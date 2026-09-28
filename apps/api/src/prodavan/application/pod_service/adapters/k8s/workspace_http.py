@@ -10,6 +10,7 @@ the agent-sandbox sandbox-router (X-Sandbox-* headers) in sandbox mode.
 from __future__ import annotations
 
 import logging
+from collections.abc import Awaitable, Callable
 from typing import Any
 from urllib.parse import quote
 
@@ -66,6 +67,41 @@ class HttpWorkspaceAdapterBase:
             detail="agent runtime has no workspace write API",
         )
 
+    async def _invalidate_runtime_endpoint(
+        self, runtime_ref: str, endpoint: RuntimeEndpoint
+    ) -> None:
+        """Drop cached routing state so a re-resolve fetches a fresh target.
+
+        Sandbox mode caches the claim→sandbox name mapping in Redis; a router
+        404/410 means the sandbox is gone (re-adopted) and the cached name is
+        stale. No-op in k8s mode (no cache entries keyed by pod name).
+        """
+        from prodavan.application.agent.runtime_transport import (
+            invalidate_sandbox_name_cache,
+        )
+
+        await invalidate_sandbox_name_cache(
+            runtime_ref=runtime_ref,
+            sandbox_name=str((endpoint.headers or {}).get("X-Sandbox-Id") or "") or None,
+        )
+
+    async def _execute_with_reresolve(
+        self,
+        *,
+        runtime_ref: str,
+        send: Callable[[RuntimeEndpoint], Awaitable[httpx.Response]],
+    ) -> httpx.Response:
+        """Run ``send`` against the resolved endpoint; on router 404/410
+        invalidate cached routing state and retry ONCE against a re-resolved
+        endpoint — the sandbox may have been re-adopted under a new name."""
+        endpoint = await self._runtime_endpoint(runtime_ref)
+        response = await send(endpoint)
+        if response.status_code in (404, 410):
+            await self._invalidate_runtime_endpoint(runtime_ref, endpoint)
+            endpoint = await self._runtime_endpoint(runtime_ref)
+            response = await send(endpoint)
+        return response
+
     async def _request_json(
         self,
         *,
@@ -74,23 +110,25 @@ class HttpWorkspaceAdapterBase:
         path: str,
         json_body: dict | None = None,
     ) -> dict[str, Any]:
-        endpoint = await self._runtime_endpoint(runtime_ref)
-        url = f"{endpoint.base_url}{path}"
-        try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.request(
-                    method,
-                    url,
-                    json=json_body,
-                    headers=_endpoint_headers(endpoint),
-                )
-        except Exception as exc:
-            raise AppError(
-                code="RUNTIME_UNREACHABLE",
-                title="Bad Gateway",
-                status=502,
-                detail=str(exc),
-            ) from exc
+        async def _send(endpoint: RuntimeEndpoint) -> httpx.Response:
+            url = f"{endpoint.base_url}{path}"
+            try:
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    return await client.request(
+                        method,
+                        url,
+                        json=json_body,
+                        headers=_endpoint_headers(endpoint),
+                    )
+            except Exception as exc:
+                raise AppError(
+                    code="RUNTIME_UNREACHABLE",
+                    title="Bad Gateway",
+                    status=502,
+                    detail=str(exc),
+                ) from exc
+
+        response = await self._execute_with_reresolve(runtime_ref=runtime_ref, send=_send)
         if response.status_code >= 400:
             raise AppError(
                 code="RUNTIME_FS_FAILED",
@@ -126,18 +164,24 @@ class HttpWorkspaceAdapterBase:
                 detail="path required",
             )
         limit = max(1, min(int(max_bytes), _DEFAULT_READ_MAX))
-        endpoint = await self._runtime_endpoint(runtime_ref)
-        url = f"{endpoint.base_url}/v1/workspace/content?path={quote(rel, safe='')}&max_bytes={limit}"
-        try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                response = await client.get(url, headers=_endpoint_headers(endpoint))
-        except Exception as exc:
-            raise AppError(
-                code="RUNTIME_UNREACHABLE",
-                title="Bad Gateway",
-                status=502,
-                detail=str(exc),
-            ) from exc
+
+        async def _send(endpoint: RuntimeEndpoint) -> httpx.Response:
+            url = (
+                f"{endpoint.base_url}/v1/workspace/content"
+                f"?path={quote(rel, safe='')}&max_bytes={limit}"
+            )
+            try:
+                async with httpx.AsyncClient(timeout=60.0) as client:
+                    return await client.get(url, headers=_endpoint_headers(endpoint))
+            except Exception as exc:
+                raise AppError(
+                    code="RUNTIME_UNREACHABLE",
+                    title="Bad Gateway",
+                    status=502,
+                    detail=str(exc),
+                ) from exc
+
+        response = await self._execute_with_reresolve(runtime_ref=runtime_ref, send=_send)
         if response.status_code >= 400:
             raise AppError(
                 code="RUNTIME_FS_FAILED",
@@ -222,18 +266,20 @@ class HttpWorkspaceAdapterBase:
                 status=422,
                 detail="path required",
             )
-        endpoint = await self._runtime_endpoint(runtime_ref)
-        url = f"{endpoint.base_url}/v1/workspace/content?path={quote(rel, safe='')}"
-        try:
-            async with httpx.AsyncClient(timeout=120.0) as client:
-                response = await client.put(url, content=data, headers=_endpoint_headers(endpoint))
-        except Exception as exc:
-            raise AppError(
-                code="RUNTIME_UNREACHABLE",
-                title="Bad Gateway",
-                status=502,
-                detail=str(exc),
-            ) from exc
+        async def _send(endpoint: RuntimeEndpoint) -> httpx.Response:
+            url = f"{endpoint.base_url}/v1/workspace/content?path={quote(rel, safe='')}"
+            try:
+                async with httpx.AsyncClient(timeout=120.0) as client:
+                    return await client.put(url, content=data, headers=_endpoint_headers(endpoint))
+            except Exception as exc:
+                raise AppError(
+                    code="RUNTIME_UNREACHABLE",
+                    title="Bad Gateway",
+                    status=502,
+                    detail=str(exc),
+                ) from exc
+
+        response = await self._execute_with_reresolve(runtime_ref=runtime_ref, send=_send)
         if response.status_code in {404, 405}:
             await self._write_fallback(runtime_ref=runtime_ref, path=rel, data=data)
             return

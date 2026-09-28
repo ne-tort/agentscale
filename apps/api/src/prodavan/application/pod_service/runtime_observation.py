@@ -153,6 +153,7 @@ class RuntimeObservationService:
                 settings.pod_image_pull_timeout_sec + settings.pod_ready_timeout_sec
             )
         deadline = datetime.now(UTC).timestamp() + budget
+        started_at_ts = deadline - budget
         last: dict[str, Any] | None = None
         while datetime.now(UTC).timestamp() < deadline:
             project = await self._session.get(ProjectRow, project_id)
@@ -161,6 +162,16 @@ class RuntimeObservationService:
                 raise RuntimeError("project or pod missing while waiting for running")
             last = await self.observe(project=project, pod=pod)
             state = last.get("observed_state")
+            if mode == "sandbox" and state == ObservedState.PULLING.value:
+                # Cold launch (warm-pool miss): the image pull easily exceeds
+                # the warm-adoption budget — stretch the deadline to the
+                # image-pull budget instead of erroring mid-pull (B7).
+                deadline = max(
+                    deadline,
+                    started_at_ts
+                    + float(settings.pod_image_pull_timeout_sec)
+                    + float(settings.pod_ready_timeout_sec),
+                )
             if state == ObservedState.RUNNING.value:
                 pod.status = PodStatus.RUNNING
                 pod.last_started_at = datetime.now(UTC)
@@ -175,14 +186,32 @@ class RuntimeObservationService:
             f"pod not verified running within {budget}s; last={last}"
         )
 
-    async def sync_runtime_health(self, *, project: ProjectRow, pod: ProjectPodRow) -> str:
+    async def sync_runtime_health(
+        self,
+        *,
+        project: ProjectRow,
+        pod: ProjectPodRow,
+        obs: dict[str, Any] | None = None,
+    ) -> str:
         """Sync project/pod DB status from live observation. Returns action taken."""
-        return await self.promote_or_demote(project=project, pod=pod)
+        return await self.promote_or_demote(project=project, pod=pod, obs=obs)
 
-    async def promote_or_demote(self, *, project: ProjectRow, pod: ProjectPodRow) -> str:
-        """Sync DB orchestrator status from observation. Returns action taken."""
+    async def promote_or_demote(
+        self,
+        *,
+        project: ProjectRow,
+        pod: ProjectPodRow,
+        obs: dict[str, Any] | None = None,
+    ) -> str:
+        """Sync DB orchestrator status from observation. Returns action taken.
+
+        ``obs``: pre-fetched observation — callers that already observed the
+        runtime (e.g. PodQuery.runtime_view) pass it in so the hot path pays
+        for ONE k8s observation instead of two (B4).
+        """
         now = datetime.now(UTC)
-        obs = await self.observe(project=project, pod=pod)
+        if obs is None:
+            obs = await self.observe(project=project, pod=pod)
         state = obs.get("observed_state")
 
         if pod.desired_state == PodDesiredState.ABSENT.value:
@@ -571,6 +600,15 @@ class RuntimeObservationService:
             "failed": ObservedState.FAILED,
         }
         observed = _SANDBOX_STATE_TO_OBSERVED.get(state, ObservedState.UNKNOWN)
+        if (
+            observed == ObservedState.PROVISIONING
+            and str(status.get("launch_type") or "") == "cold"
+        ):
+            # Warm-pool miss: a cold sandbox pulls the image on first start,
+            # which easily exceeds the provisioning budget — report PULLING so
+            # promote_or_demote grants the image-pull budget instead of a
+            # false FAILED at pod_provisioning_timeout_sec (B7).
+            observed = ObservedState.PULLING
 
         kw: dict[str, Any] = {
             "orchestrator_status": pod.status,

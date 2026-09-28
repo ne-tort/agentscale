@@ -563,3 +563,47 @@ async def test_get_status_includes_claim_created_at() -> None:
     status = await adapter.get_status(runtime_ref=REF)
     assert status["created_at"] == created
     assert datetime.fromisoformat(status["created_at"].replace("Z", "+00:00"))
+
+
+# ------------------------------------------------- get_status TTL re-arm (B2)
+
+
+async def test_get_status_rearms_claim_ttl_when_expiry_near() -> None:
+    """B2: the observed hot path re-arms the claim TTL — a live project that
+    is never paused/resumed must not lose its claim+PVC mid-work."""
+    ttl = 604800
+    claim = _claim(
+        ready=("True", "DependenciesReady"),
+        lifecycle={
+            "shutdownTime": _shutdown_time_iso(ttl / 4),
+            "shutdownPolicy": "Delete",
+        },
+    )
+    sandbox = _sandbox(mode="Running", ready=("True", "DependenciesReady"))
+    client = _client(claim=claim, sandbox=sandbox)
+    adapter = AgentSandboxPodRuntimeAdapter(client=client)
+    status = await adapter.get_status(runtime_ref=REF)
+    assert status["observed_state"] == "running"
+    patch = client.k8s_helper.custom_objects_api.patch_namespaced_custom_object
+    patch.assert_awaited_once()
+    kwargs = patch.await_args.kwargs
+    assert kwargs["plural"] == "sandboxclaims"
+    assert kwargs["name"] == REF
+    new_time = kwargs["body"]["spec"]["lifecycle"]["shutdownTime"]
+    new_dt = datetime.fromisoformat(new_time.replace("Z", "+00:00"))
+    assert new_dt > datetime.now(UTC) + timedelta(seconds=ttl - 3600)
+
+
+async def test_get_status_keeps_claim_ttl_when_expiry_far() -> None:
+    """B2: fresh TTL → NO patch (the ttl/2 threshold bounds the patch rate)."""
+    ttl = 604800
+    claim = _claim(
+        ready=("True", "DependenciesReady"),
+        lifecycle={"shutdownTime": _shutdown_time_iso(ttl - 60)},
+    )
+    sandbox = _sandbox(mode="Running", ready=("True", "DependenciesReady"))
+    client = _client(claim=claim, sandbox=sandbox)
+    adapter = AgentSandboxPodRuntimeAdapter(client=client)
+    status = await adapter.get_status(runtime_ref=REF)
+    assert status["observed_state"] == "running"
+    client.k8s_helper.custom_objects_api.patch_namespaced_custom_object.assert_not_awaited()

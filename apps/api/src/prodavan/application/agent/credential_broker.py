@@ -11,6 +11,7 @@ from typing import Any
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from prodavan.application.agent.runtime_auth import runtime_auth_headers
 from prodavan.application.agent.runtime_transport import (
     RuntimeEndpoint,
     resolve_runtime_endpoint,
@@ -150,6 +151,7 @@ class AgentCredentialBroker:
         key_id: str,
         ttl_sec: int = _DEFAULT_LEASE_TTL_SEC,
         principal: Principal | None = None,
+        endpoint: RuntimeEndpoint | None = None,
     ) -> bool:
         """API → runtime: install lease in agent-runtime memory.
 
@@ -168,7 +170,8 @@ class AgentCredentialBroker:
             logger.debug("credential push skipped key=%s: %s", key_id, exc)
             return False
 
-        endpoint = await self._resolve_endpoint_for_project(project_id)
+        if endpoint is None:
+            endpoint = await self._resolve_endpoint_for_project(project_id)
         if endpoint is None:
             return False
 
@@ -304,10 +307,11 @@ class AgentCredentialBroker:
 
 
 def _runtime_request_headers(extra: Mapping[str, str] | None = None) -> dict[str, str]:
-    headers: dict[str, str] = {}
-    token = settings.pod_agent_runtime_token.strip()
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
+    # DRY: auth headers come from runtime_auth — the sandbox-router strips
+    # ``Authorization`` before forwarding, so the bridge token must also ride
+    # in ``X-Prodavan-Bridge-Token`` or every lease push/revoke answers 401.
+    # Endpoint headers (X-Sandbox-* router selection) merge on top.
+    headers = runtime_auth_headers()
     if extra:
         headers.update(extra)
     return headers

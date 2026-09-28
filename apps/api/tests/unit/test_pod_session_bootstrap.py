@@ -72,3 +72,51 @@ async def test_bootstrap_registers_active_sessions(monkeypatch: pytest.MonkeyPat
     assert out["registered"] == 1
     assert out["reactivated"] == 1
     bootstrap._bridge.register_session.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_bootstrap_releases_lock_on_exception(monkeypatch: pytest.MonkeyPatch) -> None:
+    """B6: an exception mid-bootstrap must release the guard lock — otherwise
+    the guard strands for its 300s TTL and silently skips re-registration."""
+    monkeypatch.setattr(
+        "prodavan.application.agent.pod_session_bootstrap.settings.pod_agent_runtime_enabled",
+        True,
+    )
+    session = AsyncMock()
+    pod_row = ProjectPodRow(
+        id="pod_1",
+        project_id="proj_1",
+        workspace_key="ws_1",
+        status="running",
+        desired_state="running",
+        hydrate_generation=2,
+    )
+    pod_result = MagicMock()
+    pod_result.scalar_one_or_none.return_value = pod_row
+    session.execute = AsyncMock(return_value=pod_result)
+
+    bootstrap = PodSessionBootstrap(session)
+    bootstrap._sessions.reactivate_resumable_for_project = AsyncMock(  # type: ignore[method-assign]
+        side_effect=RuntimeError("db blew up")
+    )
+
+    release = AsyncMock(return_value=True)
+    with (
+        patch(
+            "prodavan.application.agent.pod_session_bootstrap.acquire_lock",
+            AsyncMock(return_value="tok"),
+        ),
+        patch(
+            "prodavan.application.agent.pod_session_bootstrap.release_lock",
+            release,
+        ),
+        patch(
+            "prodavan.application.agent.pod_session_bootstrap._redis_enabled",
+            return_value=True,
+        ),
+    ):
+        with pytest.raises(RuntimeError, match="db blew up"):
+            await bootstrap.bootstrap_project_sessions(project_id="proj_1", wait_for_pod=False)
+
+    release.assert_awaited_once()
+    assert release.await_args.args[1] == "tok"

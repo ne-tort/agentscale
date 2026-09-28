@@ -80,3 +80,19 @@ def test_build_pod_workspace_k8s_raises_without_client() -> None:
         mock_settings.pod_runtime_mode = "k8s"
         with pytest.raises(RuntimeError, match="K8sManager client is unavailable"):
             factory_mod.build_pod_workspace()
+
+
+def test_build_pod_runtime_unknown_mode_raises() -> None:
+    """B8b: an unknown pod_runtime_mode must fail loudly — silently building
+    the stub hides deploy misconfigurations (pods never reach a cluster)."""
+    with patch("prodavan.application.pod_service.factory.settings") as mock_settings:
+        mock_settings.pod_runtime_mode = "bogus"
+        with pytest.raises(ValueError, match="unknown pod_runtime_mode"):
+            factory_mod.build_pod_runtime(force_new=True)
+
+
+def test_build_pod_runtime_stub_remains_valid_explicit_choice() -> None:
+    with patch("prodavan.application.pod_service.factory.settings") as mock_settings:
+        mock_settings.pod_runtime_mode = "stub"
+        adapter = factory_mod.build_pod_runtime(force_new=True)
+    assert isinstance(adapter, StubPodRuntimeAdapter)

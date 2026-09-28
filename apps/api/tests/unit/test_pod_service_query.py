@@ -108,3 +108,51 @@ async def test_runtime_view_includes_failed_pod() -> None:
     assert summary["status"] == PodStatus.FAILED
     assert summary["last_error"] == "boom"
 
+
+@pytest.mark.asyncio
+async def test_runtime_view_observes_exactly_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    """B4: runtime_view pays for ONE k8s observation — sync_runtime_health
+    and the summary builder share the same obs dict."""
+    from prodavan.application.pod_service.runtime_observation import RuntimeObservationService
+    from prodavan.config.settings import settings as real_settings
+
+    monkeypatch.setattr(real_settings, "pod_runtime_mode", "stub")
+
+    session = AsyncMock()
+    pod = ProjectPodRow(
+        id="pod_live123",
+        project_id="prj_test1234567890",
+        workspace_key="wk_demo",
+        status=PodStatus.RUNNING,
+        desired_state=PodDesiredState.RUNNING,
+        runtime_ref="object-ws:wk_demo",
+        hydrate_generation=0,
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+    )
+    execute_result = MagicMock()
+    execute_result.scalar_one_or_none.return_value = pod
+    session.execute = AsyncMock(return_value=execute_result)
+    project = MagicMock()
+    project.launch_phase = None
+    project.status = ProjectStatus.ACTIVE
+    session.get = AsyncMock(return_value=project)
+    session.commit = AsyncMock()
+    session.refresh = AsyncMock()
+
+    obs_payload = {
+        "observed_state": "running",
+        "orchestrator_status": PodStatus.RUNNING,
+        "desired_state": PodDesiredState.RUNNING.value,
+        "stub": True,
+        "metrics_fresh": False,
+    }
+    observe = AsyncMock(return_value=dict(obs_payload))
+    monkeypatch.setattr(RuntimeObservationService, "observe", observe)
+
+    summary = await PodQuery(session).runtime_view("prj_test1234567890")
+
+    assert summary is not None
+    assert summary["observed_state"] == "running"
+    assert observe.await_count == 1
+

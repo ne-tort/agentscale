@@ -50,10 +50,21 @@ class PodQuery:
 
             if (settings.pod_runtime_mode or "stub").strip().lower() == "k8s":
                 await PodMetricsSampler(self._session).sample_project(project_id)
-            action = await self._observation.sync_runtime_health(project=project, pod=row)
+            # Observe once (B4): sync_runtime_health and the summary below used
+            # to observe independently — two k8s GETs per runtime_view.
+            obs = await self._observation.observe(project=project, pod=row)
+            action = await self._observation.sync_runtime_health(project=project, pod=row, obs=obs)
             if action != "noop":
                 await self._session.commit()
                 await self._session.refresh(row)
+                # Keep the reused observation consistent with the updated row
+                # (a promote/demote may have flipped orchestrator_status).
+                obs = {
+                    **obs,
+                    "orchestrator_status": row.status,
+                    "desired_state": row.desired_state,
+                }
+            return await self._build_runtime_summary(row, project_id, observed=obs)
         return await self._build_runtime_summary(row, project_id)
 
     async def _get_live_row(self, project_id: str) -> ProjectPodRow | None:
@@ -77,10 +88,17 @@ class PodQuery:
         )
         return q.scalar_one_or_none()
 
-    async def _build_runtime_summary(self, row: ProjectPodRow, project_id: str) -> dict:
+    async def _build_runtime_summary(
+        self,
+        row: ProjectPodRow,
+        project_id: str,
+        *,
+        observed: dict | None = None,
+    ) -> dict:
         pod = self._public(row)
         project = await self._session.get(ProjectRow, project_id)
-        observed = await self._observation.observe(project=project, pod=row)
+        if observed is None:
+            observed = await self._observation.observe(project=project, pod=row)
         summary = {
             "pod_id": pod["id"],
             "status": pod["status"],

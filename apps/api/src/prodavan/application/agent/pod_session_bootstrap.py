@@ -84,38 +84,41 @@ class PodSessionBootstrap:
         if lock_token is None and redis_enabled and await self._redis_guard_exists(guard_key):
             return {"project_id": project_id, "registered": 0, "skipped": "already_bootstrapped"}
 
-        session_ids: list[str] = []
-        if reactivate:
-            session_ids = await self._sessions.reactivate_resumable_for_project(project_id=project_id)
+        # try/finally: an exception mid-bootstrap must not strand the guard
+        # until its 300s TTL — every retry would silently skip registration.
+        try:
+            session_ids: list[str] = []
+            if reactivate:
+                session_ids = await self._sessions.reactivate_resumable_for_project(project_id=project_id)
 
-        result = await self._session.execute(
-            select(AgentSessionRow)
-            .where(AgentSessionRow.project_id == project_id)
-            .where(AgentSessionRow.status == AgentSessionStatus.ACTIVE)
-            .order_by(AgentSessionRow.created_at.asc())
-        )
-        rows = list(result.scalars().all())
-        # Post-Ready identity bind before re-registering sessions: a freshly
-        # adopted sandbox runtime has no project identity yet (idempotent,
-        # 404-tolerant, best-effort — never aborts the bootstrap).
-        await bind_project_runtime(
-            self._session,
-            project_id,
-            pod_id=pod_row.id if pod_row is not None else None,
-            workspace_key=str(pod_row.workspace_key or "") if pod_row is not None else None,
-        )
-        registered = 0
-        keys_pushed: set[str] = set()
-        broker = AgentCredentialBroker(self._session)
-        for row in rows:
-            if await self._bridge.register_session(project_id=project_id, payload=_bootstrap_payload(row)):
-                registered += 1
-            if row.resolved_key_id and row.resolved_key_id not in keys_pushed:
-                await broker.push_lease_to_runtime(project_id=project_id, key_id=row.resolved_key_id)
-                keys_pushed.add(row.resolved_key_id)
-
-        if lock_token is not None and lock_token != "local":
-            await release_lock(guard_key, lock_token)
+            result = await self._session.execute(
+                select(AgentSessionRow)
+                .where(AgentSessionRow.project_id == project_id)
+                .where(AgentSessionRow.status == AgentSessionStatus.ACTIVE)
+                .order_by(AgentSessionRow.created_at.asc())
+            )
+            rows = list(result.scalars().all())
+            # Post-Ready identity bind before re-registering sessions: a freshly
+            # adopted sandbox runtime has no project identity yet (idempotent,
+            # 404-tolerant, best-effort — never aborts the bootstrap).
+            await bind_project_runtime(
+                self._session,
+                project_id,
+                pod_id=pod_row.id if pod_row is not None else None,
+                workspace_key=str(pod_row.workspace_key or "") if pod_row is not None else None,
+            )
+            registered = 0
+            keys_pushed: set[str] = set()
+            broker = AgentCredentialBroker(self._session)
+            for row in rows:
+                if await self._bridge.register_session(project_id=project_id, payload=_bootstrap_payload(row)):
+                    registered += 1
+                if row.resolved_key_id and row.resolved_key_id not in keys_pushed:
+                    await broker.push_lease_to_runtime(project_id=project_id, key_id=row.resolved_key_id)
+                    keys_pushed.add(row.resolved_key_id)
+        finally:
+            if lock_token is not None and lock_token != "local":
+                await release_lock(guard_key, lock_token)
         logger.info(
             "pod session bootstrap project_id=%s reactivated=%s registered=%s",
             project_id,

@@ -13,6 +13,7 @@ import asyncio
 import json
 import logging
 import time
+from collections import OrderedDict
 from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -29,6 +30,7 @@ from prodavan.application.agent.runtime_auth import runtime_auth_headers
 from prodavan.application.agent.runtime_model import sanitize_runtime_model
 from prodavan.application.agent.runtime_transport import (
     RuntimeEndpoint,
+    invalidate_sandbox_name_cache,
     resolve_runtime_endpoint,
     runtime_mode,
 )
@@ -71,7 +73,22 @@ _BIND_MARK_TTL_SEC = 12 * 60 * 60
 # Redis-unavailable degradation: in-memory throttle so binds run at most
 # this often per project per process instead of on every send.
 _BIND_FALLBACK_INTERVAL_SEC = 300.0
-_last_bind_attempt: dict[str, float] = {}
+# Bounded fallback-throttle map (LRU eviction): an unbounded dict would leak
+# project ids for the whole process lifetime.
+_BIND_ATTEMPT_CACHE_MAX = 1024
+_last_bind_attempt: OrderedDict[str, float] = OrderedDict()
+
+
+def _bind_attempt_throttled(throttle_key: str, now: float) -> bool:
+    """Record a bind attempt; True when the previous attempt is too recent."""
+    last = _last_bind_attempt.get(throttle_key)
+    if last is not None and now - last < _BIND_FALLBACK_INTERVAL_SEC:
+        return True
+    _last_bind_attempt[throttle_key] = now
+    _last_bind_attempt.move_to_end(throttle_key)
+    while len(_last_bind_attempt) > _BIND_ATTEMPT_CACHE_MAX:
+        _last_bind_attempt.popitem(last=False)
+    return False
 
 
 def _is_hydrating_conflict(response: httpx.Response | None) -> bool:
@@ -95,7 +112,8 @@ async def ensure_recent_bind(
 
     The bridge JWT lives ~24h while a sandbox lives for days; once it
     expires, runtime→API callbacks start failing 401. A Redis mark
-    (``prodavan:bind:<project_id>``, TTL 12h) records the last bind; when
+    (``prodavan:bind:<project_id>[:<sandbox_name>]``, TTL 12h) records the
+    last bind; when
     it is absent the idempotent ``POST /v1/project/bind`` is re-run (it
     mints a fresh token and the runtime swaps it in). Redis-unavailable
     degradation: an in-memory throttle keeps binds at most once per
@@ -103,24 +121,31 @@ async def ensure_recent_bind(
     """
     from prodavan.core.infra.cache import cache_get, cache_key, cache_set
 
-    key = cache_key("bind", project_id)
+    # The mark is keyed by the CURRENT sandbox identity: after a re-adoption
+    # the claim points at a fresh warm pod that has never seen this project,
+    # so a bind recorded for the previous sandbox must not suppress a re-bind.
+    sandbox_name = ""
+    if endpoint is not None:
+        sandbox_name = str((endpoint.headers or {}).get("X-Sandbox-Id") or "").strip()
+    key = cache_key("bind", project_id, sandbox_name)
     try:
         if await cache_get(key) is not None:
             return
     except Exception:  # noqa: BLE001 - cache helpers degrade, never raise
         pass
-    now = time.monotonic()
-    if now - _last_bind_attempt.get(project_id, 0.0) < _BIND_FALLBACK_INTERVAL_SEC:
+    if _bind_attempt_throttled(key, time.monotonic()):
         return
-    _last_bind_attempt[project_id] = now
     try:
-        await bind_project_runtime(
+        ok = await bind_project_runtime(
             session,
             project_id,
             endpoint=endpoint,
             http_client=http_client,
         )
-        await cache_set(key, "1", ttl_sec=_BIND_MARK_TTL_SEC)
+        if ok:
+            # Mark only a CONFIRMED bind — a failed bind must not suppress
+            # the next attempt for the whole 12h mark TTL.
+            await cache_set(key, "1", ttl_sec=_BIND_MARK_TTL_SEC)
     except Exception as exc:  # noqa: BLE001 - best-effort by contract
         logger.debug("ensure_recent_bind failed project_id=%s: %s", project_id, exc)
 
@@ -362,15 +387,27 @@ class OpenClawBridgeBootstrap:
         message: str,
         model: str | None = None,
         bootstrap: BridgeSessionBootstrap | None = None,
+        endpoint: RuntimeEndpoint | None = None,
     ) -> AsyncIterator[AgentEvent]:
-        """Proxy send to Pod agent-runtime; yields normalized AgentEvent stream."""
+        """Proxy send to Pod agent-runtime; yields normalized AgentEvent stream.
+
+        ``endpoint``: pre-resolved endpoint for the first attempt (the send
+        hot path already resolved it for the lease push) — saves a duplicate
+        runtime_view + claim status fetch per message. The recoverable-error
+        retry still re-resolves from scratch.
+        """
         if not settings.pod_agent_runtime_enabled:
             return
 
         retried = False
+        pending_endpoint = endpoint
         while True:
             recoverable = False
-            endpoint = await self._resolve_endpoint_for_project(project_id)
+            if pending_endpoint is not None:
+                endpoint = pending_endpoint
+                pending_endpoint = None
+            else:
+                endpoint = await self._resolve_endpoint_for_project(project_id)
             if endpoint is None:
                 logger.debug("openclaw send: no runtime endpoint for project %s", project_id)
                 yield AgentEvent.now(
@@ -384,6 +421,8 @@ class OpenClawBridgeBootstrap:
                 return
 
             if bootstrap is not None and bootstrap.provider_key_id:
+                # TODO(F8): drop this pre-send PATCH once all deployed runtimes
+                # persist key/model — it costs one extra runtime call per send.
                 # Heal sessions wiped by older bridge PATCH (undefined fields cleared key/model).
                 await self._patch_adapter_state(
                     endpoint=endpoint,
@@ -466,6 +505,13 @@ class OpenClawBridgeBootstrap:
                     json=body,
                     headers=_runtime_request_headers(endpoint.headers),
                 ) as response:
+                    if response.status_code in (404, 410):
+                        # Router: the claim's sandbox is gone / re-adopted —
+                        # drop the cached claim→sandbox mapping so the
+                        # re-resolve on retry fetches the fresh sandbox name.
+                        await invalidate_sandbox_name_cache(
+                            sandbox_name=str(endpoint.headers.get("X-Sandbox-Id") or "") or None,
+                        )
                     if response.status_code >= 400:
                         text = await response.aread()
                         body_text = text.decode("utf-8", errors="replace")
