@@ -653,6 +653,15 @@ class AppLocalizationsRu extends AppLocalizations {
   String get containerStateLabel => 'Состояние';
 
   @override
+  String get containerRuntimeLabel => 'Рантайм';
+
+  @override
+  String get containerLaunchTypeWarm => 'Тёплый старт';
+
+  @override
+  String get containerLaunchTypeCold => 'Холодный старт';
+
+  @override
   String get containerCreatedAt => 'Создан';
 
   @override
@@ -1924,6 +1933,50 @@ class AppLocalizationsRu extends AppLocalizations {
       'Прервано — сообщение восстановлено в поле ввода';
 
   @override
+  String chatMessageTooLong(int max) {
+    return 'Сообщение слишком длинное (макс. $max знаков)';
+  }
+
+  @override
+  String chatTooManyAttachments(int max) {
+    return 'Слишком много вложений (макс. $max)';
+  }
+
+  @override
+  String get chatFileTooLarge => 'Файл слишком большой';
+
+  @override
+  String get chatAttachmentUploadFailed => 'Не удалось загрузить вложение';
+
+  @override
+  String chatAttachmentLabel(String name) {
+    return 'Вложение: $name';
+  }
+
+  @override
+  String chatAttachmentJsonLabel(String name) {
+    return 'Вложение: $name (JSON)';
+  }
+
+  @override
+  String chatAttachmentPathLabel(String name, String path) {
+    return 'Вложение: $name → /workspace/$path';
+  }
+
+  @override
+  String chatAttachmentRowsLabel(String name, int rows) {
+    String _temp0 = intl.Intl.pluralLogic(
+      rows,
+      locale: localeName,
+      other: '$rows строки',
+      many: '$rows строк',
+      few: '$rows строки',
+      one: '$rows строка',
+    );
+    return 'Вложение: $name ($_temp0)';
+  }
+
+  @override
   String projectAgentFailedToStart(String reason) {
     return 'Агент не запустился: $reason';
   }
@@ -2547,6 +2600,9 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get projectResumeStartingSnack => 'Проект возобновляется…';
+
+  @override
+  String get projectPauseInProgress => 'Приостановка проекта…';
 
   @override
   String get projectPauseConfirmMessage =>

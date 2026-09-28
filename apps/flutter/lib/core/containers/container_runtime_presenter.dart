@@ -26,7 +26,6 @@ enum ObservedState {
   running,
   degraded,
   failed,
-  paused,
   absent,
   unknown;
 
@@ -42,9 +41,6 @@ enum ObservedState {
     return ObservedState.unknown;
   }
 
-  /// Legacy wire string (kept for compatibility with old API payloads).
-  String get wireName => name;
-
   bool get isInFlight => switch (this) {
         preparing ||
         provisioning ||
@@ -57,11 +53,11 @@ enum ObservedState {
       };
 
   bool get isTerminal => switch (this) {
-        running || failed || suspended || paused || absent => true,
+        running || failed || suspended || absent => true,
         _ => false,
       };
 
-  bool get isSleeping => this == paused || this == suspended || this == pausing;
+  bool get isSleeping => this == suspended || this == pausing;
 
   bool get isError => this == failed;
 }
@@ -83,7 +79,6 @@ class ContainerRuntime {
     this.suspended,
     this.restarts,
     this.lastError,
-    this.stub = false,
     this.podId,
     this.k8sPodName,
     this.startedAt,
@@ -139,7 +134,6 @@ class ContainerRuntime {
       suspended: suspendedRaw is bool ? suspendedRaw : null,
       restarts: restartsRaw is num ? restartsRaw : null,
       lastError: rtString('last_error') ?? rootString('last_error'),
-      stub: runtime?['stub'] == true || item?['stub'] == true,
       podId: rtString('pod_id') ?? rootString('pod_id'),
       k8sPodName: _k8sPodName(runtime, item),
       startedAt: rtString('started_at') ?? rtString('last_started_at') ??
@@ -153,13 +147,10 @@ class ContainerRuntime {
   }
 
   static String? _k8sPodName(Map<String, dynamic>? runtime, Map<String, dynamic>? item) {
-    // Legacy `stub` payloads hide the pod name; `object-ws:` refs are legacy too.
-    if (runtime?['stub'] == true) return null;
     final name = runtime?['k8s_pod_name'] ?? runtime?['runtime_ref'] ?? item?['k8s_pod_name'];
     if (name == null) return null;
     final s = '$name'.trim();
-    if (s.isEmpty || s.startsWith('object-ws:')) return null;
-    return s;
+    return s.isEmpty ? null : s;
   }
 
   final ObservedState observedState;
@@ -173,7 +164,6 @@ class ContainerRuntime {
   final bool? suspended;
   final num? restarts;
   final String? lastError;
-  final bool stub;
   final String? podId;
   final String? k8sPodName;
   final String? startedAt;
@@ -184,7 +174,7 @@ class ContainerRuntime {
   final Map<String, dynamic>? raw;
 
   bool get isRunning => observedState == ObservedState.running;
-  bool get isHealthy => !stub && isRunning;
+  bool get isHealthy => isRunning;
 }
 
 Map<String, dynamic>? runtimeMap(Map<String, dynamic>? item) {
@@ -478,7 +468,6 @@ bool projectChatAvailable(Map<String, dynamic>? project) => projectChatSendable(
 /// condition — the agent itself still answers, so the composer stays
 /// sendable (degraded only feeds the metrics banner).
 bool containerRuntimeHealthy(Map<String, dynamic>? item) {
-  if (item?['runtime']?['stub'] == true) return false;
   final state = _observedState(item);
   return state == 'running' || state == 'degraded';
 }
@@ -493,12 +482,10 @@ String? containerPodServiceId(Map<String, dynamic>? item) {
 
 String? containerK8sPodName(Map<String, dynamic>? item) {
   final runtime = runtimeMap(item);
-  if (runtime?['stub'] == true) return null;
   final name = runtime?['k8s_pod_name'] ?? runtime?['runtime_ref'];
   if (name == null) return null;
   final s = '$name'.trim();
-  if (s.isEmpty || s.startsWith('object-ws:')) return null;
-  return s;
+  return s.isEmpty ? null : s;
 }
 
 /// agent-sandbox runtime view (sandbox_name/claim_name present) — there is
@@ -513,4 +500,14 @@ bool containerIsSandboxRuntime(Map<String, dynamic>? item) {
 String? containerRuntimeRefName(Map<String, dynamic>? item) {
   final rt = ContainerRuntime.fromJson(item);
   return rt.sandboxName ?? rt.claimName ?? containerK8sPodName(item);
+}
+
+/// Localized badge label for the sandbox launch type (warm resume vs cold
+/// start). Null when the payload carries no (known) launch_type.
+String? formatContainerLaunchType(String? launchType, AppLocalizations l10n) {
+  return switch (launchType) {
+    'warm' => l10n.containerLaunchTypeWarm,
+    'cold' => l10n.containerLaunchTypeCold,
+    _ => null,
+  };
 }

@@ -252,19 +252,14 @@ class _ChatComposerState extends State<ChatComposer> {
 
   void _submit() {
     if (!_canSend) return;
+    final l10n = AppLocalizations.of(context);
     final text = _controller.text;
     if (text.length > kChatMaxMessageChars) {
-      AppSnackBar.warning(
-        context,
-        'Сообщение слишком длинное (макс. $kChatMaxMessageChars знаков)',
-      );
+      AppSnackBar.warning(context, l10n.chatMessageTooLong(kChatMaxMessageChars));
       return;
     }
     if (_attachments.length > kChatMaxAttachmentsPerMessage) {
-      AppSnackBar.warning(
-        context,
-        'Слишком много вложений (макс. $kChatMaxAttachmentsPerMessage)',
-      );
+      AppSnackBar.warning(context, l10n.chatTooManyAttachments(kChatMaxAttachmentsPerMessage));
       return;
     }
     _draftTimer?.cancel();
@@ -315,12 +310,12 @@ class _ChatComposerState extends State<ChatComposer> {
     if (_attachments.length >= kChatMaxAttachmentsPerMessage) {
       AppSnackBar.warning(
         context,
-        'Слишком много вложений (макс. $kChatMaxAttachmentsPerMessage)',
+        AppLocalizations.of(context).chatTooManyAttachments(kChatMaxAttachmentsPerMessage),
       );
       return;
     }
     if (bytes.length > kChatMaxAttachmentBytesClient) {
-      AppSnackBar.warning(context, 'Файл слишком большой');
+      AppSnackBar.warning(context, AppLocalizations.of(context).chatFileTooLarge);
       return;
     }
 
@@ -334,7 +329,10 @@ class _ChatComposerState extends State<ChatComposer> {
       final id = body['id'] as String? ?? body['storage_ref'] as String? ?? '';
       if (id.isEmpty) {
         if (mounted) {
-          AppSnackBar.warning(context, 'Не удалось загрузить вложение');
+          AppSnackBar.warning(
+            context,
+            AppLocalizations.of(context).chatAttachmentUploadFailed,
+          );
         }
         return;
       }

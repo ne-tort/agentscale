@@ -145,4 +145,66 @@ void main() {
       l10n.containerObservedPulling,
     );
   });
+
+  test('formatContainerLaunchType localizes warm/cold, null otherwise', () {
+    final l10n = AppLocalizationsRu();
+    expect(formatContainerLaunchType('warm', l10n), l10n.containerLaunchTypeWarm);
+    expect(formatContainerLaunchType('cold', l10n), l10n.containerLaunchTypeCold);
+    expect(formatContainerLaunchType(null, l10n), isNull);
+    expect(formatContainerLaunchType('bogus', l10n), isNull);
+  });
+
+  test('containerRuntimeRefName prefers sandbox name, then claim, then k8s', () {
+    expect(
+      containerRuntimeRefName(const {
+        'runtime': {
+          'sandbox_name': 'sb-1',
+          'claim_name': 'cl-1',
+          'k8s_pod_name': 'pod-1',
+        },
+      }),
+      'sb-1',
+    );
+    expect(
+      containerRuntimeRefName(const {
+        'runtime': {'claim_name': 'cl-1'},
+      }),
+      'cl-1',
+    );
+    expect(
+      containerRuntimeRefName(const {
+        'runtime': {'k8s_pod_name': 'pod-1'},
+      }),
+      'pod-1',
+    );
+    expect(containerRuntimeRefName(const {'runtime': {}}), isNull);
+  });
+
+  test('ContainerRuntime parses sandbox identity fields', () {
+    final rt = ContainerRuntime.fromJson(const {
+      'runtime': {
+        'sandbox_name': 'sb-1',
+        'claim_name': 'cl-1',
+        'service_fqdn': 'sb-1.sandboxes.svc.cluster.local',
+        'launch_type': 'warm',
+      },
+    });
+    expect(rt.sandboxName, 'sb-1');
+    expect(rt.claimName, 'cl-1');
+    expect(rt.serviceFqdn, 'sb-1.sandboxes.svc.cluster.local');
+    expect(rt.launchType, 'warm');
+    expect(containerIsSandboxRuntime(const {
+      'runtime': {'sandbox_name': 'sb-1'},
+    }), isTrue);
+    expect(containerIsSandboxRuntime(const {
+      'runtime': {'k8s_pod_name': 'pod-1'},
+    }), isFalse);
+  });
+
+  test('ObservedState.parse normalizes legacy paused to suspended', () {
+    expect(ObservedState.parse('paused'), ObservedState.suspended);
+    expect(ObservedState.parse(' PAUSED '), ObservedState.suspended);
+    expect(ObservedState.parse('suspended'), ObservedState.suspended);
+    expect(ObservedState.parse('nope'), ObservedState.unknown);
+  });
 }

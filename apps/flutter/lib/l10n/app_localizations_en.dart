@@ -653,6 +653,15 @@ class AppLocalizationsEn extends AppLocalizations {
   String get containerStateLabel => 'State';
 
   @override
+  String get containerRuntimeLabel => 'Runtime';
+
+  @override
+  String get containerLaunchTypeWarm => 'Warm start';
+
+  @override
+  String get containerLaunchTypeCold => 'Cold start';
+
+  @override
   String get containerCreatedAt => 'Created';
 
   @override
@@ -1910,6 +1919,48 @@ class AppLocalizationsEn extends AppLocalizations {
       'Interrupted — your message was restored to the input field';
 
   @override
+  String chatMessageTooLong(int max) {
+    return 'Message is too long (max $max characters)';
+  }
+
+  @override
+  String chatTooManyAttachments(int max) {
+    return 'Too many attachments (max $max)';
+  }
+
+  @override
+  String get chatFileTooLarge => 'File is too large';
+
+  @override
+  String get chatAttachmentUploadFailed => 'Failed to upload the attachment';
+
+  @override
+  String chatAttachmentLabel(String name) {
+    return 'Attachment: $name';
+  }
+
+  @override
+  String chatAttachmentJsonLabel(String name) {
+    return 'Attachment: $name (JSON)';
+  }
+
+  @override
+  String chatAttachmentPathLabel(String name, String path) {
+    return 'Attachment: $name → /workspace/$path';
+  }
+
+  @override
+  String chatAttachmentRowsLabel(String name, int rows) {
+    String _temp0 = intl.Intl.pluralLogic(
+      rows,
+      locale: localeName,
+      other: '$rows rows',
+      one: '$rows row',
+    );
+    return 'Attachment: $name ($_temp0)';
+  }
+
+  @override
   String projectAgentFailedToStart(String reason) {
     return 'Agent failed to start: $reason';
   }
@@ -2532,6 +2583,9 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get projectResumeStartingSnack => 'Project is resuming…';
+
+  @override
+  String get projectPauseInProgress => 'Pausing project…';
 
   @override
   String get projectPauseConfirmMessage =>

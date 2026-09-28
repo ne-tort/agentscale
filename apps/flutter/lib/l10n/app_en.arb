@@ -439,6 +439,9 @@
   "adminContainerColK8s": "K8s",
   "containerObservedStateLabel": "State",
   "containerStateLabel": "State",
+  "containerRuntimeLabel": "Runtime",
+  "containerLaunchTypeWarm": "Warm start",
+  "containerLaunchTypeCold": "Cold start",
   "containerCreatedAt": "Created",
   "containerLastLaunch": "Last launch",
   "containerPodServiceId": "Pod ID",
@@ -1064,6 +1067,46 @@
   "projectChatNeedsUpdate": "Project needs an update. Update?",
   "projectChatCancelled": "Cancelled",
   "projectChatInterrupted": "Interrupted — your message was restored to the input field",
+  "chatMessageTooLong": "Message is too long (max {max} characters)",
+  "@chatMessageTooLong": {
+    "placeholders": {
+      "max": { "type": "int" }
+    }
+  },
+  "chatTooManyAttachments": "Too many attachments (max {max})",
+  "@chatTooManyAttachments": {
+    "placeholders": {
+      "max": { "type": "int" }
+    }
+  },
+  "chatFileTooLarge": "File is too large",
+  "chatAttachmentUploadFailed": "Failed to upload the attachment",
+  "chatAttachmentLabel": "Attachment: {name}",
+  "@chatAttachmentLabel": {
+    "placeholders": {
+      "name": { "type": "String" }
+    }
+  },
+  "chatAttachmentJsonLabel": "Attachment: {name} (JSON)",
+  "@chatAttachmentJsonLabel": {
+    "placeholders": {
+      "name": { "type": "String" }
+    }
+  },
+  "chatAttachmentPathLabel": "Attachment: {name} → /workspace/{path}",
+  "@chatAttachmentPathLabel": {
+    "placeholders": {
+      "name": { "type": "String" },
+      "path": { "type": "String" }
+    }
+  },
+  "chatAttachmentRowsLabel": "Attachment: {name} ({rows, plural, one{{rows} row} other{{rows} rows}})",
+  "@chatAttachmentRowsLabel": {
+    "placeholders": {
+      "name": { "type": "String" },
+      "rows": { "type": "int" }
+    }
+  },
   "projectAgentFailedToStart": "Agent failed to start: {reason}",
   "@projectAgentFailedToStart": {
     "placeholders": {
@@ -1391,6 +1434,7 @@
   "projectLifecycleTimedOut": "Container start timed out",
   "projectResumeInProgress": "Resuming project…",
   "projectResumeStartingSnack": "Project is resuming…",
+  "projectPauseInProgress": "Pausing project…",
   "projectPauseConfirmMessage": "While paused, the agent will be unavailable.",
   "projectReloadSuccess": "Project reloaded",
   "projectUpdateSuccess": "Project updated",
