@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -11,7 +12,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from prodavan.application.admin.company_service import AdminCompanyService
 from prodavan.application.agent.credential_broker import AgentCredentialBroker
 from prodavan.application.agent.openclaw_bridge import (
-    OpenClawBridgeBootstrap,
     _runtime_request_headers,
     api_kind_to_bridge_adapter,
 )
@@ -205,36 +205,63 @@ class AiModelsLiveService:
                 params["models_path"] = provider_endpoint.models_path
                 params["auth_scheme"] = provider_endpoint.auth_scheme
         url = f"{runtime_endpoint.base_url}/v1/models"
-        try:
-            async with httpx.AsyncClient(timeout=15.0) as client:
-                response = await client.get(
-                    url,
-                    params=params,
-                    headers=_runtime_request_headers(runtime_endpoint.headers),
-                )
-                if response.status_code >= 400:
-                    logger.warning(
-                        "live models bridge status=%s body=%s",
-                        response.status_code,
-                        response.text[:200],
+        # Transient pod/bridge flaps (pod busy, cold conntrack, brief 5xx)
+        # must not surface as 503 MODELS_UNAVAILABLE while the stack is
+        # healthy: retry with short backoff. Retries cover network errors,
+        # bridge >=500 and empty-but-200 answers (runtime warming up);
+        # definitive 4xx fails fast.
+        attempts = int(getattr(settings, "live_models_fetch_attempts", 3) or 3)
+        backoffs = (0.5, 1.5)
+        last_exc: Exception | None = None
+        for attempt in range(max(1, attempts)):
+            try:
+                async with httpx.AsyncClient(timeout=15.0) as client:
+                    response = await client.get(
+                        url,
+                        params=params,
+                        headers=_runtime_request_headers(runtime_endpoint.headers),
                     )
-                    return []
-                body = response.json()
-                models = body.get("models") if isinstance(body, dict) else None
-                if not isinstance(models, list):
-                    return []
-                out: list[str] = []
-                for item in models:
-                    if isinstance(item, str) and item.strip():
-                        out.append(item.strip())
-                    elif isinstance(item, dict):
-                        mid = str(item.get("id") or item.get("name") or "").strip()
-                        if mid:
-                            out.append(mid)
-                return out
-        except Exception as exc:
-            logger.debug("live models fetch failed: %s", exc)
-            return []
+                    if response.status_code >= 500:
+                        logger.warning(
+                            "live models bridge status=%s body=%s (attempt %s)",
+                            response.status_code,
+                            response.text[:200],
+                            attempt + 1,
+                        )
+                        last_exc = RuntimeError(f"bridge status {response.status_code}")
+                    elif response.status_code >= 400:
+                        logger.warning(
+                            "live models bridge status=%s body=%s",
+                            response.status_code,
+                            response.text[:200],
+                        )
+                        return []
+                    else:
+                        body = response.json()
+                        models = body.get("models") if isinstance(body, dict) else None
+                        if not isinstance(models, list):
+                            models = []
+                        out: list[str] = []
+                        for item in models:
+                            if isinstance(item, str) and item.strip():
+                                out.append(item.strip())
+                            elif isinstance(item, dict):
+                                mid = str(item.get("id") or item.get("name") or "").strip()
+                                if mid:
+                                    out.append(mid)
+                        if out:
+                            return out
+                        last_exc = RuntimeError("live models returned no models")
+                if attempt + 1 < max(1, attempts):
+                    await asyncio.sleep(backoffs[min(attempt, len(backoffs) - 1)])
+            except Exception as exc:
+                last_exc = exc
+                logger.debug("live models fetch failed (attempt %s): %s", attempt + 1, exc)
+                if attempt + 1 < max(1, attempts):
+                    await asyncio.sleep(backoffs[min(attempt, len(backoffs) - 1)])
+        if last_exc is not None:
+            logger.debug("live models fetch gave up: %s", last_exc)
+        return []
 
     async def _resolve_key_secret(self, key_id: str) -> str | None:
         """Best-effort secret lookup for provider endpoint resolution (cursor token shape)."""

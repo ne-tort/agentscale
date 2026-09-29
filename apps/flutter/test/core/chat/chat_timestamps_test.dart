@@ -254,6 +254,51 @@ void main() {
       expect(find.text('0:45'), findsOneWidget);
     });
 
+    testWidgets('revealing the copy icon does not shift the message layout', (tester) async {
+      tester.view.physicalSize = const Size(900, 400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(
+        _themedWide(
+          AssistantStreamBlock(
+            text: 'Hello',
+            usageRaw: const {'model': 'model-a', 'input_tokens': 1234},
+            completedAt: DateTime(2026, 9, 29, 14, 7),
+            turnMs: 45000,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Idle: the metadata row is already mounted (time anchor) at its
+      // fixed height; the copy button is NOT in the tree yet.
+      final bodyIdle = tester.getRect(find.text('Hello'));
+      expect(find.byIcon(Icons.copy_outlined), findsNothing);
+
+      // Hover reveals usage + copy — the message body must not move.
+      await _hoverOver(tester, find.byType(AssistantStreamBlock));
+      expect(find.byIcon(Icons.copy_outlined), findsOneWidget);
+      final bodyHover = tester.getRect(find.text('Hello'));
+      expect(bodyHover.top, moreOrLessEquals(bodyIdle.top, epsilon: 0.01));
+      expect(bodyHover.bottom, moreOrLessEquals(bodyIdle.bottom, epsilon: 0.01));
+
+      // The copy button is flush right and the reserved slot keeps its box.
+      final copyBox =
+          find.byWidgetPredicate((w) => w is SizedBox && w.width == 28.0);
+      expect(copyBox, findsWidgets);
+      expect(tester.getRect(copyBox.last).right, moreOrLessEquals(800, epsilon: 0.5));
+
+      // Pointer leaves: the row keeps its height (time anchor), the message
+      // still has not moved a single pixel.
+      final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await gesture.moveTo(const Offset(-100, -100));
+      await tester.pumpAndSettle();
+      final bodyLeft = tester.getRect(find.text('Hello'));
+      expect(bodyLeft.top, moreOrLessEquals(bodyIdle.top, epsilon: 0.01));
+      expect(find.text('14:07'), findsOneWidget);
+    });
+
     testWidgets('user message shows send time under the bubble, right-aligned', (tester) async {
       tester.view.physicalSize = const Size(900, 400);
       tester.view.devicePixelRatio = 1.0;

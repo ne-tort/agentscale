@@ -97,9 +97,10 @@ void main() {
     // No chat count badges on project headers.
     expect(find.text('· 2'), findsNothing);
     expect(find.text('· 1'), findsNothing);
-    // Chat rows are text-only — no leading icons.
+    // Chat rows have no leading icons — except the small pin glyph that
+    // marks a pinned chat inside its item.
     expect(find.byIcon(Icons.chat_bubble_outline), findsNothing);
-    expect(find.byIcon(Icons.push_pin), findsNothing);
+    expect(find.byIcon(Icons.push_pin), findsOneWidget);
     expect(find.byIcon(Icons.edit_note_outlined), findsNothing);
     // Compact tree fonts: chats labelMedium (12), project names 13.
     expect(tester.widget<Text>(find.text('A2')).style?.fontSize, 12);
@@ -174,8 +175,8 @@ void main() {
       ),
     );
 
-    // No pin icons anymore — order is the only pinned signal.
-    expect(find.byIcon(Icons.push_pin), findsNothing);
+    // Pinned chat: order (first) AND the small pin glyph inside the item.
+    expect(find.byIcon(Icons.push_pin), findsOneWidget);
     final pinnedTop = tester.getTopLeft(find.text('Pinned A')).dy;
     final newerTop = tester.getTopLeft(find.text('Newer A')).dy;
     final midTop = tester.getTopLeft(find.text('Mid A')).dy;

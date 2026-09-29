@@ -90,13 +90,12 @@ class CabinetChatsRail extends StatelessWidget {
   /// tree column visually lines up with the menu icons above it.
   static const double _treeHorizontalPadding = (_railMinWidth - 24) / 2;
 
-  /// Absolute left offset of chat text: tree padding + under the branch
-  /// name, +[_branchIndent]. Derived from [_treeHorizontalPadding], so the
-  /// chats stay exactly under the branch name when the tree column shifts.
-  static const double _chatIndent = _treeHorizontalPadding +
-      _chevronSize +
-      _chevronLabelGap +
-      _branchIndent;
+  /// Absolute left offset of chat rows — the SAME tree column as the branch
+  /// header (no extra tree indent): the chat item starts exactly where the
+  /// chevron row starts, so the tree reads as one flat column. Pinned chats
+  /// carry a small pin glyph inside the item (left of the label) instead of
+  /// an indent.
+  static const double _chatIndent = _treeHorizontalPadding;
 
   /// Extra left padding for the chat label INSIDE the row's highlight
   /// container (added on top of the row's horizontal [AppSpacing.xs]):
@@ -244,6 +243,11 @@ class CabinetChatsRail extends StatelessWidget {
           : () => onToggleProjectCollapsed!(projectId),
       borderRadius: BorderRadius.circular(12),
       hoverColor: Colors.transparent,
+      // No ink animation on tap: the header is a collapse toggle, the
+      // ripple under the whole branch reads as a click on the tree itself.
+      splashColor: Colors.transparent,
+      highlightColor: Colors.transparent,
+      focusColor: Colors.transparent,
       child: Padding(
         padding: const EdgeInsets.symmetric(
           horizontal: _treeHorizontalPadding,
@@ -520,7 +524,21 @@ class _ChatRowState extends State<_ChatRow> {
             top: AppSpacing.xs,
             bottom: AppSpacing.xs,
           ),
-          child: text,
+          child: Row(
+            children: [
+              // Pinned chats show a small pin glyph inside the item (left of
+              // the label); non-pinned rows keep the plain label.
+              if (chat['pinned'] == true) ...[
+                Icon(
+                  Icons.push_pin,
+                  size: 13,
+                  color: colors.muted.withValues(alpha: 0.7),
+                ),
+                const SizedBox(width: 6),
+              ],
+              Expanded(child: text),
+            ],
+          ),
         ),
       ),
     );

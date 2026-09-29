@@ -165,3 +165,50 @@ def register_pod_surface_allowlist(app: FastAPI) -> None:
 def register_trace_id(app: FastAPI) -> None:
     """Register trace id middleware (audit XCUT-P2a)."""
     app.add_middleware(TraceIdMiddleware)
+
+
+class JsonCharsetMiddleware:
+    """Ensure JSON responses declare ``charset=utf-8``.
+
+    Starlette serves ``application/json`` without a charset; clients that
+    default to latin1 for unknown charsets (Dart's ``http`` package) then
+    decode UTF-8 payloads (em-dash, Cyrillic) into mojibake (``â€"``) —
+    visible in error toasts like MODELS_UNAVAILABLE. Pure-ASGI header
+    rewrite only: no body buffering, SSE streams pass untouched.
+    """
+
+    _JSON_TYPES = ("application/json", "application/problem+json")
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http":
+            await self.app(scope, receive, send)
+            return
+
+        async def send_wrapper(message):
+            if message["type"] == "http.response.start":
+                headers = list(message.get("headers") or [])
+                for idx, item in enumerate(headers):
+                    name = item[0] if isinstance(item, tuple) else None
+                    if name is None:
+                        continue
+                    if name.lower() != b"content-type":
+                        continue
+                    value = item[1]
+                    ct = value.decode("latin-1") if isinstance(value, (bytes, bytearray)) else str(value)
+                    base = ct.split(";", 1)[0].strip().lower()
+                    if base in self._JSON_TYPES and "charset" not in ct.lower():
+                        ct = f"{ct}; charset=utf-8"
+                        headers[idx] = (name, ct.encode("latin-1"))
+                    break
+                message = {**message, "headers": headers}
+            await send(message)
+
+        await self.app(scope, receive, send_wrapper)
+
+
+def register_json_charset(app: FastAPI) -> None:
+    """Declare JSON charset (client-side UTF-8 decoding, no mojibake)."""
+    app.add_middleware(JsonCharsetMiddleware)

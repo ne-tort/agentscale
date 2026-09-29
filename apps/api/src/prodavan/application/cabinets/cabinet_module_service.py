@@ -332,6 +332,12 @@ class CabinetModuleService:
                     cabinet_id,
                     row_id,
                 )
+        # Commit the deletion: create/update commit in this service, delete
+        # used to rely on the request teardown — which rolls back, so the
+        # flushed DELETE was silently discarded and the row "came back"
+        # on the next list/poll (row survived with 200 OK).
+        await self._session.commit()
+
         from prodavan.application.projects.rematerialize_scheduler import schedule_cabinet_rematerialize
 
         return await schedule_cabinet_rematerialize(

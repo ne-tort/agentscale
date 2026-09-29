@@ -11,7 +11,12 @@ from prodavan.api.exception_handlers import register_exception_handlers
 from prodavan.api.v1 import health as health_routes
 from prodavan.api.v1.router import router as v1_router
 from prodavan.config.settings import settings
-from prodavan.core.middleware import register_cors, register_pod_surface_allowlist, register_trace_id
+from prodavan.core.middleware import (
+    register_cors,
+    register_json_charset,
+    register_pod_surface_allowlist,
+    register_trace_id,
+)
 from prodavan.core.trace_context import install_trace_id_log_filter
 from prodavan.core.wiring import build_lifespan_manager
 
@@ -32,6 +37,10 @@ def create_app() -> FastAPI:
     # Trace id first so request.state.trace_id is set for all later middleware
     # and exception handlers (audit XCUT-P2a).
     register_trace_id(app)
+    # JSON bodies are UTF-8 — declare the charset so every client (Dart http
+    # defaults to latin1 without it) decodes them correctly (no «â€"» mojibake
+    # in error details).
+    register_json_charset(app)
     # Allowlist before CORS so pod credential checks always run.
     register_pod_surface_allowlist(app)
     register_cors(app, allow_origins=settings.cors_origin_list)

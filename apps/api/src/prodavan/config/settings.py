@@ -317,6 +317,13 @@ class Settings(BaseSettings):
         default="templates",
         validation_alias=AliasChoices("DOCUMENTS_TEMPLATES_DIR"),
     )
+    # Live model list (/v1/models via pod agent-runtime): transient pod/bridge
+    # flaps are retried with a short backoff before surfacing 503
+    # MODELS_UNAVAILABLE — the models themselves are usually fine.
+    live_models_fetch_attempts: int = Field(
+        default=3,
+        validation_alias=AliasChoices("LIVE_MODELS_FETCH_ATTEMPTS"),
+    )
     # Platform probe pod — single long-lived agent-runtime pod owned by the platform
     # (not a project sandbox) used to verify AI keys and fetch their model list via
     # the vendor SDK/HTTP path that only exists inside agent-runtime. The API pushes
