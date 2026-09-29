@@ -64,6 +64,7 @@ from prodavan.domain.identity import Principal
 from prodavan.domain.projects import CHAT_MAX_ATTACHMENTS_PER_MESSAGE, CHAT_MAX_MESSAGE_CHARS
 from prodavan.infrastructure.persistence.models.agent import AgentEventRow, AgentSessionRow, AgentUsageRow
 from prodavan.infrastructure.persistence.models.identity import EmployeeRow
+from prodavan.infrastructure.persistence.models.modules import ModuleInstanceDataRow
 from prodavan.infrastructure.persistence.models.projects import ProjectRow
 from prodavan.infrastructure.projects.workspace import WorkspaceLayoutWriter
 
@@ -1443,11 +1444,24 @@ class AgentSessionService:
             except Exception:
                 pass
 
+        # Chat-scoped module rows (request_lines / found_offers / budget_lines …,
+        # scope.chats=current) must die with their chat — otherwise the deleted
+        # chat's data outlives it and can leak into other sessions' views.
+        # Rows with NULL session_id (chats=all tables: catalogs, sellers …)
+        # are never matched and stay intact.
+        module_rows = await self._session.execute(
+            delete(ModuleInstanceDataRow).where(ModuleInstanceDataRow.session_id == session_id)
+        )
         await self._session.execute(delete(AgentEventRow).where(AgentEventRow.session_id == session_id))
         await self._session.execute(delete(AgentUsageRow).where(AgentUsageRow.session_id == session_id))
         await self._session.execute(delete(AgentSessionRow).where(AgentSessionRow.id == session_id))
         await self._session.commit()
-        return {"ok": True, "session_id": session_id, "project_id": project_id}
+        return {
+            "ok": True,
+            "session_id": session_id,
+            "project_id": project_id,
+            "module_rows_deleted": int(module_rows.rowcount or 0),
+        }
 
     async def cancel_session(
         self,
