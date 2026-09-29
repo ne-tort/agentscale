@@ -63,6 +63,19 @@ String formatModuleCell({
   if (field == 'path') {
     return formatPathCell(raw);
   }
+  if (format == 'index_progress') {
+    // «В процессе (x из y)»: dynamic progress from the worker heartbeat
+    // fields; other statuses fall through to the enum labels below.
+    if (raw?.toString() == 'indexing') {
+      final indexed = _asInt(body['indexed_count']);
+      if (indexed != null) {
+        final total = _asInt(body['total_rows']);
+        final totalText = total != null ? ' из $total' : '';
+        return 'В процессе ($indexed$totalText)';
+      }
+      return 'В процессе';
+    }
+  }
 
   final enumMeta = col['enum'];
   if (enumMeta is Map && enumMeta['labels'] is Map) {
@@ -91,6 +104,12 @@ String formatModuleCell({
   }
 
   return raw?.toString() ?? '';
+}
+
+int? _asInt(dynamic raw) {
+  if (raw is num) return raw.toInt();
+  if (raw is String) return int.tryParse(raw.trim());
+  return null;
 }
 
 String _formatEnvelopeDate(dynamic raw) {

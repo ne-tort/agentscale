@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/preferences/app_value_preference.dart';
@@ -11,6 +13,7 @@ import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/features/meta/meta_icon.dart';
 import 'package:prodavan/features/meta/meta_label.dart';
 import 'package:prodavan/features/meta/module_meta_manifest.dart';
+import 'package:prodavan/features/meta/poll_while.dart';
 import 'package:prodavan/features/meta/preview/preview_stub.dart';
 import 'package:prodavan/features/meta/runtime/cabinet_data_controller.dart';
 import 'package:prodavan/features/meta/runtime/module_runtime_scope.dart';
@@ -74,6 +77,7 @@ class CollectionViewInterpreter extends StatelessWidget {
         final styled = _applyRowStyles(context, uiJson, rawRows);
         final rows = _withSelection(context, uiJson, styled);
         final hasInline = _hasInlineAdd(uiJson);
+        final hasPoll = _hasActivePoll(uiJson, rawRows, seeds);
         final toolbar = _toolbar(context, uiJson, tableSlug, l10n, skipCreate: hasInline);
         final emptyUi = uiJson['empty'];
         final emptyTitle = emptyUi is Map && emptyUi['title'] != null
@@ -130,13 +134,19 @@ class CollectionViewInterpreter extends StatelessWidget {
                 },
         );
 
-        if (!hasInline && !_hasContextHeader(uiJson) && !_hasListHeader(uiJson)) {
+        if (!hasInline && !_hasContextHeader(uiJson) && !_hasListHeader(uiJson) && !hasPoll) {
           return collection;
         }
 
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            if (hasPoll)
+              _CollectionPoller(
+                seeds: seeds,
+                uiJson: uiJson,
+                rows: rawRows,
+              ),
             if (_hasListHeader(uiJson))
               _CollectionListHeader(
                 headerConfig: Map<String, dynamic>.from(uiJson['list_header'] as Map),
@@ -743,6 +753,103 @@ class CollectionViewInterpreter extends StatelessWidget {
 }
 
 /// Singleton-row preference fields above a collection (e.g. MCP zip on databases list).
+/// True when ui_json.poll_while is configured and at least one row
+/// currently matches (e.g. any catalogs row with status=indexing).
+bool _hasActivePoll(
+  Map<String, dynamic> uiJson,
+  List<dynamic> rows,
+  dynamic seeds,
+) {
+  final config = parsePollWhile(uiJson['poll_while']);
+  if (config == null) return false;
+  for (final row in rows) {
+    final id = row is Map ? row['row_id'] : row.id;
+    final item = seeds.itemById(id?.toString() ?? '');
+    final body = item is Map ? item['body'] : null;
+    if (body is Map && config.matches(body[config.field])) return true;
+  }
+  return false;
+}
+
+/// Invisible poller: reloads `seeds.loadAll()` on the ui_json.poll_while
+/// interval while any row matches. The surrounding ListenableBuilder then
+/// rebuilds with fresh rows (live indexing progress). 30-minute hard cap.
+class _CollectionPoller extends StatefulWidget {
+  const _CollectionPoller({
+    required this.seeds,
+    required this.uiJson,
+    required this.rows,
+  });
+
+  final dynamic seeds;
+  final Map<String, dynamic> uiJson;
+  final List<dynamic> rows;
+
+  @override
+  State<_CollectionPoller> createState() => _CollectionPollerState();
+}
+
+class _CollectionPollerState extends State<_CollectionPoller> {
+  Timer? _timer;
+  DateTime? _startedAt;
+
+  @override
+  void initState() {
+    super.initState();
+    _schedule();
+  }
+
+  @override
+  void didUpdateWidget(covariant _CollectionPoller oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _schedule();
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _timer = null;
+    super.dispose();
+  }
+
+  void _schedule() {
+    final config = parsePollWhile(widget.uiJson['poll_while']);
+    final active =
+        config != null && _hasActivePoll(widget.uiJson, widget.rows, widget.seeds);
+    if (!active) {
+      _timer?.cancel();
+      _timer = null;
+      _startedAt = null;
+      return;
+    }
+    _startedAt ??= DateTime.now();
+    _timer ??= Timer.periodic(config.interval, (_) => _tick());
+  }
+
+  Future<void> _tick() async {
+    if (!mounted) return;
+    final started = _startedAt;
+    if (started != null &&
+        DateTime.now().difference(started) > const Duration(minutes: 30)) {
+      _timer?.cancel();
+      _timer = null;
+      return;
+    }
+    try {
+      final reload = widget.seeds.loadAll;
+      if (reload is Future Function()) {
+        await reload();
+      } else if (reload is Function()) {
+        final result = reload();
+        if (result is Future) await result;
+      }
+    } catch (_) {}
+  }
+
+  @override
+  Widget build(BuildContext context) => const SizedBox.shrink();
+}
+
 class _CollectionListHeader extends StatefulWidget {
   const _CollectionListHeader({
     required this.headerConfig,
