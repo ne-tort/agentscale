@@ -1,60 +1,115 @@
 import 'package:flutter/material.dart';
 
-/// Empty-chat placeholder: a quiet, dialog-shaped bubble with three muted
-/// dots — the same visual language as the streaming indicator, with no text.
+import 'package:prodavan/core/theme/app_spacing.dart';
+
+/// Empty-chat placeholder: quiet dialog-shaped skeleton plates pinned to the
+/// TOP of the chat (not centered) — the same visual language as
+/// [ChatTranscriptSkeleton]: grey placeholder "picture" plates (avatar dot,
+/// message card, text lines, a small reply bubble), gently pulsing.
 ///
-/// [highlighted] is driven by the OS drag & drop hover: the bubble gets a
-/// primary-tinted border, brighter dots and a subtle scale-up so the chat
-/// visibly "opens up" while a file is being dragged in.
-class ChatEmptyPlaceholder extends StatelessWidget {
+/// [highlighted] is driven by the OS drag & drop hover: plates take a
+/// primary tint so the chat visibly opens up for the incoming file — no
+/// labels anywhere.
+class ChatEmptyPlaceholder extends StatefulWidget {
   const ChatEmptyPlaceholder({super.key, this.highlighted = false});
 
   final bool highlighted;
 
   @override
+  State<ChatEmptyPlaceholder> createState() => _ChatEmptyPlaceholderState();
+}
+
+class _ChatEmptyPlaceholderState extends State<ChatEmptyPlaceholder>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _pulse = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 900),
+  )..repeat(reverse: true);
+
+  @override
+  void dispose() {
+    _pulse.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final borderColor = highlighted
-        ? scheme.primary.withValues(alpha: 0.55)
-        : scheme.onSurfaceVariant.withValues(alpha: 0.16);
-    final dotColor = highlighted
-        ? scheme.primary.withValues(alpha: 0.65)
-        : scheme.onSurfaceVariant.withValues(alpha: 0.28);
-    return Center(
-      child: AnimatedScale(
-        scale: highlighted ? 1.03 : 1.0,
-        duration: const Duration(milliseconds: 150),
-        curve: Curves.easeOutCubic,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 150),
-          curve: Curves.easeOutCubic,
-          padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 22),
-          decoration: BoxDecoration(
-            color: scheme.surfaceContainerLow,
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(
-              color: borderColor,
-              width: highlighted ? 1.4 : 1.0,
-            ),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
+    final plateColor = widget.highlighted
+        ? scheme.primary.withValues(alpha: 0.14)
+        : scheme.onSurface.withValues(alpha: 0.08);
+
+    return FadeTransition(
+      opacity: Tween<double>(begin: 0.5, end: 0.9)
+          .animate(CurvedAnimation(parent: _pulse, curve: Curves.easeInOut)),
+      child: ListView(
+        padding: EdgeInsets.all(AppSpacing.md),
+        physics: const NeverScrollableScrollPhysics(),
+        children: [
+          // Assistant side: avatar placeholder + message card + text lines.
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              for (var i = 0; i < 3; i++)
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 3),
-                  child: Container(
-                    width: 6,
-                    height: 6,
-                    decoration: BoxDecoration(shape: BoxShape.circle, color: dotColor),
-                  ),
+              Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(shape: BoxShape.circle, color: plateColor),
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      height: 56,
+                      decoration: BoxDecoration(
+                        color: plateColor,
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                    ),
+                    const SizedBox(height: AppSpacing.xs),
+                    _line(plateColor, 0.78),
+                    const SizedBox(height: AppSpacing.xs),
+                    _line(plateColor, 0.55),
+                    const SizedBox(height: AppSpacing.xs),
+                    _line(plateColor, 0.66),
+                  ],
                 ),
+              ),
             ],
           ),
-        ),
+          const SizedBox(height: AppSpacing.sm),
+          // User side: small reply bubble placeholder.
+          Align(
+            alignment: Alignment.centerRight,
+            child: FractionallySizedBox(
+              alignment: Alignment.centerRight,
+              widthFactor: 0.34,
+              child: Container(
+                height: 30,
+                decoration: BoxDecoration(
+                  color: plateColor,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
+
+  Widget _line(Color color, double factor) => FractionallySizedBox(
+        alignment: Alignment.centerLeft,
+        widthFactor: factor,
+        child: Container(
+          height: 10,
+          decoration: BoxDecoration(
+            color: color,
+            borderRadius: BorderRadius.circular(5),
+          ),
+        ),
+      );
 }
 
 /// Full-area veil shown while files are dragged over the chat transcript.

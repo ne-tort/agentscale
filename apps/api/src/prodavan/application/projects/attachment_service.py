@@ -177,17 +177,46 @@ class ProjectAttachmentService:
             await store.put_bytes(key, raw, content_type=guessed)
             storage_ref = object_ref(key)
 
-        row = ProjectAttachmentRow(
-            project_id=project_id,
-            filename=Path(safe_name).name,
-            content_type=guessed,
-            size_bytes=len(raw),
-            storage_ref=storage_ref,
-            content_asset_id=content_asset_id,
+        # Inbox keys are deterministic per filename: re-attaching the same
+        # file must reuse the existing row (idempotent) instead of stacking
+        # duplicate rows that share one storage_ref.
+        existing = (
+            (
+                await self._session.execute(
+                    select(ProjectAttachmentRow)
+                    .where(
+                        ProjectAttachmentRow.project_id == project_id,
+                        ProjectAttachmentRow.storage_ref == storage_ref,
+                        ProjectAttachmentRow.content_asset_id.is_(None),
+                    )
+                    .order_by(ProjectAttachmentRow.created_at.desc())
+                    .limit(1)
+                )
+            )
+            .scalars()
+            .first()
+            if not content_asset_id
+            else None
         )
-        self._session.add(row)
-        await self._session.commit()
-        await self._session.refresh(row)
+        if existing is not None:
+            existing.filename = Path(safe_name).name
+            existing.content_type = guessed
+            existing.size_bytes = len(raw)
+            row = existing
+            await self._session.commit()
+            await self._session.refresh(row)
+        else:
+            row = ProjectAttachmentRow(
+                project_id=project_id,
+                filename=Path(safe_name).name,
+                content_type=guessed,
+                size_bytes=len(raw),
+                storage_ref=storage_ref,
+                content_asset_id=content_asset_id,
+            )
+            self._session.add(row)
+            await self._session.commit()
+            await self._session.refresh(row)
 
         if settings.content_attachments_via_assets and content_asset_id:
             await UploadService(self._session).link_asset(

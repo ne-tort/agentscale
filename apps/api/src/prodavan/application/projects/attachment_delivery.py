@@ -164,16 +164,22 @@ class AttachmentDeliveryService:
         principal: Principal,
         employee: EmployeeRow | None,
     ) -> tuple[ProjectAttachmentRow, bytes]:
+        # The inbox storage key is deterministic per filename, so legacy
+        # re-attachments can share one storage_ref across several rows —
+        # resolve to the newest row instead of raising MultipleResultsFound.
         q = await self._session.execute(
-            select(ProjectAttachmentRow).where(
+            select(ProjectAttachmentRow)
+            .where(
                 ProjectAttachmentRow.project_id == project_id,
                 or_(
                     ProjectAttachmentRow.storage_ref == storage_ref,
                     ProjectAttachmentRow.id == storage_ref,
                 ),
             )
+            .order_by(ProjectAttachmentRow.created_at.desc())
+            .limit(1)
         )
-        row = q.scalar_one_or_none()
+        row = q.scalars().first()
         if row is None:
             raise LookupError(storage_ref)
         if row.content_asset_id or row.storage_ref.startswith("content://"):

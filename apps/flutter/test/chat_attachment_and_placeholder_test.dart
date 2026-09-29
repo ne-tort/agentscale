@@ -78,24 +78,27 @@ void main() {
     expect(find.textContaining('"a"'), findsOneWidget);
   });
 
-  testWidgets('empty chat placeholder: no text, three dots, quiet morph', (tester) async {
+  testWidgets('empty chat placeholder: top-anchored skeleton plates, no text', (tester) async {
     await tester.pumpWidget(_themed(const ChatEmptyPlaceholder()));
-    await tester.pumpAndSettle();
+    await tester.pump();
 
-    // Textless placeholder.
+    // A placeholder "picture": no text of any kind.
     expect(find.byType(Text), findsNothing);
 
-    // Three dots.
-    final dots = find.byWidgetPredicate(
-      (w) => w is Container && (w.constraints?.minWidth ?? 0) == 6.0,
+    // Skeleton plates: circular avatar placeholder + card + lines + bubble.
+    final circle = find.byWidgetPredicate(
+      (w) => w is Container && (w.constraints?.minWidth ?? 0) == 34.0,
     );
-    expect(dots, findsNWidgets(3));
+    expect(circle, findsOneWidget);
 
-    // Highlighted (drag hover): primary-tinted border and a subtle scale.
-    await tester.pumpWidget(_themed(const ChatEmptyPlaceholder(highlighted: true)));
-    await tester.pumpAndSettle();
-    expect(find.byType(AnimatedScale), findsOneWidget);
-    final scale = tester.widget<AnimatedScale>(find.byType(AnimatedScale));
-    expect(scale.scale, 1.03);
+    // Top-anchored: the avatar plate starts at the top-left padding (~16,16),
+    // not centered in the viewport.
+    final topLeft = tester.getTopLeft(circle);
+    expect(topLeft.dx, moreOrLessEquals(16, epsilon: 1));
+    expect(topLeft.dy, lessThan(100));
+
+    // The dialog picture continues below the assistant card (lines + reply).
+    expect(find.byType(FractionallySizedBox), findsNWidgets(4));
   });
+
 }
