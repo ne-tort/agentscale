@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:prodavan/core/preferences/collapsed_projects_store.dart';
 import 'package:prodavan/core/theme/app_color_tokens.dart';
+import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/theme/app_theme.dart';
 import 'package:prodavan/features/employee/cabinet_chats_rail.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
@@ -181,7 +183,7 @@ void main() {
     expect(newerTop, lessThan(midTop));
   });
 
-  testWidgets('selected chat row shows a persistent hover-colored highlight', (tester) async {
+  testWidgets('selected chat row shows a persistent hover-identical highlight', (tester) async {
     await tester.pumpWidget(
       _app(
         CabinetChatsRail(
@@ -205,21 +207,146 @@ void main() {
     expect(selected.style?.fontWeight, FontWeight.w600);
     expect(plain.style?.fontWeight, isNot(FontWeight.w600));
 
-    // Persistent highlight: a container with the hover color behind the text.
+    // Persistent highlight: ONE shared row container with the hover color.
+    Finder decoratedOf(Finder text) =>
+        find.ancestor(of: text, matching: find.byType(DecoratedBox));
     final label = find.text('Selected one');
     final expected = tester
         .element(label)
         .appColors
         .onSurface
         .withValues(alpha: 0.08);
-    final box = tester.widget<DecoratedBox>(
-      find.ancestor(of: label, matching: find.byType(DecoratedBox)),
-    );
+    final box = tester.widget<DecoratedBox>(decoratedOf(label));
     expect((box.decoration as BoxDecoration).color, expected);
-    // Plain rows have no highlight container.
+    // Plain rows use the SAME container — no color until hovered/selected.
     expect(
-      find.ancestor(of: find.text('Plain one'), matching: find.byType(DecoratedBox)),
-      findsNothing,
+      (tester.widget<DecoratedBox>(decoratedOf(find.text('Plain one')))
+              .decoration as BoxDecoration)
+          .color,
+      isNull,
+    );
+  });
+
+  testWidgets('hovering a chat row paints exactly the selected highlight', (tester) async {
+    await tester.pumpWidget(
+      _app(
+        CabinetChatsRail(
+          extended: true,
+          newChatEnabled: false,
+          projectGroups: [
+            _group('proj_a', 'Alpha', chats: [
+              _chat('ags_1', 'Selected one'),
+              _chat('ags_2', 'Plain one'),
+            ]),
+          ],
+          activeSessionId: 'ags_1',
+          onNewChat: null,
+          onOpenChat: (_) {},
+        ),
+      ),
+    );
+
+    final expected = tester
+        .element(find.text('Selected one'))
+        .appColors
+        .onSurface
+        .withValues(alpha: 0.08);
+
+    // Hover the PLAIN row with a real mouse pointer.
+    final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await gesture.addPointer(location: Offset.zero);
+    addTearDown(gesture.removePointer);
+    await gesture.moveTo(tester.getCenter(find.text('Plain one')));
+    await tester.pump();
+
+    Finder decoratedOf(Finder text) =>
+        find.ancestor(of: text, matching: find.byType(DecoratedBox));
+    final hovered =
+        tester.widget<DecoratedBox>(decoratedOf(find.text('Plain one')));
+    final selected =
+        tester.widget<DecoratedBox>(decoratedOf(find.text('Selected one')));
+
+    // Same color, same radius, same geometry (full row incl. paddings):
+    // the persistent selection is pixel-identical to the hover highlight.
+    expect((hovered.decoration as BoxDecoration).color, expected);
+    expect((selected.decoration as BoxDecoration).color, expected);
+    expect(
+      (hovered.decoration as BoxDecoration).borderRadius,
+      (selected.decoration as BoxDecoration).borderRadius,
+    );
+    expect(
+      tester.getRect(decoratedOf(find.text('Plain one'))).size,
+      tester.getRect(decoratedOf(find.text('Selected one'))).size,
+    );
+  });
+
+  testWidgets('project headers have no hover background, chat rows keep hover', (tester) async {
+    await tester.pumpWidget(
+      _app(
+        CabinetChatsRail(
+          extended: true,
+          newChatEnabled: false,
+          projectGroups: [
+            _group('proj_a', 'Alpha', chats: [_chat('ags_1', 'A1')]),
+          ],
+          activeSessionId: 'ags_1',
+          onNewChat: null,
+          onToggleProjectCollapsed: (_) {},
+          onOpenChat: (_) {},
+        ),
+      ),
+    );
+
+    // Header is a structural collapse toggle — no hover ink.
+    final header = tester.widget<InkWell>(
+      find.ancestor(of: find.text('Alpha'), matching: find.byType(InkWell)).first,
+    );
+    expect(header.hoverColor, Colors.transparent);
+    // The header still toggles collapse on tap.
+    expect(header.onTap, isNotNull);
+
+    // Chat rows keep hover — painted by the shared row container, so the
+    // row's own ink hover is off (one layer, no double tint).
+    final row = tester.widget<InkWell>(
+      find.ancestor(of: find.text('A1'), matching: find.byType(InkWell)).first,
+    );
+    expect(row.hoverColor, Colors.transparent);
+    expect(row.onHover, isNotNull);
+  });
+
+  testWidgets('tree column leading padding matches the nav tile padding', (tester) async {
+    await tester.pumpWidget(
+      _app(
+        CabinetChatsRail(
+          extended: true,
+          newChatEnabled: false,
+          projectGroups: [
+            _group('proj_a', 'Alpha', chats: [_chat('ags_1', 'A1')]),
+          ],
+          activeSessionId: null,
+          onNewChat: null,
+          onOpenChat: (_) {},
+        ),
+      ),
+    );
+
+    // The header row content (chevron) starts at the nav destination
+    // horizontal padding: Material `_horizontalDestinationPadding` (8px).
+    expect(tester.getTopLeft(find.byIcon(Icons.expand_more)).dx, 8);
+    final paddings = tester
+        .widgetList<Padding>(
+          find.ancestor(
+            of: find.byIcon(Icons.expand_more),
+            matching: find.byType(Padding),
+          ),
+        )
+        .map((p) => p.padding)
+        .toList();
+    expect(
+      paddings,
+      contains(
+        const EdgeInsets.symmetric(horizontal: 8, vertical: AppSpacing.sm),
+      ),
     );
   });
 

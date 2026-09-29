@@ -62,6 +62,8 @@ class _CabinetShellState extends State<CabinetShell> {
   /// Collapsed project branch ids in the chats rail (persisted per user).
   Set<String> _collapsedProjectIds = const <String>{};
   Timer? _presenceHeartbeat;
+  /// Debounce for [onChatActivityChanged] reloads (turn-completion refresh).
+  Timer? _sidebarRefreshDebounce;
 
   bool get _showManagement => _managementEntries.isNotEmpty;
   bool get _showData => _dataEntries.isNotEmpty;
@@ -96,6 +98,7 @@ class _CabinetShellState extends State<CabinetShell> {
   @override
   void dispose() {
     _presenceHeartbeat?.cancel();
+    _sidebarRefreshDebounce?.cancel();
     workContext.removeListener(_onWorkContext);
     super.dispose();
   }
@@ -137,7 +140,12 @@ class _CabinetShellState extends State<CabinetShell> {
       _loadNav();
       return;
     }
-    setState(() {});
+    // A descendant (workspace page initState) can notify workContext
+    // during the current build phase: setState would then be called on
+    // a shell while a child is still mounting. Defer to the next frame.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) setState(() {});
+    });
   }
 
   Future<void> _loadNav() async {
@@ -397,6 +405,37 @@ class _CabinetShellState extends State<CabinetShell> {
     await _reloadSidebar();
   }
 
+  /// Opening a chat in a branch also makes that project the active one
+  /// (best-effort): PUT the selection, then sync local state and reload the
+  /// sidebar so the tree follows the branch the user is chatting in. Runs
+  /// BEFORE the chat page is pushed; a failed PUT must not block navigation.
+  Future<void> _syncProjectSelection(String projectId) async {
+    if (projectId == workContext.selectedProjectId) return;
+    try {
+      await workContext.api.putProjectSelection(
+        cabinetId: widget.cabinetId,
+        projectId: projectId,
+      );
+    } catch (_) {
+      // Best-effort sync: the chat still opens, sidebar keeps old selection.
+    }
+    workContext.setSelectedProjectId(projectId);
+    await _reloadSidebar();
+  }
+
+  /// Turn-completion refresh: a finished chat turn (answer or error) can
+  /// change what the sidebar should show — e.g. a chat materialized at
+  /// first send stays hidden until its first message lands, so the tree
+  /// would otherwise not update until the user navigates away. Debounced so
+  /// rapid consecutive turns do not spam the sidebar endpoint.
+  void _onChatActivityChanged() {
+    _sidebarRefreshDebounce?.cancel();
+    _sidebarRefreshDebounce = Timer(const Duration(milliseconds: 1500), () {
+      if (!mounted) return;
+      unawaited(_reloadSidebar());
+    });
+  }
+
   Future<void> _openChat(Map<String, dynamic> chat) async {
     final sessionId = chat['session_id'] as String?;
     final projectId = chat['project_id'] as String?;
@@ -405,6 +444,8 @@ class _CabinetShellState extends State<CabinetShell> {
     if (workContext.selectedSessionId == sessionId && _chatOpen) return;
 
     final projectName = chat['project_name'] as String? ?? projectId;
+    // Selecting a chat in another branch switches the active project first.
+    await _syncProjectSelection(projectId);
     workContext.setSelectedSessionId(sessionId);
     final page = ProjectWorkspacePage(
       cabinetId: widget.cabinetId,
@@ -418,6 +459,7 @@ class _CabinetShellState extends State<CabinetShell> {
         await _reloadSidebar();
       },
       onDraftPresenceChanged: _reloadSidebar,
+      onChatActivityChanged: _onChatActivityChanged,
     );
     await _pushChat(page);
     if (!mounted) return;
@@ -432,8 +474,9 @@ class _CabinetShellState extends State<CabinetShell> {
     await _newChatForProject(projectId);
   }
 
-  /// Start a chat in [projectId] — does NOT move the project selection;
-  /// the selection only drives the global "new chat" default.
+  /// Start a chat in [projectId] — also moves the active project selection
+  /// there (best-effort, synced before the chat page opens) so the rail and
+  /// chat-scoped modules follow the branch the new chat belongs to.
   Future<void> _newChatForProject(String projectId) async {
     try {
       String name = projectId;
@@ -442,6 +485,7 @@ class _CabinetShellState extends State<CabinetShell> {
         name = p['name'] as String? ?? projectId;
       } catch (_) {}
       if (!mounted) return;
+      await _syncProjectSelection(projectId);
       // Lazy session: do not create DB dialog until draft (≥5) or first send.
       workContext.setSelectedSessionId(null);
       final page = ProjectWorkspacePage(
@@ -454,6 +498,7 @@ class _CabinetShellState extends State<CabinetShell> {
           await _reloadSidebar();
         },
         onDraftPresenceChanged: _reloadSidebar,
+        onChatActivityChanged: _onChatActivityChanged,
       );
       await _pushChat(page);
       if (!mounted) return;

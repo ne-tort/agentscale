@@ -194,8 +194,10 @@ List<ChatBlock> applyStreamEvent(List<ChatBlock> blocks, Map<String, dynamic> ev
       final userRaw = Map<String, dynamic>.from(payload);
       final idx = next.indexWhere((b) => b.kind == 'user');
       if (idx >= 0) {
-        // Server echo of the optimistic block — keep local widget identity.
+        // Server echo of the optimistic block — keep local widget identity
+        // and the optimistic send time (the echo payload carries no ts).
         userRaw['_key'] = next[idx].key;
+        userRaw['created_at'] ??= next[idx].raw['created_at'];
         next[idx] = ChatBlock(kind: 'user', raw: userRaw);
       } else {
         userRaw['_key'] = _KeyGen.next('user');

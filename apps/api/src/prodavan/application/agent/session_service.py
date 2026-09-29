@@ -159,6 +159,8 @@ def _event_public(row: AgentEventRow) -> dict:
         "type": row.event_type,
         "data": row.payload,
         "at": row.at.isoformat() if row.at else None,
+        # Row creation time — feeds chat block timestamps (created_at / turn_ms).
+        "created_at": row.created_at.isoformat() if row.created_at else None,
     }
 
 
@@ -401,6 +403,7 @@ class AgentSessionService:
             {
                 "type": getattr(row, "event_type", None),
                 "data": row.payload if isinstance(getattr(row, "payload", None), dict) else {},
+                "created_at": row.created_at.isoformat() if getattr(row, "created_at", None) else None,
             }
             for row in rows
         ]

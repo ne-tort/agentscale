@@ -73,6 +73,12 @@ class ChatSessionController {
 
   ProjectChatStreamHandle? _handle;
   List<ChatBlock> _liveTurnBlocks = const [];
+
+  /// Turn timing (live path): first assistant output moment and the moment
+  /// the answer completed — stamped onto the assistant block as
+  /// `created_at` / `turn_ms` when the turn finalizes.
+  DateTime? _turnFirstOutputAt;
+  DateTime? _turnEndedAt;
   final _tick = StreamController<void>.broadcast();
   Timer? _notifyTimer;
 
@@ -310,9 +316,14 @@ class ChatSessionController {
       }
     }
 
+    _turnFirstOutputAt = null;
+    _turnEndedAt = null;
     final userBlock = createLiveBlock('user', {
       'text': trimmed,
       if (attachmentRefs.isNotEmpty) 'attachment_refs': attachmentRefs,
+      // Optimistic send time (UTC ISO — same shape as the server format);
+      // history reload replaces it with the persisted event timestamp.
+      'created_at': DateTime.now().toUtc().toIso8601String(),
     });
     _liveTurnBlocks = [userBlock];
     notifyImmediate();
@@ -361,7 +372,9 @@ class ChatSessionController {
           }
           final pending = data['pending_approvals'];
           if (pending is List) pendingApprovals = pending.cast<Map<String, dynamic>>();
-          _liveTurnBlocks = attachUsageToAssistant(finalizeTurnBlocks(_liveTurnBlocks));
+          _turnEndedAt ??= DateTime.now().toUtc();
+          _liveTurnBlocks =
+              _attachTurnTimestamps(attachUsageToAssistant(finalizeTurnBlocks(_liveTurnBlocks)));
         } else if (type == '_error' && data is Map<String, dynamic>) {
           error = ProdavanApiException(
             data['status'] is int ? data['status'] as int : 503,
@@ -380,6 +393,7 @@ class ChatSessionController {
             error = AgentStreamError({'message': event.toString()});
           }
         } else if (type == 'done') {
+          _turnEndedAt = DateTime.now().toUtc();
           _liveTurnBlocks = applyStreamEvent(_liveTurnBlocks, event);
           final doneData = data is Map<String, dynamic>
               ? data
@@ -405,6 +419,8 @@ class ChatSessionController {
         } else {
           _liveTurnBlocks = applyStreamEvent(_liveTurnBlocks, event);
           if (type == 'text_delta' || type == 'thinking_delta') {
+            // First assistant output of the turn — duration start.
+            _turnFirstOutputAt ??= DateTime.now().toUtc();
             notifyImmediate();
           } else {
             notify();
@@ -419,7 +435,7 @@ class ChatSessionController {
         error = _bridgeTimeoutError();
         _finalizeInterruptedTurn(trimmed);
       } else {
-        blocks.addAll(attachUsageToAssistant(_liveTurnBlocks));
+        blocks.addAll(_attachTurnTimestamps(attachUsageToAssistant(_liveTurnBlocks)));
         _liveTurnBlocks = const [];
         if (pendingApprovals.isEmpty) {
           pendingApprovals = await _fetchPending();
@@ -441,13 +457,44 @@ class ChatSessionController {
     }
   }
 
+  /// Stamp the turn's assistant message with its completion time and
+  /// duration (first assistant output → end):
+  /// - `created_at` — wall-clock completion moment (UTC ISO, server format);
+  /// - `turn_ms` — only when the turn actually produced assistant output.
+  ///
+  /// History blocks carry the same fields derived server-side, so live and
+  /// reloaded transcripts render identically. Turns with no assistant text
+  /// (error / cancelled before any output) get nothing — there is no answer
+  /// to date. The main (last non-empty) assistant block of the turn is the
+  /// message the metadata row lives on.
+  List<ChatBlock> _attachTurnTimestamps(List<ChatBlock> turnBlocks) {
+    var target = -1;
+    for (var i = turnBlocks.length - 1; i >= 0; i--) {
+      if (turnBlocks[i].kind == 'assistant_markdown' && turnBlocks[i].text.isNotEmpty) {
+        target = i;
+        break;
+      }
+    }
+    if (target < 0) return turnBlocks;
+    final endedAt = _turnEndedAt ?? DateTime.now().toUtc();
+    final patch = <String, dynamic>{'created_at': endedAt.toIso8601String()};
+    final firstOutputAt = _turnFirstOutputAt;
+    if (firstOutputAt != null) {
+      patch['turn_ms'] = endedAt.difference(firstOutputAt).inMilliseconds;
+    }
+    final out = List<ChatBlock>.from(turnBlocks);
+    out[target] = out[target].copyWithRaw(patch);
+    return out;
+  }
+
   /// Connection dropped mid-turn: keep the partial transcript (marked
   /// interrupted, the way [cancelStream] marks cancelled) so the optimistic
   /// user message is not lost, and hand the user text back to the composer
   /// as an editable draft.
   void _finalizeInterruptedTurn(String userText) {
     if (_liveTurnBlocks.isNotEmpty) {
-      _liveTurnBlocks = attachUsageToAssistant(finalizeTurnBlocks(_liveTurnBlocks, interrupted: true));
+      _liveTurnBlocks =
+          _attachTurnTimestamps(attachUsageToAssistant(finalizeTurnBlocks(_liveTurnBlocks, interrupted: true)));
       blocks.addAll(_liveTurnBlocks);
       _liveTurnBlocks = const [];
       _saveToCache();
@@ -461,7 +508,8 @@ class ChatSessionController {
 
   Future<void> cancelStream() async {
     _handle?.abort();
-    _liveTurnBlocks = attachUsageToAssistant(finalizeTurnBlocks(_liveTurnBlocks, cancelled: true));
+    _liveTurnBlocks =
+        _attachTurnTimestamps(attachUsageToAssistant(finalizeTurnBlocks(_liveTurnBlocks, cancelled: true)));
     blocks.addAll(_liveTurnBlocks);
     _liveTurnBlocks = const [];
     streaming = false;

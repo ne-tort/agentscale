@@ -116,3 +116,101 @@ def test_events_to_chat_blocks_plan_progress() -> None:
     blocks = events_to_chat_blocks(events)
     assert blocks[0]["kind"] == "plan"
     assert blocks[0]["tasks"][0]["status"] == "done"
+
+
+def test_events_to_chat_blocks_user_and_assistant_timestamps() -> None:
+    events = [
+        {"type": PLATFORM_EVENT_USER_MESSAGE, "data": {"text": "hi"}, "created_at": "2026-09-29T10:00:00+00:00"},
+        {"type": AgentEventType.TEXT_DELTA, "data": {"text": "He"}, "created_at": "2026-09-29T10:00:02+00:00"},
+        {"type": AgentEventType.TEXT_DELTA, "data": {"text": "llo"}, "created_at": "2026-09-29T10:00:05+00:00"},
+        {"type": AgentEventType.DONE, "data": {"reason": "completed"}, "created_at": "2026-09-29T10:00:06+00:00"},
+    ]
+    blocks = events_to_chat_blocks(events)
+    assert blocks[0]["created_at"] == "2026-09-29T10:00:00+00:00"
+    assert blocks[1]["created_at"] == "2026-09-29T10:00:05+00:00"
+    assert blocks[1]["turn_ms"] == 3000
+
+
+def test_events_to_chat_blocks_thinking_starts_turn_duration() -> None:
+    events = [
+        {"type": PLATFORM_EVENT_USER_MESSAGE, "data": {"text": "go"}, "created_at": "2026-09-29T10:00:00+00:00"},
+        {"type": AgentEventType.THINKING_DELTA, "data": {"text": "hmm"}, "created_at": "2026-09-29T10:00:01+00:00"},
+        {"type": AgentEventType.THINKING_COMPLETE, "data": {"duration_ms": 1000}},
+        {"type": AgentEventType.TEXT_DELTA, "data": {"text": "Done"}, "created_at": "2026-09-29T10:00:04+00:00"},
+    ]
+    blocks = events_to_chat_blocks(events)
+    assert blocks[2]["created_at"] == "2026-09-29T10:00:04+00:00"
+    assert blocks[2]["turn_ms"] == 3000
+
+
+def test_events_to_chat_blocks_without_timestamps_omit_fields() -> None:
+    events = [
+        {"type": PLATFORM_EVENT_USER_MESSAGE, "data": {"text": "hi"}},
+        {"type": AgentEventType.TEXT_DELTA, "data": {"text": "Hello"}},
+        {"type": AgentEventType.DONE, "data": {}},
+    ]
+    blocks = events_to_chat_blocks(events)
+    assert "created_at" not in blocks[0]
+    assert "created_at" not in blocks[1]
+    assert "turn_ms" not in blocks[1]
+
+
+def test_events_to_chat_blocks_turn_duration_resets_per_turn() -> None:
+    events = [
+        {"type": PLATFORM_EVENT_USER_MESSAGE, "data": {"text": "one"}, "created_at": "2026-09-29T10:00:00+00:00"},
+        {"type": AgentEventType.TEXT_DELTA, "data": {"text": "A"}, "created_at": "2026-09-29T10:00:02+00:00"},
+        {"type": AgentEventType.TEXT_DELTA, "data": {"text": "B"}, "created_at": "2026-09-29T10:00:05+00:00"},
+        {"type": AgentEventType.DONE, "data": {}, "created_at": "2026-09-29T10:00:06+00:00"},
+        {"type": PLATFORM_EVENT_USER_MESSAGE, "data": {"text": "two"}, "created_at": "2026-09-29T11:00:00+00:00"},
+        {"type": AgentEventType.TEXT_DELTA, "data": {"text": "C"}, "created_at": "2026-09-29T11:00:01+00:00"},
+        {"type": AgentEventType.TEXT_DELTA, "data": {"text": "D"}, "created_at": "2026-09-29T11:00:03+00:00"},
+    ]
+    blocks = events_to_chat_blocks(events)
+    assistant = [b for b in blocks if b["kind"] == "assistant_markdown"]
+    assert assistant[0]["turn_ms"] == 3000
+    assert assistant[1]["turn_ms"] == 2000
+
+
+def test_events_to_chat_blocks_multi_segment_assistant_timestamps() -> None:
+    events = [
+        {"type": PLATFORM_EVENT_USER_MESSAGE, "data": {"text": "go"}, "created_at": "2026-09-29T10:00:00+00:00"},
+        {"type": AgentEventType.TEXT_DELTA, "data": {"text": "Before "}, "created_at": "2026-09-29T10:00:01+00:00"},
+        {"type": AgentEventType.TEXT_DELTA, "data": {"text": "tool"}, "created_at": "2026-09-29T10:00:02+00:00"},
+        {"type": AgentEventType.TOOL_CALL, "data": {"id": "tc_1", "name": "Read", "input": {}}, "created_at": "2026-09-29T10:00:03+00:00"},
+        {"type": AgentEventType.TEXT_DELTA, "data": {"text": "After"}, "created_at": "2026-09-29T10:00:04+00:00"},
+    ]
+    blocks = events_to_chat_blocks(events)
+    first = blocks[1]
+    second = blocks[3]
+    assert first["created_at"] == "2026-09-29T10:00:02+00:00"
+    assert first["turn_ms"] == 1000
+    assert second["created_at"] == "2026-09-29T10:00:04+00:00"
+    assert second["turn_ms"] == 3000
+
+
+def test_events_to_chat_blocks_timestamp_falls_back_to_at() -> None:
+    events = [
+        {"type": PLATFORM_EVENT_USER_MESSAGE, "data": {"text": "hi"}, "at": "2026-09-29T10:00:00+00:00"},
+        {"type": AgentEventType.TEXT_DELTA, "data": {"text": "He"}, "at": "2026-09-29T10:00:01+00:00"},
+        {"type": AgentEventType.TEXT_DELTA, "data": {"text": "llo"}, "at": "2026-09-29T10:00:03+00:00"},
+    ]
+    blocks = events_to_chat_blocks(events)
+    assert blocks[0]["created_at"] == "2026-09-29T10:00:00+00:00"
+    assert blocks[1]["created_at"] == "2026-09-29T10:00:03+00:00"
+    assert blocks[1]["turn_ms"] == 2000
+
+
+def test_event_public_includes_created_at() -> None:
+    from datetime import UTC, datetime
+
+    from prodavan.application.agent.session_service import _event_public
+
+    class _Row:
+        seq = 3
+        event_type = "user_message"
+        payload = {"text": "hi"}
+        at = None
+        created_at = datetime(2026, 9, 29, 10, 0, tzinfo=UTC)
+
+    public = _event_public(_Row())  # type: ignore[arg-type]
+    assert public["created_at"] == "2026-09-29T10:00:00+00:00"
