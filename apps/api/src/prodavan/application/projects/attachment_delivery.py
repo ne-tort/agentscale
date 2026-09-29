@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from prodavan.application.content.tabular_json import (
     is_tabular_filename,
     records_to_json_bytes,
+    records_to_markdown_table,
     tabular_bytes_to_json,
 )
 from prodavan.application.content.text_extract import (
@@ -48,7 +49,7 @@ from prodavan.infrastructure.persistence.models.projects import ProjectAttachmen
 
 logger = logging.getLogger(__name__)
 
-DeliveryKind = Literal["inline_text", "inline_json", "workspace_file"]
+DeliveryKind = Literal["inline_text", "inline_json", "inline_table", "workspace_file"]
 
 _INSTRUCTION_SUFFIX = "Поступи с ним, согласно инструкциям."
 
@@ -63,6 +64,7 @@ class DeliveredAttachment:
     records: list[dict[str, str]] | None
     text: str | None = None
     note: str = ""
+    markdown: str | None = None
 
     def ui_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {
@@ -79,6 +81,8 @@ class DeliveredAttachment:
             out["inline_json"] = self.records
         if self.kind == "inline_text" and self.text is not None:
             out["inline_text"] = self.text
+        if self.kind == "inline_table" and self.markdown is not None:
+            out["inline_markdown"] = self.markdown
         return out
 
 
@@ -107,7 +111,10 @@ def compose_agent_message(*, user_text: str, items: list[DeliveredAttachment]) -
 
     sections: list[str] = []
     for item in items:
-        if item.kind == "inline_json" and item.records is not None:
+        if item.kind == "inline_table" and item.markdown is not None:
+            header = f"Вложенные данные: {item.filename} ({item.note})"
+            sections.append(f"{header}\n```\n{item.markdown}\n```")
+        elif item.kind == "inline_json" and item.records is not None:
             payload = records_to_json_bytes(item.records, indent=2).decode("utf-8")
             header = (
                 f"Вложенные данные: {item.filename} "
@@ -337,12 +344,13 @@ class AttachmentDeliveryService:
             return DeliveredAttachment(
                 filename=filename,
                 storage_ref=storage_ref,
-                kind="inline_json",
+                kind="inline_table",
                 workspace_path=None,
                 row_count=parsed.row_count,
                 records=parsed.records,
                 text=None,
-                note=f"парсинг {parsed.source_format} → JSON, {parsed.row_count} строк",
+                note=f"таблица, {parsed.row_count} строк",
+                markdown=records_to_markdown_table(parsed.records, parsed.columns),
             )
 
         # Large tabular: convert to JSON file in workspace, reference by path.

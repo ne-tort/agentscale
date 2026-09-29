@@ -1,7 +1,9 @@
+import 'package:desktop_drop/desktop_drop.dart';
 import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/api/prodavan_api.dart';
 import 'package:prodavan/core/chat/controller/chat_session_controller.dart';
+import 'package:prodavan/core/chat/widgets/chat_empty_placeholder.dart';
 import 'package:prodavan/core/chat/models/chat_block.dart';
 import 'package:prodavan/core/chat/widgets/blocks/chat_block_renderer.dart';
 import 'package:prodavan/core/chat/widgets/blocks/chat_blocks.dart';
@@ -389,7 +391,7 @@ class ChatMessageListState extends State<ChatMessageList> {
   }
 }
 
-class ChatScaffold extends StatelessWidget {
+class ChatScaffold extends StatefulWidget {
   const ChatScaffold({
     super.key,
     required this.controller,
@@ -435,6 +437,73 @@ class ChatScaffold extends StatelessWidget {
   final VoidCallback? onUpdate;
   final VoidCallback? onDismissUpdate;
 
+  @override
+  State<ChatScaffold> createState() => _ChatScaffoldState();
+}
+
+class _ChatScaffoldState extends State<ChatScaffold> {
+  /// Stable key into the composer: dropped files are routed through the
+  /// composer's public attach pipeline (same limits/upload/chips as the
+  /// attach button).
+  final GlobalKey<ChatComposerState> _composerKey = GlobalKey<ChatComposerState>();
+
+  /// True while an OS file drag hovers over the chat area.
+  bool _dragOver = false;
+
+  // Widget-field accessors keep the build body readable.
+  ChatSessionController get controller => widget.controller;
+  ProdavanApi get api => widget.api;
+  bool get chatSendable => widget.chatSendable;
+  bool get loading => widget.loading;
+  VoidCallback? get onOpenChatSettings => widget.onOpenChatSettings;
+  void Function(String sessionId)? get onSessionMaterialized => widget.onSessionMaterialized;
+  VoidCallback? get onDraftPresenceChanged => widget.onDraftPresenceChanged;
+  String? get modelLabel => widget.modelLabel;
+  VoidCallback? get onPickModel => widget.onPickModel;
+  String? get disabledHint => widget.disabledHint;
+  bool get wakeMode => widget.wakeMode;
+  bool get waking => widget.waking;
+  VoidCallback? get onWake => widget.onWake;
+  bool get updateMode => widget.updateMode;
+  bool get updating => widget.updating;
+  VoidCallback? get onUpdate => widget.onUpdate;
+  VoidCallback? get onDismissUpdate => widget.onDismissUpdate;
+
+  bool get _canAttachDrops =>
+      chatSendable && !updateMode && controller.projectId.isNotEmpty;
+
+  void _setDrag(bool value) {
+    if (_dragOver != value) {
+      setState(() => _dragOver = value);
+    }
+  }
+
+  Future<void> _handleDroppedFiles(DropDoneDetails details) async {
+    if (!_canAttachDrops) {
+      return;
+    }
+    final composer = _composerKey.currentState;
+    if (composer == null) {
+      return;
+    }
+    final files = <DroppedChatFile>[];
+    for (final dropped in details.files) {
+      try {
+        final bytes = await dropped.readAsBytes();
+        if (bytes.isNotEmpty) {
+          files.add(DroppedChatFile(name: dropped.name, bytes: bytes));
+        }
+      } catch (_) {
+        // Unreadable drop entries are skipped — the picker stays the
+        // reliable path.
+      }
+    }
+    if (files.isEmpty) {
+      return;
+    }
+    await composer.attachDroppedFiles(files);
+  }
+
   double _columnMaxWidth(double width) {
     if (width < 600) return width;
     if (width < 1024) return 768;
@@ -452,31 +521,50 @@ class ChatScaffold extends StatelessWidget {
             child: Column(
               children: [
                 Expanded(
-                  child: (loading && !controller.hasCachedTranscript)
-                      ? const ChatTranscriptSkeleton()
-                      // Render the (possibly empty) list while streaming so
-                      // the working indicator shows right after the first
-                      // send — the list shows just the indicator.
-                      : (controller.visibleBlocks.isEmpty && !controller.streaming)
-                          ? const SizedBox.shrink()
-                          : ChatMessageList(
-                              blocks: controller.visibleBlocks,
-                              projectId: controller.projectId,
-                              sessionId: controller.sessionId,
-                              api: api,
-                              hasMoreHistory: controller.hasMoreHistory,
-                              loadingHistory: controller.loadingHistory,
-                              onLoadOlder: controller.hasMoreHistory
-                                  ? controller.loadOlderTranscript
-                                  : null,
-                              turnStreaming: controller.streaming,
-                              showWorkingIndicator: controller.showWorkingIndicator,
-                              costResolver: controller.usageCostUsd,
-                              onResolveApproval: (id, decision) =>
-                                  controller.resolveApproval(id, decision),
-                            ),
+                  // OS drag & drop: the transcript region accepts files and
+                  // routes them into the composer's attach pipeline. The
+                  // composer field itself never changes.
+                  child: DropTarget(
+                    onDragDone: _handleDroppedFiles,
+                    onDragEntered: (_) => _setDrag(true),
+                    onDragExited: (_) => _setDrag(false),
+                    child: Stack(
+                      children: [
+                        Positioned.fill(
+                          child: (loading && !controller.hasCachedTranscript)
+                              ? const ChatTranscriptSkeleton()
+                              // Render the (possibly empty) list while streaming so
+                              // the working indicator shows right after the first
+                              // send — the list shows just the indicator.
+                              : (controller.visibleBlocks.isEmpty && !controller.streaming)
+                                  ? ChatEmptyPlaceholder(highlighted: _dragOver)
+                                  : ChatMessageList(
+                                      blocks: controller.visibleBlocks,
+                                      projectId: controller.projectId,
+                                      sessionId: controller.sessionId,
+                                      api: api,
+                                      hasMoreHistory: controller.hasMoreHistory,
+                                      loadingHistory: controller.loadingHistory,
+                                      onLoadOlder: controller.hasMoreHistory
+                                          ? controller.loadOlderTranscript
+                                          : null,
+                                      turnStreaming: controller.streaming,
+                                      showWorkingIndicator: controller.showWorkingIndicator,
+                                      costResolver: controller.usageCostUsd,
+                                      onResolveApproval: (id, decision) =>
+                                          controller.resolveApproval(id, decision),
+                                    ),
+                        ),
+                        if (_dragOver && _canAttachDrops)
+                          const Positioned.fill(
+                            child: IgnorePointer(child: ChatDropVeil()),
+                          ),
+                      ],
+                    ),
+                  ),
                 ),
                 ChatComposer(
+                  key: _composerKey,
                   projectId: controller.projectId,
                   sessionId: controller.sessionId.isEmpty ? null : controller.sessionId,
                   api: api,

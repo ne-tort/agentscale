@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from xml.etree import ElementTree as ET
@@ -16,7 +17,6 @@ from prodavan.application.content.tabular_index import (
     _xlsx_cell_text,
     _xlsx_shared_strings,
 )
-
 
 TABULAR_EXTENSIONS = frozenset({".csv", ".tsv", ".xlsx", ".xls", ".xml"})
 
@@ -33,7 +33,52 @@ def is_tabular_filename(filename: str) -> bool:
     return Path(filename or "").suffix.lower() in TABULAR_EXTENSIONS
 
 
+def _nonempty_cells(row: list[str]) -> int:
+    return sum(1 for cell in row if str(cell or "").strip())
+
+
 def _matrix_to_records(headers: list[str], body: list[list[str]]) -> TabularJsonResult:
+    """Matrix (already split) → JSON records with a *real* header row.
+
+    Sheets exported from templates often carry artifact rows above the real
+    header (a lone ``@dropdown`` marker, a merged title cell, …). The first
+    row holding at least two non-empty cells is treated as the header when
+    the rows before it are sparser — otherwise the first row stays the header
+    (classic single-column files keep that behavior).
+
+    Fully-empty rows are dropped, and columns that are empty both in the
+    header and in every data row are removed: the inline representation must
+    not ship col_6..col_25 padding.
+    """
+    # Drop fully-empty rows first.
+    body = [row for row in body if _nonempty_cells(row) > 0]
+
+    header_start = -1
+    if headers and _nonempty_cells(headers) < 2:
+        for i, row in enumerate(body):
+            if _nonempty_cells(row) >= 2:
+                # First rich row below the sparse header is the real header.
+                header_start = i
+                break
+    if header_start >= 0:
+        headers = body[header_start]
+        body = body[header_start + 1 :]
+
+    # Columns with no data at all are template padding: drop them when the
+    # header is empty, or when there are enough rows to be sure the column
+    # is genuinely unused (>= 2). Named columns of 0-1-row tables survive.
+    width = max([len(headers)] + [len(r) for r in body]) if body else len(headers)
+    keep: list[int] = []
+    for i in range(width):
+        header_cell = str(headers[i]).strip() if i < len(headers) else ""
+        has_data = any(i < len(r) and str(r[i]).strip() for r in body)
+        if has_data or (header_cell and len(body) < 2):
+            keep.append(i)
+    if not keep:
+        keep = [0]
+    headers = [headers[i] if i < len(headers) else "" for i in keep]
+    body = [[row[i] if i < len(row) else "" for i in keep] for row in body]
+
     used: set[str] = set()
     cols = [_normalize_header(h, index=i, used=used) for i, h in enumerate(headers)]
     if not cols:
@@ -199,3 +244,26 @@ def tabular_bytes_to_json(
 
 def records_to_json_bytes(records: list[dict[str, str]], *, indent: int | None = 2) -> bytes:
     return json.dumps(records, ensure_ascii=False, indent=indent).encode("utf-8")
+
+
+def _md_cell(value: str) -> str:
+    text = str(value or "").replace("\r", " ").replace("\n", " ").strip()
+    text = text.replace("|", "\\|")
+    return re.sub(r"\s+", " ", text)
+
+
+def records_to_markdown_table(
+    records: list[dict[str, str]],
+    columns: list[str],
+    *,
+    max_rows: int | None = None,
+) -> str:
+    """Records → compact GFM markdown table (the natural chat representation)."""
+    shown = records[:max_rows] if max_rows else records
+    lines = [
+        "| " + " | ".join(_md_cell(c) for c in columns) + " |",
+        "| " + " | ".join("---" for _ in columns) + " |",
+    ]
+    for rec in shown:
+        lines.append("| " + " | ".join(_md_cell(rec.get(c, "")) for c in columns) + " |")
+    return "\n".join(lines)
