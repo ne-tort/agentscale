@@ -25,6 +25,9 @@ dependencies = [
     "aiokafka>=0.11.0",
     "motor>=3.6.0",
     "k8s-agent-sandbox[async]>=1.0,<2",
+    "openpyxl>=3.1",
+    "python-docx>=1.1",
+    "docxtpl>=0.16",
 ]
 
 [project.optional-dependencies]

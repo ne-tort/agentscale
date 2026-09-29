@@ -288,6 +288,29 @@ class Settings(BaseSettings):
         default=15.0,
         validation_alias=AliasChoices("WEB_SEARCH_TIMEOUT_SEC", "POD_WEB_SEARCH_TIMEOUT_SEC"),
     )
+    # Documents module (DOCUM). GOTENBERG_URL empty -> local in-proc converter
+    # fallback (office->pdf routes then answer 422 CONVERSION_UNAVAILABLE).
+    # The rate limit is per project on the /documents/convert endpoint; 0 disables.
+    gotenberg_url: str = Field(
+        default="",
+        validation_alias=AliasChoices("GOTENBERG_URL"),
+    )
+    gotenberg_timeout_sec: float = Field(
+        default=120.0,
+        validation_alias=AliasChoices("GOTENBERG_TIMEOUT_SEC"),
+    )
+    gotenberg_rate_limit_per_minute: int = Field(
+        default=30,
+        validation_alias=AliasChoices("GOTENBERG_RATE_LIMIT_PER_MINUTE"),
+    )
+    documents_max_input_mb: int = Field(
+        default=25,
+        validation_alias=AliasChoices("DOCUMENTS_MAX_INPUT_MB"),
+    )
+    documents_max_output_mb: int = Field(
+        default=50,
+        validation_alias=AliasChoices("DOCUMENTS_MAX_OUTPUT_MB"),
+    )
     # Platform probe pod — single long-lived agent-runtime pod owned by the platform
     # (not a project sandbox) used to verify AI keys and fetch their model list via
     # the vendor SDK/HTTP path that only exists inside agent-runtime. The API pushes
