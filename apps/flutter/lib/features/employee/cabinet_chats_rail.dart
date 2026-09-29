@@ -80,19 +80,28 @@ class CabinetChatsRail extends StatelessWidget {
   /// Chat rows sit this far right of the branch name.
   static const double _branchIndent = 8;
 
-  /// Horizontal padding of tree rows — the same value the rail's nav tiles
-  /// use as their horizontal padding (Material's
-  /// `_horizontalDestinationPadding`, 8px; cf. `_kRailIconLabelGap` in
-  /// [AppLayout]). The tree column lines up exactly with the nav menu
-  /// items rendered above it in the same rail.
-  static const double _treeHorizontalPadding = _iconLabelGap;
+  /// Leading (left) padding of tree rows. NOT Material's
+  /// `_horizontalDestinationPadding` (8px) — the effective left coordinate
+  /// of nav-tile content is farther right: the destination icon (24px) is
+  /// centered inside the 80px icon column ([_railMinWidth], cf.
+  /// `_kRailMinWidth` / `_railIconLabel` in [AppLayout]), so its left edge
+  /// sits at (80 - 24) / 2 = 28px from the rail edge. The branch header
+  /// (chevron) aligns its left edge with that same vertical line, so the
+  /// tree column visually lines up with the menu icons above it.
+  static const double _treeHorizontalPadding = (_railMinWidth - 24) / 2;
 
   /// Absolute left offset of chat text: tree padding + under the branch
-  /// name, +[_branchIndent].
+  /// name, +[_branchIndent]. Derived from [_treeHorizontalPadding], so the
+  /// chats stay exactly under the branch name when the tree column shifts.
   static const double _chatIndent = _treeHorizontalPadding +
       _chevronSize +
       _chevronLabelGap +
       _branchIndent;
+
+  /// Extra left padding for the chat label INSIDE the row's highlight
+  /// container (added on top of the row's horizontal [AppSpacing.xs]):
+  /// keeps the text clear of the rounded left corner of the highlight.
+  static const double _chatTextInset = 6;
 
   @override
   Widget build(BuildContext context) {
@@ -269,8 +278,11 @@ class CabinetChatsRail extends StatelessWidget {
   }
 
   /// Small inline "+" that starts a chat in this project branch. Rendered
-  /// whenever the branch allows new chats (hover brightens; touch devices
-  /// have no hover, so it stays quietly visible).
+  /// whenever the branch allows new chats. Instead of the default
+  /// IconButton hover circle the icon zooms up on hover (classic
+  /// "zoom on hover"): the IconButton's ink is fully transparent and the
+  /// scale animation lives INSIDE the button, so the 32×32 tap area keeps
+  /// its geometry.
   Widget _branchAddButton(BuildContext context, String projectId) {
     final colors = context.appColors;
     final onNewChatForProject = this.onNewChatForProject;
@@ -283,7 +295,11 @@ class CabinetChatsRail extends StatelessWidget {
       iconSize: 18,
       tooltip: AppLocalizations.of(context).navNewChat,
       color: colors.muted,
-      icon: const Icon(Icons.add),
+      hoverColor: Colors.transparent,
+      focusColor: Colors.transparent,
+      highlightColor: Colors.transparent,
+      splashColor: Colors.transparent,
+      icon: _ZoomOnHoverIcon(icon: Icon(Icons.add, size: 18, color: colors.muted)),
       onPressed: () => onNewChatForProject(projectId),
     );
   }
@@ -383,6 +399,39 @@ class CabinetChatsRail extends StatelessWidget {
   }
 }
 
+/// Icon that smoothly scales up on pointer hover and back down on exit.
+///
+/// Used for the per-branch "+" add-chat button: replaces the default
+/// IconButton hover ink circle with a zoom effect ([AnimatedScale],
+/// ~150ms, [Curves.easeOutCubic]). The animation wraps only the icon, so
+/// the parent button's tap target is unaffected.
+class _ZoomOnHoverIcon extends StatefulWidget {
+  const _ZoomOnHoverIcon({required this.icon});
+
+  final Widget icon;
+
+  @override
+  State<_ZoomOnHoverIcon> createState() => _ZoomOnHoverIconState();
+}
+
+class _ZoomOnHoverIconState extends State<_ZoomOnHoverIcon> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: AnimatedScale(
+        scale: _hovered ? 1.3 : 1.0,
+        duration: const Duration(milliseconds: 150),
+        curve: Curves.easeOutCubic,
+        child: widget.icon,
+      ),
+    );
+  }
+}
+
 /// One chat row of the tree — text-only, no leading icons: the chevron
 /// column carries the branch structure, titles stay compact (labelMedium).
 ///
@@ -450,6 +499,8 @@ class _ChatRowState extends State<_ChatRow> {
     // The row container paints the highlight for BOTH states — hover ink is
     // disabled (transparent) so hovering a selected row does not double the
     // tint: exactly one layer, identical color and geometry either way.
+    // The label gets a little extra left padding INSIDE the highlight so the
+    // text does not hug the rounded corner of the container.
     final highlight = colors.onSurface.withValues(alpha: 0.08);
     return InkWell(
       onTap: () => widget.onOpenChat(chat),
@@ -462,9 +513,12 @@ class _ChatRowState extends State<_ChatRow> {
           borderRadius: BorderRadius.circular(12),
         ),
         child: Padding(
-          padding: const EdgeInsets.symmetric(
-            horizontal: AppSpacing.xs,
-            vertical: AppSpacing.xs,
+          padding: const EdgeInsets.only(
+            left: AppSpacing.xs +
+                CabinetChatsRail._chatTextInset,
+            right: AppSpacing.xs,
+            top: AppSpacing.xs,
+            bottom: AppSpacing.xs,
           ),
           child: text,
         ),
