@@ -105,7 +105,7 @@ void main() {
     expect(find.text('Projects'), findsWidgets);
     expect(find.text('Cabinets'), findsWidgets);
     expect(find.text('Modules'), findsWidgets);
-    expect(find.text('Prodavan'), findsWidgets);
+    expect(find.text('AgentScale'), findsWidgets);
     expect(find.text('Management'), findsNothing);
 
     // Phone-width surface → bottom bar: Overview + Management + Settings (Projects on employee only).

@@ -80,9 +80,19 @@ class CabinetChatsRail extends StatelessWidget {
   /// Chat rows sit this far right of the branch name.
   static const double _branchIndent = 8;
 
-  /// Absolute left offset of chat text: under the branch name, +[_branchIndent].
-  static const double _chatIndent =
-      _chevronSize + _chevronLabelGap + _branchIndent;
+  /// Horizontal padding of tree rows — the same value the rail's nav tiles
+  /// use as their horizontal padding (Material's
+  /// `_horizontalDestinationPadding`, 8px; cf. `_kRailIconLabelGap` in
+  /// [AppLayout]). The tree column lines up exactly with the nav menu
+  /// items rendered above it in the same rail.
+  static const double _treeHorizontalPadding = _iconLabelGap;
+
+  /// Absolute left offset of chat text: tree padding + under the branch
+  /// name, +[_branchIndent].
+  static const double _chatIndent = _treeHorizontalPadding +
+      _chevronSize +
+      _chevronLabelGap +
+      _branchIndent;
 
   @override
   Widget build(BuildContext context) {
@@ -102,7 +112,12 @@ class CabinetChatsRail extends StatelessWidget {
         // projects flat (same look as before the tree).
         for (final group in projectGroups)
           for (final chat in _groupChats(group))
-            _chatRow(context, chat, l10n: l10n),
+            _ChatRow(
+              chat: chat,
+              extended: false,
+              selected: (chat['session_id'] as String? ?? '') == activeSessionId,
+              onOpenChat: onOpenChat,
+            ),
       if (extended)
         for (final group in projectGroups) ...[
           _projectHeader(context, group),
@@ -154,7 +169,12 @@ class CabinetChatsRail extends StatelessWidget {
       for (final chat in chats)
         Padding(
           padding: const EdgeInsets.only(left: _chatIndent),
-          child: _chatRow(context, chat, l10n: l10n),
+          child: _ChatRow(
+            chat: chat,
+            extended: true,
+            selected: (chat['session_id'] as String? ?? '') == activeSessionId,
+            onOpenChat: onOpenChat,
+          ),
         ),
     ];
   }
@@ -197,7 +217,8 @@ class CabinetChatsRail extends StatelessWidget {
 
   /// Branch header: chevron + project name + per-project new-chat button.
   /// Tap toggles collapse. No chat count badge — the compact tree carries
-  /// the size implicitly.
+  /// the size implicitly. No hover background: the header is structural
+  /// (a collapse toggle), chat rows keep their hover/selection highlight.
   Widget _projectHeader(BuildContext context, Map<String, dynamic> group) {
     final colors = context.appColors;
     final projectId = _projectIdOf(group);
@@ -213,8 +234,12 @@ class CabinetChatsRail extends StatelessWidget {
           ? null
           : () => onToggleProjectCollapsed!(projectId),
       borderRadius: BorderRadius.circular(12),
+      hoverColor: Colors.transparent,
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
+        padding: const EdgeInsets.symmetric(
+          horizontal: _treeHorizontalPadding,
+          vertical: AppSpacing.sm,
+        ),
         child: Row(
           children: [
             Icon(
@@ -263,82 +288,17 @@ class CabinetChatsRail extends StatelessWidget {
     );
   }
 
-  /// Chat rows are text-only — no leading icons: the chevron column carries
-  /// the branch structure, titles stay compact (labelMedium).
-  Widget _chatRow(
-    BuildContext context,
-    Map<String, dynamic> chat, {
-    required AppLocalizations l10n,
-  }) {
-    final colors = context.appColors;
-    final sid = chat['session_id'] as String? ?? '';
-    final title = (chat['title'] as String?)?.trim();
-    final label = (title == null || title.isEmpty) ? l10n.chatUntitled : title;
-    final selected = sid == activeSessionId;
-    final base = Theme.of(context).textTheme.labelMedium ?? const TextStyle();
-    final text = Text(
-      label,
-      maxLines: 1,
-      overflow: TextOverflow.ellipsis,
-      style: base.copyWith(
-        color: selected ? colors.primary : colors.onSurface,
-        fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
-      ),
-    );
-
-    if (!extended) {
-      // Icon-only rail: centered label, same as before minus the icon.
-      return InkWell(
-        onTap: () => onOpenChat(chat),
-        borderRadius: BorderRadius.circular(12),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
-          child: Center(child: text),
-        ),
-      );
-    }
-
-    // Persistent selection: same container color as hover, so the active chat
-    // looks exactly like a hovered row.
-    final highlight = _rowHighlight(colors);
-    final content = selected
-        ? DecoratedBox(
-            decoration: BoxDecoration(
-              color: highlight,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs),
-              child: text,
-            ),
-          )
-        : Padding(
-            padding: const EdgeInsets.only(right: AppSpacing.sm),
-            child: text,
-          );
-
-    return InkWell(
-      onTap: () => onOpenChat(chat),
-      borderRadius: BorderRadius.circular(12),
-      hoverColor: highlight,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
-        child: content,
-      ),
-    );
-  }
-
-  /// Hover/selected row background — one color for both so the persistent
-  /// selection is identical to the hover highlight.
-  Color _rowHighlight(AppColorTokens colors) =>
-      colors.onSurface.withValues(alpha: 0.08);
-
-  /// Section break between the nav destinations and the chats tree: extra
-  /// vertical breathing room plus a fading hairline with a centered label.
+  /// Section break between the nav destinations and the chats tree: full
+  /// vertical breathing room above, half below (the tree sits closer to its
+  /// section break than to the nav tiles above it), plus a fading hairline
+  /// with a centered label.
   Widget _sectionHeader(BuildContext context, AppLocalizations l10n) {
     final colors = context.appColors;
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
+      padding: EdgeInsets.only(
+        top: AppSpacing.md,
+        bottom: AppSpacing.md / 2,
+      ),
       child: Row(
         children: [
           const Expanded(child: _TaperSide()),
@@ -418,6 +378,96 @@ class CabinetChatsRail extends StatelessWidget {
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
         child: _railIconLabel(icon: iconWidget, label: labelWidget),
+      ),
+    );
+  }
+}
+
+/// One chat row of the tree — text-only, no leading icons: the chevron
+/// column carries the branch structure, titles stay compact (labelMedium).
+///
+/// Hover and selection share ONE background container: the highlight is
+/// visible when the row is hovered OR selected — same color, same corner
+/// radius, same geometry (the full row, paddings included) — so the
+/// persistent selection is pixel-identical to the hover highlight.
+/// Selection additionally emphasizes the text (primary / w600).
+class _ChatRow extends StatefulWidget {
+  const _ChatRow({
+    required this.chat,
+    required this.extended,
+    required this.selected,
+    required this.onOpenChat,
+  });
+
+  final Map<String, dynamic> chat;
+
+  /// Extended rail: tree row with the shared hover/selection container.
+  /// Icon-only (collapsed) rail: centered label, no background container
+  /// (no room for one) — selection is text emphasis only.
+  final bool extended;
+
+  final bool selected;
+  final void Function(Map<String, dynamic> chat) onOpenChat;
+
+  @override
+  State<_ChatRow> createState() => _ChatRowState();
+}
+
+class _ChatRowState extends State<_ChatRow> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    final colors = context.appColors;
+    final chat = widget.chat;
+    final title = (chat['title'] as String?)?.trim();
+    final label = (title == null || title.isEmpty) ? l10n.chatUntitled : title;
+    final selected = widget.selected;
+    final base = Theme.of(context).textTheme.labelMedium ?? const TextStyle();
+    final text = Text(
+      label,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: base.copyWith(
+        color: selected ? colors.primary : colors.onSurface,
+        fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+      ),
+    );
+
+    if (!widget.extended) {
+      // Icon-only rail: centered label, same as before minus the icon.
+      return InkWell(
+        onTap: () => widget.onOpenChat(chat),
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
+          child: Center(child: text),
+        ),
+      );
+    }
+
+    // The row container paints the highlight for BOTH states — hover ink is
+    // disabled (transparent) so hovering a selected row does not double the
+    // tint: exactly one layer, identical color and geometry either way.
+    final highlight = colors.onSurface.withValues(alpha: 0.08);
+    return InkWell(
+      onTap: () => widget.onOpenChat(chat),
+      borderRadius: BorderRadius.circular(12),
+      onHover: (value) => setState(() => _hovered = value),
+      hoverColor: Colors.transparent,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: (_hovered || selected) ? highlight : null,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.xs,
+            vertical: AppSpacing.xs,
+          ),
+          child: text,
+        ),
       ),
     );
   }

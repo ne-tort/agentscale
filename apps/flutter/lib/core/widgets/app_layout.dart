@@ -120,26 +120,18 @@ class AppLayout extends StatelessWidget {
 
   Widget _logo(BuildContext context, {required bool extended}) {
     final colors = context.appColors;
-    final badge = Container(
-      width: _kLogoBadgeSize,
-      height: _kLogoBadgeSize,
-      alignment: Alignment.center,
-      decoration: BoxDecoration(
-        color: colors.primary.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Text(
-        'AI',
-        style: TextStyle(
-          color: colors.primary,
-          fontSize: 14,
-          fontWeight: FontWeight.w700,
-          height: 1,
-        ),
+    // Brand mark: the asset carries its own opaque background — no tint box.
+    final badge = ClipRRect(
+      borderRadius: BorderRadius.circular(10),
+      child: Image.asset(
+        'assets/brand/agentscale.png',
+        fit: BoxFit.contain,
+        width: _kLogoBadgeSize,
+        height: _kLogoBadgeSize,
       ),
     );
     final label = Text(
-      'Prodavan',
+      'AgentScale',
       style: TextStyle(
         color: colors.onSurface,
         fontSize: extended ? 14 : 12,

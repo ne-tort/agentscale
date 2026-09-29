@@ -2,8 +2,31 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from prodavan.application.agent.text_delta import normalize_text_delta
 from prodavan.domain.agent import PLATFORM_EVENT_USER_MESSAGE, AgentEventType
+
+
+def _event_ts(event: dict) -> datetime | None:
+    """Event timestamp — persisted `created_at` first, stream `at` fallback."""
+    raw = event.get("created_at") or event.get("at")
+    if isinstance(raw, datetime):
+        return raw
+    if isinstance(raw, str) and raw:
+        try:
+            return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    return None
+
+
+def _ts_delta_ms(later: datetime, earlier: datetime) -> int | None:
+    """Milliseconds between timestamps; None when naive/aware cannot mix."""
+    try:
+        return int((later - earlier).total_seconds() * 1000)
+    except TypeError:
+        return None
 
 
 def assistant_text_from_events(events: list[dict]) -> str:
@@ -81,13 +104,25 @@ def events_to_chat_blocks(events: list[dict]) -> list[dict]:
     assistant_cumulative = ""
     thinking_cumulative = ""
     open_subagents: dict[str, dict] = {}
+    # Turn timing: first assistant output of the turn, plus the ts of the
+    # last event accumulated into the open assistant block (completion moment).
+    turn_first_ts: datetime | None = None
+    assistant_last_ts: datetime | None = None
 
     def flush_assistant() -> None:
-        nonlocal assistant_cumulative
-        if not assistant_cumulative:
-            return
-        blocks.append({"kind": "assistant_markdown", "text": assistant_cumulative})
+        nonlocal assistant_cumulative, assistant_last_ts
+        if assistant_cumulative:
+            block: dict = {"kind": "assistant_markdown", "text": assistant_cumulative}
+            if assistant_last_ts is not None:
+                # Answer completed when its last delta was persisted.
+                block["created_at"] = assistant_last_ts.isoformat()
+                if turn_first_ts is not None:
+                    delta = _ts_delta_ms(assistant_last_ts, turn_first_ts)
+                    if delta is not None:
+                        block["turn_ms"] = delta
+            blocks.append(block)
         assistant_cumulative = ""
+        assistant_last_ts = None
 
     def flush_thinking(duration_ms: int | None = None) -> None:
         nonlocal thinking_cumulative
@@ -107,6 +142,8 @@ def events_to_chat_blocks(events: list[dict]) -> list[dict]:
         if etype == PLATFORM_EVENT_USER_MESSAGE:
             flush_assistant()
             flush_thinking()
+            # New turn — answer duration restarts from the next assistant output.
+            turn_first_ts = None
             text = data.get("text")
             refs = data.get("attachment_refs") or []
             attachments = data.get("attachments") or []
@@ -116,16 +153,27 @@ def events_to_chat_blocks(events: list[dict]) -> list[dict]:
                     block["attachment_refs"] = [str(r) for r in refs]
                 if isinstance(attachments, list) and attachments:
                     block["attachments"] = attachments
+                user_ts = _event_ts(event)
+                if user_ts is not None:
+                    block["created_at"] = user_ts.isoformat()
                 blocks.append(block)
             continue
 
         if etype == AgentEventType.TEXT_DELTA:
+            ts = _event_ts(event)
+            if turn_first_ts is None and ts is not None:
+                turn_first_ts = ts
             chunk = data.get("text")
             if chunk:
                 _, assistant_cumulative = normalize_text_delta(assistant_cumulative, str(chunk))
+                if ts is not None:
+                    assistant_last_ts = ts
             continue
 
         if etype == AgentEventType.THINKING_DELTA:
+            ts = _event_ts(event)
+            if turn_first_ts is None and ts is not None:
+                turn_first_ts = ts
             flush_assistant()
             chunk = data.get("text")
             if chunk:
@@ -141,6 +189,9 @@ def events_to_chat_blocks(events: list[dict]) -> list[dict]:
         if etype in {AgentEventType.DONE, AgentEventType.ERROR}:
             flush_assistant()
             flush_thinking()
+            # Turn ended — the next assistant output (even without a following
+            # user_message) starts a fresh duration window.
+            turn_first_ts = None
             if etype == AgentEventType.ERROR:
                 blocks.append(
                     {

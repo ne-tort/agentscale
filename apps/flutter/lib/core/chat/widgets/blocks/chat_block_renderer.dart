@@ -7,6 +7,16 @@ import 'package:prodavan/core/chat/widgets/blocks/chat_blocks.dart';
 String? _nonEmptyString(Object? value) =>
     value is String && value.trim().isNotEmpty ? value : null;
 
+/// ISO timestamp (server `created_at`) → DateTime, null-safe.
+DateTime? _parseTimestamp(Object? value) =>
+    value is String && value.isNotEmpty ? DateTime.tryParse(value) : null;
+
+int? _intOrNull(Object? value) {
+  if (value is int) return value;
+  if (value is num) return value.toInt();
+  return null;
+}
+
 class ChatBlockRenderer extends StatelessWidget {
   const ChatBlockRenderer({
     super.key,
@@ -53,6 +63,7 @@ class ChatBlockRenderer extends StatelessWidget {
           text: block.text,
           attachmentRefs: refs is List ? refs.cast<String>() : const [],
           attachments: attachments,
+          timestamp: _parseTimestamp(block.raw['created_at']),
         );
       case 'assistant_markdown':
         final usage = block.raw['usage'];
@@ -63,6 +74,8 @@ class ChatBlockRenderer extends StatelessWidget {
           interrupted: block.raw['_interrupted'] == true,
           usageRaw: usage is Map ? Map<String, dynamic>.from(usage) : null,
           costResolver: costResolver,
+          completedAt: _parseTimestamp(block.raw['created_at']),
+          turnMs: _intOrNull(block.raw['turn_ms']),
         );
       case 'thinking':
         return ThinkingBlock(

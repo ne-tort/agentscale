@@ -29,6 +29,7 @@ class ProjectWorkspacePage extends StatefulWidget {
     this.initiallyPinned = false,
     this.onSessionMaterialized,
     this.onDraftPresenceChanged,
+    this.onChatActivityChanged,
   });
 
   final String cabinetId;
@@ -39,6 +40,13 @@ class ProjectWorkspacePage extends StatefulWidget {
   final bool initiallyPinned;
   final void Function(String sessionId)? onSessionMaterialized;
   final VoidCallback? onDraftPresenceChanged;
+
+  /// Fired when a chat turn ends — the controller's streaming flag flipped
+  /// true→false (turn finished, success or error). The owner
+  /// (CabinetShell) refreshes the chats sidebar then: a chat materialized
+  /// at first send stays hidden in the sidebar until its first message
+  /// lands, so without this the tree does not update until navigation.
+  final VoidCallback? onChatActivityChanged;
 
   @override
   State<ProjectWorkspacePage> createState() => _ProjectWorkspacePageState();
@@ -61,18 +69,29 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
   /// (first load) must not override an explicit choice.
   bool _userPickedModel = false;
 
+  /// Mirrors [_chat].streaming across change notifications — a true→false
+  /// flip means a turn just ended (see the changes listener in initState).
+  bool _chatWasStreaming = false;
+
   bool get _hasSession => _sessionId != null && _sessionId!.isNotEmpty;
 
   @override
   void initState() {
     super.initState();
-    workContext.enterProject(widget.projectId);
-    unawaited(
-      workContext.selectProject(
-        cabinetId: widget.cabinetId,
-        projectId: widget.projectId,
-      ),
-    );
+    // workContext mutations notify every subscriber synchronously; doing
+    // that from initState fires notifications mid-build, while replaced
+    // pages (pushReplacement) are still deactivating - defunct elements
+    // then get setState called on them. Defer to after the first frame.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      workContext.enterProject(widget.projectId);
+      unawaited(
+        workContext.selectProject(
+          cabinetId: widget.cabinetId,
+          projectId: widget.projectId,
+        ),
+      );
+    });
     _title = (widget.initialTitle ?? '').trim();
     _pinned = widget.initiallyPinned;
     _sessionId = widget.sessionId;
@@ -89,6 +108,14 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
           showAgentChatSnack(context, err);
           _chat.error = null;
         }
+        // Turn end (success or error): streaming flipped true→false — the
+        // transcript changed server-side, so let the owner refresh the
+        // chats sidebar (the shell debounces rapid turns).
+        final streaming = _chat.streaming;
+        if (_chatWasStreaming && !streaming) {
+          widget.onChatActivityChanged?.call();
+        }
+        _chatWasStreaming = streaming;
         setState(() {});
       });
     _bootstrap();

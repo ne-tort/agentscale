@@ -5,6 +5,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:intl/intl.dart';
 import 'package:markdown/markdown.dart' as md;
 
 import 'package:prodavan/core/chat/markdown_table_normalize.dart';
@@ -69,6 +70,20 @@ String _formatCost(double value) {
     }
   }
   return '\$$s';
+}
+
+/// `HH:MM` clock label (locale-neutral 24h, tabular-friendly) — null without a ts.
+String? _formatClockTime(DateTime? ts) {
+  if (ts == null) return null;
+  return DateFormat('HH:mm').format(ts.toLocal());
+}
+
+/// `m:ss` duration label (locale-neutral, no units): 45000 → "0:45", 83000 → "1:23".
+String _formatDurationLabel(int ms) {
+  final totalSeconds = ms <= 0 ? 0 : (ms / 1000).round();
+  final minutes = totalSeconds ~/ 60;
+  final seconds = totalSeconds % 60;
+  return '$minutes:${seconds.toString().padLeft(2, '0')}';
 }
 
 class ChatMutedLine extends StatefulWidget {
@@ -259,6 +274,8 @@ class AssistantStreamBlock extends StatefulWidget {
     this.interrupted = false,
     this.usageRaw,
     this.costResolver,
+    this.completedAt,
+    this.turnMs,
   });
 
   final String text;
@@ -274,6 +291,14 @@ class AssistantStreamBlock extends StatefulWidget {
 
   /// UI-side cost estimate from the models catalog; runtime `cost_usd` wins.
   final double? Function(String? model, int? inputTokens, int? outputTokens)? costResolver;
+
+  /// Wall-clock moment the answer completed — always-visible `HH:MM` cell on
+  /// the left of the metadata row.
+  final DateTime? completedAt;
+
+  /// How long the answer took (first output → completion), rendered as a
+  /// hover-reveal `m:ss` cell at the end of the metadata group.
+  final int? turnMs;
 
   @override
   State<AssistantStreamBlock> createState() => _AssistantStreamBlockState();
@@ -300,40 +325,83 @@ class _AssistantStreamBlockState extends State<AssistantStreamBlock> {
     });
   }
 
-  /// Hover metadata row (model · вход: N · выход: N · $cost · copy). Collapsed
-  /// to zero height while hidden — reserves no space; AnimatedSize makes the
-  /// reveal smooth instead of a layout jump.
-  Widget _usageRow(BuildContext context) {
+  /// Metadata row under the message:
+  /// [HH:MM always visible] · hover-reveal [model · вход: N · выход: N · $cost · m:ss] · copy (hover-reveal, flush right).
+  ///
+  /// The completion time is permanent — the row keeps its height instead of
+  /// collapsing to zero; the usage cells and the copy button animate in via
+  /// AnimatedSize on hover (or while the 2s copied confirmation is up, which
+  /// must survive the pointer leaving). Without a completion time the row
+  /// behaves as before: collapsed to zero height while hidden — no space
+  /// reserved, AnimatedSize keeps the reveal smooth instead of a layout jump.
+  Widget _metaRow(BuildContext context) {
     final usage = widget.usageRaw;
     final model = _stringOrNull(usage?['model']);
     final input = _intOrNull(usage?['input_tokens']);
     final output = _intOrNull(usage?['output_tokens']);
     var cost = _doubleOrNull(usage?['cost_usd']);
     cost ??= widget.costResolver?.call(model, input, output);
-    final hasAny = model != null || input != null || output != null || cost != null;
-    final visible = !widget.streaming && hasAny && (_hover || _copied);
+    final turnMs = _intOrNull(widget.turnMs);
+    final hasAny = model != null || input != null || output != null || cost != null || turnMs != null;
+    final metaVisible = !widget.streaming && hasAny && (_hover || _copied);
+    final timeText = _formatClockTime(widget.completedAt);
+    final rowVisible = timeText != null || metaVisible;
     return AnimatedSize(
       duration: const Duration(milliseconds: 160),
       curve: Curves.easeOut,
-      child: visible
-          ? _buildUsageRow(context, model: model, input: input, output: output, cost: cost)
+      child: rowVisible
+          ? Padding(
+              padding: EdgeInsets.only(top: AppSpacing.xs / 2),
+              child: Row(
+                children: [
+                  if (timeText != null) Text(timeText, style: _metaStyle(context)),
+                  AnimatedSize(
+                    duration: const Duration(milliseconds: 160),
+                    curve: Curves.easeOut,
+                    child: metaVisible
+                        ? Padding(
+                            padding: EdgeInsets.only(left: timeText != null ? 8 : 0),
+                            child: _buildUsageCells(
+                              context,
+                              model: model,
+                              input: input,
+                              output: output,
+                              cost: cost,
+                              turnMs: turnMs,
+                            ),
+                          )
+                        : const SizedBox(width: 0, height: 0),
+                  ),
+                  const Spacer(),
+                  AnimatedSize(
+                    duration: const Duration(milliseconds: 160),
+                    curve: Curves.easeOut,
+                    child: metaVisible ? _copyButton(context) : const SizedBox(width: 0, height: 0),
+                  ),
+                ],
+              ),
+            )
           : const SizedBox(width: double.infinity, height: 0),
     );
   }
 
-  Widget _buildUsageRow(
+  TextStyle _metaStyle(BuildContext context) {
+    return _mutedTextStyle(context).copyWith(
+      fontSize: 12,
+      fontFeatures: const [FontFeature.tabularFigures()],
+    );
+  }
+
+  Widget _buildUsageCells(
     BuildContext context, {
     String? model,
     int? input,
     int? output,
     double? cost,
+    int? turnMs,
   }) {
     final l10n = AppLocalizations.of(context);
-    final scheme = Theme.of(context).colorScheme;
-    final style = _mutedTextStyle(context).copyWith(
-      fontSize: 12,
-      fontFeatures: const [FontFeature.tabularFigures()],
-    );
+    final style = _metaStyle(context);
     final cells = <Widget>[
       if (model != null)
         ConstrainedBox(
@@ -350,35 +418,33 @@ class _AssistantStreamBlockState extends State<AssistantStreamBlock> {
       if (output != null)
         Text('${l10n.chatUsageOutputLabel} ${_formatTokens(output)}', style: style),
       if (cost != null) Text(_formatCost(cost), style: style),
+      if (turnMs != null) Text(_formatDurationLabel(turnMs), style: style),
     ];
     final items = <Widget>[];
     for (var i = 0; i < cells.length; i++) {
       if (i > 0) items.add(const SizedBox(width: 8));
       items.add(cells[i]);
     }
-    return Padding(
-      padding: EdgeInsets.only(top: AppSpacing.xs / 2),
-      child: Row(
-        children: [
-          ...items,
-          const Spacer(),
-          SizedBox(
-            width: 28,
-            height: 28,
-            child: IconButton(
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-              iconSize: 16,
-              tooltip: _copied ? l10n.chatCopiedMessage : l10n.chatCopyMessage,
-              onPressed: _copy,
-              icon: Icon(
-                _copied ? Icons.check : Icons.copy_outlined,
-                size: 16,
-                color: _copied ? scheme.primary : null,
-              ),
-            ),
-          ),
-        ],
+    return Row(mainAxisSize: MainAxisSize.min, children: items);
+  }
+
+  Widget _copyButton(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    final scheme = Theme.of(context).colorScheme;
+    return SizedBox(
+      width: 28,
+      height: 28,
+      child: IconButton(
+        padding: EdgeInsets.zero,
+        constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+        iconSize: 16,
+        tooltip: _copied ? l10n.chatCopiedMessage : l10n.chatCopyMessage,
+        onPressed: _copy,
+        icon: Icon(
+          _copied ? Icons.check : Icons.copy_outlined,
+          size: 16,
+          color: _copied ? scheme.primary : null,
+        ),
       ),
     );
   }
@@ -412,7 +478,7 @@ class _AssistantStreamBlockState extends State<AssistantStreamBlock> {
               padding: EdgeInsets.only(top: AppSpacing.xs),
               child: Text(l10n.projectChatInterrupted, style: Theme.of(context).textTheme.labelSmall),
             ),
-          _usageRow(context),
+          _metaRow(context),
         ],
       ),
     );
@@ -494,11 +560,15 @@ class UserMessageBlock extends StatefulWidget {
     required this.text,
     this.attachmentRefs = const [],
     this.attachments = const [],
+    this.timestamp,
   });
 
   final String text;
   final List<String> attachmentRefs;
   final List<Map<String, dynamic>> attachments;
+
+  /// Send time — muted `HH:MM` label right-aligned under the bubble.
+  final DateTime? timestamp;
 
   @override
   State<UserMessageBlock> createState() => _UserMessageBlockState();
@@ -529,50 +599,67 @@ class _UserMessageBlockState extends State<UserMessageBlock> {
     final scheme = Theme.of(context).colorScheme;
     final attachments = widget.attachments;
     final refs = widget.attachmentRefs;
+    final timeText = _formatClockTime(widget.timestamp);
     return Align(
       alignment: Alignment.centerRight,
-      child: Container(
-        margin: EdgeInsets.only(top: AppSpacing.md, bottom: AppSpacing.sm),
-        padding: EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: AppSpacing.sm),
-        constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * 0.85),
-        decoration: BoxDecoration(
-          color: scheme.primaryContainer,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            if (widget.text.isNotEmpty) Text(widget.text),
-            if (attachments.isNotEmpty)
-              for (var i = 0; i < attachments.length; i++) ...[
-                Padding(
-                  padding: EdgeInsets.only(top: AppSpacing.xs),
-                  child: _AttachmentSpoiler(
-                    label: _attachmentLabel(l10n, attachments[i]),
-                    expanded: _openSpoilers.contains(i),
-                    onTap: attachments[i]['kind'] == 'inline_json' && attachments[i]['inline_json'] != null
-                        ? () => setState(() {
-                              if (_openSpoilers.contains(i)) {
-                                _openSpoilers.remove(i);
-                              } else {
-                                _openSpoilers.add(i);
-                              }
-                            })
-                        : null,
-                    body: attachments[i]['kind'] == 'inline_json' && _openSpoilers.contains(i)
-                        ? JsonEncoder.withIndent('  ').convert(attachments[i]['inline_json'])
-                        : null,
-                  ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          Container(
+            margin: EdgeInsets.only(top: AppSpacing.md, bottom: timeText != null ? 0 : AppSpacing.sm),
+            padding: EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: AppSpacing.sm),
+            constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * 0.85),
+            decoration: BoxDecoration(
+              color: scheme.primaryContainer,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                if (widget.text.isNotEmpty) Text(widget.text),
+                if (attachments.isNotEmpty)
+                  for (var i = 0; i < attachments.length; i++) ...[
+                    Padding(
+                      padding: EdgeInsets.only(top: AppSpacing.xs),
+                      child: _AttachmentSpoiler(
+                        label: _attachmentLabel(l10n, attachments[i]),
+                        expanded: _openSpoilers.contains(i),
+                        onTap: attachments[i]['kind'] == 'inline_json' && attachments[i]['inline_json'] != null
+                            ? () => setState(() {
+                                  if (_openSpoilers.contains(i)) {
+                                    _openSpoilers.remove(i);
+                                  } else {
+                                    _openSpoilers.add(i);
+                                  }
+                                })
+                            : null,
+                        body: attachments[i]['kind'] == 'inline_json' && _openSpoilers.contains(i)
+                            ? JsonEncoder.withIndent('  ').convert(attachments[i]['inline_json'])
+                            : null,
+                      ),
+                    ),
+                  ]
+                else
+                  for (final ref in refs)
+                    Padding(
+                      padding: EdgeInsets.only(top: AppSpacing.xs),
+                      child: Chip(label: Text(ref.split('/').last, overflow: TextOverflow.ellipsis)),
+                    ),
+              ],
+            ),
+          ),
+          if (timeText != null)
+            Padding(
+              padding: EdgeInsets.only(top: AppSpacing.xs / 2, bottom: AppSpacing.sm),
+              child: Text(
+                timeText,
+                style: _mutedTextStyle(context).copyWith(
+                  fontSize: 11,
+                  fontFeatures: const [FontFeature.tabularFigures()],
                 ),
-              ]
-            else
-              for (final ref in refs)
-                Padding(
-                  padding: EdgeInsets.only(top: AppSpacing.xs),
-                  child: Chip(label: Text(ref.split('/').last, overflow: TextOverflow.ellipsis)),
-                ),
-          ],
-        ),
+              ),
+            ),
+        ],
       ),
     );
   }

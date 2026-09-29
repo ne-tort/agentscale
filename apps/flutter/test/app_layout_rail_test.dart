@@ -59,7 +59,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('CONTENT_MARKER'), findsOneWidget);
-    expect(find.text('Prodavan'), findsOneWidget);
+    expect(find.text('AgentScale'), findsOneWidget);
   });
 
   testWidgets('settings pinned near bottom of rail', (tester) async {

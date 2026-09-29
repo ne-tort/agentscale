@@ -82,7 +82,7 @@ void main() {
 
     final label = find.text('Проекты');
     expect(label, findsOneWidget);
-    // Increased vertical padding around the section header.
+    // Full vertical breathing room above the break, half below (md / 2).
     final paddings = tester
         .widgetList<Padding>(
           find.ancestor(of: label, matching: find.byType(Padding)),
@@ -91,7 +91,7 @@ void main() {
         .toList();
     expect(
       paddings,
-      contains(const EdgeInsets.symmetric(vertical: AppSpacing.md)),
+      contains(EdgeInsets.only(top: AppSpacing.md, bottom: AppSpacing.md / 2)),
     );
     // The fading line runs on both sides of the label.
     final row = tester
