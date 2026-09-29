@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
 import logging
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import select
@@ -248,6 +248,26 @@ class ModuleActionExecutor:
                 project_id=project_id,
             )
 
+        if kind == "equipment.budget_sync":
+            return await self._budget_sync(
+                cabinet_id=cabinet_id,
+                module_id=module_id,
+                params=params,
+                principal=principal,
+                employee=employee,
+                project_id=project_id,
+            )
+
+        if kind == "equipment.budget_export":
+            return await self._budget_export(
+                cabinet_id=cabinet_id,
+                module_id=module_id,
+                params=params,
+                principal=principal,
+                employee=employee,
+                project_id=project_id,
+            )
+
         raise AppError(
             code="NOT_IMPLEMENTED",
             title="Not Implemented",
@@ -308,6 +328,263 @@ class ModuleActionExecutor:
             status=501,
             detail=f"action kind not supported: {kind}",
         )
+
+    async def _budget_sync(
+        self,
+        *,
+        cabinet_id: str,
+        module_id: str,
+        params: dict[str, Any],
+        principal: Principal,
+        employee: EmployeeRow | None,
+        project_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Sync budget_lines rows from request_lines + their selected offers.
+
+        Snapshot fields (title/part_number/qty/price_in/seller) follow the
+        best offer; user fields (vat/markup/comment) are never overwritten.
+        """
+        lines_table = str(params.get("lines_table") or "request_lines")
+        offers_table = str(params.get("offers_table") or "found_offers")
+        budget_table = str(params.get("budget_table") or "budget_lines")
+        catalogs_table = str(params.get("catalogs_table") or "catalogs")
+
+        lines = await self._list_rows_for_scope(
+            cabinet_id=cabinet_id,
+            project_id=project_id,
+            module_id=module_id,
+            table_slug=lines_table,
+            principal=principal,
+            employee=employee,
+        )
+        offers = await self._list_rows_for_scope(
+            cabinet_id=cabinet_id,
+            project_id=project_id,
+            module_id=module_id,
+            table_slug=offers_table,
+            principal=principal,
+            employee=employee,
+        )
+        budget_rows = await self._list_rows_for_scope(
+            cabinet_id=cabinet_id,
+            project_id=project_id,
+            module_id=module_id,
+            table_slug=budget_table,
+            principal=principal,
+            employee=employee,
+        )
+        try:
+            catalogs = await self._list_rows_for_scope(
+                cabinet_id=cabinet_id,
+                project_id=project_id,
+                module_id=module_id,
+                table_slug=catalogs_table,
+                principal=principal,
+                employee=employee,
+            )
+        except Exception:
+            catalogs = []
+
+        catalog_names: dict[str, str] = {}
+        for c in catalogs:
+            if not isinstance(c, dict):
+                continue
+            name = str((c.get("body") or {}).get("name") or "").strip()
+            if name:
+                catalog_names[str(c.get("row_id"))] = name
+        offers_by_id: dict[str, dict[str, Any]] = {}
+        for o in offers:
+            if isinstance(o, dict):
+                offers_by_id[str(o.get("row_id"))] = o.get("body") or {}
+        offers_by_line: dict[str, dict[str, Any]] = {}
+        for o in offers:
+            if not isinstance(o, dict):
+                continue
+            body = o.get("body") or {}
+            if body.get("is_selected") is True:
+                offers_by_line[str(body.get("line_id") or "")] = body
+        budget_by_line: dict[str, dict[str, Any]] = {}
+        for b in budget_rows:
+            if not isinstance(b, dict):
+                continue
+            body = b.get("body") or {}
+            lid = str(body.get("line_id") or "")
+            if lid:
+                budget_by_line[lid] = b
+
+        created = 0
+        updated = 0
+        for line in lines:
+            if not isinstance(line, dict):
+                continue
+            line_id = str(line.get("row_id") or "")
+            if not line_id:
+                continue
+            line_body = line.get("body") or {}
+            offer = offers_by_id.get(str(line_body.get("selected_offer_id") or "")) or {}
+            if not offer:
+                offer = offers_by_line.get(line_id) or {}
+
+            seller = str(catalog_names.get(str(offer.get("catalog_id") or "")) or "").strip()
+            if not seller:
+                seller = str(offer.get("brand") or "").strip()
+            snapshot = {
+                "line_id": line_id,
+                "title": str(offer.get("title") or line_body.get("title") or "").strip()
+                or "Не найден",
+                "part_number": str(
+                    line_body.get("part_number") or offer.get("part_number") or ""
+                ).strip()
+                or "Не определен",
+                "qty": line_body.get("qty") or 1,
+                "price_in": offer.get("price") or 0,
+                "seller": seller or "Не найден",
+            }
+            existing = budget_by_line.get(line_id)
+            if existing is None:
+                body = dict(snapshot)
+                body.setdefault("vat", 0.22)
+                body.setdefault("markup", 0.1)
+                await self._modules.create_data_row(
+                    cabinet_id=cabinet_id,
+                    module_id=module_id,
+                    table_slug=budget_table,
+                    body=body,
+                    principal=principal,
+                    employee=employee,
+                )
+                created += 1
+                continue
+            row_id = str(existing.get("row_id") or "")
+            if not row_id:
+                continue
+            body = dict(existing.get("body") or {})
+            body.update(snapshot)
+            await self._update_row_for_scope(
+                cabinet_id=cabinet_id,
+                project_id=project_id,
+                module_id=module_id,
+                table_slug=budget_table,
+                row_id=row_id,
+                body=body,
+                principal=principal,
+                employee=employee,
+                run_actions=False,
+            )
+            updated += 1
+
+        return {
+            "kind": "equipment.budget_sync",
+            "created": created,
+            "updated": updated,
+            "lines": len(lines),
+        }
+
+    async def _budget_export(
+        self,
+        *,
+        cabinet_id: str,
+        module_id: str,
+        params: dict[str, Any],
+        principal: Principal,
+        employee: EmployeeRow | None,
+        project_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Export budget rows as the filled Commerce КП xlsx template."""
+        from prodavan.application.documents.service import DocumentsService
+        from prodavan.application.modules.equipment_budget import (
+            fill_budget_workbook,
+            load_budget_template,
+        )
+
+        budget_table = str(params.get("budget_table") or "budget_lines")
+        rows = await self._list_rows_for_scope(
+            cabinet_id=cabinet_id,
+            project_id=project_id,
+            module_id=module_id,
+            table_slug=budget_table,
+            principal=principal,
+            employee=employee,
+        )
+        bodies = [r.get("body") or {} for r in rows if isinstance(r, dict)]
+        if not bodies:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="no budget lines to export (run budget sync first)",
+            )
+        template = load_budget_template()
+        data = fill_budget_workbook(template, bodies, {})
+
+        company_id = await self._resolve_documents_company_id(
+            cabinet_id=cabinet_id, project_id=project_id
+        )
+        if not company_id:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="no company tenancy for budget export",
+            )
+        service = DocumentsService(self._session)
+        ref = await service.save_document(
+            data,
+            filename="budget.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            company_id=company_id,
+            cabinet_id=cabinet_id or None,
+            project_id=project_id,
+            principal=principal,
+            employee=employee,
+        )
+        return {"kind": "equipment.budget_export", "file_ref": ref, "rows": len(bodies)}
+
+    async def maybe_auto_budget_sync(
+        self,
+        *,
+        cabinet_id: str,
+        module_id: str,
+        table_slug: str,
+        principal: Principal,
+        employee: EmployeeRow | None,
+        project_id: str | None = None,
+    ) -> None:
+        """Best-effort: equipment.budget_sync after request_lines/found_offers writes."""
+        try:
+            matched_params: dict[str, Any] | None = None
+            for action in await self._list_actions(module_id=module_id):
+                if action.get("enabled") is False:
+                    continue
+                if str(action.get("kind") or "") != "equipment.budget_sync":
+                    continue
+                params = action.get("params") if isinstance(action.get("params"), dict) else {}
+                watched = {
+                    str(params.get("lines_table") or "request_lines"),
+                    str(params.get("offers_table") or "found_offers"),
+                }
+                if table_slug not in watched:
+                    continue
+                trigger = action.get("trigger") if isinstance(action.get("trigger"), dict) else {}
+                on = trigger.get("on") if isinstance(trigger.get("on"), list) else []
+                if "row.created" not in on and "row.updated" not in on:
+                    continue
+                matched_params = params
+                break
+            if matched_params is None:
+                return
+            await self._budget_sync(
+                cabinet_id=cabinet_id,
+                module_id=module_id,
+                params=matched_params,
+                principal=principal,
+                employee=employee,
+                project_id=project_id,
+            )
+        except AppError:
+            raise
+        except Exception:
+            logger.exception("auto budget sync failed module=%s table=%s", module_id, table_slug)
 
     async def maybe_auto_index_tabular(
         self,
@@ -857,6 +1134,15 @@ class ModuleActionExecutor:
                         )
                         break
 
+        # Best-offer swap: keep the budget snapshot in sync (equipment
+        # budget_sync action watches the offers table).
+        await self.maybe_auto_budget_sync(
+            cabinet_id=cabinet_id,
+            module_id=module_id,
+            table_slug=table_slug,
+            principal=principal,
+            employee=employee,
+        )
         return {"kind": "data.select_row", "row_id": row_id, "updated": updated}
 
     async def _index_tabular(

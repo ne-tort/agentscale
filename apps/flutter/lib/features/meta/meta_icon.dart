@@ -78,6 +78,9 @@ IconData metaIconFromName(String? name, {IconData fallback = Icons.extension_out
       return Icons.storefront_outlined;
     case 'alternate_email':
       return Icons.alternate_email;
+    case 'request_quote':
+    case 'request_quote_outlined':
+      return Icons.request_quote_outlined;
     case 'cookie':
       return Icons.cookie_outlined;
     default:

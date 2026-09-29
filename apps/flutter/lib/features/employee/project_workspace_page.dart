@@ -13,8 +13,14 @@ import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/app_snack_bar.dart';
 import 'package:prodavan/features/employee/agent_chat_errors.dart';
+import 'package:prodavan/features/employee/cabinet_module_host.dart';
+import 'package:prodavan/features/employee/cabinet_nav_loader.dart';
 import 'package:prodavan/features/employee/project_chat_model_select_page.dart';
 import 'package:prodavan/features/employee/project_chat_settings_page.dart';
+import 'package:prodavan/features/meta/chat_header.dart';
+import 'package:prodavan/features/meta/meta_icon.dart';
+import 'package:prodavan/features/meta/meta_label.dart';
+import 'package:prodavan/features/meta/module_meta_manifest.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Project agent workspace — [sessionId] null = pending «Новый диалог».
@@ -65,6 +71,15 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
   late bool _pinned;
   late String? _sessionId;
 
+  /// Module views with `ui_json.chat_header` (e.g. equipment budget) —
+  /// extra AppBar actions while a chat session is open. Loaded lazily,
+  /// silent on failure (buttons just do not appear).
+  List<ChatHeaderButton>? _chatHeaderButtons;
+
+  /// Session the header-button load was attempted for (cache guard).
+  String? _chatHeaderButtonsSession;
+  bool _chatHeaderButtonsLoading = false;
+
   /// Set when the user picked a model explicitly — the session model restore
   /// (first load) must not override an explicit choice.
   bool _userPickedModel = false;
@@ -91,6 +106,7 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
           projectId: widget.projectId,
         ),
       );
+      unawaited(_maybeLoadChatHeaderButtons());
     });
     _title = (widget.initialTitle ?? '').trim();
     _pinned = widget.initiallyPinned;
@@ -126,6 +142,7 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
     setState(() => _sessionId = sessionId);
     workContext.setSelectedSessionId(sessionId);
     widget.onSessionMaterialized?.call(sessionId);
+    unawaited(_maybeLoadChatHeaderButtons());
   }
 
   Future<void> _refreshProjectFlags() async {
@@ -367,6 +384,89 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
     return raw is String && raw.isNotEmpty;
   }
 
+  /// Lazy chat-header module buttons (budget etc.): load once per session,
+  /// never blocking the chat UI. Silent on failure.
+  Future<void> _maybeLoadChatHeaderButtons() async {
+    final sessionId = _sessionId;
+    if (sessionId == null || sessionId.isEmpty) return;
+    if (_chatHeaderButtonsLoading) return;
+    if (_chatHeaderButtonsSession == sessionId) return;
+    _chatHeaderButtonsLoading = true;
+    _chatHeaderButtonsSession = sessionId;
+    try {
+      final modules =
+          await workContext.api.listProjectModules(widget.projectId);
+      final buttons = await loadProjectChatHeaderButtons(
+        modules: modules,
+        fetchViews: (moduleId) => workContext.api.getProjectRuntimeModuleMeta(
+          projectId: widget.projectId,
+          moduleId: moduleId,
+          slug: ModuleMetaSlugs.views,
+        ),
+      );
+      if (!mounted) return;
+      setState(() => _chatHeaderButtons = buttons);
+    } catch (_) {
+      // Silent: header buttons are optional chrome.
+    } finally {
+      _chatHeaderButtonsLoading = false;
+    }
+  }
+
+  List<Widget> _chatHeaderActions(AppLocalizations l10n, Locale locale) {
+    final buttons = _chatHeaderButtons;
+    if (buttons == null || buttons.isEmpty) return const [];
+    return [
+      for (final button in buttons)
+        IconButton(
+          icon: Icon(
+            metaIconFromName(
+              button.icon,
+              fallback: Icons.request_quote_outlined,
+            ),
+          ),
+          tooltip: _chatHeaderButtonLabel(button, l10n, locale),
+          onPressed: () => _openChatHeaderButton(button),
+        ),
+    ];
+  }
+
+  String _chatHeaderButtonLabel(
+    ChatHeaderButton button,
+    AppLocalizations l10n,
+    Locale locale,
+  ) {
+    final resolved = resolveMetaLabel(button.label, l10n, locale: locale);
+    return resolved.isNotEmpty ? resolved : button.moduleName;
+  }
+
+  /// Opens the module view behind a chat-header button with the active chat
+  /// session scope (``chats=current`` tables stay bound to this session).
+  Future<void> _openChatHeaderButton(ChatHeaderButton button) async {
+    final sessionId = _sessionId;
+    if (sessionId == null || sessionId.isEmpty) return;
+    final l10n = AppLocalizations.of(context);
+    final locale = Localizations.localeOf(context);
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => CabinetModuleHost(
+          cabinetId: widget.cabinetId,
+          projectId: widget.projectId,
+          sessionId: sessionId,
+          entry: CabinetNavEntry(
+            moduleId: button.moduleId,
+            moduleName: button.moduleName,
+            tab: {
+              'view_slug': button.viewSlug,
+              if (button.icon != null) 'icon': button.icon,
+            },
+            label: _chatHeaderButtonLabel(button, l10n, locale),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
@@ -404,6 +504,8 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
             )
           : Text(widget.projectName),
       actions: [
+        if (showChat && _hasSession)
+          ..._chatHeaderActions(l10n, Localizations.localeOf(context)),
         if (showChat) ...[
           IconButton(
             icon: Icon(_pinned ? Icons.push_pin : Icons.push_pin_outlined),

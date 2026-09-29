@@ -77,6 +77,11 @@ String formatModuleCell({
     }
   }
 
+  if (format == 'budget_calc') {
+    // Equipment budgeting: computed cell, value lives in col['variant'].
+    return formatBudgetCalcCell(body: body, col: col);
+  }
+
   final enumMeta = col['enum'];
   if (enumMeta is Map && enumMeta['labels'] is Map) {
     final labels = Map<String, dynamic>.from(enumMeta['labels'] as Map);
@@ -106,9 +111,41 @@ String formatModuleCell({
   return raw?.toString() ?? '';
 }
 
+/// Equipment budgeting computed cell (`format: budget_calc` on a column).
+///
+/// Row body inputs (budget_lines): `price_in` (purchase price, with VAT),
+/// `qty` (default 1), `vat` (default 0.22 — informational, canonical
+/// formulas do not use it), `markup` (default 0.1). Column `variant`:
+/// - `price_out` — price with margin, with VAT: `price_in * (1 + markup)`
+///   (Excel template column K);
+/// - `margin_total` — margin for the total: `qty * (price_out - price_in)`
+///   (Excel template column O).
+///
+/// Empty string when `price_in` is missing (nothing to compute from).
+String formatBudgetCalcCell({
+  required Map<String, dynamic> body,
+  required Map<String, dynamic> col,
+}) {
+  final priceIn = _asDouble(body['price_in']);
+  if (priceIn == null) return '';
+  final qty = _asDouble(body['qty']) ?? 1.0;
+  final markup = _asDouble(body['markup']) ?? 0.1;
+  final priceOut = priceIn * (1 + markup);
+  final value = col['variant']?.toString() == 'margin_total'
+      ? qty * (priceOut - priceIn)
+      : priceOut;
+  return value.toStringAsFixed(2);
+}
+
 int? _asInt(dynamic raw) {
   if (raw is num) return raw.toInt();
   if (raw is String) return int.tryParse(raw.trim());
+  return null;
+}
+
+double? _asDouble(dynamic raw) {
+  if (raw is num) return raw.toDouble();
+  if (raw is String) return double.tryParse(raw.trim());
   return null;
 }
 

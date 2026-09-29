@@ -385,6 +385,13 @@ class CabinetModuleService:
             employee=employee,
             previous_body=previous_body,
         )
+        await ModuleActionExecutor(self._session).maybe_auto_budget_sync(
+            cabinet_id=cabinet_id,
+            module_id=module_id,
+            table_slug=table_slug,
+            principal=principal,
+            employee=employee,
+        )
 
     async def _require_module_binding(self, *, cabinet_id: str, module_id: str) -> None:
         q = await self._session.execute(

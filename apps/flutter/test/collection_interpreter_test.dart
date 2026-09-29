@@ -83,6 +83,113 @@ Map<String, dynamic> _collectionManifestJson() => {
       'tabs': [],
     };
 
+/// Budget-line → offers flow: row_tap with `context_field` must open the
+/// linked row (id from the tapped row's body), not the tapped row itself.
+Map<String, dynamic> _rowTapManifestJson() => {
+      'syntax_version': 1,
+      'tables': [
+        {
+          'slug': 'budget_lines',
+          'label': 'Budget lines',
+          'storage_kind': 'json_document',
+          'enabled': true,
+        },
+        {
+          'slug': 'offers',
+          'label': 'Offers',
+          'storage_kind': 'json_document',
+          'enabled': true,
+        },
+      ],
+      'columns': [
+        {
+          'table_slug': 'budget_lines',
+          'name': 'title',
+          'label': 'Название',
+          'type': 'text',
+        },
+        {
+          'table_slug': 'budget_lines',
+          'name': 'line_id',
+          'label': 'Line',
+          'type': 'text',
+        },
+        {
+          'table_slug': 'offers',
+          'name': 'title',
+          'label': 'Название',
+          'type': 'text',
+        },
+      ],
+      'views': [
+        {
+          'slug': 'budget_lines_list',
+          'table_slug': 'budget_lines',
+          'kind': 'collection',
+          'ui_json': {
+            'version': 1,
+            'kind': 'collection',
+            'title_field': 'title',
+            'columns': [
+              {'field': 'title', 'label': 'Название'},
+            ],
+            'row_tap': {
+              'kind': 'open_view',
+              'view': 'offers_for_line',
+              'context_field': 'line_id',
+            },
+          },
+        },
+        {
+          'slug': 'lines_no_ctx',
+          'table_slug': 'budget_lines',
+          'kind': 'collection',
+          'ui_json': {
+            'version': 1,
+            'kind': 'collection',
+            'title_field': 'title',
+            'columns': [
+              {'field': 'title', 'label': 'Название'},
+            ],
+            'row_tap': {'kind': 'open_view', 'view': 'offers_for_line'},
+          },
+        },
+        {
+          'slug': 'offers_for_line',
+          'table_slug': 'offers',
+          'kind': 'collection',
+          'ui_json': {
+            'version': 1,
+            'kind': 'collection',
+            'title_field': 'title',
+            'columns': [
+              {'field': 'title', 'label': 'Название'},
+            ],
+          },
+        },
+      ],
+      'tabs': [],
+      'seed_rows': {
+        'items': [
+          {
+            'table_slug': 'budget_lines',
+            'row_id': 'line1',
+            'body': {'title': 'Линия 1', 'line_id': 'offer42'},
+          },
+          {
+            'table_slug': 'budget_lines',
+            'row_id': 'line2',
+            'body': {'title': 'Линия 2'},
+          },
+          {
+            'table_slug': 'offers',
+            'row_id': 'offer42',
+            'body': {'title': 'Оффер 42'},
+          },
+        ],
+      },
+    };
+
 void main() {
   testWidgets('uses AppInlineAddField with meta title', (tester) async {
     final manifest = ModuleMetaManifest.fromJson(_collectionManifestJson());
@@ -155,5 +262,66 @@ void main() {
     expect(seeds.itemsForTable('items'), hasLength(1));
     expect(seeds.itemsForTable('items').first['body']['name'], 'Alpha');
     expect(find.text('Alpha'), findsWidgets);
+  });
+
+  group('row_tap context_field', () {
+    Future<void> pumpList(
+      WidgetTester tester,
+      String viewSlug,
+      List<(String, String?)> opened,
+    ) async {
+      tester.view.physicalSize = const Size(1200, 700);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      final manifest = ModuleMetaManifest.fromJson(_rowTapManifestJson());
+      final seeds = SeedDataController(manifest);
+      final view = manifest.viewBySlug(viewSlug)!;
+
+      await tester.pumpWidget(
+        _ruApp(
+          CollectionViewInterpreter(
+            manifest: manifest,
+            view: view,
+            seeds: seeds,
+            onOpenForm: (viewSlug, {rowId}) => opened.add((viewSlug, rowId)),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('opens the linked row id from the tapped row body',
+        (tester) async {
+      final opened = <(String, String?)>[];
+      await pumpList(tester, 'budget_lines_list', opened);
+
+      await tester.tap(find.text('Линия 1'));
+      await tester.pumpAndSettle();
+
+      expect(opened, [('offers_for_line', 'offer42')]);
+    });
+
+    testWidgets('falls back to the tapped row when the field is empty',
+        (tester) async {
+      final opened = <(String, String?)>[];
+      await pumpList(tester, 'budget_lines_list', opened);
+
+      await tester.tap(find.text('Линия 2'));
+      await tester.pumpAndSettle();
+
+      expect(opened, [('offers_for_line', 'line2')]);
+    });
+
+    testWidgets('without context_field passes the tapped row id',
+        (tester) async {
+      final opened = <(String, String?)>[];
+      await pumpList(tester, 'lines_no_ctx', opened);
+
+      await tester.tap(find.text('Линия 1'));
+      await tester.pumpAndSettle();
+
+      expect(opened, [('offers_for_line', 'line1')]);
+    });
   });
 }

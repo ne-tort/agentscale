@@ -311,6 +311,12 @@ class Settings(BaseSettings):
         default=50,
         validation_alias=AliasChoices("DOCUMENTS_MAX_OUTPUT_MB"),
     )
+    # Directory with document templates (kp-template.xlsx …). Relative paths
+    # resolve against the process cwd (Docker: /app/templates; dev: apps/api).
+    documents_templates_dir: str = Field(
+        default="templates",
+        validation_alias=AliasChoices("DOCUMENTS_TEMPLATES_DIR"),
+    )
     # Platform probe pod — single long-lived agent-runtime pod owned by the platform
     # (not a project sandbox) used to verify AI keys and fetch their model list via
     # the vendor SDK/HTTP path that only exists inside agent-runtime. The API pushes
