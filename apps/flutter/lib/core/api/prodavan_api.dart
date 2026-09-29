@@ -1504,7 +1504,18 @@ class ProdavanApi {
 
   void _throwIfError(http.Response res) {
     if (res.statusCode >= 400) {
-      throw ProdavanApiException(res.statusCode, res.body);
+      // UTF-8 from bytes: `res.body` falls back to latin1 when the server
+      // omits a charset, turning em-dashes/Cyrillic into mojibake («â€"») in
+      // error toasts (e.g. MODELS_UNAVAILABLE).
+      throw ProdavanApiException(res.statusCode, _bodyText(res));
+    }
+  }
+
+  String _bodyText(http.Response res) {
+    try {
+      return utf8.decode(res.bodyBytes, allowMalformed: true);
+    } catch (_) {
+      return res.body;
     }
   }
 }

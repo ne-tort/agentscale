@@ -329,11 +329,13 @@ class _AssistantStreamBlockState extends State<AssistantStreamBlock> {
   /// [HH:MM always visible] · hover-reveal [model · вход: N · выход: N · $cost · m:ss] · copy (hover-reveal, flush right).
   ///
   /// The completion time is permanent — the row keeps its height instead of
-  /// collapsing to zero; the usage cells and the copy button animate in via
-  /// AnimatedSize on hover (or while the 2s copied confirmation is up, which
-  /// must survive the pointer leaving). Without a completion time the row
-  /// behaves as before: collapsed to zero height while hidden — no space
-  /// reserved, AnimatedSize keeps the reveal smooth instead of a layout jump.
+  /// collapsing to zero. While mounted the row is FIXED at the copy button's
+  /// 28px: the usage cells and the copy button fade in/out (AnimatedOpacity)
+  /// inside that reserved space, so revealing the copy icon never re-layouts
+  /// — the message above is not lifted on hover (or while the 2s copied
+  /// confirmation is up, which must survive the pointer leaving). Without a
+  /// completion time the row collapses to zero while hidden; the first hover
+  /// mounts it at the same fixed height.
   Widget _metaRow(BuildContext context) {
     final usage = widget.usageRaw;
     final model = _stringOrNull(usage?['model']);
@@ -346,39 +348,54 @@ class _AssistantStreamBlockState extends State<AssistantStreamBlock> {
     final metaVisible = !widget.streaming && hasAny && (_hover || _copied);
     final timeText = _formatClockTime(widget.completedAt);
     final rowVisible = timeText != null || metaVisible;
+    // Fixed-height row (28px — the copy button's box): once the row is
+    // mounted its geometry NEVER changes. The copy slot keeps its exact
+    // 28×28 box whether or not the button is shown, and the usage cells fade
+    // into the row without touching its height — so revealing the copy icon
+    // on hover never re-layouts or lifts the message above. A small gap
+    // (AppSpacing.xs) separates the metadata from the message body.
     return AnimatedSize(
       duration: const Duration(milliseconds: 160),
       curve: Curves.easeOut,
       child: rowVisible
           ? Padding(
-              padding: EdgeInsets.only(top: AppSpacing.xs / 2),
-              child: Row(
-                children: [
-                  if (timeText != null) Text(timeText, style: _metaStyle(context)),
-                  AnimatedSize(
-                    duration: const Duration(milliseconds: 160),
-                    curve: Curves.easeOut,
-                    child: metaVisible
-                        ? Padding(
-                            padding: EdgeInsets.only(left: timeText != null ? 8 : 0),
-                            child: _buildUsageCells(
-                              context,
-                              model: model,
-                              input: input,
-                              output: output,
-                              cost: cost,
-                              turnMs: turnMs,
-                            ),
-                          )
-                        : const SizedBox(width: 0, height: 0),
-                  ),
-                  const Spacer(),
-                  AnimatedSize(
-                    duration: const Duration(milliseconds: 160),
-                    curve: Curves.easeOut,
-                    child: metaVisible ? _copyButton(context) : const SizedBox(width: 0, height: 0),
-                  ),
-                ],
+              padding: const EdgeInsets.only(top: AppSpacing.xs),
+              child: SizedBox(
+                height: 28,
+                child: Row(
+                  children: [
+                    if (timeText != null)
+                      Center(child: Text(timeText, style: _metaStyle(context))),
+                    AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 160),
+                      child: metaVisible
+                          ? Padding(
+                              padding: EdgeInsets.only(
+                                left: timeText != null ? 8 : 0,
+                              ),
+                              key: const ValueKey<bool>(true),
+                              child: _buildUsageCells(
+                                context,
+                                model: model,
+                                input: input,
+                                output: output,
+                                cost: cost,
+                                turnMs: turnMs,
+                              ),
+                            )
+                          : const SizedBox(height: 28, key: ValueKey<bool>(false)),
+                    ),
+                    const Spacer(),
+                    AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 160),
+                      // The placeholder keeps the exact copy-button box, so
+                      // the swap never moves a single pixel around it.
+                      child: metaVisible
+                          ? _copyButton(context)
+                          : const SizedBox(width: 28, height: 28),
+                    ),
+                  ],
+                ),
               ),
             )
           : const SizedBox(width: double.infinity, height: 0),
