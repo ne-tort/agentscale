@@ -598,7 +598,7 @@ class _UserMessageBlockState extends State<UserMessageBlock> {
     final name = att['filename'] as String? ?? 'file';
     final kind = att['kind'] as String? ?? '';
     final rows = att['row_count'];
-    if (kind == 'inline_json') {
+    if (kind == 'inline_json' || kind == 'inline_table') {
       return rows is int
           ? l10n.chatAttachmentRowsLabel(name, rows)
           : l10n.chatAttachmentJsonLabel(name);
@@ -636,25 +636,40 @@ class _UserMessageBlockState extends State<UserMessageBlock> {
                 if (widget.text.isNotEmpty) Text(widget.text),
                 if (attachments.isNotEmpty)
                   for (var i = 0; i < attachments.length; i++) ...[
-                    Padding(
-                      padding: EdgeInsets.only(top: AppSpacing.xs),
-                      child: _AttachmentSpoiler(
-                        label: _attachmentLabel(l10n, attachments[i]),
-                        expanded: _openSpoilers.contains(i),
-                        onTap: attachments[i]['kind'] == 'inline_json' && attachments[i]['inline_json'] != null
-                            ? () => setState(() {
-                                  if (_openSpoilers.contains(i)) {
-                                    _openSpoilers.remove(i);
-                                  } else {
-                                    _openSpoilers.add(i);
-                                  }
-                                })
-                            : null,
-                        body: attachments[i]['kind'] == 'inline_json' && _openSpoilers.contains(i)
-                            ? JsonEncoder.withIndent('  ').convert(attachments[i]['inline_json'])
-                            : null,
-                      ),
-                    ),
+                    Builder(builder: (context) {
+                      final att = attachments[i];
+                      final kind = att['kind'] as String? ?? '';
+                      final inlineJson =
+                          kind == 'inline_json' ? att['inline_json'] : null;
+                      // Tabular attachments carry a GFM markdown table —
+                      // rendered as a real table instead of a JSON dump.
+                      final inlineMarkdown =
+                          kind == 'inline_table' ? att['inline_markdown'] as String? : null;
+                      final expandable = inlineJson != null || inlineMarkdown != null;
+                      return Padding(
+                        padding: const EdgeInsets.only(top: AppSpacing.xs),
+                        child: _AttachmentSpoiler(
+                          label: _attachmentLabel(l10n, att),
+                          expanded: _openSpoilers.contains(i),
+                          onTap: expandable
+                              ? () => setState(() {
+                                    if (_openSpoilers.contains(i)) {
+                                      _openSpoilers.remove(i);
+                                    } else {
+                                      _openSpoilers.add(i);
+                                    }
+                                  })
+                              : null,
+                          body: inlineJson != null && _openSpoilers.contains(i)
+                              ? JsonEncoder.withIndent('  ').convert(inlineJson)
+                              : null,
+                          bodyWidget:
+                              inlineMarkdown != null && _openSpoilers.contains(i)
+                                  ? ChatMarkdownBody(text: inlineMarkdown)
+                                  : null,
+                        ),
+                      );
+                    }),
                   ]
                 else
                   for (final ref in refs)
@@ -688,12 +703,16 @@ class _AttachmentSpoiler extends StatelessWidget {
     required this.expanded,
     this.onTap,
     this.body,
+    this.bodyWidget,
   });
 
   final String label;
   final bool expanded;
   final VoidCallback? onTap;
   final String? body;
+
+  /// Rich body (markdown table) — takes precedence over [body] when set.
+  final Widget? bodyWidget;
 
   @override
   Widget build(BuildContext context) {
@@ -705,9 +724,17 @@ class _AttachmentSpoiler extends StatelessWidget {
           expanded: expanded,
           onTap: onTap,
         ),
-        if (expanded && body != null && body!.isNotEmpty)
+        if (expanded && bodyWidget != null)
           Padding(
-            padding: EdgeInsets.only(top: AppSpacing.xs),
+            padding: const EdgeInsets.only(top: AppSpacing.xs),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: bodyWidget,
+            ),
+          )
+        else if (expanded && body != null && body!.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: AppSpacing.xs),
             child: ChatCodePanel(text: body!),
           ),
       ],

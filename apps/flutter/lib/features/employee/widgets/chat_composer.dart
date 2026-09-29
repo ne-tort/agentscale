@@ -20,6 +20,14 @@ const int kComposerDraftMinChars = 5;
 
 typedef ChatComposerSend = void Function(String text, List<String> attachmentRefs);
 
+/// A file captured by an OS drag & drop onto the chat area.
+class DroppedChatFile {
+  const DroppedChatFile({required this.name, required this.bytes});
+
+  final String name;
+  final Uint8List bytes;
+}
+
 class _PendingAttachment {
   const _PendingAttachment({required this.id, required this.filename});
 
@@ -86,10 +94,10 @@ class ChatComposer extends StatefulWidget {
   final VoidCallback? onDismissUpdate;
 
   @override
-  State<ChatComposer> createState() => _ChatComposerState();
+  State<ChatComposer> createState() => ChatComposerState();
 }
 
-class _ChatComposerState extends State<ChatComposer> {
+class ChatComposerState extends State<ChatComposer> {
   final _controller = TextEditingController();
   final _focusNode = FocusNode();
   // Stable key for the Focus widget so that when the layout switches between
@@ -315,23 +323,59 @@ class _ChatComposerState extends State<ChatComposer> {
     final bytes = file.bytes;
     if (bytes == null) return;
     if (!mounted) return;
+    await _uploadAttachment(
+      api: api,
+      projectId: projectId,
+      filename: file.name,
+      bytes: bytes,
+    );
+  }
+
+  /// Files dropped onto the chat area (drag & drop) enter the exact same
+  /// pipeline as the attach button: per-file limits, upload, pending chips
+  /// and error snackbars.
+  Future<void> attachDroppedFiles(List<DroppedChatFile> files) async {
+    final projectId = widget.projectId;
+    final api = widget.api;
+    if (!widget.enabled || projectId == null || api == null || _uploading) return;
+    for (final dropped in files) {
+      if (!mounted) return;
+      if (!_checkAttachmentLimits(dropped.bytes)) return;
+      await _uploadAttachment(
+        api: api,
+        projectId: projectId,
+        filename: dropped.name,
+        bytes: dropped.bytes,
+      );
+    }
+  }
+
+  bool _checkAttachmentLimits(Uint8List bytes) {
     if (_attachments.length >= kChatMaxAttachmentsPerMessage) {
       AppSnackBar.warning(
         context,
         AppLocalizations.of(context).chatTooManyAttachments(kChatMaxAttachmentsPerMessage),
       );
-      return;
+      return false;
     }
     if (bytes.length > kChatMaxAttachmentBytesClient) {
       AppSnackBar.warning(context, AppLocalizations.of(context).chatFileTooLarge);
-      return;
+      return false;
     }
+    return true;
+  }
 
+  Future<void> _uploadAttachment({
+    required ProdavanApi api,
+    required String projectId,
+    required String filename,
+    required Uint8List bytes,
+  }) async {
     setState(() => _uploading = true);
     try {
       final body = await api.uploadProjectAttachment(
         projectId: projectId,
-        filename: file.name,
+        filename: filename,
         bytes: bytes,
       );
       final id = body['id'] as String? ?? body['storage_ref'] as String? ?? '';
@@ -345,7 +389,7 @@ class _ChatComposerState extends State<ChatComposer> {
         return;
       }
       setState(() {
-        _attachments.add(_PendingAttachment(id: id, filename: file.name));
+        _attachments.add(_PendingAttachment(id: id, filename: filename));
       });
     } catch (e) {
       if (mounted) AppErrors.showSnack(context, e);
