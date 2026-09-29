@@ -1180,6 +1180,7 @@
   },
   "chatModelDefaultLabel": "По умолчанию",
   "chatModelPickerEmpty": "Нет доступных моделей",
+  "chatModelSearchHint": "Поиск модели",
   "projectChatToolReadFile": "Прочитан файл",
   "projectChatToolReadPath": "Прочитан {path}",
   "@projectChatToolReadPath": {

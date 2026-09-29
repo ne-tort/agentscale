@@ -13,8 +13,8 @@ import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/app_snack_bar.dart';
 import 'package:prodavan/features/employee/agent_chat_errors.dart';
+import 'package:prodavan/features/employee/project_chat_model_select_page.dart';
 import 'package:prodavan/features/employee/project_chat_settings_page.dart';
-import 'package:prodavan/features/employee/widgets/chat_model_picker_sheet.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Project agent workspace — [sessionId] null = pending «Новый диалог».
@@ -279,15 +279,15 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
     }
   }
 
-  /// Composer pill: quick model switch via bottom sheet. An explicit user
-  /// pick wins over the session's stored model ([_restoreSessionModel]).
+  /// Composer pill: quick model switch via the full model table page (same
+  /// picker as chat settings). An explicit user pick wins over the session's
+  /// stored model ([_restoreSessionModel]).
   Future<void> _pickModelQuick() async {
     if (_chat.streaming) return;
-    final picked = await showChatModelPickerSheet(
+    final picked = await ProjectChatModelSelectPage.push(
       context,
       models: _chat.availableModels,
       selectedModelId: _chat.selectedModel ?? _chat.defaultModel,
-      defaultModelId: _chat.defaultModel,
       enabled: true,
     );
     if (picked == null || !mounted) return;

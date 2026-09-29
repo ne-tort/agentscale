@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/theme/app_theme.dart';
 import 'package:prodavan/core/widgets/app_taper_hairline.dart';
 import 'package:prodavan/features/employee/cabinet_chats_rail.dart';
@@ -23,7 +24,8 @@ Widget _app(Widget home) {
 }
 
 void main() {
-  testWidgets('shows taper divider only when chats block is non-empty', (tester) async {
+  testWidgets('section break appears only when the chats block is non-empty', (tester) async {
+    // Empty tree and no legacy tile — nothing to separate.
     await tester.pumpWidget(
       _app(
         const CabinetChatsRail(
@@ -37,12 +39,15 @@ void main() {
         ),
       ),
     );
+    expect(find.text('Проекты'), findsNothing);
     expect(find.byType(AppTaperHairline), findsNothing);
 
+    // Legacy global tile renders → the section break appears with it.
     await tester.pumpWidget(
       _app(
         CabinetChatsRail(
           extended: true,
+          legacyLayout: true,
           newChatEnabled: true,
           projectGroups: [],
           activeSessionId: null,
@@ -53,10 +58,10 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.byType(AppTaperHairline), findsOneWidget);
+    expect(find.text('Проекты'), findsOneWidget);
   });
 
-  testWidgets('divider shows when a project branch has chats', (tester) async {
+  testWidgets('section break shows when a project branch has chats', (tester) async {
     await tester.pumpWidget(
       _app(
         CabinetChatsRail(
@@ -73,8 +78,71 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.byType(AppTaperHairline), findsOneWidget);
     expect(find.text('A1'), findsOneWidget);
+
+    final label = find.text('Проекты');
+    expect(label, findsOneWidget);
+    // Increased vertical padding around the section header.
+    final paddings = tester
+        .widgetList<Padding>(
+          find.ancestor(of: label, matching: find.byType(Padding)),
+        )
+        .map((p) => p.padding)
+        .toList();
+    expect(
+      paddings,
+      contains(const EdgeInsets.symmetric(vertical: AppSpacing.md)),
+    );
+    // The fading line runs on both sides of the label.
+    final row = tester
+        .widget<Row>(find.ancestor(of: label, matching: find.byType(Row)).first)
+        .children;
+    expect(row.whereType<Expanded>(), hasLength(2));
+  });
+
+  testWidgets('section break shows for an empty branch (draft row only)', (tester) async {
+    await tester.pumpWidget(
+      _app(
+        CabinetChatsRail(
+          extended: true,
+          newChatEnabled: false,
+          projectGroups: [
+            _group('proj_1', 'Alpha', newChatEnabled: false, chats: const []),
+          ],
+          activeSessionId: null,
+          onNewChat: null,
+          onNewChatForProject: (_) {},
+          onOpenChat: _noopOpen,
+          showLeadingDivider: true,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    // The draft row makes the chats block non-empty → the section break shows.
+    expect(find.text('Новый диалог'), findsOneWidget);
+    expect(find.text('Проекты'), findsOneWidget);
+  });
+
+  testWidgets('icon-only rail keeps a plain fading divider', (tester) async {
+    await tester.pumpWidget(
+      _app(
+        CabinetChatsRail(
+          extended: false,
+          newChatEnabled: false,
+          projectGroups: [
+            _group('proj_1', 'Alpha', chats: [_chat('ags_1', 'A1')]),
+          ],
+          activeSessionId: null,
+          onNewChat: null,
+          onOpenChat: _noopOpen,
+          showLeadingDivider: true,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    // Collapsed rail: no room for a label — just the fading hairline.
+    expect(find.byType(AppTaperHairline), findsOneWidget);
+    expect(find.text('Проекты'), findsNothing);
   });
 }
 

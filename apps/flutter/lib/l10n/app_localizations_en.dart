@@ -2039,6 +2039,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get chatModelPickerEmpty => 'No models available';
 
   @override
+  String get chatModelSearchHint => 'Search models';
+
+  @override
   String get projectChatToolReadFile => 'Read file';
 
   @override

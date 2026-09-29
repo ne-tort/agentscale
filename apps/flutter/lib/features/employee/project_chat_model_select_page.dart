@@ -8,7 +8,12 @@ import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Table picker for project chat model — metadata from catalog enrichment.
-class ProjectChatModelSelectPage extends StatelessWidget {
+///
+/// Tapping a row (or its radio) pops the page with the picked model id; null
+/// when dismissed. An inline search field pinned above the table filters rows
+/// by label / id / publisher (case-insensitive). [enabled] `false` renders
+/// rows inert (read-only).
+class ProjectChatModelSelectPage extends StatefulWidget {
   const ProjectChatModelSelectPage({
     super.key,
     required this.models,
@@ -37,6 +42,37 @@ class ProjectChatModelSelectPage extends StatelessWidget {
     );
   }
 
+  @override
+  State<ProjectChatModelSelectPage> createState() =>
+      _ProjectChatModelSelectPageState();
+}
+
+class _ProjectChatModelSelectPageState
+    extends State<ProjectChatModelSelectPage> {
+  final TextEditingController _searchController = TextEditingController();
+  String _query = '';
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  /// Case-insensitive filter over label, id and publisher.
+  List<Map<String, dynamic>> get _filteredModels {
+    final q = _query.trim().toLowerCase();
+    if (q.isEmpty) return widget.models;
+    bool matches(Map<String, dynamic> m) {
+      final label = m['label'] as String? ?? '';
+      final id = m['id'] as String? ?? '';
+      final publisher = m['publisher'] as String? ?? '';
+      return label.toLowerCase().contains(q) ||
+          id.toLowerCase().contains(q) ||
+          publisher.toLowerCase().contains(q);
+    }
+    return widget.models.where(matches).toList();
+  }
+
   String _priceLabel(AppLocalizations l10n, Map<String, dynamic> m) {
     final input = m['input_price_usd_per_mtok'];
     final output = m['output_price_usd_per_mtok'];
@@ -62,14 +98,53 @@ class ProjectChatModelSelectPage extends StatelessWidget {
   }
 
   void _select(BuildContext context, String modelId) {
-    if (!enabled) return;
+    if (!widget.enabled) return;
     Navigator.of(context).pop(modelId);
+  }
+
+  Widget _searchField(BuildContext context, AppLocalizations l10n) {
+    final scheme = Theme.of(context).colorScheme;
+    final border = OutlineInputBorder(
+      borderRadius: BorderRadius.circular(10),
+      borderSide: BorderSide.none,
+    );
+    return TextField(
+      controller: _searchController,
+      onChanged: (v) => setState(() => _query = v),
+      decoration: InputDecoration(
+        hintText: l10n.chatModelSearchHint,
+        isDense: true,
+        filled: true,
+        fillColor: scheme.surfaceContainerHighest,
+        prefixIcon: const Icon(Icons.search, size: 18),
+        suffixIcon: _query.isEmpty
+            ? null
+            : IconButton(
+                icon: const Icon(Icons.close, size: 18),
+                padding: EdgeInsets.zero,
+                visualDensity: VisualDensity.compact,
+                onPressed: () {
+                  _searchController.clear();
+                  setState(() => _query = '');
+                },
+              ),
+        border: border,
+        enabledBorder: border,
+        focusedBorder: border,
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.md,
+          vertical: AppSpacing.sm + AppSpacing.xs,
+        ),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final rows = models.map((m) {
+    final scheme = Theme.of(context).colorScheme;
+    final filtered = _filteredModels;
+    final rows = filtered.map((m) {
       final id = m['id'] as String? ?? m['label'] as String? ?? '';
       return AppEntityRow(
         id: id,
@@ -83,8 +158,9 @@ class ProjectChatModelSelectPage extends StatelessWidget {
         cellWidgets: {
           'select': AppRadio<String>(
             value: id,
-            groupValue: selectedModelId,
-            onChanged: enabled ? (_) => _select(context, id) : null,
+            groupValue: widget.selectedModelId,
+            onChanged:
+                widget.enabled ? (_) => _select(context, id) : null,
           ),
         },
       );
@@ -92,31 +168,77 @@ class ProjectChatModelSelectPage extends StatelessWidget {
 
     return AppScaffold(
       title: Text(l10n.projectChatModelSelectTitle),
-      body: models.isEmpty
+      body: widget.models.isEmpty
           ? EmptyPlaceholder(
               title: l10n.projectChatModelLabel,
               icon: Icons.smart_toy_outlined,
             )
-          : Padding(
-              padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
-              child: AppEntityCollection(
-                mode: AppEntityCollectionMode.table,
-                rows: rows,
-                primaryColumnLabel: l10n.projectChatModelLabel,
-                columns: [
-                  AppEntityColumn(id: 'price', label: l10n.projectChatModelColumnPrice),
-                  AppEntityColumn(id: 'tokens', label: l10n.projectChatModelColumnMaxTokens),
-                  AppEntityColumn(id: 'publisher', label: l10n.projectChatModelColumnPublisher),
-                  AppEntityColumn(id: 'released', label: l10n.projectChatModelColumnReleased),
-                  AppEntityColumn(
-                    id: 'select',
-                    label: '',
-                    width: 48,
-                    align: AppEntityColumnAlign.center,
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(
+                    AppSpacing.md,
+                    AppSpacing.sm,
+                    AppSpacing.md,
+                    AppSpacing.xs,
                   ),
-                ],
-                onOpen: (row) => _select(context, row.id),
-              ),
+                  child: _searchField(context, l10n),
+                ),
+                Expanded(
+                  child: filtered.isEmpty
+                      ? Center(
+                          child: Padding(
+                            padding: const EdgeInsets.all(AppSpacing.xl),
+                            child: Text(
+                              l10n.chatModelPickerEmpty,
+                              textAlign: TextAlign.center,
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodyMedium
+                                  ?.copyWith(
+                                    color: scheme.onSurfaceVariant,
+                                  ),
+                            ),
+                          ),
+                        )
+                      : Padding(
+                          padding: const EdgeInsets.symmetric(
+                            vertical: AppSpacing.sm,
+                          ),
+                          child: AppEntityCollection(
+                            mode: AppEntityCollectionMode.table,
+                            rows: rows,
+                            primaryColumnLabel: l10n.projectChatModelLabel,
+                            columns: [
+                              AppEntityColumn(
+                                id: 'price',
+                                label: l10n.projectChatModelColumnPrice,
+                              ),
+                              AppEntityColumn(
+                                id: 'tokens',
+                                label: l10n.projectChatModelColumnMaxTokens,
+                              ),
+                              AppEntityColumn(
+                                id: 'publisher',
+                                label: l10n.projectChatModelColumnPublisher,
+                              ),
+                              AppEntityColumn(
+                                id: 'released',
+                                label: l10n.projectChatModelColumnReleased,
+                              ),
+                              AppEntityColumn(
+                                id: 'select',
+                                label: '',
+                                width: 48,
+                                align: AppEntityColumnAlign.center,
+                              ),
+                            ],
+                            onOpen: (row) => _select(context, row.id),
+                          ),
+                        ),
+                ),
+              ],
             ),
     );
   }

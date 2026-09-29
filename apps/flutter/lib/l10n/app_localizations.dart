@@ -3632,6 +3632,12 @@ abstract class AppLocalizations {
   /// **'No models available'**
   String get chatModelPickerEmpty;
 
+  /// No description provided for @chatModelSearchHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Search models'**
+  String get chatModelSearchHint;
+
   /// No description provided for @projectChatToolReadFile.
   ///
   /// In en, this message translates to:

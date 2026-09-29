@@ -277,8 +277,9 @@ async def test_sidebar_new_chat_disabled_for_error_project() -> None:
 
     assert out["new_chat_enabled"] is False
     assert out["observed_state"] is None
-    assert out["projects"][0]["status"] == "error"
-    assert out["projects"][0]["new_chat_enabled"] is False
+    # Error project is not running → no branch in the tree at all.
+    assert out["projects"] == []
+    assert out["project_chats"] == []
 
 
 @pytest.mark.asyncio
@@ -428,8 +429,9 @@ def test_touch_session_sets_title_once() -> None:
 
 
 @pytest.mark.asyncio
-async def test_sidebar_projects_tree_contains_all_cabinet_projects() -> None:
-    """Tree has one branch per alive project — not only the selected one."""
+async def test_sidebar_projects_tree_contains_only_running_projects() -> None:
+    """Tree has one branch per RUNNING project — not only the selected one;
+    draft/paused/error/completed/deleted projects stay out until launched."""
     session = AsyncMock()
     emp = _employee()
     sel = MagicMock()
@@ -476,19 +478,53 @@ async def test_sidebar_projects_tree_contains_all_cabinet_projects() -> None:
         )
         out = await svc.sidebar(cabinet_id="cab_1", principal=_principal(), employee=emp)
 
-    # Branches: all alive projects, alphabetically, soft-deleted skipped.
-    assert [g["project_id"] for g in out["projects"]] == ["proj_1", "proj_2"]
+    # Branches: RUNNING projects only — paused/draft/completed/deleted stay
+    # out of the tree, together with their chats.
+    assert [g["project_id"] for g in out["projects"]] == ["proj_1"]
     by_id = {g["project_id"]: g for g in out["projects"]}
     assert by_id["proj_1"]["project_name"] == "Alpha"
     assert by_id["proj_1"]["status"] == "active"
-    assert by_id["proj_2"]["status"] == "paused"
-    assert by_id["proj_2"]["new_chat_enabled"] is False
     assert [c["session_id"] for c in by_id["proj_1"]["chats"]] == ["ags_1"]
-    assert [c["session_id"] for c in by_id["proj_2"]["chats"]] == ["ags_2"]
     # Legacy fields keep their old shape.
     assert out["project_ids_in_cabinet"] == ["proj_1", "proj_2", "proj_del"]
     assert [c["session_id"] for c in out["project_chats"]] == ["ags_1"]
     assert out["pinned"] == []
+
+
+@pytest.mark.asyncio
+async def test_sidebar_selected_paused_project_keeps_legacy_chats() -> None:
+    """Paused selection: no tree branch, but the legacy project_chats field
+    still lists its chats (and new chats stay disabled)."""
+    session = AsyncMock()
+    emp = _employee()
+    sel = MagicMock()
+    sel.project_id = "proj_1"
+    proj = _project(pid="proj_1", name="Alpha", status="paused")
+    chat = _session_row(
+        sid="ags_1",
+        project_id="proj_1",
+        title="A1",
+        last_message_at=datetime(2026, 6, 1, tzinfo=UTC),
+        created_at=datetime(2026, 6, 1, tzinfo=UTC),
+    )
+    session.get = AsyncMock(return_value=sel)
+    session.execute = AsyncMock(
+        side_effect=[
+            _rows_result([proj]),  # projects
+            _rows_result([]),  # pins
+            _drafts_result(),  # drafts
+            _rows_result([chat]),  # sessions (selected project outside the tree)
+        ]
+    )
+
+    svc = ChatSidebarService(session)
+    with patch.object(svc._cabinets, "require_access", new=AsyncMock()):
+        out = await svc.sidebar(cabinet_id="cab_1", principal=_principal(), employee=emp)
+
+    assert out["projects"] == []  # paused → hidden from the tree
+    assert out["new_chat_enabled"] is False
+    assert out["observed_state"] is None
+    assert [c["session_id"] for c in out["project_chats"]] == ["ags_1"]
 
 
 @pytest.mark.asyncio
@@ -559,7 +595,8 @@ async def test_sidebar_branch_sorts_pinned_first_then_recency() -> None:
 
 @pytest.mark.asyncio
 async def test_sidebar_branch_new_chat_requires_active_and_running_pod() -> None:
-    """Per-branch new_chat_enabled: active project + running container only."""
+    """Per-branch new_chat_enabled: running container only (the tree itself
+    holds active projects only)."""
     session = AsyncMock()
     emp = _employee()
     sel = MagicMock()
@@ -602,11 +639,13 @@ async def test_sidebar_branch_new_chat_requires_active_and_running_pod() -> None
         out = await svc.sidebar(cabinet_id="cab_1", principal=_principal(), employee=emp)
 
     by_id = {g["project_id"]: g for g in out["projects"]}
+    assert set(by_id) == {"proj_sel", "proj_ok", "proj_prov", "proj_nopod"}
     assert by_id["proj_sel"]["new_chat_enabled"] is True  # active + observed running
     assert by_id["proj_ok"]["new_chat_enabled"] is True  # active + live pod running
-    assert by_id["proj_paused"]["new_chat_enabled"] is False  # paused project
     assert by_id["proj_prov"]["new_chat_enabled"] is False  # pod not running yet
     assert by_id["proj_nopod"]["new_chat_enabled"] is False  # no live pod row
+    # Paused project is not running → no branch at all.
+    assert "proj_paused" not in by_id
     # Global gate mirrors the selected project.
     assert out["new_chat_enabled"] is True
 

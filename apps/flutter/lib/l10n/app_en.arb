@@ -1178,6 +1178,7 @@
   },
   "chatModelDefaultLabel": "Default",
   "chatModelPickerEmpty": "No models available",
+  "chatModelSearchHint": "Search models",
   "projectChatToolReadFile": "Read file",
   "projectChatToolReadPath": "Read {path}",
   "@projectChatToolReadPath": {

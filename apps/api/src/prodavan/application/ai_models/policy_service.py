@@ -129,7 +129,7 @@ class AiModelPolicyService:
         if not explicit:
             return None
         ceiling = [m for m in (company_policy.model_allowlist or []) if str(m).strip()]
-        if ceiling and explicit not in ceiling:
+        if ceiling and explicit.lower() not in {m.lower() for m in ceiling}:
             from prodavan.domain.errors import AppError
 
             raise AppError(
@@ -138,7 +138,13 @@ class AiModelPolicyService:
                 status=403,
                 detail=f"model {explicit!r} not in company model_allowlist",
             )
-        if policy.allowed_models and explicit not in policy.allowed_models:
+        # Providers emit model ids in arbitrary casing (e.g. 'DeepSeek-V4-Pro'
+        # live id vs catalog alias 'deepseek-v4-pro'): every other layer
+        # (live filter, catalog lookup, dedupe) already compares
+        # case-insensitively, so membership must be case-insensitive too.
+        if policy.allowed_models and explicit.lower() not in {
+            m.lower() for m in policy.allowed_models
+        }:
             from prodavan.domain.errors import AppError
 
             raise AppError(

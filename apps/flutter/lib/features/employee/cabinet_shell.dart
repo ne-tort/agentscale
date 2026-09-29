@@ -56,6 +56,9 @@ class _CabinetShellState extends State<CabinetShell> {
   bool _newChatEnabled = false;
   /// Sidebar tree: one group per cabinet project (decoupled from selection).
   List<Map<String, dynamic>> _projectGroups = const [];
+  /// Legacy sidebar (backend without the `projects[]` tree) — keeps the
+  /// global "New chat" tile; tree mode hides it (per-branch "+" + draft row).
+  bool _sidebarLegacy = false;
   /// Collapsed project branch ids in the chats rail (persisted per user).
   Set<String> _collapsedProjectIds = const <String>{};
   Timer? _presenceHeartbeat;
@@ -231,8 +234,11 @@ class _CabinetShellState extends State<CabinetShell> {
       final projectList = projectChats is List
           ? projectChats.cast<Map<String, dynamic>>()
           : const <Map<String, dynamic>>[];
+      // `projects` present (even empty) = tree mode; only a backend without
+      // the field falls back to the legacy flat group.
       final rawGroups = body['projects'];
-      final groups = rawGroups is List && rawGroups.isNotEmpty
+      final hasTree = rawGroups is List;
+      final groups = hasTree
           ? rawGroups.cast<Map<String, dynamic>>()
           : _legacyProjectGroups(
               pinned: pinnedList,
@@ -242,6 +248,7 @@ class _CabinetShellState extends State<CabinetShell> {
             );
       setState(() {
         _newChatEnabled = body['new_chat_enabled'] == true;
+        _sidebarLegacy = !hasTree;
         _projectGroups = groups;
         final selected = body['selected_project_id'] as String?;
         if (selected != workContext.selectedProjectId) {
@@ -495,6 +502,7 @@ class _CabinetShellState extends State<CabinetShell> {
           onNewChatForProject: _newChatForProject,
           onToggleProjectCollapsed: _toggleProjectCollapsed,
           onOpenChat: _openChat,
+          legacyLayout: _sidebarLegacy,
         ),
       ),
     );
@@ -512,6 +520,7 @@ class _CabinetShellState extends State<CabinetShell> {
       onToggleProjectCollapsed: _toggleProjectCollapsed,
       onOpenChat: _openChat,
       showLeadingDivider: true,
+      legacyLayout: _sidebarLegacy,
     );
   }
 

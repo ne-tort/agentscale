@@ -103,3 +103,40 @@ def test_assert_model_allowed_rejects_outside_ceiling() -> None:
             company_policy=policy,
         )
     assert ei.value.code == "MODEL_NOT_ALLOWED"
+
+def test_assert_model_allowed_accepts_live_id_casing() -> None:
+    session = AsyncMock()
+    svc = AiModelPolicyService(session)
+    company = CompanyAgentRuntimePolicy(model_allowlist=[])
+    # Allowed strings are stored catalog values (alias + human name);
+    # the chat picker sends the provider live id in its own casing.
+    policy = EffectiveModelPolicy(
+        allowed_models=['deepseek-v4-pro', 'DeepSeek V4 Pro'],
+        ui_default_model=None,
+    )
+
+    out = svc.assert_model_allowed(
+        model='DeepSeek-V4-Pro',
+        policy=policy,
+        company_policy=company,
+    )
+
+    assert out == 'DeepSeek-V4-Pro'
+
+
+def test_assert_model_allowed_still_rejects_unknown_model() -> None:
+    session = AsyncMock()
+    svc = AiModelPolicyService(session)
+    company = CompanyAgentRuntimePolicy(model_allowlist=[])
+    policy = EffectiveModelPolicy(
+        allowed_models=['deepseek-v4-pro'],
+        ui_default_model=None,
+    )
+
+    with pytest.raises(AppError) as exc_info:
+        svc.assert_model_allowed(
+            model='some-other-model',
+            policy=policy,
+            company_policy=company,
+        )
+    assert exc_info.value.code == 'MODEL_NOT_ALLOWED'

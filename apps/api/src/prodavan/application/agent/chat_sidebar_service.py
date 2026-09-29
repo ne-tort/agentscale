@@ -205,12 +205,12 @@ class ChatSidebarService:
                 observed_state = runtime.get("observed_state") if runtime else None
                 new_chat_enabled = observed_state == "running"
 
-        # Tree branches: one entry per alive project in the cabinet — the
-        # sidebar is NOT bound to the selected project. Soft-deleted projects
-        # are skipped (same rule as cabinet project listing); everything else
-        # (draft/active/paused/error/completed) gets a branch.
+        # Tree branches: one entry per RUNNING project — until a project is
+        # launched (status active) it stays out of the chats tree; the sidebar
+        # is NOT bound to the selected project. Draft/paused/error/completed
+        # and soft-deleted projects are skipped (same rule as cabinet listing).
         tree_projects = sorted(
-            (p for p in projects.values() if p.status != ProjectStatus.DELETED),
+            (p for p in projects.values() if p.status == ProjectStatus.ACTIVE),
             key=lambda p: ((p.name or "").lower(), p.id),
         )
         tree_id_set = {p.id for p in tree_projects}
@@ -218,8 +218,8 @@ class ChatSidebarService:
 
         # Per-branch new_chat_enabled without N+1 runtime_view calls: the
         # selected project keeps the exact runtime check above; every other
-        # active project is gated from live pod rows fetched in ONE query.
-        active_tree_ids = [p.id for p in tree_projects if p.status == ProjectStatus.ACTIVE]
+        # tree branch is gated from live pod rows fetched in ONE query.
+        active_tree_ids = [p.id for p in tree_projects]
         pod_rows: dict[str, ProjectPodRow] = {}
         if active_tree_ids:
             pods_q = await self._session.execute(
@@ -232,9 +232,9 @@ class ChatSidebarService:
                 if pod.project_id is not None:
                     pod_rows[pod.project_id] = pod
 
-        # Sessions of every cabinet project in ONE query (visible statuses
-        # only). Also covers a soft-deleted selected project so the legacy
-        # project_chats field keeps its old semantics.
+        # Sessions of every tree project in ONE query (visible statuses only).
+        # Also covers a selected project outside the tree (paused/draft/deleted)
+        # so the legacy project_chats field keeps its old semantics.
         query_ids = list(tree_ids)
         if selected_project_id and selected_project_id in projects and selected_project_id not in tree_id_set:
             query_ids.append(selected_project_id)
@@ -263,15 +263,15 @@ class ChatSidebarService:
             visible.sort(key=lambda r: (r.id in pinned_ids, _sort_key(r)), reverse=True)
             if proj.id == selected_project_id:
                 branch_new_chat = new_chat_enabled
-            elif proj.status == ProjectStatus.ACTIVE:
+            else:
+                # Every tree branch is a running (active) project — gate from
+                # the live pod row.
                 pod = pod_rows.get(proj.id)
                 branch_new_chat = (
                     pod is not None
                     and pod.status == PodStatus.RUNNING
                     and pod.desired_state == PodDesiredState.RUNNING.value
                 )
-            else:
-                branch_new_chat = False
             projects_payload.append(
                 {
                     "project_id": proj.id,
@@ -296,8 +296,8 @@ class ChatSidebarService:
             if selected_project_id in tree_id_set:
                 sel_visible = visible_by_project.get(selected_project_id, [])
             else:
-                # Soft-deleted selected project: no branch, but the legacy
-                # list keeps listing its chats.
+                # Selected project outside the tree (paused/draft/deleted…):
+                # no branch, but the legacy list keeps listing its chats.
                 sel_visible, sel_gc = _split_visible(
                     sessions_by_project.get(selected_project_id, []),
                     pinned_ids=pinned_ids,
