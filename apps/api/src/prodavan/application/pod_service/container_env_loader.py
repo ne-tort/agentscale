@@ -43,7 +43,7 @@ def row_eligible_for_env(body: dict[str, Any], project_id: str) -> bool:
     """Whether a module data row may supply container_env value_from fields."""
     if not _row_applies_to_project(body, project_id):
         return False
-    # Explicit enabled=false must not inject env (S4B and similar).
+    # Explicit enabled=false must not inject env (disabled integration rows).
     if body.get("enabled") is False:
         return False
     # Catalog pause toggle.

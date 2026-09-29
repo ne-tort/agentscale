@@ -235,7 +235,7 @@ def apply_remote_connect_overrides(
                 status=422,
                 detail=(
                     "database name must be a simple identifier "
-                    "(letters, digits, underscore, hyphen; e.g. s4b_catalog), "
+                    "(letters, digits, underscore, hyphen; e.g. remote_catalog), "
                     "not a URL or schema.table"
                 ),
             )
@@ -248,7 +248,7 @@ def apply_remote_connect_overrides(
                 status=422,
                 detail=(
                     f"database name in URL path is invalid: {path_db!r}. "
-                    "Use a simple identifier (e.g. /s4b_catalog)."
+                    "Use a simple identifier (e.g. /remote_catalog)."
                 ),
             )
         target_db = path_db
@@ -316,7 +316,7 @@ def resolve_connect_dsn(
                 title="Validation Error",
                 status=422,
                 detail=(
-                    "database name must be a simple identifier (e.g. s4b_catalog), "
+                    "database name must be a simple identifier (e.g. remote_catalog), "
                     "not schema.table — pick the SQL table in the Table field"
                 ),
             )

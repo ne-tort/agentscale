@@ -152,7 +152,6 @@ def test_equipment_meta_hub_on_data_placement() -> None:
         "equipment_builds",
         "trusted_sellers",
         "web_shops",
-        "s4b_settings",
         "equipment_mcp",
     }
     kinds = {a["kind"] for a in meta["actions"]}
@@ -161,20 +160,25 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     assert "data.select_row" in kinds
     assert not any(r["target"]["format"] == "merge_mapped_sqlite" for r in meta["materialize"])
     assert any(r["id"] == "catalog_manifest" for r in meta["materialize"])
-    assert any(r["id"] == "s4b_mcp_package" for r in meta["materialize"])
-    s4b_rule = next(r for r in meta["materialize"] if r["id"] == "s4b_mcp_package")
-    assert s4b_rule["target"]["format"] == "mcp_package"
-    assert s4b_rule["target"]["field"] == "mcp_zip"
-    assert s4b_rule["source"]["filter"] == {"enabled": True}
+    # s4b is fully removed (table, views, hub tile, materialize, env)
+    assert not any(r["id"] == "s4b_mcp_package" for r in meta["materialize"])
+    assert any(r["id"] == "equipment_mcp_package" for r in meta["materialize"])
     assert not any(r["target"]["format"] == "copy_blob" for r in meta["materialize"])
-    env_names = {e["env_name"] for e in meta["container_env"]}
-    assert env_names == {"S4B_BASE_URL", "S4B_LOGIN"}
-    secret_entries = meta["container_env_secrets"]
-    assert secret_entries[0]["env_name"] == "S4B_PASSWORD"
-    assert not any(isinstance(e.get("foreach_rows"), dict) for e in secret_entries)
+    assert meta["container_env"] == []
+    assert meta["container_env_secrets"] == []
     catalog_cols = {c["name"] for c in meta["columns"] if c["table_slug"] == "catalogs"}
     assert {"source_kind", "remote_dsn", "remote_table", "remote_database", "remote_dsn_has_database", "remote_user", "remote_password"} <= catalog_cols
     assert {"last_indexed_at", "reindex_interval_hours", "index_name"} <= catalog_cols
+    # indexing progress heartbeat fields (hidden; «В процессе (x из y)»)
+    assert {"indexed_count", "total_rows", "indexing_started_at"} <= catalog_cols
+    progress_cols = {
+        c["name"]: c
+        for c in meta["columns"]
+        if c["table_slug"] == "catalogs"
+        and c["name"] in {"indexed_count", "total_rows", "indexing_started_at"}
+    }
+    assert all(c.get("read_only") is True for c in progress_cols.values())
+    assert all(c.get("hidden") is True for c in progress_cols.values())
     reindex_col = next(
         c
         for c in meta["columns"]
@@ -189,6 +193,7 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     status_field = next(f for f in settings["ui_json"]["fields"] if f["column"] == "status")
     assert status_field.get("read_only") is True
     assert status_field.get("trailing_action", {}).get("action_id") == "index_catalog_opensearch"
+    assert settings["ui_json"]["poll_while"]["equals"] == "indexing"
     assert status_field.get("accent_map") == {
         "draft": "warning",
         "indexing": "warning",
@@ -212,6 +217,15 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     list_fields = [c["field"] for c in catalogs_list["ui_json"]["columns"]]
     assert "source_kind" in list_fields
     assert "status" in list_fields
+    assert catalogs_list["ui_json"]["poll_while"] == {
+        "field": "status",
+        "equals": "indexing",
+        "interval_ms": 3000,
+    }
+    status_cell = next(
+        c for c in catalogs_list["ui_json"]["columns"] if c["field"] == "status"
+    )
+    assert status_cell.get("format") == "index_progress"
     assert catalogs_list["ui_json"]["row_style"][0]["accent"] == "error"
     accents = {r["when"]["eq"]: r["accent"] for r in catalogs_list["ui_json"]["row_style"] if r.get("when", {}).get("field") == "status"}
     assert accents["draft"] == "warning"
@@ -225,16 +239,18 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     user_field = next(f for f in settings["ui_json"]["fields"] if f["column"] == "remote_user")
     assert "any" in user_field["visible_when"]
     tool_names = {t["name"] for t in meta["mcp_tools"]}
-    assert "equipment_catalog_query" in tool_names
-    assert "equipment_offers_upsert" in tool_names
+    # legacy disabled tool + duplicate of the first-party MCP tool removed
+    assert "equipment_catalog_query" not in tool_names
+    assert "equipment_offers_upsert" not in tool_names
     assert "equipment_types_list" in tool_names
     assert "equipment_items_upsert" in tool_names
     assert "equipment_builds_list" in tool_names
     assert "equipment_builds_upsert" in tool_names
+    # sellers / web shops are READ-ONLY for the agent
     assert "trusted_sellers_list" in tool_names
-    assert "trusted_sellers_upsert" in tool_names
+    assert "trusted_sellers_upsert" not in tool_names
     assert "web_shops_list" in tool_names
-    assert "web_shops_upsert" in tool_names
+    assert "web_shops_upsert" not in tool_names
 
     hub = next(v for v in meta["views"] if v["slug"] == "equipment_hub")
     hub_titles = {i["title"] for i in hub["ui_json"]["items"]}
@@ -243,35 +259,8 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     assert "Сборка" in hub_titles
     assert "Проверенные продавцы" in hub_titles
     assert "Интернет магазины" in hub_titles
-    assert "S4B" in hub_titles
-
-    s4b_form = next(v for v in meta["views"] if v["slug"] == "s4b_settings_form")
-    s4b_cols = [f["column"] for f in s4b_form["ui_json"]["fields"]]
-    assert s4b_cols == [
-        "name",
-        "base_url",
-        "login",
-        "password",
-        "mcp_zip",
-        "project_ids",
-        "enabled",
-    ]
-    name_field = next(f for f in s4b_form["ui_json"]["fields"] if f["column"] == "name")
-    assert name_field["icon"] == "storefront"
-    password_field = next(
-        f for f in s4b_form["ui_json"]["fields"] if f["column"] == "password"
-    )
-    assert password_field["widget"] == "value"
-    assert password_field["secret"] is True
-    enabled_field = next(
-        f for f in s4b_form["ui_json"]["fields"] if f["column"] == "enabled"
-    )
-    assert enabled_field["widget"] == "pause_toggle"
-    assert enabled_field["invert"] is True
-    assert any(
-        c["name"] == "password" and c["type"] == "secret_ref" for c in meta["columns"]
-    )
-    assert any(c["name"] == "mcp_zip" and c["type"] == "file_ref" for c in meta["columns"])
+    assert "S4B" not in hub_titles
+    assert not any("s4b" in v["slug"] for v in meta["views"])
 
     items_list = next(v for v in meta["views"] if v["slug"] == "equipment_items_list")
     assert items_list["ui_json"]["inline_add"]["field"] == "name"

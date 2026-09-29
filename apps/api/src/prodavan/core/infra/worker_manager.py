@@ -174,6 +174,12 @@ class WorkerManager(LifespanResource):
             task_always_eager=self._task_always_eager,
             task_eager_propagates=True,
             broker_connection_retry_on_startup=True,
+            # Long-running acks_late tasks (equipment catalog indexing) must be
+            # re-delivered when a worker dies: visibility window 6h > max
+            # indexing time; combined with per-task acks_late + reject_on_
+            # worker_lost a deploy mid-index no longer loses the job.
+            visibility_timeout=21600,
+            broker_transport_options={"visibility_timeout": 21600},
         )
         beat: dict[str, dict[str, Any]] = {}
         interval = schedule(run_every=self._trigger_interval_sec)

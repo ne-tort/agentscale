@@ -289,7 +289,15 @@ def register_tasks(app) -> None:
         logger.info("celery task %s", job_names.POD_RECONCILE)
         return run_async(_run())
 
-    @app.task(name=job_names.INDEX_EQUIPMENT_CATALOG, bind=False)
+    @app.task(
+        name=job_names.INDEX_EQUIPMENT_CATALOG,
+        bind=False,
+        # Late ack: a worker killed mid-index (deploy/SIGKILL) re-queues the
+        # job instead of dropping it — the catalog row would otherwise stay
+        # «В процессе» forever.
+        acks_late=True,
+        reject_on_worker_lost=True,
+    )
     def index_equipment_catalog(
         instance_id: str,
         row_id: str,

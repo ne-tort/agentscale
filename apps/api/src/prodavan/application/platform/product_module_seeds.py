@@ -949,13 +949,6 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "scope": {"projects": "all", "chats": "all"},
             },
             {
-                "slug": "s4b_settings",
-                "label": {"ru": "S4B", "en": "S4B"},
-                "storage_kind": "json_document",
-                "enabled": True,
-                "scope": {"projects": "all", "chats": "current"},
-            },
-            {
                 "slug": "equipment_mcp",
                 "label": {"ru": "MCP", "en": "MCP"},
                 "storage_kind": "json_document",
@@ -1161,6 +1154,36 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "label": {"ru": "Ошибка", "en": "Error"},
                 "type": "text",
                 "required": False,
+            },
+            # Indexing progress (worker heartbeat): rendered by the UI as
+            # «В процессе (x из y)»; used by the beat sweep to heal rows stuck
+            # in `indexing` after a worker restart.
+            {
+                "table_slug": "catalogs",
+                "name": "indexed_count",
+                "label": {"ru": "Проиндексировано", "en": "Indexed"},
+                "type": "number",
+                "required": False,
+                "read_only": True,
+                "hidden": True,
+            },
+            {
+                "table_slug": "catalogs",
+                "name": "total_rows",
+                "label": {"ru": "Всего строк", "en": "Total rows"},
+                "type": "number",
+                "required": False,
+                "read_only": True,
+                "hidden": True,
+            },
+            {
+                "table_slug": "catalogs",
+                "name": "indexing_started_at",
+                "label": {"ru": "Начало индексации", "en": "Indexing started"},
+                "type": "datetime",
+                "required": False,
+                "read_only": True,
+                "hidden": True,
             },
             _project_ids_column("catalogs"),
             {
@@ -1473,53 +1496,6 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
             },
             _project_ids_column("web_shops"),
             {
-                "table_slug": "s4b_settings",
-                "name": "name",
-                "label": {"ru": "Название", "en": "Name"},
-                "type": "text",
-                "required": True,
-                "default": "S4B",
-            },
-            {
-                "table_slug": "s4b_settings",
-                "name": "base_url",
-                "label": {"ru": "Ссылка", "en": "URL"},
-                "type": "text",
-                "required": False,
-                "default": "",
-            },
-            {
-                "table_slug": "s4b_settings",
-                "name": "login",
-                "label": {"ru": "Логин", "en": "Login"},
-                "type": "text",
-                "required": False,
-                "default": "",
-            },
-            {
-                "table_slug": "s4b_settings",
-                "name": "password",
-                "label": {"ru": "Пароль", "en": "Password"},
-                "type": "secret_ref",
-                "required": False,
-            },
-            {
-                "table_slug": "s4b_settings",
-                "name": "mcp_zip",
-                "label": {"ru": "MCP (zip)", "en": "MCP (zip)"},
-                "type": "file_ref",
-                "required": False,
-            },
-            {
-                "table_slug": "s4b_settings",
-                "name": "enabled",
-                "label": {"ru": "Включено", "en": "Enabled"},
-                "type": "bool",
-                "required": False,
-                "default": True,
-            },
-            _project_ids_column("s4b_settings"),
-            {
                 "table_slug": "equipment_mcp",
                 "name": "name",
                 "label": "Имя",
@@ -1619,12 +1595,6 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                                 "view": "web_shops_list",
                             },
                         },
-                        {
-                            "title": "S4B",
-                            "icon": "storefront",
-                            "target": {"kind": "view", "view": "s4b_settings_list"},
-                            "scope": {"active_chat": "required"},
-                        },
                     ],
                 },
             },
@@ -1650,9 +1620,15 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                         {
                             "field": "status",
                             "label": {"ru": "Статус", "en": "Status"},
+                            "format": "index_progress",
                         },
                         {"field": "row_count", "label": {"ru": "Строк", "en": "Rows"}},
                     ],
+                    "poll_while": {
+                        "field": "status",
+                        "equals": "indexing",
+                        "interval_ms": 3000,
+                    },
                     "row_style": [
                         {
                             "when": {"field": "status", "eq": "error"},
@@ -1739,6 +1715,11 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "kind": "detail",
                     "mode": "edit",
                     "title": {"ru": "Настройки БД", "en": "Database settings"},
+                    "poll_while": {
+                        "field": "status",
+                        "equals": "indexing",
+                        "interval_ms": 3000,
+                    },
                     "fields": [
                         {"column": "name", "widget": "value", "icon": "storage"},
                         {
@@ -2748,101 +2729,6 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     ],
                 },
             },
-            {
-                "slug": "s4b_settings_list",
-                "table_slug": "s4b_settings",
-                "kind": "collection",
-                "ui_json": {
-                    "version": 1,
-                    "kind": "collection",
-                    "scaffold": {
-                        "title": {"ru": "S4B", "en": "S4B"},
-                    },
-                    "title_field": "name",
-                    "subtitle_fields": ["base_url", "login"],
-                    "columns": [
-                        {
-                            "field": "name",
-                            "label": {"ru": "Название", "en": "Name"},
-                        },
-                        {
-                            "field": "base_url",
-                            "label": {"ru": "Ссылка", "en": "URL"},
-                        },
-                        {
-                            "field": "enabled",
-                            "label": {"ru": "Вкл.", "en": "On"},
-                        },
-                    ],
-                    "row_tap": {
-                        "kind": "open_form",
-                        "view": "s4b_settings_form",
-                    },
-                    "inline_add": {
-                        "field": "name",
-                        "title": "Добавить S4B",
-                    },
-                    "empty": _empty(
-                        "Нет настроек S4B",
-                        "No S4B settings",
-                        icon="storefront",
-                    ),
-                },
-            },
-            {
-                "slug": "s4b_settings_form",
-                "table_slug": "s4b_settings",
-                "kind": "form",
-                "ui_json": {
-                    "version": 1,
-                    "kind": "form",
-                    "mode": "edit",
-                    "title": {"ru": "S4B", "en": "S4B"},
-                    "fields": [
-                        {
-                            "column": "name",
-                            "widget": "value",
-                            "icon": "storefront",
-                        },
-                        {
-                            "column": "base_url",
-                            "widget": "value",
-                            "icon": "link",
-                        },
-                        {
-                            "column": "login",
-                            "widget": "value",
-                            "icon": "person",
-                        },
-                        {
-                            "column": "password",
-                            "widget": "value",
-                            "icon": "password",
-                            "secret": True,
-                        },
-                        {
-                            "column": "mcp_zip",
-                            "widget": "file_upload",
-                            "accept": ".zip",
-                            "icon": "inventory_2",
-                        },
-                        {"column": "project_ids", "widget": "project_multiselect"},
-                        {
-                            "column": "enabled",
-                            "widget": "pause_toggle",
-                            "invert": True,
-                            "pause_label": {
-                                "ru": "Приостановить",
-                                "en": "Pause",
-                            },
-                            "resume_label": {
-                                "ru": "Возобновить",
-                                "en": "Resume",
-                            },
-                        },
-                    ],
-                },
-            },
         ],
         "tabs": [
             {
@@ -2963,22 +2849,6 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 },
             },
             {
-                "id": "s4b_mcp_package",
-                "enabled": True,
-                "when": ["project.created", "project.resumed", "project.sync"],
-                "priority": 65,
-                "source": {
-                    "type": "rows",
-                    "table_slug": "s4b_settings",
-                    "filter": {"enabled": True},
-                },
-                "target": {
-                    "workspace_path": "packages/{{name}}",
-                    "format": "mcp_package",
-                    "field": "mcp_zip",
-                },
-            },
-            {
                 "id": "equipment_mcp_package",
                 "enabled": True,
                 "when": ["project.created", "project.resumed", "project.sync"],
@@ -3015,45 +2885,6 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                         "limit": 100,
                     },
                 },
-            },
-            {
-                "id": "equipment_catalog_query",
-                "name": "equipment_catalog_query",
-                "label": "Search OpenSearch catalogs",
-                "description": (
-                    "Prefer first-party MCP tool equipment_catalog_search "
-                    "(OpenSearch: title/P/N/brand/supplier; brand also matches title). "
-                    "Legacy SQLite path is removed."
-                ),
-                "enabled": False,
-                "kind": "workspace_sqlite_query",
-                "params_schema": {
-                    "type": "object",
-                    "properties": {
-                        "part_number": {"type": "string"},
-                        "query": {"type": "string"},
-                        "limit": {"type": "integer", "default": 20},
-                    },
-                },
-                "implementation": {
-                    "workspace_path": "catalogs/catalog.sqlite",
-                    "table": "rows",
-                    "helper": "prodavan.application.modules.catalog_sqlite_query",
-                },
-            },
-            {
-                "id": "equipment_offers_upsert",
-                "name": "equipment_offers_upsert",
-                "label": "Upsert found offers",
-                "description": (
-                    "Prefer found_offers_upsert MCP: require line_id=request_lines.row_id, "
-                    "copy part_number/brand/price/match_kind/score/catalog_id from search; "
-                    "source_title auto from request line (never catalog/DB name); "
-                    "bumps request_lines.found_count. Never write offers only into Pod FS."
-                ),
-                "enabled": True,
-                "kind": "rows_upsert",
-                "implementation": {"table_slug": "found_offers"},
             },
             {
                 "id": "equipment_types_list",
@@ -3139,17 +2970,6 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 },
             },
             {
-                "id": "trusted_sellers_upsert",
-                "name": "trusted_sellers_upsert",
-                "label": "Upsert trusted sellers",
-                "description": (
-                    "Create/update trusted_sellers. aliases is a comma-separated string."
-                ),
-                "enabled": True,
-                "kind": "rows_upsert",
-                "implementation": {"table_slug": "trusted_sellers"},
-            },
-            {
                 "id": "web_shops_list",
                 "name": "web_shops_list",
                 "label": "List web shops",
@@ -3162,62 +2982,9 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "query": {"limit": 200},
                 },
             },
-            {
-                "id": "web_shops_upsert",
-                "name": "web_shops_upsert",
-                "label": "Upsert web shops",
-                "description": (
-                    "Create/update web_shops. cookies is a free-form string "
-                    "(Cookie header / jar dump) for later automation."
-                ),
-                "enabled": True,
-                "kind": "rows_upsert",
-                "implementation": {"table_slug": "web_shops"},
-            },
         ],
-        "container_env": [
-            {
-                "env_name": "S4B_BASE_URL",
-                "value_from": {
-                    "table_slug": "s4b_settings",
-                    "field": "base_url",
-                },
-                "when": [
-                    "project.launch",
-                    "project.sync",
-                    "project.resumed",
-                    "project.reload",
-                ],
-            },
-            {
-                "env_name": "S4B_LOGIN",
-                "value_from": {
-                    "table_slug": "s4b_settings",
-                    "field": "login",
-                },
-                "when": [
-                    "project.launch",
-                    "project.sync",
-                    "project.resumed",
-                    "project.reload",
-                ],
-            },
-        ],
-        "container_env_secrets": [
-            {
-                "env_name": "S4B_PASSWORD",
-                "secret_ref_from": {
-                    "table_slug": "s4b_settings",
-                    "field": "password",
-                },
-                "when": [
-                    "project.launch",
-                    "project.sync",
-                    "project.resumed",
-                    "project.reload",
-                ],
-            },
-        ],
+        "container_env": [],
+        "container_env_secrets": [],
         "seed_rows": {
             "items": [
                 *_equipment_type_seed_rows(),

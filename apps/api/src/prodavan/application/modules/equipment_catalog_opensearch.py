@@ -1,7 +1,16 @@
 """Equipment catalog → OpenSearch indexing (Celery worker + enqueue).
 
 One physical index per catalog row: namespace ``equipment``, index ``c_{row_id}``.
-Reindex = delete_index + ensure_index + chunked bulk_index.
+Reindex pipeline (v2 — reliable):
+
+1. stamp ``status=indexing`` + progress fields (``indexed_count`` = 0,
+   ``total_rows``, ``indexing_started_at`` heartbeat);
+2. **open the source first** (local: download + parse tabular; remote: connect
+   + COUNT(*)) — a failing source leaves the old index intact;
+3. only then ``delete_index`` + ``ensure_index`` + chunked ``bulk_index``;
+4. persist progress (``indexed_count``) after every bulk chunk so the UI can
+   render «В процессе (x из y)» and the beat sweep can re-enqueue stale rows;
+5. final ``status=ready|error`` + Kafka lifecycle events.
 """
 
 from __future__ import annotations
@@ -12,7 +21,7 @@ import logging
 import re
 import sqlite3
 from datetime import UTC, datetime
-from typing import Any, Iterator
+from typing import Any, AsyncIterator, Awaitable, Callable, Iterator
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -198,7 +207,7 @@ async def run_index_equipment_catalog(
     cabinet_id: str | None = None,
     project_id: str | None = None,
 ) -> dict[str, Any]:
-    """Full wipe+reindex one catalogs row into OpenSearch."""
+    """Full wipe+reindex one catalogs row into OpenSearch (source-first)."""
     inst_svc = ModuleInstanceService(session)
     row = await inst_svc.get_data_row(
         instance_id=instance_id, table_slug="catalogs", row_id=row_id
@@ -231,6 +240,9 @@ async def run_index_equipment_catalog(
     body["status"] = "indexing"
     body["error"] = None
     body["index_name"] = f"{OS_NAMESPACE}__{index_name}"
+    body["indexed_count"] = 0
+    body["total_rows"] = None
+    body["indexing_started_at"] = datetime.now(UTC).isoformat()
     await inst_svc.upsert_data_row(
         instance_id=instance_id, table_slug="catalogs", row_id=row_id, body=body
     )
@@ -246,50 +258,91 @@ async def run_index_equipment_catalog(
     )
 
     svc = get_search_index_service()
+
+    # --- 1) open the source BEFORE touching the old index ------------------
+    # An unreachable remote DSN / missing file must NOT leave the catalog with
+    # a deleted (empty) index: fail early, keep previous documents intact.
     try:
-        await svc.delete_index(
+        if source_kind in ("remote", "remote_sql"):
+            source = await _open_remote_source(body, cabinet_id=cabinet_id or "")
+        else:
+            source = await _open_local_source(body)
+    except Exception as exc:
+        logger.exception("equipment os source open failed row=%s", row_id)
+        body["status"] = "error"
+        body["error"] = str(exc)[:500]
+        body["total_rows"] = None
+        body["indexed_count"] = 0
+        await inst_svc.upsert_data_row(
+            instance_id=instance_id, table_slug="catalogs", row_id=row_id, body=body
+        )
+        await session.commit()
+        await emit_equipment_catalog_index_completed(
+            session=None,
+            company_id=cid,
+            cabinet_id=cabinet_id,
+            project_id=project_id,
+            catalog_row_id=row_id,
+            instance_id=instance_id,
+            index=index_name,
+            ok=False,
+            error=str(exc)[:300],
+        )
+        return {"ok": False, "error": str(exc)[:300], "row_id": row_id}
+
+    # Expose the discovered row count early so UI shows «0 из y».
+    if source.total_rows is not None:
+        body["total_rows"] = source.total_rows
+        await inst_svc.upsert_data_row(
+            instance_id=instance_id, table_slug="catalogs", row_id=row_id, body=body
+        )
+        await session.commit()
+
+    async def _persist_progress(indexed: int, total: int | None) -> None:
+        """Heartbeat: row body update after each bulk chunk (x из y)."""
+        body["indexed_count"] = indexed
+        if total is not None:
+            body["total_rows"] = total
+        await inst_svc.upsert_data_row(
+            instance_id=instance_id, table_slug="catalogs", row_id=row_id, body=body
+        )
+        await session.commit()
+
+    try:
+        # --- 2) wipe + recreate (source already validated) -----------------
+        try:
+            await svc.delete_index(
+                namespace=OS_NAMESPACE,
+                index=index_name,
+                company_id=cid,
+                cabinet_id=cabinet_id,
+                project_id=project_id,
+            )
+        except Exception:
+            logger.exception("equipment os delete_index ignored row=%s", row_id)
+
+        await svc.ensure_index(
             namespace=OS_NAMESPACE,
             index=index_name,
+            mappings=_canonical_mappings(),
             company_id=cid,
             cabinet_id=cabinet_id,
             project_id=project_id,
         )
-    except Exception:
-        logger.exception("equipment os delete_index ignored row=%s", row_id)
 
-    await svc.ensure_index(
-        namespace=OS_NAMESPACE,
-        index=index_name,
-        mappings=_canonical_mappings(),
-        company_id=cid,
-        cabinet_id=cabinet_id,
-        project_id=project_id,
-    )
-
-    try:
-        if source_kind in ("remote", "remote_sql"):
-            indexed = await _index_remote_rows(
-                session,
-                body=body,
-                cabinet_id=cabinet_id or "",
-                column_map=column_map,
-                catalog_id=row_id,
-                catalog_name=catalog_name,
-                company_id=cid,
-                project_id=project_id,
-                index_name=index_name,
-            )
-        else:
-            indexed = await _index_local_rows(
-                body=body,
-                column_map=column_map,
-                catalog_id=row_id,
-                catalog_name=catalog_name,
-                company_id=cid,
-                cabinet_id=cabinet_id,
-                project_id=project_id,
-                index_name=index_name,
-            )
+        # --- 3) chunked bulk with persisted progress -----------------------
+        indexed = await _index_opened_source(
+            svc=svc,
+            source=source,
+            column_map=column_map,
+            catalog_id=row_id,
+            catalog_name=catalog_name,
+            company_id=cid,
+            cabinet_id=cabinet_id,
+            project_id=project_id,
+            index_name=index_name,
+            on_progress=_persist_progress,
+        )
     except Exception as exc:
         logger.exception("equipment os index failed row=%s", row_id)
         body["status"] = "error"
@@ -310,10 +363,15 @@ async def run_index_equipment_catalog(
             error=str(exc)[:300],
         )
         return {"ok": False, "error": str(exc)[:300], "row_id": row_id}
+    finally:
+        await source.aclose()
 
     body["status"] = "ready"
     body["error"] = None
     body["row_count"] = indexed
+    body["indexed_count"] = indexed
+    if source.total_rows is not None:
+        body["total_rows"] = source.total_rows
     body["last_indexed_at"] = datetime.now(UTC).isoformat()
     body["index_name"] = f"{OS_NAMESPACE}__{index_name}"
     await inst_svc.upsert_data_row(
@@ -339,17 +397,57 @@ async def run_index_equipment_catalog(
     }
 
 
-async def _index_local_rows(
-    *,
-    body: dict[str, Any],
-    column_map: dict[str, str],
-    catalog_id: str,
-    catalog_name: str,
-    company_id: str,
-    cabinet_id: str | None,
-    project_id: str | None,
-    index_name: str,
-) -> int:
+# --- sources (opened before the index is touched) --------------------------
+
+
+class _LocalTabularSource:
+    """Parsed local CSV/XLSX source: in-memory sqlite + row count."""
+
+    def __init__(self, tabular: Any, total_rows: int) -> None:
+        self._tabular = tabular
+        self.total_rows = total_rows
+
+    async def aiter_rows(self) -> AsyncIterator[dict[str, Any]]:
+        for row in _iter_sqlite_source_rows(self._tabular.sqlite_bytes):
+            yield row
+
+    async def aclose(self) -> None:
+        return None
+
+
+class _RemoteSqlSource:
+    """Opened remote PostgreSQL source: connection + optional COUNT(*)."""
+
+    def __init__(self, conn: Any, from_sql: str, total_rows: int | None) -> None:
+        self._conn = conn
+        self._from_sql = from_sql
+        self.total_rows = total_rows
+
+    async def aiter_rows(self) -> AsyncIterator[dict[str, Any]]:
+        stmt = await self._conn.prepare(f"SELECT * FROM {self._from_sql}")  # noqa: S608
+        async with self._conn.transaction():
+            async for record in stmt.cursor(prefetch=500):
+                yield dict(record)
+
+    async def aclose(self) -> None:
+        try:
+            await self._conn.close()
+        except Exception:
+            logger.exception("remote source close failed")
+
+
+def _sqlite_row_count(sqlite_bytes: bytes) -> int:
+    conn = sqlite3.connect(":memory:")
+    try:
+        conn.deserialize(sqlite_bytes)
+        row = conn.execute("SELECT COUNT(*) FROM rows").fetchone()
+        return int((row or (0,))[0] or 0)
+    finally:
+        conn.close()
+
+
+async def _open_local_source(body: dict[str, Any]) -> _LocalTabularSource:
+    """Download + parse the local tabular file; writes header columns to body."""
     file_ref = body.get("source_file")
     if not isinstance(file_ref, dict):
         raise ValueError("source_file missing")
@@ -361,75 +459,13 @@ async def _index_local_rows(
     tabular = index_tabular_bytes(raw, filename=filename)
     body["columns_json"] = json.dumps(tabular.columns, ensure_ascii=False)
     body["indexed_source_key"] = storage_key
-
-    svc = get_search_index_service()
-    batch: list[dict[str, Any]] = []
-    total = 0
-    seq = 0
-    for raw_row in _iter_sqlite_source_rows(tabular.sqlite_bytes):
-        seq += 1
-        mapped = apply_column_map(raw_row, column_map)
-        if not (mapped.get("title") or "").strip():
-            continue
-        doc = _doc_from_mapped(
-            mapped=mapped,
-            catalog_id=catalog_id,
-            catalog_name=catalog_name,
-            company_id=company_id,
-            project_id=project_id,
-            cabinet_id=cabinet_id,
-        )
-        doc_id = catalog_doc_id(catalog_id, _source_row_key(mapped, raw_row, seq))
-        batch.append({"doc_id": doc_id, "document": doc})
-        if len(batch) >= MAX_BULK_BATCH:
-            result = await svc.bulk_index(
-                namespace=OS_NAMESPACE,
-                index=index_name,
-                documents=batch,
-                company_id=company_id,
-                cabinet_id=cabinet_id,
-                project_id=project_id,
-                refresh=False,
-            )
-            total += result.indexed
-            batch = []
-    if batch:
-        result = await svc.bulk_index(
-            namespace=OS_NAMESPACE,
-            index=index_name,
-            documents=batch,
-            company_id=company_id,
-            cabinet_id=cabinet_id,
-            project_id=project_id,
-            refresh=True,
-        )
-        total += result.indexed
-    elif total:
-        # force refresh after last chunk
-        await svc.search(
-            namespace=OS_NAMESPACE,
-            index=index_name,
-            query={"match_all": {}},
-            size=1,
-            company_id=company_id,
-            project_id=project_id,
-            cabinet_id=cabinet_id,
-        )
-    return total
+    return _LocalTabularSource(tabular, _sqlite_row_count(tabular.sqlite_bytes))
 
 
-async def _index_remote_rows(
-    session: AsyncSession,
-    *,
-    body: dict[str, Any],
-    cabinet_id: str,
-    column_map: dict[str, str],
-    catalog_id: str,
-    catalog_name: str,
-    company_id: str,
-    project_id: str | None,
-    index_name: str,
-) -> int:
+async def _open_remote_source(
+    body: dict[str, Any], *, cabinet_id: str
+) -> _RemoteSqlSource:
+    """Resolve secrets, connect to the remote SQL and COUNT(*) rows."""
     import asyncpg
 
     from prodavan.application.content.remote_sql_probe import (
@@ -440,7 +476,6 @@ async def _index_remote_rows(
     from prodavan.infrastructure.secrets.cabinet_secret_store import assert_cabinet_secret_scope
     from prodavan.infrastructure.secrets.store import get_secret_store
 
-    _ = session
     secret_ref = field_value_as_secret_ref(body.get("remote_dsn"))
     if not secret_ref:
         raise ValueError("remote_dsn missing")
@@ -469,47 +504,63 @@ async def _index_remote_rows(
     else:
         from_sql = quote_ident(tbl)
 
-    svc = get_search_index_service()
+    conn = await asyncpg.connect(connect_dsn)
+    total: int | None
+    try:
+        row = await conn.fetchrow(f"SELECT COUNT(*) FROM {from_sql}")  # noqa: S608
+        total = int((row or (0,))[0] or 0)
+    except Exception:
+        logger.exception("remote COUNT(*) failed — progress will be indeterminate")
+        total = None
+    return _RemoteSqlSource(conn, from_sql, total)
+
+
+async def _index_opened_source(
+    *,
+    svc: Any,
+    source: _LocalTabularSource | _RemoteSqlSource,
+    column_map: dict[str, str],
+    catalog_id: str,
+    catalog_name: str,
+    company_id: str,
+    cabinet_id: str | None,
+    project_id: str | None,
+    index_name: str,
+    on_progress: Callable[[int, int | None], Awaitable[None]] | None = None,
+) -> int:
+    """Chunked bulk_index over an already-opened source, with progress heartbeats."""
     batch: list[dict[str, Any]] = []
     total = 0
     seq = 0
-    conn = await asyncpg.connect(connect_dsn)
-    try:
-        stmt = await conn.prepare(f"SELECT * FROM {from_sql}")  # noqa: S608
-        async with conn.transaction():
-            async for record in stmt.cursor(prefetch=500):
-                seq += 1
-                raw_row = dict(record)
-                mapped = apply_column_map(raw_row, column_map)
-                if not (mapped.get("title") or "").strip():
-                    continue
-                doc = _doc_from_mapped(
-                    mapped=mapped,
-                    catalog_id=catalog_id,
-                    catalog_name=catalog_name,
-                    company_id=company_id,
-                    project_id=project_id,
-                    cabinet_id=cabinet_id,
-                )
-                doc_id = catalog_doc_id(
-                    catalog_id, _source_row_key(mapped, raw_row, seq)
-                )
-                batch.append({"doc_id": doc_id, "document": doc})
-                if len(batch) >= MAX_BULK_BATCH:
-                    result = await svc.bulk_index(
-                        namespace=OS_NAMESPACE,
-                        index=index_name,
-                        documents=batch,
-                        company_id=company_id,
-                        cabinet_id=cabinet_id,
-                        project_id=project_id,
-                        refresh=False,
-                    )
-                    total += result.indexed
-                    batch = []
-    finally:
-        await conn.close()
-
+    async for raw_row in source.aiter_rows():
+        seq += 1
+        mapped = apply_column_map(raw_row, column_map)
+        if not (mapped.get("title") or "").strip():
+            continue
+        doc = _doc_from_mapped(
+            mapped=mapped,
+            catalog_id=catalog_id,
+            catalog_name=catalog_name,
+            company_id=company_id,
+            project_id=project_id,
+            cabinet_id=cabinet_id,
+        )
+        doc_id = catalog_doc_id(catalog_id, _source_row_key(mapped, raw_row, seq))
+        batch.append({"doc_id": doc_id, "document": doc})
+        if len(batch) >= MAX_BULK_BATCH:
+            result = await svc.bulk_index(
+                namespace=OS_NAMESPACE,
+                index=index_name,
+                documents=batch,
+                company_id=company_id,
+                cabinet_id=cabinet_id,
+                project_id=project_id,
+                refresh=False,
+            )
+            total += result.indexed
+            batch = []
+            if on_progress is not None:
+                await on_progress(total, source.total_rows)
     if batch:
         result = await svc.bulk_index(
             namespace=OS_NAMESPACE,
@@ -521,6 +572,19 @@ async def _index_remote_rows(
             refresh=True,
         )
         total += result.indexed
+        if on_progress is not None:
+            await on_progress(total, source.total_rows)
+    elif total:
+        # force refresh after last chunk
+        await svc.search(
+            namespace=OS_NAMESPACE,
+            index=index_name,
+            query={"match_all": {}},
+            size=1,
+            company_id=company_id,
+            project_id=project_id,
+            cabinet_id=cabinet_id,
+        )
     return total
 
 
