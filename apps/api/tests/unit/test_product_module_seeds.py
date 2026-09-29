@@ -153,6 +153,7 @@ def test_equipment_meta_hub_on_data_placement() -> None:
         "trusted_sellers",
         "web_shops",
         "equipment_mcp",
+        "budget_lines",
     }
     kinds = {a["kind"] for a in meta["actions"]}
     assert "content.index_opensearch" in kinds
@@ -251,6 +252,12 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     assert "trusted_sellers_upsert" not in tool_names
     assert "web_shops_list" in tool_names
     assert "web_shops_upsert" not in tool_names
+    # budget page: read-only MCP tool + sync/export actions
+    assert "budget_lines_list" in tool_names
+    action_map = {a["id"]: a for a in meta["actions"]}
+    assert action_map["budget_sync_lines"]["kind"] == "equipment.budget_sync"
+    assert action_map["budget_export"]["kind"] == "equipment.budget_export"
+    assert action_map["budget_sync_lines"]["params"]["budget_table"] == "budget_lines"
 
     hub = next(v for v in meta["views"] if v["slug"] == "equipment_hub")
     hub_titles = {i["title"] for i in hub["ui_json"]["items"]}
@@ -259,7 +266,22 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     assert "Сборка" in hub_titles
     assert "Проверенные продавцы" in hub_titles
     assert "Интернет магазины" in hub_titles
+    assert "Бюджетирование" in hub_titles
     assert "S4B" not in hub_titles
+    budget_view = next(v for v in meta["views"] if v["slug"] == "budget_lines_list")
+    assert budget_view["table_slug"] == "budget_lines"
+    assert budget_view["ui_json"]["row_tap"] == {
+        "kind": "open_view",
+        "view": "offers_for_line",
+        "context_field": "line_id",
+    }
+    assert budget_view["ui_json"]["chat_header"]["icon"] == "request_quote"
+    budget_cols = [c["field"] for c in budget_view["ui_json"]["columns"]]
+    assert "price_in" in budget_cols
+    assert any(c.get("format") == "budget_calc" and c.get("variant") == "price_out" for c in budget_view["ui_json"]["columns"])
+    assert any(c.get("format") == "budget_calc" and c.get("variant") == "margin_total" for c in budget_view["ui_json"]["columns"])
+    budget_columns = {c["name"] for c in meta["columns"] if c["table_slug"] == "budget_lines"}
+    assert {"line_id", "title", "part_number", "seller", "qty", "price_in", "vat", "markup"} <= budget_columns
     assert not any("s4b" in v["slug"] for v in meta["views"])
 
     items_list = next(v for v in meta["views"] if v["slug"] == "equipment_items_list")

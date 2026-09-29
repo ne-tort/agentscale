@@ -542,3 +542,11 @@ class ProjectRuntimeModuleService:
             employee=employee,
             previous_body=previous_body,
         )
+        await ModuleActionExecutor(self._session).maybe_auto_budget_sync(
+            cabinet_id=cabinet_id,
+            project_id=project_id,
+            module_id=module_id,
+            table_slug=table_slug,
+            principal=principal,
+            employee=employee,
+        )

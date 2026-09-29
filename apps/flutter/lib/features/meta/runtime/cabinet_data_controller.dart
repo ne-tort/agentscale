@@ -222,8 +222,11 @@ class CabinetDataController extends ChangeNotifier with ModulePickContextMixin {
     notifyListeners();
   }
 
-  Future<void> invokeAction(String actionId, {String? rowId}) async {
-    await api.invokeModuleAction(
+  /// Invokes a module action and returns the raw result body (may carry
+  /// `file_ref` for exports). Reloads data afterwards so the UI reflects
+  /// any server-side row updates.
+  Future<Map<String, dynamic>> invokeAction(String actionId, {String? rowId}) async {
+    final result = await api.invokeModuleAction(
       cabinetId: cabinetId,
       moduleId: moduleId,
       actionId: actionId,
@@ -231,6 +234,7 @@ class CabinetDataController extends ChangeNotifier with ModulePickContextMixin {
       projectId: projectId,
     );
     await loadAll();
+    return result;
   }
 
   void refresh() => notifyListeners();

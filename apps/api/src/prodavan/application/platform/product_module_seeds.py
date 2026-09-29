@@ -955,6 +955,13 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "enabled": True,
                 "scope": {"projects": "all", "chats": "all"},
             },
+            {
+                "slug": "budget_lines",
+                "label": {"ru": "Бюджетирование", "en": "Budget"},
+                "storage_kind": "json_document",
+                "enabled": True,
+                "scope": {"projects": "all", "chats": "current"},
+            },
         ],
         "columns": [
             {
@@ -1526,6 +1533,78 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "required": False,
             },
             _project_ids_column("equipment_mcp"),
+            # Бюджетирование — best-offer snapshot of request_lines (sync action).
+            {
+                "table_slug": "budget_lines",
+                "name": "line_id",
+                "label": {"ru": "Позиция", "en": "Request line"},
+                "type": "ref",
+                "required": False,
+                "ref": {"table_slug": "request_lines"},
+            },
+            {
+                "table_slug": "budget_lines",
+                "name": "title",
+                "label": {"ru": "Наименование", "en": "Title"},
+                "type": "text",
+                "required": False,
+                "read_only": True,
+            },
+            {
+                "table_slug": "budget_lines",
+                "name": "part_number",
+                "label": {"ru": "Партномер", "en": "Part number"},
+                "type": "text",
+                "required": False,
+                "read_only": True,
+            },
+            {
+                "table_slug": "budget_lines",
+                "name": "seller",
+                "label": {"ru": "Поставщик", "en": "Seller"},
+                "type": "text",
+                "required": False,
+                "read_only": True,
+            },
+            {
+                "table_slug": "budget_lines",
+                "name": "qty",
+                "label": {"ru": "Кол-во", "en": "Qty"},
+                "type": "number",
+                "required": False,
+                "default": 1,
+            },
+            {
+                "table_slug": "budget_lines",
+                "name": "price_in",
+                "label": {"ru": "Вход с НДС", "en": "In price with VAT"},
+                "type": "number",
+                "required": False,
+            },
+            {
+                "table_slug": "budget_lines",
+                "name": "vat",
+                "label": {"ru": "НДС", "en": "VAT"},
+                "type": "number",
+                "required": False,
+                "default": 0.22,
+            },
+            {
+                "table_slug": "budget_lines",
+                "name": "markup",
+                "label": {"ru": "Наценка", "en": "Markup"},
+                "type": "number",
+                "required": False,
+                "default": 0.1,
+            },
+            {
+                "table_slug": "budget_lines",
+                "name": "comment",
+                "label": {"ru": "Комментарий", "en": "Comment"},
+                "type": "text",
+                "required": False,
+            },
+            _project_ids_column("budget_lines"),
         ],
         "views": [
             {
@@ -1576,6 +1655,15 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "target": {
                                 "kind": "view",
                                 "view": "equipment_builds_list",
+                            },
+                            "scope": {"active_chat": "required"},
+                        },
+                        {
+                            "title": "Бюджетирование",
+                            "icon": "request_quote",
+                            "target": {
+                                "kind": "view",
+                                "view": "budget_lines_list",
                             },
                             "scope": {"active_chat": "required"},
                         },
@@ -1704,6 +1792,52 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "accept": ".zip",
                         },
                     ],
+                },
+            },
+            {
+                "slug": "budget_lines_list",
+                "table_slug": "budget_lines",
+                "kind": "collection",
+                "ui_json": {
+                    "version": 1,
+                    "kind": "collection",
+                    "scaffold": {"title": {"ru": "Бюджетирование", "en": "Budget"}},
+                    # Inject an icon button into the project chat header when the
+                    # equipment module is bound and a chat is open (chat-scoped
+                    # budget rows); opens this view in the module runtime host.
+                    "chat_header": {
+                        "icon": "request_quote",
+                        "label": {"ru": "Бюджетирование", "en": "Budget"},
+                    },
+                    "title_field": "title",
+                    "subtitle_fields": ["part_number", "seller"],
+                    "columns": [
+                        {"field": "title", "label": {"ru": "Наименование", "en": "Title"}},
+                        {"field": "part_number", "label": {"ru": "Партномер", "en": "P/N"}},
+                        {"field": "qty", "label": {"ru": "Кол-во", "en": "Qty"}},
+                        {"field": "price_in", "label": {"ru": "Вход с НДС", "en": "In w/ VAT"}},
+                        {"field": "vat", "label": {"ru": "НДС", "en": "VAT"}},
+                        {"field": "markup", "label": {"ru": "Наценка", "en": "Markup"}},
+                        {
+                            "field": "price_out",
+                            "label": {"ru": "Цена с маржой", "en": "Price out"},
+                            "format": "budget_calc",
+                            "variant": "price_out",
+                        },
+                        {
+                            "field": "margin_total",
+                            "label": {"ru": "Маржа", "en": "Margin"},
+                            "format": "budget_calc",
+                            "variant": "margin_total",
+                        },
+                    ],
+                    # computed columns are Flutter-side; backend ships raw fields
+                    "row_tap": {
+                        "kind": "open_view",
+                        "view": "offers_for_line",
+                        "context_field": "line_id",
+                    },
+                    "empty": _empty("Нет позиций", "No budget lines", icon="request_quote"),
                 },
             },
             {
@@ -2831,6 +2965,31 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 },
                 "ui": {"placement": ["row_action"]},
             },
+            {
+                "id": "budget_sync_lines",
+                "label": {"ru": "Синхронизировать", "en": "Sync"},
+                "kind": "equipment.budget_sync",
+                "enabled": True,
+                "params": {
+                    "lines_table": "request_lines",
+                    "offers_table": "found_offers",
+                    "budget_table": "budget_lines",
+                },
+                "trigger": {"on": ["row.created", "row.updated"], "async": True},
+                "ui": {"placement": ["toolbar"], "icon": "sync"},
+            },
+            {
+                "id": "budget_export",
+                "label": {"ru": "Скачать xlsx", "en": "Download xlsx"},
+                "kind": "equipment.budget_export",
+                "enabled": True,
+                "params": {
+                    "budget_table": "budget_lines",
+                    "lines_table": "request_lines",
+                },
+                "trigger": {"on": []},
+                "ui": {"placement": ["toolbar"], "icon": "download"},
+            },
         ],
         "materialize": [
             {
@@ -2980,6 +3139,22 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "implementation": {
                     "table_slug": "web_shops",
                     "query": {"limit": 200},
+                },
+            },
+            {
+                "id": "budget_lines_list",
+                "name": "budget_lines_list",
+                "label": "List budget lines",
+                "description": (
+                    "Budget rows for the current chat (budget_lines) — best-offer "
+                    "snapshot synced from request_lines / found_offers."
+                ),
+                "enabled": True,
+                "kind": "rows_query",
+                "params_schema": {"type": "object", "properties": {}},
+                "implementation": {
+                    "table_slug": "budget_lines",
+                    "query": {"limit": 500},
                 },
             },
         ],

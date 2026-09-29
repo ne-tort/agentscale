@@ -752,6 +752,32 @@ class ProdavanApi {
     }
   }
 
+  /// Downloads a content asset by FileRef (module action `file_ref` results,
+  /// e.g. budget export).
+  ///
+  /// GET /content/assets/{asset_id}/download responds with a 302 to the
+  /// presigned blob URL. The HTTP client follows it automatically; dart:io
+  /// drops the Authorization header on the cross-origin redirect hop, so the
+  /// presigned signature stays valid.
+  Future<Uint8List> downloadContentAsset({
+    required String assetId,
+    String? versionId,
+    String? blobVersionId,
+  }) async {
+    var uri = _uri('/content/assets/$assetId/download');
+    final params = <String, String>{
+      if (versionId != null && versionId.isNotEmpty) 'version_id': versionId,
+      if (blobVersionId != null && blobVersionId.isNotEmpty)
+        'blob_version_id': blobVersionId,
+    };
+    if (params.isNotEmpty) {
+      uri = uri.replace(queryParameters: params);
+    }
+    final res = await AuthHttp.get(uri, extraHeaders: _workHeaders);
+    _throwIfError(res);
+    return res.bodyBytes;
+  }
+
   Future<List<String>> listProjectModuleIds(String projectId) async {
     final prevProj = this.projectId;
     this.projectId = projectId;

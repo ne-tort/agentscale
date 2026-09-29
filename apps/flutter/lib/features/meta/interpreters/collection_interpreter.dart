@@ -19,6 +19,7 @@ import 'package:prodavan/features/meta/runtime/cabinet_data_controller.dart';
 import 'package:prodavan/features/meta/runtime/module_runtime_scope.dart';
 import 'package:prodavan/features/meta/runtime/owner_module_data_controller.dart';
 import 'package:prodavan/features/meta/runtime/runtime_data_adapter.dart';
+import 'package:prodavan/features/containers/workspace_file_utils.dart';
 import 'package:prodavan/features/meta/widgets/file_upload_field.dart';
 import 'package:prodavan/features/meta/widgets/project_multiselect_field.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
@@ -117,7 +118,7 @@ class CollectionViewInterpreter extends StatelessWidget {
               final targetView = rowTap['view'] as String?;
               if (targetView != null &&
                   (kind == 'open_form' || kind == 'open_view')) {
-                onOpenForm!(targetView, rowId: row.id);
+                onOpenForm!(targetView, rowId: _rowTapRowId(rowTap, row.id));
               }
             }
           },
@@ -422,10 +423,20 @@ class CollectionViewInterpreter extends StatelessWidget {
           );
         } else if (kind == 'invoke_action') {
           final actionId = t['action'] as String? ?? '';
+          final actionLabel = resolveMetaLabel(
+            t['label'],
+            l10n,
+            locale: Localizations.localeOf(context),
+          );
           items.add(
             AppIconButton(
-              icon: Icons.bolt_outlined,
-              tooltip: actionId.isEmpty ? 'Action' : actionId,
+              icon: metaIconFromName(
+                t['icon'] as String?,
+                fallback: Icons.bolt_outlined,
+              ),
+              tooltip: actionLabel.isNotEmpty
+                  ? actionLabel
+                  : (actionId.isEmpty ? 'Action' : actionId),
               onPressed: () => _invokeAction(context, actionId, rowId: contextRowId),
             ),
           );
@@ -475,10 +486,19 @@ class CollectionViewInterpreter extends StatelessWidget {
   Future<void> _invokeAction(BuildContext context, String actionId, {String? rowId}) async {
     if (actionId.isEmpty) return;
     if (seeds is CabinetDataController) {
+      final controller = seeds as CabinetDataController;
       try {
-        await (seeds as CabinetDataController).invokeAction(actionId, rowId: rowId);
+        final result = await controller.invokeAction(actionId, rowId: rowId);
+        final savedFile = await _saveActionFileRef(controller, result);
         if (context.mounted) {
-          AppSnackBar.info(context, actionId);
+          if (savedFile) {
+            AppSnackBar.success(
+              context,
+              AppLocalizations.of(context).projectWorkspaceDownloaded,
+            );
+          } else {
+            AppSnackBar.info(context, actionId);
+          }
         }
       } catch (e) {
         if (context.mounted) {
@@ -488,6 +508,40 @@ class CollectionViewInterpreter extends StatelessWidget {
       return;
     }
     PreviewStub.run(context, actionId);
+  }
+
+  /// row_tap `context_field`: open the linked row (its id lives in the tapped
+  /// row's body) instead of the tapped row itself. Falls back to [rowId] when
+  /// the field is unset or empty.
+  String? _rowTapRowId(Map rowTap, String rowId) {
+    final contextField = rowTap['context_field']?.toString();
+    if (contextField == null || contextField.isEmpty) return rowId;
+    final item = seeds.itemById(rowId);
+    final body = item is Map ? item['body'] : null;
+    final linked = body is Map ? body[contextField]?.toString() : null;
+    if (linked != null && linked.isNotEmpty) return linked;
+    return rowId;
+  }
+
+  /// Downloads the `file_ref` returned by a module action (e.g. budget
+  /// export) and saves it through the desktop save dialog. True when a file
+  /// was saved, false when there is nothing to download.
+  Future<bool> _saveActionFileRef(
+    CabinetDataController controller,
+    Map<String, dynamic> result,
+  ) async {
+    final ref = result['file_ref'];
+    if (ref is! Map) return false;
+    final assetId = ref['asset_id']?.toString() ?? '';
+    if (assetId.isEmpty) return false;
+    var filename = ref['filename']?.toString() ?? '';
+    if (filename.isEmpty) filename = 'export';
+    final bytes = await controller.api.downloadContentAsset(
+      assetId: assetId,
+      versionId: ref['version_id']?.toString(),
+      blobVersionId: ref['blob_version_id']?.toString(),
+    );
+    return saveWorkspaceFileBytes(filename: filename, bytes: bytes);
   }
 
   List<AppEntityRow> _withSelection(

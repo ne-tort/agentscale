@@ -190,6 +190,45 @@ class DocumentsService:
 
     # ------------------------------------------------------------------ public API
 
+    async def save_document(
+        self,
+        data: bytes,
+        *,
+        filename: str,
+        mime: str,
+        company_id: str | None,
+        cabinet_id: str | None = None,
+        project_id: str | None = None,
+        principal: Principal,
+        employee: EmployeeRow | None,
+    ) -> dict[str, Any]:
+        """Persist ready-made document bytes (e.g. filled budget template)."""
+        self._check_output_size(data)
+        ref = await self._upload(
+            data=data,
+            filename=filename,
+            mime=mime,
+            company_id=company_id,
+            principal=principal,
+            employee=employee,
+        )
+        await emit_documents_event(
+            session=self._session,
+            event_type=EVENT_DOCUMENTS_CREATED,
+            company_id=company_id,
+            cabinet_id=cabinet_id,
+            project_id=project_id,
+            payload={"filename": filename, "size": len(data), "asset_id": ref["asset_id"]},
+        )
+        await emit_op_metric(
+            session=self._session,
+            metric=METRIC_DOCUMENTS_CREATIONS,
+            company_id=company_id,
+            cabinet_id=cabinet_id,
+            project_id=project_id,
+        )
+        return ref
+
     async def convert(
         self,
         source: bytes | dict[str, Any],
