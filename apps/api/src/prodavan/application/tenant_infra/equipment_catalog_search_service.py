@@ -135,7 +135,7 @@ def _build_os_query(
     brand_q = (brand or "").strip()
     if brand_q:
         # Many catalogs leave brand empty and put the manufacturer only in title
-        # (e.g. S4B SE lines). Match keyword brand OR title text.
+        # (supplier part-number lines). Match keyword brand OR title text.
         filters.append(
             {
                 "bool": {

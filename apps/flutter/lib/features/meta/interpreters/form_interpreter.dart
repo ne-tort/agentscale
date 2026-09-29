@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -8,6 +10,7 @@ import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_snack_bar.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/features/meta/module_meta_manifest.dart';
+import 'package:prodavan/features/meta/poll_while.dart';
 import 'package:prodavan/features/meta/runtime/module_runtime_scope.dart';
 import 'package:prodavan/features/meta/meta_icon.dart';
 import 'package:prodavan/features/meta/widgets/column_map_field.dart';
@@ -52,6 +55,8 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
   late Map<String, dynamic> _values;
   String? _rowId;
   Listenable? _seedsListenable;
+  Timer? _pollTimer;
+  DateTime? _pollStartedAt;
 
   @override
   void initState() {
@@ -78,6 +83,8 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
 
   @override
   void dispose() {
+    _pollTimer?.cancel();
+    _pollTimer = null;
     _detachSeedsListener();
     super.dispose();
   }
@@ -98,6 +105,7 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
   void _onSeedsChanged() {
     if (!mounted) return;
     _syncFromSeedsIfChanged();
+    _updatePolling();
   }
 
   void _syncFromSeedsIfChanged() {
@@ -155,6 +163,52 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
     } else {
       _values = Map<String, dynamic>.from(widget.seeds.defaultBodyForTable(tableSlug));
     }
+  }
+
+  /// ui_json.poll_while: reload the row on an interval while [field] keeps
+  /// [equals] (e.g. status=indexing) — live indexing progress. Hard 30-minute
+  /// cap so a hung status cannot poll forever.
+  void _updatePolling() {
+    final ui = widget.view['ui_json'];
+    final config = parsePollWhile(ui is Map ? ui['poll_while'] : null);
+    final active = config != null && _rowId != null && config.matches(_values[config.field]);
+    if (!active) {
+      _pollTimer?.cancel();
+      _pollTimer = null;
+      _pollStartedAt = null;
+      return;
+    }
+    _pollStartedAt ??= DateTime.now();
+    _pollTimer ??= Timer.periodic(config.interval, (_) => _pollTick());
+  }
+
+  Future<void> _pollTick() async {
+    if (!mounted) return;
+    final started = _pollStartedAt;
+    if (started != null &&
+        DateTime.now().difference(started) > const Duration(minutes: 30)) {
+      _pollTimer?.cancel();
+      _pollTimer = null;
+      return;
+    }
+    try {
+      final reload = widget.seeds.loadAll;
+      if (reload is Future Function()) {
+        await reload();
+      } else if (reload is Function()) {
+        final result = reload();
+        if (result is Future) await result;
+      }
+    } catch (_) {}
+  }
+
+  /// «В процессе (x из y)» suffix from the row heartbeat fields.
+  String _withIndexProgress(String label) {
+    final indexed = _values['indexed_count'];
+    if (indexed == null) return label;
+    final total = _values['total_rows'];
+    final totalText = total == null ? '' : ' из $total';
+    return '$label ($indexed$totalText)';
   }
 
   Future<void> _persist(String name, dynamic value) async {
@@ -654,9 +708,7 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
         scope: scope,
         readOnly: fieldReadOnly || indexing,
         accept: accept,
-        subtitle: indexing
-            ? 'Индексация…'
-            : subtitle,
+        subtitle: indexing ? _withIndexProgress('Индексация…') : subtitle,
         warnWhenEmpty: warnWhenEmpty,
         onChanged: (ref) => _persist(name, ref),
       );
@@ -719,10 +771,11 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
       final text = raw.isEmpty ? '' : _enumLabel(column, raw);
       final accent = _fieldAccent(context, fieldCfg, value: raw);
       final indexing = raw == 'indexing';
+      final valueText = indexing ? _withIndexProgress(text) : text;
       return AppValuePreference<String>(
         title: label,
         icon: fieldIcon,
-        value: text,
+        value: valueText,
         enabled: false,
         accentColor: accent,
         busy: indexing,

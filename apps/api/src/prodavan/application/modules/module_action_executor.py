@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 import logging
 from typing import Any
 
@@ -917,6 +918,11 @@ class ModuleActionExecutor:
 
         body[status_col] = "indexing"
         body[error_col] = None
+        # Progress heartbeat fields (rendered by UI as «В процессе (x из y)»
+        # and used by the beat sweep to heal rows stuck after a deploy).
+        body["indexed_count"] = 0
+        body["total_rows"] = None
+        body["indexing_started_at"] = datetime.now(UTC).isoformat()
         await self._update_row_for_scope(
             cabinet_id=cabinet_id,
             project_id=project_id,

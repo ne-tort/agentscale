@@ -99,12 +99,22 @@ async def test_run_index_emits_kafka_accepted_and_completed(monkeypatch) -> None
     row = {"body": body}
     inst = MagicMock()
     inst.get_data_row = AsyncMock(return_value=row)
-    inst.upsert_data_row = AsyncMock()
+    snapshots: list[dict] = []
+
+    async def _upsert(**kwargs):  # noqa: ANN003
+        snapshots.append(dict(kwargs.get("body") or {}))
+
+    inst.upsert_data_row = AsyncMock(side_effect=_upsert)
     session = MagicMock()
     session.commit = AsyncMock()
 
     monkeypatch.setattr(mod, "ModuleInstanceService", lambda _s: inst)
-    monkeypatch.setattr(mod, "_index_local_rows", AsyncMock(return_value=3))
+
+    source = MagicMock()
+    source.total_rows = 3
+    source.aclose = AsyncMock()
+    monkeypatch.setattr(mod, "_open_local_source", AsyncMock(return_value=source))
+    monkeypatch.setattr(mod, "_index_opened_source", AsyncMock(return_value=3))
 
     svc = MagicMock()
     svc.delete_index = AsyncMock(return_value=True)
@@ -127,5 +137,145 @@ async def test_run_index_emits_kafka_accepted_and_completed(monkeypatch) -> None
     assert completed[0]["ok"] is True
     assert completed[0]["indexed"] == 3
     assert inst.upsert_data_row.await_count >= 2
-    last_body = inst.upsert_data_row.await_args_list[-1].kwargs["body"]
+    bodies = snapshots
+    assert bodies[0]["status"] == "indexing"
+    assert bodies[0]["indexed_count"] == 0
+    assert bodies[0]["indexing_started_at"]
+    # total_rows discovered at source open, before any bulk chunk
+    assert bodies[1]["total_rows"] == 3
+    last_body = bodies[-1]
     assert last_body["status"] == "ready"
+    assert last_body["indexed_count"] == 3
+    assert last_body["total_rows"] == 3
+
+
+@pytest.mark.asyncio
+async def test_run_index_source_failure_keeps_old_index(monkeypatch) -> None:
+    """Source-first: unreachable source must NOT delete the existing index."""
+    from prodavan.application.modules import equipment_catalog_opensearch as mod
+
+    completed: list[dict] = []
+
+    async def _accepted(**kwargs):  # noqa: ANN003
+        pass
+
+    async def _completed(**kwargs):  # noqa: ANN003
+        completed.append(kwargs)
+
+    monkeypatch.setattr(
+        "prodavan.application.search_index.publish.emit_equipment_catalog_index_accepted",
+        _accepted,
+    )
+    monkeypatch.setattr(
+        "prodavan.application.search_index.publish.emit_equipment_catalog_index_completed",
+        _completed,
+    )
+
+    row = {
+        "body": {
+            "name": "cat",
+            "source_kind": "local",
+            "column_map": {"title": "Name", "price": "Cost"},
+            "source_file": {"storage_key": "k"},
+        }
+    }
+    inst = MagicMock()
+    inst.get_data_row = AsyncMock(return_value=row)
+    inst.upsert_data_row = AsyncMock()
+    session = MagicMock()
+    session.commit = AsyncMock()
+    monkeypatch.setattr(mod, "ModuleInstanceService", lambda _s: inst)
+
+    async def _boom(_body):
+        raise ValueError("source unreachable")
+
+    monkeypatch.setattr(mod, "_open_local_source", _boom)
+
+    svc = MagicMock()
+    svc.delete_index = AsyncMock(return_value=True)
+    svc.ensure_index = AsyncMock()
+    monkeypatch.setattr(mod, "get_search_index_service", lambda: svc)
+
+    out = await mod.run_index_equipment_catalog(
+        session, instance_id="inst1", row_id="row1", company_id="co1"
+    )
+    assert out["ok"] is False
+    # the old index is NOT touched when the source cannot be opened
+    svc.delete_index.assert_not_awaited()
+    svc.ensure_index.assert_not_awaited()
+    last_body = inst.upsert_data_row.await_args_list[-1].kwargs["body"]
+    assert last_body["status"] == "error"
+    assert "source unreachable" in last_body["error"]
+    assert completed and completed[0]["ok"] is False
+
+
+@pytest.mark.asyncio
+async def test_run_index_progress_heartbeats_persisted(monkeypatch) -> None:
+    """on_progress persists indexed_count/total_rows after each bulk chunk."""
+    from prodavan.application.modules import equipment_catalog_opensearch as mod
+
+    row = {
+        "body": {
+            "name": "cat",
+            "source_kind": "local",
+            "column_map": {"title": "Name", "price": "Cost"},
+            "source_file": {"storage_key": "k"},
+        }
+    }
+    inst = MagicMock()
+    inst.get_data_row = AsyncMock(return_value=row)
+    snapshots: list[dict] = []
+
+    async def _upsert(**kwargs):  # noqa: ANN003
+        snapshots.append(dict(kwargs.get("body") or {}))
+
+    inst.upsert_data_row = AsyncMock(side_effect=_upsert)
+    session = MagicMock()
+    session.commit = AsyncMock()
+    monkeypatch.setattr(mod, "ModuleInstanceService", lambda _s: inst)
+
+    monkeypatch.setattr(
+        "prodavan.application.search_index.publish.emit_equipment_catalog_index_accepted",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        "prodavan.application.search_index.publish.emit_equipment_catalog_index_completed",
+        AsyncMock(),
+    )
+
+    class _Src:
+        total_rows = 10
+
+        async def aiter_rows(self):
+            for i in range(10):
+                yield {"Name": f"item {i}", "Cost": "1"}
+
+        async def aclose(self):
+            return None
+
+    monkeypatch.setattr(mod, "_open_local_source", AsyncMock(return_value=_Src()))
+
+    svc = MagicMock()
+
+    async def _bulk(**kwargs):
+        return MagicMock(indexed=len(kwargs.get("documents") or []))
+
+    svc.bulk_index = AsyncMock(side_effect=_bulk)
+    svc.delete_index = AsyncMock(return_value=True)
+    svc.ensure_index = AsyncMock()
+    svc.search = AsyncMock()
+    monkeypatch.setattr(mod, "get_search_index_service", lambda: svc)
+
+    out = await mod.run_index_equipment_catalog(
+        session, instance_id="inst1", row_id="row1", company_id="co1"
+    )
+    assert out["ok"] is True
+    assert out["indexed"] == 10
+    bodies = snapshots
+    # stamps: indexing + total discovery + final ready (batch smaller than
+    # MAX_BULK_BATCH → single final heartbeat)
+    assert bodies[0]["status"] == "indexing"
+    assert bodies[-1]["status"] == "ready"
+    assert bodies[-1]["indexed_count"] == 10
+    assert bodies[-1]["total_rows"] == 10
+    assert bodies[-1]["row_count"] == 10
