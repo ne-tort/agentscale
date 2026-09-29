@@ -330,9 +330,11 @@ void main() {
       ),
     );
 
-    // The header row content (chevron) starts at the nav destination
-    // horizontal padding: Material `_horizontalDestinationPadding` (8px).
-    expect(tester.getTopLeft(find.byIcon(Icons.expand_more)).dx, 8);
+    // The header row content (chevron) aligns with the nav destination
+    // icons: they are centered in the 80px icon column, so their left edge
+    // (and the branch chevron) sits at (80 - 24) / 2 = 28px from the rail
+    // edge — the tree column visually lines up with the menu icons.
+    expect(tester.getTopLeft(find.byIcon(Icons.expand_more)).dx, 28);
     final paddings = tester
         .widgetList<Padding>(
           find.ancestor(
@@ -345,7 +347,7 @@ void main() {
     expect(
       paddings,
       contains(
-        const EdgeInsets.symmetric(horizontal: 8, vertical: AppSpacing.sm),
+        const EdgeInsets.symmetric(horizontal: 28, vertical: AppSpacing.sm),
       ),
     );
   });
