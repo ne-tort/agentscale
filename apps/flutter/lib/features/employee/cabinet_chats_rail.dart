@@ -77,9 +77,6 @@ class CabinetChatsRail extends StatelessWidget {
   /// block instead of the wide nav-destination geometry.
   static const double _chevronLabelGap = 4;
 
-  /// Chat rows sit this far right of the branch name.
-  static const double _branchIndent = 8;
-
   /// Leading (left) padding of tree rows. NOT Material's
   /// `_horizontalDestinationPadding` (8px) — the effective left coordinate
   /// of nav-tile content is farther right: the destination icon (24px) is
