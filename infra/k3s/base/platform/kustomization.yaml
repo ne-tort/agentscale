@@ -9,6 +9,7 @@ resources:
   - celery.yaml
   - keycloak.yaml
   - searxng.yaml
+  - gotenberg.yaml
   - pdb.yaml
 generatorOptions:
   disableNameSuffixHash: true

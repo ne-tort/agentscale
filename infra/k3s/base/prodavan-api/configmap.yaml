@@ -46,6 +46,8 @@ data:
   OPENSEARCH_ENABLED: "true"
   OPENSEARCH_URL: http://prodavan-opensearch:9200
   OPENSEARCH_REQUIRED: "true"
+  # Documents module (DOCUM): office->pdf converter (LibreOffice route).
+  GOTENBERG_URL: http://gotenberg.prodavan.svc:3000
   CELERY_REQUIRED: "false"
   # Project MCP sandbox: local process spawn only (no k8s Job/Pod isolator yet)
   MCP_SANDBOX_SPAWN: "false"

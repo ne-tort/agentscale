@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from prodavan.config.settings import settings
 from prodavan.core.infra.database_resource import DatabaseEngineResource
+from prodavan.core.infra.gotenberg_manager import GotenbergManager
 from prodavan.core.infra.k8s_manager import k8s_manager_from_settings
 from prodavan.core.infra.kafka_manager import KafkaManager
 from prodavan.core.infra.metrics_consumer_resource import MetricsConsumerResource
@@ -60,6 +61,12 @@ def build_lifespan_manager() -> LifespanManager:
             required=settings.opensearch_required,
             username=settings.opensearch_username,
             password=settings.opensearch_password,
+        )
+    )
+    manager.register(
+        GotenbergManager(
+            url=settings.gotenberg_url,
+            timeout_sec=settings.gotenberg_timeout_sec,
         )
     )
     manager.register(
@@ -142,6 +149,12 @@ def build_pod_surface_lifespan_manager() -> LifespanManager:
             required=settings.opensearch_required,
             username=settings.opensearch_username,
             password=settings.opensearch_password,
+        )
+    )
+    manager.register(
+        GotenbergManager(
+            url=settings.gotenberg_url,
+            timeout_sec=settings.gotenberg_timeout_sec,
         )
     )
     manager.register(

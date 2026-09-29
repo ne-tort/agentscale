@@ -9,7 +9,8 @@ from fastapi import APIRouter, FastAPI
 
 from prodavan.api.exception_handlers import register_exception_handlers
 from prodavan.api.internal import pods as internal_pods
-from prodavan.api.v1 import agent, health as health_routes, pod_modules, tenant_infra
+from prodavan.api.v1 import agent, documents, pod_modules, tenant_infra
+from prodavan.api.v1 import health as health_routes
 from prodavan.config.settings import settings
 from prodavan.core.middleware import register_cors, register_pod_surface_allowlist
 from prodavan.core.wiring import build_pod_surface_lifespan_manager
@@ -34,6 +35,7 @@ def create_pod_app() -> FastAPI:
     v1.include_router(agent.router)
     v1.include_router(tenant_infra.router)
     v1.include_router(pod_modules.router)
+    v1.include_router(documents.router)
     v1.include_router(internal_pods.router)
     app.include_router(v1, prefix=settings.api_v1_prefix)
     return app

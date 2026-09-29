@@ -1,0 +1,76 @@
+# Gotenberg — LibreOffice document converter for the Documents module (DOCUM).
+# Exposes HTTP API at http://gotenberg.prodavan.svc:3000.
+# Consumed by the API application (GOTENBERG_URL in prodavan-config) for
+# office→pdf conversions on /projects/{id}/documents/convert and module
+# metasyntax actions (documents.convert). Non-pdf routes run in-proc
+# (openpyxl/python-docx) and never touch this service.
+# The `prodavan` namespace is set by the base kustomization (namespace:
+# prodavan), matching prodavan-api / searxng / minio placement.
+apiVersion: v1
+kind: Service
+metadata:
+  name: gotenberg
+  labels:
+    app.kubernetes.io/name: gotenberg
+    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/component: document-converter
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  ports:
+    - name: http
+      port: 3000
+      targetPort: 3000
+  selector:
+    app.kubernetes.io/name: gotenberg
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gotenberg
+  labels:
+    app.kubernetes.io/name: gotenberg
+    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/component: document-converter
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: gotenberg
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: gotenberg
+        app.kubernetes.io/part-of: prodavan
+        app.kubernetes.io/component: document-converter
+    spec:
+      containers:
+        - name: gotenberg
+          image: gotenberg/gotenberg:8.20.1
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 3000
+          # Gotenberg API is unauthenticated by design: only the API pod
+          # reaches it (same namespace, no ingress route for this Service).
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 1Gi
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 15
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 10

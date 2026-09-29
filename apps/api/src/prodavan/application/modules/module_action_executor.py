@@ -226,6 +226,28 @@ class ModuleActionExecutor:
                 project_id=project_id,
             )
 
+        if kind == "documents.convert":
+            return await self._documents_convert(
+                cabinet_id=cabinet_id,
+                module_id=module_id,
+                params=params,
+                row_id=row_id,
+                principal=principal,
+                employee=employee,
+                project_id=project_id,
+            )
+
+        if kind == "documents.fill_template":
+            return await self._documents_fill_template(
+                cabinet_id=cabinet_id,
+                module_id=module_id,
+                params=params,
+                row_id=row_id,
+                principal=principal,
+                employee=employee,
+                project_id=project_id,
+            )
+
         raise AppError(
             code="NOT_IMPLEMENTED",
             title="Not Implemented",
@@ -1254,6 +1276,261 @@ class ModuleActionExecutor:
             "enqueued": bool(enq.get("enqueued")),
             "task_id": enq.get("task_id"),
         }
+
+    async def _documents_convert(
+        self,
+        *,
+        cabinet_id: str,
+        module_id: str,
+        params: dict[str, Any],
+        row_id: str | None,
+        principal: Principal,
+        employee: EmployeeRow | None,
+        project_id: str | None = None,
+    ) -> dict[str, Any]:
+        from prodavan.application.documents.service import DocumentsService
+
+        table_slug = params.get("table_slug")
+        if not isinstance(table_slug, str) or not table_slug:
+            raise AppError(
+                code="META_VALIDATION",
+                title="Meta validation error",
+                status=422,
+                detail="documents.convert requires params.table_slug",
+            )
+        file_col = str(params.get("file_column") or "").strip()
+        if not file_col:
+            raise AppError(
+                code="META_VALIDATION",
+                title="Meta validation error",
+                status=422,
+                detail="documents.convert requires params.file_column",
+            )
+        target_format = str(params.get("target_format") or "").strip().lower()
+        if not target_format:
+            raise AppError(
+                code="META_VALIDATION",
+                title="Meta validation error",
+                status=422,
+                detail="documents.convert requires params.target_format",
+            )
+        output_column = str(params.get("output_column") or "").strip()
+        if not output_column:
+            output_column = f"{file_col}_pdf" if target_format == "pdf" else f"{file_col}_converted"
+        if not row_id:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="row_id required for documents.convert",
+            )
+
+        rows = await self._list_rows_for_scope(
+            cabinet_id=cabinet_id,
+            project_id=project_id,
+            module_id=module_id,
+            table_slug=table_slug,
+            principal=principal,
+            employee=employee,
+        )
+        target_row = next((r for r in rows if str(r.get("row_id")) == row_id), None)
+        if target_row is None:
+            raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="row not found")
+        body = dict(target_row.get("body") or {})
+        file_ref = body.get(file_col)
+        if not isinstance(file_ref, dict):
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail=f"row {file_col!r} has no file_ref to convert",
+            )
+        filename = str(file_ref.get("filename") or "").strip()
+        if not filename:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail=f"row {file_col!r} file_ref has no filename",
+            )
+        company_id = await self._resolve_documents_company_id(
+            cabinet_id=cabinet_id, project_id=project_id
+        )
+        if not company_id:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="no company tenancy for documents action",
+            )
+
+        service = DocumentsService(self._session)
+        result_ref = await service.convert(
+            file_ref,
+            filename=filename,
+            target_format=target_format,
+            company_id=company_id,
+            cabinet_id=cabinet_id or None,
+            project_id=project_id,
+            principal=principal,
+            employee=employee,
+            session=self._session,
+        )
+        body[output_column] = result_ref
+        await self._update_row_for_scope(
+            cabinet_id=cabinet_id,
+            project_id=project_id,
+            module_id=module_id,
+            table_slug=table_slug,
+            row_id=row_id,
+            body=body,
+            principal=principal,
+            employee=employee,
+            run_actions=False,
+        )
+        return {"kind": "documents.convert", "row_id": row_id, "file_ref": result_ref}
+
+    async def _documents_fill_template(
+        self,
+        *,
+        cabinet_id: str,
+        module_id: str,
+        params: dict[str, Any],
+        row_id: str | None,
+        principal: Principal,
+        employee: EmployeeRow | None,
+        project_id: str | None = None,
+    ) -> dict[str, Any]:
+        from prodavan.application.documents.service import DocumentsService
+
+        table_slug = params.get("table_slug")
+        if not isinstance(table_slug, str) or not table_slug:
+            raise AppError(
+                code="META_VALIDATION",
+                title="Meta validation error",
+                status=422,
+                detail="documents.fill_template requires params.table_slug",
+            )
+        template_col = str(params.get("template_column") or "").strip()
+        template_file = params.get("template_file")
+        if not template_col and not isinstance(template_file, dict):
+            raise AppError(
+                code="META_VALIDATION",
+                title="Meta validation error",
+                status=422,
+                detail="documents.fill_template requires params.template_column or params.template_file",
+            )
+        data = params.get("data") if isinstance(params.get("data"), dict) else {}
+        output_column = str(params.get("output_column") or "").strip()
+        if not output_column:
+            output_column = f"{template_col}_filled" if template_col else "filled_file"
+        output_format = params.get("output_format")
+        output_format = str(output_format).strip().lower() if output_format else None
+        if not row_id:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="row_id required for documents.fill_template",
+            )
+
+        rows = await self._list_rows_for_scope(
+            cabinet_id=cabinet_id,
+            project_id=project_id,
+            module_id=module_id,
+            table_slug=table_slug,
+            principal=principal,
+            employee=employee,
+        )
+        target_row = next((r for r in rows if str(r.get("row_id")) == row_id), None)
+        if target_row is None:
+            raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="row not found")
+        body = dict(target_row.get("body") or {})
+        if template_col:
+            template_ref = body.get(template_col)
+            if not isinstance(template_ref, dict):
+                raise AppError(
+                    code="VALIDATION_ERROR",
+                    title="Validation Error",
+                    status=422,
+                    detail=f"row {template_col!r} has no template file_ref",
+                )
+        else:
+            template_ref = dict(template_file)  # type: ignore[arg-type]
+        filename = str(template_ref.get("filename") or "").strip()
+        if not filename:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="template file_ref has no filename",
+            )
+        company_id = await self._resolve_documents_company_id(
+            cabinet_id=cabinet_id, project_id=project_id
+        )
+        if not company_id:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="no company tenancy for documents action",
+            )
+
+        # docx context values may name row columns - resolve them from the row
+        # body so the mapping can be built "from row fields" (see docs).
+        context = data.get("context")
+        if isinstance(context, dict):
+            resolved = {
+                key: (body.get(value) if isinstance(value, str) and value in body else value)
+                for key, value in context.items()
+            }
+            data = {**data, "context": resolved}
+
+        service = DocumentsService(self._session)
+        result_ref = await service.fill_template(
+            template_ref,
+            filename=filename,
+            data=data,
+            output_format=output_format,
+            company_id=company_id,
+            cabinet_id=cabinet_id or None,
+            project_id=project_id,
+            principal=principal,
+            employee=employee,
+            session=self._session,
+        )
+        body[output_column] = result_ref
+        await self._update_row_for_scope(
+            cabinet_id=cabinet_id,
+            project_id=project_id,
+            module_id=module_id,
+            table_slug=table_slug,
+            row_id=row_id,
+            body=body,
+            principal=principal,
+            employee=employee,
+            run_actions=False,
+        )
+        return {"kind": "documents.fill_template", "row_id": row_id, "file_ref": result_ref}
+
+    async def _resolve_documents_company_id(
+        self,
+        *,
+        cabinet_id: str,
+        project_id: str | None,
+    ) -> str | None:
+        """Company tenancy for documents actions: project row, else cabinet row."""
+        if project_id:
+            from prodavan.infrastructure.persistence.models.projects import ProjectRow
+
+            project = await self._session.get(ProjectRow, project_id)
+            if project is not None and project.company_id:
+                return str(project.company_id)
+        if cabinet_id:
+            cab = await self._session.get(CabinetInstanceRow, cabinet_id)
+            if cab is not None and cab.company_id:
+                return str(cab.company_id)
+        return None
 
     def _remote_sql_row_auth(
         self,

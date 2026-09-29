@@ -28,6 +28,7 @@ from prodavan.api.v1 import (
     company_containers,
     company_modules,
     content,
+    documents,
     health,
     identity,
     pod_modules,
@@ -46,6 +47,7 @@ router.include_router(company_ai_models.router)
 router.include_router(company_containers.router)
 router.include_router(company_modules.router)
 router.include_router(content.router)
+router.include_router(documents.router)
 router.include_router(admin_companies.router)
 router.include_router(admin_profile.router)
 router.include_router(admin_metrics.router)
