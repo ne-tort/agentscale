@@ -5,10 +5,17 @@ import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_taper_hairline.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
-/// Peer nav block for chats — same geometry as [AppLayout] destinations.
+/// Chats block of the cabinet rail — a compact projects tree rendered under
+/// the main nav destinations.
 ///
-/// Tree layout: every project group is a collapsible branch header followed
-/// by its chats (pinned chats pinned WITHIN their branch, backend-sorted).
+/// Tree layout: every project branch is a collapsible header (chevron + name,
+/// no count badge) followed by text-only chat rows (pinned chats pinned WITHIN
+/// their branch, backend-sorted). A branch with no chats yet renders a single
+/// muted "New chat" draft row that starts a chat in that project.
+///
+/// Legacy fallback ([legacyLayout], older backend without `projects[]`):
+/// keeps the global "New chat" tile above the tree.
+///
 /// In icon-only (collapsed rail) mode there are no per-project icons, so
 /// chats of all projects render flat without headers.
 class CabinetChatsRail extends StatelessWidget {
@@ -24,6 +31,7 @@ class CabinetChatsRail extends StatelessWidget {
     this.onToggleProjectCollapsed,
     this.onNewChatForProject,
     this.showLeadingDivider = false,
+    this.legacyLayout = false,
   });
 
   final bool extended;
@@ -47,19 +55,40 @@ class CabinetChatsRail extends StatelessWidget {
   /// add button only when that group's new_chat_enabled is true).
   final void Function(String projectId)? onNewChatForProject;
 
-  /// When true and the chats block is non-empty, draw a taper hairline above
+  /// When true and the chats block is non-empty, draw a section break above
   /// (separates main rail destinations from chats).
   final bool showLeadingDivider;
 
+  /// Legacy fallback (backend without the `projects[]` tree): render the
+  /// global "New chat" tile above the groups. Tree mode hides it — each
+  /// branch has its own "+" plus an empty-branch draft row instead.
+  final bool legacyLayout;
+
+  /// Icon column width for legacy tiles (matches [AppLayout] destinations).
   static const double _railMinWidth = 80;
+
+  /// Icon↔label gap for legacy tiles (Material destination padding).
   static const double _iconLabelGap = 8;
+
+  /// Branch chevron size.
+  static const double _chevronSize = 18;
+
+  /// Chevron ↔ project name gap — tight, so the tree reads as one compact
+  /// block instead of the wide nav-destination geometry.
+  static const double _chevronLabelGap = 4;
+
+  /// Chat rows sit this far right of the branch name.
   static const double _branchIndent = 8;
+
+  /// Absolute left offset of chat text: under the branch name, +[_branchIndent].
+  static const double _chatIndent =
+      _chevronSize + _chevronLabelGap + _branchIndent;
 
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final items = <Widget>[
-      if (newChatEnabled && onNewChat != null)
+      if (legacyLayout && newChatEnabled && onNewChat != null)
         _row(
           context,
           icon: Icons.add_comment_outlined,
@@ -77,12 +106,7 @@ class CabinetChatsRail extends StatelessWidget {
       if (extended)
         for (final group in projectGroups) ...[
           _projectHeader(context, group),
-          if (_isExpanded(group))
-            for (final chat in _groupChats(group))
-              Padding(
-                padding: const EdgeInsets.only(left: _branchIndent),
-                child: _chatRow(context, chat, l10n: l10n),
-              ),
+          if (_isExpanded(group)) ..._branchRows(context, group, l10n: l10n),
         ],
     ];
 
@@ -94,7 +118,8 @@ class CabinetChatsRail extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        if (showLeadingDivider) const AppTaperHairline(),
+        if (showLeadingDivider)
+          extended ? _sectionHeader(context, l10n) : const AppTaperHairline(),
         ...items,
       ],
     );
@@ -114,16 +139,74 @@ class CabinetChatsRail extends StatelessWidget {
   bool _isExpanded(Map<String, dynamic> group) =>
       !collapsedProjectIds.contains(_projectIdOf(group));
 
-  /// Branch header: chevron + project name (+ chats count) + per-project
-  /// new-chat button. Tap toggles collapse.
+  /// Rows inside one expanded branch: chat rows — or, while the branch lists
+  /// no chats at all, a single synthetic draft row ([_draftRow]).
+  List<Widget> _branchRows(
+    BuildContext context,
+    Map<String, dynamic> group, {
+    required AppLocalizations l10n,
+  }) {
+    final chats = _groupChats(group);
+    if (chats.isEmpty) {
+      return [_draftRow(context, group, l10n: l10n)];
+    }
+    return [
+      for (final chat in chats)
+        Padding(
+          padding: const EdgeInsets.only(left: _chatIndent),
+          child: _chatRow(context, chat, l10n: l10n),
+        ),
+    ];
+  }
+
+  /// Synthetic "New chat" row inside an empty branch — same action as the
+  /// per-branch "+", so a fresh project explains how to start. Disappears as
+  /// soon as the branch lists a real chat; disabled (dim, no tap) when the
+  /// branch does not allow new chats.
+  Widget _draftRow(
+    BuildContext context,
+    Map<String, dynamic> group, {
+    required AppLocalizations l10n,
+  }) {
+    final colors = context.appColors;
+    final projectId = _projectIdOf(group);
+    final start = onNewChatForProject;
+    final enabled = group['new_chat_enabled'] == true && start != null;
+    final base = Theme.of(context).textTheme.labelMedium ?? const TextStyle();
+    return Padding(
+      padding: const EdgeInsets.only(left: _chatIndent),
+      child: InkWell(
+        onTap: start != null && group['new_chat_enabled'] == true
+            ? () => start(projectId)
+            : null,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
+          child: Text(
+            l10n.navNewChat,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: base.copyWith(
+              color: colors.muted.withValues(alpha: enabled ? 0.6 : 0.45),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Branch header: chevron + project name + per-project new-chat button.
+  /// Tap toggles collapse. No chat count badge — the compact tree carries
+  /// the size implicitly.
   Widget _projectHeader(BuildContext context, Map<String, dynamic> group) {
     final colors = context.appColors;
     final projectId = _projectIdOf(group);
     final expanded = _isExpanded(group);
     final rawName = (group['project_name'] as String?)?.trim();
     final label = (rawName == null || rawName.isEmpty) ? projectId : rawName;
-    final count = _groupChats(group).length;
-    final addChat = onNewChatForProject != null && group['new_chat_enabled'] == true;
+    final addChat =
+        onNewChatForProject != null && group['new_chat_enabled'] == true;
+    final base = Theme.of(context).textTheme.labelMedium ?? const TextStyle();
 
     return InkWell(
       onTap: onToggleProjectCollapsed == null
@@ -134,41 +217,22 @@ class CabinetChatsRail extends StatelessWidget {
         padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
         child: Row(
           children: [
-            SizedBox(
-              width: _railMinWidth,
-              child: Center(
-                child: Icon(
-                  expanded ? Icons.expand_more : Icons.chevron_right,
-                  size: 18,
-                  color: colors.muted,
-                ),
-              ),
+            Icon(
+              expanded ? Icons.expand_more : Icons.chevron_right,
+              size: _chevronSize,
+              color: colors.muted,
             ),
+            const SizedBox(width: _chevronLabelGap),
             Expanded(
-              child: Row(
-                children: [
-                  Flexible(
-                    child: Text(
-                      label,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: colors.onSurface,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ),
-                  if (count > 0)
-                    Padding(
-                      padding: const EdgeInsets.only(left: AppSpacing.xs),
-                      child: Text(
-                        '· $count',
-                        maxLines: 1,
-                        style: TextStyle(color: colors.muted, fontSize: 12),
-                      ),
-                    ),
-                ],
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: base.copyWith(
+                  color: colors.onSurface,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ),
             const SizedBox(width: _iconLabelGap),
@@ -199,32 +263,102 @@ class CabinetChatsRail extends StatelessWidget {
     );
   }
 
+  /// Chat rows are text-only — no leading icons: the chevron column carries
+  /// the branch structure, titles stay compact (labelMedium).
   Widget _chatRow(
     BuildContext context,
     Map<String, dynamic> chat, {
     required AppLocalizations l10n,
   }) {
-    final pinned = chat['pinned'] == true;
+    final colors = context.appColors;
     final sid = chat['session_id'] as String? ?? '';
     final title = (chat['title'] as String?)?.trim();
     final label = (title == null || title.isEmpty) ? l10n.chatUntitled : title;
-    final hasDraft = chat['has_draft'] == true;
-    final hasMessages = chat['has_messages'] == true || chat['last_message_at'] != null;
-    final IconData icon;
-    if (pinned) {
-      icon = Icons.push_pin;
-    } else if (hasDraft && !hasMessages) {
-      icon = Icons.edit_note_outlined;
-    } else {
-      icon = Icons.chat_bubble_outline;
+    final selected = sid == activeSessionId;
+    final base = Theme.of(context).textTheme.labelMedium ?? const TextStyle();
+    final text = Text(
+      label,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: base.copyWith(
+        color: selected ? colors.primary : colors.onSurface,
+        fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+      ),
+    );
+
+    if (!extended) {
+      // Icon-only rail: centered label, same as before minus the icon.
+      return InkWell(
+        onTap: () => onOpenChat(chat),
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
+          child: Center(child: text),
+        ),
+      );
     }
-    return _row(
-      context,
-      icon: icon,
-      label: label,
-      selected: sid == activeSessionId,
-      enabled: true,
+
+    // Persistent selection: same container color as hover, so the active chat
+    // looks exactly like a hovered row.
+    final highlight = _rowHighlight(colors);
+    final content = selected
+        ? DecoratedBox(
+            decoration: BoxDecoration(
+              color: highlight,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs),
+              child: text,
+            ),
+          )
+        : Padding(
+            padding: const EdgeInsets.only(right: AppSpacing.sm),
+            child: text,
+          );
+
+    return InkWell(
       onTap: () => onOpenChat(chat),
+      borderRadius: BorderRadius.circular(12),
+      hoverColor: highlight,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
+        child: content,
+      ),
+    );
+  }
+
+  /// Hover/selected row background — one color for both so the persistent
+  /// selection is identical to the hover highlight.
+  Color _rowHighlight(AppColorTokens colors) =>
+      colors.onSurface.withValues(alpha: 0.08);
+
+  /// Section break between the nav destinations and the chats tree: extra
+  /// vertical breathing room plus a fading hairline with a centered label.
+  Widget _sectionHeader(BuildContext context, AppLocalizations l10n) {
+    final colors = context.appColors;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
+      child: Row(
+        children: [
+          const Expanded(child: _TaperSide()),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
+            child: Text(
+              l10n.navProjects,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: colors.muted.withValues(alpha: 0.6),
+                fontSize: 11,
+                letterSpacing: 0.5,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          const Expanded(child: _TaperSide(reverse: true)),
+        ],
+      ),
     );
   }
 
@@ -250,6 +384,8 @@ class CabinetChatsRail extends StatelessWidget {
     );
   }
 
+  /// Legacy global "New chat" tile — same geometry as [AppLayout]
+  /// destinations (icon column + label).
   Widget _row(
     BuildContext context, {
     required IconData icon,
@@ -282,6 +418,32 @@ class CabinetChatsRail extends StatelessWidget {
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
         child: _railIconLabel(icon: iconWidget, label: labelWidget),
+      ),
+    );
+  }
+}
+
+/// One side of the chats-tree section header hairline: solid next to the
+/// label, fading out toward the rail edge.
+class _TaperSide extends StatelessWidget {
+  const _TaperSide({this.reverse = false});
+
+  /// Fade toward the right instead of the left.
+  final bool reverse;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    final near = colors.border.withValues(alpha: 0.85);
+    final far = colors.border.withValues(alpha: 0);
+    return SizedBox(
+      height: 1,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: reverse ? [near, far] : [far, near],
+          ),
+        ),
       ),
     );
   }

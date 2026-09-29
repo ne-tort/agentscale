@@ -18,6 +18,7 @@ class CabinetChatsPage extends StatelessWidget {
     required this.onOpenChat,
     this.onToggleProjectCollapsed,
     this.onNewChatForProject,
+    this.legacyLayout = false,
   });
 
   final bool newChatEnabled;
@@ -28,6 +29,9 @@ class CabinetChatsPage extends StatelessWidget {
   final void Function(Map<String, dynamic> chat) onOpenChat;
   final void Function(String projectId)? onToggleProjectCollapsed;
   final void Function(String projectId)? onNewChatForProject;
+
+  /// Passed to the rail: legacy fallback keeps the global "New chat" tile.
+  final bool legacyLayout;
 
   @override
   Widget build(BuildContext context) {
@@ -43,6 +47,7 @@ class CabinetChatsPage extends StatelessWidget {
             projectGroups: projectGroups,
             collapsedProjectIds: collapsedProjectIds,
             activeSessionId: activeSessionId,
+            legacyLayout: legacyLayout,
             onNewChat: onNewChat == null
                 ? null
                 : () {

@@ -187,9 +187,12 @@ class ChatMarkdownBody extends StatelessWidget {
       extensionSet: md.ExtensionSet.gitHubWeb,
       styleSheet: base.copyWith(
         p: Theme.of(context).textTheme.bodyMedium,
+        // Semi-transparent: inline-code background must not fully cover
+        // the selection tint (RenderParagraph paints selection UNDER the
+        // per-span background paints).
         code: TextStyle(
           fontFamily: 'monospace',
-          backgroundColor: scheme.surfaceContainerHighest,
+          backgroundColor: scheme.surfaceContainerHighest.withValues(alpha: 0.55),
         ),
         codeblockDecoration: BoxDecoration(
           color: scheme.surfaceContainerHighest,
@@ -333,7 +336,8 @@ class _AssistantStreamBlockState extends State<AssistantStreamBlock> {
     );
     final cells = <Widget>[
       if (model != null)
-        Flexible(
+        ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 260),
           child: Text(
             model,
             style: style,
@@ -449,7 +453,6 @@ class _AgentWorkingIndicatorState extends State<AgentWorkingIndicator>
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final scheme = Theme.of(context).colorScheme;
-    final color = scheme.onSurfaceVariant.withValues(alpha: 0.72);
     // The l10n copy ends with "…" — the ellipsis is rendered as animated
     // dots instead, so strip any trailing dots from the base text.
     var label = l10n.projectChatAgentWorking;
@@ -462,12 +465,6 @@ class _AgentWorkingIndicatorState extends State<AgentWorkingIndicator>
       builder: (context, _) => Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          SizedBox(
-            width: 14,
-            height: 14,
-            child: CircularProgressIndicator(strokeWidth: 1.8, color: color),
-          ),
-          const SizedBox(width: 8),
           Text(
             label,
             style: _mutedTextStyle(context).copyWith(fontSize: 12.5),
