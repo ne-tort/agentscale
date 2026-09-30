@@ -54,6 +54,21 @@ KP_MONEY_COL_WIDTHS = {7: 13.0, 8: 14.5}  # G H
 
 TEMPLATE_NAME = "kp-template.xlsx"
 
+# Standalone single-sheet templates derived from the КП sheet (values fill).
+TEMPLATE_TYPES: dict[str, str] = {
+    # 2 sheets: «Бюджетирование» + auto-filled «КП» (formula-linked).
+    "budget": TEMPLATE_NAME,
+    # Standalone «КП» sheet (values fill; no cross-sheet formulas).
+    "commercial_proposal": "commercial-proposal-template.xlsx",
+    # Standalone retitled «Спецификация» sheet (values fill).
+    "specification": "specification-template.xlsx",
+}
+
+# КП/spec item columns (rows 12..111): values written directly, formulas
+# (if any) are replaced — the standalone templates have none by contract.
+KP_ITEM_TEXT_COLS = ("B",)
+KP_ITEM_NUMBER_COLS = ("E", "G", "H")
+
 _BUDGET_REF = re.compile(r"Бюджетирование!\$?([A-Z]+)\$?(\d+)")
 _CELL_REF = re.compile(r"([A-Z]+)(\d+)")
 
@@ -397,3 +412,128 @@ def load_budget_template() -> bytes:
         status=422,
         detail=f"budget template not found: {TEMPLATE_NAME} (documents_templates_dir={base})",
     )
+
+
+def load_default_template(template_type: str) -> bytes:
+    """Built-in template bytes for a type (budget / КП / Спецификация)."""
+    from prodavan.config.settings import settings
+
+    name = TEMPLATE_TYPES.get(template_type)
+    if name is None:
+        raise AppError(
+            code="VALIDATION_ERROR",
+            title="Validation Error",
+            status=422,
+            detail=f"unknown template type: {template_type}",
+        )
+    base = str(getattr(settings, "documents_templates_dir", "") or "templates").strip() or "templates"
+    candidates = [Path(base) / name]
+    if not Path(base).is_absolute():
+        candidates.append(Path.cwd() / base / name)
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate.read_bytes()
+    raise AppError(
+        code="VALIDATION_ERROR",
+        title="Validation Error",
+        status=422,
+        detail=f"template not found: {name} (documents_templates_dir={base})",
+    )
+
+
+# --- standalone КП / Спецификация fill (values only, no cross-sheet refs) ------
+
+
+@dataclass(slots=True)
+class KpRowFill:
+    """One КП/Спецификация item row: B=name, E=qty, G=price_out, H=sum."""
+
+    row: int
+    title: str
+    qty: float
+    price_out: float
+    total: float
+
+
+def build_kp_fill(rows: list[dict[str, Any]] | None) -> list[KpRowFill]:
+    """Value model for the standalone КП/Спецификация sheet (rows 12..111)."""
+    fills: list[KpRowFill] = []
+    for raw in rows or []:
+        if len(fills) >= BUDGET_TEMPLATE_ROWS:
+            break  # 100 item slots (12..111) in the layout contract
+        body = raw if isinstance(raw, dict) else {}
+        price_in = _num_or(body.get("price_in"), 0)
+        if price_in <= 0:
+            continue  # КП shows priced items only
+        qty = _num_or(body.get("qty"), 1)
+        markup = _num_or(body.get("markup"), DEFAULT_MARKUP)
+        price_out = round(price_in * (1 + markup), 2)
+        fills.append(
+            KpRowFill(
+                row=KP_DATA_START + len(fills),
+                title=_str_or(body.get("title")) or TITLE_NOT_FOUND,
+                qty=qty,
+                price_out=price_out,
+                total=round(qty * price_out, 2),
+            )
+        )
+    return fills
+
+
+def _patch_kp_values_sheet(xml: bytes, fills: list[KpRowFill]) -> bytes:
+    """Write КП item values (replacing formulas when present) + trim tail rows."""
+    root = ET.fromstring(xml)
+    _trim_kp_rows(root, n_items=len(fills))
+    xpatch.ensure_col_widths(root, KP_MONEY_COL_WIDTHS)
+    sheet_data = root.find(xpatch._q("sheetData"))
+    if sheet_data is None:
+        raise AppError(
+            code="VALIDATION_ERROR",
+            title="Validation Error",
+            status=422,
+            detail="КП sheet has no sheetData",
+        )
+    for fill in fills:
+        row = xpatch.find_row(sheet_data, fill.row)
+        if row is None:
+            continue
+        b = xpatch.cell_in_row(row, "B")
+        xpatch.set_text(b, fill.title)
+        for col, val in (("E", fill.qty), ("G", fill.price_out), ("H", fill.total)):
+            cell = xpatch.cell_in_row(row, col)
+            xpatch.set_number(cell, val)
+    return xpatch.dumps_sml(root)
+
+
+def fill_kp_workbook(template_bytes: bytes, rows: list[dict[str, Any]] | None) -> bytes:
+    """Fill the standalone КП/Спецификация template; returns workbook bytes."""
+    fills = build_kp_fill(rows)
+    with zipfile.ZipFile(io.BytesIO(template_bytes), "r") as z:
+        names = set(z.namelist())
+        if KP_SHEET_PART not in names:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="КП template has no КП sheet (xl/worksheets/sheet2.xml)",
+            )
+        if BUDGET_SHEET_PART in names:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail=(
+                    "КП template must be single-sheet (no Бюджетирование sheet); "
+                    "upload the standalone КП layout"
+                ),
+            )
+        sheet = z.read(KP_SHEET_PART)
+    updated = {KP_SHEET_PART: _patch_kp_values_sheet(sheet, fills)}
+    buf = io.BytesIO()
+    with zipfile.ZipFile(io.BytesIO(template_bytes), "r") as zin, zipfile.ZipFile(
+        buf, "w", zipfile.ZIP_DEFLATED
+    ) as zout:
+        for item in zin.infolist():
+            payload = updated.get(item.filename, zin.read(item.filename))
+            zout.writestr(item, payload)
+    return buf.getvalue()

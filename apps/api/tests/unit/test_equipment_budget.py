@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import zipfile
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
@@ -330,3 +331,240 @@ async def test_maybe_auto_budget_sync_fires_for_lines_table(monkeypatch) -> None
         employee=None,
     )
     assert called == ["request_lines"]
+
+
+# ------------------------------------------------ standalone КП / spec fill
+
+KP_TEMPLATE = Path(__file__).resolve().parents[2] / "templates" / "commercial-proposal-template.xlsx"
+SPEC_TEMPLATE = Path(__file__).resolve().parents[2] / "templates" / "specification-template.xlsx"
+NS = {"m": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+
+
+def _kp_cells(out: bytes) -> dict[str, tuple[str | None, bool]]:
+    with zipfile.ZipFile(io.BytesIO(out)) as z:
+        assert z.testzip() is None
+        wb = z.read("xl/workbook.xml").decode("utf-8")
+        assert "Бюджетирование" not in wb, "standalone template must not reference the budget sheet"
+        sheet = z.read("xl/worksheets/sheet2.xml")
+    root = ET.fromstring(sheet)
+    cells: dict[str, tuple[str | None, bool]] = {}
+    for row in root.find("m:sheetData", NS).findall("m:row", NS):
+        for c in row.findall("m:c", NS):
+            v = c.find("m:v", NS)
+            is_ = c.find("m:is/m:t", NS)
+            f = c.find("m:f", NS)
+            val = is_.text if is_ is not None else (v.text if v is not None else None)
+            cells[c.get("r")] = (val, f is not None)
+    return cells
+
+
+@pytest.mark.skipif(not KP_TEMPLATE.is_file(), reason="КП template not shipped")
+def test_fill_kp_workbook_writes_values_and_trims() -> None:
+    rows = [
+        _row(title="SSD Samsung 990 Pro 2TB", qty=2, price_in=15000, vat=0.22, markup=0.1),
+        _row(title="Патч-корд Vention 3м", qty=10, price_in=250.5, vat=0.22, markup=0.2),
+        _row(title="без цены", qty=1, price_in=0, vat=0.22, markup=0.1),
+    ]
+    cells = _kp_cells(budget.fill_kp_workbook(KP_TEMPLATE.read_bytes(), rows))
+    # values (no formulas) in the item rows
+    assert cells["B12"][0] == "SSD Samsung 990 Pro 2TB"
+    assert float(cells["E12"][0]) == 2.0
+    assert float(cells["G12"][0]) == 16500.0
+    assert float(cells["H12"][0]) == 33000.0
+    assert not cells["G12"][1] and not cells["H12"][1]
+    assert cells["B13"][0] == "Патч-корд Vention 3м"
+    assert float(cells["H13"][0]) == 3006.0
+    # unpriced rows are skipped; tail slots trimmed (100 slots collapsed to 2)
+    assert "B14" not in cells or cells["B14"][0] != "без цены"
+    assert float(cells.get("H14", ("0", False))[0] or 0) != 33000.0
+
+
+@pytest.mark.skipif(not SPEC_TEMPLATE.is_file(), reason="spec template not shipped")
+def test_fill_kp_workbook_spec_variant() -> None:
+    rows = [_row(title="Router Mikrotik hEX", qty=1, price_in=5000, vat=0.22, markup=0.1)]
+    cells = _kp_cells(budget.fill_kp_workbook(SPEC_TEMPLATE.read_bytes(), rows))
+    assert cells["B12"][0] == "Router Mikrotik hEX"
+    assert float(cells["H12"][0]) == 5500.0
+
+
+def test_fill_kp_workbook_rejects_two_sheet_template() -> None:
+    with pytest.raises(AppError) as err:
+        budget.fill_kp_workbook(TEMPLATE.read_bytes(), [])
+    assert "single-sheet" in (err.value.detail or "")
+
+
+def test_load_default_template_unknown_type() -> None:
+    with pytest.raises(AppError):
+        budget.load_default_template("nope")
+
+
+# ------------------------------------------------------- template resolution
+
+
+@pytest.mark.asyncio
+async def test_resolve_export_template_falls_back_without_rows(monkeypatch) -> None:
+    executor = _executor()
+    fallback = b"FALLBACK"
+
+    async def _rows(**kwargs):  # noqa: ANN003
+        return []
+
+    monkeypatch.setattr(executor, "_list_rows_for_scope", _rows)
+    out = await executor._resolve_export_template(
+        cabinet_id="cab_1",
+        template_type="commercial_proposal",
+        principal=Principal(sub="u1", roles=frozenset()),
+        employee=None,
+        fallback=fallback,
+    )
+    assert out == fallback
+
+
+@pytest.mark.asyncio
+async def test_resolve_export_template_unbound_module_falls_back(monkeypatch) -> None:
+    executor = _executor()
+
+    async def _rows(**kwargs):  # noqa: ANN003
+        raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="unbound")
+
+    monkeypatch.setattr(executor, "_list_rows_for_scope", _rows)
+    out = await executor._resolve_export_template(
+        cabinet_id="cab_1",
+        template_type="budget",
+        principal=Principal(sub="u1", roles=frozenset()),
+        employee=None,
+        fallback=b"DEFAULT",
+    )
+    assert out == b"DEFAULT"
+
+
+@pytest.mark.asyncio
+async def test_resolve_export_template_picks_latest_active(monkeypatch) -> None:
+    executor = _executor()
+
+    async def _rows(**kwargs):  # noqa: ANN003
+        return [
+            {"row_id": "t2", "body": {"template_type": "budget", "active": True,
+                                      "file": {"storage_key": "sk2"}}},
+            {"row_id": "t1", "body": {"template_type": "budget", "active": False,
+                                      "file": {"storage_key": "sk_inactive"}}},
+            {"row_id": "t0", "body": {"template_type": "commercial_proposal",
+                                      "file": {"storage_key": "sk_other"}}},
+        ]
+
+    monkeypatch.setattr(executor, "_list_rows_for_scope", _rows)
+    loaded: list[str] = []
+
+    class _Store:
+        def get_bytes_sync(self, key: str) -> bytes:
+            loaded.append(key)
+            return f"XLSX:{key}".encode()
+
+    import prodavan.infrastructure.files.manager as files_mod
+
+    monkeypatch.setattr(files_mod, "ensure_file_store", lambda: _Store())
+    out = await executor._resolve_export_template(
+        cabinet_id="cab_1",
+        template_type="budget",
+        principal=Principal(sub="u1", roles=frozenset()),
+        employee=None,
+        fallback=b"DEFAULT",
+    )
+    assert out == b"XLSX:sk2"
+    assert loaded == ["sk2"]
+
+
+# ------------------------------------------------------------- КП/спецификация export
+
+
+@pytest.mark.asyncio
+async def test_kp_export_saves_and_converts(monkeypatch) -> None:
+    executor = _executor()
+
+    async def _rows(**kwargs):  # noqa: ANN003
+        if kwargs["table_slug"] == "budget_lines":
+            return [
+                {"row_id": "b1", "body": {"title": "SSD", "qty": 1, "price_in": 10,
+                                          "vat": 0.22, "markup": 0.1}},
+            ]
+        return []
+
+    monkeypatch.setattr(executor, "_list_rows_for_scope", _rows)
+    monkeypatch.setattr(
+        executor, "_resolve_documents_company_id", AsyncMock(return_value="co1")
+    )
+    saved: dict = {}
+
+    async def _save(_self, data, **kwargs):  # noqa: ANN003
+        saved["filename"] = kwargs["filename"]
+        saved["size"] = len(data)
+        return {"asset_id": "a1", "version_id": "v1", "filename": kwargs["filename"]}
+
+    async def _convert(_self, ref, **kwargs):  # noqa: ANN003
+        assert kwargs["target_format"] == "pdf"
+        return {"asset_id": "a2", "version_id": "v2", "filename": "kp.pdf"}
+
+    monkeypatch.setattr(
+        "prodavan.application.documents.service.DocumentsService.save_document", _save
+    )
+    monkeypatch.setattr(
+        "prodavan.application.documents.service.DocumentsService.convert", _convert
+    )
+
+    out = await _invoke(
+        executor,
+        monkeypatch,
+        {
+            "id": "kp_export",
+            "kind": "equipment.kp_export",
+            "params": {"budget_table": "budget_lines"},
+        },
+    )
+    assert out["kind"] == "equipment.kp_export"
+    assert out["file_ref"]["asset_id"] == "a2"
+    assert out["rows"] == 1
+    assert saved["filename"] == "commercial-proposal.xlsx"
+    assert saved["size"] > 0
+
+
+@pytest.mark.asyncio
+async def test_spec_export_kind(monkeypatch) -> None:
+    executor = _executor()
+
+    async def _rows(**kwargs):  # noqa: ANN003
+        if kwargs["table_slug"] == "budget_lines":
+            return [
+                {"row_id": "b1", "body": {"title": "SSD", "qty": 1, "price_in": 10,
+                                          "vat": 0.22, "markup": 0.1}},
+            ]
+        return []
+
+    monkeypatch.setattr(executor, "_list_rows_for_scope", _rows)
+    monkeypatch.setattr(
+        executor, "_resolve_documents_company_id", AsyncMock(return_value="co1")
+    )
+
+    async def _save(_self, data, **kwargs):  # noqa: ANN003
+        return {"asset_id": "a1", "version_id": "v1", "filename": kwargs["filename"]}
+
+    async def _convert(_self, ref, **kwargs):  # noqa: ANN003
+        return {"asset_id": "a2", "version_id": "v2", "filename": "spec.pdf"}
+
+    monkeypatch.setattr(
+        "prodavan.application.documents.service.DocumentsService.save_document", _save
+    )
+    monkeypatch.setattr(
+        "prodavan.application.documents.service.DocumentsService.convert", _convert
+    )
+
+    out = await _invoke(
+        executor,
+        monkeypatch,
+        {
+            "id": "spec_export",
+            "kind": "equipment.spec_export",
+            "params": {"budget_table": "budget_lines"},
+        },
+    )
+    assert out["kind"] == "equipment.spec_export"
+    assert out["file_ref"]["asset_id"] == "a2"
