@@ -257,6 +257,8 @@ async def test_cabinet_write_targets_cabinet_instance() -> None:
     svc._instances.ensure_cabinet_instance = AsyncMock(return_value=cab_inst)
     svc._instances.sot_may_edit = AsyncMock(return_value=True)
     svc._instances.resolve_columns_body = AsyncMock(return_value=[])
+    svc._instances.resolve_tables_body = AsyncMock(return_value=[])
+
     created = {"row_id": "row_1", "table_slug": "notes", "body": {"t": 1}}
     svc._instances.create_data_row = AsyncMock(return_value=created)
     svc._instances.get_data_row = AsyncMock(return_value=created)

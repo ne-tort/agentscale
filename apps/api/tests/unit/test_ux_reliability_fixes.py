@@ -20,6 +20,9 @@ async def test_cabinet_delete_data_row_commits(monkeypatch) -> None:
     rolls it back and the row "comes back" on the next list/poll."""
     session = AsyncMock()
     svc = CabinetModuleService(session)
+    async def _tables_body(**kwargs):  # noqa: ANN003
+        return [{"slug": "catalogs", "scope": {"chats": "all"}}]
+
 
     async def _require_access(**kwargs):  # noqa: ANN003
         return None
@@ -42,6 +45,7 @@ async def test_cabinet_delete_data_row_commits(monkeypatch) -> None:
     monkeypatch.setattr(svc, "_require_module_binding", _require_module_binding)
     monkeypatch.setattr(svc, "_cabinet_sot", _cabinet_sot)
     monkeypatch.setattr(svc._instances, "delete_data_row", _delete)
+    monkeypatch.setattr(svc._instances, "resolve_tables_body", _tables_body)
     import prodavan.application.projects.rematerialize_scheduler as remat
 
     monkeypatch.setattr(
