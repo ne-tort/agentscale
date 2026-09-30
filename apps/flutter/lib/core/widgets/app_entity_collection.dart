@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/responsive/app_breakpoints.dart';
@@ -176,6 +177,13 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
   static const double _defaultColumnMaxWidth = 220;
 
   String? _editFocusId;
+  final ScrollController _hScroll = ScrollController();
+
+  @override
+  void dispose() {
+    _hScroll.dispose();
+    super.dispose();
+  }
 
   bool get _mutateEnabled =>
       widget.onCopy != null ||
@@ -562,9 +570,26 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
           child: table,
         );
 
-        final tableBody = SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: child,
+        // Visible scrollbar + drag-to-scroll (mouse) so wide tables are
+        // actually reachable with a wheel-mouse: the wheel alone only drives
+        // the vertical axis on desktop.
+        final tableBody = Scrollbar(
+          controller: _hScroll,
+          thumbVisibility: true,
+          child: ScrollConfiguration(
+            behavior: ScrollConfiguration.of(context).copyWith(
+              dragDevices: {
+                PointerDeviceKind.touch,
+                PointerDeviceKind.mouse,
+                PointerDeviceKind.trackpad,
+              },
+            ),
+            child: SingleChildScrollView(
+              controller: _hScroll,
+              scrollDirection: Axis.horizontal,
+              child: child,
+            ),
+          ),
         );
         return SingleChildScrollView(
           scrollDirection: Axis.vertical,

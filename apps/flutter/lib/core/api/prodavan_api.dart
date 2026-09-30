@@ -1322,6 +1322,26 @@ class ProdavanApi {
     }
   }
 
+  /// Updates the persisted active chat without touching the selected project.
+  Future<Map<String, dynamic>> putChatSelection({
+    required String cabinetId,
+    required String? chatSessionId,
+  }) async {
+    final prevCab = this.cabinetId;
+    this.cabinetId = cabinetId;
+    try {
+      final res = await AuthHttp.put(
+        _uri('/cabinets/$cabinetId/me/selection'),
+        body: jsonEncode({'chat_session_id': chatSessionId}),
+        extraHeaders: _workHeaders,
+      );
+      _throwIfError(res);
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    } finally {
+      this.cabinetId = prevCab;
+    }
+  }
+
   Future<Map<String, dynamic>> getChatsSidebar(String cabinetId) async {
     final prevCab = this.cabinetId;
     this.cabinetId = cabinetId;

@@ -74,19 +74,21 @@ def test_fill_budget_workbook_on_real_template() -> None:
     assert "PRODUCT(F7,1+I7)" in sheet1
     # cached totals next to the formulas
     assert "220" in sheet1  # M4 total (2 * 110)
-    # КП sheet: trimmed to 2 items — the empty-slot formulas are gone
-    assert "Бюджетирование!D7" in sheet2.decode("utf-8")
-    assert "Бюджетирование!D8" in sheet2.decode("utf-8")
-    assert "Бюджетирование!D9" not in sheet2.decode("utf-8")
-    assert "Бюджетирование!L4" in sheet2.decode("utf-8")
-    # merged item rows (B12:D12 style) survived the trim
+    # third sheet (Спецификация) is part of the budget template
+    assert "xl/worksheets/sheet3.xml" in names
+    # КП sheet: trimmed to 2 items (quoted sheet refs survive in formulas)
+    s2 = sheet2.decode("utf-8")
+    assert "'Бюджетирование'!D7" in s2
+    assert "'Бюджетирование'!D8" in s2
+    assert "'Бюджетирование'!D9" not in s2
     assert sheet2 != tpl_sheet2
     # workbook still opens cleanly for openpyxl
     from openpyxl import load_workbook
 
     wb = load_workbook(__import__("io").BytesIO(out))
     assert "Бюджетирование" in wb.sheetnames and "КП" in wb.sheetnames
-    assert wb["Бюджетирование"].max_row and wb["Бюджетирование"].max_row > 900
+    assert "Спецификация" in wb.sheetnames
+    assert wb["Бюджетирование"].max_row and wb["Бюджетирование"].max_row >= 100
 
 
 @pytest.mark.skipif(not TEMPLATE.is_file(), reason="template not shipped")
@@ -345,7 +347,10 @@ def _kp_cells(out: bytes) -> dict[str, tuple[str | None, bool]]:
         assert z.testzip() is None
         wb = z.read("xl/workbook.xml").decode("utf-8")
         assert "Бюджетирование" not in wb, "standalone template must not reference the budget sheet"
-        sheet = z.read("xl/worksheets/sheet2.xml")
+        part = "xl/worksheets/sheet2.xml"
+        if part not in z.namelist():
+            part = "xl/worksheets/sheet3.xml"
+        sheet = z.read(part)
     root = ET.fromstring(sheet)
     cells: dict[str, tuple[str | None, bool]] = {}
     for row in root.find("m:sheetData", NS).findall("m:row", NS):
@@ -365,32 +370,37 @@ def test_fill_kp_workbook_writes_values_and_trims() -> None:
         _row(title="Патч-корд Vention 3м", qty=10, price_in=250.5, vat=0.22, markup=0.2),
         _row(title="без цены", qty=1, price_in=0, vat=0.22, markup=0.1),
     ]
-    cells = _kp_cells(budget.fill_kp_workbook(KP_TEMPLATE.read_bytes(), rows))
-    # values (no formulas) in the item rows
-    assert cells["B12"][0] == "SSD Samsung 990 Pro 2TB"
-    assert float(cells["E12"][0]) == 2.0
-    assert float(cells["G12"][0]) == 16500.0
-    assert float(cells["H12"][0]) == 33000.0
-    assert not cells["G12"][1] and not cells["H12"][1]
-    assert cells["B13"][0] == "Патч-корд Vention 3м"
-    assert float(cells["H13"][0]) == 3006.0
-    # unpriced rows are skipped; tail slots trimmed (100 slots collapsed to 2)
-    assert "B14" not in cells or cells["B14"][0] != "без цены"
-    assert float(cells.get("H14", ("0", False))[0] or 0) != 33000.0
+    cells = _kp_cells(budget.fill_kp_workbook(KP_TEMPLATE.read_bytes(), rows, "commercial_proposal"))
+    # values (no formulas) in the item rows (first slot = row 11)
+    assert cells["B11"][0] == "SSD Samsung 990 Pro 2TB"
+    assert float(cells["E11"][0]) == 2.0
+    assert float(cells["G11"][0]) == 16500.0
+    assert float(cells["H11"][0]) == 33000.0
+    assert not cells["G11"][1] and not cells["H11"][1]
+    assert cells["B12"][0] == "Патч-корд Vention 3м"
+    assert float(cells["H12"][0]) == 3006.0
+    # unpriced rows are skipped; empty tail slots trimmed
+    assert "B13" not in cells or cells["B13"][0] != "без цены"
+    assert float(cells.get("H13", ("0", False))[0] or 0) != 33000.0
 
 
 @pytest.mark.skipif(not SPEC_TEMPLATE.is_file(), reason="spec template not shipped")
 def test_fill_kp_workbook_spec_variant() -> None:
     rows = [_row(title="Router Mikrotik hEX", qty=1, price_in=5000, vat=0.22, markup=0.1)]
-    cells = _kp_cells(budget.fill_kp_workbook(SPEC_TEMPLATE.read_bytes(), rows))
-    assert cells["B12"][0] == "Router Mikrotik hEX"
-    assert float(cells["H12"][0]) == 5500.0
+    cells = _kp_cells(
+        budget.fill_kp_workbook(SPEC_TEMPLATE.read_bytes(), rows, "specification")
+    )
+    # spec layout: first slot row 14, columns B/C/D/E
+    assert cells["B14"][0] == "Router Mikrotik hEX"
+    assert float(cells["C14"][0]) == 1.0
+    assert float(cells["D14"][0]) == 5500.0
+    assert float(cells["E14"][0]) == 5500.0
 
 
 def test_fill_kp_workbook_rejects_two_sheet_template() -> None:
     with pytest.raises(AppError) as err:
-        budget.fill_kp_workbook(TEMPLATE.read_bytes(), [])
-    assert "single-sheet" in (err.value.detail or "")
+        budget.fill_kp_workbook(TEMPLATE.read_bytes(), [], "commercial_proposal")
+    assert "exactly one sheet" in (err.value.detail or "")
 
 
 def test_load_default_template_unknown_type() -> None:

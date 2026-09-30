@@ -20,14 +20,14 @@ import json
 import logging
 import re
 import sqlite3
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from datetime import UTC, datetime
-from typing import Any, AsyncIterator, Awaitable, Callable, Iterator
+from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.application.content.tabular_index import index_tabular_bytes
 from prodavan.application.modules.equipment_catalog_search import (
-    CANONICAL_FIELDS,
     apply_column_map,
     is_in_stock,
     parse_price,
@@ -100,7 +100,7 @@ def catalog_os_index_name(row_id: str) -> str:
 
 
 def catalog_doc_id(catalog_id: str, source_row_key: str) -> str:
-    digest = hashlib.sha1(f"{catalog_id}|{source_row_key}".encode("utf-8")).hexdigest()
+    digest = hashlib.sha1(f"{catalog_id}|{source_row_key}".encode()).hexdigest()
     return digest
 
 
@@ -686,9 +686,9 @@ def enqueue_or_run_index_equipment_catalog(
     project_id: str | None = None,
 ) -> dict[str, Any]:
     """Enqueue Celery job or run inline when Celery is disabled."""
+    from prodavan.core.infra.worker_manager import get_worker_manager
     from prodavan.core.jobs import names as job_names
     from prodavan.core.jobs.idempotency import index_equipment_catalog_task_id
-    from prodavan.core.infra.worker_manager import get_worker_manager
 
     mgr = get_worker_manager()
     if mgr is None or not mgr.enabled:

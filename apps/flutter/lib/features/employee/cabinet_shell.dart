@@ -446,7 +446,7 @@ class _CabinetShellState extends State<CabinetShell> {
     final projectName = chat['project_name'] as String? ?? projectId;
     // Selecting a chat in another branch switches the active project first.
     await _syncProjectSelection(projectId);
-    workContext.setSelectedSessionId(sessionId);
+    await workContext.selectChat(cabinetId: widget.cabinetId, sessionId: sessionId);
     final page = ProjectWorkspacePage(
       cabinetId: widget.cabinetId,
       projectId: projectId,
@@ -455,7 +455,7 @@ class _CabinetShellState extends State<CabinetShell> {
       initialTitle: chat['title'] as String?,
       initiallyPinned: chat['pinned'] == true,
       onSessionMaterialized: (sid) async {
-        workContext.setSelectedSessionId(sid);
+        await workContext.selectChat(cabinetId: widget.cabinetId, sessionId: sid);
         await _reloadSidebar();
       },
       onDraftPresenceChanged: _reloadSidebar,
@@ -494,7 +494,7 @@ class _CabinetShellState extends State<CabinetShell> {
         projectName: name,
         sessionId: null,
         onSessionMaterialized: (sid) async {
-          workContext.setSelectedSessionId(sid);
+          await workContext.selectChat(cabinetId: widget.cabinetId, sessionId: sid);
           await _reloadSidebar();
         },
         onDraftPresenceChanged: _reloadSidebar,

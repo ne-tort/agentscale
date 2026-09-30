@@ -66,6 +66,7 @@ class ProjectSelectionBody(BaseModel):
     model_config = {"extra": "forbid"}
 
     project_id: str | None = Field(default=None, max_length=40)
+    chat_session_id: str | None = Field(default=None, max_length=40)
 
 
 @router.get("/{cabinet_id}/me/selection")
@@ -96,9 +97,14 @@ async def put_project_selection(
         from prodavan.domain.errors import AppError
 
         raise AppError(code="FORBIDDEN", title="Forbidden", status=403, detail="employee required")
+    # `chat_session_id` alone (no project_id in the payload) updates the
+    # chat selection without touching the selected project.
+    update_chat = "chat_session_id" in body.model_fields_set
     return await ChatSidebarService(session).set_selection(
         cabinet_id=cabinet_id,
         project_id=body.project_id,
+        chat_session_id=body.chat_session_id,
+        update_chat=update_chat,
         principal=principal,
         employee=employee,
     )
@@ -385,13 +391,20 @@ async def get_cabinet_module_meta(
     session: SessionDep,
     employee: Annotated[EmployeeRow | None, Depends(get_current_employee)] = None,
 ) -> dict:
-    return await CabinetModuleService(session).get_meta_document(
-        cabinet_id=cabinet_id,
-        module_id=module_id,
-        slug=slug,
-        principal=principal,
-        employee=employee,
-    )
+    try:
+        return await CabinetModuleService(session).get_meta_document(
+            cabinet_id=cabinet_id,
+            module_id=module_id,
+            slug=slug,
+            principal=principal,
+            employee=employee,
+        )
+    except Exception as exc:
+        # Modules without MCP tooling have no mcp_tools document - answer with
+        # an empty registry instead of a 404 (UI treats it as "no tools").
+        if slug == "mcp_tools" and getattr(exc, "status_code", None) == 404:
+            return {"slug": "mcp_tools", "body": {"items": []}}
+        raise
 
 
 @router.get("/{cabinet_id}/modules/{module_id}/data/{table_slug}")

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 
 import 'package:prodavan/core/api/prodavan_api.dart';
@@ -68,9 +70,30 @@ class WorkContext extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Selects the active chat AND persists it per employee+cabinet (survives
+  /// reloads, same as the project selection). Errors are ignored here - the
+  /// local selection still applies; callers show their own feedback.
+  Future<void> selectChat({
+    required String cabinetId,
+    required String? sessionId,
+  }) async {
+    setSelectedSessionId(sessionId);
+    if (cabinetId.trim().isNotEmpty) {
+      // Fire-and-forget persistence: keeps the synchronous selection flow
+      // (and the shell's reload pattern) identical to the non-persistent one.
+      unawaited(
+        api.putChatSelection(cabinetId: cabinetId, chatSessionId: sessionId).catchError((_) {
+          return <String, dynamic>{};
+        }),
+      );
+    }
+  }
+
   Future<void> loadProjectSelection(String cabinetId) async {
     final body = await api.getProjectSelection(cabinetId);
     setSelectedProjectId(body['project_id'] as String?);
+    // Restore the persisted active chat (chat-scoped module UI).
+    setSelectedSessionId(body['chat_session_id'] as String?);
   }
 
   Future<void> selectProject({
