@@ -299,7 +299,7 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     assert "Характеристики оборудования" in hub_titles
     assert "Типы комплектующих" in hub_titles
     assert "Сборка" in hub_titles
-    assert "Проверенные продавцы" in hub_titles
+    assert "Поставщики" in hub_titles
     assert "Интернет магазины" in hub_titles
     assert "Бюджетирование" in hub_titles
     assert "S4B" not in hub_titles
@@ -398,10 +398,18 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     sellers_settings = next(
         v for v in meta["views"] if v["slug"] == "trusted_sellers_settings"
     )
-    assert [f["column"] for f in sellers_settings["ui_json"]["fields"]] == [
-        "name",
-        "aliases",
-    ]
+    seller_fields = [f["column"] for f in sellers_settings["ui_json"]["fields"]]
+    assert seller_fields[:2] == ["name", "aliases"]
+    assert {
+        "is_enabled",
+        "is_verified",
+        "payment_deferral",
+        "priority_purchase",
+        "margin_pct",
+        "email",
+        "comment",
+        "inn",
+    } <= set(seller_fields)
 
     shops_list = next(v for v in meta["views"] if v["slug"] == "web_shops_list")
     assert shops_list["ui_json"]["inline_add"]["field"] == "name"

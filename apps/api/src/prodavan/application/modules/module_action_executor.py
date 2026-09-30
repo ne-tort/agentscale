@@ -367,6 +367,7 @@ class ModuleActionExecutor:
         offers_table = str(params.get("offers_table") or "found_offers")
         budget_table = str(params.get("budget_table") or "budget_lines")
         catalogs_table = str(params.get("catalogs_table") or "catalogs")
+        sellers_table = str(params.get("sellers_table") or "trusted_sellers")
 
         lines = await self._list_rows_for_scope(
             cabinet_id=cabinet_id,
@@ -408,6 +409,87 @@ class ModuleActionExecutor:
         except Exception:
             catalogs = []
 
+        try:
+            seller_rows = await self._list_rows_for_scope(
+                cabinet_id=cabinet_id,
+                project_id=project_id,
+                module_id=module_id,
+                table_slug=sellers_table,
+                principal=principal,
+                employee=employee,
+                session_id=session_id,
+            )
+        except Exception:
+            seller_rows = []
+
+        def _alias_tokens(raw: Any) -> list[str]:
+            if isinstance(raw, list):
+                return [str(x).strip() for x in raw if str(x).strip()]
+            if isinstance(raw, str):
+                return [
+                    t.strip()
+                    for t in raw.replace(";", ",").replace("\n", ",").split(",")
+                    if t.strip()
+                ]
+            return []
+
+        # name/alias (case-insensitive) -> seller row entry
+        sellers_by_token: dict[str, dict[str, Any]] = {}
+        for s in seller_rows:
+            if not isinstance(s, dict):
+                continue
+            sbody = s.get("body") or {}
+            sname = str(sbody.get("name") or "").strip()
+            if not sname:
+                continue
+            entry = {"row_id": str(s.get("row_id") or ""), "body": sbody}
+            for tok in [sname] + _alias_tokens(sbody.get("aliases")):
+                sellers_by_token[tok.casefold()] = entry
+
+        sellers_created = 0
+
+        async def _register_seller(name: str) -> dict[str, Any]:
+            """Auto-map a catalog/offer supplier into trusted_sellers (dedup by name/alias)."""
+            nonlocal sellers_created
+            key = name.strip().casefold()
+            if not key:
+                return {}
+            existing = sellers_by_token.get(key)
+            if existing is not None:
+                return existing
+            sbody = {"name": name.strip(), "is_enabled": True}
+            # trusted_sellers scope: chats=all -> shared bucket, no session stamp
+            created = None
+            try:
+                created = await self._modules.create_data_row(
+                    cabinet_id=cabinet_id,
+                    module_id=module_id,
+                    table_slug=sellers_table,
+                    body=sbody,
+                    principal=principal,
+                    employee=employee,
+                    session_id=None,
+                )
+            except Exception:
+                logger.warning(
+                    "budget_sync: seller auto-map failed for %r", name, exc_info=True
+                )
+            if isinstance(created, dict) and created.get("row_id"):
+                entry = {"row_id": str(created["row_id"]), "body": sbody}
+                sellers_by_token[key] = entry
+                sellers_created += 1
+                return entry
+            return {}
+
+        def _seller_markup(name: str) -> float | None:
+            entry = sellers_by_token.get(name.strip().casefold())
+            if not entry:
+                return None
+            raw = entry["body"].get("margin_pct")
+            if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+                return None
+            return float(raw)
+
         catalog_names: dict[str, str] = {}
         for c in catalogs:
             if not isinstance(c, dict):
@@ -448,9 +530,14 @@ class ModuleActionExecutor:
             if not offer:
                 offer = offers_by_line.get(line_id) or {}
 
-            seller = str(catalog_names.get(str(offer.get("catalog_id") or "")) or "").strip()
+            seller = str(offer.get("seller") or "").strip()
+            if not seller:
+                seller = str(catalog_names.get(str(offer.get("catalog_id") or "")) or "").strip()
             if not seller:
                 seller = str(offer.get("brand") or "").strip()
+            if seller:
+                # Auto-map into trusted_sellers (no-op when already known).
+                await _register_seller(seller)
             snapshot = {
                 "line_id": line_id,
                 "title": str(offer.get("title") or line_body.get("title") or "").strip()
@@ -467,7 +554,11 @@ class ModuleActionExecutor:
             if existing is None:
                 body = dict(snapshot)
                 body.setdefault("vat", 0.22)
-                body.setdefault("markup", 0.1)
+                markup = 0.1
+                seller_markup = _seller_markup(seller) if seller else None
+                if seller_markup is not None:
+                    markup = seller_markup
+                body.setdefault("markup", markup)
                 await self._modules.create_data_row(
                     cabinet_id=cabinet_id,
                     module_id=module_id,
@@ -503,6 +594,7 @@ class ModuleActionExecutor:
             "created": created,
             "updated": updated,
             "lines": len(lines),
+            "sellers_created": sellers_created,
         }
 
     async def _budget_export(

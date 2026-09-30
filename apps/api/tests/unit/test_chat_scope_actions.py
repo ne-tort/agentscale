@@ -286,7 +286,15 @@ async def test_budget_sync_scopes_reads_and_stamps_writes(monkeypatch) -> None:
         session_id="ags_123",
     )
     assert out["created"] == 2
-    assert created and all(c["session_id"] == "ags_123" for c in created)
+    # budget rows are stamped with the chat session; trusted_sellers auto-map
+    # rows (chats=all shared table) intentionally stay session-less.
+    assert created and all(
+        c["session_id"] == "ags_123"
+        for c in created
+        if c.get("table_slug") != "trusted_sellers"
+    )
+    seller_creates = [c for c in created if c.get("table_slug") == "trusted_sellers"]
+    assert all(c["session_id"] is None for c in seller_creates)
 
 
 # --------------------------------------------------------------------------

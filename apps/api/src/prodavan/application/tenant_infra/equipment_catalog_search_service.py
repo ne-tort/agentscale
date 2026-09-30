@@ -35,6 +35,36 @@ logger = logging.getLogger(__name__)
 
 _MODULE_ID = "mod_equipment"
 _CATALOGS = "catalogs"
+_SELLERS = "trusted_sellers"
+
+
+def _alias_tokens(raw: Any) -> list[str]:
+    if isinstance(raw, list):
+        return [str(x).strip() for x in raw if str(x).strip()]
+    if isinstance(raw, str):
+        return [
+            t.strip()
+            for t in raw.replace(";", ",").split(",")
+            if t.strip()
+        ]
+    return []
+
+
+def _supplier_sets(rows: list[dict[str, Any]]) -> tuple[set[str], set[str]]:
+    """(disabled, priority) supplier tokens (name + aliases, casefolded)."""
+    disabled: set[str] = set()
+    priority: set[str] = set()
+    for r in rows:
+        body = r.get("body") if isinstance(r.get("body"), dict) else {}
+        name = str(body.get("name") or "").strip()
+        if not name:
+            continue
+        tokens = {name.casefold()} | {t.casefold() for t in _alias_tokens(body.get("aliases"))}
+        if body.get("is_enabled") is False:
+            disabled |= tokens
+        if body.get("priority_purchase") is True:
+            priority |= tokens
+    return disabled, priority
 
 _MATCH_LABELS = {
     MATCH_EXACT_PN: "exact_pn",
@@ -285,7 +315,7 @@ class EquipmentCatalogPodSearchService:
                 "total_returned": 0,
                 "limit": limit,
                 "offset": offset,
-                "sort": ["match_rank", "price_asc"],
+                "sort": ["priority_purchase", "match_rank", "price_asc"],
                 "in_stock_only": in_stock_only,
                 "catalogs": [],
             }
@@ -299,6 +329,36 @@ class EquipmentCatalogPodSearchService:
             in_stock_only=in_stock_only,
             catalog_ids=None,  # already filtered by which indexes we hit
         )
+
+        # Supplier registry: disabled sellers are excluded from the agent's
+        # search (OS filter + post-filter), priority sellers rank first on
+        # exact part-number matches.
+        disabled_sellers: set[str] = set()
+        priority_sellers: set[str] = set()
+        try:
+            inst = await ModuleInstanceService(self._session).resolve_sot_instance(
+                module_id=_MODULE_ID,
+                owner_kind=OWNER_PROJECT,
+                owner_id=project_id,
+            )
+            if inst is not None:
+                seller_rows = await ModuleInstanceService(self._session).list_data_rows(
+                    instance_id=inst.id, table_slug=_SELLERS
+                )
+                disabled_sellers, priority_sellers = _supplier_sets(seller_rows)
+        except Exception:
+            logger.exception("equipment catalog search: seller registry read failed")
+        if disabled_sellers:
+            os_query["bool"]["filter"].append(
+                {
+                    "bool": {
+                        "must_not": [
+                            {"match_phrase": {"supplier": tok}}
+                            for tok in sorted(disabled_sellers)
+                        ]
+                    }
+                }
+            )
         svc = get_search_index_service()
         # Over-fetch per catalog then merge (simple MVP fan-out).
         per = min(max(limit + offset, limit), 200)
@@ -344,6 +404,8 @@ class EquipmentCatalogPodSearchService:
                 price_num = doc.get("price_num")
                 if not isinstance(price_num, (int, float)):
                     price_num = parse_price(values.get("price"))
+                if (values.get("supplier") or "").strip().casefold() in disabled_sellers:
+                    continue
                 in_stock = bool(doc.get("in_stock"))
                 rank = _match_rank(
                     part_number=values["part_number"],
@@ -364,7 +426,13 @@ class EquipmentCatalogPodSearchService:
 
         def _sort_key(h: CatalogHit) -> tuple:
             price_key = h.price_num if h.price_num is not None else float("inf")
-            return (h.match_rank, price_key, h.values.get("title") or "")
+            supplier_cf = (h.values.get("supplier") or "").strip().casefold()
+            priority_key = (
+                0
+                if supplier_cf in priority_sellers and h.match_rank == MATCH_EXACT_PN
+                else 1
+            )
+            return (priority_key, h.match_rank, price_key, h.values.get("title") or "")
 
         hits.sort(key=_sort_key)
         total = len(hits)
@@ -377,7 +445,7 @@ class EquipmentCatalogPodSearchService:
             "total_returned": len(items),
             "limit": limit,
             "offset": offset,
-            "sort": ["match_rank", "price_asc"],
+            "sort": ["priority_purchase", "match_rank", "price_asc"],
             "in_stock_only": in_stock_only,
             "catalogs": [c["id"] for c in catalogs],
         }
