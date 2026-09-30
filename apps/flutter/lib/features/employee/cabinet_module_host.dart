@@ -10,6 +10,7 @@ import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/features/employee/cabinet_nav_loader.dart';
 import 'package:prodavan/features/meta/interpreters/hub_interpreter.dart';
 import 'package:prodavan/features/meta/meta_view_scaffold_page.dart';
+import 'package:prodavan/features/meta/module_scaffold_actions.dart';
 import 'package:prodavan/features/meta/module_meta_manifest.dart';
 import 'package:prodavan/features/meta/runtime/cabinet_data_controller.dart';
 import 'package:prodavan/features/meta/runtime/module_runtime_scope.dart';
@@ -259,6 +260,14 @@ class _CabinetModuleHostState extends State<CabinetModuleHost> {
 
     return AppScaffold(
       title: Text(widget.entry.label),
+      // Module-level AppBar actions (ui_json.scaffold.actions of the tab view,
+      // e.g. budget sync + xlsx/КП/spec export on «Бюджетирование»).
+      actions: buildModuleScaffoldActions(
+        context: context,
+        view: view,
+        seeds: adapter,
+        readOnly: false,
+      ),
       body: body,
     );
   }

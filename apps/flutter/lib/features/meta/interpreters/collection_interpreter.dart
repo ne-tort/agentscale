@@ -20,6 +20,7 @@ import 'package:prodavan/features/meta/runtime/cabinet_data_controller.dart';
 import 'package:prodavan/features/meta/runtime/module_runtime_scope.dart';
 import 'package:prodavan/features/meta/runtime/owner_module_data_controller.dart';
 import 'package:prodavan/features/meta/runtime/runtime_data_adapter.dart';
+import 'package:prodavan/features/meta/module_scaffold_actions.dart';
 import 'package:prodavan/features/meta/widgets/budget_summary_strip.dart';
 import 'package:prodavan/features/meta/widgets/editable_number_cell.dart';
 import 'package:prodavan/features/meta/widgets/file_upload_field.dart';
@@ -158,8 +159,7 @@ class CollectionViewInterpreter extends StatelessWidget {
                 uiJson: uiJson,
                 rows: rawRows,
               ),
-            if (_summary(uiJson) != null && rows.isNotEmpty)
-              _summary(uiJson)!,
+            if (_summary(uiJson) != null) _summary(uiJson)!,
             if (_hasListHeader(uiJson))
               _CollectionListHeader(
                 headerConfig: Map<String, dynamic>.from(uiJson['list_header'] as Map),
@@ -604,7 +604,14 @@ class CollectionViewInterpreter extends StatelessWidget {
               AppLocalizations.of(context).projectWorkspaceDownloaded,
             );
           } else {
-            AppSnackBar.info(context, actionId);
+            AppSnackBar.success(
+              context,
+              moduleActionLabel(
+                context,
+                actionId,
+                manifest.actions,
+              ),
+            );
           }
         }
       } catch (e) {

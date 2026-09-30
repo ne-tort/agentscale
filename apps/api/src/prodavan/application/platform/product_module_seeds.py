@@ -931,8 +931,8 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
             {
                 "slug": "trusted_sellers",
                 "label": {
-                    "ru": "Проверенные продавцы",
-                    "en": "Trusted sellers",
+                    "ru": "Поставщики",
+                    "en": "Suppliers",
                 },
                 "storage_kind": "json_document",
                 "enabled": True,
@@ -1274,6 +1274,13 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
             },
             {
                 "table_slug": "found_offers",
+                "name": "seller",
+                "label": {"ru": "Поставщик", "en": "Supplier"},
+                "type": "text",
+                "required": False,
+            },
+            {
+                "table_slug": "found_offers",
                 "name": "price",
                 "label": {"ru": "Цена", "en": "Price"},
                 "type": "number",
@@ -1465,14 +1472,127 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
             {
                 "table_slug": "trusted_sellers",
                 "name": "name",
-                "label": {"ru": "Название", "en": "Name"},
+                "label": {"ru": "Компания", "en": "Company"},
                 "type": "text",
                 "required": True,
+                "unique": True,
             },
             {
                 "table_slug": "trusted_sellers",
                 "name": "aliases",
                 "label": {"ru": "Алиасы", "en": "Aliases"},
+                "type": "text",
+                "required": False,
+                "default": "",
+                "unique": True,
+            },
+            {
+                "table_slug": "trusted_sellers",
+                "name": "is_verified",
+                "label": {"ru": "Проверен", "en": "Verified"},
+                "type": "bool",
+                "required": False,
+                "default": False,
+            },
+            {
+                "table_slug": "trusted_sellers",
+                "name": "payment_deferral",
+                "label": {"ru": "Отсрочка платежа", "en": "Payment deferral"},
+                "type": "bool",
+                "required": False,
+                "default": False,
+            },
+            {
+                "table_slug": "trusted_sellers",
+                "name": "email",
+                "label": {"ru": "Email", "en": "Email"},
+                "type": "text",
+                "required": False,
+                "default": "",
+            },
+            {
+                "table_slug": "trusted_sellers",
+                "name": "comment",
+                "label": {"ru": "Комментарий", "en": "Comment"},
+                "type": "text",
+                "required": False,
+                "default": "",
+            },
+            {
+                "table_slug": "trusted_sellers",
+                "name": "margin_pct",
+                "label": {"ru": "Маржа %", "en": "Margin %"},
+                "type": "number",
+                "required": False,
+            },
+            {
+                "table_slug": "trusted_sellers",
+                "name": "is_enabled",
+                "label": {"ru": "Включён", "en": "Enabled"},
+                "type": "bool",
+                "required": False,
+                "default": True,
+            },
+            {
+                "table_slug": "trusted_sellers",
+                "name": "priority_purchase",
+                "label": {"ru": "Приоритетная закупка", "en": "Priority purchase"},
+                "type": "bool",
+                "required": False,
+                "default": False,
+            },
+            {
+                "table_slug": "trusted_sellers",
+                "name": "inn",
+                "label": {"ru": "ИНН", "en": "INN"},
+                "type": "text",
+                "required": False,
+                "default": "",
+            },
+            {
+                "table_slug": "trusted_sellers",
+                "name": "kpp",
+                "label": {"ru": "КПП", "en": "KPP"},
+                "type": "text",
+                "required": False,
+                "default": "",
+            },
+            {
+                "table_slug": "trusted_sellers",
+                "name": "legal_address",
+                "label": {"ru": "Юр. адрес", "en": "Legal address"},
+                "type": "text",
+                "required": False,
+                "default": "",
+            },
+            {
+                "table_slug": "trusted_sellers",
+                "name": "bank_name",
+                "label": {"ru": "Банк", "en": "Bank"},
+                "type": "text",
+                "required": False,
+                "default": "",
+            },
+            {
+                "table_slug": "trusted_sellers",
+                "name": "bik",
+                "label": {"ru": "БИК", "en": "BIK"},
+                "type": "text",
+                "required": False,
+                "default": "",
+            },
+            {
+                "table_slug": "trusted_sellers",
+                "name": "bank_account",
+                "label": {"ru": "Счёт", "en": "Account"},
+                "type": "text",
+                "required": False,
+                "default": "",
+            },
+            {
+                "table_slug": "trusted_sellers",
+                "name": "phone",
+                "label": {"ru": "Телефон", "en": "Phone"},
                 "type": "text",
                 "required": False,
                 "default": "",
@@ -1668,8 +1788,8 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "scope": {"active_chat": "required"},
                         },
                         {
-                            "title": "Проверенные продавцы",
-                            "icon": "verified",
+                            "title": "Поставщики",
+                            "icon": "local_shipping",
                             "target": {
                                 "kind": "view",
                                 "view": "trusted_sellers_list",
@@ -1803,8 +1923,14 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "kind": "collection",
                     "scaffold": {
                         "title": {"ru": "Бюджетирование", "en": "Budget"},
-                        # AppBar actions (top-right): budget xlsx / КП PDF / spec PDF.
+                        # AppBar actions (top-right): sync / budget xlsx / КП PDF / spec PDF.
                         "actions": [
+                            {
+                                "kind": "invoke_action",
+                                "action": "budget_sync_lines",
+                                "icon": "sync",
+                                "label": {"ru": "Синхронизировать", "en": "Sync"},
+                            },
                             {
                                 "kind": "invoke_action",
                                 "action": "budget_export",
@@ -1837,14 +1963,6 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     # Totals strip above the table (Flutter-side computation from
                     # the same budget_lines bodies the table renders).
                     "summary": {"kind": "budget_totals"},
-                    "toolbar": [
-                        {
-                            "kind": "invoke_action",
-                            "action": "budget_sync_lines",
-                            "icon": "sync",
-                            "label": {"ru": "Синхронизировать", "en": "Sync"},
-                        },
-                    ],
                     "columns": [
                         {
                             "field": "title",
@@ -2890,20 +3008,49 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "kind": "collection",
                     "scaffold": {
                         "title": {
-                            "ru": "Проверенные продавцы",
-                            "en": "Trusted sellers",
+                            "ru": "Поставщики",
+                            "en": "Suppliers",
                         }
                     },
                     "title_field": "name",
-                    "subtitle_fields": ["aliases"],
+                    "subtitle_fields": ["aliases", "comment"],
                     "columns": [
                         {
                             "field": "name",
-                            "label": {"ru": "Название", "en": "Name"},
+                            "label": {"ru": "Компания", "en": "Company"},
+                            "max_lines": 2,
+                            "max_width": 260,
                         },
                         {
-                            "field": "aliases",
-                            "label": {"ru": "Алиасы", "en": "Aliases"},
+                            "field": "is_verified",
+                            "label": {"ru": "Проверен", "en": "Verified"},
+                            "format": "bool_yes_no",
+                            "max_width": 90,
+                        },
+                        {
+                            "field": "payment_deferral",
+                            "label": {"ru": "Отсрочка", "en": "Deferral"},
+                            "format": "bool_yes_no",
+                            "max_width": 90,
+                        },
+                        {
+                            "field": "email",
+                            "label": {"ru": "Email", "en": "Email"},
+                            "max_lines": 2,
+                            "max_width": 180,
+                        },
+                        {
+                            "field": "comment",
+                            "label": {"ru": "Комментарий", "en": "Comment"},
+                            "max_lines": 3,
+                            "max_width": 260,
+                        },
+                    ],
+                    # Disabled suppliers stay visible but highlighted (warning).
+                    "row_style": [
+                        {
+                            "when": {"field": "is_enabled", "eq": False},
+                            "accent": "warning",
                         },
                     ],
                     "row_tap": {
@@ -2912,12 +3059,12 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     },
                     "inline_add": {
                         "field": "name",
-                        "title": "Добавить продавца",
+                        "title": "Добавить поставщика",
                     },
                     "empty": _empty(
-                        "Нет продавцов",
-                        "No sellers",
-                        icon="verified",
+                        "Нет поставщиков",
+                        "No suppliers",
+                        icon="local_shipping",
                     ),
                 },
             },
@@ -2930,8 +3077,8 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "kind": "detail",
                     "mode": "edit",
                     "title": {
-                        "ru": "Продавец",
-                        "en": "Seller",
+                        "ru": "Поставщик",
+                        "en": "Supplier",
                     },
                     "fields": [
                         {
@@ -2943,6 +3090,76 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "column": "aliases",
                             "widget": "value",
                             "icon": "alternate_email",
+                        },
+                        {
+                            "column": "is_enabled",
+                            "widget": "switch",
+                            "icon": "toggle_on",
+                        },
+                        {
+                            "column": "is_verified",
+                            "widget": "switch",
+                            "icon": "verified",
+                        },
+                        {
+                            "column": "payment_deferral",
+                            "widget": "switch",
+                            "icon": "schedule",
+                        },
+                        {
+                            "column": "priority_purchase",
+                            "widget": "switch",
+                            "icon": "star",
+                        },
+                        {
+                            "column": "margin_pct",
+                            "widget": "number",
+                            "icon": "percent",
+                        },
+                        {
+                            "column": "email",
+                            "widget": "text",
+                            "icon": "email",
+                        },
+                        {
+                            "column": "phone",
+                            "widget": "text",
+                            "icon": "phone",
+                        },
+                        {
+                            "column": "comment",
+                            "widget": "text",
+                            "icon": "notes",
+                        },
+                        {
+                            "column": "inn",
+                            "widget": "text",
+                            "icon": "badge",
+                        },
+                        {
+                            "column": "kpp",
+                            "widget": "text",
+                            "icon": "badge",
+                        },
+                        {
+                            "column": "legal_address",
+                            "widget": "text",
+                            "icon": "location_on",
+                        },
+                        {
+                            "column": "bank_name",
+                            "widget": "text",
+                            "icon": "account_balance",
+                        },
+                        {
+                            "column": "bik",
+                            "widget": "text",
+                            "icon": "tag",
+                        },
+                        {
+                            "column": "bank_account",
+                            "widget": "text",
+                            "icon": "credit_card",
                         },
                     ],
                 },
@@ -3131,7 +3348,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "budget_table": "budget_lines",
                 },
                 "trigger": {"on": ["row.created", "row.updated"], "async": True},
-                "ui": {"placement": ["toolbar"], "icon": "sync"},
+                "ui": {"placement": ["scaffold"], "icon": "sync"},
             },
             {
                 "id": "budget_export",

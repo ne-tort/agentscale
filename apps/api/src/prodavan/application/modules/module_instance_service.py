@@ -622,6 +622,13 @@ class ModuleInstanceService:
         )
         row = q.scalar_one_or_none()
         body_out = dict(body)
+        if created_by != "module_seed":
+            await self._enforce_unique_columns(
+                instance_id=instance_id,
+                table_slug=table_slug,
+                row_id=row_id,
+                body=body_out,
+            )
         effective_session = session_id
         if effective_session is None and isinstance(body_out.get("session_id"), str):
             effective_session = str(body_out["session_id"]).strip() or None
@@ -684,6 +691,79 @@ class ModuleInstanceService:
             created_by=created_by,
             session_id=session_id,
         )
+
+    async def _enforce_unique_columns(
+        self,
+        *,
+        instance_id: str,
+        table_slug: str,
+        row_id: str,
+        body: dict[str, Any],
+    ) -> None:
+        """Reject duplicate values for columns marked ``unique: true``.
+
+        Text columns are compared case-insensitively as whole values;
+        comma/semicolon-separated lists (aliases) are compared token-wise so
+        two suppliers can never share a name or alias. Seed provenance rows
+        (``module_seed``) bypass the check.
+        """
+        # Best-effort guard: when the instance/columns meta cannot be resolved
+        # the write proceeds (clash detection below still raises ROW_VALIDATION).
+        try:
+            inst = await self._session.get(ModuleInstanceRow, instance_id)
+            if inst is None:
+                return
+            cols = await self.resolve_columns_body(
+                instance_id=instance_id, module_id=inst.module_id
+            )
+        except Exception:
+            return
+        if not isinstance(cols, list):
+            return
+        unique_cols = [
+            str(c.get("name"))
+            for c in cols
+            if isinstance(c, dict)
+            and c.get("table_slug") == table_slug
+            and c.get("unique") is True
+            and c.get("name")
+        ]
+        if not unique_cols:
+            return
+
+        def _tokens(value: Any) -> set[str]:
+            if isinstance(value, list):
+                raw_tokens = [str(x).strip() for x in value]
+            elif isinstance(value, str):
+                raw_tokens = value.replace(";", ",").split(",")
+            elif value is None:
+                raw_tokens = []
+            else:
+                raw_tokens = [str(value).strip()]
+            return {t.casefold() for t in raw_tokens if t}
+
+        incoming: dict[str, set[str]] = {
+            name: _tokens(body.get(name)) for name in unique_cols
+        }
+        if not any(incoming.values()):
+            return
+        rows = await self.list_all_data_rows(instance_id=instance_id)
+        for other in rows:
+            if other.table_slug != table_slug or other.row_id == row_id:
+                continue
+            other_body = other.body if isinstance(other.body, dict) else {}
+            for name, values in incoming.items():
+                clash = values & _tokens(other_body.get(name))
+                if clash:
+                    raise AppError(
+                        code="ROW_VALIDATION",
+                        title="Row validation error",
+                        status=422,
+                        detail=(
+                            f"duplicate value for field {name}: "
+                            f"{sorted(clash)[0]!r} is already used by another row"
+                        ),
+                    )
 
     async def delete_data_row(self, *, instance_id: str, table_slug: str, row_id: str) -> bool:
         q = await self._session.execute(

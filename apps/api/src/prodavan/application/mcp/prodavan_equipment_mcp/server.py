@@ -188,7 +188,8 @@ TOOLS: list[dict[str, Any]] = [
             "source_title is auto-filled from that request line's title; "
             "do NOT put catalog names (s4b, source_catalog) into source_title or line_id. "
             "Copy from catalog search when present: part_number, brand, price, "
-            "catalog_id; match_kind=exact if match_rank=exact_pn else analog; "
+            "seller (supplier), catalog_id; "
+            "match_kind=exact if match_rank=exact_pn else analog; "
             "score optional (e.g. match_rank_order). "
             "PATCH merges: omit = leave; null = clear. "
             "Optional: is_selected, project_ids. "
@@ -206,6 +207,13 @@ TOOLS: list[dict[str, Any]] = [
                 },
                 "part_number": {"type": ["string", "null"]},
                 "brand": {"type": ["string", "null"]},
+                "seller": {
+                    "type": ["string", "null"],
+                    "description": (
+                        "Supplier company name from catalog search (supplier field). "
+                        "Used for supplier registry, margin defaults and priority."
+                    ),
+                },
                 "price": {"type": ["number", "integer", "null"]},
                 "score": {"type": ["number", "integer", "null"]},
                 "match_kind": {
@@ -475,6 +483,7 @@ def _call_tool(name: str, arguments: dict[str, Any]) -> Any:
             "line_id",
             "part_number",
             "brand",
+            "seller",
             "price",
             "score",
             "match_kind",
