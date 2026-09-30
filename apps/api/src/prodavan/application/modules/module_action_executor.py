@@ -94,6 +94,7 @@ class ModuleActionExecutor:
         employee: EmployeeRow | None,
         row_id: str | None = None,
         project_id: str | None = None,
+        session_id: str | None = None,
     ) -> dict[str, Any]:
         action = await self._load_action(module_id=module_id, action_id=action_id)
         if action.get("enabled") is False:
@@ -256,6 +257,7 @@ class ModuleActionExecutor:
                 principal=principal,
                 employee=employee,
                 project_id=project_id,
+                session_id=session_id,
             )
 
         if kind == "equipment.budget_export":
@@ -338,6 +340,7 @@ class ModuleActionExecutor:
         principal: Principal,
         employee: EmployeeRow | None,
         project_id: str | None = None,
+        session_id: str | None = None,
     ) -> dict[str, Any]:
         """Sync budget_lines rows from request_lines + their selected offers.
 
@@ -1007,6 +1010,7 @@ class ModuleActionExecutor:
         owner_kind: str | None = None,
         owner_id: str | None = None,
         run_actions: bool = False,
+        session_id: str | None = None,
     ) -> dict[str, Any]:
         if owner_kind and owner_id:
             from prodavan.application.modules.owner_module_data_service import (
@@ -1032,6 +1036,7 @@ class ModuleActionExecutor:
             principal=principal,
             employee=employee,
             run_actions=run_actions,
+            session_id=session_id,
         )
 
     async def _select_row(
