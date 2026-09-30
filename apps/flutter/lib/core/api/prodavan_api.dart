@@ -791,6 +791,9 @@ class ProdavanApi {
   }) async {
     var uri = _uri('/content/assets/$assetId/download');
     final params = <String, String>{
+      // Stream through the API: presigned blob URLs point at in-cluster DNS
+      // (dev: prodavan-minio:9000) which desktop clients cannot resolve.
+      'proxy': '1',
       if (versionId != null && versionId.isNotEmpty) 'version_id': versionId,
       if (blobVersionId != null && blobVersionId.isNotEmpty)
         'blob_version_id': blobVersionId,

@@ -88,8 +88,8 @@ class ReplaceAclBody(BaseModel):
     entries: list[AclEntryBody]
 
 
-async def _download_response(target) -> Response:
-    if target.url:
+async def _download_response(target, *, proxy: bool = False) -> Response:
+    if target.url and not proxy:
         return RedirectResponse(url=target.url, status_code=302)
     assert target.storage_key is not None
     raw = await ensure_file_store().get_bytes(target.storage_key)
@@ -214,6 +214,7 @@ async def download_asset(
     session: SessionDep,
     employee: Annotated[EmployeeRow | None, Depends(get_current_employee)] = None,
     blob_version_id: str | None = Query(default=None),
+    proxy: bool = Query(default=False),
 ) -> Response:
     target = await DownloadService(session).presign_asset(
         asset_id=asset_id,
@@ -221,7 +222,11 @@ async def download_asset(
         employee=employee,
         blob_version_id=blob_version_id,
     )
-    return await _download_response(target)
+    # ``proxy=1``: stream the bytes through the API instead of the 302 to the
+    # presigned blob URL. Desktop/mobile clients outside the cluster cannot
+    # resolve the in-cluster object-store DNS (dev: prodavan-minio:9000), so
+    # module-export downloads (budget xlsx / КП PDF) use this mode.
+    return await _download_response(target, proxy=proxy)
 
 
 @router.get("/aliases")
