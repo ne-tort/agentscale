@@ -133,6 +133,7 @@ class ModuleActionExecutor:
                 body=body,
                 principal=principal,
                 employee=employee,
+                session_id=session_id,
             )
             return {"kind": kind, "row": row}
 
@@ -159,6 +160,7 @@ class ModuleActionExecutor:
                 row_id=row_id,
                 principal=principal,
                 employee=employee,
+                session_id=session_id,
             )
             return {"kind": kind, "deleted_row_id": row_id}
 
@@ -170,6 +172,7 @@ class ModuleActionExecutor:
                 row_id=row_id,
                 principal=principal,
                 employee=employee,
+                session_id=session_id,
             )
 
         if kind == "content.index_tabular":
@@ -268,6 +271,7 @@ class ModuleActionExecutor:
                 principal=principal,
                 employee=employee,
                 project_id=project_id,
+                session_id=session_id,
             )
 
         raise AppError(
@@ -359,6 +363,7 @@ class ModuleActionExecutor:
             table_slug=lines_table,
             principal=principal,
             employee=employee,
+            session_id=session_id,
         )
         offers = await self._list_rows_for_scope(
             cabinet_id=cabinet_id,
@@ -367,6 +372,7 @@ class ModuleActionExecutor:
             table_slug=offers_table,
             principal=principal,
             employee=employee,
+            session_id=session_id,
         )
         budget_rows = await self._list_rows_for_scope(
             cabinet_id=cabinet_id,
@@ -375,6 +381,7 @@ class ModuleActionExecutor:
             table_slug=budget_table,
             principal=principal,
             employee=employee,
+            session_id=session_id,
         )
         try:
             catalogs = await self._list_rows_for_scope(
@@ -384,6 +391,7 @@ class ModuleActionExecutor:
                 table_slug=catalogs_table,
                 principal=principal,
                 employee=employee,
+                session_id=session_id,
             )
         except Exception:
             catalogs = []
@@ -455,6 +463,7 @@ class ModuleActionExecutor:
                     body=body,
                     principal=principal,
                     employee=employee,
+                    session_id=session_id,
                 )
                 created += 1
                 continue
@@ -473,6 +482,7 @@ class ModuleActionExecutor:
                 principal=principal,
                 employee=employee,
                 run_actions=False,
+                session_id=session_id,
             )
             updated += 1
 
@@ -492,6 +502,7 @@ class ModuleActionExecutor:
         principal: Principal,
         employee: EmployeeRow | None,
         project_id: str | None = None,
+        session_id: str | None = None,
     ) -> dict[str, Any]:
         """Export budget rows as the filled Commerce КП xlsx template."""
         from prodavan.application.documents.service import DocumentsService
@@ -508,6 +519,7 @@ class ModuleActionExecutor:
             table_slug=budget_table,
             principal=principal,
             employee=employee,
+            session_id=session_id,
         )
         bodies = [r.get("body") or {} for r in rows if isinstance(r, dict)]
         if not bodies:
@@ -552,8 +564,13 @@ class ModuleActionExecutor:
         principal: Principal,
         employee: EmployeeRow | None,
         project_id: str | None = None,
+        session_id: str | None = None,
     ) -> None:
-        """Best-effort: equipment.budget_sync after request_lines/found_offers writes."""
+        """Best-effort: equipment.budget_sync after request_lines/found_offers writes.
+
+        ``session_id`` scopes source reads and stamps budget rows with the chat
+        session of the triggering write (None -> shared 'main' bucket).
+        """
         try:
             matched_params: dict[str, Any] | None = None
             for action in await self._list_actions(module_id=module_id):
@@ -583,6 +600,7 @@ class ModuleActionExecutor:
                 principal=principal,
                 employee=employee,
                 project_id=project_id,
+                session_id=session_id,
             )
         except AppError:
             raise
@@ -600,6 +618,7 @@ class ModuleActionExecutor:
         employee: EmployeeRow | None,
         project_id: str | None = None,
         previous_body: dict[str, Any] | None = None,
+        session_id: str | None = None,
     ) -> None:
         """Best-effort: run content.index_tabular actions matching table after row write."""
         for action in await self._list_actions(module_id=module_id):
@@ -623,6 +642,7 @@ class ModuleActionExecutor:
                 table_slug=table_slug,
                 principal=principal,
                 employee=employee,
+                session_id=session_id,
             )
             target = next((r for r in rows if str(r.get("row_id")) == row_id), None)
             if target is None:
@@ -904,6 +924,7 @@ class ModuleActionExecutor:
         principal: Principal,
         employee: EmployeeRow | None,
         project_id: str | None = None,
+        session_id: str | None = None,
     ) -> list[dict[str, Any]]:
         if project_id:
             from prodavan.application.projects.project_runtime_module_service import (
@@ -916,6 +937,7 @@ class ModuleActionExecutor:
                 table_slug=table_slug,
                 principal=principal,
                 employee=employee,
+                session_id=session_id,
             )
         return await self._modules.list_data_rows(
             cabinet_id=cabinet_id,
@@ -923,6 +945,7 @@ class ModuleActionExecutor:
             table_slug=table_slug,
             principal=principal,
             employee=employee,
+            session_id=session_id,
         )
 
     async def _list_rows_for_scope(
@@ -936,6 +959,7 @@ class ModuleActionExecutor:
         project_id: str | None = None,
         owner_kind: str | None = None,
         owner_id: str | None = None,
+        session_id: str | None = None,
     ) -> list[dict[str, Any]]:
         if owner_kind and owner_id:
             from prodavan.application.modules.owner_module_data_service import (
@@ -955,6 +979,7 @@ class ModuleActionExecutor:
             table_slug=table_slug,
             principal=principal,
             employee=employee,
+            session_id=session_id,
         )
 
     async def _update_module_row(
@@ -969,6 +994,7 @@ class ModuleActionExecutor:
         employee: EmployeeRow | None,
         project_id: str | None = None,
         run_actions: bool = False,
+        session_id: str | None = None,
     ) -> dict[str, Any]:
         if project_id:
             from prodavan.application.projects.project_runtime_module_service import (
@@ -984,6 +1010,7 @@ class ModuleActionExecutor:
                 principal=principal,
                 employee=employee,
                 run_actions=run_actions,
+                session_id=session_id,
             )
         return await self._modules.update_data_row(
             cabinet_id=cabinet_id,
@@ -994,6 +1021,7 @@ class ModuleActionExecutor:
             principal=principal,
             employee=employee,
             run_actions=run_actions,
+            session_id=session_id,
         )
 
     async def _update_row_for_scope(
@@ -1048,6 +1076,7 @@ class ModuleActionExecutor:
         row_id: str | None,
         principal: Principal,
         employee: EmployeeRow | None,
+        session_id: str | None = None,
     ) -> dict[str, Any]:
         table_slug = params.get("table_slug")
         select_field = str(params.get("select_field") or "is_selected")
@@ -1080,6 +1109,7 @@ class ModuleActionExecutor:
             table_slug=table_slug,
             principal=principal,
             employee=employee,
+            session_id=session_id,
         )
         target = next((r for r in rows if str(r.get("row_id")) == row_id), None)
         if target is None:
@@ -1105,6 +1135,7 @@ class ModuleActionExecutor:
                 principal=principal,
                 employee=employee,
                 run_actions=False,
+                session_id=session_id,
             )
             updated += 1
 
@@ -1121,6 +1152,7 @@ class ModuleActionExecutor:
                     table_slug=parent_table,
                     principal=principal,
                     employee=employee,
+                    session_id=session_id,
                 )
                 for prow in parent_rows:
                     if str(prow.get("row_id")) == str(parent_id):
@@ -1136,6 +1168,7 @@ class ModuleActionExecutor:
                             principal=principal,
                             employee=employee,
                             run_actions=False,
+                            session_id=session_id,
                         )
                         break
 
@@ -1147,6 +1180,7 @@ class ModuleActionExecutor:
             table_slug=table_slug,
             principal=principal,
             employee=employee,
+            session_id=session_id,
         )
         return {"kind": "data.select_row", "row_id": row_id, "updated": updated}
 

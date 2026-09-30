@@ -316,6 +316,7 @@ class ProjectRuntimeModuleService:
                     row_id=row_id,
                     principal=principal,
                     employee=employee,
+                    session_id=stamp_sid,
                 )
             except AppError as exc:
                 action_error = exc
@@ -434,6 +435,7 @@ class ProjectRuntimeModuleService:
                         if isinstance(existing.get("body"), dict)
                         else None
                     ),
+                    session_id=stamp_sid,
                 )
             except AppError as exc:
                 action_error = exc
@@ -527,6 +529,7 @@ class ProjectRuntimeModuleService:
         principal: Principal,
         employee: EmployeeRow | None,
         previous_body: dict | None = None,
+        session_id: str | None = None,
     ) -> None:
         if not row_id:
             return
@@ -541,6 +544,7 @@ class ProjectRuntimeModuleService:
             principal=principal,
             employee=employee,
             previous_body=previous_body,
+            session_id=session_id,
         )
         await ModuleActionExecutor(self._session).maybe_auto_budget_sync(
             cabinet_id=cabinet_id,
@@ -549,4 +553,5 @@ class ProjectRuntimeModuleService:
             table_slug=table_slug,
             principal=principal,
             employee=employee,
+            session_id=session_id,
         )

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -35,6 +36,8 @@ from prodavan.domain.identity import ROLE_PLATFORM_ADMIN, Principal
 from prodavan.domain.modules import ModuleBindKind
 from prodavan.infrastructure.persistence.models.modules import ModuleRow
 from prodavan.infrastructure.persistence.models.projects import ProjectRow
+
+logger = logging.getLogger(__name__)
 
 # Alias kept for existing imports / tests.
 PodModuleAccessService = None  # set below after class def
@@ -72,6 +75,58 @@ class PodModuleDataService:
 
     def _require_module_actions(self, bridge: PodBridgeClaims, module_id: str) -> None:
         bridge.require_scope(module_actions_scope(module_id))
+
+    async def _maybe_run_row_actions(
+        self,
+        *,
+        bridge: PodBridgeClaims,
+        cabinet_id: str,
+        project_id: str,
+        module_id: str,
+        table_slug: str,
+        row_id: str,
+        session_id: str | None = None,
+        previous_body: dict[str, Any] | None = None,
+    ) -> None:
+        """Best-effort auto-actions (equipment.budget_sync) after a bridge write.
+
+        Mirrors the employee contour: agent-written request_lines/found_offers
+        rows produce chat-scoped budget rows, same as manual UI writes.
+        """
+        from prodavan.application.modules.module_action_executor import ModuleActionExecutor
+
+        principal = self._pod_principal(bridge)
+        executor = ModuleActionExecutor(self._session)
+        try:
+            await executor.maybe_auto_index_tabular(
+                cabinet_id=cabinet_id,
+                project_id=project_id,
+                module_id=module_id,
+                table_slug=table_slug,
+                row_id=row_id,
+                principal=principal,
+                employee=None,
+                previous_body=previous_body,
+                session_id=session_id,
+            )
+        except Exception:
+            logger.exception(
+                "pod auto index failed module=%s table=%s", module_id, table_slug
+            )
+        try:
+            await executor.maybe_auto_budget_sync(
+                cabinet_id=cabinet_id,
+                project_id=project_id,
+                module_id=module_id,
+                table_slug=table_slug,
+                principal=principal,
+                employee=None,
+                session_id=session_id,
+            )
+        except Exception:
+            logger.exception(
+                "pod auto budget sync failed module=%s table=%s", module_id, table_slug
+            )
 
     def _pod_principal(self, bridge: PodBridgeClaims) -> Principal:
         """Privileged principal for nested ModuleActionExecutor after Bridge ACL."""
@@ -313,6 +368,30 @@ class PodModuleDataService:
             session_id=stamp_sid,
         )
         await self._session.commit()
+        row_id = str(row.get("row_id") or "")
+        if row_id:
+            try:
+                await self._maybe_run_row_actions(
+                    bridge=bridge,
+                    cabinet_id=project.cabinet_id,
+                    project_id=project_id,
+                    module_id=module_id,
+                    table_slug=table_slug,
+                    row_id=row_id,
+                    session_id=stamp_sid,
+                )
+                refreshed = await self._instances.get_data_row(
+                    instance_id=inst.id, table_slug=table_slug, row_id=row_id
+                )
+                if refreshed is not None:
+                    row = refreshed
+            except Exception:
+                logger.exception(
+                    "pod module row actions failed project=%s module=%s table=%s",
+                    project_id,
+                    module_id,
+                    table_slug,
+                )
         return {"module_id": module_id, "instance_id": inst.id, **row}
 
     async def update_data_row(
@@ -372,6 +451,33 @@ class PodModuleDataService:
             session_id=stamp_sid,
         )
         await self._session.commit()
+        try:
+            await self._maybe_run_row_actions(
+                bridge=bridge,
+                cabinet_id=project.cabinet_id,
+                project_id=project_id,
+                module_id=module_id,
+                table_slug=table_slug,
+                row_id=row_id,
+                session_id=stamp_sid,
+                previous_body=(
+                    existing.get("body")
+                    if isinstance(existing.get("body"), dict)
+                    else None
+                ),
+            )
+            refreshed = await self._instances.get_data_row(
+                instance_id=inst.id, table_slug=table_slug, row_id=row_id
+            )
+            if refreshed is not None:
+                row = refreshed
+        except Exception:
+            logger.exception(
+                "pod module row actions failed project=%s module=%s table=%s",
+                project_id,
+                module_id,
+                table_slug,
+            )
         return {"module_id": module_id, "instance_id": inst.id, **row}
 
     async def delete_data_row(
