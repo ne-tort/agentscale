@@ -47,6 +47,8 @@ SELLER_NOT_FOUND = "Не найден"
 
 BUDGET_SHEET_PART = "xl/worksheets/sheet1.xml"
 KP_SHEET_PART = "xl/worksheets/sheet2.xml"
+# Third sheet (Спецификация) exists in the 3-sheet budget template.
+SPEC_SHEET_PART = "xl/worksheets/sheet3.xml"
 DRAWING_PART = "xl/drawings/drawing1.xml"
 
 BUDGET_MONEY_COL_WIDTHS = {6: 13.5, 8: 14.5, 12: 14.0, 13: 14.5}  # F H L M
@@ -66,10 +68,26 @@ TEMPLATE_TYPES: dict[str, str] = {
 
 # КП/spec item columns (rows 12..111): values written directly, formulas
 # (if any) are replaced — the standalone templates have none by contract.
-KP_ITEM_TEXT_COLS = ("B",)
-KP_ITEM_NUMBER_COLS = ("E", "G", "H")
+# Standalone item layouts: first slot row + text/qty/price/total columns
+# + slot count. КП: rows 11..110 (B/E/G/H); Спецификация: rows 14..113
+# (B/C/D/E) — derived from the user's template sheets.
+@dataclass(frozen=True)
+class KpItemLayout:
+    first_row: int
+    slots: int
+    text_col: str
+    qty_col: str
+    price_col: str
+    total_col: str
 
-_BUDGET_REF = re.compile(r"Бюджетирование!\$?([A-Z]+)\$?(\d+)")
+
+TEMPLATE_LAYOUTS: dict[str, KpItemLayout] = {
+    "commercial_proposal": KpItemLayout(11, 100, "B", "E", "G", "H"),
+    "specification": KpItemLayout(14, 100, "B", "C", "D", "E"),
+}
+
+# Quoted sheet refs are also valid: 'Бюджетирование'!$D$7.
+_BUDGET_REF = re.compile(r"'?Бюджетирование'?!\$?([A-Z]+)\$?(\d+)")
 _CELL_REF = re.compile(r"([A-Z]+)(\d+)")
 
 
@@ -255,10 +273,39 @@ def _shift_addr(addr: str, *, first_empty: int, last_slot: int, delta: int) -> s
     return ":".join(out)
 
 
-def _trim_kp_rows(root: ET.Element, *, n_items: int) -> bool:
+def _slot_range(root: ET.Element) -> tuple[int, int] | None:
+    """Actual xref-formula item slot range (first, last) found in the sheet."""
+    first: int | None = None
+    last: int | None = None
+    for row in root.iter(xpatch._q("row")):
+        for c in row.iter(xpatch._q("c")):
+            f = c.find(xpatch._q("f"))
+            if f is not None and _BUDGET_REF.search(f.text or ""):
+                r = int(row.get("r") or 0)
+                first = r if first is None else first
+                last = r
+                break
+    if first is None or last is None:
+        return None
+    return first, last
+
+
+def _trim_kp_rows(
+    root: ET.Element,
+    *,
+    n_items: int,
+    first_row: int | None = None,
+    last_row: int | None = None,
+) -> bool:
     """Delete empty КП item rows and shift everything below up. True if trimmed."""
-    first_empty = KP_DATA_START + n_items
-    last_slot = KP_ITEM_TEMPLATE_LAST
+    if first_row is None or last_row is None:
+        detected = _slot_range(root)
+        if detected is None:
+            first_row, last_row = KP_DATA_START, KP_ITEM_TEMPLATE_LAST
+        else:
+            first_row, last_row = detected
+    first_empty = first_row + n_items
+    last_slot = last_row
     if n_items <= 0 or first_empty > last_slot:
         return False
     delta = last_slot - first_empty + 1
@@ -353,6 +400,15 @@ def _patch_kp_sheet(xml: bytes, model: BudgetFillModel) -> bytes:
     return xpatch.dumps_sml(root)
 
 
+def _patch_ref_sheet(xml: bytes, model: BudgetFillModel) -> bytes:
+    """Formula-linked sheet in the 3-sheet budget template."""
+    root = ET.fromstring(xml)
+    trimmed = _trim_kp_rows(root, n_items=model.n_items)
+    _refresh_kp_formula_cells(root, model)
+    _ = trimmed
+    return xpatch.dumps_sml(root)
+
+
 def _shift_drawing_rows(xml: bytes, n_items: int) -> bytes:
     """Shift stamp/logo anchors up so they do not «float» after the trim."""
     first_empty = KP_DATA_START + n_items
@@ -384,12 +440,15 @@ def fill_budget_workbook(
     with zipfile.ZipFile(io.BytesIO(template_bytes), "r") as z:
         sheet1 = z.read(BUDGET_SHEET_PART)
         sheet2 = z.read(KP_SHEET_PART)
+        spec = z.read(SPEC_SHEET_PART) if SPEC_SHEET_PART in z.namelist() else None
         drawing = z.read(DRAWING_PART) if DRAWING_PART in z.namelist() else None
 
     updates = {
         BUDGET_SHEET_PART: _patch_budget_sheet(sheet1, model),
         KP_SHEET_PART: _patch_kp_sheet(sheet2, model),
     }
+    if spec is not None:
+        updates[SPEC_SHEET_PART] = _patch_ref_sheet(spec, model)
     if drawing is not None:
         updates[DRAWING_PART] = _shift_drawing_rows(drawing, model.n_items)
     return xpatch.rewrite_xlsx_bytes(template_bytes, updates)
@@ -446,7 +505,7 @@ def load_default_template(template_type: str) -> bytes:
 
 @dataclass(slots=True)
 class KpRowFill:
-    """One КП/Спецификация item row: B=name, E=qty, G=price_out, H=sum."""
+    """One item row (column set per [KpItemLayout])."""
 
     row: int
     title: str
@@ -455,12 +514,16 @@ class KpRowFill:
     total: float
 
 
-def build_kp_fill(rows: list[dict[str, Any]] | None) -> list[KpRowFill]:
-    """Value model for the standalone КП/Спецификация sheet (rows 12..111)."""
+def build_kp_fill(
+    rows: list[dict[str, Any]] | None,
+    layout: KpItemLayout | None = None,
+) -> list[KpRowFill]:
+    """Value model for the standalone КП/Спецификация sheet."""
+    lay = layout or TEMPLATE_LAYOUTS["commercial_proposal"]
     fills: list[KpRowFill] = []
     for raw in rows or []:
-        if len(fills) >= BUDGET_TEMPLATE_ROWS:
-            break  # 100 item slots (12..111) in the layout contract
+        if len(fills) >= lay.slots:
+            break  # item slots in the layout contract
         body = raw if isinstance(raw, dict) else {}
         price_in = _num_or(body.get("price_in"), 0)
         if price_in <= 0:
@@ -470,7 +533,7 @@ def build_kp_fill(rows: list[dict[str, Any]] | None) -> list[KpRowFill]:
         price_out = round(price_in * (1 + markup), 2)
         fills.append(
             KpRowFill(
-                row=KP_DATA_START + len(fills),
+                row=lay.first_row + len(fills),
                 title=_str_or(body.get("title")) or TITLE_NOT_FOUND,
                 qty=qty,
                 price_out=price_out,
@@ -480,10 +543,91 @@ def build_kp_fill(rows: list[dict[str, Any]] | None) -> list[KpRowFill]:
     return fills
 
 
-def _patch_kp_values_sheet(xml: bytes, fills: list[KpRowFill]) -> bytes:
-    """Write КП item values (replacing formulas when present) + trim tail rows."""
+def _shift_rows_down(root: ET.Element, after_row: int, delta: int) -> None:
+    """Shift all rows/cells/merges below [after_row] down by delta."""
+    sd = root.find(xpatch._q("sheetData"))
+    if sd is None:
+        return
+    for row in list(sd):
+        r = int(row.get("r") or 0)
+        if r <= after_row:
+            continue
+        row.set("r", str(r + delta))
+        for cell in row.findall(xpatch._q("c")):
+            ref = cell.get("r") or ""
+            mm = _CELL_REF.fullmatch(ref)
+            if mm:
+                cell.set("r", f"{mm.group(1)}{int(mm.group(2)) + delta}")
+    merges = root.find(xpatch._q("mergeCells"))
+    if merges is not None:
+        for mc in list(merges):
+            parts = (mc.get("ref") or "").split(":")
+            out = []
+            ok = True
+            for part in parts:
+                mm = _CELL_REF.fullmatch(part)
+                if mm and int(mm.group(2)) > after_row:
+                    out.append(f"{mm.group(1)}{int(mm.group(2)) + delta}")
+                elif mm:
+                    out.append(part)
+                else:
+                    ok = False
+                    break
+            if ok:
+                mc.set("ref", ":".join(out))
+
+
+def _extend_slots(root: ET.Element, first: int, last: int, need: int) -> int:
+    """Clone slot rows so [first..] covers `need` items. Returns the new last."""
+    sd = root.find(xpatch._q("sheetData"))
+    if sd is None:
+        return last
+    rows = {int(r.get("r")): r for r in sd.findall(xpatch._q("row"))}
+    template_row = rows.get(last)
+    if template_row is None:
+        return last
+    existing = last - first + 1
+    if need <= existing:
+        return last
+    delta = need - existing
+    _shift_rows_down(root, last, delta)
+    prev = template_row
+    for i in range(existing, need):
+        new_r = first + i
+        clone = ET.fromstring(ET.tostring(template_row))
+        shift = new_r - last
+        clone.set("r", str(new_r))
+        for c in clone.iter(xpatch._q("c")):
+            ref = c.get("r") or ""
+            mm = _CELL_REF.fullmatch(ref)
+            if mm:
+                c.set("r", f"{mm.group(1)}{int(mm.group(2)) + shift}")
+        idx = list(sd).index(prev)
+        sd.insert(idx + 1, clone)
+        prev = clone
+    return first + need - 1
+
+
+def _patch_kp_values_sheet(
+    xml: bytes,
+    fills: list[KpRowFill],
+    layout: KpItemLayout | None = None,
+) -> bytes:
+    """Write КП/Спецификация item values into a standalone sheet.
+
+    Slot rows are detected by the (still present) xref formulas from the
+    template build; extra slots are cloned on demand and the empty tail is
+    trimmed. Formulas inside the slots are replaced by plain values.
+    """
+    lay = layout or TEMPLATE_LAYOUTS["commercial_proposal"]
     root = ET.fromstring(xml)
-    _trim_kp_rows(root, n_items=len(fills))
+    detected = _slot_range(root)
+    if detected is not None:
+        first, last = detected
+    else:
+        first, last = lay.first_row, lay.first_row + lay.slots - 1
+    last = _extend_slots(root, first, last, max(len(fills), 1))
+    _trim_kp_rows(root, n_items=len(fills), first_row=first, last_row=last)
     xpatch.ensure_col_widths(root, KP_MONEY_COL_WIDTHS)
     sheet_data = root.find(xpatch._q("sheetData"))
     if sheet_data is None:
@@ -491,44 +635,79 @@ def _patch_kp_values_sheet(xml: bytes, fills: list[KpRowFill]) -> bytes:
             code="VALIDATION_ERROR",
             title="Validation Error",
             status=422,
-            detail="КП sheet has no sheetData",
+            detail="sheet has no sheetData",
         )
     for fill in fills:
         row = xpatch.find_row(sheet_data, fill.row)
         if row is None:
             continue
-        b = xpatch.cell_in_row(row, "B")
+        # xref formulas (if any) are replaced by the direct values below.
+        for c in list(row.findall(xpatch._q("c"))):
+            f = c.find(xpatch._q("f"))
+            if f is not None and _BUDGET_REF.search(f.text or ""):
+                row.remove(c)
+        b = xpatch.cell_in_row(row, lay.text_col)
         xpatch.set_text(b, fill.title)
-        for col, val in (("E", fill.qty), ("G", fill.price_out), ("H", fill.total)):
+        for col, val in (
+            (lay.qty_col, fill.qty),
+            (lay.price_col, fill.price_out),
+            (lay.total_col, fill.total),
+        ):
             cell = xpatch.cell_in_row(row, col)
             xpatch.set_number(cell, val)
     return xpatch.dumps_sml(root)
 
 
-def fill_kp_workbook(template_bytes: bytes, rows: list[dict[str, Any]] | None) -> bytes:
+def _single_sheet_part(z: zipfile.ZipFile) -> str:
+    """Worksheet part of the (single) sheet workbook.
+
+    ET re-serialized workbook files may use a generated prefix instead of
+    `r:id`, so attributes are matched namespace-agnostically.
+    """
+    wb_root = ET.fromstring(z.read("xl/workbook.xml"))
+    sheets_el = wb_root.find(xpatch._q("sheets"))
+    if sheets_el is None or len(list(sheets_el)) != 1:
+        raise AppError(
+            code="VALIDATION_ERROR",
+            title="Validation Error",
+            status=422,
+            detail="standalone template must have exactly one sheet",
+        )
+    sh = list(sheets_el)[0]
+    rid = None
+    for key, value in sh.attrib.items():
+        # r:id is namespaced; plain sheetId is not.
+        if key.endswith("}id"):
+            rid = value
+    if rid is None:
+        raise AppError(
+            code="VALIDATION_ERROR",
+            title="Validation Error",
+            status=422,
+            detail="sheet relationship id not found",
+        )
+    rels_root = ET.fromstring(z.read("xl/_rels/workbook.xml.rels"))
+    target = ""
+    for rel in rels_root:
+        if rel.get("Id") == rid:
+            target = rel.get("Target") or ""
+            break
+    part = target if target.startswith("xl/") else "xl/" + target
+    return part
+
+
+def fill_kp_workbook(
+    template_bytes: bytes,
+    rows: list[dict[str, Any]] | None,
+    template_type: str = "commercial_proposal",
+) -> bytes:
     """Fill the standalone КП/Спецификация template; returns workbook bytes."""
-    fills = build_kp_fill(rows)
+    layout = TEMPLATE_LAYOUTS.get(template_type) or TEMPLATE_LAYOUTS["commercial_proposal"]
+    fills = build_kp_fill(rows, layout)
     with zipfile.ZipFile(io.BytesIO(template_bytes), "r") as z:
-        names = set(z.namelist())
-        if KP_SHEET_PART not in names:
-            raise AppError(
-                code="VALIDATION_ERROR",
-                title="Validation Error",
-                status=422,
-                detail="КП template has no КП sheet (xl/worksheets/sheet2.xml)",
-            )
-        if BUDGET_SHEET_PART in names:
-            raise AppError(
-                code="VALIDATION_ERROR",
-                title="Validation Error",
-                status=422,
-                detail=(
-                    "КП template must be single-sheet (no Бюджетирование sheet); "
-                    "upload the standalone КП layout"
-                ),
-            )
-        sheet = z.read(KP_SHEET_PART)
-    updated = {KP_SHEET_PART: _patch_kp_values_sheet(sheet, fills)}
+        part = _single_sheet_part(z)
+        sheet = z.read(part)
+    updated = {part: _patch_kp_values_sheet(sheet, fills, layout)}
     buf = io.BytesIO()
     with zipfile.ZipFile(io.BytesIO(template_bytes), "r") as zin, zipfile.ZipFile(
         buf, "w", zipfile.ZIP_DEFLATED
@@ -537,3 +716,4 @@ def fill_kp_workbook(template_bytes: bytes, rows: list[dict[str, Any]] | None) -
             payload = updated.get(item.filename, zin.read(item.filename))
             zout.writestr(item, payload)
     return buf.getvalue()
+

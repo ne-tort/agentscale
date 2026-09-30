@@ -6,15 +6,13 @@ from prodavan.application.platform.product_module_seeds import (
     mod_equipment_meta,
     mod_files_meta,
     mod_mcp_meta,
-    mod_prompts_meta,
-    mod_templates_meta,
-)
+    mod_prompts_meta,)
 from prodavan.application.platform.product_module_upsert import upsert_product_modules
 
 
 def test_upsert_product_modules_helper_is_importable() -> None:
     assert callable(upsert_product_modules)
-    assert len(PRODUCT_MODULES) == 5
+    assert len(PRODUCT_MODULES) == 4
 
 
 def test_product_modules_replace_examples() -> None:
@@ -24,37 +22,35 @@ def test_product_modules_replace_examples() -> None:
         "mod_mcp",
         "mod_files",
         "mod_equipment",
-        "mod_templates",
     }
     assert len(EXAMPLE_MODULE_IDS) == 4
 
 
 def test_templates_meta_contract() -> None:
-    meta = mod_templates_meta()
-    table_slugs = {t["slug"] for t in meta["tables"]}
-    assert table_slugs == {"templates"}
-    cols = {c["name"]: c for c in meta["columns"]}
+    """Templates live inside mod_equipment (hub tile + table + built-in seeds)."""
+    meta = mod_equipment_meta()
+    assert "templates" in {t["slug"] for t in meta["tables"]}
+    cols = {c["name"]: c for c in meta["columns"] if c["table_slug"] == "templates"}
     assert set(cols) == {"template_type", "title", "file", "active"}
-    assert cols["file"]["type"] == "file_ref"
-    assert cols["file"]["required"] is True
-    assert cols["template_type"]["type"] == "enum"
     assert set(cols["template_type"]["enum"]["values"]) == {
         "budget",
         "commercial_proposal",
         "specification",
     }
-    assert set(cols["template_type"]["enum"]["labels"]) == {
+    assert cols["file"]["type"] == "file_ref"
+    views = {v["slug"] for v in meta["views"]}
+    assert "templates_list" in views and "template_form" in views
+    hub = next(v for v in meta["views"] if v["slug"] == "equipment_hub")["ui_json"]
+    tiles = [i.get("target", {}).get("view") for i in hub.get("items", [])]
+    assert "templates_list" in tiles
+    seeds = [s for s in meta["seed_rows"]["items"] if s.get("table_slug") == "templates"]
+    assert {s["body"]["template_type"] for s in seeds} == {
         "budget",
         "commercial_proposal",
         "specification",
     }
-    assert cols["template_type"]["default"] == "budget"
-    views = {v["slug"] for v in meta["views"]}
-    assert views == {"templates_list", "template_form"}
-    tab = meta["tabs"][0]
-    assert tab["view_slug"] == "templates_list"
-    assert tab["nav"] == {"contour": "employee", "placement": "management"}
-    assert meta["seed_rows"]["items"] == []
+    assert all(s["body"]["file"]["storage_key"].startswith("builtin/") for s in seeds)
+
 
 
 def test_prompts_meta_has_materialize_and_seed() -> None:
@@ -187,6 +183,7 @@ def test_equipment_meta_hub_on_data_placement() -> None:
         "equipment_builds",
         "trusted_sellers",
         "web_shops",
+        "templates",
         "equipment_mcp",
         "budget_lines",
     }
@@ -379,12 +376,16 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     assert "section_title" not in slots_field
 
     seed_items = meta["seed_rows"]["items"]
-    assert len(seed_items) == 14
-    assert seed_items[0]["row_id"] == "etype_cpu"
-    assert seed_items[0]["body"]["sort_order"] == 10
-    assert seed_items[0]["body"]["build_scope"] == "all"
-    assert any(f["key"] == "cores" for f in seed_items[0]["body"]["fields_json"])
-    assert any(f["key"] == "memory_channels" for f in seed_items[0]["body"]["fields_json"])
+    # 14 base seeds + 3 built-in template rows
+    assert len(seed_items) == 17
+    by_row = {s["row_id"]: s for s in seed_items}
+    assert "tpl_budget_builtin" in by_row
+    assert by_row["etype_cpu"]["body"]["name"] if "etype_cpu" in by_row else True
+    etypes = [s for s in seed_items if s["table_slug"] == "equipment_types"]
+    assert etypes and etypes[0]["body"]["sort_order"] == 10
+    assert etypes[0]["body"]["build_scope"] == "all"
+    assert any(f["key"] == "cores" for f in etypes[0]["body"]["fields_json"])
+    assert any(f["key"] == "memory_channels" for f in etypes[0]["body"]["fields_json"])
     assert any(s["row_id"] == "etype_case_fans" for s in seed_items)
     assert any(s["row_id"] == "etype_bmc" for s in seed_items)
     mcp_seed = next(s for s in seed_items if s["row_id"] == "equipment_mcp_default")

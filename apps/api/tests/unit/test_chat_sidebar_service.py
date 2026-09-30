@@ -100,7 +100,7 @@ async def test_get_selection_empty() -> None:
         out = await svc.get_selection(
             cabinet_id="cab_1", principal=_principal(), employee=_employee()
         )
-    assert out == {"cabinet_id": "cab_1", "project_id": None}
+    assert out == {"cabinet_id": "cab_1", "project_id": None, "chat_session_id": None}
 
 
 @pytest.mark.asyncio

@@ -1,13 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import 'package:prodavan/core/theme/app_color_tokens.dart';
-
-/// Compact tap-to-edit numeric table cell (module `editable: true` columns).
+/// Seamless tap-to-edit numeric table cell (module `editable: true` columns).
 ///
-/// Tap → inline [TextField] (numeric keyboard, autofocus); Enter submits,
-/// Escape cancels, focus loss submits when the text changed. The caller owns
-/// persistence (controller.patchField) — the widget only formats and parses.
+/// Read mode renders exactly like a plain text cell (no icon / border /
+/// fill); tap swaps it for a borderless inline [TextField] (numeric
+/// keyboard, autofocus) styled as the cell text itself. Enter submits,
+/// Escape cancels, focus loss submits when the text changed. The caller
+/// owns persistence (controller.patchField) - the widget formats and parses.
 class EditableNumberCell extends StatefulWidget {
   const EditableNumberCell({
     super.key,
@@ -42,10 +42,7 @@ class _EditableNumberCellState extends State<EditableNumberCell> {
   void _beginEdit() {
     if (!widget.enabled || _submitting) return;
     setState(() {
-      _controller = TextEditingController(text: _initialText)
-        ..addListener(() {
-          if (mounted) setState(() {});
-        });
+      _controller = TextEditingController(text: _initialText);
       _focus = FocusNode()
         ..addListener(() {
           if (!(_focus?.hasFocus ?? true)) _submitIfChanged();
@@ -106,40 +103,28 @@ class _EditableNumberCellState extends State<EditableNumberCell> {
   @override
   Widget build(BuildContext context) {
     final controller = _controller;
+    final style = Theme.of(context).textTheme.bodyMedium;
     if (controller == null) {
-      final tokens = context.appColors;
+      // Read mode: identical to a plain (non-editable) cell - only a
+      // hover-friendly ink splash marks the tap target.
       return InkWell(
-        onTap: _beginEdit,
-        borderRadius: BorderRadius.circular(6),
+        onTap: widget.enabled ? _beginEdit : null,
+        borderRadius: BorderRadius.circular(4),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Flexible(
-                child: Text(
-                  _initialText.isEmpty ? '—' : _initialText,
-                  textAlign: widget.align,
-                  overflow: TextOverflow.ellipsis,
-                  maxLines: 1,
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: widget.enabled ? tokens.primary : null,
-                      ),
-                ),
-              ),
-              if (widget.enabled)
-                Icon(
-                  Icons.edit_outlined,
-                  size: 14,
-                  color: tokens.muted,
-                ),
-            ],
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+          child: Text(
+            _initialText.isEmpty ? '-' : _initialText,
+            textAlign: widget.align,
+            overflow: TextOverflow.ellipsis,
+            maxLines: 1,
+            style: style,
           ),
         ),
       );
     }
-    return SizedBox(
-      width: 110,
+    // Edit mode: borderless field, cell typography, no background fill.
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
       child: TextField(
         controller: controller,
         focusNode: _focus,
@@ -149,18 +134,19 @@ class _EditableNumberCellState extends State<EditableNumberCell> {
         inputFormatters: [
           FilteringTextInputFormatter.allow(RegExp(r'[0-9.,\-]')),
         ],
-        style: Theme.of(context).textTheme.bodyMedium,
+        style: style,
         decoration: InputDecoration(
           isDense: true,
-          contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(6),
-            borderSide: BorderSide(color: Theme.of(context).colorScheme.primary),
-          ),
+          isCollapsed: true,
+          border: InputBorder.none,
+          enabledBorder: InputBorder.none,
+          focusedBorder: InputBorder.none,
+          filled: false,
+          contentPadding: EdgeInsets.zero,
           suffixIcon: _submitting
               ? const SizedBox(
-                  width: 14,
-                  height: 14,
+                  width: 16,
+                  height: 16,
                   child: Padding(
                     padding: EdgeInsets.all(2),
                     child: CircularProgressIndicator(strokeWidth: 2),

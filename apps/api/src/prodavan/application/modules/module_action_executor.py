@@ -914,6 +914,7 @@ class ModuleActionExecutor:
         principal: Principal,
         employee: EmployeeRow | None,
         fallback: bytes,
+        module_id: str = "mod_equipment",
     ) -> bytes:
         """Uploadable document templates (mod_templates) with built-in fallback.
 
@@ -928,7 +929,7 @@ class ModuleActionExecutor:
             rows = await self._list_rows_for_scope(
                 cabinet_id=cabinet_id,
                 project_id=None,
-                module_id="mod_templates",
+                module_id=module_id,
                 table_slug="templates",
                 principal=principal,
                 employee=employee,
@@ -949,6 +950,17 @@ class ModuleActionExecutor:
             storage_key = str(file_ref.get("storage_key") or "").strip()
             if not storage_key:
                 continue
+            if storage_key.startswith("builtin/"):
+                # Seeded built-in template: shipped inside the API image.
+                try:
+                    from prodavan.application.modules.equipment_budget import (
+                        load_default_template,
+                    )
+
+                    return load_default_template(template_type)
+                except Exception:  # noqa: BLE001
+                    logger.warning("builtin template unreadable: %s", storage_key)
+                    return fallback
             try:
                 return ensure_file_store().get_bytes_sync(storage_key)
             except Exception:  # noqa: BLE001 - corrupt/unreadable upload
@@ -1006,7 +1018,7 @@ class ModuleActionExecutor:
             employee=employee,
             fallback=load_default_template(template_type),
         )
-        data = fill_kp_workbook(template, bodies)
+        data = fill_kp_workbook(template, bodies, template_type)
 
         company_id = await self._resolve_documents_company_id(
             cabinet_id=cabinet_id, project_id=project_id

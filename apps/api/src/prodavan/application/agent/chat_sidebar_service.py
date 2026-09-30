@@ -104,6 +104,7 @@ class ChatSidebarService:
         return {
             "cabinet_id": cabinet_id,
             "project_id": row.project_id if row else None,
+            "chat_session_id": getattr(row, "chat_session_id", None) if row else None,
         }
 
     async def set_selection(
@@ -111,6 +112,8 @@ class ChatSidebarService:
         *,
         cabinet_id: str,
         project_id: str | None,
+        chat_session_id: str | None = None,
+        update_chat: bool = False,
         principal: Principal,
         employee: EmployeeRow,
     ) -> dict:
@@ -122,6 +125,21 @@ class ChatSidebarService:
             if project is None or project.cabinet_id != cabinet_id:
                 raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Project not found")
 
+        if update_chat and chat_session_id is not None:
+            session_row = await self._session.get(AgentSessionRow, chat_session_id)
+            if session_row is None:
+                raise AppError(
+                    code="NOT_FOUND", title="Not Found", status=404, detail="Chat session not found"
+                )
+            project = await self._session.get(ProjectRow, session_row.project_id)
+            if project is None or project.cabinet_id != cabinet_id:
+                raise AppError(
+                    code="NOT_FOUND",
+                    title="Not Found",
+                    status=404,
+                    detail="Chat session belongs to another cabinet",
+                )
+
         row = await self._session.get(
             EmployeeProjectSelectionRow, {"employee_id": employee.id, "cabinet_id": cabinet_id}
         )
@@ -130,12 +148,23 @@ class ChatSidebarService:
                 employee_id=employee.id,
                 cabinet_id=cabinet_id,
                 project_id=project_id,
+                chat_session_id=chat_session_id if update_chat else None,
             )
             self._session.add(row)
         else:
-            row.project_id = project_id
+            if update_chat:
+                row.chat_session_id = chat_session_id
+            else:
+                # Full project-selection PUT: switching the project resets the
+                # chat selection of the previous project.
+                row.project_id = project_id
+                row.chat_session_id = None
         await self._session.commit()
-        return {"cabinet_id": cabinet_id, "project_id": project_id}
+        return {
+            "cabinet_id": cabinet_id,
+            "project_id": getattr(row, "project_id", None),
+            "chat_session_id": getattr(row, "chat_session_id", None),
+        }
 
     async def sidebar(
         self,

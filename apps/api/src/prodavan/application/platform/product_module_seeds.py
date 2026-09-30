@@ -949,6 +949,13 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "scope": {"projects": "all", "chats": "all"},
             },
             {
+                "slug": "templates",
+                "label": "Шаблоны документов",
+                "storage_kind": "json_document",
+                "enabled": True,
+                "scope": {"chats": "all", "projects": "all"},
+            },
+            {
                 "slug": "equipment_mcp",
                 "label": {"ru": "MCP", "en": "MCP"},
                 "storage_kind": "json_document",
@@ -1640,6 +1647,45 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "required": True,
             },
             {
+                "table_slug": "templates",
+                "name": "template_type",
+                "label": "Тип шаблона",
+                "type": "enum",
+                "required": True,
+                "default": "budget",
+                "enum": {
+                    "values": ["budget", "commercial_proposal", "specification"],
+                    "labels": {
+                        "budget": "Бюджетирование (xlsx)",
+                        "commercial_proposal": "КП (PDF)",
+                        "specification": "Спецификация (PDF)",
+                    },
+                },
+            },
+            {
+                "table_slug": "templates",
+                "name": "title",
+                "label": "Название",
+                "type": "text",
+                "required": False,
+            },
+            {
+                "table_slug": "templates",
+                "name": "file",
+                "label": "Файл (xlsx)",
+                "type": "file_ref",
+                "required": True,
+            },
+            {
+                "table_slug": "templates",
+                "name": "active",
+                "label": "Активен",
+                "type": "bool",
+                "required": False,
+                "default": True,
+            },
+
+            {
                 "table_slug": "web_shops",
                 "name": "url",
                 "label": {"ru": "Ссылка", "en": "URL"},
@@ -1837,6 +1883,14 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                                 "view": "web_shops_list",
                             },
                         },
+                        {
+                            "title": "Шаблоны",
+                            "icon": "upload_file",
+                            "target": {
+                                "kind": "view",
+                                "view": "templates_list",
+                            },
+                        },
                     ],
                 },
             },
@@ -2018,11 +2072,6 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "max_width": 170,
                         },
                         {
-                            "field": "brand",
-                            "label": {"ru": "Бренд", "en": "Brand"},
-                            "max_width": 110,
-                        },
-                        {
                             "field": "qty",
                             "label": {"ru": "Кол-во", "en": "Qty"},
                             "align": "end",
@@ -2063,6 +2112,11 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "variant": "margin_total",
                             "align": "end",
                             "max_width": 130,
+                        },
+                        {
+                            "field": "brand",
+                            "label": {"ru": "Бренд", "en": "Brand"},
+                            "max_width": 110,
                         },
                     ],
                     # computed columns are Flutter-side; backend ships raw fields
@@ -3324,7 +3378,76 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     ],
                 },
             },
-        ],
+        {
+                "slug": "templates_list",
+                "table_slug": "templates",
+                "kind": "collection",
+                "ui_json": {
+                    "version": 1,
+                    "kind": "collection",
+                    "scaffold": {
+                        "title": {"ru": "Шаблоны", "en": "Templates"},
+                    },
+                    "title_field": "template_type",
+                    "subtitle_fields": ["title"],
+                    "columns": [
+                        {
+                            "field": "template_type",
+                            "label": {"ru": "Тип", "en": "Type"},
+                            "max_width": 220,
+                        },
+                        {
+                            "field": "title",
+                            "label": {"ru": "Название", "en": "Title"},
+                            "max_lines": 2,
+                            "max_width": 260,
+                        },
+                        {
+                            "field": "file",
+                            "label": {"ru": "Файл", "en": "File"},
+                            "format": "file_name",
+                            "max_lines": 2,
+                            "max_width": 260,
+                        },
+                        {
+                            "field": "active",
+                            "label": {"ru": "Активен", "en": "Active"},
+                            "format": "bool_yes_no",
+                            "max_width": 100,
+                        },
+                    ],
+                    "row_tap": {"kind": "open_form", "view": "template_form"},
+                    "inline_add": {"field": "title", "title": "Добавить шаблон"},
+                    "empty": _empty(
+                        "Нет шаблонов - используются встроенные",
+                        "No templates - built-ins are used",
+                        icon="upload_file",
+                    ),
+                },
+            },
+            {
+                "slug": "template_form",
+                "table_slug": "templates",
+                "kind": "form",
+                "ui_json": {
+                    "version": 1,
+                    "kind": "form",
+                    "mode": "edit",
+                    "title": {"ru": "Шаблон", "en": "Template"},
+                    "fields": [
+                        {"column": "template_type", "widget": "choice", "icon": "category"},
+                        {"column": "title", "widget": "value", "icon": "title"},
+                        {
+                            "column": "file",
+                            "widget": "file_upload",
+                            "icon": "upload_file",
+                            "accept": ".xlsx",
+                        },
+                        {"column": "active", "widget": "switch"},
+                    ],
+                },
+            },
+],
         "tabs": [
             {
                 "id": "tab_equipment",
@@ -3656,7 +3779,43 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
         "container_env_secrets": [],
         "seed_rows": {
             "items": [
-                *_equipment_type_seed_rows(),
+                {
+                "row_id": "tpl_budget_builtin",
+                "table_slug": "templates",
+                "body": {
+                    "template_type": "budget",
+                    "title": "Бюджетирование (встроенный)",
+                    "file": {"storage_key": "builtin/kp-template.xlsx", "filename": "budget.xlsx"},
+                    "active": True,
+                },
+            },
+            {
+                "row_id": "tpl_kp_builtin",
+                "table_slug": "templates",
+                "body": {
+                    "template_type": "commercial_proposal",
+                    "title": "Коммерческое предложение (встроенный)",
+                    "file": {
+                        "storage_key": "builtin/commercial-proposal-template.xlsx",
+                        "filename": "commercial-proposal.xlsx",
+                    },
+                    "active": True,
+                },
+            },
+            {
+                "row_id": "tpl_spec_builtin",
+                "table_slug": "templates",
+                "body": {
+                    "template_type": "specification",
+                    "title": "Спецификация (встроенный)",
+                    "file": {
+                        "storage_key": "builtin/specification-template.xlsx",
+                        "filename": "specification.xlsx",
+                    },
+                    "active": True,
+                },
+            },
+*_equipment_type_seed_rows(),
                 {
                     "table_slug": "equipment_mcp",
                     "row_id": "equipment_mcp_default",
@@ -3671,174 +3830,11 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
     }
 
 
-def mod_templates_meta() -> dict[str, list[Any]]:
-    """«Шаблоны» — uploadable document templates (budget / КП / Спецификация).
-
-    Rows live on the cabinet/company SoT (chats: all). ``template_type``
-    selects the consumer: ``budget`` (xlsx fill), ``commercial_proposal``
-    (КП PDF), ``specification`` (Спецификация PDF). Consumers resolve the
-    latest active row per type; missing rows fall back to built-in templates.
-    """
-    return {
-        "tables": [
-            {
-                "slug": "templates",
-                "label": "Шаблоны документов",
-                "storage_kind": "json_document",
-                "enabled": True,
-                "scope": {"chats": "all", "projects": "all"},
-            },
-        ],
-        "columns": [
-            {
-                "table_slug": "templates",
-                "name": "template_type",
-                "label": "Тип шаблона",
-                "type": "enum",
-                "required": True,
-                "default": "budget",
-                "enum": {
-                    "values": ["budget", "commercial_proposal", "specification"],
-                    "labels": {
-                        "budget": "Бюджетирование (xlsx)",
-                        "commercial_proposal": "КП (PDF)",
-                        "specification": "Спецификация (PDF)",
-                    },
-                },
-            },
-            {
-                "table_slug": "templates",
-                "name": "title",
-                "label": "Название",
-                "type": "text",
-                "required": False,
-            },
-            {
-                "table_slug": "templates",
-                "name": "file",
-                "label": "Файл (xlsx)",
-                "type": "file_ref",
-                "required": True,
-            },
-            {
-                "table_slug": "templates",
-                "name": "active",
-                "label": "Активен",
-                "type": "bool",
-                "required": False,
-                "default": True,
-            },
-        ],
-        "views": [
-            {
-                "slug": "templates_list",
-                "table_slug": "templates",
-                "kind": "collection",
-                "ui_json": {
-                    "version": 1,
-                    "kind": "collection",
-                    "scaffold": {
-                        "title": {"ru": "Шаблоны", "en": "Templates"},
-                    },
-                    "title_field": "template_type",
-                    "subtitle_fields": ["title"],
-                    "columns": [
-                        {
-                            "field": "template_type",
-                            "label": {"ru": "Тип", "en": "Type"},
-                            "max_width": 220,
-                        },
-                        {
-                            "field": "title",
-                            "label": {"ru": "Название", "en": "Title"},
-                            "max_lines": 2,
-                            "max_width": 260,
-                        },
-                        {
-                            "field": "file",
-                            "label": {"ru": "Файл", "en": "File"},
-                            "format": "file_name",
-                            "max_lines": 2,
-                            "max_width": 260,
-                        },
-                        {
-                            "field": "active",
-                            "label": {"ru": "Активен", "en": "Active"},
-                            "format": "bool_yes_no",
-                            "max_width": 100,
-                        },
-                    ],
-                    "row_tap": {"kind": "open_form", "view": "template_form"},
-                    "inline_add": {
-                        "field": "title",
-                        "title": "Добавить шаблон",
-                    },
-                    "empty": _empty(
-                        "Нет шаблонов — используются встроенные",
-                        "No templates — built-ins are used",
-                        icon="upload_file",
-                    ),
-                },
-            },
-            {
-                "slug": "template_form",
-                "table_slug": "templates",
-                "kind": "form",
-                "ui_json": {
-                    "version": 1,
-                    "kind": "form",
-                    "mode": "edit",
-                    "title": {"ru": "Шаблон", "en": "Template"},
-                    "fields": [
-                        {
-                            "column": "template_type",
-                            "widget": "choice",
-                            "icon": "category",
-                        },
-                        {
-                            "column": "title",
-                            "widget": "value",
-                            "icon": "title",
-                        },
-                        {
-                            "column": "file",
-                            "widget": "file_upload",
-                            "icon": "upload_file",
-                            "accept": ".xlsx",
-                        },
-                        {
-                            "column": "active",
-                            "widget": "switch",
-                        },
-                    ],
-                },
-            },
-        ],
-        "tabs": [
-            {
-                "id": "tab_templates",
-                "title": "Шаблоны",
-                "subtitle": "Документы: бюджет, КП, спецификация",
-                "order": 20,
-                "icon": "upload_file",
-                "view_slug": "templates_list",
-                "table_slug": "templates",
-                "enabled": True,
-                "default_project_bind": "global",
-                "nav": {"contour": "employee", "placement": "management"},
-            },
-        ],
-        "materialize": [],
-        "seed_rows": {"items": []},
-    }
-
-
 PRODUCT_MODULES: list[tuple[str, str, dict[str, Any]]] = [
     ("mod_prompts", "Промпты", mod_prompts_meta()),
     ("mod_mcp", "MCP", mod_mcp_meta()),
     ("mod_files", "Файлы", mod_files_meta()),
     ("mod_equipment", "Подбор техники", mod_equipment_meta()),
-    ("mod_templates", "Шаблоны", mod_templates_meta()),
 ]
 
 EXAMPLE_MODULE_IDS: tuple[str, ...] = (
