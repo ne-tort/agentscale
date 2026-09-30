@@ -274,6 +274,18 @@ class ModuleActionExecutor:
                 session_id=session_id,
             )
 
+        if kind in ("equipment.kp_export", "equipment.spec_export"):
+            return await self._kp_export(
+                cabinet_id=cabinet_id,
+                module_id=module_id,
+                params=params,
+                principal=principal,
+                employee=employee,
+                project_id=project_id,
+                session_id=session_id,
+                spec=(kind == "equipment.spec_export"),
+            )
+
         raise AppError(
             code="NOT_IMPLEMENTED",
             title="Not Implemented",
@@ -529,7 +541,13 @@ class ModuleActionExecutor:
                 status=422,
                 detail="no budget lines to export (run budget sync first)",
             )
-        template = load_budget_template()
+        template = await self._resolve_export_template(
+            cabinet_id=cabinet_id,
+            template_type="budget",
+            principal=principal,
+            employee=employee,
+            fallback=load_budget_template(),
+        )
         data = fill_budget_workbook(template, bodies, {})
 
         company_id = await self._resolve_documents_company_id(
@@ -554,6 +572,147 @@ class ModuleActionExecutor:
             employee=employee,
         )
         return {"kind": "equipment.budget_export", "file_ref": ref, "rows": len(bodies)}
+
+    async def _resolve_export_template(
+        self,
+        *,
+        cabinet_id: str,
+        template_type: str,
+        principal: Principal,
+        employee: EmployeeRow | None,
+        fallback: bytes,
+    ) -> bytes:
+        """Uploadable document templates (mod_templates) with built-in fallback.
+
+        Reads the cabinet-contour ``mod_templates`` rows (latest by updated_at,
+        ``template_type`` match) and loads the stored xlsx. Any miss (module not
+        bound, no rows, unreadable file) falls back to the built-in template —
+        exports must never hard-fail on template management state.
+        """
+        from prodavan.infrastructure.files.manager import ensure_file_store
+
+        try:
+            rows = await self._list_rows_for_scope(
+                cabinet_id=cabinet_id,
+                project_id=None,
+                module_id="mod_templates",
+                table_slug="templates",
+                principal=principal,
+                employee=employee,
+            )
+        except AppError:
+            return fallback
+        for row in rows:
+            body = row.get("body") if isinstance(row, dict) else None
+            if not isinstance(body, dict):
+                continue
+            if str(body.get("template_type") or "").strip() != template_type:
+                continue
+            if body.get("active") is False:
+                continue
+            file_ref = body.get("file")
+            if not isinstance(file_ref, dict):
+                continue
+            storage_key = str(file_ref.get("storage_key") or "").strip()
+            if not storage_key:
+                continue
+            try:
+                return ensure_file_store().get_bytes_sync(storage_key)
+            except Exception:  # noqa: BLE001 - corrupt/unreadable upload
+                logger.warning(
+                    "template file unreadable template_type=%s storage_key=%s",
+                    template_type,
+                    storage_key,
+                )
+                continue
+        return fallback
+
+    async def _kp_export(
+        self,
+        *,
+        cabinet_id: str,
+        module_id: str,
+        params: dict[str, Any],
+        principal: Principal,
+        employee: EmployeeRow | None,
+        project_id: str | None = None,
+        session_id: str | None = None,
+        spec: bool = False,
+    ) -> dict[str, Any]:
+        """Fill the standalone КП/Спецификация template and convert to PDF."""
+        from prodavan.application.documents.service import DocumentsService
+        from prodavan.application.modules.equipment_budget import (
+            fill_kp_workbook,
+            load_default_template,
+        )
+
+        budget_table = str(params.get("budget_table") or "budget_lines")
+        rows = await self._list_rows_for_scope(
+            cabinet_id=cabinet_id,
+            project_id=project_id,
+            module_id=module_id,
+            table_slug=budget_table,
+            principal=principal,
+            employee=employee,
+            session_id=session_id,
+        )
+        bodies = [r.get("body") or {} for r in rows if isinstance(r, dict)]
+        if not bodies:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="no budget lines to export (run budget sync first)",
+            )
+
+        template_type = "specification" if spec else "commercial_proposal"
+        template = await self._resolve_export_template(
+            cabinet_id=cabinet_id,
+            template_type=template_type,
+            principal=principal,
+            employee=employee,
+            fallback=load_default_template(template_type),
+        )
+        data = fill_kp_workbook(template, bodies)
+
+        company_id = await self._resolve_documents_company_id(
+            cabinet_id=cabinet_id, project_id=project_id
+        )
+        if not company_id:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="no company tenancy for КП export",
+            )
+        service = DocumentsService(self._session)
+        base_name = "specification" if spec else "commercial-proposal"
+        ref = await service.save_document(
+            data,
+            filename=f"{base_name}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            company_id=company_id,
+            cabinet_id=cabinet_id or None,
+            project_id=project_id,
+            principal=principal,
+            employee=employee,
+        )
+        converted = await service.convert(
+            ref,
+            filename=f"{base_name}.xlsx",
+            target_format="pdf",
+            company_id=company_id,
+            cabinet_id=cabinet_id or None,
+            project_id=project_id,
+            principal=principal,
+            employee=employee,
+            session=self._session,
+        )
+        return {
+            "kind": "equipment.spec_export" if spec else "equipment.kp_export",
+            "file_ref": converted,
+            "rows": len(bodies),
+        }
 
     async def maybe_auto_budget_sync(
         self,

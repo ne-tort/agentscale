@@ -12,6 +12,7 @@ import 'package:prodavan/core/widgets/app_snack_bar.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/features/meta/meta_icon.dart';
 import 'package:prodavan/features/meta/meta_label.dart';
+import 'package:prodavan/features/meta/module_action_file_download.dart';
 import 'package:prodavan/features/meta/module_meta_manifest.dart';
 import 'package:prodavan/features/meta/poll_while.dart';
 import 'package:prodavan/features/meta/preview/preview_stub.dart';
@@ -19,7 +20,8 @@ import 'package:prodavan/features/meta/runtime/cabinet_data_controller.dart';
 import 'package:prodavan/features/meta/runtime/module_runtime_scope.dart';
 import 'package:prodavan/features/meta/runtime/owner_module_data_controller.dart';
 import 'package:prodavan/features/meta/runtime/runtime_data_adapter.dart';
-import 'package:prodavan/features/containers/workspace_file_utils.dart';
+import 'package:prodavan/features/meta/widgets/budget_summary_strip.dart';
+import 'package:prodavan/features/meta/widgets/editable_number_cell.dart';
 import 'package:prodavan/features/meta/widgets/file_upload_field.dart';
 import 'package:prodavan/features/meta/widgets/project_multiselect_field.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
@@ -74,9 +76,15 @@ class CollectionViewInterpreter extends StatelessWidget {
             (allColumns.isNotEmpty ? allColumns.first.label : l10n.commonEntity);
         // Primary column already shows title_field — do not repeat it as a data column.
         final columns = allColumns.where((c) => c.id != titleField).toList();
+        // Primary column layout follows the title_field column entry config.
+        final primaryEntry = allColumns.firstWhere(
+          (c) => c.id == titleField,
+          orElse: () => AppEntityColumn(id: titleField, label: primaryLabel),
+        );
         final rawRows = _filteredRows(seeds, tableSlug, uiJson);
         final styled = _applyRowStyles(context, uiJson, rawRows);
-        final rows = _withSelection(context, uiJson, styled);
+        var rows = _withSelection(context, uiJson, styled);
+        rows = _withEditableCells(context, uiJson, tableSlug, rows);
         final hasInline = _hasInlineAdd(uiJson);
         final hasPoll = _hasActivePoll(uiJson, rawRows, seeds);
         final toolbar = _toolbar(context, uiJson, tableSlug, l10n, skipCreate: hasInline);
@@ -95,6 +103,8 @@ class CollectionViewInterpreter extends StatelessWidget {
           rows: rows,
           columns: columns,
           primaryColumnLabel: primaryLabel,
+          primaryMaxLines: primaryEntry.maxLines,
+          primaryMaxWidth: primaryEntry.maxWidth,
           toolbar: toolbar,
           empty: EmptyPlaceholder(
             title: emptyTitle.isEmpty ? l10n.adminModuleSeedEmpty : emptyTitle,
@@ -148,6 +158,8 @@ class CollectionViewInterpreter extends StatelessWidget {
                 uiJson: uiJson,
                 rows: rawRows,
               ),
+            if (_summary(uiJson) != null && rows.isNotEmpty)
+              _summary(uiJson)!,
             if (_hasListHeader(uiJson))
               _CollectionListHeader(
                 headerConfig: Map<String, dynamic>.from(uiJson['list_header'] as Map),
@@ -372,14 +384,109 @@ class CollectionViewInterpreter extends StatelessWidget {
     if (raw is! List) return const [];
     return raw.whereType<Map>().map((c) {
       final labelRaw = c['label'] ?? c['field'];
+      final alignRaw = c['align']?.toString() ?? '';
+      final formatRaw = c['format']?.toString() ?? '';
       return AppEntityColumn(
         id: c['field'] as String? ?? '',
         label: resolveMetaLabel(labelRaw, l10n, locale: locale).isNotEmpty
             ? resolveMetaLabel(labelRaw, l10n, locale: locale)
             : c['field'] as String? ?? '',
         width: c['width'] is num ? (c['width'] as num).toDouble() : null,
+        maxWidth: c['max_width'] is num ? (c['max_width'] as num).toDouble() : null,
+        maxLines: c['max_lines'] is num ? (c['max_lines'] as num).toInt().clamp(1, 8) : 1,
+        align: switch (alignRaw) {
+          'center' => AppEntityColumnAlign.center,
+          'end' => AppEntityColumnAlign.end,
+          _ => formatRaw == 'budget_calc' || formatRaw == 'money'
+              ? AppEntityColumnAlign.end
+              : AppEntityColumnAlign.start,
+        },
       );
     }).where((c) => c.id.isNotEmpty).toList();
+  }
+
+  /// `editable: true` columns render tap-to-edit cells (numeric).
+  List<String> _editableFields(Map<String, dynamic> uiJson) {
+    final raw = uiJson['columns'];
+    if (raw is! List || readOnly) return const [];
+    return raw
+        .whereType<Map>()
+        .where((c) => c['editable'] == true && (c['field'] as String?) != null)
+        .map((c) => c['field'] as String)
+        .where((f) => f.isNotEmpty)
+        .toList();
+  }
+
+  List<AppEntityRow> _withEditableCells(
+    BuildContext context,
+    Map<String, dynamic> uiJson,
+    String tableSlug,
+    List<AppEntityRow> rows,
+  ) {
+    final fields = _editableFields(uiJson);
+    if (fields.isEmpty) return rows;
+    return rows.map((row) {
+      final item = seeds.itemById(row.id);
+      final body = item is Map && item['body'] is Map
+          ? Map<String, dynamic>.from(item['body'] as Map)
+          : const <String, dynamic>{};
+      final widgets = Map<String, Widget>.from(row.cellWidgets);
+      for (final field in fields) {
+        if (widgets.containsKey(field)) continue;
+        widgets[field] = EditableNumberCell(
+          value: body[field],
+          align: TextAlign.end,
+          onSubmit: (parsed) async {
+            try {
+              final patch = seeds.patchField(row.id, field, parsed);
+              if (patch is Future) await patch;
+            } catch (e) {
+              if (context.mounted) AppErrors.showSnack(context, e);
+              rethrow;
+            }
+          },
+        );
+      }
+      return AppEntityRow(
+        id: row.id,
+        title: row.title,
+        subtitle: row.subtitle,
+        cells: row.cells,
+        cellWidgets: widgets,
+        leading: row.leading,
+        trailing: row.trailing,
+        titleColor: row.titleColor,
+        rowColor: row.rowColor,
+        titleBold: row.titleBold,
+      );
+    }).toList();
+  }
+
+  Widget? _summary(Map<String, dynamic> uiJson) {
+    final raw = uiJson['summary'];
+    if (raw is! Map) return null;
+    final kind = raw['kind']?.toString();
+    if (kind != 'budget_totals') return null;
+    final items = _allItems(seeds, _tableSlugOf(uiJson));
+    final bodies = items
+        .map((item) => item['body'])
+        .whereType<Map>()
+        .map((b) => Map<String, dynamic>.from(b))
+        .toList();
+    return BudgetSummaryStrip(bodies: bodies);
+  }
+
+  String _tableSlugOf(Map<String, dynamic> uiJson) {
+    return view['table_slug'] as String? ?? '';
+  }
+
+  List<Map> _allItems(dynamic seeds, String tableSlug) {
+    try {
+      final rows = seeds.itemsForTable(tableSlug);
+      return rows.whereType<Map>().toList();
+    } catch (_) {
+      return const [];
+    }
   }
 
   List<Widget>? _toolbar(
@@ -530,18 +637,7 @@ class CollectionViewInterpreter extends StatelessWidget {
     CabinetDataController controller,
     Map<String, dynamic> result,
   ) async {
-    final ref = result['file_ref'];
-    if (ref is! Map) return false;
-    final assetId = ref['asset_id']?.toString() ?? '';
-    if (assetId.isEmpty) return false;
-    var filename = ref['filename']?.toString() ?? '';
-    if (filename.isEmpty) filename = 'export';
-    final bytes = await controller.api.downloadContentAsset(
-      assetId: assetId,
-      versionId: ref['version_id']?.toString(),
-      blobVersionId: ref['blob_version_id']?.toString(),
-    );
-    return saveWorkspaceFileBytes(filename: filename, bytes: bytes);
+    return saveModuleActionFile(controller, result);
   }
 
   List<AppEntityRow> _withSelection(

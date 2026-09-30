@@ -7,19 +7,54 @@ from prodavan.application.platform.product_module_seeds import (
     mod_files_meta,
     mod_mcp_meta,
     mod_prompts_meta,
+    mod_templates_meta,
 )
 from prodavan.application.platform.product_module_upsert import upsert_product_modules
 
 
 def test_upsert_product_modules_helper_is_importable() -> None:
     assert callable(upsert_product_modules)
-    assert len(PRODUCT_MODULES) == 4
+    assert len(PRODUCT_MODULES) == 5
 
 
 def test_product_modules_replace_examples() -> None:
     ids = {m[0] for m in PRODUCT_MODULES}
-    assert ids == {"mod_prompts", "mod_mcp", "mod_files", "mod_equipment"}
+    assert ids == {
+        "mod_prompts",
+        "mod_mcp",
+        "mod_files",
+        "mod_equipment",
+        "mod_templates",
+    }
     assert len(EXAMPLE_MODULE_IDS) == 4
+
+
+def test_templates_meta_contract() -> None:
+    meta = mod_templates_meta()
+    table_slugs = {t["slug"] for t in meta["tables"]}
+    assert table_slugs == {"templates"}
+    cols = {c["name"]: c for c in meta["columns"]}
+    assert set(cols) == {"template_type", "title", "file", "active"}
+    assert cols["file"]["type"] == "file_ref"
+    assert cols["file"]["required"] is True
+    assert cols["template_type"]["type"] == "enum"
+    assert set(cols["template_type"]["enum"]["values"]) == {
+        "budget",
+        "commercial_proposal",
+        "specification",
+    }
+    assert set(cols["template_type"]["enum"]["labels"]) == {
+        "budget",
+        "commercial_proposal",
+        "specification",
+    }
+    assert cols["template_type"]["default"] == "budget"
+    views = {v["slug"] for v in meta["views"]}
+    assert views == {"templates_list", "template_form"}
+    tab = meta["tabs"][0]
+    assert tab["view_slug"] == "templates_list"
+    assert tab["nav"] == {"contour": "employee", "placement": "management"}
+    assert meta["seed_rows"]["items"] == []
 
 
 def test_prompts_meta_has_materialize_and_seed() -> None:

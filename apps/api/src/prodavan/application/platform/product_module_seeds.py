@@ -1801,7 +1801,30 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "ui_json": {
                     "version": 1,
                     "kind": "collection",
-                    "scaffold": {"title": {"ru": "Бюджетирование", "en": "Budget"}},
+                    "scaffold": {
+                        "title": {"ru": "Бюджетирование", "en": "Budget"},
+                        # AppBar actions (top-right): budget xlsx / КП PDF / spec PDF.
+                        "actions": [
+                            {
+                                "kind": "invoke_action",
+                                "action": "budget_export",
+                                "icon": "download",
+                                "label": {"ru": "Скачать xlsx", "en": "Download xlsx"},
+                            },
+                            {
+                                "kind": "invoke_action",
+                                "action": "kp_export",
+                                "icon": "picture_as_pdf",
+                                "label": {"ru": "Скачать КП (PDF)", "en": "Download quote (PDF)"},
+                            },
+                            {
+                                "kind": "invoke_action",
+                                "action": "spec_export",
+                                "icon": "table_view",
+                                "label": {"ru": "Спецификация (PDF)", "en": "Specification (PDF)"},
+                            },
+                        ],
+                    },
                     # Inject an icon button into the project chat header when the
                     # equipment module is bound and a chat is open (chat-scoped
                     # budget rows); opens this view in the module runtime host.
@@ -1811,24 +1834,71 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     },
                     "title_field": "title",
                     "subtitle_fields": ["part_number", "seller"],
+                    # Totals strip above the table (Flutter-side computation from
+                    # the same budget_lines bodies the table renders).
+                    "summary": {"kind": "budget_totals"},
+                    "toolbar": [
+                        {
+                            "kind": "invoke_action",
+                            "action": "budget_sync_lines",
+                            "icon": "sync",
+                            "label": {"ru": "Синхронизировать", "en": "Sync"},
+                        },
+                    ],
                     "columns": [
-                        {"field": "title", "label": {"ru": "Наименование", "en": "Title"}},
-                        {"field": "part_number", "label": {"ru": "Партномер", "en": "P/N"}},
-                        {"field": "qty", "label": {"ru": "Кол-во", "en": "Qty"}},
-                        {"field": "price_in", "label": {"ru": "Вход с НДС", "en": "In w/ VAT"}},
-                        {"field": "vat", "label": {"ru": "НДС", "en": "VAT"}},
-                        {"field": "markup", "label": {"ru": "Наценка", "en": "Markup"}},
+                        {
+                            "field": "title",
+                            "label": {"ru": "Наименование", "en": "Title"},
+                            "max_lines": 3,
+                            "max_width": 300,
+                        },
+                        {
+                            "field": "part_number",
+                            "label": {"ru": "Партномер", "en": "P/N"},
+                            "max_lines": 2,
+                            "max_width": 150,
+                        },
+                        {
+                            "field": "qty",
+                            "label": {"ru": "Кол-во", "en": "Qty"},
+                            "align": "end",
+                            "max_width": 90,
+                        },
+                        {
+                            "field": "price_in",
+                            "label": {"ru": "Вход с НДС", "en": "In w/ VAT"},
+                            "align": "end",
+                            "max_width": 130,
+                        },
+                        {
+                            "field": "vat",
+                            "label": {"ru": "НДС", "en": "VAT"},
+                            "align": "end",
+                            "max_width": 110,
+                            "editable": True,
+                        },
+                        {
+                            "field": "markup",
+                            "label": {"ru": "Наценка", "en": "Markup"},
+                            "align": "end",
+                            "max_width": 110,
+                            "editable": True,
+                        },
                         {
                             "field": "price_out",
                             "label": {"ru": "Цена с маржой", "en": "Price out"},
                             "format": "budget_calc",
                             "variant": "price_out",
+                            "align": "end",
+                            "max_width": 140,
                         },
                         {
                             "field": "margin_total",
                             "label": {"ru": "Маржа", "en": "Margin"},
                             "format": "budget_calc",
                             "variant": "margin_total",
+                            "align": "end",
+                            "max_width": 130,
                         },
                     ],
                     # computed columns are Flutter-side; backend ships raw fields
@@ -2143,11 +2213,35 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "title_field": "title",
                     "subtitle_fields": ["part_number", "found_count"],
                     "columns": [
-                        {"field": "title", "label": {"ru": "Название", "en": "Title"}},
-                        {"field": "part_number", "label": {"ru": "Партномер", "en": "P/N"}},
-                        {"field": "qty", "label": {"ru": "Кол-во", "en": "Qty"}},
-                        {"field": "found_count", "label": {"ru": "Найдено", "en": "Found"}},
-                        {"field": "status", "label": {"ru": "Статус", "en": "Status"}},
+                        {
+                            "field": "title",
+                            "label": {"ru": "Название", "en": "Title"},
+                            "max_lines": 3,
+                            "max_width": 300,
+                        },
+                        {
+                            "field": "part_number",
+                            "label": {"ru": "Партномер", "en": "P/N"},
+                            "max_lines": 2,
+                            "max_width": 150,
+                        },
+                        {
+                            "field": "qty",
+                            "label": {"ru": "Кол-во", "en": "Qty"},
+                            "align": "end",
+                            "max_width": 90,
+                        },
+                        {
+                            "field": "found_count",
+                            "label": {"ru": "Найдено", "en": "Found"},
+                            "align": "end",
+                            "max_width": 100,
+                        },
+                        {
+                            "field": "status",
+                            "label": {"ru": "Статус", "en": "Status"},
+                            "max_width": 110,
+                        },
                     ],
                     "row_tap": {"kind": "open_view", "view": "offers_for_line"},
                     "inline_add": {"field": "title", "title": "Добавить позицию"},
@@ -2184,11 +2278,35 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "title_field": "title",
                     "subtitle_fields": ["part_number", "match_kind", "score"],
                     "columns": [
-                        {"field": "title", "label": {"ru": "Товар", "en": "Title"}},
-                        {"field": "part_number", "label": {"ru": "Партномер", "en": "P/N"}},
-                        {"field": "price", "label": {"ru": "Цена", "en": "Price"}},
-                        {"field": "match_kind", "label": {"ru": "Совпадение", "en": "Match"}},
-                        {"field": "score", "label": {"ru": "Оценка", "en": "Score"}},
+                        {
+                            "field": "title",
+                            "label": {"ru": "Товар", "en": "Title"},
+                            "max_lines": 3,
+                            "max_width": 300,
+                        },
+                        {
+                            "field": "part_number",
+                            "label": {"ru": "Партномер", "en": "P/N"},
+                            "max_lines": 2,
+                            "max_width": 150,
+                        },
+                        {
+                            "field": "price",
+                            "label": {"ru": "Цена", "en": "Price"},
+                            "align": "end",
+                            "max_width": 120,
+                        },
+                        {
+                            "field": "match_kind",
+                            "label": {"ru": "Совпадение", "en": "Match"},
+                            "max_width": 120,
+                        },
+                        {
+                            "field": "score",
+                            "label": {"ru": "Оценка", "en": "Score"},
+                            "align": "end",
+                            "max_width": 90,
+                        },
                     ],
                     "context_bind": {"line_id": "contextRowId"},
                     "selection": {
@@ -2214,13 +2332,45 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "title_field": "title",
                     "subtitle_fields": ["line_id", "match_kind"],
                     "columns": [
-                        {"field": "title", "label": {"ru": "Товар", "en": "Title"}},
-                        {"field": "brand", "label": {"ru": "Бренд", "en": "Brand"}},
-                        {"field": "part_number", "label": {"ru": "Партномер", "en": "P/N"}},
-                        {"field": "price", "label": {"ru": "Цена", "en": "Price"}},
-                        {"field": "match_kind", "label": {"ru": "Совпадение", "en": "Match"}},
-                        {"field": "score", "label": {"ru": "Оценка", "en": "Score"}},
-                        {"field": "line_id", "label": {"ru": "Запрос", "en": "Request"}},
+                        {
+                            "field": "title",
+                            "label": {"ru": "Товар", "en": "Title"},
+                            "max_lines": 3,
+                            "max_width": 280,
+                        },
+                        {
+                            "field": "brand",
+                            "label": {"ru": "Бренд", "en": "Brand"},
+                            "max_width": 120,
+                        },
+                        {
+                            "field": "part_number",
+                            "label": {"ru": "Партномер", "en": "P/N"},
+                            "max_lines": 2,
+                            "max_width": 150,
+                        },
+                        {
+                            "field": "price",
+                            "label": {"ru": "Цена", "en": "Price"},
+                            "align": "end",
+                            "max_width": 120,
+                        },
+                        {
+                            "field": "match_kind",
+                            "label": {"ru": "Совпадение", "en": "Match"},
+                            "max_width": 120,
+                        },
+                        {
+                            "field": "score",
+                            "label": {"ru": "Оценка", "en": "Score"},
+                            "align": "end",
+                            "max_width": 90,
+                        },
+                        {
+                            "field": "line_id",
+                            "label": {"ru": "Запрос", "en": "Request"},
+                            "max_width": 130,
+                        },
                     ],
                     "row_tap": {"kind": "open_form", "view": "found_offers_form"},
                     "inline_add": {"field": "title", "title": "Добавить товар"},
@@ -2280,18 +2430,25 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                         {
                             "field": "name",
                             "label": {"ru": "Название", "en": "Name"},
+                            "max_lines": 3,
+                            "max_width": 300,
                         },
                         {
                             "field": "type_name",
                             "label": {"ru": "Тип", "en": "Type"},
+                            "max_width": 140,
                         },
                         {
                             "field": "part_number",
                             "label": {"ru": "Партномер", "en": "P/N"},
+                            "max_lines": 2,
+                            "max_width": 150,
                         },
                         {
                             "field": "qty",
                             "label": {"ru": "Кол-во", "en": "Qty"},
+                            "align": "end",
+                            "max_width": 90,
                         },
                     ],
                     "row_tap": {
@@ -2986,7 +3143,29 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "lines_table": "request_lines",
                 },
                 "trigger": {"on": []},
-                "ui": {"placement": ["toolbar"], "icon": "download"},
+                "ui": {"placement": ["toolbar", "scaffold"], "icon": "download"},
+            },
+            {
+                "id": "kp_export",
+                "label": {"ru": "Скачать КП (PDF)", "en": "Download quote (PDF)"},
+                "kind": "equipment.kp_export",
+                "enabled": True,
+                "params": {
+                    "budget_table": "budget_lines",
+                },
+                "trigger": {"on": []},
+                "ui": {"placement": ["toolbar", "scaffold"], "icon": "picture_as_pdf"},
+            },
+            {
+                "id": "spec_export",
+                "label": {"ru": "Спецификация (PDF)", "en": "Specification (PDF)"},
+                "kind": "equipment.spec_export",
+                "enabled": True,
+                "params": {
+                    "budget_table": "budget_lines",
+                },
+                "trigger": {"on": []},
+                "ui": {"placement": ["toolbar", "scaffold"], "icon": "table_view"},
             },
         ],
         "materialize": [
@@ -3175,11 +3354,174 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
     }
 
 
+def mod_templates_meta() -> dict[str, list[Any]]:
+    """«Шаблоны» — uploadable document templates (budget / КП / Спецификация).
+
+    Rows live on the cabinet/company SoT (chats: all). ``template_type``
+    selects the consumer: ``budget`` (xlsx fill), ``commercial_proposal``
+    (КП PDF), ``specification`` (Спецификация PDF). Consumers resolve the
+    latest active row per type; missing rows fall back to built-in templates.
+    """
+    return {
+        "tables": [
+            {
+                "slug": "templates",
+                "label": "Шаблоны документов",
+                "storage_kind": "json_document",
+                "enabled": True,
+                "scope": {"chats": "all", "projects": "all"},
+            },
+        ],
+        "columns": [
+            {
+                "table_slug": "templates",
+                "name": "template_type",
+                "label": "Тип шаблона",
+                "type": "enum",
+                "required": True,
+                "default": "budget",
+                "enum": {
+                    "values": ["budget", "commercial_proposal", "specification"],
+                    "labels": {
+                        "budget": "Бюджетирование (xlsx)",
+                        "commercial_proposal": "КП (PDF)",
+                        "specification": "Спецификация (PDF)",
+                    },
+                },
+            },
+            {
+                "table_slug": "templates",
+                "name": "title",
+                "label": "Название",
+                "type": "text",
+                "required": False,
+            },
+            {
+                "table_slug": "templates",
+                "name": "file",
+                "label": "Файл (xlsx)",
+                "type": "file_ref",
+                "required": True,
+            },
+            {
+                "table_slug": "templates",
+                "name": "active",
+                "label": "Активен",
+                "type": "bool",
+                "required": False,
+                "default": True,
+            },
+        ],
+        "views": [
+            {
+                "slug": "templates_list",
+                "table_slug": "templates",
+                "kind": "collection",
+                "ui_json": {
+                    "version": 1,
+                    "kind": "collection",
+                    "scaffold": {
+                        "title": {"ru": "Шаблоны", "en": "Templates"},
+                    },
+                    "title_field": "template_type",
+                    "subtitle_fields": ["title"],
+                    "columns": [
+                        {
+                            "field": "template_type",
+                            "label": {"ru": "Тип", "en": "Type"},
+                            "max_width": 220,
+                        },
+                        {
+                            "field": "title",
+                            "label": {"ru": "Название", "en": "Title"},
+                            "max_lines": 2,
+                            "max_width": 260,
+                        },
+                        {
+                            "field": "file",
+                            "label": {"ru": "Файл", "en": "File"},
+                            "format": "file_name",
+                            "max_lines": 2,
+                            "max_width": 260,
+                        },
+                        {
+                            "field": "active",
+                            "label": {"ru": "Активен", "en": "Active"},
+                            "format": "bool_yes_no",
+                            "max_width": 100,
+                        },
+                    ],
+                    "row_tap": {"kind": "open_form", "view": "template_form"},
+                    "inline_add": {
+                        "field": "title",
+                        "title": "Добавить шаблон",
+                    },
+                    "empty": _empty(
+                        "Нет шаблонов — используются встроенные",
+                        "No templates — built-ins are used",
+                        icon="upload_file",
+                    ),
+                },
+            },
+            {
+                "slug": "template_form",
+                "table_slug": "templates",
+                "kind": "form",
+                "ui_json": {
+                    "version": 1,
+                    "kind": "form",
+                    "mode": "edit",
+                    "title": {"ru": "Шаблон", "en": "Template"},
+                    "fields": [
+                        {
+                            "column": "template_type",
+                            "widget": "choice",
+                            "icon": "category",
+                        },
+                        {
+                            "column": "title",
+                            "widget": "value",
+                            "icon": "title",
+                        },
+                        {
+                            "column": "file",
+                            "widget": "file_upload",
+                            "icon": "upload_file",
+                            "accept": ".xlsx",
+                        },
+                        {
+                            "column": "active",
+                            "widget": "switch",
+                        },
+                    ],
+                },
+            },
+        ],
+        "tabs": [
+            {
+                "id": "tab_templates",
+                "title": "Шаблоны",
+                "subtitle": "Документы: бюджет, КП, спецификация",
+                "order": 20,
+                "icon": "upload_file",
+                "view_slug": "templates_list",
+                "table_slug": "templates",
+                "enabled": True,
+                "default_project_bind": "global",
+                "nav": {"contour": "employee", "placement": "management"},
+            },
+        ],
+        "materialize": [],
+        "seed_rows": {"items": []},
+    }
+
+
 PRODUCT_MODULES: list[tuple[str, str, dict[str, Any]]] = [
     ("mod_prompts", "Промпты", mod_prompts_meta()),
     ("mod_mcp", "MCP", mod_mcp_meta()),
     ("mod_files", "Файлы", mod_files_meta()),
     ("mod_equipment", "Подбор техники", mod_equipment_meta()),
+    ("mod_templates", "Шаблоны", mod_templates_meta()),
 ]
 
 EXAMPLE_MODULE_IDS: tuple[str, ...] = (

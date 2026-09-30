@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/responsive/app_breakpoints.dart';
@@ -26,13 +28,25 @@ class AppEntityColumn {
     this.flex = 1,
     this.width,
     this.align = AppEntityColumnAlign.start,
+    this.maxLines = 1,
+    this.maxWidth,
   });
 
   final String id;
   final String label;
   final int flex;
+
+  /// Fixed DataTable column width (rare; prefer [maxWidth]).
   final double? width;
   final AppEntityColumnAlign align;
+
+  /// Text wrapping before the ellipsis. 1 (default) keeps the legacy
+  /// single-line cell; >1 renders a multi-line cell (row grows).
+  final int maxLines;
+
+  /// Content width cap before ellipsis/truncate. Keeps intrinsic table
+  /// width bounded so long values never stretch the column off-screen.
+  final double? maxWidth;
 }
 
 class AppEntityRow {
@@ -101,6 +115,8 @@ class AppEntityCollection extends StatefulWidget {
     this.loading = false,
     this.mode,
     this.primaryColumnLabel,
+    this.primaryMaxLines = 2,
+    this.primaryMaxWidth = 360,
     this.showHeader = true,
     this.onCopy,
     this.onDelete,
@@ -119,6 +135,11 @@ class AppEntityCollection extends StatefulWidget {
   final bool loading;
   final AppEntityCollectionMode? mode;
   final String? primaryColumnLabel;
+
+  /// Primary (title) column constraints. Defaults keep the legacy layout:
+  /// 2 wrapped lines inside 360px.
+  final int primaryMaxLines;
+  final double? primaryMaxWidth;
 
   /// When false (table mode), hides the heading row entirely.
   final bool showHeader;
@@ -149,6 +170,10 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
   static const double _primaryMinWidth = 140;
   static const double _flexColumnMinWidth = 96;
   static const double _mutateTrailingMinWidth = 128;
+  // Default content cap for unconstrained columns: bounds the intrinsic
+  // DataTable width so long single-line values ellipsize instead of pushing
+  // the table off-screen.
+  static const double _defaultColumnMaxWidth = 220;
 
   String? _editFocusId;
 
@@ -292,18 +317,27 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
   }
 
   Widget _primaryCellContent(AppEntityRow row, TextStyle? bodyMedium) {
+    final effectiveMaxWidth = widget.primaryMaxWidth;
     final title = Text(
       row.title,
       overflow: TextOverflow.ellipsis,
+      maxLines: math.max(1, widget.primaryMaxLines),
+      softWrap: widget.primaryMaxLines > 1,
       style: _titleStyle(row, bodyMedium),
     );
-    if (row.leading == null) return title;
+    final constrained = effectiveMaxWidth == null
+        ? title
+        : ConstrainedBox(
+            constraints: BoxConstraints(maxWidth: effectiveMaxWidth),
+            child: title,
+          );
+    if (row.leading == null) return constrained;
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
         row.leading!,
         const SizedBox(width: AppSpacing.sm),
-        Flexible(child: title),
+        Flexible(child: constrained),
       ],
     );
   }
@@ -403,13 +437,19 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
           0,
           (sum, c) => sum + (c.width ?? 0),
         );
+        // Bounded columns cap the intrinsic width; the true minimum is the
+        // sum of the caps (not the 96px floor) so the scroll threshold
+        // matches what DataTable will actually lay out.
         final flexMin = widget.columns
-                .where((c) => c.width == null)
-                .length *
-            _flexColumnMinWidth;
+            .where((c) => c.width == null)
+            .fold<double>(
+              0,
+              (sum, c) =>
+                  sum + (c.maxWidth ?? _flexColumnMinWidth).clamp(_flexColumnMinWidth, 1000),
+            );
         final mutateMin = _mutateEnabled ? _mutateTrailingMinWidth : 0;
         final minTableWidth = _horizontalMargin * 2 +
-            _primaryMinWidth +
+            (widget.primaryMaxWidth ?? _primaryMinWidth) +
             fixedWidth +
             flexMin +
             mutateMin +
@@ -433,6 +473,7 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
             columnSpacing: _columnSpacing,
             horizontalMargin: _horizontalMargin,
             dataRowMinHeight: 40,
+            dataRowMaxHeight: double.infinity,
             headingRowHeight: widget.showHeader ? 44 : 0,
             headingRowColor: WidgetStatePropertyAll(colors.surface),
             decoration: const BoxDecoration(),
@@ -542,22 +583,30 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
     final alignment = _alignment(column.align);
     final bodyMedium = Theme.of(context).textTheme.bodyMedium;
     final widgetCell = row.cellWidgets[column.id];
+    final maxLines = math.max(1, column.maxLines);
     final child = widgetCell ??
         Text(
           row.cells[column.id] ?? '',
           overflow: TextOverflow.ellipsis,
-          maxLines: 1,
+          maxLines: maxLines,
+          softWrap: maxLines > 1,
           textAlign: _textAlign(column.align),
           style: _cellTextStyle(row, bodyMedium),
         );
-    if (column.width != null) {
+    final cap = column.width ?? column.maxWidth;
+    if (cap != null) {
       return DataCell(
-        SizedBox(
-          width: column.width,
+        ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: cap),
           child: Align(alignment: alignment, child: child),
         ),
       );
     }
-    return DataCell(Align(alignment: alignment, child: child));
+    return DataCell(
+      ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: _defaultColumnMaxWidth),
+        child: Align(alignment: alignment, child: child),
+      ),
+    );
   }
 }

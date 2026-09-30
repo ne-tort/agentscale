@@ -77,6 +77,20 @@ String formatModuleCell({
     }
   }
 
+  if (format == 'file_name') {
+    // FileRef map (module file columns): show the uploaded filename.
+    if (raw is Map) {
+      final name = raw['filename']?.toString() ?? '';
+      if (name.isNotEmpty) return name;
+      final size = raw['size'];
+      if (size is num) return '$size B';
+      return 'файл';
+    }
+    return '';
+  }
+  if (format == 'bool_yes_no') {
+    return raw == true ? 'Да' : 'Нет';
+  }
   if (format == 'budget_calc') {
     // Equipment budgeting: computed cell, value lives in col['variant'].
     return formatBudgetCalcCell(body: body, col: col);

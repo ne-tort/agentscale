@@ -98,8 +98,13 @@ class FileUploadField extends StatelessWidget {
     final warn = warnWhenEmpty && empty;
     final tokens = context.appColors;
     final accent = warn ? tokens.warning : null;
-    final sub = (!empty && subtitle != null && subtitle!.trim().isNotEmpty)
-        ? Text(subtitle!.trim())
+    String? effectiveSubtitle = subtitle;
+    if (!empty && (effectiveSubtitle == null || effectiveSubtitle.trim().isEmpty)) {
+      final name = _ref?['filename']?.toString() ?? '';
+      if (name.isNotEmpty) effectiveSubtitle = name;
+    }
+    final sub = (!empty && effectiveSubtitle != null && effectiveSubtitle.trim().isNotEmpty)
+        ? Text(effectiveSubtitle.trim())
         : null;
 
     return AppPreferenceTile(
