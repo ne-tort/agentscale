@@ -114,7 +114,7 @@ async def test_run_index_emits_kafka_accepted_and_completed(monkeypatch) -> None
     source.total_rows = 3
     source.aclose = AsyncMock()
     monkeypatch.setattr(mod, "_open_local_source", AsyncMock(return_value=source))
-    monkeypatch.setattr(mod, "_index_opened_source", AsyncMock(return_value=3))
+    monkeypatch.setattr(mod, "_index_opened_source", AsyncMock(return_value=(3, {"OCS"})))
 
     svc = MagicMock()
     svc.delete_index = AsyncMock(return_value=True)
@@ -143,8 +143,10 @@ async def test_run_index_emits_kafka_accepted_and_completed(monkeypatch) -> None
     assert bodies[0]["indexing_started_at"]
     # total_rows discovered at source open, before any bulk chunk
     assert bodies[1]["total_rows"] == 3
-    last_body = bodies[-1]
-    assert last_body["status"] == "ready"
+    # the ready snapshot (the suppliers auto-fill may append more bodies after)
+    ready_bodies = [b for b in bodies if b.get("status") == "ready"]
+    assert ready_bodies, bodies
+    last_body = ready_bodies[-1]
     assert last_body["indexed_count"] == 3
     assert last_body["total_rows"] == 3
 

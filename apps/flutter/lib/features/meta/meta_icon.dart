@@ -83,6 +83,46 @@ IconData metaIconFromName(String? name, {IconData fallback = Icons.extension_out
       return Icons.request_quote_outlined;
     case 'cookie':
       return Icons.cookie_outlined;
+    // Budget exports + sync (AppBar actions)
+    case 'download':
+    case 'file_download':
+      return Icons.download;
+    case 'picture_as_pdf':
+      return Icons.picture_as_pdf;
+    case 'table_view':
+      return Icons.table_view;
+    case 'refresh':
+      return Icons.refresh;
+    // Suppliers registry (fields + tiles)
+    case 'local_shipping':
+      return Icons.local_shipping;
+    case 'email':
+      return Icons.email_outlined;
+    case 'phone':
+      return Icons.phone_outlined;
+    case 'notes':
+      return Icons.notes;
+    case 'schedule':
+      return Icons.schedule;
+    case 'star':
+    case 'star_outlined':
+      return Icons.star_outline;
+    case 'percent':
+      return Icons.percent;
+    case 'badge':
+      return Icons.badge_outlined;
+    case 'location_on':
+      return Icons.location_on_outlined;
+    case 'account_balance':
+      return Icons.account_balance;
+    case 'tag':
+      return Icons.tag;
+    case 'credit_card':
+      return Icons.credit_card;
+    case 'toggle_on':
+      return Icons.toggle_on_outlined;
+    case 'currency_exchange':
+      return Icons.currency_exchange;
     default:
       return fallback;
   }

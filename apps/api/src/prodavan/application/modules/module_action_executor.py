@@ -263,6 +263,16 @@ class ModuleActionExecutor:
                 session_id=session_id,
             )
 
+        if kind == "equipment.offers_refresh":
+            return await self._offers_refresh(
+                cabinet_id=cabinet_id,
+                module_id=module_id,
+                params=params,
+                principal=principal,
+                employee=employee,
+                project_id=project_id,
+                session_id=session_id,
+            )
         if kind == "equipment.budget_export":
             return await self._budget_export(
                 cabinet_id=cabinet_id,
@@ -366,8 +376,30 @@ class ModuleActionExecutor:
         lines_table = str(params.get("lines_table") or "request_lines")
         offers_table = str(params.get("offers_table") or "found_offers")
         budget_table = str(params.get("budget_table") or "budget_lines")
+        def _num_or_zero(raw: Any) -> float:
+            if raw is None or isinstance(raw, bool):
+                return 0.0
+            try:
+                return float(raw)
+            except (TypeError, ValueError):
+                return 0.0
+
         catalogs_table = str(params.get("catalogs_table") or "catalogs")
         sellers_table = str(params.get("sellers_table") or "trusted_sellers")
+        # Refresh offer prices from the live catalog (src_hash) before the
+        # snapshot so «Синхронизировать» also pulls price changes.
+        try:
+            await self._offers_refresh(
+                cabinet_id=cabinet_id,
+                module_id=module_id,
+                params={},
+                principal=principal,
+                employee=employee,
+                project_id=project_id,
+                session_id=session_id,
+            )
+        except Exception:
+            logger.warning("budget_sync: offers_refresh failed", exc_info=True)
 
         lines = await self._list_rows_for_scope(
             cabinet_id=cabinet_id,
@@ -502,12 +534,32 @@ class ModuleActionExecutor:
             if isinstance(o, dict):
                 offers_by_id[str(o.get("row_id"))] = o.get("body") or {}
         offers_by_line: dict[str, dict[str, Any]] = {}
+        offers_by_line_all: dict[str, list[dict[str, Any]]] = {}
         for o in offers:
             if not isinstance(o, dict):
                 continue
             body = o.get("body") or {}
+            lid = str(body.get("line_id") or "")
+            if lid:
+                offers_by_line_all.setdefault(lid, []).append(body)
             if body.get("is_selected") is True:
-                offers_by_line[str(body.get("line_id") or "")] = body
+                offers_by_line[lid] = body
+
+        def _offer_rank(body: dict[str, Any]) -> tuple:
+            """Best candidate: exact match, higher score, lower price."""
+            try:
+                price = float(body.get("price") or 0)
+            except (TypeError, ValueError):
+                price = 0.0
+            try:
+                score = float(body.get("score") or 0)
+            except (TypeError, ValueError):
+                score = 0.0
+            return (
+                0 if str(body.get("match_kind") or "") == "exact" else 1,
+                -score,
+                price,
+            )
         budget_by_line: dict[str, dict[str, Any]] = {}
         for b in budget_rows:
             if not isinstance(b, dict):
@@ -529,12 +581,18 @@ class ModuleActionExecutor:
             offer = offers_by_id.get(str(line_body.get("selected_offer_id") or "")) or {}
             if not offer:
                 offer = offers_by_line.get(line_id) or {}
+            if not offer:
+                # No selection yet: budget from the best candidate
+                # (selection stays the user's choice — snapshot only).
+                candidates = offers_by_line_all.get(line_id) or []
+                if candidates:
+                    offer = sorted(candidates, key=_offer_rank)[0]
 
+            # Supplier: offer.seller -> catalog name. NEVER brand (a supplier
+            # is not a brand; the supplier always exists in the catalog).
             seller = str(offer.get("seller") or "").strip()
             if not seller:
                 seller = str(catalog_names.get(str(offer.get("catalog_id") or "")) or "").strip()
-            if not seller:
-                seller = str(offer.get("brand") or "").strip()
             if seller:
                 # Auto-map into trusted_sellers (no-op when already known).
                 await _register_seller(seller)
@@ -547,8 +605,9 @@ class ModuleActionExecutor:
                 ).strip()
                 or "Не определен",
                 "qty": line_body.get("qty") or 1,
-                "price_in": offer.get("price") or 0,
+                "price_in": _num_or_zero(offer.get("price")),
                 "seller": seller or "Не найден",
+                "brand": str(offer.get("brand") or "").strip(),
             }
             existing = budget_by_line.get(line_id)
             if existing is None:
@@ -595,6 +654,188 @@ class ModuleActionExecutor:
             "updated": updated,
             "lines": len(lines),
             "sellers_created": sellers_created,
+        }
+
+    async def _offers_refresh(
+        self,
+        *,
+        cabinet_id: str,
+        module_id: str,
+        params: dict[str, Any],
+        principal: Principal,
+        employee: EmployeeRow | None,
+        project_id: str | None = None,
+        session_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Re-check found_offers against the live catalog (by src_hash).
+
+        - price changed in OpenSearch -> update price_orig (+RUB reconvert),
+          never comparing the RUB-converted value;
+        - position gone from the catalog -> mark the row stale (is_stale),
+          keep the old price;
+        - backfills score (exact 1.0 / analog 0.5) when missing.
+        """
+        offers_table = str(params.get("offers_table") or "found_offers")
+        offers = await self._list_rows_for_scope(
+            cabinet_id=cabinet_id,
+            project_id=project_id,
+            module_id=module_id,
+            table_slug=offers_table,
+            principal=principal,
+            employee=employee,
+            session_id=session_id,
+        )
+        rows = [o for o in offers if isinstance(o, dict)]
+        if not rows:
+            return {"kind": "equipment.offers_refresh", "checked": 0, "updated": 0, "stale": 0}
+
+        catalogs = await self._list_rows_for_scope(
+            cabinet_id=cabinet_id,
+            project_id=project_id,
+            module_id=module_id,
+            table_slug="catalogs",
+            principal=principal,
+            employee=employee,
+            session_id=session_id,
+        )
+        ready = [
+            str(c.get("row_id"))
+            for c in catalogs
+            if isinstance(c, dict)
+            and str((c.get("body") or {}).get("status") or "") == "ready"
+        ]
+        if not ready:
+            return {
+                "kind": "equipment.offers_refresh",
+                "checked": 0,
+                "updated": 0,
+                "stale": 0,
+                "reason": "no_ready_catalogs",
+            }
+
+        by_hash: dict[str, list[dict[str, Any]]] = {}
+        for o in rows:
+            h = str((o.get("body") or {}).get("src_hash") or "").strip()
+            if h:
+                by_hash.setdefault(h, []).append(o)
+
+        from prodavan.application.modules.equipment_catalog_opensearch import (
+            OS_NAMESPACE,
+            catalog_os_index_name,
+        )
+        from prodavan.application.modules.equipment_fx import convert_offer_price
+        from prodavan.core.infra.opensearch_manager import get_search_index_service
+
+        svc = get_search_index_service()
+        found: dict[str, dict[str, Any]] = {}
+        hashes = list(by_hash.keys())
+        for start in range(0, len(hashes), 100):
+            chunk = hashes[start : start + 100]
+            query = {"bool": {"filter": [{"terms": {"src_hash": chunk}}]}}
+            for catalog_row_id in ready:
+                try:
+                    result = await svc.search(
+                        namespace=OS_NAMESPACE,
+                        index=catalog_os_index_name(catalog_row_id),
+                        query=query,
+                        from_=0,
+                        size=len(chunk),
+                        company_id="platform",
+                        cabinet_id=None,
+                        project_id=None,
+                        apply_tenant_filter=False,
+                        session=self._session,
+                    )
+                except Exception:
+                    logger.exception(
+                        "offers_refresh: os search failed catalog=%s", catalog_row_id
+                    )
+                    continue
+                for hit in result.hits:
+                    doc = hit.source if isinstance(hit.source, dict) else {}
+                    h = str(doc.get("src_hash") or "")
+                    if h and h not in found:
+                        found[h] = doc
+
+        updated = 0
+        stale = 0
+        checked = 0
+        for o in rows:
+            body = dict(o.get("body") or {})
+            h = str(body.get("src_hash") or "").strip()
+            row_id = str(o.get("row_id") or "")
+            if not row_id:
+                continue
+            checked += 1
+            doc = found.get(h) if h else None
+            if doc is None:
+                # Position no longer in the catalog: stale (price untouched).
+                if body.get("is_stale") is not True and h:
+                    body["is_stale"] = True
+                    await self._update_row_for_scope(
+                        cabinet_id=cabinet_id,
+                        project_id=project_id,
+                        module_id=module_id,
+                        table_slug=offers_table,
+                        row_id=row_id,
+                        body=body,
+                        principal=principal,
+                        employee=employee,
+                        run_actions=False,
+                        session_id=session_id,
+                    )
+                    stale += 1
+                continue
+
+            changed = False
+            if body.get("is_stale") is True:
+                body["is_stale"] = False
+                changed = True
+            # Score backfill (legacy rows with 0/missing score).
+            if not body.get("score"):
+                body["score"] = 1.0 if str(body.get("match_kind") or "") == "exact" else 0.5
+                changed = True
+            # Price compare in the ORIGINAL currency (doc.price_num is the
+            # raw catalog price), never the RUB-converted value.
+            doc_price = doc.get("price_num")
+            cur = str(body.get("currency") or "RUB").upper()
+            if isinstance(doc_price, (int, float)) and not isinstance(doc_price, bool):
+                try:
+                    orig = float(body.get("price_orig", body.get("price")))
+                except (TypeError, ValueError):
+                    orig = None
+                if orig is None or abs(float(doc_price) - orig) > 0.005:
+                    body["price_orig"] = float(doc_price)
+                    if cur == "RUB":
+                        body["price"] = round(float(doc_price), 2)
+                    else:
+                        rub, _ = await convert_offer_price(
+                            price=float(doc_price), currency=cur
+                        )
+                        body["price"] = rub
+                    changed = True
+            if not changed:
+                continue
+            await self._update_row_for_scope(
+                cabinet_id=cabinet_id,
+                project_id=project_id,
+                module_id=module_id,
+                table_slug=offers_table,
+                row_id=row_id,
+                body=body,
+                principal=principal,
+                employee=employee,
+                run_actions=False,
+                session_id=session_id,
+            )
+            updated += 1
+
+        return {
+            "kind": "equipment.offers_refresh",
+            "checked": checked,
+            "updated": updated,
+            "stale": stale,
+            "catalogs": len(ready),
         }
 
     async def _budget_export(

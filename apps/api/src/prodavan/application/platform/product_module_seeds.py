@@ -1281,6 +1281,40 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
             },
             {
                 "table_slug": "found_offers",
+                "name": "currency",
+                "label": {"ru": "Валюта", "en": "Currency"},
+                "type": "enum",
+                "required": False,
+                "enum": {
+                    "values": ["RUB", "USD", "EUR"],
+                    "labels": {"RUB": "₽", "USD": "$", "EUR": "€"},
+                },
+                "default": "RUB",
+            },
+            {
+                "table_slug": "found_offers",
+                "name": "price_orig",
+                "label": {"ru": "Цена в валюте", "en": "Price (orig)"},
+                "type": "number",
+                "required": False,
+            },
+            {
+                "table_slug": "found_offers",
+                "name": "src_hash",
+                "label": {"ru": "Хэш позиции", "en": "Source hash"},
+                "type": "text",
+                "required": False,
+            },
+            {
+                "table_slug": "found_offers",
+                "name": "is_stale",
+                "label": {"ru": "Устарела", "en": "Stale"},
+                "type": "bool",
+                "required": False,
+                "default": False,
+            },
+            {
+                "table_slug": "found_offers",
                 "name": "price",
                 "label": {"ru": "Цена", "en": "Price"},
                 "type": "number",
@@ -1923,14 +1957,9 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "kind": "collection",
                     "scaffold": {
                         "title": {"ru": "Бюджетирование", "en": "Budget"},
-                        # AppBar actions (top-right): sync / budget xlsx / КП PDF / spec PDF.
+                        # AppBar actions (top-right): budget xlsx / КП PDF /
+                        # spec PDF, sync to the right of the export buttons.
                         "actions": [
-                            {
-                                "kind": "invoke_action",
-                                "action": "budget_sync_lines",
-                                "icon": "sync",
-                                "label": {"ru": "Синхронизировать", "en": "Sync"},
-                            },
                             {
                                 "kind": "invoke_action",
                                 "action": "budget_export",
@@ -1948,6 +1977,12 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                                 "action": "spec_export",
                                 "icon": "table_view",
                                 "label": {"ru": "Спецификация (PDF)", "en": "Specification (PDF)"},
+                            },
+                            {
+                                "kind": "invoke_action",
+                                "action": "budget_sync_lines",
+                                "icon": "sync",
+                                "label": {"ru": "Синхронизировать", "en": "Sync"},
                             },
                         ],
                     },
@@ -1975,6 +2010,17 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "label": {"ru": "Партномер", "en": "P/N"},
                             "max_lines": 2,
                             "max_width": 150,
+                        },
+                        {
+                            "field": "seller",
+                            "label": {"ru": "Поставщик", "en": "Supplier"},
+                            "max_lines": 2,
+                            "max_width": 170,
+                        },
+                        {
+                            "field": "brand",
+                            "label": {"ru": "Бренд", "en": "Brand"},
+                            "max_width": 110,
                         },
                         {
                             "field": "qty",
@@ -2400,30 +2446,48 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "field": "title",
                             "label": {"ru": "Товар", "en": "Title"},
                             "max_lines": 3,
-                            "max_width": 300,
+                            "max_width": 260,
+                        },
+                        {
+                            "field": "seller",
+                            "label": {"ru": "Поставщик", "en": "Supplier"},
+                            "max_lines": 2,
+                            "max_width": 150,
+                        },
+                        {
+                            "field": "brand",
+                            "label": {"ru": "Бренд", "en": "Brand"},
+                            "max_width": 100,
                         },
                         {
                             "field": "part_number",
                             "label": {"ru": "Партномер", "en": "P/N"},
                             "max_lines": 2,
-                            "max_width": 150,
+                            "max_width": 130,
                         },
                         {
                             "field": "price",
-                            "label": {"ru": "Цена", "en": "Price"},
+                            "label": {"ru": "Цена (руб.)", "en": "Price (RUB)"},
                             "align": "end",
-                            "max_width": 120,
+                            "max_width": 110,
                         },
                         {
                             "field": "match_kind",
                             "label": {"ru": "Совпадение", "en": "Match"},
-                            "max_width": 120,
+                            "max_width": 100,
                         },
                         {
                             "field": "score",
                             "label": {"ru": "Оценка", "en": "Score"},
                             "align": "end",
-                            "max_width": 90,
+                            "max_width": 80,
+                        },
+                    ],
+                    # Position gone from the catalog (src_hash miss): warning.
+                    "row_style": [
+                        {
+                            "when": {"field": "is_stale", "eq": True},
+                            "accent": "warning",
                         },
                     ],
                     "context_bind": {"line_id": "contextRowId"},
@@ -2444,11 +2508,19 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "ui_json": {
                     "version": 1,
                     "kind": "collection",
-                    "scaffold": {
-                        "title": {"ru": "Найденные товары", "en": "Found offers"}
-                    },
                     "title_field": "title",
                     "subtitle_fields": ["line_id", "match_kind"],
+                    "scaffold": {
+                        "title": {"ru": "Найденные товары", "en": "Found offers"},
+                        "actions": [
+                            {
+                                "kind": "invoke_action",
+                                "action": "offers_refresh",
+                                "icon": "refresh",
+                                "label": {"ru": "Обновить цены", "en": "Refresh prices"},
+                            },
+                        ],
+                    },
                     "columns": [
                         {
                             "field": "title",
@@ -2457,9 +2529,15 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "max_width": 280,
                         },
                         {
+                            "field": "seller",
+                            "label": {"ru": "Поставщик", "en": "Supplier"},
+                            "max_lines": 2,
+                            "max_width": 160,
+                        },
+                        {
                             "field": "brand",
                             "label": {"ru": "Бренд", "en": "Brand"},
-                            "max_width": 120,
+                            "max_width": 110,
                         },
                         {
                             "field": "part_number",
@@ -2469,25 +2547,32 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                         },
                         {
                             "field": "price",
-                            "label": {"ru": "Цена", "en": "Price"},
+                            "label": {"ru": "Цена (руб.)", "en": "Price (RUB)"},
                             "align": "end",
                             "max_width": 120,
                         },
                         {
                             "field": "match_kind",
                             "label": {"ru": "Совпадение", "en": "Match"},
-                            "max_width": 120,
+                            "max_width": 110,
                         },
                         {
                             "field": "score",
                             "label": {"ru": "Оценка", "en": "Score"},
                             "align": "end",
-                            "max_width": 90,
+                            "max_width": 80,
                         },
                         {
                             "field": "line_id",
                             "label": {"ru": "Запрос", "en": "Request"},
-                            "max_width": 130,
+                            "max_width": 120,
+                        },
+                    ],
+                    # Position gone from the catalog (src_hash miss): warning.
+                    "row_style": [
+                        {
+                            "when": {"field": "is_stale", "eq": True},
+                            "accent": "warning",
                         },
                     ],
                     "row_tap": {"kind": "open_form", "view": "found_offers_form"},
@@ -2522,10 +2607,14 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                         },
                         {"column": "brand", "widget": "value"},
                         {"column": "part_number", "widget": "value"},
+                        {"column": "seller", "widget": "value"},
                         {"column": "price", "widget": "value"},
+                        {"column": "price_orig", "widget": "value"},
+                        {"column": "currency", "widget": "choice"},
                         {"column": "score", "widget": "value"},
                         {"column": "match_kind", "widget": "choice"},
                         {"column": "is_selected", "widget": "switch"},
+                        {"column": "is_stale", "widget": "switch"},
                     ],
                 },
             },
@@ -3351,7 +3440,18 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "ui": {"placement": ["scaffold"], "icon": "sync"},
             },
             {
-                "id": "budget_export",
+                    "id": "offers_refresh",
+                    "label": {"ru": "Обновить цены", "en": "Refresh prices"},
+                    "kind": "equipment.offers_refresh",
+                    "enabled": True,
+                    "params": {
+                        "offers_table": "found_offers",
+                    },
+                    "trigger": {"on": []},
+                    "ui": {"placement": ["scaffold"], "icon": "refresh"},
+                },
+                {
+                    "id": "budget_export",
                 "label": {"ru": "Скачать xlsx", "en": "Download xlsx"},
                 "kind": "equipment.budget_export",
                 "enabled": True,

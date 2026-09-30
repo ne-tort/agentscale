@@ -139,6 +139,7 @@ def _canonical_mappings() -> dict[str, Any]:
         "price": {"type": "keyword"},
         "supplier": {"type": "keyword"},
         "lead_time": {"type": "keyword"},
+        "src_hash": {"type": "keyword"},
     }
     return {"properties": props}
 
@@ -157,6 +158,16 @@ def _iter_sqlite_source_rows(sqlite_bytes: bytes) -> Iterator[dict[str, Any]]:
                 yield {cols[i]: row[i] for i in range(len(cols))}
     finally:
         conn.close()
+
+
+def source_hash(supplier: str, title: str) -> str:
+    """Stable position identity: sha1(casefold supplier|title)[:16].
+
+    Survives 24h wipe+reindex (docs get new _ids but the same src_hash), so
+    found_offers rows can be matched against the live catalog later.
+    """
+    key = f"{supplier.strip().casefold()}|{title.strip().casefold()}"
+    return hashlib.sha1(key.encode("utf-8")).hexdigest()[:16]
 
 
 def _source_row_key(mapped: dict[str, str], raw: dict[str, Any], seq: int) -> str:
@@ -195,6 +206,7 @@ def _doc_from_mapped(
         "lead_time": lead,
         "price_num": price_num,
         "in_stock": is_in_stock(lead),
+        "src_hash": source_hash(mapped.get("supplier") or "", mapped.get("title") or ""),
     }
 
 
@@ -331,7 +343,7 @@ async def run_index_equipment_catalog(
         )
 
         # --- 3) chunked bulk with persisted progress -----------------------
-        indexed = await _index_opened_source(
+        indexed, indexed_suppliers = await _index_opened_source(
             svc=svc,
             source=source,
             column_map=column_map,
@@ -389,11 +401,21 @@ async def run_index_equipment_catalog(
         ok=True,
         indexed=indexed,
     )
+    sellers_mapped = 0
+    try:
+        sellers_mapped = await _sync_sellers_from_catalog(
+            session,
+            instance_id=instance_id,
+            suppliers=indexed_suppliers,
+        )
+    except Exception:
+        logger.exception("equipment catalog index: sellers auto-fill failed")
     return {
         "ok": True,
         "row_id": row_id,
         "indexed": indexed,
         "index": f"{OS_NAMESPACE}__{index_name}",
+        "sellers_mapped": sellers_mapped,
     }
 
 
@@ -527,16 +549,23 @@ async def _index_opened_source(
     project_id: str | None,
     index_name: str,
     on_progress: Callable[[int, int | None], Awaitable[None]] | None = None,
-) -> int:
-    """Chunked bulk_index over an already-opened source, with progress heartbeats."""
+) -> tuple[int, set[str]]:
+    """Chunked bulk_index over an already-opened source, with progress heartbeats.
+
+    Returns (indexed, distinct supplier names seen in the source).
+    """
     batch: list[dict[str, Any]] = []
     total = 0
     seq = 0
+    suppliers: set[str] = set()
     async for raw_row in source.aiter_rows():
         seq += 1
         mapped = apply_column_map(raw_row, column_map)
         if not (mapped.get("title") or "").strip():
             continue
+        supplier_name = (mapped.get("supplier") or "").strip()
+        if supplier_name:
+            suppliers.add(supplier_name)
         doc = _doc_from_mapped(
             mapped=mapped,
             catalog_id=catalog_id,
@@ -585,7 +614,67 @@ async def _index_opened_source(
             project_id=project_id,
             cabinet_id=cabinet_id,
         )
-    return total
+    return total, suppliers
+
+
+async def _sync_sellers_from_catalog(
+    session: AsyncSession,
+    *,
+    instance_id: str,
+    suppliers: set[str],
+) -> int:
+    """Auto-fill «Поставщики» (trusted_sellers) from a freshly indexed catalog.
+
+    Dedup by name/aliases (casefold); existing rows are never touched.
+    Deterministic row ids make the sync idempotent across re-indexes.
+    """
+    if not suppliers:
+        return 0
+    inst_svc = ModuleInstanceService(session)
+
+    def _alias_tokens(raw: Any) -> set[str]:
+        if isinstance(raw, list):
+            toks = [str(x).strip() for x in raw]
+        elif isinstance(raw, str):
+            toks = raw.replace(";", ",").split(",")
+        else:
+            toks = []
+        return {t.casefold() for t in toks if t}
+
+    known: set[str] = set()
+    try:
+        rows = await inst_svc.list_data_rows(
+            instance_id=instance_id, table_slug="trusted_sellers"
+        )
+    except Exception:
+        rows = []
+    for r in rows:
+        body = r.get("body") if isinstance(r, dict) else {}
+        if not isinstance(body, dict):
+            continue
+        name = str(body.get("name") or "").strip()
+        if not name:
+            continue
+        known |= {name.casefold()} | _alias_tokens(body.get("aliases"))
+
+    created = 0
+    for name in sorted(suppliers):
+        if not name.strip() or name.casefold() in known:
+            continue
+        row_id = f"sell_{hashlib.sha1(name.strip().casefold().encode('utf-8')).hexdigest()[:12]}"
+        await inst_svc.upsert_data_row(
+            instance_id=instance_id,
+            table_slug="trusted_sellers",
+            row_id=row_id,
+            body={"name": name.strip(), "is_enabled": True},
+            created_by="module_seed",
+        )
+        known.add(name.casefold())
+        created += 1
+    if created:
+        await session.commit()
+        logger.info("equipment catalog index: mapped %d new suppliers", created)
+    return created
 
 
 def enqueue_or_run_index_equipment_catalog(

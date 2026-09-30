@@ -188,7 +188,10 @@ TOOLS: list[dict[str, Any]] = [
             "source_title is auto-filled from that request line's title; "
             "do NOT put catalog names (s4b, source_catalog) into source_title or line_id. "
             "Copy from catalog search when present: part_number, brand, price, "
-            "seller (supplier), catalog_id; "
+            "seller (supplier), catalog_id, src_hash; "
+            "price is in the supplier's currency — pass currency "
+            "(RUB default) and price as found (server converts to RUB); "
+            "score defaults to 1.0 (exact) / 0.5 (analog) when omitted; "
             "match_kind=exact if match_rank=exact_pn else analog; "
             "score optional (e.g. match_rank_order). "
             "PATCH merges: omit = leave; null = clear. "
@@ -214,7 +217,19 @@ TOOLS: list[dict[str, Any]] = [
                         "Used for supplier registry, margin defaults and priority."
                     ),
                 },
-                "price": {"type": ["number", "integer", "null"]},
+                "price": {
+                    "type": ["number", "integer", "null"],
+                    "description": "Price in the supplier's currency (see currency)",
+                },
+                "currency": {
+                    "type": ["string", "null"],
+                    "enum": ["RUB", "USD", "EUR", None],
+                    "description": "Currency of price (default RUB)",
+                },
+                "src_hash": {
+                    "type": ["string", "null"],
+                    "description": "Stable catalog position id from catalog search",
+                },
                 "score": {"type": ["number", "integer", "null"]},
                 "match_kind": {
                     "type": ["string", "null"],
@@ -485,6 +500,8 @@ def _call_tool(name: str, arguments: dict[str, Any]) -> Any:
             "brand",
             "seller",
             "price",
+            "currency",
+            "src_hash",
             "score",
             "match_kind",
             "is_selected",
@@ -495,6 +512,9 @@ def _call_tool(name: str, arguments: dict[str, Any]) -> Any:
         body = _pick_present(arguments, keys)
         row_id = str(arguments.get("row_id") or "").strip() or None
         _validate_offer_body(body, creating=not row_id)
+        if "score" not in body:
+            # Relevance default: exact matches rank 1.0, analogs 0.5.
+            body["score"] = 1.0 if str(body.get("match_kind") or "") == "exact" else 0.5
         # Always prefer request-line title over agent-supplied catalog nicknames.
         _fill_source_title_from_line(mid, body, session_id=sid)
         if row_id:

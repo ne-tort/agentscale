@@ -391,6 +391,12 @@ class PodModuleDataService:
         columns_body = await self._instances.resolve_columns_body(
             instance_id=inst.id, module_id=module_id
         )
+        if table_slug == "found_offers":
+            # Agent-supplied price is in `currency` — store RUB in `price`,
+            # original in `price_orig` (budget math stays single-currency).
+            from prodavan.application.modules.equipment_fx import apply_fx_to_offer_body
+
+            body = await apply_fx_to_offer_body(body)
         body = merge_column_defaults(
             columns_body=columns_body, table_slug=table_slug, body=body
         )
