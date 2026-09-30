@@ -135,7 +135,7 @@ def upgrade() -> None:
             sa.text(
                 "INSERT INTO module_instance_data_rows "
                 "(id, instance_id, table_slug, row_id, body, session_id, created_by, created_at, updated_at) "
-                "SELECT CAST(gen_random_uuid() AS text), i.id, 'templates', :rid, CAST(:body AS jsonb), NULL, "
+                "SELECT CAST(gen_random_uuid() AS text), i.id, 'templates', CAST(:rid AS varchar), CAST(:body AS jsonb), NULL, "
                 "'module_seed', now(), now() "
                 "FROM module_instances i "
                 "WHERE i.module_id = 'mod_equipment' "
