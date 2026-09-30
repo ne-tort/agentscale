@@ -63,6 +63,32 @@ def _attach_rematerialize(row: dict[str, Any], remat: dict[str, Any]) -> dict[st
 
 
 class CabinetModuleService:
+    async def _chat_scope_session(
+        self,
+        *,
+        inst,
+        module_id: str,
+        table_slug: str,
+        session_id: str | None,
+    ) -> str | None:
+        """Resolved session filter for chats=current tables (None = shared).
+
+        The cabinet contour has no project, so real sessions are not
+        re-validated against a project here — the header comes from the
+        employee UI (workContext active chat).
+        """
+        from prodavan.application.modules.chat_scope import (
+            CHAT_SCOPE_CURRENT,
+            chats_scope_from_tables_body,
+            resolve_session_id,
+        )
+
+        tables_body = await self._instances.resolve_tables_body(
+            instance_id=inst.id, module_id=module_id
+        )
+        if chats_scope_from_tables_body(tables_body, table_slug) != CHAT_SCOPE_CURRENT:
+            return None
+        return resolve_session_id(session_id)
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
         self._access = CabinetAccessService(session)
@@ -124,6 +150,7 @@ class CabinetModuleService:
         table_slug: str,
         principal: Principal,
         employee: EmployeeRow | None,
+        session_id: str | None = None,
     ) -> list[dict]:
         table_slug = check_table_slug(table_slug)
         await self._access.require_access(
@@ -131,7 +158,12 @@ class CabinetModuleService:
         )
         await self._require_module_binding(cabinet_id=cabinet_id, module_id=module_id)
         inst = await self._cabinet_sot(cabinet_id=cabinet_id, module_id=module_id, write=False)
-        rows = await self._instances.list_data_rows(instance_id=inst.id, table_slug=table_slug)
+        filter_session = await self._chat_scope_session(
+            inst=inst, module_id=module_id, table_slug=table_slug, session_id=session_id
+        )
+        rows = await self._instances.list_data_rows(
+            instance_id=inst.id, table_slug=table_slug, session_id=filter_session
+        )
         return [
             {
                 "module_id": module_id,
@@ -150,6 +182,7 @@ class CabinetModuleService:
         body: Any,
         principal: Principal,
         employee: EmployeeRow | None,
+        session_id: str | None = None,
     ) -> dict:
         table_slug = check_table_slug(table_slug)
         body = ensure_row_body(body)
@@ -158,6 +191,14 @@ class CabinetModuleService:
         )
         await self._require_module_binding(cabinet_id=cabinet_id, module_id=module_id)
         inst = await self._cabinet_sot(cabinet_id=cabinet_id, module_id=module_id, write=True)
+        stamp_session = await self._chat_scope_session(
+            inst=inst, module_id=module_id, table_slug=table_slug, session_id=session_id
+        )
+        if stamp_session is None:
+            body = {k: v for k, v in dict(body or {}).items() if k != "session_id"}
+        else:
+            body = dict(body or {})
+            body["session_id"] = stamp_session
         columns_body = await self._instances.resolve_columns_body(
             instance_id=inst.id, module_id=module_id
         )
@@ -176,6 +217,7 @@ class CabinetModuleService:
             table_slug=table_slug,
             body=body,
             created_by=created_by,
+            session_id=stamp_session,
         )
         await self._session.commit()
         remat = await self._schedule_rematerialize(cabinet_id=cabinet_id, module_id=module_id)
@@ -187,6 +229,7 @@ class CabinetModuleService:
         action_error: AppError | None = None
         try:
             await self._maybe_run_row_actions(
+                session_id=stamp_session,
                 cabinet_id=cabinet_id,
                 module_id=module_id,
                 table_slug=table_slug,
@@ -220,6 +263,7 @@ class CabinetModuleService:
         principal: Principal,
         employee: EmployeeRow | None,
         run_actions: bool = True,
+        session_id: str | None = None,
     ) -> dict:
         table_slug = check_table_slug(table_slug)
         body = ensure_row_body(body)
@@ -232,6 +276,11 @@ class CabinetModuleService:
             instance_id=inst.id, table_slug=table_slug, row_id=row_id
         )
         if existing is None:
+            raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="row not found")
+        update_session = await self._chat_scope_session(
+            inst=inst, module_id=module_id, table_slug=table_slug, session_id=session_id
+        )
+        if update_session is not None and (existing.get("session_id") or "").strip() != update_session:
             raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="row not found")
         existing_body = (
             dict(existing["body"]) if isinstance(existing.get("body"), dict) else {}
@@ -251,6 +300,7 @@ class CabinetModuleService:
             table_slug=table_slug,
             row_id=row_id,
             body=body,
+            session_id=update_session,
         )
         await self._session.flush()
         # Avoid double-commit when nested from set_profile; callers that need
@@ -265,6 +315,7 @@ class CabinetModuleService:
             action_error: AppError | None = None
             try:
                 await self._maybe_run_row_actions(
+                session_id=update_session,
                     cabinet_id=cabinet_id,
                     module_id=module_id,
                     table_slug=table_slug,
@@ -300,6 +351,7 @@ class CabinetModuleService:
         row_id: str,
         principal: Principal,
         employee: EmployeeRow | None,
+        session_id: str | None = None,
     ) -> dict:
         table_slug = check_table_slug(table_slug)
         await self._access.require_access(
@@ -307,6 +359,15 @@ class CabinetModuleService:
         )
         await self._require_module_binding(cabinet_id=cabinet_id, module_id=module_id)
         inst = await self._cabinet_sot(cabinet_id=cabinet_id, module_id=module_id, write=True)
+        delete_session = await self._chat_scope_session(
+            inst=inst, module_id=module_id, table_slug=table_slug, session_id=session_id
+        )
+        if delete_session is not None:
+            existing = await self._instances.get_data_row(
+                instance_id=inst.id, table_slug=table_slug, row_id=row_id
+            )
+            if existing is None or (existing.get("session_id") or "").strip() != delete_session:
+                raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="row not found")
         ok = await self._instances.delete_data_row(
             instance_id=inst.id, table_slug=table_slug, row_id=row_id
         )
@@ -377,6 +438,7 @@ class CabinetModuleService:
         principal: Principal,
         employee: EmployeeRow | None,
         previous_body: dict | None = None,
+        session_id: str | None = None,
     ) -> None:
         if not row_id:
             return
@@ -390,6 +452,7 @@ class CabinetModuleService:
             principal=principal,
             employee=employee,
             previous_body=previous_body,
+            session_id=session_id,
         )
         await ModuleActionExecutor(self._session).maybe_auto_budget_sync(
             cabinet_id=cabinet_id,

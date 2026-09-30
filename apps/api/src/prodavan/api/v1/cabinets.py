@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, File, UploadFile
+from fastapi import APIRouter, Depends, File, Header, UploadFile
 from pydantic import BaseModel, Field
 
 from prodavan.api.deps import PrincipalDep, SessionDep, get_current_employee
@@ -13,6 +13,7 @@ from prodavan.application.cabinets.cabinet_module_secret_service import CabinetM
 from prodavan.application.cabinets.cabinet_module_service import CabinetModuleService
 from prodavan.application.cabinets.instance_service import CabinetInstanceService
 from prodavan.application.content.cabinet_upload_service import CabinetContentUploadService
+from prodavan.application.modules.chat_scope import SESSION_HEADER
 from prodavan.application.modules.module_action_executor import ModuleActionExecutor
 from prodavan.infrastructure.persistence.models.identity import EmployeeRow
 
@@ -347,11 +348,12 @@ async def list_cabinet_module_bound_projects(
 
     Soft-deleted projects are excluded even if an MP row still exists.
     """
+    from sqlalchemy import select
+
     from prodavan.application.cabinets.access import CabinetAccessService
     from prodavan.application.modules.module_binding_service import ModuleBindingService
     from prodavan.domain.lifecycle import project_alive_clause
     from prodavan.infrastructure.persistence.models.projects import ProjectRow
-    from sqlalchemy import select
 
     await CabinetAccessService(session).require_access(
         cabinet_id=cabinet_id, principal=principal, employee=employee, write=False
@@ -400,6 +402,7 @@ async def list_module_data_rows(
     principal: PrincipalDep,
     session: SessionDep,
     employee: Annotated[EmployeeRow | None, Depends(get_current_employee)] = None,
+    x_prodavan_session_id: str | None = Header(default=None, alias=SESSION_HEADER),
 ) -> dict:
     items = await CabinetModuleService(session).list_data_rows(
         cabinet_id=cabinet_id,
@@ -407,6 +410,7 @@ async def list_module_data_rows(
         table_slug=table_slug,
         principal=principal,
         employee=employee,
+        session_id=x_prodavan_session_id,
     )
     return {"items": items}
 
@@ -420,6 +424,7 @@ async def create_module_data_row(
     principal: PrincipalDep,
     session: SessionDep,
     employee: Annotated[EmployeeRow | None, Depends(get_current_employee)] = None,
+    x_prodavan_session_id: str | None = Header(default=None, alias=SESSION_HEADER),
 ) -> dict:
     return await CabinetModuleService(session).create_data_row(
         cabinet_id=cabinet_id,
@@ -428,6 +433,7 @@ async def create_module_data_row(
         body=body.body,
         principal=principal,
         employee=employee,
+        session_id=x_prodavan_session_id,
     )
 
 
@@ -441,6 +447,7 @@ async def update_module_data_row(
     principal: PrincipalDep,
     session: SessionDep,
     employee: Annotated[EmployeeRow | None, Depends(get_current_employee)] = None,
+    x_prodavan_session_id: str | None = Header(default=None, alias=SESSION_HEADER),
 ) -> dict:
     return await CabinetModuleService(session).update_data_row(
         cabinet_id=cabinet_id,
@@ -450,6 +457,7 @@ async def update_module_data_row(
         body=body.body,
         principal=principal,
         employee=employee,
+        session_id=x_prodavan_session_id,
     )
 
 
@@ -462,6 +470,7 @@ async def delete_module_data_row(
     principal: PrincipalDep,
     session: SessionDep,
     employee: Annotated[EmployeeRow | None, Depends(get_current_employee)] = None,
+    x_prodavan_session_id: str | None = Header(default=None, alias=SESSION_HEADER),
 ) -> dict:
     return await CabinetModuleService(session).delete_data_row(
         cabinet_id=cabinet_id,
@@ -470,6 +479,7 @@ async def delete_module_data_row(
         row_id=row_id,
         principal=principal,
         employee=employee,
+        session_id=x_prodavan_session_id,
     )
 
 
@@ -501,6 +511,7 @@ async def invoke_module_action(
     principal: PrincipalDep,
     session: SessionDep,
     employee: Annotated[EmployeeRow | None, Depends(get_current_employee)] = None,
+    x_prodavan_session_id: str | None = Header(default=None, alias=SESSION_HEADER),
 ) -> dict:
     return await ModuleActionExecutor(session).invoke(
         cabinet_id=cabinet_id,
@@ -510,6 +521,7 @@ async def invoke_module_action(
         employee=employee,
         row_id=body.row_id,
         project_id=body.project_id,
+        session_id=x_prodavan_session_id,
     )
 
 
@@ -530,3 +542,4 @@ async def upload_cabinet_content(
         principal=principal,
         employee=employee,
     )
+

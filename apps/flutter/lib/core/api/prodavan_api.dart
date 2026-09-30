@@ -164,13 +164,18 @@ class ProdavanApi {
     required String cabinetId,
     required String moduleId,
     required String tableSlug,
+    String? sessionId,
   }) async {
     final prev = this.cabinetId;
     this.cabinetId = cabinetId;
     try {
       final res = await AuthHttp.get(
         _uri('/cabinets/$cabinetId/modules/$moduleId/data/$tableSlug'),
-        extraHeaders: _workHeaders,
+        extraHeaders: {
+          ..._workHeaders,
+          if (sessionId != null && sessionId.isNotEmpty)
+            'X-Prodavan-Session-Id': sessionId,
+        },
       );
       _throwIfError(res);
       final body = jsonDecode(res.body) as Map<String, dynamic>;
@@ -189,14 +194,19 @@ class ProdavanApi {
     required String moduleId,
     required String tableSlug,
     required Map<String, dynamic> body,
+    String? sessionId,
   }) async {
     final prev = this.cabinetId;
     this.cabinetId = cabinetId;
     try {
       final res = await AuthHttp.post(
         _uri('/cabinets/$cabinetId/modules/$moduleId/data/$tableSlug'),
+        extraHeaders: {
+          ..._workHeaders,
+          if (sessionId != null && sessionId.isNotEmpty)
+            'X-Prodavan-Session-Id': sessionId,
+        },
         body: jsonEncode({'body': body}),
-        extraHeaders: _workHeaders,
       );
       _throwIfError(res);
       return jsonDecode(res.body) as Map<String, dynamic>;
@@ -211,6 +221,7 @@ class ProdavanApi {
     required String tableSlug,
     required String rowId,
     required Map<String, dynamic> body,
+    String? sessionId,
   }) async {
     final prev = this.cabinetId;
     this.cabinetId = cabinetId;
@@ -218,7 +229,11 @@ class ProdavanApi {
       final res = await AuthHttp.patch(
         _uri('/cabinets/$cabinetId/modules/$moduleId/data/$tableSlug/$rowId'),
         body: jsonEncode({'body': body}),
-        extraHeaders: _workHeaders,
+        extraHeaders: {
+          ..._workHeaders,
+          if (sessionId != null && sessionId.isNotEmpty)
+            'X-Prodavan-Session-Id': sessionId,
+        },
       );
       _throwIfError(res);
       return jsonDecode(res.body) as Map<String, dynamic>;
@@ -232,13 +247,18 @@ class ProdavanApi {
     required String moduleId,
     required String tableSlug,
     required String rowId,
+    String? sessionId,
   }) async {
     final prev = this.cabinetId;
     this.cabinetId = cabinetId;
     try {
       final res = await AuthHttp.delete(
         _uri('/cabinets/$cabinetId/modules/$moduleId/data/$tableSlug/$rowId'),
-        extraHeaders: _workHeaders,
+        extraHeaders: {
+          ..._workHeaders,
+          if (sessionId != null && sessionId.isNotEmpty)
+            'X-Prodavan-Session-Id': sessionId,
+        },
       );
       _throwIfError(res);
       if (res.body.isEmpty) return <String, dynamic>{'deleted': true};
@@ -366,17 +386,22 @@ class ProdavanApi {
     required String actionId,
     String? rowId,
     String? projectId,
+    String? sessionId,
   }) async {
     final prev = this.cabinetId;
     this.cabinetId = cabinetId;
     try {
       final res = await AuthHttp.post(
         _uri('/cabinets/$cabinetId/modules/$moduleId/actions/$actionId/invoke'),
+        extraHeaders: {
+          ..._workHeaders,
+          if (sessionId != null && sessionId.isNotEmpty)
+            'X-Prodavan-Session-Id': sessionId,
+        },
         body: jsonEncode({
           if (rowId != null) 'row_id': rowId,
           if (projectId != null && projectId.isNotEmpty) 'project_id': projectId,
         }),
-        extraHeaders: _workHeaders,
       );
       _throwIfError(res);
       return jsonDecode(res.body) as Map<String, dynamic>;

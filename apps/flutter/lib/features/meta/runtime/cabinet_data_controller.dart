@@ -53,6 +53,7 @@ class CabinetDataController extends ChangeNotifier with ModulePickContextMixin {
               cabinetId: cabinetId,
               moduleId: moduleId,
               tableSlug: slug,
+              sessionId: sessionId,
             );
       for (final row in rows) {
         next.add({
@@ -147,6 +148,7 @@ class CabinetDataController extends ChangeNotifier with ModulePickContextMixin {
             moduleId: moduleId,
             tableSlug: tableSlug,
             body: body,
+            sessionId: sessionId,
           );
     _emitRematerialize(created);
     final rowId = created['row_id'] as String;
@@ -178,6 +180,7 @@ class CabinetDataController extends ChangeNotifier with ModulePickContextMixin {
             tableSlug: tableSlug,
             rowId: rowId,
             body: body,
+            sessionId: sessionId,
           );
     _emitRematerialize(updated);
     for (var i = 0; i < _items.length; i++) {
@@ -216,6 +219,7 @@ class CabinetDataController extends ChangeNotifier with ModulePickContextMixin {
             moduleId: moduleId,
             tableSlug: item['table_slug'] as String,
             rowId: rowId,
+            sessionId: sessionId,
           );
     _emitRematerialize(deleted);
     _items.removeWhere((i) => i['row_id'] == rowId);
@@ -232,6 +236,7 @@ class CabinetDataController extends ChangeNotifier with ModulePickContextMixin {
       actionId: actionId,
       rowId: rowId,
       projectId: projectId,
+      sessionId: sessionId,
     );
     await loadAll();
     return result;
