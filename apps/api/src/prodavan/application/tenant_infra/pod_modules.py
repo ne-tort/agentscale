@@ -128,6 +128,40 @@ class PodModuleDataService:
                 "pod auto budget sync failed module=%s table=%s", module_id, table_slug
             )
 
+    async def _resolve_active_agent_session(self, project_id: str) -> str | None:
+        """Latest active chat session of the project, or None.
+
+        Platform MCP servers in the pod are pod-scoped processes spawned once
+        per runtime (no per-chat env). When a Bridge data call carries no
+        X-Prodavan-Session-Id, chats=current tables resolve to the chat the
+        agent is currently working in instead of the shared synthetic 'main'
+        bucket, so agent-written rows surface in the active chat's UI views.
+        """
+        from sqlalchemy import select
+
+        from prodavan.domain.agent import AgentSessionStatus
+        from prodavan.infrastructure.persistence.models.agent import AgentSessionRow
+
+        q = await self._session.execute(
+            select(AgentSessionRow.id)
+            .where(
+                AgentSessionRow.project_id == project_id,
+                AgentSessionRow.status == AgentSessionStatus.ACTIVE,
+            )
+            .order_by(AgentSessionRow.updated_at.desc())
+            .limit(1)
+        )
+        return q.scalar_one_or_none()
+
+    async def _scoped_session_id(
+        self, *, project_id: str, session_id: str | None
+    ) -> str | None:
+        """Explicit session wins; missing session -> active chat of the project."""
+        sid = (session_id or "").strip() or None
+        if sid is not None:
+            return sid
+        return await self._resolve_active_agent_session(project_id)
+
     def _pod_principal(self, bridge: PodBridgeClaims) -> Principal:
         """Privileged principal for nested ModuleActionExecutor after Bridge ACL."""
         return Principal(
@@ -297,6 +331,9 @@ class PodModuleDataService:
         await self._require_project_row(project_id, bridge)
         self._require_module_rows(bridge, module_id)
         table_slug = check_table_slug(table_slug)
+        session_id = await self._scoped_session_id(
+            project_id=project_id, session_id=session_id
+        )
         inst = await self._runtime._sot_for_project(
             project_id=project_id, module_id=module_id, write=False
         )
@@ -335,6 +372,9 @@ class PodModuleDataService:
         self._require_module_rows(bridge, module_id)
         table_slug = check_table_slug(table_slug)
         body = ensure_row_body(body)
+        session_id = await self._scoped_session_id(
+            project_id=project_id, session_id=session_id
+        )
         inst = await self._runtime._sot_for_project(
             project_id=project_id, module_id=module_id, write=True
         )
@@ -411,6 +451,9 @@ class PodModuleDataService:
         self._require_module_rows(bridge, module_id)
         table_slug = check_table_slug(table_slug)
         body = ensure_row_body(body)
+        session_id = await self._scoped_session_id(
+            project_id=project_id, session_id=session_id
+        )
         inst = await self._runtime._sot_for_project(
             project_id=project_id, module_id=module_id, write=True
         )
@@ -525,9 +568,13 @@ class PodModuleDataService:
         module_id: str,
         action_id: str,
         row_id: str | None = None,
+        session_id: str | None = None,
     ) -> dict[str, Any]:
         project = await self._require_project_row(project_id, bridge)
         self._require_module_actions(bridge, module_id)
+        session_id = await self._scoped_session_id(
+            project_id=project_id, session_id=session_id
+        )
         binding = await self._bindings.get_project_binding(module_id, project_id)
         if binding is None:
             raise AppError(
@@ -546,6 +593,7 @@ class PodModuleDataService:
             employee=None,
             row_id=row_id,
             project_id=project_id,
+            session_id=session_id,
         )
         return {"module_id": module_id, **result}
 

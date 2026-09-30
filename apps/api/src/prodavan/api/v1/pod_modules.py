@@ -191,6 +191,7 @@ async def invoke_pod_module_action(
     bridge: PodBridgeDep,
     session: SessionDep,
     body: PodModuleActionBody | None = None,
+    x_prodavan_session_id: str | None = Header(default=None, alias=SESSION_HEADER),
 ) -> dict[str, Any]:
     return await PodModuleDataService(session).invoke_action(
         bridge=bridge,
@@ -198,6 +199,7 @@ async def invoke_pod_module_action(
         module_id=module_id,
         action_id=action_id,
         row_id=body.row_id if body else None,
+        session_id=x_prodavan_session_id,
     )
 
 
