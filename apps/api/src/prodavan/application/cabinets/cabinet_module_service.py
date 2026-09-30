@@ -315,7 +315,7 @@ class CabinetModuleService:
             action_error: AppError | None = None
             try:
                 await self._maybe_run_row_actions(
-                session_id=update_session,
+                    session_id=update_session,
                     cabinet_id=cabinet_id,
                     module_id=module_id,
                     table_slug=table_slug,
@@ -460,6 +460,7 @@ class CabinetModuleService:
             table_slug=table_slug,
             principal=principal,
             employee=employee,
+            session_id=session_id,
         )
 
     async def _require_module_binding(self, *, cabinet_id: str, module_id: str) -> None:
