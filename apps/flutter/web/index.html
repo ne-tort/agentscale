@@ -3,7 +3,7 @@
 <head>
   <!--
     If you are serving your web app in a path other than the root, change the
-    href value below to reflect the base path you are serving from.
+    href value below to reflect the base path you are serving the app from.
 
     The path provided below has to start and end with a slash "/" in order for
     it to work correctly.
@@ -31,6 +31,73 @@
 
   <title>prodavan</title>
   <link rel="manifest" href="manifest.json">
+
+  <script>
+    // Build-hash service-worker invalidation (see apps/flutter/CACHE_BUSTING.md).
+    //
+    // Flutter web caches the whole app in a service worker. A new deploy only
+    // reaches the user after the waiting SW activates (usually: close all tabs
+    // or reload twice). This probe compares the ACTIVE worker's build hash
+    // (controller.scriptURL ?v=…) with the hash of the bootstrap currently
+    // served by nginx (fetched network-only via a cache-busting query param),
+    // and when they differ — unregisters the workers, wipes the SW caches and
+    // reloads, so the next load picks up the fresh bundle unconditionally.
+    (function () {
+      'use strict';
+      if (!('serviceWorker' in navigator)) { return; }
+      var reBoot = /serviceWorkerVersion\s*:\s*"?(\d+)"?/;
+      var reSwUrl = /[?&]v=(\d+)/;
+
+      function activeHash() {
+        var c = navigator.serviceWorker.controller;
+        if (!c) { return null; }
+        var m = reSwUrl.exec(c.scriptURL || '');
+        return m ? m[1] : null;
+      }
+
+      function servedHash() {
+        return fetch('flutter_bootstrap.js?swprobe=' + Date.now(), { cache: 'no-store' })
+          .then(function (r) { return r.ok ? r.text() : ''; })
+          .then(function (t) {
+            var m = reBoot.exec(t);
+            return m ? m[1] : null;
+          })
+          .catch(function () { return null; });
+      }
+
+      function nukeAndReload() {
+        navigator.serviceWorker.getRegistrations().then(function (rs) {
+          var p = rs.length
+            ? Promise.all(rs.map(function (r) { return r.unregister(); }))
+            : Promise.resolve();
+          return p.then(function () {
+            if (window.caches) {
+              return caches.keys().then(function (ks) {
+                return Promise.all(ks.map(function (k) { return caches.delete(k); }));
+              });
+            }
+          });
+        }).then(function () { location.reload(); },
+                function () { location.reload(); });
+      }
+
+      function check() {
+        var active = activeHash();
+        if (active == null) { return; }
+        servedHash().then(function (served) {
+          if (served != null && served !== active) { nukeAndReload(); }
+        });
+      }
+
+      // Let the current page boot and its worker take control first.
+      setTimeout(check, 4000);
+      setInterval(check, 5 * 60 * 1000);
+      document.addEventListener('visibilitychange', function () {
+        if (!document.hidden) { setTimeout(check, 1500); }
+      });
+      window.addEventListener('focus', function () { setTimeout(check, 500); });
+    })();
+  </script>
 </head>
 <body>
   <!--
