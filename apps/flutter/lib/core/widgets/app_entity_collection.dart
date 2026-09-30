@@ -454,7 +454,6 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
             flexMin +
             mutateMin +
             widget.columns.length * _columnSpacing;
-        final needsScroll = minTableWidth > tableWidth;
         final showActionsCol = _mutateEnabled;
 
         final table = Theme(
@@ -552,21 +551,21 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
           ),
         );
 
+        // Always horizontally scrollable: the table lays out at its own
+        // intrinsic width (cell caps bound it); whenever that is wider than
+        // the viewport the scrollbar appears — no width guessing. Narrow
+        // tables still fill the viewport via the minWidth constraint.
         final child = ConstrainedBox(
           constraints: BoxConstraints(
-            minWidth: needsScroll ? minTableWidth : tableWidth,
-            maxWidth: needsScroll ? minTableWidth : tableWidth,
+            minWidth: math.max(minTableWidth, tableWidth),
           ),
           child: table,
         );
 
-        Widget tableBody = child;
-        if (needsScroll) {
-          tableBody = SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: child,
-          );
-        }
+        final tableBody = SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: child,
+        );
         return SingleChildScrollView(
           scrollDirection: Axis.vertical,
           child: tableBody,

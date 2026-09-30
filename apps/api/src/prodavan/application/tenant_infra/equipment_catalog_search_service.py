@@ -400,6 +400,7 @@ class EquipmentCatalogPodSearchService:
                     "price": str(doc.get("price") or ""),
                     "supplier": str(doc.get("supplier") or ""),
                     "lead_time": str(doc.get("lead_time") or ""),
+                    "src_hash": str(doc.get("src_hash") or ""),
                 }
                 price_num = doc.get("price_num")
                 if not isinstance(price_num, (int, float)):

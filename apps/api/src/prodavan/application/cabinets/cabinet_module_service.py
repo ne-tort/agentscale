@@ -202,6 +202,11 @@ class CabinetModuleService:
         columns_body = await self._instances.resolve_columns_body(
             instance_id=inst.id, module_id=module_id
         )
+        if table_slug == "found_offers" and (body.get("currency") or "RUB") != "RUB":
+            # Manual/UI offer with foreign currency — same RUB-canonical storage.
+            from prodavan.application.modules.equipment_fx import apply_fx_to_offer_body
+
+            body = await apply_fx_to_offer_body(body)
         body = merge_column_defaults(
             columns_body=columns_body, table_slug=table_slug, body=body
         )
