@@ -43,7 +43,12 @@ class DownloadService:
         url = await store.presign_get(ver.storage_key, ttl_seconds=ttl_seconds)
         if url.startswith("file://"):
             return DownloadTarget(url=None, storage_key=ver.storage_key, content_type=asset.mime)
-        return DownloadTarget(url=url, storage_key=None, content_type=asset.mime)
+        # storage_key stays set: proxy downloads (``?proxy=1``) and inline
+        # reads fetch by key even on the S3 backend, while the presigned url
+        # serves the default 302 flow.
+        return DownloadTarget(
+            url=url, storage_key=ver.storage_key, content_type=asset.mime
+        )
 
     async def resolve_alias_slug(
         self,
