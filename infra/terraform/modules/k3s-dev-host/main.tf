@@ -184,7 +184,7 @@ resource "null_resource" "k3s_server" {
       "sudo -n rm -f /etc/systemd/system/k3s.service.d/prodavan-wsl-stop.conf",
       # WSL only: Docker Engine inside WSL fights k3s CNI. On a vm-profile host
       # Docker stays — CI runners (same VM) build images with it.
-      var.host_profile == "wsl" ? "if systemctl list-unit-files docker.service >/dev/null 2>&1; then sudo -n systemctl stop docker.socket docker 2>/dev/null || true; sudo -n systemctl disable --now docker.socket docker 2>/dev/null || true; sudo -n systemctl mask docker.socket docker 2>/dev/null || true; fi" : "echo vm-profile: docker engine left running (CI runners share it)",
+      var.host_profile == "wsl" ? "if systemctl list-unit-files docker.service >/dev/null 2>&1; then sudo -n systemctl stop docker.socket docker 2>/dev/null || true; sudo -n systemctl disable --now docker.socket docker 2>/dev/null || true; sudo -n systemctl mask docker.socket docker 2>/dev/null || true; fi" : "echo vm-profile: docker engine left running for CI runners",
       # Broken/unauthenticated Tailscale netmon flaps routes around CNI veths on WSL.
       "if systemctl is-active --quiet tailscaled 2>/dev/null && ! tailscale status >/dev/null 2>&1; then sudo -n systemctl stop tailscaled 2>/dev/null || true; fi",
       "if ! command -v k3s >/dev/null 2>&1; then",
