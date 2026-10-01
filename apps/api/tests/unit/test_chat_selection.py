@@ -64,6 +64,26 @@ async def test_chat_only_update_keeps_project() -> None:
 
 
 @pytest.mark.asyncio
+async def test_same_project_put_keeps_chat() -> None:
+    """Re-selecting the same project must not wipe the chat selection.
+
+    Regression: _openChat syncs project selection (project-only PUT) right
+    after selecting a chat - the wipe made the active chat reset on reload.
+    """
+    row = SimpleNamespace(project_id="proj_1", chat_session_id="ags_1")
+    svc = _service(row)
+    svc._session.get = AsyncMock(side_effect=[_project_row(), row])
+
+    out = await svc.set_selection(
+        cabinet_id="cab_1",
+        project_id="proj_1",
+        principal=_principal(),
+        employee=_employee(),
+    )
+    assert out["project_id"] == "proj_1"
+    assert out["chat_session_id"] == "ags_1"
+
+
 async def test_project_switch_resets_chat() -> None:
     svc = _service(SimpleNamespace(project_id="proj_1", chat_session_id="ags_1"))
     svc._session.get = AsyncMock(side_effect=[_project_row(), SimpleNamespace(project_id="proj_1", chat_session_id="ags_1")])

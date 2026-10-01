@@ -139,6 +139,13 @@ class ChatSidebarService:
                     status=404,
                     detail="Chat session belongs to another cabinet",
                 )
+            if project_id is not None and session_row.project_id != project_id:
+                raise AppError(
+                    code="NOT_FOUND",
+                    title="Not Found",
+                    status=404,
+                    detail="Chat session belongs to another project",
+                )
 
         row = await self._session.get(
             EmployeeProjectSelectionRow, {"employee_id": employee.id, "cabinet_id": cabinet_id}
@@ -154,11 +161,15 @@ class ChatSidebarService:
         else:
             if update_chat:
                 row.chat_session_id = chat_session_id
+                if project_id is not None:
+                    row.project_id = project_id
             else:
-                # Full project-selection PUT: switching the project resets the
-                # chat selection of the previous project.
+                # Project-only PUT: switching to a DIFFERENT project resets the
+                # chat (it belongs to the old project); re-selecting the same
+                # project keeps the chat selection alive across reloads.
+                if row.project_id != project_id:
+                    row.chat_session_id = None
                 row.project_id = project_id
-                row.chat_session_id = None
         await self._session.commit()
         return {
             "cabinet_id": cabinet_id,
