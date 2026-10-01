@@ -53,57 +53,25 @@ jobs:
               f.write("\n".join(lines) + "\n")
           PY
 
-      - name: Sanitize Docker config
-        run: |
-          python3 - <<'PY'
-          import json, os
-          from pathlib import Path
-          path = Path.home() / ".docker" / "config.json"
-          path.parent.mkdir(parents=True, exist_ok=True)
-          cfg = {}
-          if path.is_file():
-              cfg = json.loads(path.read_text(encoding="utf-8"))
-          cfg.pop("credsStore", None)
-          cfg.pop("credHelpers", None)
-          cfg.setdefault("auths", {})
-          path.write_text(json.dumps(cfg, indent=2) + "\n", encoding="utf-8")
-          print("sanitized", path)
-          PY
-
-      - uses: docker/setup-buildx-action@v3
-        with:
-          driver-opts: network=host
-
-      - name: Warm base images (WSL TLS flakiness)
+      - name: Use persistent buildx builder
         run: |
           set -euo pipefail
-          for img in python:3.12-slim-bookworm; do
-            for i in 1 2 3 4 5; do
-              docker pull "$img" && break
-              echo "retry $i $img"
-              sleep 10
-            done
-          done
-
-      - name: Sanitize Docker config (no desktop.exe credsStore)
-        run: |
-          set -euo pipefail
-          mkdir -p "${HOME}/.docker"
-          python3 - <<'PY'
-          import json, os
-          path = os.path.expanduser("~/.docker/config.json")
-          cfg = {}
-          if os.path.isfile(path):
-              with open(path, encoding="utf-8") as f:
-                  cfg = json.load(f)
-          cfg.pop("credsStore", None)
-          cfg.pop("credHelpers", None)
-          cfg.setdefault("auths", {})
-          with open(path, "w", encoding="utf-8") as f:
-              json.dump(cfg, f, indent=2)
-              f.write("\n")
-          print("docker config sanitized:", path)
-          PY
+          # One long-lived buildkitd on the CI VM (docker-container driver,
+          # name prodavan-ci). Layer cache AND RUN cache mounts (pip, pub)
+          # live in its state volume and survive across jobs/PRs/deploys.
+          # GC cap: /etc/buildkit/buildkitd.toml on the runner host (50Gi/30d).
+          # All VM runners share the `runner` user's docker CLI store, so the
+          # create/use race between parallel jobs is idempotent.
+          if ! docker buildx inspect prodavan-ci >/dev/null 2>&1; then
+            docker buildx create --name prodavan-ci \
+              --driver docker-container \
+              --driver-opt network=host \
+              --config /etc/buildkit/buildkitd.toml \
+              || docker buildx create --name prodavan-ci \
+                --driver docker-container --driver-opt network=host
+          fi
+          docker buildx use prodavan-ci
+          docker buildx inspect --bootstrap prodavan-ci >/dev/null
 
       - uses: docker/login-action@v3
         if: steps.meta.outputs.push == 'true'
@@ -123,8 +91,6 @@ jobs:
           tags: |
             ${{ steps.meta.outputs.api }}:${{ steps.meta.outputs.tag }}
             ${{ steps.meta.outputs.api }}:latest
-          cache-from: type=local,src=/tmp/.buildx-cache-api
-          cache-to: type=local,dest=/tmp/.buildx-cache-api-new,mode=max
 
       - name: Migration smoke (image ORM ↔ alembic)
         run: |
@@ -161,18 +127,6 @@ jobs:
           docker rm -f "$NAME"
           docker network rm "$NET"
 
-      - name: Rotate cache
-        run: |
-          python3 - <<'PY'
-          import shutil
-          from pathlib import Path
-          old, new = Path("/tmp/.buildx-cache-api"), Path("/tmp/.buildx-cache-api-new")
-          if old.exists():
-              shutil.rmtree(old, ignore_errors=True)
-          if new.exists():
-              new.rename(old)
-          PY
-
   build-web:
     runs-on: [self-hosted, linux, docker]
     steps:
@@ -197,57 +151,20 @@ jobs:
               f.write("\n".join(lines) + "\n")
           PY
 
-      - name: Sanitize Docker config
-        run: |
-          python3 - <<'PY'
-          import json
-          from pathlib import Path
-          path = Path.home() / ".docker" / "config.json"
-          path.parent.mkdir(parents=True, exist_ok=True)
-          cfg = {}
-          if path.is_file():
-              cfg = json.loads(path.read_text(encoding="utf-8"))
-          cfg.pop("credsStore", None)
-          cfg.pop("credHelpers", None)
-          cfg.setdefault("auths", {})
-          path.write_text(json.dumps(cfg, indent=2) + "\n", encoding="utf-8")
-          print("sanitized", path)
-          PY
-
-      - uses: docker/setup-buildx-action@v3
-        with:
-          driver-opts: network=host
-
-      - name: Warm base images (WSL TLS flakiness)
+      - name: Use persistent buildx builder
         run: |
           set -euo pipefail
-          for img in nginx:1.27-alpine debian:bookworm-slim; do
-            for i in 1 2 3 4 5; do
-              docker pull "$img" && break
-              echo "retry $i $img"
-              sleep 10
-            done
-          done
-
-      - name: Sanitize Docker config (no desktop.exe credsStore)
-        run: |
-          set -euo pipefail
-          mkdir -p "${HOME}/.docker"
-          python3 - <<'PY'
-          import json, os
-          path = os.path.expanduser("~/.docker/config.json")
-          cfg = {}
-          if os.path.isfile(path):
-              with open(path, encoding="utf-8") as f:
-                  cfg = json.load(f)
-          cfg.pop("credsStore", None)
-          cfg.pop("credHelpers", None)
-          cfg.setdefault("auths", {})
-          with open(path, "w", encoding="utf-8") as f:
-              json.dump(cfg, f, indent=2)
-              f.write("\n")
-          print("docker config sanitized:", path)
-          PY
+          # Shared long-lived buildkitd on the CI VM (see build-api job).
+          if ! docker buildx inspect prodavan-ci >/dev/null 2>&1; then
+            docker buildx create --name prodavan-ci \
+              --driver docker-container \
+              --driver-opt network=host \
+              --config /etc/buildkit/buildkitd.toml \
+              || docker buildx create --name prodavan-ci \
+                --driver docker-container --driver-opt network=host
+          fi
+          docker buildx use prodavan-ci
+          docker buildx inspect --bootstrap prodavan-ci >/dev/null
 
       - uses: docker/login-action@v3
         if: steps.meta.outputs.push == 'true'
@@ -272,20 +189,6 @@ jobs:
           tags: |
             ${{ steps.meta.outputs.web }}:${{ steps.meta.outputs.tag }}
             ${{ steps.meta.outputs.web }}:latest
-          cache-from: type=local,src=/tmp/.buildx-cache-web
-          cache-to: type=local,dest=/tmp/.buildx-cache-web-new,mode=max
-
-      - name: Rotate cache
-        run: |
-          python3 - <<'PY'
-          import shutil
-          from pathlib import Path
-          old, new = Path("/tmp/.buildx-cache-web"), Path("/tmp/.buildx-cache-web-new")
-          if old.exists():
-              shutil.rmtree(old, ignore_errors=True)
-          if new.exists():
-              new.rename(old)
-          PY
 
   trigger-verify:
     name: trigger-verify

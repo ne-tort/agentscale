@@ -1,5 +1,13 @@
 # Self-hosted GitHub Actions runners — Docker Desktop (**CI only**)
 
+> **Переехали на VM:** раннеры перенесены на выделенную Linux-VM
+> (нативные systemd-сервисы, persistent buildx builder, общий `/cache`).
+> Актуальная директория — [`../github-runner-vm/`](../github-runner-vm/).
+> Этот каталог — исторический (Docker Desktop / WSL), `docker compose` сюда
+> больше не поднимается; порядок вывода dd-* раннеров из эксплуатации —
+> в конце README `github-runner-vm`.
+
+
 Не bootstrap. После `terraform apply` UI: **http://127.0.0.1:8088/**  
 ( Traefik `0.0.0.0:8088`, Ingress без `host` — браузеру kubeconfig/portproxy не нужны. )
 
