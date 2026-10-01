@@ -31,7 +31,7 @@ locals {
 resource "null_resource" "sshd" {
   count = var.host_profile == "wsl" ? 1 : 0
 
-  triggers {
+  triggers = {
     rev              = "v7-sshd-no-restart"
     ssh_port         = tostring(var.ssh_port)
     ssh_user         = var.ssh_user
