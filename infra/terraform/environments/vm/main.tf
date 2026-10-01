@@ -100,20 +100,25 @@ module "k3s_dev" {
   ghcr_username          = var.ghcr_username
 }
 
+locals {
+  # Last SAN is the VM address (see api_tls_sans default).
+  api_host = element(var.api_tls_sans, length(var.api_tls_sans) - 1)
+}
+
 output "kubeconfig_path" {
   value = module.k3s_dev.kubeconfig_path
 }
 
 output "http_url" {
-  value = "http://${var.api_tls_sans[length(var.api_tls_sans) - 1}:${var.http_port}/"
+  value = "http://${local.api_host}:${var.http_port}/"
 }
 
 output "https_url" {
-  value = var.https_port != 0 ? "https://${var.api_tls_sans[length(var.api_tls_sans) - 1]}:${var.https_port}/" : ""
+  value = var.https_port != 0 ? "https://${local.api_host}:${var.https_port}/" : ""
 }
 
 output "api_endpoint" {
-  value = "https://${var.api_tls_sans[length(var.api_tls_sans) - 1]}:6443"
+  value = "https://${local.api_host}:6443"
 }
 
 output "runner_kubeconfig_path" {
