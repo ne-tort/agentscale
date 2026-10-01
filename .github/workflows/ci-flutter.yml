@@ -12,7 +12,7 @@ on:
 jobs:
   analyze:
     # github-hosted ubuntu-latest fails instantly in this org.
-    # Flutter SDK + pub live on Docker volume /cache (see infra/github-runner).
+    # Flutter SDK + pub live on the CI VM /cache (see infra/github-runner-vm).
     runs-on: [self-hosted, linux, docker]
     defaults:
       run:

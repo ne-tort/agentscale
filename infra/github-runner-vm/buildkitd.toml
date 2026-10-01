@@ -1,0 +1,7 @@
+# Persistent CI buildx builder ("prodavan-ci"): cap build cache at 50GiB,
+# drop entries older than 30 days. Read client-side by `docker buildx create`.
+# Kept in sync with /etc/buildkit/buildkitd.toml on the CI VM (01-base.sh).
+[worker.oci]
+  [[worker.oci.gcpolicy]]
+    keepDuration = 2592000
+    keepBytes = 53687091200
