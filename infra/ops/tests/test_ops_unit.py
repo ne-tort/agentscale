@@ -263,7 +263,7 @@ def test_k3s_dev_host_crlf_strip_not_nested_in_bash_lc_quotes() -> None:
         / "k3s-dev-host"
         / "main.tf"
     ).read_text(encoding="utf-8")
-    assert 'rev       = "v8-heal-crlf-quote"' in main_tf
+    assert 'rev       = "v9-host-profile-vm"' in main_tf
     assert "prodavan-k3s-preflight.lf" in main_tf
     assert "read_bytes().replace" in main_tf
     assert "tr -d '\\r' < /tmp/prodavan-k3s-preflight.sh" not in main_tf
