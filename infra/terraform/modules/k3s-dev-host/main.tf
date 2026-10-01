@@ -170,7 +170,8 @@ resource "null_resource" "k3s_server" {
     inline = [
       # Do NOT wrap this block in bash -lc '...': nested tr -d '\r' breaks the outer
       # single quotes and becomes `tr -d r`, which strips every letter r from scripts.
-      "set -euo pipefail",
+      # NOTE: remote-exec runs this via /bin/sh (dash on Ubuntu) — POSIX only, no pipefail.
+      "set -eu",
       "export PATH=\"$HOME/.local/bin:/usr/sbin:/usr/bin:$PATH\"",
       "sudo -n mkdir -p /var/lib/rancher/k3s/server/manifests /etc/rancher/k3s /etc/systemd/system/k3s.service.d /usr/local/lib/prodavan",
       "sudo -n cp /tmp/prodavan-traefik-port.yaml /var/lib/rancher/k3s/server/manifests/prodavan-traefik-port.yaml",
@@ -187,7 +188,8 @@ resource "null_resource" "k3s_server" {
       # Broken/unauthenticated Tailscale netmon flaps routes around CNI veths on WSL.
       "if systemctl is-active --quiet tailscaled 2>/dev/null && ! tailscale status >/dev/null 2>&1; then sudo -n systemctl stop tailscaled 2>/dev/null || true; fi",
       "if ! command -v k3s >/dev/null 2>&1; then",
-      "  curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=\"${var.k3s_version}\" sh -s - server --write-kubeconfig-mode 644 ${local.tls_san_flags}",
+      "  curl -sfL https://get.k3s.io -o /tmp/prodavan-k3s-install.sh",
+      "  INSTALL_K3S_VERSION=\"${var.k3s_version}\" sh /tmp/prodavan-k3s-install.sh server --write-kubeconfig-mode 644 ${local.tls_san_flags}",
       "elif ! sudo -n systemctl is-active --quiet k3s; then",
       "  sudo -n systemctl start k3s",
       "else",
