@@ -592,8 +592,12 @@ class CollectionViewInterpreter extends StatelessWidget {
 
   Future<void> _invokeAction(BuildContext context, String actionId, {String? rowId}) async {
     if (actionId.isEmpty) return;
-    if (seeds is CabinetDataController) {
-      final controller = seeds as CabinetDataController;
+    final controller = switch (seeds) {
+      CabinetDataController c => c,
+      RuntimeDataAdapter a => a.controller,
+      _ => null,
+    };
+    if (controller != null) {
       try {
         final result = await controller.invokeAction(actionId, rowId: rowId);
         final savedFile = await _saveActionFileRef(controller, result);

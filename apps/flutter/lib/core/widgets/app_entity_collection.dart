@@ -475,7 +475,7 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
           ),
           child: DataTable(
             showCheckboxColumn: false,
-            dividerThickness: 0,
+            dividerThickness: 1,
             showBottomBorder: false,
             columnSpacing: _columnSpacing,
             horizontalMargin: _horizontalMargin,
@@ -485,6 +485,7 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
             headingRowColor: WidgetStatePropertyAll(colors.surface),
             decoration: const BoxDecoration(),
             border: TableBorder.all(width: 0, color: Colors.transparent),
+
             columns: [
               DataColumn(
                 label: widget.showHeader
@@ -617,19 +618,26 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
           textAlign: _textAlign(column.align),
           style: _cellTextStyle(row, bodyMedium),
         );
+    // Multi-line cells need vertical breathing room - otherwise rows with
+    // wrapped titles visually merge with their neighbors.
+    final vpad = maxLines > 1 ? 6.0 : 2.0;
+    final padded = Padding(
+      padding: EdgeInsets.symmetric(vertical: vpad, horizontal: 4),
+      child: child,
+    );
     final cap = column.width ?? column.maxWidth;
     if (cap != null) {
       return DataCell(
         ConstrainedBox(
           constraints: BoxConstraints(maxWidth: cap),
-          child: Align(alignment: alignment, child: child),
+          child: Align(alignment: alignment, child: padded),
         ),
       );
     }
     return DataCell(
       ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: _defaultColumnMaxWidth),
-        child: Align(alignment: alignment, child: child),
+        child: Align(alignment: alignment, child: padded),
       ),
     );
   }

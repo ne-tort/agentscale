@@ -186,9 +186,38 @@ class _CabinetShellState extends State<CabinetShell> {
       _lastKnownSelectedProjectId = workContext.selectedProjectId;
       _lastProjectLifecycleEpoch = workContext.projectLifecycleEpoch;
       await _reloadSidebar();
+      await _maybeRestorePersistedChat();
     } catch (_) {
       // Sidebar is best-effort; projects page still works.
     }
+  }
+
+  /// One-shot: reopen the server-persisted active chat after a page reload
+  /// (selection survives refresh the same way the project selection does).
+  bool _chatRestoreAttempted = false;
+
+  Future<void> _maybeRestorePersistedChat() async {
+    if (_chatRestoreAttempted || _chatOpen) return;
+    _chatRestoreAttempted = true;
+    final sid = workContext.selectedSessionId;
+    if (sid == null || sid.isEmpty) return;
+    Map<String, dynamic>? chat;
+    for (final g in _projectGroups) {
+      final chats = g['chats'];
+      if (chats is! List) continue;
+      for (final c in chats) {
+        if (c is Map && c['session_id'] == sid) {
+          chat = {
+            for (final e in c.entries)
+              e.key.toString(): e.value,
+          };
+          break;
+        }
+      }
+      if (chat != null) break;
+    }
+    if (chat == null) return;
+    await _openChat(chat);
   }
 
   Future<void> _loadCollapsedProjects() async {

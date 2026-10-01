@@ -799,6 +799,18 @@ class ModuleActionExecutor:
             # raw catalog price), never the RUB-converted value.
             doc_price = doc.get("price_num")
             cur = str(body.get("currency") or "RUB").upper()
+            # Currency backfill: rows written before currency propagation kept
+            # raw USD/EUR numbers under a RUB label - heal from the indexed doc
+            # (re-derive the RUB price, keep the original in price_orig).
+            doc_cur = str(doc.get("currency") or "RUB").upper()
+            if doc_cur != "RUB" and cur != doc_cur:
+                cur = doc_cur
+                body["currency"] = doc_cur
+                if isinstance(doc_price, (int, float)) and not isinstance(doc_price, bool):
+                    body["price_orig"] = float(doc_price)
+                    rub, _ = await convert_offer_price(price=float(doc_price), currency=doc_cur)
+                    body["price"] = rub
+                changed = True
             if isinstance(doc_price, (int, float)) and not isinstance(doc_price, bool):
                 try:
                     orig = float(body.get("price_orig", body.get("price")))

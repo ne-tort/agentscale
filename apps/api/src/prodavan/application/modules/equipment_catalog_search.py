@@ -10,9 +10,10 @@ import json
 import os
 import re
 import sqlite3
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Sequence
+from typing import Any
 
 CANONICAL_FIELDS = (
     "part_number",
@@ -21,7 +22,31 @@ CANONICAL_FIELDS = (
     "price",
     "supplier",
     "lead_time",
+    "currency",
 )
+
+# Source headers that mean "currency of the price column" (case-insensitive).
+_CURRENCY_HEADER_RE = re.compile(
+    r"^(валюта|вал\.?|currency|curr\.?|cur\.|ден\.?ед\.?|currency_code|iso_currency)$",
+    re.IGNORECASE,
+)
+
+
+def detect_currency_value(raw: Any) -> str:
+    """Normalize a raw currency cell to RUB/USD/EUR ('' when unknown)."""
+    s = str(raw or "").strip().upper()
+    if not s:
+        return ""
+    table = str.maketrans({"$": "S", "€": "E", "₽": "R", "Р": "R"})
+    s2 = s.translate(table)
+    if s in {"RUB", "RUR", "РУБ", "Р", "R", "₽", "РУБ."} or s2.startswith("RUB"):
+        return "RUB"
+    usd = {"USD", "$", "USA", "US", "S", "ДОЛЛ", "ДОЛЛ.", "ДОЛЛАР", "ДОЛЛАР США", "У.Е.", "УЕ"}
+    if s in usd or s2.startswith("USD"):
+        return "USD"
+    if s in {"EUR", "€", "E", "ЕВРО", "EVRO", "ЕВРО."} or s2.startswith("EUR"):
+        return "EUR"
+    return ""
 
 MATCH_EXACT_PN = 0
 MATCH_PN_PREFIX = 1
@@ -116,6 +141,18 @@ def apply_column_map(source_row: dict[str, Any], column_map: dict[str, str]) -> 
             continue
         val = source_row.get(src)
         values[canon] = "" if val is None else str(val)
+    # Currency is almost always unmapped in legacy column maps - heal it by
+    # scanning source headers for a currency-ish column so prices from USD/EUR
+    # catalogs do not get mislabeled as RUB.
+    if not values.get("currency"):
+        for key in source_row:
+            if _CURRENCY_HEADER_RE.match(str(key).strip()):
+                detected = detect_currency_value(source_row.get(key))
+                if detected:
+                    values["currency"] = detected
+                    break
+    if values.get("currency"):
+        values["currency"] = detect_currency_value(values["currency"]) or "RUB"
     return values
 
 

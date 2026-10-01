@@ -22,7 +22,8 @@ import os
 import sys
 import urllib.error
 import urllib.request
-from typing import Any, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 DEFAULT_MODULE_ID = "mod_equipment"
 LINE_STATUSES = frozenset({"open", "matched", "selected"})
@@ -190,7 +191,8 @@ TOOLS: list[dict[str, Any]] = [
             "Copy from catalog search when present: part_number, brand, price, "
             "seller (supplier), catalog_id, src_hash; "
             "price is in the supplier's currency — pass currency "
-            "(RUB default) and price as found (server converts to RUB); "
+            "(copy it from the catalog search hit; RUB default) and price as found "
+            "(server converts to RUB and keeps the original in price_orig); "
             "score defaults to 1.0 (exact) / 0.5 (analog) when omitted; "
             "match_kind=exact if match_rank=exact_pn else analog; "
             "score optional (e.g. match_rank_order). "
