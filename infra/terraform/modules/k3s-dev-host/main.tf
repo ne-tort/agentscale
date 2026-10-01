@@ -12,6 +12,8 @@ locals {
   kubeconfig_path = var.kubeconfig_path != "" ? var.kubeconfig_path : "/home/${var.ssh_user}/.kube/prodavan-dev.yaml"
   kctl            = "sudo -n /usr/local/bin/k3s kubectl"
   tls_san_flags   = join(" ", [for s in var.k3s_tls_sans : "--tls-san=${s}"])
+  https_tls_sans  = join(",", var.https_tls_sans)
+  ssh_home        = "/home/${var.ssh_user}"
   # /mnt/c/Users/<user>/git/.../prodavan → /mnt/c/Users/<user>/.kube/prodavan-dev.yaml
   _repo_parts = split("/", var.remote_repo_path)
   # ["", "mnt", "c", "Users", "<user>", ...]
@@ -84,7 +86,10 @@ resource "null_resource" "k3s_server" {
     # reinstall; changing the var alone must not churn SSH provisioners.
     # v9: host_profile param — vm skips custom sshd and keeps Docker Engine
     # (CI runners on the VM share it), tls-san list, runner kubeconfig.
-    rev       = "v9-host-profile-vm"
+    # v10: https_tls_sans — local CA + leaf as Traefik default cert (websecure).
+    # v11: host sysctl unprivileged_port_start — non-root Traefik binds 443
+    # (hostNetwork + NET_BIND_SERVICE cap alone is not enough for userns reasons).
+    rev       = "v11-https-tls-sysctl"
     http_port = tostring(var.http_port)
     https_port = tostring(var.https_port)
     cluster   = var.cluster_name
@@ -92,6 +97,7 @@ resource "null_resource" "k3s_server" {
     boot_heal = filesha256("${path.module}/templates/prodavan-boot-heal.conf.tpl")
     preflight = filesha256("${path.module}/templates/k3s-preflight.sh.tpl")
     post_heal = filesha256("${path.module}/templates/post-k3s-heal.sh.tpl")
+    tls_tpl   = filesha256("${path.module}/templates/prodavan-tls.sh.tpl")
     # SSH coords in triggers so provisioners may only use self.*
     ssh_host     = var.ssh_host
     ssh_port     = tostring(var.ssh_port)
@@ -158,6 +164,22 @@ resource "null_resource" "k3s_server" {
     }
   }
 
+  provisioner "file" {
+    content = templatefile("${path.module}/templates/prodavan-tls.sh.tpl", {
+      https_tls_sans = local.https_tls_sans
+      ssh_home       = local.ssh_home
+    })
+    destination = "/tmp/prodavan-tls.sh"
+    connection {
+      type        = "ssh"
+      host        = self.triggers.ssh_host
+      port        = tonumber(self.triggers.ssh_port)
+      user        = self.triggers.ssh_user
+      private_key = file(self.triggers.ssh_key_path)
+      timeout     = "10m"
+    }
+  }
+
   provisioner "remote-exec" {
     connection {
       type        = "ssh"
@@ -173,11 +195,15 @@ resource "null_resource" "k3s_server" {
       # NOTE: remote-exec runs this via /bin/sh (dash on Ubuntu) — POSIX only, no pipefail.
       "set -eu",
       "export PATH=\"$HOME/.local/bin:/usr/sbin:/usr/bin:$PATH\"",
+      # Non-root pods with hostNetwork (Traefik websecure <1024) cannot bind low
+      # ports even with NET_BIND_SERVICE — relax on this dedicated CI/cluster host.
+      "sudo -n sh -c 'printf \"net.ipv4.ip_unprivileged_port_start=79\\n\" > /etc/sysctl.d/99-prodavan-unprivileged-ports.conf && sysctl -w net.ipv4.ip_unprivileged_port_start=79 >/dev/null'",
       "sudo -n mkdir -p /var/lib/rancher/k3s/server/manifests /etc/rancher/k3s /etc/systemd/system/k3s.service.d /usr/local/lib/prodavan",
       "sudo -n cp /tmp/prodavan-traefik-port.yaml /var/lib/rancher/k3s/server/manifests/prodavan-traefik-port.yaml",
       "sudo -n cp /tmp/prodavan-boot-heal.conf /etc/systemd/system/k3s.service.d/prodavan-boot-heal.conf",
       "python3 -c \"from pathlib import Path; p=Path('/tmp/prodavan-k3s-preflight.sh'); Path('/tmp/prodavan-k3s-preflight.lf').write_bytes(p.read_bytes().replace(b'\\r', b''))\"",
       "python3 -c \"from pathlib import Path; p=Path('/tmp/prodavan-post-k3s-heal.sh'); Path('/tmp/prodavan-post-k3s-heal.lf').write_bytes(p.read_bytes().replace(b'\\r', b''))\"",
+      "python3 -c \"from pathlib import Path; p=Path('/tmp/prodavan-tls.sh'); Path('/tmp/prodavan-tls.lf').write_bytes(p.read_bytes().replace(b'\\r', b''))\"",
       "sudo -n cp /tmp/prodavan-k3s-preflight.lf /usr/local/lib/prodavan/k3s-preflight.sh",
       "sudo -n cp /tmp/prodavan-post-k3s-heal.lf /usr/local/lib/prodavan/post-k3s-heal.sh",
       "sudo -n chmod 755 /usr/local/lib/prodavan/k3s-preflight.sh /usr/local/lib/prodavan/post-k3s-heal.sh",
@@ -197,6 +223,7 @@ resource "null_resource" "k3s_server" {
       "fi",
       "sudo -n systemctl daemon-reload",
       "sudo -n systemctl enable k3s || true",
+      "sudo -n bash /tmp/prodavan-tls.lf",
       "for i in $(seq 1 60); do sudo -n k3s kubectl get --raw=/readyz >/dev/null 2>&1 && break; sleep 2; done",
       "sudo -n k3s kubectl wait --for=condition=Ready node --all --timeout=180s",
       "mkdir -p /home/${var.ssh_user}/.kube",
