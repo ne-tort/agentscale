@@ -189,8 +189,6 @@ jobs:
     if: needs.gate.outputs.run_k8s == 'true' || needs.gate.outputs.run_live == 'true'
     runs-on: [self-hosted, linux, docker]
     timeout-minutes: 10
-    env:
-      PRODAVAN_CI_HOST: host.docker.internal
     steps:
       - uses: actions/checkout@v4
 
@@ -246,7 +244,7 @@ jobs:
           for round in 1 2 3; do
             echo "=== dev-preflight round ${round}/3 ==="
             if poetry run python -c "from prodavan_ops.k8s import require_k8s_api; require_k8s_api(timeout_sec=90)" \
-              && poetry run prodavan-ops smoke --addr host.docker.internal --port 8088; then
+              && poetry run prodavan-ops smoke --addr "${PRODAVAN_CI_HOST:-127.0.0.1}" --port 8088; then
               exit 0
             fi
             if [ "${round}" -lt 3 ]; then
@@ -267,8 +265,6 @@ jobs:
       group: prodavan-e2e-k8s-cluster
       cancel-in-progress: true
     runs-on: [self-hosted, linux, docker]
-    env:
-      PRODAVAN_CI_HOST: host.docker.internal
     steps:
       - uses: actions/checkout@v4
 
@@ -374,9 +370,9 @@ jobs:
       - name: Resolve live hosts
         run: |
           set -euo pipefail
-          # Docker Desktop runners reach WSL Traefik via host.docker.internal (portproxy on Windows).
-          # Do not use 127.0.0.1 here — inside the job container it is the container itself.
-          addr="${PRODAVAN_CI_HOST:-host.docker.internal}"
+          # Runners share the host with the dev cluster (k3s + Traefik hostPort):
+          # 127.0.0.1 reaches both the API (8088) and Keycloak (8089).
+          addr="${PRODAVAN_CI_HOST:-127.0.0.1}"
           echo "PRODAVAN_E2E_BASE_URL=http://${addr}:8088" >> "${GITHUB_ENV}"
           echo "PRODAVAN_E2E_KC_URL=http://${addr}:8089" >> "${GITHUB_ENV}"
           echo "live API: http://${addr}:8088  Keycloak: http://${addr}:8089"

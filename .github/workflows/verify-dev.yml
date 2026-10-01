@@ -27,8 +27,9 @@ concurrency:
 
 env:
   HTTP_PORT: "8088"
+  # CI runners live on the cluster VM (infra/github-runner-vm + terraform vm env):
+  # Traefik/k3s are reachable at 127.0.0.1 on the runner host.
   SMOKE_ADDR: "127.0.0.1"
-  PRODAVAN_CI_HOST: host.docker.internal
 
 jobs:
   wait-smoke:
@@ -116,7 +117,7 @@ jobs:
         working-directory: infra/ops
         run: |
           set -euo pipefail
-          # Docker Desktop runners: host.docker.internal + Windows portproxy → WSL Traefik
+          # Runners share the VM with the cluster: Traefik hostPort on 127.0.0.1.
           ADDR="${PRODAVAN_CI_HOST:-${SMOKE_ADDR:-127.0.0.1}}"
           echo "smoke addr=$ADDR port=${HTTP_PORT}"
           poetry run prodavan-ops smoke --addr "$ADDR" --port "${HTTP_PORT}"

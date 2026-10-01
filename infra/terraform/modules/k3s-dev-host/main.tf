@@ -11,6 +11,7 @@ terraform {
 locals {
   kubeconfig_path = var.kubeconfig_path != "" ? var.kubeconfig_path : "/home/${var.ssh_user}/.kube/prodavan-dev.yaml"
   kctl            = "sudo -n /usr/local/bin/k3s kubectl"
+  tls_san_flags   = join(" ", [for s in var.k3s_tls_sans : "--tls-san=${s}"])
   # /mnt/c/Users/<user>/git/.../prodavan → /mnt/c/Users/<user>/.kube/prodavan-dev.yaml
   _repo_parts = split("/", var.remote_repo_path)
   # ["", "mnt", "c", "Users", "<user>", ...]
@@ -25,8 +26,12 @@ locals {
   )
 }
 
+# Custom sshd is WSL-only: Kali WSL ships no sshd and Windows portproxy (2222)
+# fronts it. A dedicated VM uses the system sshd — nothing to install.
 resource "null_resource" "sshd" {
-  triggers = {
+  count = var.host_profile == "wsl" ? 1 : 0
+
+  triggers {
     rev              = "v7-sshd-no-restart"
     ssh_port         = tostring(var.ssh_port)
     ssh_user         = var.ssh_user
@@ -77,8 +82,9 @@ resource "null_resource" "k3s_server" {
   triggers = {
     # k3s_version intentionally NOT in triggers: already-running path skips
     # reinstall; changing the var alone must not churn SSH provisioners.
-    # v8: fix remote-exec quoting — bash -lc '… tr -d '\r' …' became tr -d r (stripped all r).
-    rev       = "v8-heal-crlf-quote"
+    # v9: host_profile param — vm skips custom sshd and keeps Docker Engine
+    # (CI runners on the VM share it), tls-san list, runner kubeconfig.
+    rev       = "v9-host-profile-vm"
     http_port = tostring(var.http_port)
     https_port = tostring(var.https_port)
     cluster   = var.cluster_name
@@ -123,7 +129,9 @@ resource "null_resource" "k3s_server" {
   }
 
   provisioner "file" {
-    content     = file("${path.module}/templates/k3s-preflight.sh.tpl")
+    content = templatefile("${path.module}/templates/k3s-preflight.sh.tpl", {
+      disable_docker = var.host_profile == "wsl"
+    })
     destination = "/tmp/prodavan-k3s-preflight.sh"
     connection {
       type        = "ssh"
@@ -173,12 +181,13 @@ resource "null_resource" "k3s_server" {
       "sudo -n cp /tmp/prodavan-post-k3s-heal.lf /usr/local/lib/prodavan/post-k3s-heal.sh",
       "sudo -n chmod 755 /usr/local/lib/prodavan/k3s-preflight.sh /usr/local/lib/prodavan/post-k3s-heal.sh",
       "sudo -n rm -f /etc/systemd/system/k3s.service.d/prodavan-wsl-stop.conf",
-      # Docker Engine inside WSL fights k3s CNI; runners use Docker Desktop on Windows.
-      "if systemctl list-unit-files docker.service >/dev/null 2>&1; then sudo -n systemctl stop docker.socket docker 2>/dev/null || true; sudo -n systemctl disable --now docker.socket docker 2>/dev/null || true; sudo -n systemctl mask docker.socket docker 2>/dev/null || true; fi",
+      # WSL only: Docker Engine inside WSL fights k3s CNI. On a vm-profile host
+      # Docker stays — CI runners (same VM) build images with it.
+      var.host_profile == "wsl" ? "if systemctl list-unit-files docker.service >/dev/null 2>&1; then sudo -n systemctl stop docker.socket docker 2>/dev/null || true; sudo -n systemctl disable --now docker.socket docker 2>/dev/null || true; sudo -n systemctl mask docker.socket docker 2>/dev/null || true; fi" : "echo vm-profile: docker engine left running (CI runners share it)",
       # Broken/unauthenticated Tailscale netmon flaps routes around CNI veths on WSL.
       "if systemctl is-active --quiet tailscaled 2>/dev/null && ! tailscale status >/dev/null 2>&1; then sudo -n systemctl stop tailscaled 2>/dev/null || true; fi",
       "if ! command -v k3s >/dev/null 2>&1; then",
-      "  curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=\"${var.k3s_version}\" sh -s - server --write-kubeconfig-mode 644 --tls-san=127.0.0.1 --tls-san=host.docker.internal",
+      "  curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=\"${var.k3s_version}\" sh -s - server --write-kubeconfig-mode 644 ${local.tls_san_flags}",
       "elif ! sudo -n systemctl is-active --quiet k3s; then",
       "  sudo -n systemctl start k3s",
       "else",
@@ -192,6 +201,9 @@ resource "null_resource" "k3s_server" {
       "sudo -n cp /etc/rancher/k3s/k3s.yaml ${local.kubeconfig_path}",
       "sudo -n chown ${var.ssh_user}:${var.ssh_user} ${local.kubeconfig_path}",
       "chmod 600 ${local.kubeconfig_path}",
+      # vm profile: kubeconfig for the CI runner user (runners share this host;
+      # k3s API is reachable at 127.0.0.1 — no host.docker.internal needed).
+      "if [ -n \"${var.runner_kubeconfig_path}\" ] && id runner >/dev/null 2>&1; then sudo -n install -D -o runner -g runner -m 600 /etc/rancher/k3s/k3s.yaml \"${var.runner_kubeconfig_path}\"; else echo runner-kubeconfig-skipped; fi",
     ]
   }
 }
@@ -244,11 +256,11 @@ resource "null_resource" "k3s_uninstall" {
 
   triggers = {
     cluster = var.cluster_name
-    # Frozen local-dev SSH coords (must live in triggers for destroy-time connection).
-    ssh_host     = "127.0.0.1"
-    ssh_port     = "2222"
-    ssh_user     = "www"
-    ssh_key_path = "/home/www/.ssh/prodavan_tf"
+    # SSH coords in triggers (frozen at create) for the destroy-time connection.
+    ssh_host     = var.ssh_host
+    ssh_port     = tostring(var.ssh_port)
+    ssh_user     = var.ssh_user
+    ssh_key_path = var.ssh_private_key_path
   }
 
   provisioner "remote-exec" {
@@ -257,7 +269,7 @@ resource "null_resource" "k3s_uninstall" {
     connection {
       type        = "ssh"
       host        = try(self.triggers.ssh_host, "127.0.0.1")
-      port        = tonumber(try(self.triggers.ssh_port, "2222"))
+      port        = tonumber(try(self.triggers.ssh_port, "22"))
       user        = try(self.triggers.ssh_user, "www")
       private_key = file(try(self.triggers.ssh_key_path, "/home/www/.ssh/prodavan_tf"))
       timeout     = "10m"
