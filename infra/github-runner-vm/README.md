@@ -35,13 +35,16 @@ Workflows `CI Images` больше не создают per-job buildkitd и не
 кэш через `/tmp` (кэш жил в контейнере раннера и терялся при любом пересоздании).
 Единственный buildkitd `prodavan-ci` общий для всех job'ов.
 
-## Связь с dev-кластером (k3s в WSL на Windows-хосте)
+## Dev-кластер (k3s) — на этой же VM
 
-- `host.docker.internal` на VM указывает на default-gateway (Windows-хост):
-  обновляется таймером `ci-hosts-update.timer` → `/usr/local/sbin/ci-hosts-update.py`.
-- Windows portproxy слушает `0.0.0.0:6443/8088/8089` → WSL k3s (Traefik/Keycloak).
-- kubeconfig: `/home/runner/.kube/prodavan-dev.yaml` (server `https://host.docker.internal:6443`,
-  skip-tls). Не в git.
+- Кластер поднимается Terraform-ом: [`../terraform/environments/vm/`](../terraform/environments/vm/)
+  (k3s + Argo; `host_profile = "vm"` — Docker Engine не отключается, он нужен раннерам).
+- Раннеры и кластер на одном хосте: kubectl — `127.0.0.1:6443`, smoke (Traefik) —
+  `127.0.0.1:8088`, Keycloak — `127.0.0.1:8089`.
+- kubeconfig: `/home/runner/.kube/prodavan-dev.yaml` — кладёт terraform
+  (`runner_kubeconfig_path`). Не в git.
+- `ci-hosts-update.timer` (host.docker.internal → Windows-gateway) остаётся как
+  общая карта «VM → Windows-хост»; CI больше её не использует.
 
 ## Бутстрап (однократно, на новой VM)
 

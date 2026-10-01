@@ -42,7 +42,7 @@ Legacy AI-канон: [`docs/target/`](docs/target/) (кроме as-built) — �
 | **Не в PR** | `tools/_*.sh`, секреты, `.env`, артефакты сборки |
 
 - Поставка: PR → **CI Gate** → Auto-merge → **CI Images** → Argo CD sync → **Verify Dev**.
-- Bootstrap кластера: **SSH + Terraform** (`infra/terraform/environments/local`) → UI **http://127.0.0.1:8088/**.
+- Bootstrap кластера: **SSH + Terraform** (`infra/terraform/environments/vm`) → UI **http://172.31.156.203:8088/**.
 - Императив только **`infra/ops`**: `validate` / `wait` / `rollout` / `smoke`.
 - **Запрещены** `.sh` под `infra/`, docker-compose как кластер, k3d в git, recover/deploy shell.
 - Кластер: **k3s** + Argo (`infra/argocd` → `infra/k3s/overlays/dev`).
@@ -51,22 +51,25 @@ Legacy AI-канон: [`docs/target/`](docs/target/) (кроме as-built) — �
 
 1. **Декларативно везде, где возможно.** GitOps (Argo CD) + Terraform — источник истины. Никаких императивных `.sh`/`.ps1` скриптов для инфраструктуры: состояние описывается манифестами/HelmChartConfig/Terraform, применяется контроллерами.
 2. **Где GitOps/Terraform не могут декларативно** — **init containers (Python)** внутри Pod/job, которые при старте приводят состояние к нужному. Не shell-скрипты на хосте, а контейнер с Python-логикой в k8s.
-3. **Единственное исключение — WSL→Windows port forwarding.** Проброс портов из WSL на Windows делается вне кластера и вне Terraform (средствами WSL/Windows), не кластерными средствами. Всё остальное — декларативно.
+3. **Windows-хост — только как клиент.** Раньше требовался WSL→Windows port forwarding и keepalive (исключение из декларативности). Теперь кластер на выделенной VM, доступной с Windows по IP напрямую: portproxy/keepalive не нужны.
 4. **Dev overlay: wildcard access.** Dev-доступ идёт через произвольные reverse-proxy/VPN (punnel) с непредсказуемым Host/SNI/IP — dev overlays **не пиняют** конкретные SNI/IP, а разрешают любой origin (wildcard). TLS — self-signed default cert Traefik (без cert-manager в dev).
 5. **Prod overlay: cert-manager + Let's Encrypt** на домене **`ai-qwerty.ru`** (ClusterIssuer, автоматический выпуск). Prod overlay пиняет host + TLS cert.
 6. **Не ломать punnel/demux.** Punnel — L4 plaintext reverse relay по дизайну (FEATURE 029: no TLS terminate). HTTPS обеспечивается на ingress-уровне (Traefik websecure), не punnel'ом.
 
-### Dev-кластер в WSL (kubectl)
+### Dev-кластер на VM (kubectl)
 
-Локальный k3s живёт в дистрибутиве **`kali-linux`**, не в Ubuntu / docker-desktop.
+Локальный k3s живёт на выделенной VM **`www@172.31.156.203`** (там же CI-раннеры,
+см. `infra/github-runner-vm/`). Раньше — Kali WSL (удалён).
 
 ```bash
-wsl -d kali-linux
-export KUBECONFIG=~/.kube/prodavan-dev.yaml
+ssh www@172.31.156.203
+export KUBECONFIG=~/.kube/prodavan-dev.yaml   # или sudo k3s kubectl
 kubectl get pods -A
 ```
 
-Альтернатива: `/etc/rancher/k3s/k3s.yaml` (после `sudo`). UI с Windows: **http://127.0.0.1:8088/** · Keycloak hostPort **:8089**. Подробности: [`docs/07-infrastructure/wsl-dev.md`](docs/07-infrastructure/wsl-dev.md), [`runbook.md`](docs/07-infrastructure/runbook.md).
+UI с Windows: **http://172.31.156.203:8088/** · Keycloak hostPort **:8089** ·
+kubectl с Windows: `scp` kubeconfig и заменить server на `https://172.31.156.203:6443`.
+Подробности: [`infra/terraform/environments/vm/README.md`](infra/terraform/environments/vm/README.md), [`runbook.md`](docs/07-infrastructure/runbook.md).
 
 ## База данных и миграции (Alembic)
 

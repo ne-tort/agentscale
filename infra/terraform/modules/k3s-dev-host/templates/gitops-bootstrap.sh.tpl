@@ -20,7 +20,7 @@ if [ -s /tmp/prodavan-ghcr.token ]; then
   "$${KCTL[@]}" -n argocd delete secret repo-prodavan --ignore-not-found
   "$${KCTL[@]}" -n argocd create secret generic repo-prodavan \
     --from-literal=type=git \
-    --from-literal=url=https://github.com/ne-tort/prodavan.git \
+    --from-literal=url=https://github.com/ne-tort/agentscale.git \
     --from-literal=username=git \
     --from-file=password=/tmp/prodavan-ghcr.token
   "$${KCTL[@]}" -n argocd label secret repo-prodavan argocd.argoproj.io/secret-type=repository --overwrite

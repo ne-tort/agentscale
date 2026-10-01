@@ -3,6 +3,29 @@ variable "cluster_name" {
   default = "prodavan-dev"
 }
 
+variable "host_profile" {
+  type        = string
+  default     = "wsl"
+  description = "Target host kind. wsl: Kali WSL (custom sshd on 2222, disable Docker Engine — it fights CNI inside WSL). vm: dedicated Linux VM (system sshd, Docker Engine stays for CI runners)."
+
+  validation {
+    condition     = contains(["wsl", "vm"], var.host_profile)
+    error_message = "host_profile must be wsl or vm."
+  }
+}
+
+variable "k3s_tls_sans" {
+  type        = list(string)
+  default     = ["127.0.0.1", "host.docker.internal"]
+  description = "Extra TLS SANs for the k3s API cert (vm profile: 127.0.0.1 + the VM IP)."
+}
+
+variable "runner_kubeconfig_path" {
+  type        = string
+  default     = ""
+  description = "vm profile: also place a kubeconfig for the CI `runner` user (GitHub Actions runners on the same host)."
+}
+
 variable "k3s_version" {
   type    = string
   default = "v1.29.5+k3s1"
