@@ -1,4 +1,4 @@
-"""First-party Pod MCP: equipment catalogs + request_lines / found_offers.
+"""First-party Pod MCP: equipment catalogs + request_lines / found_groups.
 
 Stdio JSON-RPC (MCP tools/list + tools/call).
 
@@ -9,10 +9,17 @@ Env:
 Catalog search goes through Pod Bridge → OpenSearch (no local SQLite / EQUIPMENT_*).
 SoT rows go through Bridge JWT (:8001).
 
+WAVE7 responsibility split (v2.0.0):
+  agent — request_lines (customer positions) + found_groups (candidate selection:
+           part numbers, aliases, match category); NEVER writes found_offers;
+  platform pipeline — materializes found_offers from OpenSearch by group keys,
+           refreshes prices, computes best offers / «Закупка» / budget snapshot.
+
 Linking IDs (visible to the agent — no hidden ids):
-  - request_lines.row_id  → pass as found_offers.line_id (Запрос)
-  - found_offers.row_id   → pass as request_lines.selected_offer_id when selecting
-  - catalog hit.catalog_id / source_catalog → provenance on found_offers.catalog_id
+  - request_lines.row_id  → pass as found_groups.line_id (позиция заказчика)
+  - found_groups.row_id   → group identity (offers link back via group_id)
+  - catalog hit.src_hash  → stable catalog position id (supplier+title);
+                           use it in aliases_hash when a position has no P/N
 """
 
 from __future__ import annotations
@@ -27,7 +34,7 @@ from typing import Any
 
 DEFAULT_MODULE_ID = "mod_equipment"
 LINE_STATUSES = frozenset({"open", "matched", "selected"})
-MATCH_KINDS = frozenset({"exact", "analog"})
+MATCH_KINDS = frozenset({"exact", "analog", "doubt"})
 
 
 def _env() -> tuple[str, str, str]:
@@ -61,15 +68,17 @@ TOOLS: list[dict[str, Any]] = [
             "Unified RO search across OpenSearch equipment catalog indexes. "
             "Default query matches title, part_number, brand, supplier, lead_time, price. "
             "Prefer part_number for large catalogs. "
-            "brand filter matches keyword brand OR title text (many S4B rows have empty brand). "
+            "brand filter matches keyword brand OR title text (many rows have empty brand). "
             "Default in_stock_only=true (excludes lead_time «нет»/on-order). "
             "If an exact P/N returns 0 hits, retry with in_stock_only=false. "
-            "Hits include: part_number, title, brand, price, price_num, supplier, lead_time, "
-            "catalog_id, source_catalog, match_rank (exact_pn|pn_prefix|title|other), "
-            "match_rank_order, in_stock. "
-            "When writing found_offers, copy present fields: title, part_number, brand, "
-            "price (prefer price_num), catalog_id; set match_kind=exact for exact_pn else analog; "
-            "score from match_rank_order (lower is better) or omit."
+            "Hits include: part_number, title, brand, price, price_num, supplier, "
+            "lead_time, currency, catalog_id, source_catalog, in_stock, "
+            "match_rank (exact_pn|pn_prefix|title|other), match_rank_order, and "
+            "src_hash — the stable catalog position id (sha1 of supplier|title). "
+            "USE the hits to decide candidates: then record your selection with "
+            "found_groups_upsert (part_number + aliases + match_kind). "
+            "Do NOT copy products/prices into found_offers — the platform "
+            "materializes offers and refreshes prices automatically."
         ),
         "inputSchema": {
             "type": "object",
@@ -101,7 +110,7 @@ TOOLS: list[dict[str, Any]] = [
         "name": "request_lines_list",
         "description": (
             "List customer request lines (позиции заказчика). "
-            "Use each item's row_id as found_offers.line_id when adding candidates."
+            "Use each item's row_id as found_groups.line_id when recording candidates."
         ),
         "inputSchema": {
             "type": "object",
@@ -127,11 +136,10 @@ TOOLS: list[dict[str, Any]] = [
     {
         "name": "request_lines_upsert",
         "description": (
-            "Create or update a request_lines row. title required on create. "
-            "PATCH merges: omit a field to leave it unchanged; pass null to clear nullable. "
-            "Optional: part_number, qty, status (open|matched|selected), "
-            "found_count, selected_offer_id (= found_offers.row_id), project_ids. "
-            "Pass row_id to update. Do not re-send qty/found_count unless changing them."
+            "Create or update a request_lines row (позиция заказчика). title required on "
+            "create. PATCH merges: omit a field to leave it unchanged; pass null to clear. "
+            "Optional: part_number, qty, status (open|matched|selected), project_ids. "
+            "found_count and selected_offer_id are managed by the platform — do not set them."
         ),
         "inputSchema": {
             "type": "object",
@@ -145,30 +153,33 @@ TOOLS: list[dict[str, Any]] = [
                     "type": ["string", "null"],
                     "enum": ["open", "matched", "selected", None],
                 },
-                "found_count": {"type": ["number", "integer", "null"]},
-                "selected_offer_id": {"type": ["string", "null"]},
                 "project_ids": {"type": ["array", "null"], "items": {"type": "string"}},
             },
             "additionalProperties": False,
         },
     },
     {
-        "name": "found_offers_list",
+        "name": "found_groups_list",
         "description": (
-            "List found_offers. Optional filter line_id = request_lines.row_id."
+            "List candidate groups (found_groups) — your selection of part numbers per "
+            "request line: line_id, part_number, aliases_pn, aliases_hash, match_kind "
+            "(exact|analog|doubt), note, offers_count, face fields (best offer per group)."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
                 "module_id": {"type": "string", "default": DEFAULT_MODULE_ID},
-                "line_id": {"type": "string"},
+                "line_id": {
+                    "type": "string",
+                    "description": "Optional filter: request_lines.row_id",
+                },
             },
             "additionalProperties": False,
         },
     },
     {
-        "name": "found_offers_get",
-        "description": "Get one found_offers row by row_id.",
+        "name": "found_groups_get",
+        "description": "Get one found_groups row by row_id.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -180,71 +191,55 @@ TOOLS: list[dict[str, Any]] = [
         },
     },
     {
-        "name": "found_offers_upsert",
+        "name": "found_groups_upsert",
         "description": (
-            "Create or update a found_offers (кандидат) row. "
-            "On create: title AND line_id are required. "
-            "line_id MUST be request_lines.row_id from request_lines_list/get "
-            "(links the offer to Позиции заказчика — NOT a catalog/DB name). "
-            "source_title is auto-filled from that request line's title; "
-            "do NOT put catalog names (s4b, source_catalog) into source_title or line_id. "
-            "Copy from catalog search when present: part_number, brand, price, "
-            "seller (supplier), catalog_id, src_hash; "
-            "price is in the supplier's currency — pass currency "
-            "(copy it from the catalog search hit; RUB default) and price as found "
-            "(server converts to RUB and keeps the original in price_orig); "
-            "score defaults to 1.0 (exact) / 0.5 (analog) when omitted; "
-            "match_kind=exact if match_rank=exact_pn else analog; "
-            "score optional (e.g. match_rank_order). "
-            "PATCH merges: omit = leave; null = clear. "
-            "Optional: is_selected, project_ids. "
-            "After write with line_id, bumps request_lines.found_count."
+            "Create or update a found_groups row — THE tool to record which products "
+            "match a customer position. One row = one part-number group for one "
+            "request line. On create: line_id MUST be request_lines.row_id "
+            "(from request_lines_list) AND at least one of part_number / "
+            "aliases_pn / aliases_hash is required. "
+            "match_kind — how well THIS group matches the customer position: "
+            "'exact' (точное совпадение), 'analog' (аналог), 'doubt' (есть сомнения "
+            "в точности; analog and doubt are DIFFERENT categories). "
+            "aliases_pn — other spellings of the same part number used by other "
+            "suppliers (comma-separated). aliases_hash — catalog src_hash ids of "
+            "positions that belong to this group but carry no part number. "
+            "The platform materializes ALL catalog offers for the group keys "
+            "(part number + aliases), refreshes prices and computes best offers, "
+            "«Закупка» and budget — you only pick groups and their match category. "
+            "Do NOT write found_offers (no such tool): offers/prices are owned by "
+            "the platform. "
+            "PATCH merges: omit = leave; null = clear. Optional: note, project_ids."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
                 "module_id": {"type": "string", "default": DEFAULT_MODULE_ID},
                 "row_id": {"type": "string"},
-                "title": {"type": "string"},
                 "line_id": {
                     "type": ["string", "null"],
                     "description": "request_lines.row_id (required on create)",
                 },
-                "part_number": {"type": ["string", "null"]},
-                "brand": {"type": ["string", "null"]},
-                "seller": {
+                "part_number": {
                     "type": ["string", "null"],
-                    "description": (
-                        "Supplier company name from catalog search (supplier field). "
-                        "Used for supplier registry, margin defaults and priority."
-                    ),
+                    "description": "Part number of the group (empty for hash-only groups)",
                 },
-                "price": {
-                    "type": ["number", "integer", "null"],
-                    "description": "Price in the supplier's currency (see currency)",
-                },
-                "currency": {
+                "aliases_pn": {
                     "type": ["string", "null"],
-                    "enum": ["RUB", "USD", "EUR", None],
-                    "description": "Currency of price (default RUB)",
+                    "description": "Comma-separated alias part numbers (other spellings)",
                 },
-                "src_hash": {
+                "aliases_hash": {
                     "type": ["string", "null"],
-                    "description": "Stable catalog position id from catalog search",
+                    "description": "Comma-separated src_hash ids (positions without P/N)",
                 },
-                "score": {"type": ["number", "integer", "null"]},
                 "match_kind": {
                     "type": ["string", "null"],
-                    "enum": ["exact", "analog", None],
+                    "enum": ["exact", "analog", "doubt", None],
+                    "description": "Match category vs the customer position",
                 },
-                "is_selected": {"type": ["boolean", "null"]},
-                "catalog_id": {"type": ["string", "null"]},
-                "source_title": {
+                "note": {
                     "type": ["string", "null"],
-                    "description": (
-                        "Optional override; server auto-fills from request_lines.title "
-                        "when line_id is set. Never a catalog/DB name."
-                    ),
+                    "description": "Why analog/doubt (shown to the user)",
                 },
                 "project_ids": {"type": ["array", "null"], "items": {"type": "string"}},
             },
@@ -347,61 +342,26 @@ def _validate_line_body(body: dict[str, Any], *, creating: bool) -> None:
             raise RuntimeError(f"status must be one of {sorted(LINE_STATUSES)}")
 
 
-def _validate_offer_body(body: dict[str, Any], *, creating: bool) -> None:
-    if creating and not str(body.get("title") or "").strip():
-        raise RuntimeError("title is required when creating found_offers")
+def _validate_group_body(body: dict[str, Any], *, creating: bool) -> None:
     if creating:
         line_id = body.get("line_id")
         if not isinstance(line_id, str) or not line_id.strip():
             raise RuntimeError(
-                "line_id is required when creating found_offers "
+                "line_id is required when creating found_groups "
                 "(use request_lines.row_id from request_lines_list)"
+            )
+        has_keys = any(
+            str(body.get(k) or "").strip()
+            for k in ("part_number", "aliases_pn", "aliases_hash")
+        )
+        if not has_keys:
+            raise RuntimeError(
+                "at least one of part_number / aliases_pn / aliases_hash is required "
+                "when creating found_groups (group keys to search the catalog)"
             )
     if "match_kind" in body and body["match_kind"] is not None:
         if str(body["match_kind"]) not in MATCH_KINDS:
             raise RuntimeError(f"match_kind must be one of {sorted(MATCH_KINDS)}")
-
-
-def _fill_source_title_from_line(
-    module_id: str,
-    body: dict[str, Any],
-    *,
-    session_id: str | None,
-) -> None:
-    """source_title = request_lines.title for line_id — never catalog/source name."""
-    line_id = body.get("line_id")
-    if not isinstance(line_id, str) or not line_id.strip():
-        return
-    try:
-        line = _get_row(module_id, "request_lines", line_id.strip(), session_id=session_id)
-    except RuntimeError:
-        return
-    lb = line.get("body") if isinstance(line.get("body"), dict) else line
-    title = str(lb.get("title") or "").strip()
-    if title:
-        body["source_title"] = title
-
-
-def _bump_found_count(
-    module_id: str, line_id: str, *, session_id: str | None = None
-) -> None:
-    if not line_id:
-        return
-    count = 0
-    for r in _list_rows(module_id, "found_offers", session_id=session_id):
-        body = r.get("body") if isinstance(r.get("body"), dict) else r
-        if str(body.get("line_id") or "") == line_id:
-            count += 1
-    try:
-        _http(
-            "PATCH",
-            _data_path(module_id, "request_lines", line_id),
-            {"body": {"found_count": count}},
-            session_id=session_id,
-        )
-    except RuntimeError:
-        # Best-effort — offer write already succeeded; merge PATCH should not 422.
-        pass
 
 
 def _catalog_sources() -> dict[str, Any]:
@@ -458,8 +418,6 @@ def _call_tool(name: str, arguments: dict[str, Any]) -> Any:
             "part_number",
             "qty",
             "status",
-            "found_count",
-            "selected_offer_id",
             "project_ids",
         )
         body = _pick_present(arguments, keys)
@@ -481,8 +439,8 @@ def _call_tool(name: str, arguments: dict[str, Any]) -> Any:
             session_id=sid,
         )
 
-    if name == "found_offers_list":
-        items = _list_rows(mid, "found_offers", session_id=sid)
+    if name == "found_groups_list":
+        items = _list_rows(mid, "found_groups", session_id=sid)
         line_id = str(arguments.get("line_id") or "").strip()
         if line_id:
             filtered = []
@@ -492,58 +450,34 @@ def _call_tool(name: str, arguments: dict[str, Any]) -> Any:
                     filtered.append(r)
             items = filtered
         return {"items": items}
-    if name == "found_offers_get":
-        return _get_row(mid, "found_offers", str(arguments.get("row_id") or ""), session_id=sid)
-    if name == "found_offers_upsert":
+    if name == "found_groups_get":
+        return _get_row(mid, "found_groups", str(arguments.get("row_id") or ""), session_id=sid)
+    if name == "found_groups_upsert":
         keys = (
-            "title",
             "line_id",
             "part_number",
-            "brand",
-            "seller",
-            "price",
-            "currency",
-            "src_hash",
-            "score",
+            "aliases_pn",
+            "aliases_hash",
             "match_kind",
-            "is_selected",
-            "catalog_id",
-            "source_title",
+            "note",
             "project_ids",
         )
         body = _pick_present(arguments, keys)
         row_id = str(arguments.get("row_id") or "").strip() or None
-        _validate_offer_body(body, creating=not row_id)
-        if "score" not in body:
-            # Relevance default: exact matches rank 1.0, analogs 0.5.
-            body["score"] = 1.0 if str(body.get("match_kind") or "") == "exact" else 0.5
-        # Always prefer request-line title over agent-supplied catalog nicknames.
-        _fill_source_title_from_line(mid, body, session_id=sid)
+        _validate_group_body(body, creating=not row_id)
         if row_id:
-            result = _http(
+            return _http(
                 "PATCH",
-                _data_path(mid, "found_offers", row_id),
+                _data_path(mid, "found_groups", row_id),
                 {"body": body},
                 session_id=sid,
             )
-        else:
-            result = _http(
-                "POST",
-                _data_path(mid, "found_offers"),
-                {"body": body},
-                session_id=sid,
-            )
-        line_id = body.get("line_id")
-        if not line_id and row_id:
-            try:
-                existing = _get_row(mid, "found_offers", row_id, session_id=sid)
-                eb = existing.get("body") if isinstance(existing.get("body"), dict) else existing
-                line_id = eb.get("line_id")
-            except RuntimeError:
-                line_id = None
-        if isinstance(line_id, str) and line_id.strip():
-            _bump_found_count(mid, line_id.strip(), session_id=sid)
-        return result
+        return _http(
+            "POST",
+            _data_path(mid, "found_groups"),
+            {"body": body},
+            session_id=sid,
+        )
 
     raise RuntimeError(f"unknown tool: {name}")
 
@@ -564,7 +498,7 @@ def _handle(msg: dict[str, Any]) -> dict[str, Any] | None:
             "result": {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "prodavan-equipment", "version": "1.2.1"},
+                "serverInfo": {"name": "prodavan-equipment", "version": "2.0.0"},
             },
         }
     if method == "notifications/initialized":

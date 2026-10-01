@@ -182,6 +182,7 @@ class CabinetModuleService:
         body: Any,
         principal: Principal,
         employee: EmployeeRow | None,
+        run_actions: bool = True,
         session_id: str | None = None,
     ) -> dict:
         table_slug = check_table_slug(table_slug)
@@ -202,11 +203,6 @@ class CabinetModuleService:
         columns_body = await self._instances.resolve_columns_body(
             instance_id=inst.id, module_id=module_id
         )
-        if table_slug == "found_offers" and (body.get("currency") or "RUB") != "RUB":
-            # Manual/UI offer with foreign currency — same RUB-canonical storage.
-            from prodavan.application.modules.equipment_fx import apply_fx_to_offer_body
-
-            body = await apply_fx_to_offer_body(body)
         body = merge_column_defaults(
             columns_body=columns_body, table_slug=table_slug, body=body
         )
@@ -232,29 +228,30 @@ class CabinetModuleService:
         )
         row_id = str(row.get("row_id") or "")
         action_error: AppError | None = None
-        try:
-            await self._maybe_run_row_actions(
-                session_id=stamp_session,
-                cabinet_id=cabinet_id,
-                module_id=module_id,
-                table_slug=table_slug,
-                row_id=row_id,
-                principal=principal,
-                employee=employee,
-            )
-        except AppError as exc:
-            action_error = exc
-        if row_id:
-            refreshed = await self._instances.get_data_row(
-                instance_id=inst.id, table_slug=table_slug, row_id=row_id
-            )
-            if refreshed is not None:
-                out = _attach_rematerialize(
-                    {"module_id": module_id, "instance_id": inst.id, **refreshed},
-                    remat,
+        if run_actions:
+            try:
+                await self._maybe_run_row_actions(
+                    session_id=stamp_session,
+                    cabinet_id=cabinet_id,
+                    module_id=module_id,
+                    table_slug=table_slug,
+                    row_id=row_id,
+                    principal=principal,
+                    employee=employee,
                 )
-        if action_error is not None:
-            raise action_error
+            except AppError as exc:
+                action_error = exc
+            if row_id:
+                refreshed = await self._instances.get_data_row(
+                    instance_id=inst.id, table_slug=table_slug, row_id=row_id
+                )
+                if refreshed is not None:
+                    out = _attach_rematerialize(
+                        {"module_id": module_id, "instance_id": inst.id, **refreshed},
+                        remat,
+                    )
+            if action_error is not None:
+                raise action_error
         return out
 
     async def update_data_row(
@@ -291,6 +288,16 @@ class CabinetModuleService:
             dict(existing["body"]) if isinstance(existing.get("body"), dict) else {}
         )
         body = merge_row_patch(existing_body, body)
+        if run_actions and module_id == "mod_equipment":
+            # Ручные правки UI фиксируются как переопределения (WAVE7):
+            # бюджетная маржа/поля оффера не затираются синхронизацией.
+            from prodavan.application.modules.equipment_offers_service import (
+                mark_manual_overrides,
+            )
+
+            body = mark_manual_overrides(
+                table_slug=table_slug, existing_body=existing_body, body=body
+            )
         columns_body = await self._instances.resolve_columns_body(
             instance_id=inst.id, module_id=module_id
         )
@@ -463,6 +470,7 @@ class CabinetModuleService:
             cabinet_id=cabinet_id,
             module_id=module_id,
             table_slug=table_slug,
+            row_id=row_id,
             principal=principal,
             employee=employee,
             session_id=session_id,

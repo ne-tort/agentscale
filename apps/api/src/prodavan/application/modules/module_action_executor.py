@@ -253,7 +253,7 @@ class ModuleActionExecutor:
             )
 
         if kind == "equipment.budget_sync":
-            return await self._budget_sync(
+            return await self._equipment_pipeline(
                 cabinet_id=cabinet_id,
                 module_id=module_id,
                 params=params,
@@ -261,13 +261,26 @@ class ModuleActionExecutor:
                 employee=employee,
                 project_id=project_id,
                 session_id=session_id,
+                materialize=True,
             )
 
-        if kind == "equipment.offers_refresh":
-            return await self._offers_refresh(
+        if kind in ("equipment.pipeline", "equipment.offers_refresh"):
+            return await self._equipment_pipeline(
                 cabinet_id=cabinet_id,
                 module_id=module_id,
                 params=params,
+                principal=principal,
+                employee=employee,
+                project_id=project_id,
+                session_id=session_id,
+                materialize=params.get("materialize") is not False,
+            )
+
+        if kind == "equipment.procurement_apply":
+            return await self._procurement_apply(
+                cabinet_id=cabinet_id,
+                module_id=module_id,
+                row_id=row_id,
                 principal=principal,
                 employee=employee,
                 project_id=project_id,
@@ -357,7 +370,7 @@ class ModuleActionExecutor:
             detail=f"action kind not supported: {kind}",
         )
 
-    async def _budget_sync(
+    async def _equipment_pipeline(
         self,
         *,
         cabinet_id: str,
@@ -367,488 +380,66 @@ class ModuleActionExecutor:
         employee: EmployeeRow | None,
         project_id: str | None = None,
         session_id: str | None = None,
+        materialize: bool = True,
     ) -> dict[str, Any]:
-        """Sync budget_lines rows from request_lines + their selected offers.
+        """WAVE7: полный пайплайн «Подбора товаров».
 
-        Snapshot fields (title/part_number/qty/price_in/seller) follow the
-        best offer; user fields (vat/markup/comment) are never overwritten.
+        Материализация found_offers из OpenSearch по ключам групп (found_groups),
+        актуализация цен / is_stale, best-офферы и «лица» групп, снапшот
+        бюджетирования и таблица «Закупка» — см. equipment_offers_service.
         """
-        lines_table = str(params.get("lines_table") or "request_lines")
-        offers_table = str(params.get("offers_table") or "found_offers")
-        budget_table = str(params.get("budget_table") or "budget_lines")
-        def _num_or_zero(raw: Any) -> float:
-            if raw is None or isinstance(raw, bool):
-                return 0.0
-            try:
-                return float(raw)
-            except (TypeError, ValueError):
-                return 0.0
+        from prodavan.application.modules.equipment_offers_service import (
+            EquipmentPipelineService,
+            ModuleRowIO,
+        )
 
-        catalogs_table = str(params.get("catalogs_table") or "catalogs")
-        sellers_table = str(params.get("sellers_table") or "trusted_sellers")
-        # Refresh offer prices from the live catalog (src_hash) before the
-        # snapshot so «Синхронизировать» also pulls price changes.
-        try:
-            await self._offers_refresh(
-                cabinet_id=cabinet_id,
-                module_id=module_id,
-                params={},
-                principal=principal,
-                employee=employee,
-                project_id=project_id,
-                session_id=session_id,
-            )
-        except Exception:
-            logger.warning("budget_sync: offers_refresh failed", exc_info=True)
-
-        lines = await self._list_rows_for_scope(
+        io = ModuleRowIO(
+            self._session,
             cabinet_id=cabinet_id,
             project_id=project_id,
-            module_id=module_id,
-            table_slug=lines_table,
             principal=principal,
             employee=employee,
             session_id=session_id,
         )
-        offers = await self._list_rows_for_scope(
-            cabinet_id=cabinet_id,
-            project_id=project_id,
-            module_id=module_id,
-            table_slug=offers_table,
-            principal=principal,
-            employee=employee,
-            session_id=session_id,
-        )
-        budget_rows = await self._list_rows_for_scope(
-            cabinet_id=cabinet_id,
-            project_id=project_id,
-            module_id=module_id,
-            table_slug=budget_table,
-            principal=principal,
-            employee=employee,
-            session_id=session_id,
-        )
-        try:
-            catalogs = await self._list_rows_for_scope(
-                cabinet_id=cabinet_id,
-                project_id=project_id,
-                module_id=module_id,
-                table_slug=catalogs_table,
-                principal=principal,
-                employee=employee,
-                session_id=session_id,
-            )
-        except Exception:
-            catalogs = []
+        return await EquipmentPipelineService(self._session).run(io, materialize=materialize)
 
-        try:
-            seller_rows = await self._list_rows_for_scope(
-                cabinet_id=cabinet_id,
-                project_id=project_id,
-                module_id=module_id,
-                table_slug=sellers_table,
-                principal=principal,
-                employee=employee,
-                session_id=session_id,
-            )
-        except Exception:
-            seller_rows = []
-
-        def _alias_tokens(raw: Any) -> list[str]:
-            if isinstance(raw, list):
-                return [str(x).strip() for x in raw if str(x).strip()]
-            if isinstance(raw, str):
-                return [
-                    t.strip()
-                    for t in raw.replace(";", ",").replace("\n", ",").split(",")
-                    if t.strip()
-                ]
-            return []
-
-        # name/alias (case-insensitive) -> seller row entry
-        sellers_by_token: dict[str, dict[str, Any]] = {}
-        for s in seller_rows:
-            if not isinstance(s, dict):
-                continue
-            sbody = s.get("body") or {}
-            sname = str(sbody.get("name") or "").strip()
-            if not sname:
-                continue
-            entry = {"row_id": str(s.get("row_id") or ""), "body": sbody}
-            for tok in [sname] + _alias_tokens(sbody.get("aliases")):
-                sellers_by_token[tok.casefold()] = entry
-
-        sellers_created = 0
-
-        async def _register_seller(name: str) -> dict[str, Any]:
-            """Auto-map a catalog/offer supplier into trusted_sellers (dedup by name/alias)."""
-            nonlocal sellers_created
-            key = name.strip().casefold()
-            if not key:
-                return {}
-            existing = sellers_by_token.get(key)
-            if existing is not None:
-                return existing
-            sbody = {"name": name.strip(), "is_enabled": True}
-            # trusted_sellers scope: chats=all -> shared bucket, no session stamp
-            created = None
-            try:
-                created = await self._modules.create_data_row(
-                    cabinet_id=cabinet_id,
-                    module_id=module_id,
-                    table_slug=sellers_table,
-                    body=sbody,
-                    principal=principal,
-                    employee=employee,
-                    session_id=None,
-                )
-            except Exception:
-                logger.warning(
-                    "budget_sync: seller auto-map failed for %r", name, exc_info=True
-                )
-            if isinstance(created, dict) and created.get("row_id"):
-                entry = {"row_id": str(created["row_id"]), "body": sbody}
-                sellers_by_token[key] = entry
-                sellers_created += 1
-                return entry
-            return {}
-
-        def _seller_markup(name: str) -> float | None:
-            entry = sellers_by_token.get(name.strip().casefold())
-            if not entry:
-                return None
-            raw = entry["body"].get("margin_pct")
-            if isinstance(raw, bool) or not isinstance(raw, (int, float)):
-                return None
-            return float(raw)
-
-        catalog_names: dict[str, str] = {}
-        for c in catalogs:
-            if not isinstance(c, dict):
-                continue
-            name = str((c.get("body") or {}).get("name") or "").strip()
-            if name:
-                catalog_names[str(c.get("row_id"))] = name
-        offers_by_id: dict[str, dict[str, Any]] = {}
-        for o in offers:
-            if isinstance(o, dict):
-                offers_by_id[str(o.get("row_id"))] = o.get("body") or {}
-        offers_by_line: dict[str, dict[str, Any]] = {}
-        offers_by_line_all: dict[str, list[dict[str, Any]]] = {}
-        for o in offers:
-            if not isinstance(o, dict):
-                continue
-            body = o.get("body") or {}
-            lid = str(body.get("line_id") or "")
-            if lid:
-                offers_by_line_all.setdefault(lid, []).append(body)
-            if body.get("is_selected") is True:
-                offers_by_line[lid] = body
-
-        def _offer_rank(body: dict[str, Any]) -> tuple:
-            """Best candidate: exact match, higher score, lower price."""
-            try:
-                price = float(body.get("price") or 0)
-            except (TypeError, ValueError):
-                price = 0.0
-            try:
-                score = float(body.get("score") or 0)
-            except (TypeError, ValueError):
-                score = 0.0
-            return (
-                0 if str(body.get("match_kind") or "") == "exact" else 1,
-                -score,
-                price,
-            )
-        budget_by_line: dict[str, dict[str, Any]] = {}
-        for b in budget_rows:
-            if not isinstance(b, dict):
-                continue
-            body = b.get("body") or {}
-            lid = str(body.get("line_id") or "")
-            if lid:
-                budget_by_line[lid] = b
-
-        created = 0
-        updated = 0
-        for line in lines:
-            if not isinstance(line, dict):
-                continue
-            line_id = str(line.get("row_id") or "")
-            if not line_id:
-                continue
-            line_body = line.get("body") or {}
-            offer = offers_by_id.get(str(line_body.get("selected_offer_id") or "")) or {}
-            if not offer:
-                offer = offers_by_line.get(line_id) or {}
-            if not offer:
-                # No selection yet: budget from the best candidate
-                # (selection stays the user's choice — snapshot only).
-                candidates = offers_by_line_all.get(line_id) or []
-                if candidates:
-                    offer = sorted(candidates, key=_offer_rank)[0]
-
-            # Supplier: offer.seller -> catalog name. NEVER brand (a supplier
-            # is not a brand; the supplier always exists in the catalog).
-            seller = str(offer.get("seller") or "").strip()
-            if not seller:
-                seller = str(catalog_names.get(str(offer.get("catalog_id") or "")) or "").strip()
-            if seller:
-                # Auto-map into trusted_sellers (no-op when already known).
-                await _register_seller(seller)
-            snapshot = {
-                "line_id": line_id,
-                "title": str(offer.get("title") or line_body.get("title") or "").strip()
-                or "Не найден",
-                "part_number": str(
-                    line_body.get("part_number") or offer.get("part_number") or ""
-                ).strip()
-                or "Не определен",
-                "qty": line_body.get("qty") or 1,
-                "price_in": _num_or_zero(offer.get("price")),
-                "seller": seller or "Не найден",
-                "brand": str(offer.get("brand") or "").strip(),
-            }
-            existing = budget_by_line.get(line_id)
-            if existing is None:
-                body = dict(snapshot)
-                body.setdefault("vat", 0.22)
-                markup = 0.1
-                seller_markup = _seller_markup(seller) if seller else None
-                if seller_markup is not None:
-                    markup = seller_markup
-                body.setdefault("markup", markup)
-                await self._modules.create_data_row(
-                    cabinet_id=cabinet_id,
-                    module_id=module_id,
-                    table_slug=budget_table,
-                    body=body,
-                    principal=principal,
-                    employee=employee,
-                    session_id=session_id,
-                )
-                created += 1
-                continue
-            row_id = str(existing.get("row_id") or "")
-            if not row_id:
-                continue
-            body = dict(existing.get("body") or {})
-            body.update(snapshot)
-            await self._update_row_for_scope(
-                cabinet_id=cabinet_id,
-                project_id=project_id,
-                module_id=module_id,
-                table_slug=budget_table,
-                row_id=row_id,
-                body=body,
-                principal=principal,
-                employee=employee,
-                run_actions=False,
-                session_id=session_id,
-            )
-            updated += 1
-
-        return {
-            "kind": "equipment.budget_sync",
-            "created": created,
-            "updated": updated,
-            "lines": len(lines),
-            "sellers_created": sellers_created,
-        }
-
-    async def _offers_refresh(
+    async def _procurement_apply(
         self,
         *,
         cabinet_id: str,
         module_id: str,
-        params: dict[str, Any],
+        row_id: str | None,
         principal: Principal,
         employee: EmployeeRow | None,
         project_id: str | None = None,
         session_id: str | None = None,
     ) -> dict[str, Any]:
-        """Re-check found_offers against the live catalog (by src_hash).
-
-        - price changed in OpenSearch -> update price_orig (+RUB reconvert),
-          never comparing the RUB-converted value;
-        - position gone from the catalog -> mark the row stale (is_stale),
-          keep the old price;
-        - backfills score (exact 1.0 / analog 0.5) when missing.
-        """
-        offers_table = str(params.get("offers_table") or "found_offers")
-        offers = await self._list_rows_for_scope(
-            cabinet_id=cabinet_id,
-            project_id=project_id,
-            module_id=module_id,
-            table_slug=offers_table,
-            principal=principal,
-            employee=employee,
-            session_id=session_id,
+        """WAVE7: ручная правка строки «Закупка» (маржа % / доставка)."""
+        from prodavan.application.modules.equipment_offers_service import (
+            EquipmentPipelineService,
+            ModuleRowIO,
         )
-        rows = [o for o in offers if isinstance(o, dict)]
-        if not rows:
-            return {"kind": "equipment.offers_refresh", "checked": 0, "updated": 0, "stale": 0}
 
-        catalogs = await self._list_rows_for_scope(
-            cabinet_id=cabinet_id,
-            project_id=project_id,
-            module_id=module_id,
-            table_slug="catalogs",
-            principal=principal,
-            employee=employee,
-            session_id=session_id,
-        )
-        ready = [
-            str(c.get("row_id"))
-            for c in catalogs
-            if isinstance(c, dict)
-            and str((c.get("body") or {}).get("status") or "") == "ready"
-        ]
-        if not ready:
-            return {
-                "kind": "equipment.offers_refresh",
-                "checked": 0,
-                "updated": 0,
-                "stale": 0,
-                "reason": "no_ready_catalogs",
-            }
-
-        by_hash: dict[str, list[dict[str, Any]]] = {}
-        for o in rows:
-            h = str((o.get("body") or {}).get("src_hash") or "").strip()
-            if h:
-                by_hash.setdefault(h, []).append(o)
-
-        from prodavan.application.modules.equipment_catalog_opensearch import (
-            OS_NAMESPACE,
-            catalog_os_index_name,
-        )
-        from prodavan.application.modules.equipment_fx import convert_offer_price
-        from prodavan.core.infra.opensearch_manager import get_search_index_service
-
-        svc = get_search_index_service()
-        found: dict[str, dict[str, Any]] = {}
-        hashes = list(by_hash.keys())
-        for start in range(0, len(hashes), 100):
-            chunk = hashes[start : start + 100]
-            query = {"bool": {"filter": [{"terms": {"src_hash": chunk}}]}}
-            for catalog_row_id in ready:
-                try:
-                    result = await svc.search(
-                        namespace=OS_NAMESPACE,
-                        index=catalog_os_index_name(catalog_row_id),
-                        query=query,
-                        from_=0,
-                        size=len(chunk),
-                        company_id="platform",
-                        cabinet_id=None,
-                        project_id=None,
-                        apply_tenant_filter=False,
-                        session=self._session,
-                    )
-                except Exception:
-                    logger.exception(
-                        "offers_refresh: os search failed catalog=%s", catalog_row_id
-                    )
-                    continue
-                for hit in result.hits:
-                    doc = hit.source if isinstance(hit.source, dict) else {}
-                    h = str(doc.get("src_hash") or "")
-                    if h and h not in found:
-                        found[h] = doc
-
-        updated = 0
-        stale = 0
-        checked = 0
-        for o in rows:
-            body = dict(o.get("body") or {})
-            h = str(body.get("src_hash") or "").strip()
-            row_id = str(o.get("row_id") or "")
-            if not row_id:
-                continue
-            checked += 1
-            doc = found.get(h) if h else None
-            if doc is None:
-                # Position no longer in the catalog: stale (price untouched).
-                if body.get("is_stale") is not True and h:
-                    body["is_stale"] = True
-                    await self._update_row_for_scope(
-                        cabinet_id=cabinet_id,
-                        project_id=project_id,
-                        module_id=module_id,
-                        table_slug=offers_table,
-                        row_id=row_id,
-                        body=body,
-                        principal=principal,
-                        employee=employee,
-                        run_actions=False,
-                        session_id=session_id,
-                    )
-                    stale += 1
-                continue
-
-            changed = False
-            if body.get("is_stale") is True:
-                body["is_stale"] = False
-                changed = True
-            # Score backfill (legacy rows with 0/missing score).
-            if not body.get("score"):
-                body["score"] = 1.0 if str(body.get("match_kind") or "") == "exact" else 0.5
-                changed = True
-            # Price compare in the ORIGINAL currency (doc.price_num is the
-            # raw catalog price), never the RUB-converted value.
-            doc_price = doc.get("price_num")
-            cur = str(body.get("currency") or "RUB").upper()
-            # Currency backfill: rows written before currency propagation kept
-            # raw USD/EUR numbers under a RUB label - heal from the indexed doc
-            # (re-derive the RUB price, keep the original in price_orig).
-            doc_cur = str(doc.get("currency") or "RUB").upper()
-            if doc_cur != "RUB" and cur != doc_cur:
-                cur = doc_cur
-                body["currency"] = doc_cur
-                if isinstance(doc_price, (int, float)) and not isinstance(doc_price, bool):
-                    body["price_orig"] = float(doc_price)
-                    rub, _ = await convert_offer_price(price=float(doc_price), currency=doc_cur)
-                    body["price"] = rub
-                changed = True
-            if isinstance(doc_price, (int, float)) and not isinstance(doc_price, bool):
-                try:
-                    orig = float(body.get("price_orig", body.get("price")))
-                except (TypeError, ValueError):
-                    orig = None
-                if orig is None or abs(float(doc_price) - orig) > 0.005:
-                    body["price_orig"] = float(doc_price)
-                    if cur == "RUB":
-                        body["price"] = round(float(doc_price), 2)
-                    else:
-                        rub, _ = await convert_offer_price(
-                            price=float(doc_price), currency=cur
-                        )
-                        body["price"] = rub
-                    changed = True
-            if not changed:
-                continue
-            await self._update_row_for_scope(
-                cabinet_id=cabinet_id,
-                project_id=project_id,
-                module_id=module_id,
-                table_slug=offers_table,
-                row_id=row_id,
-                body=body,
-                principal=principal,
-                employee=employee,
-                run_actions=False,
-                session_id=session_id,
+        row_id = (row_id or "").strip()
+        if not row_id:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="row_id required for equipment.procurement_apply",
             )
-            updated += 1
+        io = ModuleRowIO(
+            self._session,
+            cabinet_id=cabinet_id,
+            project_id=project_id,
+            principal=principal,
+            employee=employee,
+            session_id=session_id,
+        )
+        return await EquipmentPipelineService(self._session).apply_procurement_row(
+            io, row_id=row_id
+        )
 
-        return {
-            "kind": "equipment.offers_refresh",
-            "checked": checked,
-            "updated": updated,
-            "stale": stale,
-            "catalogs": len(ready),
-        }
 
     async def _budget_export(
         self,
@@ -1081,47 +672,92 @@ class ModuleActionExecutor:
         employee: EmployeeRow | None,
         project_id: str | None = None,
         session_id: str | None = None,
+        row_id: str | None = None,
     ) -> None:
-        """Best-effort: equipment.budget_sync after request_lines/found_offers writes.
+        """Best-effort WAVE7: авто-пайплайн «Подбора товаров» после записей строк.
 
-        ``session_id`` scopes source reads and stamps budget rows with the chat
-        session of the triggering write (None -> shared 'main' bucket).
+        - ``found_groups`` → полный пайплайн (материализация офферов из OS);
+        - ``request_lines`` / ``found_offers`` → пайплайн без материализации
+          (пересчёт best/бюджета/закупки — например после ручной правки оффера);
+        - ``procurement`` → ``equipment.procurement_apply`` (маржа/доставка).
+
+        Пайплайн пишет строки с ``run_actions=False`` — рекурсии нет.
+        ``session_id`` задаёт скоп чата (None → общий бакет main).
         """
         try:
-            matched_params: dict[str, Any] | None = None
+            matched_kind: str | None = None
             for action in await self._list_actions(module_id=module_id):
                 if action.get("enabled") is False:
                     continue
-                if str(action.get("kind") or "") != "equipment.budget_sync":
+                kind = str(action.get("kind") or "")
+                if kind not in (
+                    "equipment.pipeline",
+                    "equipment.budget_sync",
+                    "equipment.offers_refresh",
+                    "equipment.procurement_apply",
+                ):
                     continue
                 params = action.get("params") if isinstance(action.get("params"), dict) else {}
-                watched = {
-                    str(params.get("lines_table") or "request_lines"),
-                    str(params.get("offers_table") or "found_offers"),
-                }
+                if kind == "equipment.procurement_apply":
+                    # закупка: только её таблица, отдельный экшен (маржа/доставка)
+                    watched = {str(params.get("procurement_table") or "procurement")}
+                else:
+                    watched = {
+                        str(params.get("groups_table") or "found_groups"),
+                        str(params.get("lines_table") or "request_lines"),
+                        str(params.get("offers_table") or "found_offers"),
+                    }
                 if table_slug not in watched:
                     continue
                 trigger = action.get("trigger") if isinstance(action.get("trigger"), dict) else {}
                 on = trigger.get("on") if isinstance(trigger.get("on"), list) else []
                 if "row.created" not in on and "row.updated" not in on:
                     continue
-                matched_params = params
+                matched_kind = kind
                 break
-            if matched_params is None:
+            if matched_kind is None:
                 return
-            await self._budget_sync(
+            if matched_kind == "equipment.procurement_apply":
+                if not (row_id or "").strip():
+                    return
+                await self._procurement_apply(
+                    cabinet_id=cabinet_id,
+                    module_id=module_id,
+                    row_id=row_id,
+                    principal=principal,
+                    employee=employee,
+                    project_id=project_id,
+                    session_id=session_id,
+                )
+                return
+            materialize = table_slug == str(
+                (await self._pipeline_groups_table(module_id)) or "found_groups"
+            )
+            await self._equipment_pipeline(
                 cabinet_id=cabinet_id,
                 module_id=module_id,
-                params=matched_params,
+                params={},
                 principal=principal,
                 employee=employee,
                 project_id=project_id,
                 session_id=session_id,
+                materialize=materialize,
             )
         except AppError:
             raise
         except Exception:
-            logger.exception("auto budget sync failed module=%s table=%s", module_id, table_slug)
+            logger.exception("auto equipment pipeline failed module=%s table=%s", module_id, table_slug)
+
+    async def _pipeline_groups_table(self, module_id: str) -> str | None:
+        for action in await self._list_actions(module_id=module_id):
+            if str(action.get("kind") or "") not in (
+                "equipment.pipeline",
+                "equipment.budget_sync",
+            ):
+                continue
+            params = action.get("params") if isinstance(action.get("params"), dict) else {}
+            return str(params.get("groups_table") or "found_groups")
+        return None
 
     async def maybe_auto_index_tabular(
         self,

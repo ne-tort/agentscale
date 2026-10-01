@@ -377,6 +377,16 @@ class ProjectRuntimeModuleService:
             dict(existing["body"]) if isinstance(existing.get("body"), dict) else {}
         )
         body = merge_row_patch(existing_body, body)
+        if run_actions and module_id == "mod_equipment":
+            # Ручные правки UI фиксируются как переопределения (WAVE7):
+            # бюджетная маржа/поля оффера не затираются синхронизацией.
+            from prodavan.application.modules.equipment_offers_service import (
+                mark_manual_overrides,
+            )
+
+            body = mark_manual_overrides(
+                table_slug=table_slug, existing_body=existing_body, body=body
+            )
         columns_body = await self._instances.resolve_columns_body(
             instance_id=inst.id, module_id=module_id
         )
@@ -551,6 +561,7 @@ class ProjectRuntimeModuleService:
             project_id=project_id,
             module_id=module_id,
             table_slug=table_slug,
+            row_id=row_id,
             principal=principal,
             employee=employee,
             session_id=session_id,
