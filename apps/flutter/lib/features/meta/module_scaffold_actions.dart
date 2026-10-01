@@ -7,6 +7,7 @@ import 'package:prodavan/features/meta/meta_icon.dart';
 import 'package:prodavan/features/meta/meta_label.dart';
 import 'package:prodavan/features/meta/module_action_file_download.dart';
 import 'package:prodavan/features/meta/runtime/cabinet_data_controller.dart';
+import 'package:prodavan/features/meta/runtime/runtime_data_adapter.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Shared `ui_json.scaffold.actions` AppBar buttons (invoke_action entries).
@@ -82,8 +83,10 @@ Future<void> invokeModuleScaffoldAction({
   String? label,
   List<Map<String, dynamic>> manifestActions = const [],
 }) async {
-  if (seeds is! CabinetDataController) return;
-  final controller = seeds;
+  final dynamic raw = seeds;
+  if (raw is! CabinetDataController && raw is! RuntimeDataAdapter) return;
+  final controller =
+      raw is CabinetDataController ? raw : (raw as RuntimeDataAdapter).controller;
   try {
     final result = await controller.invokeAction(actionId, rowId: rowId);
     final saved = await saveModuleActionFile(controller, result);

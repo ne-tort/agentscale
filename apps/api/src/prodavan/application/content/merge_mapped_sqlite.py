@@ -4,10 +4,50 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import sqlite3
 import tempfile
 from pathlib import Path
 from typing import Any
+
+# Source headers that mean "currency of the price column" (case-insensitive).
+_CURRENCY_HEADER_RE = re.compile(
+    r"^(валюта|вал\.?|currency|curr\.?|cur\.|ден\.?ед\.?|currency_code|iso_currency)$",
+    re.IGNORECASE,
+)
+
+# Raw currency cell -> RUB/USD/EUR ("" when unknown).
+_CURRENCY_VALUES = {
+    "RUB": "RUB",
+    "RUR": "RUB",
+    "РУБ": "RUB",
+    "РУБ.": "RUB",
+    "Р": "RUB",
+    "R": "RUB",
+    "₽": "RUB",
+    "USD": "USD",
+    "$": "USD",
+    "USA": "USD",
+    "US": "USD",
+    "S": "USD",
+    "ДОЛЛ": "USD",
+    "ДОЛЛ.": "USD",
+    "ДОЛЛАР": "USD",
+    "ДОЛЛАР США": "USD",
+    "У.Е.": "USD",
+    "УЕ": "USD",
+    "EUR": "EUR",
+    "€": "EUR",
+    "E": "EUR",
+    "ЕВРО": "EUR",
+    "EVRO": "EUR",
+}
+
+
+def normalize_currency(raw: Any) -> str:
+    s = str(raw or "").strip().upper()
+    return _CURRENCY_VALUES.get(s, "")
+
 
 DEFAULT_SCHEMA = (
     "title",
@@ -16,6 +56,7 @@ DEFAULT_SCHEMA = (
     "brand",
     "supplier",
     "lead_time",
+    "currency",
     "source_catalog",
 )
 
@@ -110,15 +151,32 @@ def merge_mapped_sqlite_bytes(
                             for i in range(len(src_cols))
                         }
                         mapped: list[str] = []
-                        for target in cols:
+                        currency_idx = -1
+                        currency_val = ""
+                        for ti, target in enumerate(cols):
                             if target == provenance_target:
                                 mapped.append(provenance)
                                 continue
                             source_name = cmap.get(target)
+                            if target == "currency":
+                                currency_idx = ti
                             if not isinstance(source_name, str) or not source_name.strip():
                                 mapped.append("")
                                 continue
                             mapped.append(values.get(source_name.strip(), ""))
+                        if currency_idx >= 0 and not mapped[currency_idx]:
+                            # Legacy column maps have no currency entry - heal
+                            # from a currency-ish source header so USD/EUR
+                            # catalogs are not mislabeled as RUB.
+                            for key in values:
+                                if _CURRENCY_HEADER_RE.match(str(key).strip()):
+                                    currency_val = normalize_currency(values.get(key))
+                                    if currency_val:
+                                        break
+                        if currency_idx >= 0:
+                            mapped[currency_idx] = currency_val or (
+                                normalize_currency(mapped[currency_idx]) or "RUB"
+                            )
                         out.execute(insert_sql, mapped)
                         total += 1
                 finally:

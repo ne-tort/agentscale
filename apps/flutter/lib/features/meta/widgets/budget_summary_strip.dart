@@ -3,11 +3,14 @@ import 'package:flutter/material.dart';
 import 'package:prodavan/core/theme/app_color_tokens.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 
-/// Totals strip for «Бюджетирование» (`ui_json.summary.kind = budget_totals`).
+/// Totals table for «Бюджетирование» (`ui_json.summary.kind = budget_totals`).
 ///
-/// Metrics follow the Excel template contract (money_cache parity):
+/// Renders as a real summary TABLE (one row per key budget column with the
+/// aggregate value) above the budget collection.
+///
+/// Math follows the Excel template contract (money_cache parity):
 /// H = qty·price_in (закупка с НДС), M = qty·price_in·(1+markup) (продажа
-/// с НДС), N = M−H (маржа), per-row VAT backs out the «без НДС» / «НДС»
+/// с НДС), N = M−H (маржа); per-row VAT backs out the «без НДС» / «НДС»
 /// split of the sale side.
 class BudgetSummaryStrip extends StatelessWidget {
   const BudgetSummaryStrip({super.key, required this.bodies});
@@ -17,7 +20,6 @@ class BudgetSummaryStrip extends StatelessWidget {
 
   static const double _vatFallback = 0.22;
   static const double _markupFallback = 0.1;
-  static const double _cardRadius = 10;
 
   static double _num(dynamic raw, double fallback) {
     if (raw is num) return raw.toDouble();
@@ -36,7 +38,7 @@ class BudgetSummaryStrip extends StatelessWidget {
   }
 
   String _pct(double ratio) {
-    if (!ratio.isFinite) return '—';
+    if (!ratio.isFinite) return '-,0 %';
     return '${(ratio * 100).toStringAsFixed(1).replaceAll('.', ',')} %';
   }
 
@@ -66,66 +68,89 @@ class BudgetSummaryStrip extends StatelessWidget {
     }
     final margin = sale - buy;
     final marginPct = sale > 0 ? margin / sale : 0.0;
-    final qtyLabel =
-        qtyTotal == qtyTotal.roundToDouble() ? qtyTotal.toInt().toString() : qtyTotal.toStringAsFixed(1);
+    final qtyLabel = qtyTotal == qtyTotal.roundToDouble()
+        ? qtyTotal.toInt().toString()
+        : qtyTotal.toStringAsFixed(1);
 
     final tokens = context.appColors;
-    final metrics = <(String, String, IconData)>[
-      ('Позиций', '$count', Icons.format_list_numbered),
-      ('Кол-во', qtyLabel, Icons.tag),
-      ('Закупка с НДС', _money(buy), Icons.shopping_cart_outlined),
-      ('Продажа с НДС', _money(sale), Icons.sell_outlined),
-      ('Маржа', _money(margin), Icons.trending_up),
-      ('Маржа %', _pct(marginPct), Icons.percent),
-      ('Продажа без НДС', _money(saleNoVat), Icons.receipt_long_outlined),
-      ('НДС', _money(vatOut), Icons.account_balance_outlined),
+    final theme = Theme.of(context);
+    final rows = <(String, String)>[
+      ('Позиций', '$count'),
+      ('Кол-во', qtyLabel),
+      ('Закупка с НДС', _money(buy)),
+      ('Продажа с НДС', _money(sale)),
+      ('Маржа', _money(margin)),
+      ('Маржа %', _pct(marginPct)),
+      ('Продажа без НДС', _money(saleNoVat)),
+      ('НДС', _money(vatOut)),
     ];
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.xs, AppSpacing.md, AppSpacing.sm),
-      child: Wrap(
-        spacing: AppSpacing.sm,
-        runSpacing: AppSpacing.xs,
-        children: [
-          for (final (label, value, icon) in metrics)
-            Container(
-              padding: const EdgeInsets.symmetric(
-                horizontal: AppSpacing.md,
-                vertical: AppSpacing.sm,
-              ),
-              decoration: BoxDecoration(
-                color: tokens.surface,
-                borderRadius: BorderRadius.circular(_cardRadius),
-                border: Border.all(color: tokens.border),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
+      child: Container(
+        decoration: BoxDecoration(
+          color: tokens.surface,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: tokens.border),
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(10),
+          child: Table(
+            defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+            columnWidths: const {
+              0: FlexColumnWidth(1),
+              1: FlexColumnWidth(1),
+            },
+            border: TableBorder(
+              horizontalInside: BorderSide(color: tokens.border.withValues(alpha: 0.6)),
+            ),
+            children: [
+              TableRow(
+                decoration: BoxDecoration(color: tokens.surfaceContainer),
                 children: [
-                  Icon(icon, size: 16, color: tokens.muted),
-                  const SizedBox(width: AppSpacing.xs),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        label,
-                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                              color: tokens.muted,
-                            ),
-                      ),
-                      Text(
-                        value,
-                        style: Theme.of(context)
-                            .textTheme
-                            .labelLarge
-                            ?.copyWith(fontWeight: FontWeight.w600),
-                      ),
-                    ],
-                  ),
+                  _cell('Показатель', theme, tokens, header: true),
+                  _cell('Значение', theme, tokens, header: true, alignRight: true),
                 ],
               ),
-            ),
-        ],
+              for (final (label, value) in rows)
+                TableRow(
+                  children: [
+                    _cell(label, theme, tokens),
+                    _cell(value, theme, tokens, strong: true, alignRight: true),
+                  ],
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _cell(
+    String text,
+    ThemeData theme,
+    AppColorTokens tokens, {
+    bool header = false,
+    bool strong = false,
+    bool alignRight = false,
+  }) {
+    final style = header
+        ? theme.textTheme.labelMedium?.copyWith(
+            color: tokens.muted,
+            fontWeight: FontWeight.w600,
+          )
+        : theme.textTheme.bodyMedium?.copyWith(
+            fontWeight: strong ? FontWeight.w600 : FontWeight.w400,
+          );
+    return Padding(
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.md,
+        vertical: AppSpacing.sm,
+      ),
+      child: Text(
+        text,
+        style: style,
+        textAlign: alignRight ? TextAlign.right : TextAlign.left,
       ),
     );
   }

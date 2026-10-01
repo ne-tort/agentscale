@@ -46,6 +46,13 @@ class RuntimeDataAdapter extends ChangeNotifier {
   List<dynamic> entityRows(String tableSlug, Map<String, dynamic> uiJson) =>
       _inner.entityRows(tableSlug, uiJson);
 
+  /// The wrapped controller (module action invocation from tab hosts).
+  CabinetDataController get controller => _inner;
+
+  /// Module action invocation (budget sync / exports) from tab-host pages.
+  Future<Map<String, dynamic>> invokeAction(String actionId, {String? rowId}) =>
+      _inner.invokeAction(actionId, rowId: rowId);
+
   Map<String, String>? get pickContext => _inner.pickContext;
 
   void setPickContext({required String typeId, required String slotKey}) =>

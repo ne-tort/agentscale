@@ -29,6 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from prodavan.application.content.tabular_index import index_tabular_bytes
 from prodavan.application.modules.equipment_catalog_search import (
     apply_column_map,
+    detect_currency_value,
     is_in_stock,
     parse_price,
 )
@@ -139,6 +140,7 @@ def _canonical_mappings() -> dict[str, Any]:
         "price": {"type": "keyword"},
         "supplier": {"type": "keyword"},
         "lead_time": {"type": "keyword"},
+        "currency": {"type": "keyword"},
         "src_hash": {"type": "keyword"},
     }
     return {"properties": props}
@@ -204,6 +206,7 @@ def _doc_from_mapped(
         "price": mapped.get("price") or "",
         "supplier": mapped.get("supplier") or "",
         "lead_time": lead,
+        "currency": detect_currency_value(mapped.get("currency")) or "RUB",
         "price_num": price_num,
         "in_stock": is_in_stock(lead),
         "src_hash": source_hash(mapped.get("supplier") or "", mapped.get("title") or ""),

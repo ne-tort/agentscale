@@ -341,6 +341,19 @@ _CATALOG_COLUMN_MAP_SCHEMA = [
             "наличие",
         ],
     },
+    {
+        "key": "currency",
+        "label": {"ru": "Валюта", "en": "Currency"},
+        "required": False,
+        "synonyms": [
+            "currency",
+            "валюта",
+            "вал.",
+            "cur",
+            "curr",
+            "currency_code",
+        ],
+    },
 ]
 
 

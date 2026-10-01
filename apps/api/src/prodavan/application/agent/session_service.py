@@ -1484,10 +1484,16 @@ class AgentSessionService:
             raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Agent session not found")
         if row.status == AgentSessionStatus.CANCELLED:
             return _session_public(row)
-        adapter = get_agent_adapter(api_kind=row.api_kind)
-        handle = AgentHandle(id=row.vendor_agent_id, provider=row.provider, cwd=row.cwd, model=row.model)
-        await adapter.cancel(handle)
-        row.status = AgentSessionStatus.CANCELLED
+        if settings.pod_agent_runtime_enabled and not settings.agent_inprocess_adapters_enabled:
+            # Pod-runtime sessions have no in-process adapter to cancel - the
+            # running turn streams into a cancelled session and stops on its
+            # own. Marking CANCELLED is the user-visible "stop" semantics.
+            row.status = AgentSessionStatus.CANCELLED
+        else:
+            adapter = get_agent_adapter(api_kind=row.api_kind)
+            handle = AgentHandle(id=row.vendor_agent_id, provider=row.provider, cwd=row.cwd, model=row.model)
+            await adapter.cancel(handle)
+            row.status = AgentSessionStatus.CANCELLED
         await self._session.commit()
         await self._session.refresh(row)
         return _session_public(row)
