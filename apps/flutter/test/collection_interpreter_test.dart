@@ -3,6 +3,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:prodavan/core/theme/app_theme.dart';
+import 'package:prodavan/core/widgets/app_entity_collection.dart';
 import 'package:prodavan/core/widgets/app_icon_button.dart';
 import 'package:prodavan/core/widgets/app_inline_add_field.dart';
 import 'package:prodavan/features/meta/interpreters/collection_interpreter.dart';
@@ -191,6 +192,7 @@ Map<String, dynamic> _rowTapManifestJson() => {
     };
 
 void main() {
+  _wave7Group('WAVE7 collection features');
   testWidgets('uses AppInlineAddField with meta title', (tester) async {
     final manifest = ModuleMetaManifest.fromJson(_collectionManifestJson());
     final seeds = SeedDataController(manifest);
@@ -322,6 +324,285 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(opened, [('offers_for_line', 'line1')]);
+    });
+  });
+}
+
+/// WAVE7: сортировка / чекбокс-выбор / bool-ячейки / context_bind по полю.
+Map<String, dynamic> _wave7ManifestJson() => {
+      'syntax_version': 1,
+      'tables': [
+        {
+          'slug': 'groups',
+          'label': 'Groups',
+          'storage_kind': 'json_document',
+          'enabled': true,
+        },
+        {
+          'slug': 'offers',
+          'label': 'Offers',
+          'storage_kind': 'json_document',
+          'enabled': true,
+        },
+        {
+          'slug': 'procurement',
+          'label': 'Procurement',
+          'storage_kind': 'json_document',
+          'enabled': true,
+        },
+      ],
+      'columns': [
+        {
+          'table_slug': 'groups',
+          'name': 'title',
+          'label': 'Товар',
+          'type': 'text',
+        },
+        {
+          'table_slug': 'groups',
+          'name': 'rank',
+          'label': 'Ранг',
+          'type': 'number',
+        },
+        {
+          'table_slug': 'groups',
+          'name': 'face_price',
+          'label': 'Цена',
+          'type': 'number',
+        },
+        {
+          'table_slug': 'offers',
+          'name': 'title',
+          'label': 'Товар',
+          'type': 'text',
+        },
+        {
+          'table_slug': 'offers',
+          'name': 'seller',
+          'label': 'Поставщик',
+          'type': 'text',
+        },
+        {
+          'table_slug': 'offers',
+          'name': 'is_selected',
+          'label': 'Выбран',
+          'type': 'bool',
+        },
+        {
+          'table_slug': 'procurement',
+          'name': 'seller',
+          'label': 'Поставщик',
+          'type': 'text',
+          'required': true,
+        },
+        {
+          'table_slug': 'procurement',
+          'name': 'margin_pct',
+          'label': 'Маржа %',
+          'type': 'number',
+        },
+        {
+          'table_slug': 'procurement',
+          'name': 'include_delivery',
+          'label': 'Доставка',
+          'type': 'bool',
+        },
+      ],
+      'views': [
+        {
+          'slug': 'groups_list',
+          'table_slug': 'groups',
+          'kind': 'collection',
+          'ui_json': {
+            'version': 1,
+            'kind': 'collection',
+            'title_field': 'title',
+            'columns': [
+              {'field': 'title', 'label': 'Товар'},
+              {'field': 'rank', 'label': 'Ранг'},
+              {'field': 'face_price', 'label': 'Цена'},
+            ],
+            'sort': [
+              {'field': 'rank', 'dir': 'asc'},
+              {'field': 'face_price', 'dir': 'asc'},
+            ],
+          },
+        },
+        {
+          'slug': 'offers_list',
+          'table_slug': 'offers',
+          'kind': 'collection',
+          'ui_json': {
+            'version': 1,
+            'kind': 'collection',
+            'title_field': 'title',
+            'columns': [
+              {'field': 'title', 'label': 'Товар'},
+              {'field': 'seller', 'label': 'Поставщик'},
+            ],
+            'context_bind': {
+              'seller': {'field': 'seller'},
+            },
+            'selection': {
+              'kind': 'single',
+              'field': 'is_selected',
+              'action': 'select_offer_primary',
+              'control': 'checkbox',
+            },
+          },
+        },
+        {
+          'slug': 'procurement_list',
+          'table_slug': 'procurement',
+          'kind': 'collection',
+          'ui_json': {
+            'version': 1,
+            'kind': 'collection',
+            'title_field': 'seller',
+            'columns': [
+              {'field': 'seller', 'label': 'Поставщик'},
+              {'field': 'margin_pct', 'label': 'Маржа %', 'editable': true},
+              {'field': 'include_delivery', 'label': 'Доставка', 'editable': true},
+            ],
+          },
+        },
+      ],
+      'tabs': [],
+      'seed_rows': {
+        'items': [
+          {
+            'table_slug': 'groups',
+            'row_id': 'g1',
+            'body': {'title': 'Аналог дороже', 'rank': 1, 'face_price': 200},
+          },
+          {
+            'table_slug': 'groups',
+            'row_id': 'g2',
+            'body': {'title': 'Точный дешёвый', 'rank': 0, 'face_price': 150},
+          },
+          {
+            'table_slug': 'groups',
+            'row_id': 'g3',
+            'body': {'title': 'Точный дорогой', 'rank': 0, 'face_price': 900},
+          },
+          {
+            'table_slug': 'groups',
+            'row_id': 'g4',
+            'body': {'title': 'Без цены', 'rank': 2},
+          },
+          {
+            'table_slug': 'offers',
+            'row_id': 'o1',
+            'body': {'title': 'Товар Иванова', 'seller': 'Иванов', 'is_selected': false},
+          },
+          {
+            'table_slug': 'offers',
+            'row_id': 'o2',
+            'body': {'title': 'Товар Петрова', 'seller': 'Петров', 'is_selected': false},
+          },
+          {
+            'table_slug': 'offers',
+            'row_id': 'o3',
+            'body': {
+              'title': 'Ещё Иванов',
+              'seller': 'Иванов',
+              'is_selected': true,
+            },
+          },
+          {
+            'table_slug': 'procurement',
+            'row_id': 'p1',
+            'body': {
+              'seller': 'Иванов',
+              'margin_pct': 15,
+              'include_delivery': false,
+            },
+          },
+        ],
+      },
+    };
+
+void _wave7Group(String description) {
+  group(description, () {
+    testWidgets('sort: rank asc then price asc, empty price last', (tester) async {
+      tester.view.physicalSize = const Size(1200, 700);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      final manifest = ModuleMetaManifest.fromJson(_wave7ManifestJson());
+      final seeds = SeedDataController(manifest);
+      final view = manifest.viewBySlug('groups_list')!;
+
+      await tester.pumpWidget(
+        _ruApp(CollectionViewInterpreter(manifest: manifest, view: view, seeds: seeds)),
+      );
+      await tester.pumpAndSettle();
+
+      final rows = tester
+          .widgetList<AppEntityCollection>(
+            find.byType(AppEntityCollection),
+          )
+          .first
+          .rows;
+      expect(
+        rows.map((r) => r.title).toList(),
+        ['Точный дешёвый', 'Точный дорогой', 'Аналог дороже', 'Без цены'],
+      );
+    });
+
+    testWidgets('context_bind by field + checkbox selection', (tester) async {
+      tester.view.physicalSize = const Size(1200, 700);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      final manifest = ModuleMetaManifest.fromJson(_wave7ManifestJson());
+      final seeds = SeedDataController(manifest);
+      final view = manifest.viewBySlug('offers_list')!;
+
+      await tester.pumpWidget(
+        _ruApp(
+          CollectionViewInterpreter(
+            manifest: manifest,
+            view: view,
+            seeds: seeds,
+            contextRowId: 'p1', // procurement row: seller Иванов
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // контекстный бинд по полю: только офферы Иванова
+      expect(find.text('Товар Иванова'), findsOneWidget);
+      expect(find.text('Ещё Иванов'), findsOneWidget);
+      expect(find.text('Товар Петрова'), findsNothing);
+
+      // чекбокс вместо радио; выбранный ряд отмечен
+      final checkboxes = tester.widgetList<Checkbox>(find.byType(Checkbox)).toList();
+      expect(checkboxes.length, 2);
+      expect(checkboxes.any((c) => c.value == true), isTrue);
+    });
+
+    testWidgets('bool editable cell toggles via patchField', (tester) async {
+      tester.view.physicalSize = const Size(1200, 700);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      final manifest = ModuleMetaManifest.fromJson(_wave7ManifestJson());
+      final seeds = SeedDataController(manifest);
+      final view = manifest.viewBySlug('procurement_list')!;
+
+      await tester.pumpWidget(
+        _ruApp(CollectionViewInterpreter(manifest: manifest, view: view, seeds: seeds)),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byIcon(Icons.check_box_outline_blank), findsOneWidget);
+      await tester.tap(find.byIcon(Icons.check_box_outline_blank));
+      await tester.pumpAndSettle();
+
+      final body = seeds.itemById('p1')!['body'] as Map<String, dynamic>;
+      expect(body['include_delivery'], isTrue);
+      expect(find.byIcon(Icons.check_box), findsOneWidget);
     });
   });
 }

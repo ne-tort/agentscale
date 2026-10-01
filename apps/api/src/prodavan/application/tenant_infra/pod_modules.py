@@ -119,6 +119,7 @@ class PodModuleDataService:
                 project_id=project_id,
                 module_id=module_id,
                 table_slug=table_slug,
+                row_id=row_id,
                 principal=principal,
                 employee=None,
                 session_id=session_id,

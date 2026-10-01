@@ -205,57 +205,26 @@ async def test_real_executor_signatures_accept_session(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_budget_sync_scopes_reads_and_stamps_writes(monkeypatch) -> None:
+    """WAVE7: сессия чата прокидывается в пайплайн (скоп reads + stamp writes).
+
+    Сама семантика скопа (list по session_id, stamp chats=current при записи)
+    живёт в сервисах строк и покрыта их тестами; здесь — что executor не теряет
+    session_id при вызове пайплайна.
+    """
     executor = _executor()
-    rows_by_table: dict[str, list[dict]] = {
-        "request_lines": [
-            {"row_id": "line_1", "body": {"title": "SSD 1TB", "qty": 1, "part_number": "MZ",
-                                           "selected_offer_id": "offer_1"}},
-        ],
-        "found_offers": [
-            {"row_id": "offer_1", "body": {"line_id": "line_1", "title": "SSD Samsung",
-                                           "part_number": "MZ-77Q", "price": 100,
-                                           "catalog_id": "cat_1", "is_selected": True}},
-        ],
-        "budget_lines": [
-            {"row_id": "bud_1", "body": {"line_id": "line_1", "title": "OLD",
-                                         "vat": 0.3, "markup": 0.15}},
-        ],
-        "catalogs": [{"row_id": "cat_1", "body": {"name": "OCS"}}],
-    }
-    list_calls: list[dict] = []
-    created: list[dict] = []
-    updated: list[dict] = []
+    calls: list[dict] = []
 
-    async def _rows(**kwargs):  # noqa: ANN003
-        list_calls.append(kwargs)
-        return rows_by_table[kwargs["table_slug"]]
+    async def _pipeline(**kwargs):
+        calls.append(kwargs)
+        return {"kind": "equipment.pipeline", "created": 0, "updated": 0}
 
-    async def _create(**kwargs):  # noqa: ANN003
-        created.append(kwargs)
-        return {"row_id": "bud_new", "body": kwargs.get("body") or {}}
-
-    async def _update(**kwargs):  # noqa: ANN003
-        updated.append(kwargs)
-        return {"row_id": kwargs.get("row_id")}
-
-    monkeypatch.setattr(executor, "_list_rows_for_scope", _rows)
-    monkeypatch.setattr(executor, "_modules", SimpleNamespace(create_data_row=_create))
-    monkeypatch.setattr(executor, "_update_row_for_scope", _update)
+    monkeypatch.setattr(executor, "_equipment_pipeline", _pipeline)
 
     async def _load(*args, **kwargs):  # noqa: ANN003
-        return {
-            "id": "budget_sync_lines",
-            "kind": "equipment.budget_sync",
-            "params": {
-                "lines_table": "request_lines",
-                "offers_table": "found_offers",
-                "budget_table": "budget_lines",
-                "catalogs_table": "catalogs",
-            },
-        }
+        return {"id": "budget_sync_lines", "kind": "equipment.budget_sync", "params": {}}
 
     monkeypatch.setattr(executor, "_load_action", _load)
-    out = await executor.invoke(
+    await executor.invoke(
         cabinet_id="cab_1",
         module_id="mod_equipment",
         action_id="budget_sync_lines",
@@ -263,38 +232,9 @@ async def test_budget_sync_scopes_reads_and_stamps_writes(monkeypatch) -> None:
         employee=None,
         session_id="ags_123",
     )
-    assert out["kind"] == "equipment.budget_sync"
-
-    # every source read is scoped by the active chat session
-    assert list_calls, "budget sync must read source tables"
-    for call in list_calls:
-        assert call["session_id"] == "ags_123", call
-    # budget row update carries the session (stamps chats=current column)
-    assert updated and updated[0]["session_id"] == "ags_123"
-
-    # budget rows reset -> every line re-created, all stamped with the session
-    rows_by_table["budget_lines"] = []
-    rows_by_table["request_lines"].append(
-        {"row_id": "line_2", "body": {"title": "RAM", "qty": 1}}
-    )
-    out = await executor.invoke(
-        cabinet_id="cab_1",
-        module_id="mod_equipment",
-        action_id="budget_sync_lines",
-        principal=_principal(),
-        employee=None,
-        session_id="ags_123",
-    )
-    assert out["created"] == 2
-    # budget rows are stamped with the chat session; trusted_sellers auto-map
-    # rows (chats=all shared table) intentionally stay session-less.
-    assert created and all(
-        c["session_id"] == "ags_123"
-        for c in created
-        if c.get("table_slug") != "trusted_sellers"
-    )
-    seller_creates = [c for c in created if c.get("table_slug") == "trusted_sellers"]
-    assert all(c["session_id"] is None for c in seller_creates)
+    assert len(calls) == 1
+    assert calls[0]["session_id"] == "ags_123"
+    assert calls[0]["project_id"] is None
 
 
 # --------------------------------------------------------------------------

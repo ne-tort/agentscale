@@ -177,6 +177,7 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     assert {t["slug"] for t in meta["tables"]} == {
         "catalogs",
         "request_lines",
+        "found_groups",
         "found_offers",
         "equipment_types",
         "equipment_items",
@@ -186,11 +187,22 @@ def test_equipment_meta_hub_on_data_placement() -> None:
         "templates",
         "equipment_mcp",
         "budget_lines",
+        "procurement",
     }
     kinds = {a["kind"] for a in meta["actions"]}
     assert "content.index_opensearch" in kinds
     assert "content.probe_remote_sql" in kinds
     assert "data.select_row" in kinds
+    # WAVE7: пайплайн + закупка
+    assert "equipment.pipeline" in kinds
+    assert "equipment.procurement_apply" in kinds
+    assert "equipment.budget_sync" in kinds
+    # WAVE7: вьюхи групп/закупки; плоский список офферов заменён группами
+    view_slugs = {v["slug"] for v in meta["views"]}
+    assert {"found_groups_list", "groups_for_line", "offers_for_group",
+            "procurement_list", "supplier_offers"} <= view_slugs
+    assert "found_offers_list" not in view_slugs
+    assert "offers_for_line" not in view_slugs
     assert not any(r["target"]["format"] == "merge_mapped_sqlite" for r in meta["materialize"])
     assert any(r["id"] == "catalog_manifest" for r in meta["materialize"])
     # s4b is fully removed (table, views, hub tile, materialize, env)
@@ -304,7 +316,7 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     assert budget_view["table_slug"] == "budget_lines"
     assert budget_view["ui_json"]["row_tap"] == {
         "kind": "open_view",
-        "view": "offers_for_line",
+        "view": "groups_for_line",
         "context_field": "line_id",
     }
     assert budget_view["ui_json"]["chat_header"]["icon"] == "request_quote"
@@ -509,11 +521,18 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     assert lines["ui_json"]["scaffold"]["title"]["ru"] == "Позиции заказчика"
     assert lines["ui_json"].get("list_header") == list_header
 
-    offers = next(v for v in meta["views"] if v["slug"] == "found_offers_list")
-    assert offers["ui_json"]["inline_add"]["field"] == "title"
-    assert offers["ui_json"].get("list_header") == list_header
-    offer_cols = [c["field"] for c in offers["ui_json"]["columns"]]
-    assert "brand" in offer_cols
+    # WAVE7: «Найденные товары» = группы; on_load синк, тап → офферы группы
+    groups_list = next(v for v in meta["views"] if v["slug"] == "found_groups_list")
+    assert groups_list["ui_json"].get("list_header") == list_header
+    assert groups_list["ui_json"]["on_load"] == {"action": "equipment_pipeline_sync"}
+    assert groups_list["ui_json"]["row_tap"] == {
+        "kind": "open_view",
+        "view": "offers_for_group",
+    }
+    assert groups_list["ui_json"]["sort"] == [
+        {"field": "rank", "dir": "asc"},
+        {"field": "face_price", "dir": "asc"},
+    ]
     assert any(
         c["name"] == "brand" and c["table_slug"] == "found_offers" for c in meta["columns"]
     )
@@ -523,9 +542,20 @@ def test_equipment_meta_hub_on_data_placement() -> None:
         part for part in db_picker["visible_when"]["all"] if isinstance(part.get("any"), list)
     )
     assert any(clause.get("field") == "remote_dsn_reachable" for clause in reach["any"])
-    line_col = next(c for c in meta["columns"] if c["name"] == "line_id")
+    line_col = next(
+        c
+        for c in meta["columns"]
+        if c["name"] == "line_id" and c["table_slug"] == "found_offers"
+    )
     assert line_col["required"] is False
     assert line_col["label"]["ru"] == "Запрос"
+    # WAVE7: у группы line_id обязателен (позиция, для которой выбираем)
+    group_line_col = next(
+        c
+        for c in meta["columns"]
+        if c["name"] == "line_id" and c["table_slug"] == "found_groups"
+    )
+    assert group_line_col["required"] is True
     form = next(v for v in meta["views"] if v["slug"] == "found_offers_form")
     form_cols = [f["column"] for f in form["ui_json"]["fields"]]
     assert "catalog_id" not in form_cols

@@ -88,6 +88,7 @@ class CollectionViewInterpreter extends StatelessWidget {
         rows = _withEditableCells(context, uiJson, tableSlug, rows);
         final hasInline = _hasInlineAdd(uiJson);
         final hasPoll = _hasActivePoll(uiJson, rawRows, seeds);
+        final onLoadAction = _onLoadAction(uiJson);
         final toolbar = _toolbar(context, uiJson, tableSlug, l10n, skipCreate: hasInline);
         final emptyUi = uiJson['empty'];
         final emptyTitle = emptyUi is Map && emptyUi['title'] != null
@@ -154,6 +155,7 @@ class CollectionViewInterpreter extends StatelessWidget {
             !_hasContextHeader(uiJson) &&
             !_hasListHeader(uiJson) &&
             !hasPoll &&
+            onLoadAction == null &&
             summary == null) {
           return collection;
         }
@@ -161,6 +163,11 @@ class CollectionViewInterpreter extends StatelessWidget {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            if (onLoadAction != null)
+              _CollectionOnLoad(
+                seeds: seeds,
+                actionId: onLoadAction,
+              ),
             if (hasPoll)
               _CollectionPoller(
                 seeds: seeds,
@@ -294,6 +301,17 @@ class CollectionViewInterpreter extends StatelessWidget {
       for (final e in contextBind.entries) {
         if (e.value?.toString() == 'contextRowId') {
           bindEntries.add(MapEntry(e.key.toString(), contextRowId!));
+        } else if (e.value is Map && e.value['field'] is String) {
+          // WAVE7: привязка поля строки к полю контекстного ряда
+          // (например supplier_offers.seller ← procurement.seller).
+          final ctx = seeds.itemById(contextRowId!);
+          final ctxBody = ctx is Map ? ctx['body'] : null;
+          final v = ctxBody is Map
+              ? ctxBody[e.value['field']]?.toString()
+              : null;
+          if (v != null && v.isNotEmpty) {
+            bindEntries.add(MapEntry(e.key.toString(), v));
+          }
         }
       }
     }
@@ -323,25 +341,77 @@ class CollectionViewInterpreter extends StatelessWidget {
       }
     }
     if (filter is! Map && bindEntries.isEmpty && ctxFilterEntries.isEmpty) {
-      return all;
+      return _applySort(uiJson, all);
     }
-    return all.where((row) {
-      final item = seeds.itemById(row.id);
-      final body = item?['body'];
-      if (body is! Map) return false;
-      if (filter is Map) {
-        for (final entry in filter.entries) {
-          if (body[entry.key]?.toString() != entry.value.toString()) return false;
+    return _applySort(
+      uiJson,
+      all.where((row) {
+        final item = seeds.itemById(row.id);
+        final body = item?['body'];
+        if (body is! Map) return false;
+        if (filter is Map) {
+          for (final entry in filter.entries) {
+            if (body[entry.key]?.toString() != entry.value.toString()) return false;
+          }
         }
+        for (final bind in bindEntries) {
+          if (body[bind.key]?.toString() != bind.value) return false;
+        }
+        for (final bind in ctxFilterEntries) {
+          if (body[bind.key]?.toString() != bind.value) return false;
+        }
+        return true;
+      }).toList(),
+    );
+  }
+
+  /// `ui_json.sort: [{field, dir}]` — стабильная сортировка рядов по полям body
+  /// (num сравнивается численно, остальное — строками; null/пусто — в конце).
+  List<AppEntityRow> _applySort(
+    Map<String, dynamic> uiJson,
+    List<AppEntityRow> rows,
+  ) {
+    final raw = uiJson['sort'];
+    if (raw is! List || raw.isEmpty) return rows;
+    final specs = <MapEntry<String, int>>[];
+    for (final s in raw.whereType<Map>()) {
+      final field = s['field']?.toString() ?? '';
+      if (field.isEmpty) continue;
+      specs.add(MapEntry(field, s['dir']?.toString() == 'desc' ? -1 : 1));
+    }
+    if (specs.isEmpty) return rows;
+    final list = [...rows];
+    list.sort((a, b) {
+      for (final spec in specs) {
+        final av = _sortValueOf(a.id, spec.key);
+        final bv = _sortValueOf(b.id, spec.key);
+        int cmp;
+        if (av == null && bv == null) {
+          cmp = 0;
+        } else if (av == null) {
+          cmp = 1;
+        } else if (bv == null) {
+          cmp = -1;
+        } else if (av is num && bv is num) {
+          cmp = av.compareTo(bv);
+        } else {
+          cmp = av.toString().toLowerCase().compareTo(bv.toString().toLowerCase());
+        }
+        if (cmp != 0) return cmp * spec.value;
       }
-      for (final bind in bindEntries) {
-        if (body[bind.key]?.toString() != bind.value) return false;
-      }
-      for (final bind in ctxFilterEntries) {
-        if (body[bind.key]?.toString() != bind.value) return false;
-      }
-      return true;
-    }).toList();
+      return 0;
+    });
+    return list;
+  }
+
+  dynamic _sortValueOf(String rowId, String field) {
+    final item = seeds.itemById(rowId);
+    final body = item is Map ? item['body'] : null;
+    if (body is! Map) return null;
+    final raw = body[field];
+    if (raw == null) return null;
+    if (raw.toString().isEmpty) return null;
+    return raw;
   }
 
   Map<String, String>? _pickContextMap() {
@@ -425,6 +495,8 @@ class CollectionViewInterpreter extends StatelessWidget {
         .toList();
   }
 
+  /// `editable: true` columns render tap-to-edit cells (numeric) or tap-to-toggle
+  /// cells (bool — например include_delivery в «Закупке»).
   List<AppEntityRow> _withEditableCells(
     BuildContext context,
     Map<String, dynamic> uiJson,
@@ -441,6 +513,21 @@ class CollectionViewInterpreter extends StatelessWidget {
       final widgets = Map<String, Widget>.from(row.cellWidgets);
       for (final field in fields) {
         if (widgets.containsKey(field)) continue;
+        if (body[field] is bool) {
+          widgets[field] = _EditableBoolCell(
+            value: body[field] as bool,
+            onToggle: () async {
+              try {
+                final patch = seeds.patchField(row.id, field, !(body[field] as bool));
+                if (patch is Future) await patch;
+              } catch (e) {
+                if (context.mounted) AppErrors.showSnack(context, e);
+                rethrow;
+              }
+            },
+          );
+          continue;
+        }
         widgets[field] = EditableNumberCell(
           value: body[field],
           align: TextAlign.end,
@@ -754,7 +841,11 @@ class CollectionViewInterpreter extends StatelessWidget {
     required bool selected,
     required VoidCallback? onSelect,
   }) {
-    final useSwitch = selection['control']?.toString() == 'switch';
+    final controlKind = selection['control']?.toString();
+    final useSwitch = controlKind == 'switch';
+    // WAVE7: чекбокс ведёт себя как single (сервер снимает выбор у других
+    // рядов группы), но выглядит как множественный выбор («Закупка»).
+    final useCheckbox = controlKind == 'checkbox';
     final trailingPlacement = selection['placement']?.toString() == 'trailing';
     Widget control;
     if (useSwitch) {
@@ -765,6 +856,11 @@ class CollectionViewInterpreter extends StatelessWidget {
             : (v) {
                 if (v) onSelect();
               },
+      );
+    } else if (useCheckbox) {
+      control = Checkbox(
+        value: selected,
+        onChanged: onSelect == null ? null : (_) => onSelect(),
       );
     } else {
       control = Radio<String>(
@@ -938,6 +1034,62 @@ bool _hasActivePoll(
     if (body is Map && config.matches(body[config.field])) return true;
   }
   return false;
+}
+
+/// `ui_json.on_load: {action}` — идентификатор экшена, тихо вызываемого один
+/// раз при открытии таблицы (WAVE7: сверка «Найденных товаров» с OpenSearch).
+String? _onLoadAction(Map<String, dynamic> uiJson) {
+  final onLoad = uiJson['on_load'];
+  if (onLoad is Map) {
+    final actionId = onLoad['action']?.toString() ?? '';
+    if (actionId.isNotEmpty) return actionId;
+  }
+  return null;
+}
+
+/// Invisible one-shot runner: invokes the on_load action quietly (no
+/// snackbars) and reloads rows so the table shows refreshed data.
+class _CollectionOnLoad extends StatefulWidget {
+  const _CollectionOnLoad({
+    required this.seeds,
+    required this.actionId,
+  });
+
+  final dynamic seeds;
+  final String actionId;
+
+  @override
+  State<_CollectionOnLoad> createState() => _CollectionOnLoadState();
+}
+
+class _CollectionOnLoadState extends State<_CollectionOnLoad> {
+  bool _started = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _run());
+  }
+
+  Future<void> _run() async {
+    if (_started || !mounted) return;
+    _started = true;
+    final controller = switch (widget.seeds) {
+      CabinetDataController c => c,
+      RuntimeDataAdapter a => a.controller,
+      _ => null,
+    };
+    if (controller == null) return;
+    try {
+      await controller.invokeAction(widget.actionId);
+      await controller.loadAll();
+    } catch (_) {
+      // Тихая сверка при открытии таблицы: ошибки не мешают просмотру данных.
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => const SizedBox.shrink();
 }
 
 /// Invisible poller: reloads `seeds.loadAll()` on the ui_json.poll_while
@@ -1418,6 +1570,39 @@ class _CollectionInlineAddHost extends StatelessWidget {
       hintText: hint.isNotEmpty ? hint : null,
       validator: (raw) => raw.trim().isNotEmpty,
       onSave: _save,
+    );
+  }
+}
+
+/// Tap-to-toggle bool cell for `editable: true` columns whose body value is a
+/// bool (WAVE7: include_delivery в «Закупке»). Mirrors EditableNumberCell:
+/// looks like a plain cell, tap flips the value via patchField.
+class _EditableBoolCell extends StatelessWidget {
+  const _EditableBoolCell({
+    required this.value,
+    required this.onToggle,
+  });
+
+  final bool value;
+  final Future<void> Function() onToggle;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    return Align(
+      alignment: AlignmentDirectional.centerEnd,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(6),
+        onTap: onToggle,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+          child: Icon(
+            value ? Icons.check_box : Icons.check_box_outline_blank,
+            size: 20,
+            color: value ? colors.success : colors.muted,
+          ),
+        ),
+      ),
     );
   }
 }
