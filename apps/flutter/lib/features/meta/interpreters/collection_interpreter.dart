@@ -146,7 +146,15 @@ class CollectionViewInterpreter extends StatelessWidget {
                 },
         );
 
-        if (!hasInline && !_hasContextHeader(uiJson) && !_hasListHeader(uiJson) && !hasPoll) {
+        // A summary strip (e.g. budget_totals) must also force the Column
+        // layout - otherwise the early return below hides it for views
+        // without inline add / headers / poll (the budget view).
+        final summary = _summary(uiJson);
+        if (!hasInline &&
+            !_hasContextHeader(uiJson) &&
+            !_hasListHeader(uiJson) &&
+            !hasPoll &&
+            summary == null) {
           return collection;
         }
 
@@ -159,7 +167,7 @@ class CollectionViewInterpreter extends StatelessWidget {
                 uiJson: uiJson,
                 rows: rawRows,
               ),
-            if (_summary(uiJson) != null) _summary(uiJson)!,
+            if (summary != null) summary,
             if (_hasListHeader(uiJson))
               _CollectionListHeader(
                 headerConfig: Map<String, dynamic>.from(uiJson['list_header'] as Map),
