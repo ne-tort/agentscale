@@ -402,7 +402,8 @@ async def get_cabinet_module_meta(
     except Exception as exc:
         # Modules without MCP tooling have no mcp_tools document - answer with
         # an empty registry instead of a 404 (UI treats it as "no tools").
-        if slug == "mcp_tools" and getattr(exc, "status_code", None) == 404:
+        status = getattr(exc, "status", None) or getattr(exc, "status_code", None)
+        if slug == "mcp_tools" and status == 404:
             return {"slug": "mcp_tools", "body": {"items": []}}
         raise
 
