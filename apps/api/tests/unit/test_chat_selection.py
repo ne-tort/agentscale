@@ -91,3 +91,29 @@ async def test_foreign_cabinet_chat_rejected() -> None:
             employee=_employee(),
         )
     assert "cabinet" in str(err.value).lower()
+
+
+# ---------------------------------------------------------------- API fallback
+@pytest.mark.asyncio
+async def test_mcp_tools_404_returns_empty_registry(monkeypatch) -> None:
+    from prodavan.api.v1 import cabinets as mod
+
+    async def _raise(**kwargs):  # noqa: ANN003
+        from prodavan.domain.errors import AppError
+
+        raise AppError(
+            code="NOT_FOUND", title="Not Found", status=404, detail="not found"
+        )
+
+    svc = MagicMock()
+    svc.get_meta_document = AsyncMock(side_effect=_raise)
+    monkeypatch.setattr(mod, "CabinetModuleService", lambda session: svc)
+    out = await mod.get_cabinet_module_meta(
+        "cab_1",
+        "mod_any",
+        "mcp_tools",
+        principal=MagicMock(),
+        session=MagicMock(),
+        employee=_employee(),
+    )
+    assert out == {"slug": "mcp_tools", "body": {"items": []}}
