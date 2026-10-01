@@ -87,7 +87,9 @@ resource "null_resource" "k3s_server" {
     # v9: host_profile param — vm skips custom sshd and keeps Docker Engine
     # (CI runners on the VM share it), tls-san list, runner kubeconfig.
     # v10: https_tls_sans — local CA + leaf as Traefik default cert (websecure).
-    rev       = "v10-https-tls"
+    # v11: host sysctl unprivileged_port_start — non-root Traefik binds 443
+    # (hostNetwork + NET_BIND_SERVICE cap alone is not enough for userns reasons).
+    rev       = "v11-https-tls-sysctl"
     http_port = tostring(var.http_port)
     https_port = tostring(var.https_port)
     cluster   = var.cluster_name
@@ -193,6 +195,9 @@ resource "null_resource" "k3s_server" {
       # NOTE: remote-exec runs this via /bin/sh (dash on Ubuntu) — POSIX only, no pipefail.
       "set -eu",
       "export PATH=\"$HOME/.local/bin:/usr/sbin:/usr/bin:$PATH\"",
+      # Non-root pods with hostNetwork (Traefik websecure <1024) cannot bind low
+      # ports even with NET_BIND_SERVICE — relax on this dedicated CI/cluster host.
+      "sudo -n sh -c 'printf \"net.ipv4.ip_unprivileged_port_start=79\\n\" > /etc/sysctl.d/99-prodavan-unprivileged-ports.conf && sysctl -w net.ipv4.ip_unprivileged_port_start=79 >/dev/null'",
       "sudo -n mkdir -p /var/lib/rancher/k3s/server/manifests /etc/rancher/k3s /etc/systemd/system/k3s.service.d /usr/local/lib/prodavan",
       "sudo -n cp /tmp/prodavan-traefik-port.yaml /var/lib/rancher/k3s/server/manifests/prodavan-traefik-port.yaml",
       "sudo -n cp /tmp/prodavan-boot-heal.conf /etc/systemd/system/k3s.service.d/prodavan-boot-heal.conf",
