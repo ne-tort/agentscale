@@ -7,10 +7,30 @@ k3s + Traefik hostPort + Argo CD + root-app → Argo синкает платфо
 | Параметр | Значение |
 |----------|----------|
 | VM | `www@172.31.156.203` (Ubuntu 24.04; CI-раннеры и Docker Engine на том же хосте — k3s их не трогает, profile `vm`) |
-| UI | **http://172.31.156.203:8088/** (Traefik hostPort 0.0.0.0; с Windows-хоста напрямую, без portproxy/kubeconfig) |
+| UI (HTTPS) | **https://172.31.156.203/** — Traefik websecure на hostPort 443, сертификат локального CA (SAN: IP VM, 127.0.0.1, localhost, prodavan.dev) |
+| UI (HTTP) | http://172.31.156.203:8088/ (smoke/CI) |
 | Keycloak | http://172.31.156.203:8089/ |
 | k3s API | https://172.31.156.203:6443 (TLS SAN: 127.0.0.1 + IP VM) |
 | kubeconfig | `/home/www/.kube/prodavan-dev.yaml` (operator), `/home/runner/.kube/prodavan-dev.yaml` (CI-раннеры; сервер 127.0.0.1) |
+
+## HTTPS в браузере (доверие к сертификату)
+
+Terraform генерирует на VM локальный CA (`/var/lib/rancher/k3s/prodavan-tls/`) и leaf-сертификат,
+кладёт его в Traefik как default TLSStore (`kube-system/prodavan-tls`), а CA экспортирует в
+`/home/www/prodavan-dev-ca.crt`. Чтобы браузер доверял:
+
+```powershell
+# Windows (admin): импорт CA в доверенные корневые
+scp www@172.31.156.203:prodavan-dev-ca.crt $env:TEMP\prodavan-dev-ca.crt
+certutil -addstore -f ROOT $env:TEMP\prodavan-dev-ca.crt
+# опционально: hosts-запись + portproxy для красивого имени
+Add-Content C:\Windows\System32\drivers\etc\hosts "172.31.156.203 prodavan.dev"
+netsh interface portproxy add v4tov4 listenaddress=127.0.0.1 listenport=443 connectaddress=172.31.156.203 connectport=443
+```
+
+После этого работают без предупреждений: `https://172.31.156.203/`, `https://localhost/`,
+`https://prodavan.dev/`. SANs задаёт переменная `https_tls_sans` (смена SAN = `terraform apply`,
+leaf пересоздаётся, CA остаётся — переимпорт в браузер не нужен).
 
 ## Bootstrap (однократно)
 

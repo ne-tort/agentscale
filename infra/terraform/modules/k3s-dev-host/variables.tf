@@ -20,6 +20,12 @@ variable "k3s_tls_sans" {
   description = "Extra TLS SANs for the k3s API cert (vm profile: 127.0.0.1 + the VM IP)."
 }
 
+variable "https_tls_sans" {
+  type        = list(string)
+  default     = []
+  description = "Entrypoint websecure cert SANs (openssl form, e.g. IP:172.31.156.203, DNS:localhost). Non-empty generates a local CA + leaf, installs it as the Traefik default TLSStore (kube-system/prodavan-tls) and copies the CA to /home/<ssh_user>/prodavan-dev-ca.crt for browser trust import."
+}
+
 variable "runner_kubeconfig_path" {
   type        = string
   default     = ""

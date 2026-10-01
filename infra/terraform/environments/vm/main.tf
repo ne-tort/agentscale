@@ -24,8 +24,14 @@ variable "http_port" {
 
 variable "https_port" {
   type        = number
-  default     = 8443
-  description = "Traefik websecure host port (HTTPS). 0 disables hostPort."
+  default     = 443
+  description = "Traefik websecure host port. 443 = clean browser URL https://<vm>/."
+}
+
+variable "https_tls_sans" {
+  type        = list(string)
+  default     = ["IP:172.31.156.203", "IP:127.0.0.1", "DNS:localhost", "DNS:prodavan.dev"]
+  description = "SANs of the websecure leaf cert (local CA, CA exported for browser trust)."
 }
 
 variable "ssh_host" {
@@ -88,6 +94,7 @@ module "k3s_dev" {
   cluster_name           = var.cluster_name
   http_port              = var.http_port
   https_port             = var.https_port
+  https_tls_sans         = var.https_tls_sans
   k3s_tls_sans           = var.api_tls_sans
   runner_kubeconfig_path = var.runner_kubeconfig_path
   ssh_host               = var.ssh_host
