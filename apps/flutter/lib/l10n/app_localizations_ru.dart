@@ -2032,6 +2032,35 @@ class AppLocalizationsRu extends AppLocalizations {
   String get projectChatAgentWorking => 'agentscale работает…';
 
   @override
+  String get projectChatReconnecting => 'Попытка реконнекта';
+
+  @override
+  String projectChatReconnectingAttempt(Object n, Object y) {
+    return 'Попытка реконнекта ($n/$y)';
+  }
+
+  @override
+  String get projectChatErrorPolicyTitle => 'Обработка ошибок';
+
+  @override
+  String get projectChatErrorPolicyInterval => 'Интервал между попытками, сек';
+
+  @override
+  String get projectChatErrorPolicyInfinite => 'Бесконечные попытки';
+
+  @override
+  String get projectChatErrorPolicyAttempts => 'Количество попыток';
+
+  @override
+  String get projectChatErrorPolicyTryOtherModels => 'Пробовать другие модели';
+
+  @override
+  String get projectChatErrorPolicyFallbackModels => 'Модели для подмены';
+
+  @override
+  String get projectChatErrorPolicyFallbackModelsNone => 'Не выбраны';
+
+  @override
   String get chatCopyMessage => 'Копировать ответ';
 
   @override

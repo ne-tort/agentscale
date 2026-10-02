@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -41,6 +41,10 @@ class ProjectRow(Base):
     materialize_manifest: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     launch_phase: Mapped[str | None] = mapped_column(String(32), nullable=True)
     budget_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Chat reconnect policy for provider errors (migration 2026100202):
+    # {"interval_sec": int, "max_attempts": int (0=∞), "fallback_models": [str]}.
+    # NULL = server default (10s / unlimited / no fallbacks).
+    chat_error_policy: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     workspace_outdated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

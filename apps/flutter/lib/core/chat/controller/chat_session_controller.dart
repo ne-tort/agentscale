@@ -50,6 +50,13 @@ class ChatSessionController {
   final List<ChatBlock> blocks = [];
   bool streaming = false;
   Object? error;
+
+  /// Provider-error reconnect (chat error policy): the runtime waits the
+  /// configured interval before re-invoking the model — the UI shows
+  /// «Попытка реконнекта…» / «(n/y)…» while it does. `null` = no reconnect.
+  int? reconnectAttempt;
+  int? reconnectMaxAttempts;
+  String? reconnectNextModel;
   List<Map<String, dynamic>> pendingApprovals = const [];
   List<Map<String, dynamic>> availableModels = const [];
   String? defaultModel;
@@ -99,8 +106,13 @@ class ChatSessionController {
 
   /// "agentscale работает…" — the turn is streaming but the agent is silent
   /// (right after send, between events): show the working indicator so the
-  /// user sees the agent did not stop.
-  bool get showWorkingIndicator => streaming && !anyBlockStreaming && !hasPendingToolCall;
+  /// user sees the agent did not stop. Suppressed while a reconnect wait is
+  /// shown instead («Попытка реконнекта…»).
+  bool get showWorkingIndicator =>
+      streaming && reconnectAttempt == null && !anyBlockStreaming && !hasPendingToolCall;
+
+  /// «Попытка реконнекта…» — the runtime reported a provider-error reconnect.
+  bool get showReconnectIndicator => streaming && reconnectAttempt != null;
 
   /// UI-side cost estimate for usage metadata: runtime `cost_usd` wins, this
   /// only computes from the models catalog when the runtime did not report.
@@ -328,6 +340,9 @@ class ChatSessionController {
     _liveTurnBlocks = [userBlock];
     notifyImmediate();
 
+    reconnectAttempt = null;
+    reconnectMaxAttempts = null;
+    reconnectNextModel = null;
     _handle?.abort();
     final handle = api.projectChatStream(
       projectId: projectId,
@@ -365,6 +380,7 @@ class ChatSessionController {
             onSessionCreated?.call(next);
           }
         } else if (type == '_turn_complete' && data is Map<String, dynamic>) {
+          reconnectAttempt = null;
           final next = data['session_id'] as String?;
           if (next != null && next.isNotEmpty) {
             sessionId = next;
@@ -376,6 +392,7 @@ class ChatSessionController {
           _liveTurnBlocks =
               _attachTurnTimestamps(attachUsageToAssistant(finalizeTurnBlocks(_liveTurnBlocks)));
         } else if (type == '_error' && data is Map<String, dynamic>) {
+          reconnectAttempt = null;
           error = ProdavanApiException(
             data['status'] is int ? data['status'] as int : 503,
             jsonEncode({
@@ -385,6 +402,7 @@ class ChatSessionController {
             }),
           );
         } else if (type == 'error') {
+          reconnectAttempt = null;
           if (data is Map<String, dynamic>) {
             error = AgentStreamError(data);
           } else if (data is Map) {
@@ -393,6 +411,7 @@ class ChatSessionController {
             error = AgentStreamError({'message': event.toString()});
           }
         } else if (type == 'done') {
+          reconnectAttempt = null;
           _turnEndedAt = DateTime.now().toUtc();
           _liveTurnBlocks = applyStreamEvent(_liveTurnBlocks, event);
           final doneData = data is Map<String, dynamic>
@@ -416,9 +435,22 @@ class ChatSessionController {
           }
           notify();
           continue;
+        } else if (type == 'status' &&
+            data is Map &&
+            data['phase'] == 'reconnect') {
+          // Provider-error reconnect (chat error policy): the runtime waits
+          // the interval and re-invokes the model (optionally a fallback
+          // model) — surface it as a status line instead of "working".
+          reconnectAttempt = (data['attempt'] as num?)?.toInt();
+          reconnectMaxAttempts = (data['max_attempts'] as num?)?.toInt();
+          reconnectNextModel = data['next_model'] as String?;
+          notifyImmediate();
         } else {
           _liveTurnBlocks = applyStreamEvent(_liveTurnBlocks, event);
           if (type == 'text_delta' || type == 'thinking_delta') {
+            // First output after (re)connect — the retry worked.
+            reconnectAttempt = null;
+            reconnectNextModel = null;
             // First assistant output of the turn — duration start.
             _turnFirstOutputAt ??= DateTime.now().toUtc();
             notifyImmediate();
@@ -453,6 +485,9 @@ class ChatSessionController {
     } finally {
       watchdog?.cancel();
       streaming = false;
+      reconnectAttempt = null;
+      reconnectMaxAttempts = null;
+      reconnectNextModel = null;
       notifyImmediate();
     }
   }

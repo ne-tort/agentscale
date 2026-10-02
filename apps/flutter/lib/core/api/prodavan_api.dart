@@ -1045,6 +1045,48 @@ class ProdavanApi {
     }
   }
 
+  /// Per-project chat reconnect policy (provider-error retries).
+  Future<Map<String, dynamic>> getProjectChatErrorPolicy(String projectId) async {
+    final prevProj = this.projectId;
+    this.projectId = projectId;
+    try {
+      final res = await AuthHttp.get(
+        _uri('/projects/$projectId/chat-error-policy'),
+        extraHeaders: _workHeaders,
+      );
+      _throwIfError(res);
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    } finally {
+      this.projectId = prevProj;
+    }
+  }
+
+  /// PUT the chat reconnect policy; null fields keep the server defaults.
+  Future<Map<String, dynamic>> putProjectChatErrorPolicy(
+    String projectId, {
+    int? intervalSec,
+    int? maxAttempts,
+    List<String>? fallbackModels,
+  }) async {
+    final prevProj = this.projectId;
+    this.projectId = projectId;
+    try {
+      final body = <String, dynamic>{};
+      if (intervalSec != null) body['interval_sec'] = intervalSec;
+      if (maxAttempts != null) body['max_attempts'] = maxAttempts;
+      if (fallbackModels != null) body['fallback_models'] = fallbackModels;
+      final res = await AuthHttp.put(
+        _uri('/projects/$projectId/chat-error-policy'),
+        body: jsonEncode(body),
+        extraHeaders: _workHeaders,
+      );
+      _throwIfError(res);
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    } finally {
+      this.projectId = prevProj;
+    }
+  }
+
   Future<Map<String, dynamic>> projectChat({
     required String projectId,
     required String text,
