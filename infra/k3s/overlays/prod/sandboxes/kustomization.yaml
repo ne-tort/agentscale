@@ -4,5 +4,20 @@ kind: Kustomization
 resources:
   - ../../../base/agentscale-sandboxes-ks
   - namespace.yaml
+patches:
+  # The API SA lives in the app namespace (agentscale), while the base
+  # Role/RoleBinding are re-namespaced into agentscale-sandboxes by the
+  # transformer below. A subject without an explicit namespace resolves to
+  # the RoleBinding's own namespace — a nonexistent SA there — leaving the
+  # API without sandboxclaims RBAC: launch → 403, delete → 500.
+  - target:
+      group: rbac.authorization.k8s.io
+      version: v1
+      kind: RoleBinding
+      name: agentscale-sandbox-claims
+    patch: |-
+      - op: add
+        path: /subjects/0/namespace
+        value: agentscale
 transformers:
   - namespace-transformer.yaml

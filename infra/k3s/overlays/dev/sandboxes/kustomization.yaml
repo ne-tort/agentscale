@@ -19,5 +19,19 @@ patches:
       - op: replace
         path: /spec/podTemplate/spec/containers/0/env/3/value
         value: http://agentscale-api.agentscale-dev.svc:8001/api/v1
+  # The API SA lives in the app namespace (agentscale-dev), while the base
+  # Role/RoleBinding are re-namespaced into agentscale-dev-sandboxes by the
+  # transformer below. A subject without an explicit namespace resolves to
+  # the RoleBinding's own namespace — a nonexistent SA there — leaving the
+  # API without sandboxclaims RBAC: launch → 403, delete → 500.
+  - target:
+      group: rbac.authorization.k8s.io
+      version: v1
+      kind: RoleBinding
+      name: agentscale-sandbox-claims
+    patch: |-
+      - op: add
+        path: /subjects/0/namespace
+        value: agentscale-dev
 transformers:
   - namespace-transformer.yaml

@@ -34,5 +34,9 @@ roleRef:
   kind: Role
   name: agentscale-sandbox-claims
 subjects:
+# CAUTION: the subject namespace MUST be set by each overlay (dev: agentscale-dev,
+# prod: agentscale). Without it the subject resolves to this RoleBinding's own
+# namespace — the sandboxes namespace, where no agentscale-api SA exists — and
+# the API loses all sandboxclaims/sandboxes RBAC (launch 403, delete 500).
 - kind: ServiceAccount
   name: agentscale-api
