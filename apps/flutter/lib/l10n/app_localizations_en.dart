@@ -1970,7 +1970,13 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String projectChatGroupMcp(int count) {
-    return 'MCP: $count calls';
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '# tool calls',
+      one: '# tool call',
+    );
+    return '$_temp0';
   }
 
   @override
@@ -1995,7 +2001,13 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String projectChatGroupGeneric(int count) {
-    return 'Tools ($count)';
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '# tool calls',
+      one: '# tool call',
+    );
+    return '$_temp0';
   }
 
   @override
@@ -2124,16 +2136,16 @@ class AppLocalizationsEn extends AppLocalizations {
   String get projectChatToolShell => 'Ran command';
 
   @override
-  String get projectChatToolMcpGeneric => 'MCP';
+  String get projectChatToolMcpGeneric => 'Tool';
 
   @override
   String projectChatToolMcp(String tool) {
-    return 'MCP: $tool';
+    return '$tool';
   }
 
   @override
   String projectChatToolMcpServer(Object server, Object tool) {
-    return 'MCP: $server · $tool';
+    return '$server · $tool';
   }
 
   @override
@@ -2167,10 +2179,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get projectChatToolCompact => 'Compacting context';
 
   @override
-  String get projectChatToolMcpServers => 'MCP servers list';
+  String get projectChatToolMcpServers => 'Tools list';
 
   @override
-  String get projectChatToolMcpTools => 'MCP tools list';
+  String get projectChatToolMcpTools => 'Tools list';
 
   @override
   String get projectChatToolErrorPrefix => 'Error';

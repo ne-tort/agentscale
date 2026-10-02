@@ -1986,7 +1986,15 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String projectChatGroupMcp(int count) {
-    return 'MCP: $count вызовов';
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '# вызова инструмента',
+      many: '# вызовов инструмента',
+      few: '# вызова инструмента',
+      one: '# вызов инструмента',
+    );
+    return '$_temp0';
   }
 
   @override
@@ -2011,7 +2019,15 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String projectChatGroupGeneric(int count) {
-    return 'Инструменты ($count)';
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '# вызова инструмента',
+      many: '# вызовов инструмента',
+      few: '# вызова инструмента',
+      one: '# вызов инструмента',
+    );
+    return '$_temp0';
   }
 
   @override
@@ -2140,16 +2156,16 @@ class AppLocalizationsRu extends AppLocalizations {
   String get projectChatToolShell => 'Запущена команда';
 
   @override
-  String get projectChatToolMcpGeneric => 'MCP';
+  String get projectChatToolMcpGeneric => 'Инструмент';
 
   @override
   String projectChatToolMcp(String tool) {
-    return 'MCP: $tool';
+    return '$tool';
   }
 
   @override
   String projectChatToolMcpServer(Object server, Object tool) {
-    return 'MCP: $server · $tool';
+    return '$server · $tool';
   }
 
   @override
@@ -2183,10 +2199,10 @@ class AppLocalizationsRu extends AppLocalizations {
   String get projectChatToolCompact => 'Сжатие контекста';
 
   @override
-  String get projectChatToolMcpServers => 'Список MCP-серверов';
+  String get projectChatToolMcpServers => 'Список инструментов';
 
   @override
-  String get projectChatToolMcpTools => 'Список MCP-инструментов';
+  String get projectChatToolMcpTools => 'Список инструментов';
 
   @override
   String get projectChatToolErrorPrefix => 'Ошибка';
@@ -2196,7 +2212,7 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String projectChatToolSubagent(String name) {
-    return 'Подагент $name';
+    return 'Субагент $name';
   }
 
   @override

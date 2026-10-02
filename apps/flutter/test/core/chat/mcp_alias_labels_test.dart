@@ -109,7 +109,7 @@ void main() {
     expect(p.label, 'Поиск товара…');
   });
 
-  testWidgets('formatToolActivityLabel: unaliased MCP → server · tool', (tester) async {
+  testWidgets('formatToolActivityLabel: unaliased MCP → server · tool (neutral)', (tester) async {
     final l = await l10n(tester);
     final p = formatToolActivityLabel(
       l,
@@ -117,7 +117,9 @@ void main() {
     );
     expect(p.label, contains('some-server'));
     expect(p.label, contains('some_tool'));
-    expect(p.label.startsWith('MCP'), isTrue);
+    // Neutral labels: no tech "MCP:" prefix.
+    expect(p.label.startsWith('MCP'), isFalse);
+    expect(p.label, l.projectChatToolMcpServer('some-server', 'some_tool'));
   });
 
   testWidgets('formatToolActivityLabel: standard utilities localized', (tester) async {
