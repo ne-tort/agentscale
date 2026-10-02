@@ -1,0 +1,11 @@
+# unsetOnly: fill ns for base resources (base is namespace-agnostic);
+# sandboxes sub-kustomization already carries agentscale-sandboxes.
+apiVersion: builtin
+kind: NamespaceTransformer
+metadata:
+  name: agentscale-namespace
+  namespace: agentscale
+unsetOnly: true
+fieldSpecs:
+  - path: metadata/namespace
+    create: true

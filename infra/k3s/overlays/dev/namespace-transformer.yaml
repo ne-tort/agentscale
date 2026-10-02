@@ -1,10 +1,10 @@
-# unsetOnly: keep prodavan-sandboxes namespace on resources that already declare it.
-# Omit metadata/name on Namespace kind — avoids renaming prodavan-sandboxes → prodavan.
+# unsetOnly: keep agentscale-dev-sandboxes namespace on resources that already declare it.
+# Omit metadata/name on Namespace kind — avoids renaming agentscale-dev-sandboxes → agentscale.
 apiVersion: builtin
 kind: NamespaceTransformer
 metadata:
-  name: prodavan-namespace
-  namespace: prodavan
+  name: agentscale-namespace
+  namespace: agentscale-dev
 unsetOnly: true
 fieldSpecs:
   - path: metadata/namespace

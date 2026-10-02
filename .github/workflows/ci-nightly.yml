@@ -23,15 +23,15 @@ jobs:
         timeout-minutes: 2
         run: |
           set -euo pipefail
-          docker rm -f prodavan-nightly-pg 2>/dev/null || true
-          docker run -d --name prodavan-nightly-pg \
-            -e POSTGRES_USER=prodavan \
-            -e POSTGRES_PASSWORD=prodavan \
-            -e POSTGRES_DB=prodavan \
+          docker rm -f agentscale-nightly-pg 2>/dev/null || true
+          docker run -d --name agentscale-nightly-pg \
+            -e POSTGRES_USER=agentscale \
+            -e POSTGRES_PASSWORD=agentscale \
+            -e POSTGRES_DB=agentscale \
             -p 55433:5432 \
             postgres:16.15
           for i in $(seq 1 15); do
-            if docker exec prodavan-nightly-pg pg_isready -U prodavan -d prodavan; then
+            if docker exec agentscale-nightly-pg pg_isready -U agentscale -d agentscale; then
               exit 0
             fi
             sleep 2
@@ -48,7 +48,7 @@ jobs:
 
       - name: Ensure app role
         env:
-          DATABASE_URL: postgresql+asyncpg://prodavan:prodavan@${{ env.DB_HOST }}:55433/prodavan
+          DATABASE_URL: postgresql+asyncpg://agentscale:agentscale@${{ env.DB_HOST }}:55433/agentscale
         run: |
           python - <<PY
           import asyncio
@@ -56,30 +56,30 @@ jobs:
           import os
           host = os.environ["DB_HOST"]
           async def main():
-              conn = await asyncpg.connect(f"postgresql://prodavan:prodavan@{host}:55433/prodavan")
+              conn = await asyncpg.connect(f"postgresql://agentscale:agentscale@{host}:55433/agentscale")
               try:
-                  await conn.execute("CREATE ROLE prodavan_app LOGIN PASSWORD 'prodavan'")
+                  await conn.execute("CREATE ROLE agentscale_app LOGIN PASSWORD 'agentscale'")
               except Exception:
                   pass
-              await conn.execute("GRANT ALL ON SCHEMA public TO prodavan_app")
-              await conn.execute("GRANT ALL ON DATABASE prodavan TO prodavan_app")
+              await conn.execute("GRANT ALL ON SCHEMA public TO agentscale_app")
+              await conn.execute("GRANT ALL ON DATABASE agentscale TO agentscale_app")
               await conn.close()
           asyncio.run(main())
           PY
 
       - name: Run migrations
         env:
-          DATABASE_URL: postgresql+asyncpg://prodavan:prodavan@${{ env.DB_HOST }}:55433/prodavan
+          DATABASE_URL: postgresql+asyncpg://agentscale:agentscale@${{ env.DB_HOST }}:55433/agentscale
         run: alembic upgrade head
 
       - name: Alembic model drift check
         env:
-          DATABASE_URL: postgresql+asyncpg://prodavan:prodavan@${{ env.DB_HOST }}:55433/prodavan
+          DATABASE_URL: postgresql+asyncpg://agentscale:agentscale@${{ env.DB_HOST }}:55433/agentscale
         run: alembic check
 
       - name: Grant app role on migrated tables
         env:
-          DATABASE_URL: postgresql+asyncpg://prodavan:prodavan@${{ env.DB_HOST }}:55433/prodavan
+          DATABASE_URL: postgresql+asyncpg://agentscale:agentscale@${{ env.DB_HOST }}:55433/agentscale
         run: |
           python - <<PY
           import asyncio
@@ -87,17 +87,17 @@ jobs:
           import os
           host = os.environ["DB_HOST"]
           async def main():
-              conn = await asyncpg.connect(f"postgresql://prodavan:prodavan@{host}:55433/prodavan")
-              await conn.execute("GRANT ALL ON ALL TABLES IN SCHEMA public TO prodavan_app")
-              await conn.execute("GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO prodavan_app")
+              conn = await asyncpg.connect(f"postgresql://agentscale:agentscale@{host}:55433/agentscale")
+              await conn.execute("GRANT ALL ON ALL TABLES IN SCHEMA public TO agentscale_app")
+              await conn.execute("GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO agentscale_app")
               await conn.close()
           asyncio.run(main())
           PY
 
       - name: Pytest integration (L2)
         env:
-          DATABASE_URL: postgresql+asyncpg://prodavan_app:prodavan@${{ env.DB_HOST }}:55433/prodavan
-          PG_ADMIN_URL: postgresql+asyncpg://prodavan:prodavan@${{ env.DB_HOST }}:55433/prodavan
+          DATABASE_URL: postgresql+asyncpg://agentscale_app:agentscale@${{ env.DB_HOST }}:55433/agentscale
+          PG_ADMIN_URL: postgresql+asyncpg://agentscale:agentscale@${{ env.DB_HOST }}:55433/agentscale
           AUTH_MODE: test
           AUTH_TEST_SECRET: dev-only-test-secret-change-me
           KEYCLOAK_INVITE_MODE: fake
@@ -106,4 +106,4 @@ jobs:
 
       - name: Stop Postgres
         if: always()
-        run: docker rm -f prodavan-nightly-pg 2>/dev/null || true
+        run: docker rm -f agentscale-nightly-pg 2>/dev/null || true

@@ -34,9 +34,9 @@
 1. локальный `.runner` «уже есть», но `configuredSettings` битый;
 2. deregister падает;
 3. контейнер exit 2 → `restart: unless-stopped` → crash-loop;
-4. на GitHub остаются **offline** `dd-prodavan-*`.
+4. на GitHub остаются **offline** `dd-agentscale-*`.
 
-Фикс: у каждого сервиса свой `RUNNER_NAME` + volume `prodavan-runner-N-files` на `/runner-files`
+Фикс: у каждого сервиса свой `RUNNER_NAME` + volume `agentscale-runner-N-files` на `/runner-files`
 и **`DISABLE_AUTOMATIC_DEREGISTRATION=true`** (без него myoung34 делает `exit 1` сразу после
 «Storing data to /runner-files»).
 
@@ -68,7 +68,7 @@ copy .env.example .env   # ACCESS_TOKEN=gh auth token
 ```powershell
 .\Sync-KubeForDocker.ps1   # optional, CI Verify only
 docker compose ps
-gh api repos/ne-tort/prodavan/actions/runners --jq '.runners[]|{name,status,busy}'
+gh api repos/ne-tort/agentscale/actions/runners --jq '.runners[]|{name,status,busy}'
 ```
 
 Стоп: `docker compose down` · wipe cache+reg: `docker compose down -v`  
@@ -137,7 +137,7 @@ EPHEMERAL=1       →  one-job + exit (только если сознатель�
 
 | Что | Где |
 |-----|-----|
-| Общий CI cache | volume `prodavan-ci-cache` → `/cache` |
-| Registration per runner | `prodavan-runner-1-files` … `-4-files` → `/runner-files` |
+| Общий CI cache | volume `agentscale-ci-cache` → `/cache` |
+| Registration per runner | `agentscale-runner-1-files` … `-4-files` → `/runner-files` |
 | Labels | `self-hosted,linux,docker,docker-desktop` |
 | Heal | `Ensure-RunnersHealthy.ps1` (из keepalive) |

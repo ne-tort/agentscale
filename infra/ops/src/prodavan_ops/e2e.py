@@ -10,9 +10,9 @@ from kubernetes.client.rest import ApiException
 from prodavan_ops.k8s import kubectl, load_kube, require_k8s_api
 from prodavan_ops.paths import overlay_e2e
 
-E2E_NAMESPACE = "prodavan"
-E2E_JOB = "prodavan-e2e-runner"
-E2E_SANDBOXES_NS = "prodavan-sandboxes"
+E2E_NAMESPACE = "agentscale-dev"
+E2E_JOB = "agentscale-e2e-runner"
+E2E_SANDBOXES_NS = "agentscale-dev-sandboxes"
 _API_FAIL_STREAK = 0
 
 
@@ -195,7 +195,7 @@ def cleanup_e2e(*, unsync: bool = False) -> None:
                     version="v1alpha1",
                     namespace="argocd",
                     plural="applications",
-                    name="prodavan-e2e",
+                    name="agentscale-e2e",
                 )
             except ApiException as exc:
                 if exc.status != 404:

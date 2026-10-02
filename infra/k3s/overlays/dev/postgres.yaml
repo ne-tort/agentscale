@@ -1,8 +1,8 @@
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: prodavan-postgres-data
-  namespace: prodavan
+  name: agentscale-postgres-data
+  namespace: agentscale-dev
   annotations:
     argocd.argoproj.io/sync-wave: "0"
 spec:
@@ -15,12 +15,12 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: prodavan-postgres
-  namespace: prodavan
+  name: agentscale-postgres
+  namespace: agentscale-dev
   labels:
-    app: prodavan-postgres
-    app.kubernetes.io/name: prodavan-postgres
-    app.kubernetes.io/part-of: prodavan
+    app: agentscale-postgres
+    app.kubernetes.io/name: agentscale-postgres
+    app.kubernetes.io/part-of: agentscale
     app.kubernetes.io/component: postgres
   annotations:
     argocd.argoproj.io/sync-wave: "0"
@@ -30,12 +30,12 @@ spec:
     type: Recreate
   selector:
     matchLabels:
-      app: prodavan-postgres
+      app: agentscale-postgres
   template:
     metadata:
       labels:
-        app: prodavan-postgres
-        app.kubernetes.io/name: prodavan-postgres
+        app: agentscale-postgres
+        app.kubernetes.io/name: agentscale-postgres
     spec:
       terminationGracePeriodSeconds: 60
       securityContext:
@@ -48,11 +48,11 @@ spec:
               name: pg
           env:
             - name: POSTGRES_USER
-              value: prodavan
+              value: agentscale
             - name: POSTGRES_PASSWORD
-              value: prodavan
+              value: agentscale
             - name: POSTGRES_DB
-              value: prodavan
+              value: agentscale
             # Official image refuses non-empty mount dir without PGDATA subdir.
             - name: PGDATA
               value: /var/lib/postgresql/data/pgdata
@@ -68,11 +68,11 @@ spec:
                   - pg_ctl stop -D "$PGDATA" -m fast -w || true
           readinessProbe:
             exec:
-              command: ["pg_isready", "-U", "prodavan", "-d", "prodavan"]
+              command: ["pg_isready", "-U", "agentscale", "-d", "agentscale"]
             periodSeconds: 5
           livenessProbe:
             exec:
-              command: ["pg_isready", "-U", "prodavan", "-d", "prodavan"]
+              command: ["pg_isready", "-U", "agentscale", "-d", "agentscale"]
             initialDelaySeconds: 20
             periodSeconds: 20
           resources:
@@ -84,18 +84,18 @@ spec:
       volumes:
         - name: data
           persistentVolumeClaim:
-            claimName: prodavan-postgres-data
+            claimName: agentscale-postgres-data
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: prodavan-postgres
-  namespace: prodavan
+  name: agentscale-postgres
+  namespace: agentscale-dev
   annotations:
     argocd.argoproj.io/sync-wave: "0"
 spec:
   selector:
-    app: prodavan-postgres
+    app: agentscale-postgres
   ports:
     - name: pg
       port: 5432

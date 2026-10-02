@@ -1,0 +1,26 @@
+# PROD contour (namespace: agentscale + agentscale-sandboxes).
+#
+# Delivery: Argo app agentscale-prod tracks the `prod` BRANCH (not main).
+# Promotion = PR main → prod (merge triggers Argo sync of this overlay).
+# Images: pinned SHA tags — the promotion PR updates newTag below.
+# Bootstrap note: initial tag is :latest; the first prod-branch push pins
+# the SHA built by CI Images on main.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespace.yaml
+  - ../../base
+  - postgres.yaml
+  - userdb-init.yaml
+  - sandboxes
+patches:
+  - path: patch-prod.yaml
+transformers:
+  - namespace-transformer.yaml
+images:
+  - name: ghcr.io/ne-tort/agentscale-api
+    newName: ghcr.io/ne-tort/agentscale-api
+    newTag: latest # TODO(prod-bootstrap): pin to the promoted :<sha12>
+  - name: ghcr.io/ne-tort/agentscale-web
+    newName: ghcr.io/ne-tort/agentscale-web
+    newTag: latest # TODO(prod-bootstrap): pin to the promoted :<sha12>

@@ -15,24 +15,24 @@ from kubernetes.client.rest import ApiException
 from prodavan_ops.paths import default_kubeconfig
 
 FIRST_PARTY_DEPLOYMENTS = (
-    "prodavan-api",
-    "prodavan-web",
-    "prodavan-celery-worker",
-    "prodavan-celery-beat",
+    "agentscale-api",
+    "agentscale-web",
+    "agentscale-celery-worker",
+    "agentscale-celery-beat",
 )
 
 # Deployment targets for rollout: (name, namespace) pairs. The probe pod
-# (agent-runtime) lives in prodavan-sandboxes (not prodavan), so rollout must
+# (agent-runtime) lives in agentscale-dev-sandboxes (not agentscale), so rollout must
 # cross namespaces. After a fresh prodavan-agent-runtime:latest is pushed by
 # openclaw-images (claw repo), rollout restarts this so the probe pod re-pulls
 # the new digest (imagePullPolicy: Always). Project sandbox pods are dynamic
 # (per-project, created by pod_service) and re-pull on recreate by design.
 DEPLOYMENT_TARGETS: tuple[tuple[str, str], ...] = (
-    ("prodavan-api", "prodavan"),
-    ("prodavan-web", "prodavan"),
-    ("prodavan-celery-worker", "prodavan"),
-    ("prodavan-celery-beat", "prodavan"),
-    ("prodavan-probe-pod", "prodavan-sandboxes"),
+    ("agentscale-api", "agentscale-dev"),
+    ("agentscale-web", "agentscale-dev"),
+    ("agentscale-celery-worker", "agentscale-dev"),
+    ("agentscale-celery-beat", "agentscale-dev"),
+    ("agentscale-probe-pod", "agentscale-dev-sandboxes"),
 )
 
 _cached_kubeconfig: Path | None = None
@@ -112,7 +112,7 @@ def wait_k3s_api_ready(*, timeout_sec: int = 30, poll_sec: float = 2.0) -> None:
     last = ""
     while time.time() < deadline:
         attempt += 1
-        proc = kubectl(["get", "ns", "prodavan", "--request-timeout=5s"], retries=1)
+        proc = kubectl(["get", "ns", "agentscale-dev", "--request-timeout=5s"], retries=1)
         if proc.returncode == 0:
             if attempt > 1:
                 print(f"k3s API ready (attempt {attempt})")
@@ -244,8 +244,8 @@ def rollout_restart(
 ) -> None:
     """Patch pod-template annotation so kubelet re-pulls :latest (Always).
 
-    By default restarts all DEPLOYMENT_TARGETS (prodavan namespace: api/web/
-    celery-worker/celery-beat; prodavan-sandboxes: prodavan-probe-pod). When
+    By default restarts all DEPLOYMENT_TARGETS (agentscale namespace: api/web/
+    celery-worker/celery-beat; agentscale-dev-sandboxes: agentscale-probe-pod). When
     `namespace` + `deployments` are passed, overrides the default target set
     (legacy single-namespace call path).
     """
@@ -263,7 +263,7 @@ def rollout_restart(
                 "template": {
                     "metadata": {
                         "annotations": {
-                            "prodavan.io/restartedAt": stamp,
+                            "agentscale.io/restartedAt": stamp,
                         }
                     }
                 }
@@ -309,7 +309,7 @@ def rollout_restart(
 
 
 def wait_argo_app(
-    name: str = "prodavan-dev",
+    name: str = "agentscale-dev",
     namespace: str = "argocd",
     timeout_sec: int = 600,
     poll_sec: float = 5.0,

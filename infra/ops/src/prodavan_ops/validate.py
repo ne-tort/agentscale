@@ -12,8 +12,8 @@ import yaml
 from prodavan_ops.paths import overlay_dev, overlay_e2e, repo_root
 
 FIRST_PARTY_LATEST = {
-    "ghcr.io/ne-tort/prodavan-api:latest",
-    "ghcr.io/ne-tort/prodavan-web:latest",
+    "ghcr.io/ne-tort/agentscale-api:latest",
+    "ghcr.io/ne-tort/agentscale-web:latest",
     # Platform probe pod (single long-lived agent-runtime, not a project sandbox).
     # Lives in the overlay render, so it must be a first-party :latest pin like
     # api/web; the prodavan-ops image-pin check otherwise treats it as third-party
@@ -134,8 +134,8 @@ def verify_image_pins(manifest: str) -> None:
         if img in FIRST_PARTY_LATEST:
             first_party += 1
             continue
-        if img.startswith("ghcr.io/ne-tort/prodavan-api:") or img.startswith(
-            "ghcr.io/ne-tort/prodavan-web:"
+        if img.startswith("ghcr.io/ne-tort/agentscale-api:") or img.startswith(
+            "ghcr.io/ne-tort/agentscale-web:"
         ):
             raise RuntimeError(f"first-party image must be :latest (got {img})")
         if FORBIDDEN_INFRA_LATEST.match(img):
@@ -203,17 +203,17 @@ def validate_all() -> None:
     e2e_lines = e2e_manifest.count("\n") + (
         1 if e2e_manifest and not e2e_manifest.endswith("\n") else 0
     )
-    if "kind: Job" not in e2e_manifest or "prodavan-e2e-runner" not in e2e_manifest:
-        raise RuntimeError("overlays/e2e render must include prodavan-e2e-runner Job")
+    if "kind: Job" not in e2e_manifest or "agentscale-e2e-runner" not in e2e_manifest:
+        raise RuntimeError("overlays/e2e render must include agentscale-e2e-runner Job")
     if "POD_RUNTIME_MODE: k8s" not in e2e_manifest:
         raise RuntimeError("overlays/e2e must set POD_RUNTIME_MODE: k8s on runner ConfigMap")
     if "POD_SANDBOX_MINIO_SECRET" in e2e_manifest:
         raise RuntimeError("overlays/e2e must use stub hydrate (omit POD_SANDBOX_MINIO_SECRET)")
-    if "name: prodavan-e2e-sandbox-pods\n  namespace: prodavan-sandboxes" not in e2e_manifest.replace(
+    if "name: agentscale-e2e-sandbox-pods\n  namespace: agentscale-dev-sandboxes" not in e2e_manifest.replace(
         "\r\n", "\n"
     ):
         raise RuntimeError(
-            "overlays/e2e sandbox Role must stay in prodavan-sandboxes (use namespace-transformer unsetOnly)"
+            "overlays/e2e sandbox Role must stay in agentscale-dev-sandboxes (use namespace-transformer unsetOnly)"
         )
     bootstrap = overlay_e2e() / "sandboxes-bootstrap.yaml"
     if not bootstrap.is_file():
@@ -254,21 +254,21 @@ def _require_api_migrate_always(manifest: str) -> None:
         if doc.get("kind") != "Deployment":
             continue
         meta = doc.get("metadata") or {}
-        if meta.get("name") != "prodavan-api":
+        if meta.get("name") != "agentscale-api":
             continue
         inits = ((doc.get("spec") or {}).get("template") or {}).get("spec", {}).get(
             "initContainers"
         ) or []
         migrate = next((c for c in inits if isinstance(c, dict) and c.get("name") == "migrate"), None)
         if migrate is None:
-            raise RuntimeError("prodavan-api must define initContainer migrate")
+            raise RuntimeError("agentscale-api must define initContainer migrate")
         if migrate.get("imagePullPolicy") != "Always":
             raise RuntimeError(
-                "prodavan-api migrate initContainer must use imagePullPolicy: Always "
+                "agentscale-api migrate initContainer must use imagePullPolicy: Always "
                 "(IfNotPresent caches an old head → upgrade noop + API 500s)"
             )
         return
-    raise RuntimeError("prodavan-api Deployment missing from overlays/dev render")
+    raise RuntimeError("agentscale-api Deployment missing from overlays/dev render")
 
 
 def _require_minio_pvc(manifest: str) -> None:
@@ -280,23 +280,23 @@ def _require_minio_pvc(manifest: str) -> None:
         if doc.get("kind") != "PersistentVolumeClaim":
             continue
         meta = doc.get("metadata") or {}
-        if meta.get("name") == "prodavan-minio-data":
+        if meta.get("name") == "agentscale-minio-data":
             found_pvc = True
             break
     if not found_pvc:
-        raise RuntimeError("overlay render must include PVC prodavan-minio-data")
-    if "prodavan-minio-init" not in manifest:
-        raise RuntimeError("overlay render must include prodavan-minio-init Job")
+        raise RuntimeError("overlay render must include PVC agentscale-minio-data")
+    if "agentscale-minio-init" not in manifest:
+        raise RuntimeError("overlay render must include agentscale-minio-init Job")
     _require_minio_init_hook(manifest)
     _require_keycloak(manifest)
 
 
 def _require_keycloak(manifest: str) -> None:
     """Keycloak STS + init Job required for AUTH_MODE=oidc cutover."""
-    if "prodavan-keycloak" not in manifest:
-        raise RuntimeError("overlay render must include prodavan-keycloak")
-    if "prodavan-keycloak-init" not in manifest:
-        raise RuntimeError("overlay render must include prodavan-keycloak-init Job")
+    if "agentscale-keycloak" not in manifest:
+        raise RuntimeError("overlay render must include agentscale-keycloak")
+    if "agentscale-keycloak-init" not in manifest:
+        raise RuntimeError("overlay render must include agentscale-keycloak-init Job")
     if "AUTH_MODE: oidc" not in manifest and 'AUTH_MODE: "oidc"' not in manifest:
         # ConfigMap data is unquoted in our overlays
         if "AUTH_MODE: oidc" not in manifest:
@@ -312,51 +312,51 @@ def _require_opensearch(manifest: str) -> None:
         if doc.get("kind") != "PersistentVolumeClaim":
             continue
         meta = doc.get("metadata") or {}
-        if meta.get("name") == "prodavan-opensearch-data":
+        if meta.get("name") == "agentscale-opensearch-data":
             found_pvc = True
             break
     if not found_pvc:
-        raise RuntimeError("overlay render must include PVC prodavan-opensearch-data")
-    if "prodavan-opensearch" not in manifest:
-        raise RuntimeError("overlay render must include prodavan-opensearch")
-    if "prodavan-opensearch-init" not in manifest:
-        raise RuntimeError("overlay render must include prodavan-opensearch-init Job")
+        raise RuntimeError("overlay render must include PVC agentscale-opensearch-data")
+    if "agentscale-opensearch" not in manifest:
+        raise RuntimeError("overlay render must include agentscale-opensearch")
+    if "agentscale-opensearch-init" not in manifest:
+        raise RuntimeError("overlay render must include agentscale-opensearch-init Job")
     for doc in yaml.safe_load_all(manifest):
         if not isinstance(doc, dict) or doc.get("kind") != "Job":
             continue
         meta = doc.get("metadata") or {}
-        if meta.get("name") != "prodavan-opensearch-init":
+        if meta.get("name") != "agentscale-opensearch-init":
             continue
         ann = meta.get("annotations") or {}
         if ann.get("argocd.argoproj.io/hook") != "Sync":
             raise RuntimeError(
-                "prodavan-opensearch-init must use argocd hook Sync "
-                "so cluster is ready before prodavan-api wave 10"
+                "agentscale-opensearch-init must use argocd hook Sync "
+                "so cluster is ready before agentscale-api wave 10"
             )
         wave = str(ann.get("argocd.argoproj.io/sync-wave", ""))
         if wave != "9":
-            raise RuntimeError("prodavan-opensearch-init sync-wave must be 9")
+            raise RuntimeError("agentscale-opensearch-init sync-wave must be 9")
         return
-    raise RuntimeError("prodavan-opensearch-init Job missing from overlay render")
+    raise RuntimeError("agentscale-opensearch-init Job missing from overlay render")
 
 
 def _require_minio_init_hook(manifest: str) -> None:
-    """Init Job must run as Sync hook before prodavan-api (wave 10)."""
+    """Init Job must run as Sync hook before agentscale-api (wave 10)."""
     for doc in yaml.safe_load_all(manifest):
         if not isinstance(doc, dict) or doc.get("kind") != "Job":
             continue
         meta = doc.get("metadata") or {}
-        if meta.get("name") != "prodavan-minio-init":
+        if meta.get("name") != "agentscale-minio-init":
             continue
         ann = meta.get("annotations") or {}
         if ann.get("argocd.argoproj.io/hook") != "Sync":
             raise RuntimeError(
-                "prodavan-minio-init must use argocd hook Sync (not PostSync) "
-                "so IAM exists before prodavan-api wave 10"
+                "agentscale-minio-init must use argocd hook Sync (not PostSync) "
+                "so IAM exists before agentscale-api wave 10"
             )
         wave = str(ann.get("argocd.argoproj.io/sync-wave", ""))
         if wave != "9":
-            raise RuntimeError("prodavan-minio-init sync-wave must be 9 (before prodavan-api 10)")
+            raise RuntimeError("agentscale-minio-init sync-wave must be 9 (before agentscale-api 10)")
         return
-    raise RuntimeError("prodavan-minio-init Job missing from overlay render")
+    raise RuntimeError("agentscale-minio-init Job missing from overlay render")
 

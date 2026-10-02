@@ -1,18 +1,18 @@
 # Gotenberg — LibreOffice document converter for the Documents module (DOCUM).
-# Exposes HTTP API at http://gotenberg.prodavan.svc:3000.
-# Consumed by the API application (GOTENBERG_URL in prodavan-config) for
+# Exposes HTTP API at http://gotenberg:3000 (same-ns short name).
+# Consumed by the API application (GOTENBERG_URL in agentscale-config) for
 # office→pdf conversions on /projects/{id}/documents/convert and module
 # metasyntax actions (documents.convert). Non-pdf routes run in-proc
 # (openpyxl/python-docx) and never touch this service.
-# The `prodavan` namespace is set by the base kustomization (namespace:
-# prodavan), matching prodavan-api / searxng / minio placement.
+# The `agentscale` namespace is set by the base kustomization (namespace:
+# agentscale), matching agentscale-api / searxng / minio placement.
 apiVersion: v1
 kind: Service
 metadata:
   name: gotenberg
   labels:
     app.kubernetes.io/name: gotenberg
-    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/part-of: agentscale
     app.kubernetes.io/component: document-converter
   annotations:
     argocd.argoproj.io/sync-wave: "1"
@@ -30,7 +30,7 @@ metadata:
   name: gotenberg
   labels:
     app.kubernetes.io/name: gotenberg
-    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/part-of: agentscale
     app.kubernetes.io/component: document-converter
   annotations:
     argocd.argoproj.io/sync-wave: "1"
@@ -43,7 +43,7 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: gotenberg
-        app.kubernetes.io/part-of: prodavan
+        app.kubernetes.io/part-of: agentscale
         app.kubernetes.io/component: document-converter
     spec:
       containers:

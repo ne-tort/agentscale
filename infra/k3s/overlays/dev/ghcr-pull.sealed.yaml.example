@@ -4,11 +4,11 @@ apiVersion: bitnami.com/v1alpha1
 kind: SealedSecret
 metadata:
   name: ghcr-pull
-  namespace: prodavan
+  namespace: agentscale-dev
 spec:
   encryptedData: {}
   template:
     metadata:
       name: ghcr-pull
-      namespace: prodavan
+      namespace: agentscale-dev
     type: kubernetes.io/dockerconfigjson

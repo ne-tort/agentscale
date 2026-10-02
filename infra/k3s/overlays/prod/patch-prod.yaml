@@ -1,0 +1,163 @@
+# Prod contour patches: host-pinned ingress (agentscale.local), keycloak on its
+# own hostPort (8099; dev owns 8089), strict CORS, cacheable pinned images.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agentscale-api
+spec:
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: agentscale-api
+        app.kubernetes.io/name: agentscale-api
+        app.kubernetes.io/part-of: agentscale
+        app.kubernetes.io/component: api
+    spec:
+      imagePullSecrets:
+        - name: ghcr-pull
+      initContainers:
+        - name: migrate
+          # Pinned SHA tags are content-addressed: IfNotPresent is safe.
+          imagePullPolicy: IfNotPresent
+      containers:
+        - name: api
+          imagePullPolicy: IfNotPresent
+        - name: api-pod
+          imagePullPolicy: IfNotPresent
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agentscale-web
+spec:
+  template:
+    spec:
+      imagePullSecrets:
+        - name: ghcr-pull
+      containers:
+        - name: web
+          imagePullPolicy: IfNotPresent
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agentscale-celery-worker
+spec:
+  template:
+    spec:
+      imagePullSecrets:
+        - name: ghcr-pull
+      containers:
+        - name: worker
+          imagePullPolicy: IfNotPresent
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agentscale-celery-beat
+spec:
+  template:
+    spec:
+      imagePullSecrets:
+        - name: ghcr-pull
+      containers:
+        - name: beat
+          imagePullPolicy: IfNotPresent
+---
+# Keycloak: prod owns hostPort 8099 (dev keycloak holds 8089 on the same node).
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: agentscale-keycloak
+spec:
+  template:
+    spec:
+      containers:
+        - name: keycloak
+          ports:
+            - containerPort: 8080
+              hostPort: 8099
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agentscale-config
+data:
+  # Real origin (not the dev wildcard): Bearer JWT auth, no cookies.
+  CORS_ORIGINS: "https://agentscale.local"
+  CORS_FORBID_WILDCARD_ORIGIN: "true"
+  # Issuer via prod keycloak hostPort.
+  KEYCLOAK_ISSUER_URL: http://127.0.0.1:8099/realms/agentscale
+  # Cross-ns (sandbox -> app ns) URL: prod contour app ns is agentscale.
+  POD_AGENT_RUNTIME_API_BASE_URL: http://agentscale-api.agentscale.svc:8001/api/v1
+  WEB_SEARCH_BACKEND_URL: "http://searxng.agentscale.svc:8080/search"
+  POD_PROBE_ENABLED: "false"
+---
+# Prod HTTP router: host-pinned (dev keeps the wildcard rule for punnel/VPN).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: agentscale
+spec:
+  rules:
+    - host: agentscale.local
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: agentscale-api
+                port:
+                  number: 8000
+          - path: /health
+            pathType: Prefix
+            backend:
+              service:
+                name: agentscale-api
+                port:
+                  number: 8000
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: agentscale-web
+                port:
+                  number: 80
+---
+# Prod HTTPS router: SNI host-pinned; cert from the default TLSStore
+# (kube-system/agentscale-tls, SAN includes DNS:agentscale.local).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: agentscale-https
+spec:
+  tls:
+    - hosts:
+        - agentscale.local
+  rules:
+    - host: agentscale.local
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: agentscale-api
+                port:
+                  number: 8000
+          - path: /health
+            pathType: Prefix
+            backend:
+              service:
+                name: agentscale-api
+                port:
+                  number: 8000
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: agentscale-web
+                port:
+                  number: 80

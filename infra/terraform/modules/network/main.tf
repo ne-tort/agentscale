@@ -22,7 +22,7 @@ variable "tags" {
 }
 
 locals {
-  name = lookup(var.tags, "Name", "prodavan-network")
+  name = lookup(var.tags, "Name", "agentscale-network")
 }
 
 resource "null_resource" "network_placeholder" {

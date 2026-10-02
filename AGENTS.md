@@ -1,6 +1,6 @@
-# Prodavan Agent
+# Agentscale Agent
 
-Работаешь в репозитории **`prodavan/`** (подмодуль Commerce) — SaaS **управления Pod'ами через UI**; внутри Pod — **AI-агенты с файлами и инструментами**, не чат-обёртка.  
+Работаешь в репозитории **ne-tort/agentscale** (локальная директория подмодуля — `prodavan/`) — SaaS **управления Pod'ами через UI**; внутри Pod — **AI-агенты с файлами и инструментами**, не чат-обёртка.  
 **Не** Telegram Commerce-бот, **не** закупочный пайплайн из корня Commerce.
 
 Legacy AI-канон: [`docs/target/`](docs/target/) (кроме as-built) — см. [`docs/LEGACY.md`](docs/LEGACY.md). Ориентир: [`docs/PRODUCT.md`](docs/PRODUCT.md) + код + тесты.

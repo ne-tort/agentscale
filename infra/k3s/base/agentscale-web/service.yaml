@@ -1,14 +1,13 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: prodavan-web
-  namespace: prodavan
+  name: agentscale-web
   labels:
-    app: prodavan-web
+    app: agentscale-web
 spec:
   type: ClusterIP
   selector:
-    app: prodavan-web
+    app: agentscale-web
   ports:
     - name: http
       port: 80

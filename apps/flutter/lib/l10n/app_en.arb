@@ -151,9 +151,15 @@
   "adminQuotasSummary": "{cabinets} · {packages} · {bundleMb}",
   "@adminQuotasSummary": {
     "placeholders": {
-      "cabinets": { "type": "String" },
-      "packages": { "type": "String" },
-      "bundleMb": { "type": "String" }
+      "cabinets": {
+        "type": "String"
+      },
+      "packages": {
+        "type": "String"
+      },
+      "bundleMb": {
+        "type": "String"
+      }
     }
   },
   "adminCreateAiKey": "Create AI key",
@@ -168,7 +174,9 @@
   "adminDisableKeyConfirm": "Pause key? Related projects will be paused",
   "@adminDisableKeyConfirm": {
     "placeholders": {
-      "keyName": { "type": "String" }
+      "keyName": {
+        "type": "String"
+      }
     }
   },
   "adminDrainProjectTriggers": "Triggers",
@@ -455,19 +463,25 @@
   "containerDurationDays": "{count, plural, one{{count} d} other{{count} d}}",
   "@containerDurationDays": {
     "placeholders": {
-      "count": { "type": "int" }
+      "count": {
+        "type": "int"
+      }
     }
   },
   "containerDurationHours": "{count, plural, one{{count} h} other{{count} h}}",
   "@containerDurationHours": {
     "placeholders": {
-      "count": { "type": "int" }
+      "count": {
+        "type": "int"
+      }
     }
   },
   "containerDurationMinutes": "{count, plural, one{{count} min} other{{count} min}}",
   "@containerDurationMinutes": {
     "placeholders": {
-      "count": { "type": "int" }
+      "count": {
+        "type": "int"
+      }
     }
   },
   "containerObservedPreparing": "Preparing",
@@ -499,13 +513,17 @@
   "adminDeleteCompanyConfirm": "Delete company \"{name}\"? This disables employees, pauses and deletes projects (workspace wipe), and hard-deletes cabinets.",
   "@adminDeleteCompanyConfirm": {
     "placeholders": {
-      "name": { "type": "String" }
+      "name": {
+        "type": "String"
+      }
     }
   },
   "adminDisableAiKeyConfirm": "Pause key? Related projects will be paused",
   "@adminDisableAiKeyConfirm": {
     "placeholders": {
-      "name": { "type": "String" }
+      "name": {
+        "type": "String"
+      }
     }
   },
   "adminNoCompaniesBound": "No companies bound",
@@ -529,14 +547,18 @@
   "adminCompanyCabinetsRunning": "{running} / {quota}",
   "@adminCompanyCabinetsRunning": {
     "placeholders": {
-      "running": { "type": "String" },
-      "quota": { "type": "String" }
+      "running": {
+        "type": "String"
+      },
+      "quota": {
+        "type": "String"
+      }
     }
   },
   "adminPreferredProvider": "Provider",
   "adminPreferredProviderOptional": "Provider",
-  "adminProdavanSubscription": "Prodavan subscription",
-  "adminProdavanSubscriptionOptional": "Prodavan subscription",
+  "adminProdavanSubscription": "Agentscale subscription",
+  "adminProdavanSubscriptionOptional": "Agentscale subscription",
   "adminProviderValue": "Provider: {provider}",
   "@adminProviderValue": {
     "placeholders": {
@@ -990,7 +1012,9 @@
   "errorHttpStatus": "Request failed (HTTP {status})",
   "@errorHttpStatus": {
     "placeholders": {
-      "status": { "type": "int" }
+      "status": {
+        "type": "int"
+      }
     }
   },
   "errorIdentityProvider": "Could not update credentials. Please try again.",
@@ -1023,7 +1047,9 @@
   "aiKeyModelsSelected": "{count} selected",
   "@aiKeyModelsSelected": {
     "placeholders": {
-      "count": { "type": "String" }
+      "count": {
+        "type": "String"
+      }
     }
   },
   "aiKeyModelsAddHint": "Add model id",
@@ -1065,13 +1091,17 @@
   "chatMessageTooLong": "Message is too long (max {max} characters)",
   "@chatMessageTooLong": {
     "placeholders": {
-      "max": { "type": "int" }
+      "max": {
+        "type": "int"
+      }
     }
   },
   "chatTooManyAttachments": "Too many attachments (max {max})",
   "@chatTooManyAttachments": {
     "placeholders": {
-      "max": { "type": "int" }
+      "max": {
+        "type": "int"
+      }
     }
   },
   "chatFileTooLarge": "File is too large",
@@ -1079,90 +1109,138 @@
   "chatAttachmentLabel": "Attachment: {name}",
   "@chatAttachmentLabel": {
     "placeholders": {
-      "name": { "type": "String" }
+      "name": {
+        "type": "String"
+      }
     }
   },
   "chatAttachmentJsonLabel": "Attachment: {name} (JSON)",
   "@chatAttachmentJsonLabel": {
     "placeholders": {
-      "name": { "type": "String" }
+      "name": {
+        "type": "String"
+      }
     }
   },
   "chatAttachmentPathLabel": "Attachment: {name} → /workspace/{path}",
   "@chatAttachmentPathLabel": {
     "placeholders": {
-      "name": { "type": "String" },
-      "path": { "type": "String" }
+      "name": {
+        "type": "String"
+      },
+      "path": {
+        "type": "String"
+      }
     }
   },
   "chatAttachmentRowsLabel": "Attachment: {name} ({rows, plural, one{{rows} row} other{{rows} rows}})",
   "@chatAttachmentRowsLabel": {
     "placeholders": {
-      "name": { "type": "String" },
-      "rows": { "type": "int" }
+      "name": {
+        "type": "String"
+      },
+      "rows": {
+        "type": "int"
+      }
     }
   },
   "projectAgentFailedToStart": "Agent failed to start: {reason}",
   "@projectAgentFailedToStart": {
     "placeholders": {
-      "reason": { "type": "String" }
+      "reason": {
+        "type": "String"
+      }
     }
   },
   "projectChatSidechainOffline": "Sidechain unavailable — container is not running",
   "projectChatGroupThinking": "Reasoning ({count})",
   "@projectChatGroupThinking": {
     "placeholders": {
-      "count": { "type": "int" }
+      "count": {
+        "type": "int"
+      }
     }
   },
   "projectChatGroupFilesEdited": "Edited {count} files",
   "@projectChatGroupFilesEdited": {
     "placeholders": {
-      "count": { "type": "int" }
+      "count": {
+        "type": "int"
+      }
     }
   },
   "projectChatGroupFilesRead": "Read {count} files",
   "@projectChatGroupFilesRead": {
     "placeholders": {
-      "count": { "type": "int" }
+      "count": {
+        "type": "int"
+      }
     }
   },
   "projectChatGroupCommands": "Ran {count} commands",
   "@projectChatGroupCommands": {
     "placeholders": {
-      "count": { "type": "int" }
+      "count": {
+        "type": "int"
+      }
     }
   },
   "projectChatGroupMcp": "MCP: {count} calls",
   "@projectChatGroupMcp": {
     "placeholders": {
-      "count": { "type": "int" }
+      "count": {
+        "type": "int"
+      }
     }
   },
   "projectChatGroupDeleted": "Deleted {count} files",
   "@projectChatGroupDeleted": {
-    "placeholders": { "count": { "type": "int" } }
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
   },
   "projectChatGroupGlob": "File search ({count})",
   "@projectChatGroupGlob": {
-    "placeholders": { "count": { "type": "int" } }
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
   },
   "projectChatGroupGrep": "Search ({count})",
   "@projectChatGroupGrep": {
-    "placeholders": { "count": { "type": "int" } }
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
   },
   "projectChatGroupListDir": "List ({count})",
   "@projectChatGroupListDir": {
-    "placeholders": { "count": { "type": "int" } }
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
   },
   "projectChatGroupGeneric": "Tools ({count})",
   "@projectChatGroupGeneric": {
-    "placeholders": { "count": { "type": "int" } }
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
   },
   "projectChatWorking": "Working…",
   "projectChatWorked": "Worked · {count} actions",
   "@projectChatWorked": {
-    "placeholders": { "count": { "type": "int" } }
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
   },
   "projectChatAgentWorking": "agentscale is working…",
   "chatCopyMessage": "Copy reply",
@@ -1172,8 +1250,12 @@
   "chatModelPricePerMtok": "{priceIn} / {priceOut} $ · 1M tokens",
   "@chatModelPricePerMtok": {
     "placeholders": {
-      "priceIn": { "type": "String" },
-      "priceOut": { "type": "String" }
+      "priceIn": {
+        "type": "String"
+      },
+      "priceOut": {
+        "type": "String"
+      }
     }
   },
   "chatModelDefaultLabel": "Default",
@@ -1182,51 +1264,91 @@
   "projectChatToolReadFile": "Read file",
   "projectChatToolReadPath": "Read {path}",
   "@projectChatToolReadPath": {
-    "placeholders": { "path": { "type": "String" } }
+    "placeholders": {
+      "path": {
+        "type": "String"
+      }
+    }
   },
   "projectChatToolWriteFile": "Wrote file",
   "projectChatToolWritePath": "Wrote {path}",
   "@projectChatToolWritePath": {
-    "placeholders": { "path": { "type": "String" } }
+    "placeholders": {
+      "path": {
+        "type": "String"
+      }
+    }
   },
   "projectChatToolEditFile": "Edited file",
   "projectChatToolEditPath": "Edited {path}",
   "@projectChatToolEditPath": {
-    "placeholders": { "path": { "type": "String" } }
+    "placeholders": {
+      "path": {
+        "type": "String"
+      }
+    }
   },
   "projectChatToolDeleteFile": "Deleted file",
   "projectChatToolDeletePath": "Deleted {path}",
   "@projectChatToolDeletePath": {
-    "placeholders": { "path": { "type": "String" } }
+    "placeholders": {
+      "path": {
+        "type": "String"
+      }
+    }
   },
   "projectChatToolGlob": "File search",
   "projectChatToolGlobPattern": "File search {pattern}",
   "@projectChatToolGlobPattern": {
-    "placeholders": { "pattern": { "type": "String" } }
+    "placeholders": {
+      "pattern": {
+        "type": "String"
+      }
+    }
   },
   "projectChatToolGrep": "Search",
   "projectChatToolGrepPattern": "Search {pattern}",
   "@projectChatToolGrepPattern": {
-    "placeholders": { "pattern": { "type": "String" } }
+    "placeholders": {
+      "pattern": {
+        "type": "String"
+      }
+    }
   },
   "projectChatToolListDir": "List files",
   "projectChatToolListDirPath": "List {path}",
   "@projectChatToolListDirPath": {
-    "placeholders": { "path": { "type": "String" } }
+    "placeholders": {
+      "path": {
+        "type": "String"
+      }
+    }
   },
   "projectChatToolShell": "Ran command",
   "projectChatToolMcpGeneric": "MCP",
   "projectChatToolMcp": "MCP: {tool}",
   "@projectChatToolMcp": {
-    "placeholders": { "tool": { "type": "String" } }
+    "placeholders": {
+      "tool": {
+        "type": "String"
+      }
+    }
   },
   "projectChatToolSubagent": "Subagent {name}",
   "@projectChatToolSubagent": {
-    "placeholders": { "name": { "type": "String" } }
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
   },
   "projectChatToolGeneric": "Tool {name}",
   "@projectChatToolGeneric": {
-    "placeholders": { "name": { "type": "String" } }
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
   },
   "errorAgentProviderNetwork": "AI provider is unreachable from the container (network).",
   "errorAgentProviderRateLimit": "AI provider rate limit exceeded. Try again later.",
@@ -1238,8 +1360,12 @@
   "companyCredentialsCreated": "Login: {companyId} · password: {password}",
   "@companyCredentialsCreated": {
     "placeholders": {
-      "companyId": { "type": "String" },
-      "password": { "type": "String" }
+      "companyId": {
+        "type": "String"
+      },
+      "password": {
+        "type": "String"
+      }
     }
   },
   "companyOwner": "Owner",
@@ -1285,7 +1411,7 @@
   "navOverview": "Overview",
   "navManagement": "Management",
   "navData": "Data",
-  "navProdavan": "Prodavan",
+  "navProdavan": "Agentscale",
   "projectAgentError": "Agent error",
   "projectApproveAndContinue": "Approve and continue",
   "projectApproveTool": "Approve tool",
@@ -1507,7 +1633,9 @@
   "aiKeyProbeModelsCountValue": "Models: {count}",
   "@aiKeyProbeModelsCountValue": {
     "placeholders": {
-      "count": { "type": "int" }
+      "count": {
+        "type": "int"
+      }
     }
   },
   "aiKeyProbeModelsNotReceived": "Models not received",
@@ -1529,7 +1657,9 @@
   "adminDeleteModelConfirm": "Delete model \"{name}\"?",
   "@adminDeleteModelConfirm": {
     "placeholders": {
-      "name": { "type": "String" }
+      "name": {
+        "type": "String"
+      }
     }
   },
   "adminNoModels": "No models"

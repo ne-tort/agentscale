@@ -5,7 +5,7 @@
 # The API pushes a short-lived credential lease (POST /v1/credentials/leases),
 # calls GET /v1/models?adapter=...&key_id=..., then revokes the lease — the
 # secret is never persisted (no env, no disk) and dropped from memory in ≤TTL.
-# See prodavan.application.ai_keys.probe.pod_probe_service.ProbePodService.
+# See agentscale.application.ai_keys.probe.pod_probe_service.ProbePodService.
 #
 # Why a separate pod (not a project sandbox): probing must not depend on a
 # running project per company, and must not spend project budget. This pod is
@@ -14,12 +14,12 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: prodavan-probe-pod
-  namespace: prodavan-sandboxes
+  name: agentscale-probe-pod
+  namespace: agentscale-dev-sandboxes
   labels:
-    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/part-of: agentscale
     app.kubernetes.io/component: probe-pod
-    prodavan.io/managed-by: pod-service
+    agentscale.io/managed-by: pod-service
 spec:
   replicas: 1
   strategy:
@@ -30,17 +30,17 @@ spec:
   template:
     metadata:
       labels:
-        app.kubernetes.io/part-of: prodavan
+        app.kubernetes.io/part-of: agentscale
         app.kubernetes.io/component: probe-pod
-        prodavan.io/managed-by: pod-service
+        agentscale.io/managed-by: pod-service
     spec:
-      serviceAccountName: prodavan-project-pod
+      serviceAccountName: agentscale-project-pod
       restartPolicy: Always
       imagePullSecrets:
         - name: ghcr-pull
       containers:
         - name: agent-runtime
-          # Pin to the SAME tag as SandboxTemplate (base/prodavan-sandboxes-ks/sandboxtemplate.yaml):
+          # Pin to the SAME tag as SandboxTemplate (base/agentscale-dev-sandboxes-ks/sandboxtemplate.yaml):
           # the probe must run the identical runtime build; :latest + Always re-pulls ~97MB on
           # every node restart and can silently diverge from the sandbox runtime.
           image: ghcr.io/ne-tort/prodavan-agent-runtime:c01dbd48d83c # prodavan-claw@c01dbd4
@@ -92,10 +92,10 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: prodavan-probe-pod
-  namespace: prodavan-sandboxes
+  name: agentscale-probe-pod
+  namespace: agentscale-dev-sandboxes
   labels:
-    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/part-of: agentscale
     app.kubernetes.io/component: probe-pod
 spec:
   type: ClusterIP

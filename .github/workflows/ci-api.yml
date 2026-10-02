@@ -55,24 +55,24 @@ jobs:
           # Docker Desktop runners: published ports land on Desktop VM → host.docker.internal
           # Host/WSL runners: 127.0.0.1
           PG_HOST="${PRODAVAN_CI_HOST:-127.0.0.1}"
-          NAME="prodavan-ci-pg-${{ github.run_id }}-${{ github.job }}"
+          NAME="agentscale-ci-pg-${{ github.run_id }}-${{ github.job }}"
           docker rm -f "$NAME" 2>/dev/null || true
           # ephemeral host port avoids collisions across parallel runners
           docker run -d --name "$NAME" \
-            -e POSTGRES_USER=prodavan \
-            -e POSTGRES_PASSWORD=prodavan \
-            -e POSTGRES_DB=prodavan \
+            -e POSTGRES_USER=agentscale \
+            -e POSTGRES_PASSWORD=agentscale \
+            -e POSTGRES_DB=agentscale \
             -p 0:5432 \
             postgres:16.15
           PORT="$(docker port "$NAME" 5432/tcp | head -1 | awk -F: '{print $NF}')"
           echo "PG_HOST=$PG_HOST" >> "${GITHUB_ENV}"
           echo "PG_PORT=$PORT" >> "${GITHUB_ENV}"
           echo "PG_CONTAINER=$NAME" >> "${GITHUB_ENV}"
-          echo "DATABASE_URL=postgresql+asyncpg://prodavan_app:prodavan@${PG_HOST}:${PORT}/prodavan" >> "${GITHUB_ENV}"
-          echo "PG_ADMIN_URL=postgresql+asyncpg://prodavan:prodavan@${PG_HOST}:${PORT}/prodavan" >> "${GITHUB_ENV}"
+          echo "DATABASE_URL=postgresql+asyncpg://agentscale_app:agentscale@${PG_HOST}:${PORT}/agentscale" >> "${GITHUB_ENV}"
+          echo "PG_ADMIN_URL=postgresql+asyncpg://agentscale:agentscale@${PG_HOST}:${PORT}/agentscale" >> "${GITHUB_ENV}"
           echo "Postgres $NAME on ${PG_HOST}:${PORT}"
           for i in $(seq 1 15); do
-            if docker exec "$NAME" pg_isready -U prodavan -d prodavan; then
+            if docker exec "$NAME" pg_isready -U agentscale -d agentscale; then
               exit 0
             fi
             sleep 2
@@ -90,13 +90,13 @@ jobs:
           async def main():
               host = os.environ["PG_HOST"]
               port = os.environ["PG_PORT"]
-              conn = await asyncpg.connect(f"postgresql://prodavan:prodavan@{host}:{port}/prodavan")
+              conn = await asyncpg.connect(f"postgresql://agentscale:agentscale@{host}:{port}/agentscale")
               try:
-                  await conn.execute("CREATE ROLE prodavan_app LOGIN PASSWORD 'prodavan'")
+                  await conn.execute("CREATE ROLE agentscale_app LOGIN PASSWORD 'agentscale'")
               except Exception:
                   pass
-              await conn.execute("GRANT ALL ON SCHEMA public TO prodavan_app")
-              await conn.execute("GRANT ALL ON DATABASE prodavan TO prodavan_app")
+              await conn.execute("GRANT ALL ON SCHEMA public TO agentscale_app")
+              await conn.execute("GRANT ALL ON DATABASE agentscale TO agentscale_app")
               await conn.close()
           asyncio.run(main())
           PY
@@ -124,14 +124,14 @@ jobs:
           async def main():
               host = os.environ["PG_HOST"]
               port = os.environ["PG_PORT"]
-              conn = await asyncpg.connect(f"postgresql://prodavan:prodavan@{host}:{port}/prodavan")
-              await conn.execute("GRANT ALL ON ALL TABLES IN SCHEMA public TO prodavan_app")
-              await conn.execute("GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO prodavan_app")
+              conn = await asyncpg.connect(f"postgresql://agentscale:agentscale@{host}:{port}/agentscale")
+              await conn.execute("GRANT ALL ON ALL TABLES IN SCHEMA public TO agentscale_app")
+              await conn.execute("GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO agentscale_app")
               await conn.execute(
-                  "ALTER DEFAULT PRIVILEGES FOR ROLE prodavan IN SCHEMA public GRANT ALL ON TABLES TO prodavan_app"
+                  "ALTER DEFAULT PRIVILEGES FOR ROLE agentscale IN SCHEMA public GRANT ALL ON TABLES TO agentscale_app"
               )
               await conn.execute(
-                  "ALTER DEFAULT PRIVILEGES FOR ROLE prodavan IN SCHEMA public GRANT ALL ON SEQUENCES TO prodavan_app"
+                  "ALTER DEFAULT PRIVILEGES FOR ROLE agentscale IN SCHEMA public GRANT ALL ON SEQUENCES TO agentscale_app"
               )
               await conn.close()
           asyncio.run(main())

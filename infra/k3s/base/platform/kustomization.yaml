@@ -14,12 +14,12 @@ resources:
 generatorOptions:
   disableNameSuffixHash: true
 configMapGenerator:
-  - name: prodavan-kafka-config
+  - name: agentscale-kafka-config
     files:
       - redpanda.yaml
-  - name: prodavan-minio-api-policy
+  - name: agentscale-minio-api-policy
     files:
       - minio-api-policy.json
-  - name: prodavan-keycloak-realm
+  - name: agentscale-keycloak-realm
     files:
-      - realm-prodavan.json
+      - realm-agentscale.json

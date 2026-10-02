@@ -99,7 +99,7 @@ jobs:
           set -euo pipefail
           path="$(poetry run python -c "from prodavan_ops.k8s import resolve_kubeconfig_path; print(resolve_kubeconfig_path())")"
           echo "KUBECONFIG=${path}" >> "${GITHUB_ENV}"
-          kubectl get ns prodavan --request-timeout=10s
+          kubectl get ns agentscale-dev --request-timeout=10s
 
       - name: Rollout first-party (after CI Images)
         if: github.event_name == 'workflow_run' || github.event_name == 'workflow_dispatch'
@@ -110,7 +110,7 @@ jobs:
       - name: Wait Argo Application
         timeout-minutes: 20
         working-directory: infra/ops
-        run: poetry run prodavan-ops wait --app prodavan-dev --timeout 900
+        run: poetry run prodavan-ops wait --app agentscale-dev --timeout 900
 
       - name: Smoke HTTP
         timeout-minutes: 2

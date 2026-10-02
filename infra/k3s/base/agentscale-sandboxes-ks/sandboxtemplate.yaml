@@ -1,4 +1,4 @@
-# SandboxTemplate — canonical pod blueprint for prodavan agent sandboxes.
+# SandboxTemplate — canonical pod blueprint for agentscale agent sandboxes.
 # Canon: docs/08-migration/agent-sandbox-adr.md (ADR §1.4, SandboxTemplate).
 # Per-project customization goes through claim LABELS only (post-Ready inject);
 # env/VCT in claims are loudly rejected (Disallowed) to keep warm-pool adoption
@@ -6,20 +6,19 @@
 apiVersion: extensions.agents.x-k8s.io/v1beta1
 kind: SandboxTemplate
 metadata:
-  name: prodavan-agent
-  namespace: prodavan-sandboxes
+  name: agentscale-agent
   labels:
-    app.kubernetes.io/part-of: prodavan
-    prodavan.io/managed-by: agent-sandbox
+    app.kubernetes.io/part-of: agentscale
+    agentscale.io/managed-by: agent-sandbox
 spec:
   podTemplate:
     metadata:
       labels:
-        app.kubernetes.io/part-of: prodavan
+        app.kubernetes.io/part-of: agentscale
         app.kubernetes.io/component: project-pod
-        prodavan.io/managed-by: agent-sandbox
+        agentscale.io/managed-by: agent-sandbox
     spec:
-      serviceAccountName: prodavan-project-pod
+      serviceAccountName: agentscale-project-pod
       automountServiceAccountToken: false
       # agent-runtime is non-root by design (Dockerfile.bun in prodavan-claw:
       # `USER node`, uid 1000, /workspace and /app chown'ed node:node) —
@@ -52,14 +51,14 @@ spec:
         - name: OPENCLAW_SESSION_MAP_PATH
           value: /workspace/.openclaw-data/session-map.json
         - name: PRODAVAN_API_BASE_URL
-          value: http://prodavan-api.prodavan.svc:8001/api/v1
+          value: http://agentscale-api.agentscale.svc:8001/api/v1
         - name: PRODAVAN_EVENTS_WRITE
           value: "1"
         - name: PORT
           value: "3921"
-        # Web search is proxied through the Prodavan API (dev default).
+        # Web search is proxied through the Agentscale API (dev default).
         - name: OPENCLAW_WEB_SEARCH_PROVIDER
-          value: prodavan_api
+          value: agentscale_api
         # Optional bridge token for API → agent calls (secret in this namespace).
         - name: BRIDGE_AUTH_TOKEN
           valueFrom:

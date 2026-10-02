@@ -1,14 +1,14 @@
-# Ephemeral pytest runner — synced only via Argo Application prodavan-e2e (manual).
+# Ephemeral pytest runner — synced only via Argo Application agentscale-e2e (manual).
 # Re-run: prodavan-ops e2e cleanup && prodavan-ops e2e run --suite k8s
 # CI may mount PR conftest + k8s tests via ConfigMaps (copied over image sources below).
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: prodavan-e2e-runner
-  namespace: prodavan
+  name: agentscale-e2e-runner
+  namespace: agentscale-dev
   labels:
-    app.kubernetes.io/name: prodavan-e2e-runner
-    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/name: agentscale-e2e-runner
+    app.kubernetes.io/part-of: agentscale
     app.kubernetes.io/component: e2e
 spec:
   ttlSecondsAfterFinished: 3600
@@ -16,17 +16,17 @@ spec:
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: prodavan-e2e-runner
-        app.kubernetes.io/part-of: prodavan
+        app.kubernetes.io/name: agentscale-e2e-runner
+        app.kubernetes.io/part-of: agentscale
         app.kubernetes.io/component: e2e
     spec:
-      serviceAccountName: prodavan-e2e-runner
+      serviceAccountName: agentscale-e2e-runner
       restartPolicy: Never
       imagePullSecrets:
         - name: ghcr-pull
       containers:
         - name: runner
-          image: ghcr.io/ne-tort/prodavan-api:latest
+          image: ghcr.io/ne-tort/agentscale-api:latest
           imagePullPolicy: Always
           workingDir: /app
           command:
@@ -43,11 +43,11 @@ spec:
               pip install -q pytest pytest-asyncio httpx PyJWT ruff asyncpg
               python - <<'PY'
               import asyncio, asyncpg, os
-              url = os.environ.get("PG_ADMIN_URL", "postgresql://prodavan:prodavan@prodavan-postgres.prodavan.svc:5432/postgres")
+              url = os.environ.get("PG_ADMIN_URL", "postgresql://agentscale:agentscale@agentscale-postgres.agentscale-dev.svc:5432/postgres")
               async def main():
                   conn = await asyncpg.connect(url)
                   try:
-                      await conn.execute("CREATE DATABASE prodavan_e2e")
+                      await conn.execute("CREATE DATABASE agentscale_e2e")
                   except asyncpg.DuplicateDatabaseError:
                       pass
                   await conn.close()
@@ -57,10 +57,10 @@ spec:
               pytest tests/e2e/k8s -m k8s -v --tb=short
           env:
             - name: PG_ADMIN_URL
-              value: postgresql://prodavan:prodavan@prodavan-postgres.prodavan.svc:5432/postgres
+              value: postgresql://agentscale:agentscale@agentscale-postgres.agentscale-dev.svc:5432/postgres
           envFrom:
             - configMapRef:
-                name: prodavan-e2e-config
+                name: agentscale-e2e-config
           volumeMounts:
             - name: e2e-conftest
               mountPath: /e2e-pr/conftest
@@ -78,9 +78,9 @@ spec:
       volumes:
         - name: e2e-conftest
           configMap:
-            name: prodavan-e2e-conftest
+            name: agentscale-e2e-conftest
             optional: true
         - name: e2e-k8s-tests
           configMap:
-            name: prodavan-e2e-k8s-tests
+            name: agentscale-e2e-k8s-tests
             optional: true

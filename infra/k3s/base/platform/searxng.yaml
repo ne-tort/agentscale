@@ -2,7 +2,7 @@
 # Exposes JSON API at http://searxng.search.svc:8080/search?q=...&format=json.
 # Consumed by the openclaw built-in web.search tool when
 # OPENCLAW_WEB_SEARCH_PROVIDER=searxng + OPENCLAW_WEB_SEARCH_URL set on
-# the agent-runtime pod (via prodavan-sandbox configmap).
+# the agent-runtime pod (via agentscale-sandbox configmap).
 # The `search` namespace is declared in namespace.yaml (base), not inline,
 # to avoid conflicts with the dev overlay namespace-transformer.
 apiVersion: v1
@@ -11,7 +11,7 @@ metadata:
   name: searxng-config
   labels:
     app.kubernetes.io/name: searxng
-    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/part-of: agentscale
     app.kubernetes.io/component: web-search
   annotations:
     argocd.argoproj.io/sync-wave: "1"
@@ -25,7 +25,7 @@ data:
       image_proxy: false
       # Secret key for SearXNG session/cookies. Must be set; the default
       # "ultrasecretkey" causes SearXNG to refuse to start.
-      secret_key: "prodavan-searxng-dev-key-change-me"
+      secret_key: "agentscale-searxng-dev-key-change-me"
     search:
       formats:
         - html
@@ -36,7 +36,7 @@ data:
       static_use_hash: true
     outgoing:
       request_timeout: 10
-      user_agent: "prodavan-searxng/1.0"
+      user_agent: "agentscale-searxng/1.0"
     engines:
       - name: duckduckgo
         engine: duckduckgo
@@ -68,7 +68,7 @@ metadata:
   name: searxng
   labels:
     app.kubernetes.io/name: searxng
-    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/part-of: agentscale
     app.kubernetes.io/component: web-search
 spec:
   ports:
@@ -84,7 +84,7 @@ metadata:
   name: searxng
   labels:
     app.kubernetes.io/name: searxng
-    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/part-of: agentscale
     app.kubernetes.io/component: web-search
   annotations:
     argocd.argoproj.io/sync-wave: "2"
@@ -97,7 +97,7 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: searxng
-        app.kubernetes.io/part-of: prodavan
+        app.kubernetes.io/part-of: agentscale
         app.kubernetes.io/component: web-search
     spec:
       containers:
@@ -149,6 +149,6 @@ metadata:
   name: searxng-env
   labels:
     app.kubernetes.io/name: searxng
-    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/part-of: agentscale
 data:
   SEARXNG_BASE_URL: http://searxng.search.svc:8080/

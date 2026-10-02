@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: agentscale-sandboxes
+  labels:
+    app.kubernetes.io/name: agentscale-sandboxes
+    app.kubernetes.io/part-of: agentscale
+    app.kubernetes.io/component: sandbox
+    agentscale.io/managed-by: agent-sandbox  # legacy selector label; new ns-wide policy does not use it

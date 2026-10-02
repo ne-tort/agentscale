@@ -2,16 +2,16 @@
 # Rendered by Terraform (k3s_server). Local CA + leaf cert for Traefik websecure.
 # Non-empty SANS: generate (idempotent), install Secret+TLSStore into the k3s
 # auto-apply manifests dir, export the CA for browser trust import.
-# Run as root: sudo bash prodavan-tls.sh
+# Run as root: sudo bash agentscale-tls.sh
 set -euo pipefail
 
 SANS='${https_tls_sans}'
 if [ -z "$SANS" ]; then
-  echo prodavan-tls: skipped \(no https_tls_sans\)
+  echo agentscale-tls: skipped \(no https_tls_sans\)
   exit 0
 fi
 
-DIR=/var/lib/rancher/k3s/prodavan-tls
+DIR=/var/lib/rancher/k3s/agentscale-tls
 MANIFEST_DIR=/var/lib/rancher/k3s/server/manifests
 SSH_HOME='${ssh_home}'
 
@@ -20,32 +20,32 @@ printf '%s\n' "$SANS" > "$DIR/.sans"
 
 if [ ! -f "$DIR/ca.key" ]; then
   openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
-    -subj "/CN=Prodavan Dev CA" \
+    -subj "/CN=Agentscale Dev CA" \
     -keyout "$DIR/ca.key" -out "$DIR/ca.crt"
-  echo "prodavan-tls: CA created"
+  echo "agentscale-tls: CA created"
 fi
 
 if [ ! -f "$DIR/leaf.key" ] || [ ! -f "$DIR/leaf.crt" ] || ! cmp -s "$DIR/.sans" "$DIR/.sans.applied"; then
-  openssl req -newkey rsa:2048 -nodes -subj "/CN=prodavan-dev" \
+  openssl req -newkey rsa:2048 -nodes -subj "/CN=agentscale-dev" \
     -keyout "$DIR/leaf.key" -out "$DIR/leaf.csr"
   printf 'subjectAltName=%s\n' "$SANS" > "$DIR/.san.ext"
   openssl x509 -req -in "$DIR/leaf.csr" \
     -CA "$DIR/ca.crt" -CAkey "$DIR/ca.key" -CAcreateserial -days 825 \
     -extfile "$DIR/.san.ext" -out "$DIR/leaf.crt"
   cp "$DIR/.sans" "$DIR/.sans.applied"
-  echo "prodavan-tls: leaf cert created (SANs: $SANS)"
+  echo "agentscale-tls: leaf cert created (SANs: $SANS)"
 else
-  echo "prodavan-tls: leaf cert up to date"
+  echo "agentscale-tls: leaf cert up to date"
 fi
 
 CRT_B64="$(base64 -w0 < "$DIR/leaf.crt")"
 KEY_B64="$(base64 -w0 < "$DIR/leaf.key")"
-cat > "$MANIFEST_DIR/prodavan-tls.yaml" <<EOF
-# Managed by terraform (k3s-dev-host/prodavan-tls.sh.tpl). Do not edit.
+cat > "$MANIFEST_DIR/agentscale-tls.yaml" <<EOF
+# Managed by terraform (k3s-dev-host/agentscale-tls.sh.tpl). Do not edit.
 apiVersion: v1
 kind: Secret
 metadata:
-  name: prodavan-tls
+  name: agentscale-tls
   namespace: kube-system
 type: kubernetes.io/tls
 data:
@@ -59,13 +59,13 @@ metadata:
   namespace: kube-system
 spec:
   defaultCertificate:
-    secretName: prodavan-tls
+    secretName: agentscale-tls
 EOF
-chmod 600 "$MANIFEST_DIR/prodavan-tls.yaml"
-echo "prodavan-tls: Secret kube-system/prodavan-tls + TLSStore default written"
+chmod 600 "$MANIFEST_DIR/agentscale-tls.yaml"
+echo "agentscale-tls: Secret kube-system/agentscale-tls + TLSStore default written"
 
 if [ -n "$SSH_HOME" ] && [ -d "$SSH_HOME" ]; then
   install -o "$(stat -c %U "$SSH_HOME")" -g "$(stat -c %G "$SSH_HOME")" -m 644 \
-    "$DIR/ca.crt" "$SSH_HOME/prodavan-dev-ca.crt"
-  echo "prodavan-tls: CA for browser trust -> $SSH_HOME/prodavan-dev-ca.crt"
+    "$DIR/ca.crt" "$SSH_HOME/agentscale-dev-ca.crt"
+  echo "agentscale-tls: CA for browser trust -> $SSH_HOME/agentscale-dev-ca.crt"
 fi

@@ -4,7 +4,7 @@ from pathlib import Path
 
 
 def repo_root() -> Path:
-    """infra/ops/src/prodavan_ops → repo root (prodavan/)."""
+    """infra/ops/src/prodavan_ops → repo root (agentscale/)."""
     return Path(__file__).resolve().parents[4]
 
 

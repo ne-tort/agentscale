@@ -14,7 +14,7 @@ terraform {
 
 variable "cluster_name" {
   type    = string
-  default = "prodavan-dev"
+  default = "agentscale-dev"
 }
 
 variable "http_port" {
@@ -30,7 +30,7 @@ variable "https_port" {
 
 variable "https_tls_sans" {
   type        = list(string)
-  default     = ["IP:172.31.156.203", "IP:127.0.0.1", "DNS:localhost", "DNS:prodavan.dev"]
+  default     = ["IP:172.31.156.203", "IP:127.0.0.1", "DNS:localhost", "DNS:agentscale.dev", "DNS:agentscale.local"]
   description = "SANs of the websecure leaf cert (local CA, CA exported for browser trust)."
 }
 
@@ -56,7 +56,7 @@ variable "ssh_private_key_path" {
 
 variable "remote_repo_path" {
   type        = string
-  description = "Prodavan checkout on the VM (this repo, cloned where terraform runs)."
+  description = "Agentscale checkout on the VM (this repo, cloned where terraform runs)."
   default     = "/home/www/git/agentscale"
 }
 

@@ -1,0 +1,11 @@
+# API + Celery worker SA (namespace agentscale). Sandbox lifecycle RBAC lives in
+# base/agentscale-sandboxes-ks/rbac-sandboxes.yaml (claims/sandboxes via agent-sandbox).
+# Legacy batch/Jobs Role removed (Wave 4): the Job isolator path is gone.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: agentscale-api
+  labels:
+    app.kubernetes.io/name: agentscale-api
+    app.kubernetes.io/part-of: agentscale
+    app.kubernetes.io/component: api

@@ -1,14 +1,14 @@
-# Template: seal ghcr-pull into prodavan-sandboxes (project Pods pull from GHCR).
+# Template: seal ghcr-pull into agentscale-dev-sandboxes (project Pods pull from GHCR).
 # After sealing, add ghcr-pull.sealed.yaml to sandboxes/kustomization.yaml resources.
 apiVersion: bitnami.com/v1alpha1
 kind: SealedSecret
 metadata:
   name: ghcr-pull
-  namespace: prodavan-sandboxes
+  namespace: agentscale-dev-sandboxes
 spec:
   encryptedData: {}
   template:
     metadata:
       name: ghcr-pull
-      namespace: prodavan-sandboxes
+      namespace: agentscale-dev-sandboxes
     type: kubernetes.io/dockerconfigjson

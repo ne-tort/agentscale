@@ -14,7 +14,7 @@ terraform {
 
 variable "cluster_name" {
   type    = string
-  default = "prodavan-dev"
+  default = "agentscale-dev"
 }
 
 variable "http_port" {
@@ -66,7 +66,7 @@ variable "ssh_private_key_path" {
 
 variable "remote_repo_path" {
   type        = string
-  description = "Prodavan checkout on WSL, e.g. /mnt/c/Users/<you>/git/Commerce/prodavan"
+  description = "Agentscale checkout on WSL, e.g. /mnt/c/Users/<you>/git/Commerce/agentscale"
   default     = ""
 }
 
@@ -87,7 +87,7 @@ variable "ghcr_username" {
 }
 
 locals {
-  remote_repo_path = var.remote_repo_path != "" ? var.remote_repo_path : "/mnt/c/Users/qwerty/git/Commerce/prodavan"
+  remote_repo_path = var.remote_repo_path != "" ? var.remote_repo_path : "/mnt/c/Users/qwerty/git/Commerce/agentscale"
   # Keys on /mnt/c/... are mode 0777 — OpenSSH refuses them. Prefer a 0600 copy under ~/.ssh.
   ssh_key_mntc = abspath("${path.module}/../../../.ssh/prodavan_tf")
   ssh_key_home = "/home/${var.ssh_user}/.ssh/prodavan_tf"

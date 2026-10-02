@@ -1,16 +1,15 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: prodavan-api
-  namespace: prodavan
+  name: agentscale-api
 spec:
   replicas: 1
   template:
     metadata:
       labels:
-        app: prodavan-api
-        app.kubernetes.io/name: prodavan-api
-        app.kubernetes.io/part-of: prodavan
+        app: agentscale-api
+        app.kubernetes.io/name: agentscale-api
+        app.kubernetes.io/part-of: agentscale
         app.kubernetes.io/component: api
     spec:
       imagePullSecrets:
@@ -30,8 +29,7 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: prodavan-web
-  namespace: prodavan
+  name: agentscale-web
 spec:
   replicas: 1
   template:
@@ -45,8 +43,7 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: prodavan-celery-worker
-  namespace: prodavan
+  name: agentscale-celery-worker
 spec:
   replicas: 1
   template:
@@ -60,8 +57,7 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: prodavan-celery-beat
-  namespace: prodavan
+  name: agentscale-celery-beat
 spec:
   replicas: 1
   template:
@@ -75,8 +71,7 @@ spec:
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: prodavan-config
-  namespace: prodavan
+  name: agentscale-config
 data:
   STORAGE_ROOT: /data/storage
   SECRETS_DIR: /data/storage/secrets
@@ -90,45 +85,45 @@ data:
   API_V1_PREFIX: /api/v1
   APP_ENV: dev
   AUTH_MODE: oidc
-  KEYCLOAK_URL: http://prodavan-keycloak:8080
-  KEYCLOAK_ISSUER_URL: http://127.0.0.1:8089/realms/prodavan
-  OIDC_JWKS_URL: http://prodavan-keycloak:8080/realms/prodavan/protocol/openid-connect/certs
-  KEYCLOAK_REALM: prodavan
+  KEYCLOAK_URL: http://agentscale-keycloak:8080
+  KEYCLOAK_ISSUER_URL: http://127.0.0.1:8089/realms/agentscale
+  OIDC_JWKS_URL: http://agentscale-keycloak:8080/realms/agentscale/protocol/openid-connect/certs
+  KEYCLOAK_REALM: agentscale
   KEYCLOAK_INVITE_MODE: admin
-  KEYCLOAK_ADMIN_CLIENT_ID: prodavan-services
-  OIDC_AUDIENCE: prodavan-api
-  OIDC_FLUTTER_CLIENT_ID: prodavan-flutter
-  REDIS_URL: redis://prodavan-redis:6379/0
+  KEYCLOAK_ADMIN_CLIENT_ID: agentscale-services
+  OIDC_AUDIENCE: agentscale-api
+  OIDC_FLUTTER_CLIENT_ID: agentscale-flutter
+  REDIS_URL: redis://agentscale-redis:6379/0
   REDIS_REQUIRED: "true"
   CELERY_ENABLED: "true"
-  CELERY_BROKER_URL: redis://prodavan-redis:6379/0
+  CELERY_BROKER_URL: redis://agentscale-redis:6379/0
   TRIGGER_WORKER_ENABLED: "true"
   IDLE_PAUSE_WORKER_ENABLED: "true"
   OBJECT_STORE_BACKEND: s3
-  S3_ENDPOINT_URL: http://prodavan-minio:9000
-  S3_BUCKET: prodavan
+  S3_ENDPOINT_URL: http://agentscale-minio:9000
+  S3_BUCKET: agentscale
   S3_REGION: us-east-1
   OBJECT_STORE_REQUIRED: "true"
   OBJECT_STORE_MIRROR_LOCAL: "true"
   KAFKA_ENABLED: "true"
-  KAFKA_BOOTSTRAP_SERVERS: prodavan-kafka:9092
+  KAFKA_BOOTSTRAP_SERVERS: agentscale-kafka:9092
   KAFKA_CONSUMER_ENABLED: "true"
   KAFKA_CONSUMER_MODE: kick
   KAFKA_REQUIRED: "true"
-  KAFKA_TOPIC_DOCUMENT_EVENTS: prodavan.document.events
-  KAFKA_TOPIC_SEARCH_EVENTS: prodavan.search.events
+  KAFKA_TOPIC_DOCUMENT_EVENTS: agentscale.document.events
+  KAFKA_TOPIC_SEARCH_EVENTS: agentscale.search.events
   MONGODB_ENABLED: "true"
-  MONGODB_DB: prodavan
+  MONGODB_DB: agentscale
   MONGODB_REQUIRED: "true"
   OPENSEARCH_ENABLED: "true"
-  OPENSEARCH_URL: http://prodavan-opensearch:9200
+  OPENSEARCH_URL: http://agentscale-opensearch:9200
   OPENSEARCH_REQUIRED: "true"
   CELERY_REQUIRED: "false"
   MCP_SANDBOX_SPAWN: "false"
   SANDBOX_K8S_JOBS: "false"
-  SANDBOX_K8S_NAMESPACE: prodavan
-  SANDBOX_K8S_PVC: prodavan-api-storage
-  SANDBOX_K8S_JOB_IMAGE: ghcr.io/ne-tort/prodavan-api:latest
+  SANDBOX_K8S_NAMESPACE: agentscale
+  SANDBOX_K8S_PVC: agentscale-api-storage
+  SANDBOX_K8S_JOB_IMAGE: ghcr.io/ne-tort/agentscale-api:latest
   # agent-sandbox cutover (Wave 3): claims from warm pool, router transport, post-Ready bind.
   POD_RUNTIME_MODE: "sandbox"
   POD_K8S_REQUIRED: "true"
@@ -138,34 +133,36 @@ data:
   POD_METRICS_GRACE_SEC: "30"
   METRICS_SAMPLE_INTERVAL_SEC: "15"
   METRICS_SAMPLE_TTL_SEC: "60"
-  POD_SANDBOX_NAMESPACE: prodavan-sandboxes
-  POD_SANDBOX_SA: prodavan-project-pod
+  POD_SANDBOX_NAMESPACE: agentscale-dev-sandboxes
+  POD_SANDBOX_SA: agentscale-project-pod
   POD_SANDBOX_IMAGE_PULL_SECRET: ghcr-pull
-  POD_SANDBOX_IMAGE: ghcr.io/ne-tort/prodavan-api:latest
-  POD_SANDBOX_HYDRATE_IMAGE: ghcr.io/ne-tort/prodavan-api:latest
+  POD_SANDBOX_IMAGE: ghcr.io/ne-tort/agentscale-api:latest
+  POD_SANDBOX_HYDRATE_IMAGE: ghcr.io/ne-tort/agentscale-api:latest
   # Hydrate is API-mediated (workspace-archive on :8001); no MinIO IAM in sandbox.
   POD_SANDBOX_MINIO_SECRET: ""
   POD_RECONCILE_WORKER_ENABLED: "true"
   # L15 agent-runtime — single container Pod (prodavan-agent-runtime image in GHCR)
   POD_AGENT_RUNTIME_ENABLED: "true"
   POD_AGENT_RUNTIME_AUTH_SECRET: pod-agent-bridge-auth
+  # Cross-ns (sandbox -> app ns) URL: dev contour app ns is agentscale-dev.
+  POD_AGENT_RUNTIME_API_BASE_URL: http://agentscale-api.agentscale-dev.svc:8001/api/v1
   POD_AGENT_RUNTIME_IMAGE: ghcr.io/ne-tort/prodavan-agent-runtime:c01dbd48d83c
   POD_AGENT_RUNTIME_BOOTSTRAP_ENABLED: "true"
   # CLAW-WEB — web.search provider config. The sandbox agent-runtime never
-  # reaches SearxNG directly: `provider=prodavan_api` makes the built-in
+  # reaches SearxNG directly: `provider=agentscale_api` makes the built-in
   # web.search tool POST to the API proxy on the pod surface (:8001), which
   # forwards to SearxNG with per-pod rate-limit + metrics. OPENCLAW_WEB_SEARCH_URL
   # is left empty — the SDK derives the endpoint from PRODAVAN_API_BASE_URL +
   # PRODAVAN_PROJECT_ID (both injected into the pod by pod_spec).
-  POD_AGENT_RUNTIME_WEB_SEARCH_PROVIDER: "prodavan_api"
+  POD_AGENT_RUNTIME_WEB_SEARCH_PROVIDER: "agentscale_api"
   POD_AGENT_RUNTIME_WEB_SEARCH_URL: ""
   # Backend SearxNG URL the *API application* proxies to. Reachable only from
-  # the API pod (prodavan ns), never from the sandbox namespace (NetworkPolicy
-  # denies :8080 to the sandbox; only :8001 to prodavan is allowed).
-  WEB_SEARCH_BACKEND_URL: "http://searxng.prodavan.svc:8080/search"
+  # the API pod (agentscale ns), never from the sandbox namespace (NetworkPolicy
+  # denies :8080 to the sandbox; only :8001 to agentscale is allowed).
+  WEB_SEARCH_BACKEND_URL: "http://searxng.agentscale-dev.svc:8080/search"
   # Platform probe pod — verify AI keys & fetch their model list via agent-runtime.
-  # The probe pod runs in prodavan-sandboxes (see sandboxes/probe-pod.yaml).
+  # The probe pod runs in agentscale-dev-sandboxes (see sandboxes/probe-pod.yaml).
   POD_PROBE_ENABLED: "true"
-  POD_PROBE_BASE_URL: http://prodavan-probe-pod.prodavan-sandboxes.svc:3921
+  POD_PROBE_BASE_URL: http://agentscale-probe-pod.agentscale-dev-sandboxes.svc:3921
   POD_PROBE_LEASE_TTL_SEC: "120"
   POD_PROBE_TIMEOUT_SEC: "15"

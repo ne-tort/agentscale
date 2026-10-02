@@ -117,7 +117,7 @@ def _incluster_list_pods(project_id: str) -> list[tuple[str, str]]:
 
 
 def k8s_pods_for_project(project_id: str) -> list[tuple[str, str]]:
-    """Return [(pod_name, phase), ...] from prodavan-sandboxes for a project."""
+    """Return [(pod_name, phase), ...] from agentscale-dev-sandboxes for a project."""
     if shutil.which("kubectl") is None:
         return _incluster_list_pods(project_id)
     proc = _kubectl(

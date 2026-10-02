@@ -1,7 +1,7 @@
 # k3s manifests (GitOps)
 
 Workloads live under `base/` + `overlays/dev`.  
-**Day-2 apply:** Argo CD Application `prodavan-dev` (see `infra/argocd/`).  
+**Day-2 apply:** Argo CD Application `agentscale-dev` (see `infra/argocd/`).  
 Do **not** `kubectl apply -k` overlays by hand after bootstrap.
 
 Bootstrap once: [`docs/07-infrastructure/runbook.md`](../../docs/07-infrastructure/runbook.md).

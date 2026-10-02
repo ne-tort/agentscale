@@ -1,30 +1,30 @@
 # Keycloak — P-KC-01. Public issuer on hostPort 8089; Admin API in-cluster :8080.
-# Realm is bootstrapped by prodavan-keycloak-init (Admin API), NOT --import-realm:
+# Realm is bootstrapped by agentscale-keycloak-init (Admin API), NOT --import-realm:
 # partial realm JSON import drops built-in client scopes (roles/profile/email).
 apiVersion: v1
 kind: Secret
 metadata:
-  name: prodavan-keycloak
+  name: agentscale-keycloak
   labels:
-    app.kubernetes.io/name: prodavan-keycloak
-    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/name: agentscale-keycloak
+    app.kubernetes.io/part-of: agentscale
     app.kubernetes.io/component: keycloak
   annotations:
     argocd.argoproj.io/sync-wave: "2"
 stringData:
   admin-user: admin
   admin-password: admin
-  services-client-secret: change-me-prodavan-services
+  services-client-secret: change-me-agentscale-services
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: prodavan-keycloak-data
+  name: agentscale-keycloak-data
   annotations:
     argocd.argoproj.io/sync-wave: "2"
   labels:
-    app.kubernetes.io/name: prodavan-keycloak
-    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/name: agentscale-keycloak
+    app.kubernetes.io/part-of: agentscale
     app.kubernetes.io/component: keycloak
 spec:
   accessModes:
@@ -36,10 +36,10 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: prodavan-keycloak
+  name: agentscale-keycloak
   labels:
-    app.kubernetes.io/name: prodavan-keycloak
-    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/name: agentscale-keycloak
+    app.kubernetes.io/part-of: agentscale
     app.kubernetes.io/component: keycloak
   annotations:
     argocd.argoproj.io/sync-wave: "2"
@@ -49,29 +49,29 @@ spec:
       port: 8080
       targetPort: 8080
   selector:
-    app.kubernetes.io/name: prodavan-keycloak
+    app.kubernetes.io/name: agentscale-keycloak
 ---
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: prodavan-keycloak
+  name: agentscale-keycloak
   labels:
-    app.kubernetes.io/name: prodavan-keycloak
-    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/name: agentscale-keycloak
+    app.kubernetes.io/part-of: agentscale
     app.kubernetes.io/component: keycloak
   annotations:
     argocd.argoproj.io/sync-wave: "2"
 spec:
-  serviceName: prodavan-keycloak
+  serviceName: agentscale-keycloak
   replicas: 1
   selector:
     matchLabels:
-      app.kubernetes.io/name: prodavan-keycloak
+      app.kubernetes.io/name: agentscale-keycloak
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: prodavan-keycloak
-        app.kubernetes.io/part-of: prodavan
+        app.kubernetes.io/name: agentscale-keycloak
+        app.kubernetes.io/part-of: agentscale
         app.kubernetes.io/component: keycloak
     spec:
       containers:
@@ -84,12 +84,12 @@ spec:
             - name: KEYCLOAK_ADMIN
               valueFrom:
                 secretKeyRef:
-                  name: prodavan-keycloak
+                  name: agentscale-keycloak
                   key: admin-user
             - name: KEYCLOAK_ADMIN_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: prodavan-keycloak
+                  name: agentscale-keycloak
                   key: admin-password
             # Flutter ROPC / browser reach Keycloak on host :8089
             - name: KC_HOSTNAME
@@ -128,15 +128,15 @@ spec:
       volumes:
         - name: data
           persistentVolumeClaim:
-            claimName: prodavan-keycloak-data
+            claimName: agentscale-keycloak-data
 ---
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: prodavan-keycloak-init
+  name: agentscale-keycloak-init
   labels:
-    app.kubernetes.io/name: prodavan-keycloak-init
-    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/name: agentscale-keycloak-init
+    app.kubernetes.io/part-of: agentscale
     app.kubernetes.io/component: keycloak-init
   annotations:
     argocd.argoproj.io/hook: Sync
@@ -148,7 +148,7 @@ spec:
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: prodavan-keycloak-init
+        app.kubernetes.io/name: agentscale-keycloak-init
     spec:
       restartPolicy: OnFailure
       containers:
@@ -158,17 +158,17 @@ spec:
             - name: KEYCLOAK_ADMIN
               valueFrom:
                 secretKeyRef:
-                  name: prodavan-keycloak
+                  name: agentscale-keycloak
                   key: admin-user
             - name: KEYCLOAK_ADMIN_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: prodavan-keycloak
+                  name: agentscale-keycloak
                   key: admin-password
             - name: SERVICES_CLIENT_SECRET
               valueFrom:
                 secretKeyRef:
-                  name: prodavan-keycloak
+                  name: agentscale-keycloak
                   key: services-client-secret
           command:
             - /bin/bash
@@ -178,7 +178,7 @@ spec:
               export HOME=/tmp
               mkdir -p /tmp/.keycloak
               KC="/opt/keycloak/bin/kcadm.sh"
-              SERVER="http://prodavan-keycloak:8080"
+              SERVER="http://agentscale-keycloak:8080"
               i=0
               until "$KC" config credentials --server "$SERVER" --realm master \
                   --user "$KEYCLOAK_ADMIN" --password "$KEYCLOAK_ADMIN_PASSWORD"; do
@@ -189,15 +189,15 @@ spec:
 
               ensure_realm() {
                 NEED_RECREATE=0
-                if ! "$KC" get realms/prodavan >/dev/null 2>&1; then
+                if ! "$KC" get realms/agentscale >/dev/null 2>&1; then
                   NEED_RECREATE=1
-                elif ! "$KC" get client-scopes -r prodavan --fields name --format csv --noquotes 2>/dev/null | grep -qx roles; then
+                elif ! "$KC" get client-scopes -r agentscale --fields name --format csv --noquotes 2>/dev/null | grep -qx roles; then
                   echo "keycloak-init: realm missing built-in scopes — recreating"
                   NEED_RECREATE=1
                 fi
                 if [ "$NEED_RECREATE" = 1 ]; then
-                  "$KC" delete realms/prodavan 2>/dev/null || true
-                  "$KC" create realms -s realm=prodavan -s enabled=true \
+                  "$KC" delete realms/agentscale 2>/dev/null || true
+                  "$KC" create realms -s realm=agentscale -s enabled=true \
                     -s registrationAllowed=false -s loginWithEmailAllowed=true \
                     -s resetPasswordAllowed=true -s accessTokenLifespan=3600
                 fi
@@ -212,7 +212,7 @@ spec:
                     echo "$sid"
                     return 0
                   fi
-                done < <("$KC" get client-scopes -r prodavan --fields id,name --format csv --noquotes 2>/dev/null || true)
+                done < <("$KC" get client-scopes -r agentscale --fields id,name --format csv --noquotes 2>/dev/null || true)
                 return 0
               }
 
@@ -222,7 +222,7 @@ spec:
                 scope_name="$2"
                 sid=$(scope_id "$scope_name")
                 [ -n "$sid" ] || return 0
-                "$KC" update "clients/${client_id}/default-client-scopes/${sid}" -r prodavan 2>/dev/null || true
+                "$KC" update "clients/${client_id}/default-client-scopes/${sid}" -r agentscale 2>/dev/null || true
               }
 
               attach_optional_scope() {
@@ -230,32 +230,32 @@ spec:
                 scope_name="$2"
                 sid=$(scope_id "$scope_name")
                 [ -n "$sid" ] || return 0
-                "$KC" update "clients/${client_id}/optional-client-scopes/${sid}" -r prodavan 2>/dev/null || true
+                "$KC" update "clients/${client_id}/optional-client-scopes/${sid}" -r agentscale 2>/dev/null || true
               }
 
               ensure_realm
 
               for ROLE in platform.admin company employee; do
-                "$KC" create roles -r prodavan -s name="$ROLE" 2>/dev/null || true
+                "$KC" create roles -r agentscale -s name="$ROLE" 2>/dev/null || true
               done
 
               # Audience client scope + mapper (KC26 rejects attributes.* on create)
-              AUD_ID=$(scope_id prodavan-audience)
+              AUD_ID=$(scope_id agentscale-audience)
               if [ -z "$AUD_ID" ]; then
-                "$KC" create client-scopes -r prodavan \
-                  -s name=prodavan-audience -s protocol=openid-connect
-                AUD_ID=$(scope_id prodavan-audience)
+                "$KC" create client-scopes -r agentscale \
+                  -s name=agentscale-audience -s protocol=openid-connect
+                AUD_ID=$(scope_id agentscale-audience)
               fi
               if [ -n "$AUD_ID" ]; then
-                "$KC" update "client-scopes/${AUD_ID}" -r prodavan \
+                "$KC" update "client-scopes/${AUD_ID}" -r agentscale \
                   -s 'attributes.include.in.token.scope=true' \
                   -s 'attributes.display.on.consent.screen=false' 2>/dev/null || true
-                if ! "$KC" get "client-scopes/${AUD_ID}/protocol-mappers/models" -r prodavan 2>/dev/null \
-                    | grep -q aud-prodavan-api; then
-                  "$KC" create "client-scopes/${AUD_ID}/protocol-mappers/models" -r prodavan \
-                    -s name=aud-prodavan-api -s protocol=openid-connect \
+                if ! "$KC" get "client-scopes/${AUD_ID}/protocol-mappers/models" -r agentscale 2>/dev/null \
+                    | grep -q aud-agentscale-api; then
+                  "$KC" create "client-scopes/${AUD_ID}/protocol-mappers/models" -r agentscale \
+                    -s name=aud-agentscale-api -s protocol=openid-connect \
                     -s protocolMapper=oidc-audience-mapper \
-                    -s 'config."included.client.audience"=prodavan-api' \
+                    -s 'config."included.client.audience"=agentscale-api' \
                     -s 'config."id.token.claim"=false' \
                     -s 'config."access.token.claim"=true' || true
                 fi
@@ -264,79 +264,79 @@ spec:
               ensure_client() {
                 cid="$1"
                 shift
-                existing=$("$KC" get clients -r prodavan -q "clientId=${cid}" --fields id --format csv --noquotes 2>/dev/null \
+                existing=$("$KC" get clients -r agentscale -q "clientId=${cid}" --fields id --format csv --noquotes 2>/dev/null \
                   | grep -E '^[0-9a-f-]{8,}' | head -1 || true)
                 if [ -z "$existing" ]; then
-                  "$KC" create clients -r prodavan -s "clientId=${cid}" "$@"
+                  "$KC" create clients -r agentscale -s "clientId=${cid}" "$@"
                 fi
               }
 
-              ensure_client prodavan-flutter \
-                -s name="Prodavan Flutter" -s enabled=true -s publicClient=true \
+              ensure_client agentscale-flutter \
+                -s name="Agentscale Flutter" -s enabled=true -s publicClient=true \
                 -s directAccessGrantsEnabled=true -s standardFlowEnabled=true \
-                -s 'redirectUris=["http://127.0.0.1:*","http://localhost:*","prodavan://*"]' \
+                -s 'redirectUris=["http://127.0.0.1:*","http://localhost:*","agentscale://*"]' \
                 -s 'webOrigins=["+"]' -s fullScopeAllowed=true
-              FLUTTER_TMP=$("$KC" get clients -r prodavan -q clientId=prodavan-flutter --fields id --format csv --noquotes \
+              FLUTTER_TMP=$("$KC" get clients -r agentscale -q clientId=agentscale-flutter --fields id --format csv --noquotes \
                 | grep -E '^[0-9a-f-]{8,}' | head -1 || true)
               if [ -n "$FLUTTER_TMP" ]; then
-                "$KC" update "clients/${FLUTTER_TMP}" -r prodavan \
+                "$KC" update "clients/${FLUTTER_TMP}" -r agentscale \
                   -s 'attributes.pkce.code.challenge.method=S256' 2>/dev/null || true
               fi
 
-              ensure_client prodavan-api \
-                -s name="Prodavan API audience" -s enabled=true -s publicClient=true \
+              ensure_client agentscale-api \
+                -s name="Agentscale API audience" -s enabled=true -s publicClient=true \
                 -s standardFlowEnabled=false -s directAccessGrantsEnabled=false \
                 -s fullScopeAllowed=false
 
-              ensure_client prodavan-services \
-                -s name="Prodavan services" -s enabled=true -s publicClient=false \
+              ensure_client agentscale-services \
+                -s name="Agentscale services" -s enabled=true -s publicClient=false \
                 -s "secret=${SERVICES_CLIENT_SECRET}" -s serviceAccountsEnabled=true \
                 -s standardFlowEnabled=false -s directAccessGrantsEnabled=false \
                 -s fullScopeAllowed=true
 
-              FLUTTER_ID=$("$KC" get clients -r prodavan -q clientId=prodavan-flutter --fields id --format csv --noquotes \
+              FLUTTER_ID=$("$KC" get clients -r agentscale -q clientId=agentscale-flutter --fields id --format csv --noquotes \
                 | grep -E '^[0-9a-f-]{8,}' | head -1)
-              for SCOPE in roles profile email web-origins acr prodavan-audience; do
+              for SCOPE in roles profile email web-origins acr agentscale-audience; do
                 attach_default_scope "$FLUTTER_ID" "$SCOPE"
               done
               attach_optional_scope "$FLUTTER_ID" offline_access
 
-              SERVICES_ID=$("$KC" get clients -r prodavan -q clientId=prodavan-services --fields id --format csv --noquotes \
+              SERVICES_ID=$("$KC" get clients -r agentscale -q clientId=agentscale-services --fields id --format csv --noquotes \
                 | grep -E '^[0-9a-f-]{8,}' | head -1 || true)
               if [ -n "${SERVICES_ID:-}" ]; then
-                for SCOPE in roles profile email prodavan-audience; do
+                for SCOPE in roles profile email agentscale-audience; do
                   attach_default_scope "$SERVICES_ID" "$SCOPE"
                 done
               fi
 
               # Platform admin user admin/admin
-              ADMIN_ID=$("$KC" get users -r prodavan -q username=admin --fields id --format csv --noquotes 2>/dev/null \
+              ADMIN_ID=$("$KC" get users -r agentscale -q username=admin --fields id --format csv --noquotes 2>/dev/null \
                 | grep -E '^[0-9a-f-]{8,}' | head -1 || true)
               if [ -z "$ADMIN_ID" ]; then
-                "$KC" create users -r prodavan \
+                "$KC" create users -r agentscale \
                   -s username=admin -s enabled=true \
-                  -s email=admin@prodavan.local -s emailVerified=true \
+                  -s email=admin@agentscale.local -s emailVerified=true \
                   -s firstName=Platform -s lastName=Admin \
                   -s 'requiredActions=[]' || true
-                ADMIN_ID=$("$KC" get users -r prodavan -q username=admin --fields id --format csv --noquotes 2>/dev/null \
+                ADMIN_ID=$("$KC" get users -r agentscale -q username=admin --fields id --format csv --noquotes 2>/dev/null \
                   | grep -E '^[0-9a-f-]{8,}' | head -1 || true)
               fi
               if [ -n "$ADMIN_ID" ]; then
-                "$KC" update "users/$ADMIN_ID" -r prodavan \
-                  -s email=admin@prodavan.local -s emailVerified=true \
+                "$KC" update "users/$ADMIN_ID" -r agentscale \
+                  -s email=admin@agentscale.local -s emailVerified=true \
                   -s firstName=Platform -s lastName=Admin \
                   -s 'requiredActions=[]' || true
               fi
-              "$KC" set-password -r prodavan --username admin --new-password admin --temporary=false
-              "$KC" add-roles -r prodavan --uusername admin --rolename platform.admin 2>/dev/null || true
+              "$KC" set-password -r agentscale --username admin --new-password admin --temporary=false
+              "$KC" add-roles -r agentscale --uusername admin --rolename platform.admin 2>/dev/null || true
 
               for ROLE in manage-users view-users query-users view-realm; do
-                "$KC" add-roles -r prodavan --uusername "service-account-prodavan-services" \
+                "$KC" add-roles -r agentscale --uusername "service-account-agentscale-services" \
                   --cclientid realm-management --rolename "$ROLE" 2>/dev/null || true
               done
 
               # ROPC: declarative user profile must not block password grant.
-              "$KC" update authentication/required-actions/VERIFY_PROFILE -r prodavan \
+              "$KC" update authentication/required-actions/VERIFY_PROFILE -r agentscale \
                 -s enabled=false -s defaultAction=false 2>/dev/null || true
 
               echo "keycloak-init: realm + admin/admin + platform.admin ok"

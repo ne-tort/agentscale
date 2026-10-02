@@ -1,8 +1,7 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: prodavan-config
-  namespace: prodavan
+  name: agentscale-config
 data:
   STORAGE_ROOT: /data/storage
   SECRETS_DIR: /data/storage/secrets
@@ -12,50 +11,50 @@ data:
   API_V1_PREFIX: /api/v1
   APP_ENV: dev
   AUTH_MODE: oidc
-  KEYCLOAK_URL: http://prodavan-keycloak:8080
-  KEYCLOAK_ISSUER_URL: http://127.0.0.1:8089/realms/prodavan
-  OIDC_JWKS_URL: http://prodavan-keycloak:8080/realms/prodavan/protocol/openid-connect/certs
-  KEYCLOAK_REALM: prodavan
+  KEYCLOAK_URL: http://agentscale-keycloak:8080
+  KEYCLOAK_ISSUER_URL: http://127.0.0.1:8089/realms/agentscale
+  OIDC_JWKS_URL: http://agentscale-keycloak:8080/realms/agentscale/protocol/openid-connect/certs
+  KEYCLOAK_REALM: agentscale
   KEYCLOAK_INVITE_MODE: admin
-  KEYCLOAK_ADMIN_CLIENT_ID: prodavan-services
-  OIDC_AUDIENCE: prodavan-api
-  OIDC_FLUTTER_CLIENT_ID: prodavan-flutter
+  KEYCLOAK_ADMIN_CLIENT_ID: agentscale-services
+  OIDC_AUDIENCE: agentscale-api
+  OIDC_FLUTTER_CLIENT_ID: agentscale-flutter
   # P0 brokers (in-cluster)
-  REDIS_URL: redis://prodavan-redis:6379/0
+  REDIS_URL: redis://agentscale-redis:6379/0
   REDIS_REQUIRED: "true"
   CELERY_ENABLED: "true"
-  CELERY_BROKER_URL: redis://prodavan-redis:6379/0
+  CELERY_BROKER_URL: redis://agentscale-redis:6379/0
   TRIGGER_WORKER_ENABLED: "true"
   IDLE_PAUSE_WORKER_ENABLED: "true"
   OBJECT_STORE_BACKEND: s3
-  S3_ENDPOINT_URL: http://prodavan-minio:9000
-  S3_BUCKET: prodavan
+  S3_ENDPOINT_URL: http://agentscale-minio:9000
+  S3_BUCKET: agentscale
   S3_REGION: us-east-1
   OBJECT_STORE_REQUIRED: "true"
   OBJECT_STORE_MIRROR_LOCAL: "true"
   KAFKA_ENABLED: "true"
-  KAFKA_BOOTSTRAP_SERVERS: prodavan-kafka:9092
+  KAFKA_BOOTSTRAP_SERVERS: agentscale-kafka:9092
   KAFKA_CONSUMER_ENABLED: "true"
   KAFKA_CONSUMER_MODE: kick
   KAFKA_REQUIRED: "true"
-  KAFKA_TOPIC_DOCUMENT_EVENTS: prodavan.document.events
-  KAFKA_TOPIC_SEARCH_EVENTS: prodavan.search.events
+  KAFKA_TOPIC_DOCUMENT_EVENTS: agentscale.document.events
+  KAFKA_TOPIC_SEARCH_EVENTS: agentscale.search.events
   MONGODB_ENABLED: "true"
-  MONGODB_DB: prodavan
+  MONGODB_DB: agentscale
   MONGODB_REQUIRED: "true"
   OPENSEARCH_ENABLED: "true"
-  OPENSEARCH_URL: http://prodavan-opensearch:9200
+  OPENSEARCH_URL: http://agentscale-opensearch:9200
   OPENSEARCH_REQUIRED: "true"
   # Documents module (DOCUM): office->pdf converter (LibreOffice route).
-  GOTENBERG_URL: http://gotenberg.prodavan.svc:3000
+  GOTENBERG_URL: http://gotenberg:3000
   CELERY_REQUIRED: "false"
   # Project MCP sandbox: local process spawn only (no k8s Job/Pod isolator yet)
   MCP_SANDBOX_SPAWN: "false"
   # I8: do not spawn Jobs from API on create. Enable only to exercise admin pvc-probe.
   SANDBOX_K8S_JOBS: "false"
-  SANDBOX_K8S_NAMESPACE: prodavan
-  SANDBOX_K8S_PVC: prodavan-api-storage
-  SANDBOX_K8S_JOB_IMAGE: ghcr.io/ne-tort/prodavan-api:latest
+  SANDBOX_K8S_NAMESPACE: agentscale
+  SANDBOX_K8S_PVC: agentscale-api-storage
+  SANDBOX_K8S_JOB_IMAGE: ghcr.io/ne-tort/agentscale-api:latest
   POD_RUNTIME_MODE: "k8s"
   POD_K8S_REQUIRED: "true"
   POD_READY_TIMEOUT_SEC: "20"
@@ -64,18 +63,18 @@ data:
   POD_METRICS_GRACE_SEC: "30"
   METRICS_SAMPLE_INTERVAL_SEC: "15"
   METRICS_SAMPLE_TTL_SEC: "60"
-  POD_SANDBOX_NAMESPACE: prodavan-sandboxes
-  POD_SANDBOX_SA: prodavan-project-pod
+  POD_SANDBOX_NAMESPACE: agentscale-sandboxes
+  POD_SANDBOX_SA: agentscale-project-pod
   POD_SANDBOX_IMAGE_PULL_SECRET: ghcr-pull
-  POD_SANDBOX_IMAGE: ghcr.io/ne-tort/prodavan-api:latest
-  POD_SANDBOX_HYDRATE_IMAGE: ghcr.io/ne-tort/prodavan-api:latest
+  POD_SANDBOX_IMAGE: ghcr.io/ne-tort/agentscale-api:latest
+  POD_SANDBOX_HYDRATE_IMAGE: ghcr.io/ne-tort/agentscale-api:latest
   # Empty: API-mediated hydrate via Bridge JWT (no MinIO IAM in sandbox).
   POD_SANDBOX_MINIO_SECRET: ""
   POD_RECONCILE_WORKER_ENABLED: "true"
   # agent-sandbox migration (ADR docs/08-migration/agent-sandbox-adr.md §1.5-1.7): router + warmpool wiring.
   # POD_RUNTIME_MODE enum: stub | k8s | sandbox (k8s stays default until Wave 1 flip).
   POD_SANDBOX_ROUTER_URL: http://sandbox-router-svc.agent-sandbox-system.svc:8080
-  POD_SANDBOX_WARMPOOL: prodavan-agent-pool
+  POD_SANDBOX_WARMPOOL: agentscale-agent-pool
   POD_SANDBOX_SHUTDOWN_TTL_SEC: "604800"
   # L15 Platform OpenClaw agent-runtime (single container Pod)
   POD_AGENT_RUNTIME_ENABLED: "true"
@@ -83,6 +82,6 @@ data:
   # Pinned to the same runtime build as SandboxTemplate — no floating :latest.
   POD_AGENT_RUNTIME_IMAGE: ghcr.io/ne-tort/prodavan-agent-runtime:c01dbd48d83c
   POD_AGENT_RUNTIME_PORT: "3921"
-  POD_AGENT_RUNTIME_API_BASE_URL: http://prodavan-api.prodavan.svc:8001/api/v1
+  POD_AGENT_RUNTIME_API_BASE_URL: http://agentscale-api.agentscale.svc:8001/api/v1
   POD_AGENT_RUNTIME_BOOTSTRAP_ENABLED: "true"
   POD_AGENT_RUNTIME_AUTH_SECRET: pod-agent-bridge-auth

@@ -1,19 +1,17 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-namespace: prodavan
 resources:
-  - namespace.yaml
   - platform
-  - prodavan-api/configmap.yaml
-  - prodavan-api/secret.yaml
-  - prodavan-api/pvc.yaml
-  - prodavan-api/deployment.yaml
-  - prodavan-api/service.yaml
-  - prodavan-web/deployment.yaml
-  - prodavan-web/service.yaml
-  # prodavan-sandbox/rbac.yaml removed (Wave 4): legacy SA + batch/Jobs Role — dead path.
-  # Only the prodavan-api ServiceAccount remains (see prodavan-sandbox/rbac-api.yaml).
-  - prodavan-sandbox/rbac-api.yaml
+  - agentscale-api/configmap.yaml
+  - agentscale-api/secret.yaml
+  - agentscale-api/pvc.yaml
+  - agentscale-api/deployment.yaml
+  - agentscale-api/service.yaml
+  - agentscale-web/deployment.yaml
+  - agentscale-web/service.yaml
+  # agentscale-sandbox/rbac.yaml removed (Wave 4): legacy SA + batch/Jobs Role — dead path.
+  # Only the agentscale-api ServiceAccount remains (see agentscale-sandbox/rbac-api.yaml).
+  - agentscale-sandbox/rbac-api.yaml
   - ingress.yaml
 # Deferred: mcp-gateway, per-project isolator spawn, agent-worker
 # (I8: SA on API + Job PVC probe; create path remains object-ws)

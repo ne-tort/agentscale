@@ -31,7 +31,7 @@ variable "ssh_key_name" {
 
 locals {
   common_tags = {
-    Project = "prodavan"
+    Project = "agentscale"
     Env     = var.env
   }
 }
@@ -46,7 +46,7 @@ module "network" {
 
 module "k3s" {
   source        = "../../modules/k3s-cluster"
-  cluster_name  = "prodavan-${var.env}"
+  cluster_name  = "agentscale-${var.env}"
   server_count  = 1
   agent_count   = var.worker_node_count
   instance_type = var.k3s_instance_type
@@ -56,11 +56,11 @@ module "k3s" {
 
 module "postgres" {
   source        = "../../modules/postgres"
-  instance_name = "prodavan-${var.env}-pg"
+  instance_name = "agentscale-${var.env}-pg"
   disk_gb       = 50
 }
 
 module "object_storage" {
   source      = "../../modules/object-storage"
-  bucket_name = "prodavan-${var.env}-artifacts"
+  bucket_name = "agentscale-${var.env}-artifacts"
 }

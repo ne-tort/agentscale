@@ -7,7 +7,7 @@ k3s + Traefik hostPort + Argo CD + root-app → Argo синкает платфо
 | Параметр | Значение |
 |----------|----------|
 | VM | `www@172.31.156.203` (Ubuntu 24.04; CI-раннеры и Docker Engine на том же хосте — k3s их не трогает, profile `vm`) |
-| UI (HTTPS) | **https://172.31.156.203/** — Traefik websecure на hostPort 443, сертификат локального CA (SAN: IP VM, 127.0.0.1, localhost, prodavan.dev) |
+| UI (HTTPS) | **https://172.31.156.203/** — Traefik websecure на hostPort 443, сертификат локального CA (SAN: IP VM, 127.0.0.1, localhost, agentscale.dev) |
 | UI (HTTP) | http://172.31.156.203:8088/ (smoke/CI) |
 | Keycloak | http://172.31.156.203:8089/ |
 | k3s API | https://172.31.156.203:6443 (TLS SAN: 127.0.0.1 + IP VM) |
@@ -15,21 +15,21 @@ k3s + Traefik hostPort + Argo CD + root-app → Argo синкает платфо
 
 ## HTTPS в браузере (доверие к сертификату)
 
-Terraform генерирует на VM локальный CA (`/var/lib/rancher/k3s/prodavan-tls/`) и leaf-сертификат,
-кладёт его в Traefik как default TLSStore (`kube-system/prodavan-tls`), а CA экспортирует в
-`/home/www/prodavan-dev-ca.crt`. Чтобы браузер доверял:
+Terraform генерирует на VM локальный CA (`/var/lib/rancher/k3s/agentscale-tls/`) и leaf-сертификат,
+кладёт его в Traefik как default TLSStore (`kube-system/agentscale-tls`), а CA экспортирует в
+`/home/www/agentscale-dev-ca.crt`. Чтобы браузер доверял:
 
 ```powershell
 # Windows (admin): импорт CA в доверенные корневые
-scp www@172.31.156.203:prodavan-dev-ca.crt $env:TEMP\prodavan-dev-ca.crt
-certutil -addstore -f ROOT $env:TEMP\prodavan-dev-ca.crt
+scp www@172.31.156.203:agentscale-dev-ca.crt $env:TEMP\agentscale-dev-ca.crt
+certutil -addstore -f ROOT $env:TEMP\agentscale-dev-ca.crt
 # опционально: hosts-запись + portproxy для красивого имени
-Add-Content C:\Windows\System32\drivers\etc\hosts "172.31.156.203 prodavan.dev"
+Add-Content C:\Windows\System32\drivers\etc\hosts "172.31.156.203 agentscale.dev"
 netsh interface portproxy add v4tov4 listenaddress=127.0.0.1 listenport=443 connectaddress=172.31.156.203 connectport=443
 ```
 
 После этого работают без предупреждений: `https://172.31.156.203/`, `https://localhost/`,
-`https://prodavan.dev/`. SANs задаёт переменная `https_tls_sans` (смена SAN = `terraform apply`,
+`https://agentscale.dev/`. SANs задаёт переменная `https_tls_sans` (смена SAN = `terraform apply`,
 leaf пересоздаётся, CA остаётся — переимпорт в браузер не нужен).
 
 ## Bootstrap (однократно)

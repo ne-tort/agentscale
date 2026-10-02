@@ -1,12 +1,11 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: prodavan-api
-  namespace: prodavan
+  name: agentscale-api
   labels:
-    app: prodavan-api
-    app.kubernetes.io/name: prodavan-api
-    app.kubernetes.io/part-of: prodavan
+    app: agentscale-api
+    app.kubernetes.io/name: agentscale-api
+    app.kubernetes.io/part-of: agentscale
     app.kubernetes.io/component: api
   annotations:
     argocd.argoproj.io/sync-wave: "10"
@@ -16,43 +15,43 @@ spec:
     type: Recreate
   selector:
     matchLabels:
-      app: prodavan-api
+      app: agentscale-api
   template:
     metadata:
       labels:
-        app: prodavan-api
-        app.kubernetes.io/name: prodavan-api
-        app.kubernetes.io/part-of: prodavan
+        app: agentscale-api
+        app.kubernetes.io/name: agentscale-api
+        app.kubernetes.io/part-of: agentscale
         app.kubernetes.io/component: api
       annotations:
         prometheus.io/scrape: "true"
         prometheus.io/port: "8000"
         prometheus.io/path: "/metrics"
     spec:
-      serviceAccountName: prodavan-api
+      serviceAccountName: agentscale-api
       automountServiceAccountToken: true
       imagePullSecrets:
         - name: ghcr-pull
       initContainers:
         - name: migrate
-          image: ghcr.io/ne-tort/prodavan-api:latest
+          image: ghcr.io/ne-tort/agentscale-api:latest
           imagePullPolicy: IfNotPresent
           command: ["./scripts/migrate.sh"]
           envFrom:
             - configMapRef:
-                name: prodavan-config
+                name: agentscale-config
             - secretRef:
-                name: prodavan-api-secrets
+                name: agentscale-api-secrets
           volumeMounts:
             - name: storage
               mountPath: /data/storage
       containers:
         - name: api
-          image: ghcr.io/ne-tort/prodavan-api:latest
+          image: ghcr.io/ne-tort/agentscale-api:latest
           imagePullPolicy: IfNotPresent
           command:
             - uvicorn
-            - prodavan.main:app
+            - agentscale.main:app
             - --host
             - 0.0.0.0
             - --port
@@ -62,9 +61,9 @@ spec:
               containerPort: 8000
           envFrom:
             - configMapRef:
-                name: prodavan-config
+                name: agentscale-config
             - secretRef:
-                name: prodavan-api-secrets
+                name: agentscale-api-secrets
           volumeMounts:
             - name: storage
               mountPath: /data/storage
@@ -95,11 +94,11 @@ spec:
               memory: 1Gi
         # Pod-only surface for Project Pods (sandbox NetworkPolicy → :8001 only).
         - name: api-pod
-          image: ghcr.io/ne-tort/prodavan-api:latest
+          image: ghcr.io/ne-tort/agentscale-api:latest
           imagePullPolicy: IfNotPresent
           command:
             - uvicorn
-            - prodavan.main_pod:app
+            - agentscale.main_pod:app
             - --host
             - 0.0.0.0
             - --port
@@ -109,9 +108,9 @@ spec:
               containerPort: 8001
           envFrom:
             - configMapRef:
-                name: prodavan-config
+                name: agentscale-config
             - secretRef:
-                name: prodavan-api-secrets
+                name: agentscale-api-secrets
           env:
             - name: KAFKA_CONSUMER_ENABLED
               value: "false"
@@ -156,4 +155,4 @@ spec:
       volumes:
         - name: storage
           persistentVolumeClaim:
-            claimName: prodavan-api-storage
+            claimName: agentscale-api-storage

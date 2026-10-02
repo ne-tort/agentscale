@@ -4,25 +4,25 @@
 apiVersion: v1
 kind: Secret
 metadata:
-  name: prodavan-opensearch
+  name: agentscale-opensearch
   labels:
-    app.kubernetes.io/name: prodavan-opensearch
-    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/name: agentscale-opensearch
+    app.kubernetes.io/part-of: agentscale
     app.kubernetes.io/component: opensearch
 stringData:
   # Reserved for future security-plugin enablement; MVP uses DISABLE_SECURITY_PLUGIN.
   admin-user: admin
-  admin-password: prodavan-opensearch-admin
+  admin-password: agentscale-opensearch-admin
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: prodavan-opensearch-data
+  name: agentscale-opensearch-data
   annotations:
     argocd.argoproj.io/sync-wave: "1"
   labels:
-    app.kubernetes.io/name: prodavan-opensearch
-    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/name: agentscale-opensearch
+    app.kubernetes.io/part-of: agentscale
     app.kubernetes.io/component: opensearch
 spec:
   accessModes:
@@ -34,10 +34,10 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: prodavan-opensearch
+  name: agentscale-opensearch
   labels:
-    app.kubernetes.io/name: prodavan-opensearch
-    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/name: agentscale-opensearch
+    app.kubernetes.io/part-of: agentscale
     app.kubernetes.io/component: opensearch
 spec:
   ports:
@@ -48,29 +48,29 @@ spec:
       port: 9300
       targetPort: 9300
   selector:
-    app.kubernetes.io/name: prodavan-opensearch
+    app.kubernetes.io/name: agentscale-opensearch
 ---
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: prodavan-opensearch
+  name: agentscale-opensearch
   labels:
-    app.kubernetes.io/name: prodavan-opensearch
-    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/name: agentscale-opensearch
+    app.kubernetes.io/part-of: agentscale
     app.kubernetes.io/component: opensearch
   annotations:
     argocd.argoproj.io/sync-wave: "1"
 spec:
-  serviceName: prodavan-opensearch
+  serviceName: agentscale-opensearch
   replicas: 1
   selector:
     matchLabels:
-      app.kubernetes.io/name: prodavan-opensearch
+      app.kubernetes.io/name: agentscale-opensearch
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: prodavan-opensearch
-        app.kubernetes.io/part-of: prodavan
+        app.kubernetes.io/name: agentscale-opensearch
+        app.kubernetes.io/part-of: agentscale
         app.kubernetes.io/component: opensearch
     spec:
       terminationGracePeriodSeconds: 60
@@ -82,9 +82,9 @@ spec:
           image: opensearchproject/opensearch:2.17.1
           env:
             - name: cluster.name
-              value: prodavan-opensearch
+              value: agentscale-opensearch
             - name: node.name
-              value: prodavan-opensearch-0
+              value: agentscale-opensearch-0
             - name: discovery.type
               value: single-node
             - name: bootstrap.memory_lock
@@ -131,15 +131,15 @@ spec:
       volumes:
         - name: data
           persistentVolumeClaim:
-            claimName: prodavan-opensearch-data
+            claimName: agentscale-opensearch-data
 ---
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: prodavan-opensearch-init
+  name: agentscale-opensearch-init
   labels:
-    app.kubernetes.io/name: prodavan-opensearch-init
-    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/name: agentscale-opensearch-init
+    app.kubernetes.io/part-of: agentscale
     app.kubernetes.io/component: opensearch-init
   annotations:
     argocd.argoproj.io/hook: Sync
@@ -151,8 +151,8 @@ spec:
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: prodavan-opensearch-init
-        app.kubernetes.io/part-of: prodavan
+        app.kubernetes.io/name: agentscale-opensearch-init
+        app.kubernetes.io/part-of: agentscale
     spec:
       restartPolicy: OnFailure
       containers:
@@ -164,10 +164,10 @@ spec:
             - |
               set -eu
               i=0
-              until curl -sf "http://prodavan-opensearch:9200/_cluster/health" >/dev/null; do
+              until curl -sf "http://agentscale-opensearch:9200/_cluster/health" >/dev/null; do
                 i=$((i+1))
                 if [ "$i" -gt 90 ]; then echo "opensearch not ready"; exit 1; fi
                 sleep 2
               done
-              curl -sf "http://prodavan-opensearch:9200/_cluster/health?pretty"
+              curl -sf "http://agentscale-opensearch:9200/_cluster/health?pretty"
               echo "opensearch-init: ok"

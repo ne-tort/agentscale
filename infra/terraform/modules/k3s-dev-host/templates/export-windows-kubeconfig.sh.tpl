@@ -32,8 +32,8 @@ if [ -n "$WSL_IP" ] && command -v powershell.exe >/dev/null 2>&1; then
       }
     }
     foreach (\$p in @(${API_PORT}, 8088, 2222)) {
-      netsh advfirewall firewall delete rule name=\"Prodavan WSL \$p\" 2>\$null | Out-Null
-      netsh advfirewall firewall add rule name=\"Prodavan WSL \$p\" dir=in action=allow protocol=TCP localport=\$p 2>\$null | Out-Null
+      netsh advfirewall firewall delete rule name=\"Agentscale WSL \$p\" 2>\$null | Out-Null
+      netsh advfirewall firewall add rule name=\"Agentscale WSL \$p\" dir=in action=allow protocol=TCP localport=\$p 2>\$null | Out-Null
     }
     Write-Host \"portproxy -> ${WSL_IP} (127.0.0.1 + 0.0.0.0)\"
   " || echo "WARN: portproxy skipped (run Start-Runners elevated once if Verify cannot reach :6443)"

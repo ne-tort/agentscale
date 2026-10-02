@@ -18,28 +18,28 @@ from prodavan_ops.validate import (
 
 def test_first_party_deployments_cover_api_web_celery() -> None:
     names = set(FIRST_PARTY_DEPLOYMENTS)
-    assert "prodavan-api" in names
-    assert "prodavan-web" in names
-    assert "prodavan-celery-worker" in names
-    assert "prodavan-celery-beat" in names
+    assert "agentscale-api" in names
+    assert "agentscale-web" in names
+    assert "agentscale-celery-worker" in names
+    assert "agentscale-celery-beat" in names
 
 
 def test_deployment_targets_include_probe_pod_in_sandboxes_namespace() -> None:
-    """Probe pod (agent-runtime) lives in prodavan-sandboxes, not prodavan."""
+    """Probe pod (agent-runtime) lives in agentscale-dev-sandboxes, not agentscale."""
     names_by_ns: dict[str, set[str]] = {}
     for name, ns in DEPLOYMENT_TARGETS:
         names_by_ns.setdefault(ns, set()).add(name)
-    assert "prodavan-probe-pod" in names_by_ns.get("prodavan-sandboxes", set())
-    # prodavan namespace still has api/web/celery.
-    prodavan = names_by_ns.get("prodavan", set())
-    assert "prodavan-api" in prodavan
-    assert "prodavan-web" in prodavan
+    assert "agentscale-probe-pod" in names_by_ns.get("agentscale-dev-sandboxes", set())
+    # agentscale namespace still has api/web/celery.
+    agentscale = names_by_ns.get("agentscale-dev", set())
+    assert "agentscale-api" in agentscale
+    assert "agentscale-web" in agentscale
 
 
 def test_deployment_targets_names_match_first_party() -> None:
-    """prodavan-namespace targets in DEPLOYMENT_TARGETS == FIRST_PARTY_DEPLOYMENTS."""
-    prodavan_targets = {name for name, ns in DEPLOYMENT_TARGETS if ns == "prodavan"}
-    assert prodavan_targets == set(FIRST_PARTY_DEPLOYMENTS)
+    """agentscale-namespace targets in DEPLOYMENT_TARGETS == FIRST_PARTY_DEPLOYMENTS."""
+    agentscale_targets = {name for name, ns in DEPLOYMENT_TARGETS if ns == "agentscale-dev"}
+    assert agentscale_targets == set(FIRST_PARTY_DEPLOYMENTS)
 
 
 def test_assert_kubeconfig_docker_ready_noop_without_ci_host(
@@ -127,9 +127,9 @@ spec:
     spec:
       containers:
         - name: api
-          image: ghcr.io/ne-tort/prodavan-api:latest
+          image: ghcr.io/ne-tort/agentscale-api:latest
         - name: web
-          image: ghcr.io/ne-tort/prodavan-web:latest
+          image: ghcr.io/ne-tort/agentscale-web:latest
 ---
 # pins
 postgres:16.15
@@ -155,9 +155,9 @@ spec:
     - name: pg
       image: postgres:latest
     - name: api
-      image: ghcr.io/ne-tort/prodavan-api:latest
+      image: ghcr.io/ne-tort/agentscale-api:latest
     - name: web
-      image: ghcr.io/ne-tort/prodavan-web:latest
+      image: ghcr.io/ne-tort/agentscale-web:latest
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -225,8 +225,8 @@ def test_is_api_unreachable_detects_connection_errors() -> None:
 
 
 def test_first_party_latest_constants() -> None:
-    assert "ghcr.io/ne-tort/prodavan-api:latest" in FIRST_PARTY_LATEST
-    assert "ghcr.io/ne-tort/prodavan-web:latest" in FIRST_PARTY_LATEST
+    assert "ghcr.io/ne-tort/agentscale-api:latest" in FIRST_PARTY_LATEST
+    assert "ghcr.io/ne-tort/agentscale-web:latest" in FIRST_PARTY_LATEST
     # Platform probe pod ships in the overlay render as :latest (first-party).
     assert "ghcr.io/ne-tort/prodavan-agent-runtime:latest" in FIRST_PARTY_LATEST
 
@@ -263,7 +263,7 @@ def test_k3s_dev_host_crlf_strip_not_nested_in_bash_lc_quotes() -> None:
         / "k3s-dev-host"
         / "main.tf"
     ).read_text(encoding="utf-8")
-    assert 'rev       = "v11-https-tls-sysctl"' in main_tf
+    assert 'rev       = "v12-contours"' in main_tf
     assert "prodavan-k3s-preflight.lf" in main_tf
     assert "read_bytes().replace" in main_tf
     assert "tr -d '\\r' < /tmp/prodavan-k3s-preflight.sh" not in main_tf

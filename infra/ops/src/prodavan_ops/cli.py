@@ -29,7 +29,7 @@ def validate_cmd() -> None:
 
 @app.command("wait")
 def wait_cmd(
-    app_name: str = typer.Option("prodavan-dev", "--app"),
+    app_name: str = typer.Option("agentscale-dev", "--app"),
     namespace: str = typer.Option("argocd", "--namespace"),
     timeout: int = typer.Option(600, "--timeout"),
 ) -> None:
@@ -49,8 +49,8 @@ def rollout_cmd(
 ) -> None:
     """Restart first-party Deployments so :latest+Always re-pulls after CI Images.
 
-    By default restarts all DEPLOYMENT_TARGETS (prodavan: api/web/celery-worker/
-    celery-beat; prodavan-sandboxes: prodavan-probe-pod). Pass --namespace to
+    By default restarts all DEPLOYMENT_TARGETS (agentscale: api/web/celery-worker/
+    celery-beat; agentscale-dev-sandboxes: agentscale-probe-pod). Pass --namespace to
     restrict to a single namespace's first-party deployments.
     """
     assert_kubeconfig_docker_ready()
@@ -86,7 +86,7 @@ def heal_cmd(
     )
 
 
-e2e_app = typer.Typer(help="Cluster e2e runner (prodavan-e2e Argo app + Job).")
+e2e_app = typer.Typer(help="Cluster e2e runner (agentscale-e2e Argo app + Job).")
 app.add_typer(e2e_app, name="e2e")
 
 
@@ -95,14 +95,14 @@ def e2e_run_cmd(
     suite: str = typer.Option("k8s", "--suite", help="k8s | all"),
     timeout: int = typer.Option(900, "--timeout"),
 ) -> None:
-    """Sync prodavan-e2e, wait pytest Job, print logs on failure."""
+    """Sync agentscale-e2e, wait pytest Job, print logs on failure."""
     assert_kubeconfig_docker_ready()
     run_e2e(suite=suite, timeout_sec=timeout)
 
 
 @e2e_app.command("cleanup")
 def e2e_cleanup_cmd(
-    unsync: bool = typer.Option(False, "--unsync", help="Delete Argo Application prodavan-e2e"),
+    unsync: bool = typer.Option(False, "--unsync", help="Delete Argo Application agentscale-e2e"),
 ) -> None:
     """Remove e2e Job (and optionally the Argo app)."""
     assert_kubeconfig_docker_ready()

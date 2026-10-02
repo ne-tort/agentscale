@@ -3,7 +3,7 @@
 #
 # terraform {
 #   backend "s3" {
-#     bucket = "prodavan-terraform-state"
+#     bucket = "agentscale-terraform-state"
 #     key    = "env/placeholder/terraform.tfstate"
 #     region = "ru-central1"
 #     endpoints = {

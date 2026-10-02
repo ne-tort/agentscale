@@ -1,6 +1,6 @@
 # Traefik on host ports — binds 0.0.0.0 (VM: reachable from the Windows host by IP).
 # web = plain HTTP (${http_port}), websecure = HTTPS (${https_port}); the default
-# cert comes from the TLSStore (prodavan-tls.sh.tpl) when https_tls_sans is set,
+# cert comes from the TLSStore (agentscale-tls.sh.tpl) when https_tls_sans is set,
 # otherwise Traefik generates a self-signed one.
 apiVersion: helm.cattle.io/v1
 kind: HelmChartConfig

@@ -43,7 +43,7 @@ jobs:
           out = os.environ["GITHUB_OUTPUT"]
           lines = [
               f"owner={owner}",
-              f"api={registry}/{owner}/prodavan-api",
+              f"api={registry}/{owner}/agentscale-api",
           ]
           if event == "pull_request":
               lines += ["tag=pr-local", "push=false"]
@@ -57,21 +57,21 @@ jobs:
         run: |
           set -euo pipefail
           # One long-lived buildkitd on the CI VM (docker-container driver,
-          # name prodavan-ci). Layer cache AND RUN cache mounts (pip, pub)
+          # name agentscale-ci). Layer cache AND RUN cache mounts (pip, pub)
           # live in its state volume and survive across jobs/PRs/deploys.
           # GC cap: /etc/buildkit/buildkitd.toml on the runner host (50Gi/30d).
           # All VM runners share the `runner` user's docker CLI store, so the
           # create/use race between parallel jobs is idempotent.
-          if ! docker buildx inspect prodavan-ci >/dev/null 2>&1; then
-            docker buildx create --name prodavan-ci \
+          if ! docker buildx inspect agentscale-ci >/dev/null 2>&1; then
+            docker buildx create --name agentscale-ci \
               --driver docker-container \
               --driver-opt network=host \
               --config /etc/buildkit/buildkitd.toml \
-              || docker buildx create --name prodavan-ci \
+              || docker buildx create --name agentscale-ci \
                 --driver docker-container --driver-opt network=host
           fi
-          docker buildx use prodavan-ci
-          docker buildx inspect --bootstrap prodavan-ci >/dev/null
+          docker buildx use agentscale-ci
+          docker buildx inspect --bootstrap agentscale-ci >/dev/null
 
       - uses: docker/login-action@v3
         if: steps.meta.outputs.push == 'true'
@@ -96,7 +96,7 @@ jobs:
         run: |
           set -euo pipefail
           IMAGE="${{ steps.meta.outputs.api }}:${{ steps.meta.outputs.tag }}"
-          NAME="prodavan-migrate-smoke-${{ github.run_id }}-${{ github.job }}"
+          NAME="agentscale-migrate-smoke-${{ github.run_id }}-${{ github.job }}"
           NET="${NAME}-net"
           docker rm -f "$NAME" 2>/dev/null || true
           docker network rm "$NET" 2>/dev/null || true
@@ -104,13 +104,13 @@ jobs:
           # Same user-defined bridge: migrate resolves Postgres by container name.
           # Avoid host.docker.internal — engine dns overrides break that special name.
           docker run -d --name "$NAME" --network "$NET" \
-            -e POSTGRES_USER=prodavan \
-            -e POSTGRES_PASSWORD=prodavan \
-            -e POSTGRES_DB=prodavan \
+            -e POSTGRES_USER=agentscale \
+            -e POSTGRES_PASSWORD=agentscale \
+            -e POSTGRES_DB=agentscale \
             postgres:16.15
           echo "Postgres $NAME on docker network $NET"
           for i in $(seq 1 30); do
-            if docker exec "$NAME" pg_isready -U prodavan -d prodavan; then
+            if docker exec "$NAME" pg_isready -U agentscale -d agentscale; then
               break
             fi
             if [ "$i" -eq 30 ]; then
@@ -120,7 +120,7 @@ jobs:
             fi
             sleep 2
           done
-          DATABASE_URL="postgresql+asyncpg://prodavan:prodavan@${NAME}:5432/prodavan"
+          DATABASE_URL="postgresql+asyncpg://agentscale:agentscale@${NAME}:5432/agentscale"
           docker run --rm --network "$NET" \
             -e DATABASE_URL="$DATABASE_URL" \
             "$IMAGE" ./scripts/migrate.sh
@@ -142,7 +142,7 @@ jobs:
           sha = os.environ["GITHUB_SHA"][:12]
           event = os.environ.get("GITHUB_EVENT_NAME", "")
           out = os.environ["GITHUB_OUTPUT"]
-          lines = [f"web={registry}/{owner}/prodavan-web"]
+          lines = [f"web={registry}/{owner}/agentscale-web"]
           if event == "pull_request":
               lines += ["tag=pr-local", "push=false"]
           else:
@@ -155,16 +155,16 @@ jobs:
         run: |
           set -euo pipefail
           # Shared long-lived buildkitd on the CI VM (see build-api job).
-          if ! docker buildx inspect prodavan-ci >/dev/null 2>&1; then
-            docker buildx create --name prodavan-ci \
+          if ! docker buildx inspect agentscale-ci >/dev/null 2>&1; then
+            docker buildx create --name agentscale-ci \
               --driver docker-container \
               --driver-opt network=host \
               --config /etc/buildkit/buildkitd.toml \
-              || docker buildx create --name prodavan-ci \
+              || docker buildx create --name agentscale-ci \
                 --driver docker-container --driver-opt network=host
           fi
-          docker buildx use prodavan-ci
-          docker buildx inspect --bootstrap prodavan-ci >/dev/null
+          docker buildx use agentscale-ci
+          docker buildx inspect --bootstrap agentscale-ci >/dev/null
 
       - uses: docker/login-action@v3
         if: steps.meta.outputs.push == 'true'

@@ -20,7 +20,7 @@ Requirements on the SSH host:
 
 - Passwordless sudo for k3s (`/etc/sudoers.d/prodavan-terraform`)
 - `authorized_keys` has `infra/.ssh/prodavan_tf.pub`
-- `remote_repo_path` points at this checkout (default `/mnt/c/Users/qwerty/git/Commerce/prodavan`)
+- `remote_repo_path` points at this checkout (default `/mnt/c/Users/qwerty/git/Commerce/agentscale`)
 
 Destroy: `terraform destroy` (k3s-uninstall over the same SSH).
 
@@ -28,5 +28,5 @@ Day-2: merge to `main` → Argo / CI Images — not terraform.
 
 ## Not the bootstrap path
 
-- **Browser / UI** does not need kubeconfig, portproxy, or `prodavan.local`.
+- **Browser / UI** does not need kubeconfig, portproxy, or `agentscale.local`.
 - **Docker Desktop GHA runners** (Verify Dev): optional `TF_VAR_export_docker_kubeconfig=true` and `infra/github-runner/` — CI only, see that README.

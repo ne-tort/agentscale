@@ -14,7 +14,7 @@ locals {
   tls_san_flags   = join(" ", [for s in var.k3s_tls_sans : "--tls-san=${s}"])
   https_tls_sans  = join(",", var.https_tls_sans)
   ssh_home        = "/home/${var.ssh_user}"
-  # /mnt/c/Users/<user>/git/.../prodavan → /mnt/c/Users/<user>/.kube/prodavan-dev.yaml
+  # /mnt/c/Users/<user>/git/.../agentscale → /mnt/c/Users/<user>/.kube/prodavan-dev.yaml
   _repo_parts = split("/", var.remote_repo_path)
   # ["", "mnt", "c", "Users", "<user>", ...]
   windows_kubeconfig_path = (
@@ -65,9 +65,9 @@ resource "null_resource" "sshd" {
   provisioner "remote-exec" {
     inline = [
       "bash -lc 'set -euo pipefail",
-      "mkdir -p /home/${var.ssh_user}/.ssh/sshd-prodavan",
-      "test -f /home/${var.ssh_user}/.ssh/sshd-prodavan/host_ed25519 || ssh-keygen -t ed25519 -N \"\" -f /home/${var.ssh_user}/.ssh/sshd-prodavan/host_ed25519",
-      "mv /tmp/prodavan-sshd_config /home/${var.ssh_user}/.ssh/sshd-prodavan/sshd_config",
+      "mkdir -p /home/${var.ssh_user}/.ssh/sshd-agentscale",
+      "test -f /home/${var.ssh_user}/.ssh/sshd-agentscale/host_ed25519 || ssh-keygen -t ed25519 -N \"\" -f /home/${var.ssh_user}/.ssh/sshd-agentscale/host_ed25519",
+      "mv /tmp/prodavan-sshd_config /home/${var.ssh_user}/.ssh/sshd-agentscale/sshd_config",
       "sudo -n mv /tmp/prodavan-sshd.service /etc/systemd/system/prodavan-sshd.service",
       "sudo -n systemctl daemon-reload",
       "sudo -n systemctl enable prodavan-sshd.service",
@@ -87,9 +87,9 @@ resource "null_resource" "k3s_server" {
     # v9: host_profile param — vm skips custom sshd and keeps Docker Engine
     # (CI runners on the VM share it), tls-san list, runner kubeconfig.
     # v10: https_tls_sans — local CA + leaf as Traefik default cert (websecure).
-    # v11: host sysctl unprivileged_port_start — non-root Traefik binds 443
+    # v11: host sysctl unprivileged_port_start; v12: two contours (agentscale ns)
     # (hostNetwork + NET_BIND_SERVICE cap alone is not enough for userns reasons).
-    rev       = "v11-https-tls-sysctl"
+    rev       = "v12-contours"
     http_port = tostring(var.http_port)
     https_port = tostring(var.https_port)
     cluster   = var.cluster_name
@@ -97,7 +97,7 @@ resource "null_resource" "k3s_server" {
     boot_heal = filesha256("${path.module}/templates/prodavan-boot-heal.conf.tpl")
     preflight = filesha256("${path.module}/templates/k3s-preflight.sh.tpl")
     post_heal = filesha256("${path.module}/templates/post-k3s-heal.sh.tpl")
-    tls_tpl   = filesha256("${path.module}/templates/prodavan-tls.sh.tpl")
+    tls_tpl   = filesha256("${path.module}/templates/agentscale-tls.sh.tpl")
     # SSH coords in triggers so provisioners may only use self.*
     ssh_host     = var.ssh_host
     ssh_port     = tostring(var.ssh_port)
@@ -165,11 +165,11 @@ resource "null_resource" "k3s_server" {
   }
 
   provisioner "file" {
-    content = templatefile("${path.module}/templates/prodavan-tls.sh.tpl", {
+    content = templatefile("${path.module}/templates/agentscale-tls.sh.tpl", {
       https_tls_sans = local.https_tls_sans
       ssh_home       = local.ssh_home
     })
-    destination = "/tmp/prodavan-tls.sh"
+    destination = "/tmp/agentscale-tls.sh"
     connection {
       type        = "ssh"
       host        = self.triggers.ssh_host
@@ -197,25 +197,25 @@ resource "null_resource" "k3s_server" {
       "export PATH=\"$HOME/.local/bin:/usr/sbin:/usr/bin:$PATH\"",
       # Non-root pods with hostNetwork (Traefik websecure <1024) cannot bind low
       # ports even with NET_BIND_SERVICE — relax on this dedicated CI/cluster host.
-      "sudo -n sh -c 'printf \"net.ipv4.ip_unprivileged_port_start=79\\n\" > /etc/sysctl.d/99-prodavan-unprivileged-ports.conf && sysctl -w net.ipv4.ip_unprivileged_port_start=79 >/dev/null'",
+      "sudo -n sh -c 'printf \"net.ipv4.ip_unprivileged_port_start=79\\n\" > /etc/sysctl.d/99-agentscale-unprivileged-ports.conf && sysctl -w net.ipv4.ip_unprivileged_port_start=79 >/dev/null'",
       "sudo -n mkdir -p /var/lib/rancher/k3s/server/manifests /etc/rancher/k3s /etc/systemd/system/k3s.service.d /usr/local/lib/prodavan",
       "sudo -n cp /tmp/prodavan-traefik-port.yaml /var/lib/rancher/k3s/server/manifests/prodavan-traefik-port.yaml",
       "sudo -n cp /tmp/prodavan-boot-heal.conf /etc/systemd/system/k3s.service.d/prodavan-boot-heal.conf",
       "python3 -c \"from pathlib import Path; p=Path('/tmp/prodavan-k3s-preflight.sh'); Path('/tmp/prodavan-k3s-preflight.lf').write_bytes(p.read_bytes().replace(b'\\r', b''))\"",
       "python3 -c \"from pathlib import Path; p=Path('/tmp/prodavan-post-k3s-heal.sh'); Path('/tmp/prodavan-post-k3s-heal.lf').write_bytes(p.read_bytes().replace(b'\\r', b''))\"",
-      "python3 -c \"from pathlib import Path; p=Path('/tmp/prodavan-tls.sh'); Path('/tmp/prodavan-tls.lf').write_bytes(p.read_bytes().replace(b'\\r', b''))\"",
+      "python3 -c \"from pathlib import Path; p=Path('/tmp/agentscale-tls.sh'); Path('/tmp/agentscale-tls.lf').write_bytes(p.read_bytes().replace(b'\\r', b''))\"",
       "sudo -n cp /tmp/prodavan-k3s-preflight.lf /usr/local/lib/prodavan/k3s-preflight.sh",
       "sudo -n cp /tmp/prodavan-post-k3s-heal.lf /usr/local/lib/prodavan/post-k3s-heal.sh",
       "sudo -n chmod 755 /usr/local/lib/prodavan/k3s-preflight.sh /usr/local/lib/prodavan/post-k3s-heal.sh",
-      "sudo -n rm -f /etc/systemd/system/k3s.service.d/prodavan-wsl-stop.conf",
+      "sudo -n rm -f /etc/systemd/system/k3s.service.d/agentscale-wsl-stop.conf",
       # WSL only: Docker Engine inside WSL fights k3s CNI. On a vm-profile host
       # Docker stays — CI runners (same VM) build images with it.
       var.host_profile == "wsl" ? "if systemctl list-unit-files docker.service >/dev/null 2>&1; then sudo -n systemctl stop docker.socket docker 2>/dev/null || true; sudo -n systemctl disable --now docker.socket docker 2>/dev/null || true; sudo -n systemctl mask docker.socket docker 2>/dev/null || true; fi" : "echo vm-profile: docker engine left running for CI runners",
       # Broken/unauthenticated Tailscale netmon flaps routes around CNI veths on WSL.
       "if systemctl is-active --quiet tailscaled 2>/dev/null && ! tailscale status >/dev/null 2>&1; then sudo -n systemctl stop tailscaled 2>/dev/null || true; fi",
       "if ! command -v k3s >/dev/null 2>&1; then",
-      "  curl -sfL https://get.k3s.io -o /tmp/prodavan-k3s-install.sh",
-      "  INSTALL_K3S_VERSION=\"${var.k3s_version}\" sh /tmp/prodavan-k3s-install.sh server --write-kubeconfig-mode 644 ${local.tls_san_flags}",
+      "  curl -sfL https://get.k3s.io -o /tmp/agentscale-k3s-install.sh",
+      "  INSTALL_K3S_VERSION=\"${var.k3s_version}\" sh /tmp/agentscale-k3s-install.sh server --write-kubeconfig-mode 644 ${local.tls_san_flags}",
       "elif ! sudo -n systemctl is-active --quiet k3s; then",
       "  sudo -n systemctl start k3s",
       "else",
@@ -223,7 +223,7 @@ resource "null_resource" "k3s_server" {
       "fi",
       "sudo -n systemctl daemon-reload",
       "sudo -n systemctl enable k3s || true",
-      "sudo -n bash /tmp/prodavan-tls.lf",
+      "sudo -n bash /tmp/agentscale-tls.lf",
       "for i in $(seq 1 60); do sudo -n k3s kubectl get --raw=/readyz >/dev/null 2>&1 && break; sleep 2; done",
       "sudo -n k3s kubectl wait --for=condition=Ready node --all --timeout=180s",
       "mkdir -p /home/${var.ssh_user}/.kube",
@@ -346,7 +346,7 @@ resource "null_resource" "gitops_bootstrap" {
 
   provisioner "remote-exec" {
     inline = [
-      "tr -d '\\r' < /tmp/prodavan-gitops.sh > /tmp/prodavan-gitops.lf && mv /tmp/prodavan-gitops.lf /tmp/prodavan-gitops.sh",
+      "tr -d '\\r' < /tmp/prodavan-gitops.sh > /tmp/agentscale-gitops.lf && mv /tmp/agentscale-gitops.lf /tmp/prodavan-gitops.sh",
       "chmod 700 /tmp/prodavan-gitops.sh",
       "bash /tmp/prodavan-gitops.sh",
     ]

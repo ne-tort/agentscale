@@ -1,5 +1,5 @@
 {
-  "realm": "prodavan",
+  "realm": "agentscale",
   "enabled": true,
   "registrationAllowed": false,
   "loginWithEmailAllowed": true,
@@ -38,8 +38,8 @@
   },
   "clients": [
     {
-      "clientId": "prodavan-flutter",
-      "name": "Prodavan Flutter",
+      "clientId": "agentscale-flutter",
+      "name": "Agentscale Flutter",
       "enabled": true,
       "publicClient": true,
       "directAccessGrantsEnabled": true,
@@ -50,7 +50,7 @@
       "redirectUris": [
         "http://127.0.0.1:*",
         "http://localhost:*",
-        "prodavan://*"
+        "agentscale://*"
       ],
       "webOrigins": ["+"],
       "attributes": {
@@ -65,13 +65,13 @@
         "profile",
         "roles",
         "email",
-        "prodavan-audience"
+        "agentscale-audience"
       ],
       "optionalClientScopes": ["address", "phone", "offline_access"]
     },
     {
-      "clientId": "prodavan-api",
-      "name": "Prodavan API audience",
+      "clientId": "agentscale-api",
+      "name": "Agentscale API audience",
       "enabled": true,
       "publicClient": true,
       "bearerOnly": false,
@@ -83,17 +83,17 @@
       "defaultClientScopes": ["roles", "profile", "email"]
     },
     {
-      "clientId": "prodavan-services",
-      "name": "Prodavan services (invite / workers)",
+      "clientId": "agentscale-services",
+      "name": "Agentscale services (invite / workers)",
       "enabled": true,
       "publicClient": false,
-      "secret": "change-me-prodavan-services",
+      "secret": "change-me-agentscale-services",
       "serviceAccountsEnabled": true,
       "standardFlowEnabled": false,
       "directAccessGrantsEnabled": false,
       "protocol": "openid-connect",
       "fullScopeAllowed": true,
-      "defaultClientScopes": ["roles", "profile", "email", "prodavan-audience"]
+      "defaultClientScopes": ["roles", "profile", "email", "agentscale-audience"]
     }
   ],
   "identityProviders": [],
@@ -101,7 +101,7 @@
     {
       "username": "admin",
       "enabled": true,
-      "email": "admin@prodavan.local",
+      "email": "admin@agentscale.local",
       "emailVerified": true,
       "firstName": "Platform",
       "lastName": "Admin",
@@ -118,7 +118,7 @@
   ],
   "clientScopes": [
     {
-      "name": "prodavan-audience",
+      "name": "agentscale-audience",
       "protocol": "openid-connect",
       "attributes": {
         "include.in.token.scope": "true",
@@ -126,12 +126,12 @@
       },
       "protocolMappers": [
         {
-          "name": "aud-prodavan-api",
+          "name": "aud-agentscale-api",
           "protocol": "openid-connect",
           "protocolMapper": "oidc-audience-mapper",
           "consentRequired": false,
           "config": {
-            "included.client.audience": "prodavan-api",
+            "included.client.audience": "agentscale-api",
             "id.token.claim": "false",
             "access.token.claim": "true"
           }

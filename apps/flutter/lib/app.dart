@@ -41,7 +41,7 @@ class _ProdavanAppState extends State<ProdavanApp> {
           );
         }
         return MaterialApp(
-          onGenerateTitle: (context) => 'Prodavan',
+          onGenerateTitle: (context) => 'Agentscale',
           theme: AppTheme.forMode(appSettings.themeMode),
           locale: appSettings.locale,
           supportedLocales: AppLocalizations.supportedLocales,

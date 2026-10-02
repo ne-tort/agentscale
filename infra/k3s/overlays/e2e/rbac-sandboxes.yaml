@@ -1,13 +1,13 @@
-# Cross-namespace: e2e Job SA manages project pods in prodavan-sandboxes.
+# Cross-namespace: e2e Job SA manages project pods in agentscale-dev-sandboxes.
 # Self-contained Role (do not depend on dev overlay Role sync).
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: prodavan-e2e-sandbox-pods
-  namespace: prodavan-sandboxes
+  name: agentscale-e2e-sandbox-pods
+  namespace: agentscale-dev-sandboxes
   labels:
-    app.kubernetes.io/name: prodavan-e2e-runner
-    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/name: agentscale-e2e-runner
+    app.kubernetes.io/part-of: agentscale
     app.kubernetes.io/component: e2e
 rules:
   - apiGroups: [""]
@@ -23,17 +23,17 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: prodavan-e2e-sandbox-pods
-  namespace: prodavan-sandboxes
+  name: agentscale-e2e-sandbox-pods
+  namespace: agentscale-dev-sandboxes
   labels:
-    app.kubernetes.io/name: prodavan-e2e-runner
-    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/name: agentscale-e2e-runner
+    app.kubernetes.io/part-of: agentscale
     app.kubernetes.io/component: e2e
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
-  name: prodavan-e2e-sandbox-pods
+  name: agentscale-e2e-sandbox-pods
 subjects:
   - kind: ServiceAccount
-    name: prodavan-e2e-runner
-    namespace: prodavan
+    name: agentscale-e2e-runner
+    namespace: agentscale-dev

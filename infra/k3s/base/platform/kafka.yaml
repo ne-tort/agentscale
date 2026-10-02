@@ -16,13 +16,13 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: prodavan-kafka
+  name: agentscale-kafka
   labels:
-    app.kubernetes.io/name: prodavan-kafka
-    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/name: agentscale-kafka
+    app.kubernetes.io/part-of: agentscale
     app.kubernetes.io/component: kafka
 spec:
-  # Headless so pod DNS prodavan-kafka-0.prodavan-kafka resolves (StatefulSet).
+  # Headless so pod DNS agentscale-kafka-0.agentscale-kafka resolves (StatefulSet).
   clusterIP: None
   ports:
     - name: kafka
@@ -32,32 +32,32 @@ spec:
       port: 9644
       targetPort: 9644
   selector:
-    app.kubernetes.io/name: prodavan-kafka
+    app.kubernetes.io/name: agentscale-kafka
 ---
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: prodavan-kafka
+  name: agentscale-kafka
   labels:
-    app.kubernetes.io/name: prodavan-kafka
-    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/name: agentscale-kafka
+    app.kubernetes.io/part-of: agentscale
     app.kubernetes.io/component: kafka
   annotations:
     argocd.argoproj.io/sync-wave: "1"
 spec:
-  serviceName: prodavan-kafka
+  serviceName: agentscale-kafka
   replicas: 1
   podManagementPolicy: OrderedReady
   updateStrategy:
     type: RollingUpdate
   selector:
     matchLabels:
-      app.kubernetes.io/name: prodavan-kafka
+      app.kubernetes.io/name: agentscale-kafka
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: prodavan-kafka
-        app.kubernetes.io/part-of: prodavan
+        app.kubernetes.io/name: agentscale-kafka
+        app.kubernetes.io/part-of: agentscale
         app.kubernetes.io/component: kafka
     spec:
       terminationGracePeriodSeconds: 90
@@ -132,13 +132,13 @@ spec:
       volumes:
         - name: config
           configMap:
-            name: prodavan-kafka-config
+            name: agentscale-kafka-config
   volumeClaimTemplates:
     - metadata:
         name: data
         labels:
-          app.kubernetes.io/name: prodavan-kafka
-          app.kubernetes.io/part-of: prodavan
+          app.kubernetes.io/name: agentscale-kafka
+          app.kubernetes.io/part-of: agentscale
           app.kubernetes.io/component: kafka
       spec:
         accessModes:
@@ -150,10 +150,10 @@ spec:
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: prodavan-kafka-init
+  name: agentscale-kafka-init
   labels:
-    app.kubernetes.io/name: prodavan-kafka-init
-    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/name: agentscale-kafka-init
+    app.kubernetes.io/part-of: agentscale
     app.kubernetes.io/component: kafka-init
   annotations:
     argocd.argoproj.io/hook: Sync
@@ -165,8 +165,8 @@ spec:
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: prodavan-kafka-init
-        app.kubernetes.io/part-of: prodavan
+        app.kubernetes.io/name: agentscale-kafka-init
+        app.kubernetes.io/part-of: agentscale
     spec:
       restartPolicy: OnFailure
       containers:
@@ -178,13 +178,13 @@ spec:
             - |
               set -eu
               i=0
-              until rpk cluster info -X brokers=prodavan-kafka:9092; do
+              until rpk cluster info -X brokers=agentscale-kafka:9092; do
                 i=$((i+1))
                 if [ "$i" -gt 60 ]; then exit 1; fi
                 sleep 2
               done
-              BROKERS=prodavan-kafka:9092
-              ADMIN=prodavan-kafka-0.prodavan-kafka.prodavan.svc.cluster.local:9644
+              BROKERS=agentscale-kafka:9092
+              ADMIN=agentscale-kafka-0.agentscale-kafka:9644
               # Wait for pod DNS + Admin API (9644). cluster info on :9092 can succeed
               # before advertised hostname / admin.hosts is reachable from this Job.
               j=0
@@ -196,16 +196,16 @@ spec:
                 fi
                 sleep 2
               done
-              rpk topic create prodavan.platform.events -p 1 -r 1 -X brokers=$BROKERS || true
-              rpk topic create prodavan.project.triggers -p 1 -r 1 -X brokers=$BROKERS || true
-              rpk topic create prodavan.ops.health -p 1 -r 1 -X brokers=$BROKERS || true
+              rpk topic create agentscale.platform.events -p 1 -r 1 -X brokers=$BROKERS || true
+              rpk topic create agentscale.project.triggers -p 1 -r 1 -X brokers=$BROKERS || true
+              rpk topic create agentscale.ops.health -p 1 -r 1 -X brokers=$BROKERS || true
               # Auth Service registration bus (auto_create disabled below — must exist before API publish).
-              rpk topic create prodavan.auth.commands -p 1 -r 1 -X brokers=$BROKERS || true
-              rpk topic create prodavan.auth.events -p 1 -r 1 -X brokers=$BROKERS || true
-              rpk topic create prodavan.relation.events -p 1 -r 1 -X brokers=$BROKERS || true
-              rpk topic create prodavan.metrics.events -p 1 -r 1 -X brokers=$BROKERS || true
-              rpk topic create prodavan.document.events -p 1 -r 1 -X brokers=$BROKERS || true
-              rpk topic create prodavan.search.events -p 1 -r 1 -X brokers=$BROKERS || true
+              rpk topic create agentscale.auth.commands -p 1 -r 1 -X brokers=$BROKERS || true
+              rpk topic create agentscale.auth.events -p 1 -r 1 -X brokers=$BROKERS || true
+              rpk topic create agentscale.relation.events -p 1 -r 1 -X brokers=$BROKERS || true
+              rpk topic create agentscale.metrics.events -p 1 -r 1 -X brokers=$BROKERS || true
+              rpk topic create agentscale.document.events -p 1 -r 1 -X brokers=$BROKERS || true
+              rpk topic create agentscale.search.events -p 1 -r 1 -X brokers=$BROKERS || true
               rpk cluster config set write_caching_default false -X brokers=$BROKERS -X admin.hosts=$ADMIN
               rpk cluster config set auto_create_topics_enabled false -X brokers=$BROKERS -X admin.hosts=$ADMIN
               rpk cluster config set default_topic_replications 1 -X brokers=$BROKERS -X admin.hosts=$ADMIN
@@ -215,12 +215,12 @@ spec:
               rpk cluster config set log_retention_ms 604800000 -X brokers=$BROKERS -X admin.hosts=$ADMIN
               rpk cluster config set log_segment_ms 86400000 -X brokers=$BROKERS -X admin.hosts=$ADMIN
               # RF=1 → min.isr must be 1 or acks=all producers stall (API enable_idempotence).
-              for t in prodavan.platform.events prodavan.project.triggers prodavan.ops.health \
-                       prodavan.auth.commands prodavan.auth.events prodavan.relation.events \
-                       prodavan.metrics.events prodavan.document.events prodavan.search.events; do
+              for t in agentscale.platform.events agentscale.project.triggers agentscale.ops.health \
+                       agentscale.auth.commands agentscale.auth.events agentscale.relation.events \
+                       agentscale.metrics.events agentscale.document.events agentscale.search.events; do
                 rpk topic alter-config "$t" \
                   --set cleanup.policy=delete \
                   --set min.insync.replicas=1 \
                   -X brokers=$BROKERS || true
               done
-              rpk topic alter-config prodavan.ops.health --set retention.ms=86400000 -X brokers=$BROKERS || true
+              rpk topic alter-config agentscale.ops.health --set retention.ms=86400000 -X brokers=$BROKERS || true

@@ -13,14 +13,14 @@ redpanda:
     address: 0.0.0.0
     port: 33145
   advertised_rpc_api:
-    address: prodavan-kafka-0.prodavan-kafka.prodavan.svc.cluster.local
+    address: agentscale-kafka-0.agentscale-kafka
     port: 33145
   kafka_api:
     - address: 0.0.0.0
       port: 9092
       name: internal
   advertised_kafka_api:
-    - address: prodavan-kafka-0.prodavan-kafka.prodavan.svc.cluster.local
+    - address: agentscale-kafka-0.agentscale-kafka
       port: 9092
       name: internal
   admin:

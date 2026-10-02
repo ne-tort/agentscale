@@ -1,7 +1,7 @@
 # Dedicated AppProject for agent-sandbox: the platform (controller + router)
 # lives in agent-sandbox-system, distinct from app namespaces managed by the
-# `prodavan` project. RBAC on sandbox objects (claims/…) in prodavan-sandboxes
-# is NOT granted through Argo — see infra/k3s/base/prodavan-sandboxes-ks/rbac-sandboxes.yaml.
+# `agentscale` project. RBAC on sandbox objects (claims/…) in agentscale-dev-sandboxes
+# is NOT granted through Argo — see infra/k3s/base/agentscale-dev-sandboxes-ks/rbac-sandboxes.yaml.
 apiVersion: argoproj.io/v1alpha1
 kind: AppProject
 metadata:

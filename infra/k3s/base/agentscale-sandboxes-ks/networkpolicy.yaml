@@ -1,12 +1,11 @@
-# NetworkPolicy for ALL pods in prodavan-sandboxes (agent-sandbox era).
+# NetworkPolicy for ALL pods in agentscale-sandboxes (agent-sandbox era).
 # Canon: docs/08-migration/agent-sandbox-adr.md (ADR §2.3). Old podSelector by
-# prodavan.io/managed-by label is gone — the controller does not stamp our labels,
+# agentscale.io/managed-by label is gone — the controller does not stamp our labels,
 # so the whole namespace is under policy (warm pods included, coverage wider).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: prodavan-sandboxes-egress
-  namespace: prodavan-sandboxes
+  name: agentscale-sandboxes-egress
 spec:
   podSelector: {}
   policyTypes: [Ingress, Egress]
@@ -23,7 +22,7 @@ spec:
   - from:
     - namespaceSelector:
         matchLabels:
-          kubernetes.io/metadata.name: prodavan
+          kubernetes.io/metadata.name: agentscale
     ports:
     - protocol: TCP
       port: 3921
@@ -32,7 +31,7 @@ spec:
   - to:
     - namespaceSelector:
         matchLabels:
-          kubernetes.io/metadata.name: prodavan
+          kubernetes.io/metadata.name: agentscale
     ports:
     - protocol: TCP
       port: 8001

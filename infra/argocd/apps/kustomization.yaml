@@ -5,5 +5,6 @@ resources:
   - 00-project.yaml
   - 00-agent-sandbox-project.yaml
   - agent-sandbox.yaml
-  - prodavan-dev.yaml
-  - prodavan-e2e.yaml
+  - agentscale-dev.yaml
+  - agentscale-prod.yaml
+  - agentscale-e2e.yaml
