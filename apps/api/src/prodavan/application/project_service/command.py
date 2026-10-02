@@ -935,12 +935,27 @@ class ProjectCommand:
         principal: Principal,
         purge_workspace: bool,
     ) -> dict:
-        await self._stop_and_pause_runtime(
-            row,
-            principal=principal,
-            reason="delete",
-            purge_workspace=purge_workspace,
-        )
+        try:
+            await self._stop_and_pause_runtime(
+                row,
+                principal=principal,
+                reason="delete",
+                purge_workspace=purge_workspace,
+            )
+        except AppError:
+            raise
+        except Exception as exc:
+            # Nothing is committed yet: the project stays alive and the
+            # employee can retry once the runtime failure is fixed. Surface
+            # the k8s/cluster error as a readable 502 (mirrors launch's
+            # POD_LAUNCH_FAILED), not a bare 500.
+            logger.exception("project delete: runtime stop failed project_id=%s", row.id)
+            raise AppError(
+                code="RUNTIME_DELETE_FAILED",
+                title="Runtime Delete Failed",
+                status=502,
+                detail=str(exc)[:300],
+            ) from exc
         row.status = ProjectStatus.DELETED
         await self._events.emit(
             event_type="project.deleted",

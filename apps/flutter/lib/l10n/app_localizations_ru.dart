@@ -2813,5 +2813,5 @@ class AppLocalizationsRu extends AppLocalizations {
       'Имя сотрудника (вход: имя@компания.local)';
 
   @override
-  String get authLoginHint => 'например: ivan@company.local';
+  String get authLoginHint => 'company@agentscale.local';
 }

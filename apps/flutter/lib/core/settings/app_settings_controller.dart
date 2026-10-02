@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:prodavan/core/refresh/app_auto_refresh.dart';
+import 'package:prodavan/core/theme/app_color_scheme_sync.dart';
 import 'package:prodavan/core/theme/app_palette.dart';
 
 /// Persisted locale + appearance + auto-refresh interval.
@@ -43,6 +44,7 @@ class AppSettingsController extends ChangeNotifier {
       _autoRefreshSeconds = kAppAutoRefreshDefaultSeconds;
     }
     _loaded = true;
+    syncDocumentColorScheme(_themeMode);
     notifyListeners();
   }
 
@@ -56,6 +58,7 @@ class AppSettingsController extends ChangeNotifier {
 
   Future<void> setThemeMode(AppThemeMode mode) async {
     _themeMode = mode;
+    syncDocumentColorScheme(_themeMode);
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(
