@@ -202,6 +202,15 @@ class _AdminAiKeyListPageState extends State<AdminAiKeyListPage> {
     if (!t.isApiKey) return '—';
     final apiKind = k['api_kind'] as String? ?? '';
     final provider = k['provider'] as String? ?? '';
+    // Explicit catalog link wins (custom+codex matches many entries).
+    final entryId = k['catalog_entry_id'] as String?;
+    if (entryId != null && entryId.isNotEmpty) {
+      for (final p in _httpProviders) {
+        if (p['id'] == entryId) {
+          return p['title'] as String? ?? apiKind;
+        }
+      }
+    }
     for (final p in _httpProviders) {
       final payload = (p['payload'] as Map?)?.cast<String, dynamic>() ?? {};
       if (payload['api_kind'] == apiKind &&

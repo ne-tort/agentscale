@@ -136,6 +136,16 @@ class _AdminAiKeyDetailPageState extends State<AdminAiKeyDetailPage> {
   String _providerSubtitle(AppLocalizations l10n) {
     final apiKind = _key?['api_kind'] as String? ?? '';
     final provider = _key?['provider'] as String? ?? '';
+    // Explicit catalog link wins: custom+codex keys match several entries
+    // (seeded Ollama + user-added endpoints) — only the linked one is real.
+    final entryId = _key?['catalog_entry_id'] as String?;
+    if (entryId != null && entryId.isNotEmpty) {
+      for (final p in _httpProviders) {
+        if (p['id'] == entryId) {
+          return p['title'] as String? ?? p['id'] as String;
+        }
+      }
+    }
     for (final p in _httpProviders) {
       final payload = (p['payload'] as Map?)?.cast<String, dynamic>() ?? {};
       if (payload['api_kind'] == apiKind &&
@@ -170,6 +180,7 @@ class _AdminAiKeyDetailPageState extends State<AdminAiKeyDetailPage> {
   Future<void> _pickProvider() async {
     final item = await AiHttpProviderSelectPage.push(
       context,
+      selectedEntryId: _key?['catalog_entry_id'] as String?,
       selectedApiKind: _key?['api_kind'] as String?,
       selectedProvider: _key?['provider'] as String?,
     );
