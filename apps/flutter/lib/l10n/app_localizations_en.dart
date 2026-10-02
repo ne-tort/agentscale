@@ -2796,5 +2796,5 @@ class AppLocalizationsEn extends AppLocalizations {
       'Employee name (login: name@company.local)';
 
   @override
-  String get authLoginHint => 'e.g. ivan@company.local';
+  String get authLoginHint => 'company@agentscale.local';
 }

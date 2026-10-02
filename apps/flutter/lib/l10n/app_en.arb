@@ -1665,5 +1665,5 @@
   "adminNoModels": "No models",
   "adminAddCompanyHint": "Company name (login: name@agentscale.local)",
   "companyAddEmployeeHint": "Employee name (login: name@company.local)",
-  "authLoginHint": "e.g. ivan@company.local"
+  "authLoginHint": "company@agentscale.local"
 }

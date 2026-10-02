@@ -5003,7 +5003,7 @@ abstract class AppLocalizations {
   /// No description provided for @authLoginHint.
   ///
   /// In en, this message translates to:
-  /// **'e.g. ivan@company.local'**
+  /// **'company@agentscale.local'**
   String get authLoginHint;
 }
 
