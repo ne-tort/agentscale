@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/api/prodavan_api.dart';
 import 'package:prodavan/core/chat/models/chat_block.dart';
+import 'package:prodavan/core/chat/tool_activity_labels.dart';
 import 'package:prodavan/core/chat/widgets/blocks/chat_blocks.dart';
+import 'package:prodavan/l10n/app_localizations.dart';
 
 String? _nonEmptyString(Object? value) =>
     value is String && value.trim().isNotEmpty ? value : null;
@@ -27,6 +29,7 @@ class ChatBlockRenderer extends StatelessWidget {
     this.api,
     this.onResolveApproval,
     this.costResolver,
+    this.mcpAliases = const {},
     this.turnStreaming = false,
   });
 
@@ -37,6 +40,10 @@ class ChatBlockRenderer extends StatelessWidget {
   final ProdavanApi? api;
   final void Function(String approvalId, String decision)? onResolveApproval;
   final double? Function(String? model, int? inputTokens, int? outputTokens)? costResolver;
+
+  /// MCP tool display aliases (see ChatSessionController.mcpAliases) —
+  /// forwarded to the tool activity labels.
+  final Map<String, String> mcpAliases;
 
   /// Parent turn is still streaming — the subagent block uses it to decide
   /// whether the child agent is running (spinner + transcript polling).
@@ -93,17 +100,20 @@ class ChatBlockRenderer extends StatelessWidget {
             input: input,
             output: pairedToolResult!.raw['output'],
             isError: pairedToolResult!.raw['is_error'] == true,
+            mcpAliases: mcpAliases,
           );
         }
         return ToolCallBlock(
           name: block.raw['name'] as String? ?? 'tool',
           input: block.raw['input'] is Map ? Map<String, dynamic>.from(block.raw['input'] as Map) : const {},
+          mcpAliases: mcpAliases,
         );
       case 'tool_result':
         return ToolResultBlock(
           name: block.raw['name'] as String? ?? 'tool',
           output: block.raw['output'],
           isError: block.raw['is_error'] == true,
+          mcpAliases: mcpAliases,
         );
       case 'approval':
         final id = block.raw['id'] as String? ?? '';
@@ -111,6 +121,7 @@ class ChatBlockRenderer extends StatelessWidget {
           name: block.raw['name'] as String? ?? 'tool',
           approvalId: id,
           input: block.raw['input'] is Map ? Map<String, dynamic>.from(block.raw['input'] as Map) : const {},
+          mcpAliases: mcpAliases,
           onAllow: onResolveApproval == null ? null : () => onResolveApproval!(id, 'allow'),
           onDeny: onResolveApproval == null ? null : () => onResolveApproval!(id, 'deny'),
         );
@@ -174,6 +185,19 @@ class ChatBlockRenderer extends StatelessWidget {
               ],
             ),
           ),
+        );
+      case 'permission_denial':
+        // Tool denied by policy/user — surfaced as a muted system line
+        // (previously invisible end-to-end: block kind existed, no case).
+        final l10n = AppLocalizations.of(context);
+        final rawName = block.raw['name'] as String? ?? block.raw['tool'] as String? ?? '';
+        final presentation = formatToolActivityLabel(
+          l10n,
+          name: rawName.isEmpty ? 'tool' : rawName,
+          mcpAliases: mcpAliases,
+        );
+        return ChatMutedLine(
+          label: '${l10n.projectChatPermissionDenied}: ${presentation.label}',
         );
       case 'status':
       case 'system_notice':

@@ -1220,9 +1220,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get cabinetManageCustomTabs => 'Manage custom tabs';
 
   @override
-  String get cabinetMcpTools => 'MCP tools';
-
-  @override
   String get cabinetMetaTables => 'Meta tables';
 
   @override
@@ -1253,9 +1250,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String cabinetNoInterpreterForView(String slug) {
     return 'No interpreter registered for view \"$slug\".';
   }
-
-  @override
-  String get cabinetNoMcpTools => 'No MCP tools exposed for this cabinet.';
 
   @override
   String get cabinetNoMetaTablesYet => 'No meta tables in this cabinet yet.';
@@ -2136,6 +2130,53 @@ class AppLocalizationsEn extends AppLocalizations {
   String projectChatToolMcp(String tool) {
     return 'MCP: $tool';
   }
+
+  @override
+  String projectChatToolMcpServer(Object server, Object tool) {
+    return 'MCP: $server · $tool';
+  }
+
+  @override
+  String get projectChatToolWebSearch => 'Web search';
+
+  @override
+  String get projectChatToolWebFetch => 'Fetching web page';
+
+  @override
+  String get projectChatToolTodoWrite => 'Updating task plan';
+
+  @override
+  String get projectChatToolTodoList => 'Task plan';
+
+  @override
+  String get projectChatToolNotesWrite => 'Writing note';
+
+  @override
+  String get projectChatToolNotesRead => 'Reading notes';
+
+  @override
+  String get projectChatToolGoalsSet => 'Setting goal';
+
+  @override
+  String get projectChatToolGoalsUpdate => 'Updating goal';
+
+  @override
+  String get projectChatToolGoalsList => 'Goals';
+
+  @override
+  String get projectChatToolCompact => 'Compacting context';
+
+  @override
+  String get projectChatToolMcpServers => 'MCP servers list';
+
+  @override
+  String get projectChatToolMcpTools => 'MCP tools list';
+
+  @override
+  String get projectChatToolErrorPrefix => 'Error';
+
+  @override
+  String get projectChatPermissionDenied => 'Action denied';
 
   @override
   String projectChatToolSubagent(String name) {

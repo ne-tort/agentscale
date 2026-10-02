@@ -1230,9 +1230,6 @@ class AppLocalizationsRu extends AppLocalizations {
   String get cabinetManageCustomTabs => 'Пользовательские вкладки';
 
   @override
-  String get cabinetMcpTools => 'MCP-инструменты';
-
-  @override
   String get cabinetMetaTables => 'Мета-таблицы';
 
   @override
@@ -1263,9 +1260,6 @@ class AppLocalizationsRu extends AppLocalizations {
   String cabinetNoInterpreterForView(String slug) {
     return 'Нет интерпретатора для представления «$slug».';
   }
-
-  @override
-  String get cabinetNoMcpTools => 'Для этого кабинета нет MCP-инструментов.';
 
   @override
   String get cabinetNoMetaTablesYet => 'В этом кабинете ещё нет мета-таблиц.';
@@ -2152,6 +2146,53 @@ class AppLocalizationsRu extends AppLocalizations {
   String projectChatToolMcp(String tool) {
     return 'MCP: $tool';
   }
+
+  @override
+  String projectChatToolMcpServer(Object server, Object tool) {
+    return 'MCP: $server · $tool';
+  }
+
+  @override
+  String get projectChatToolWebSearch => 'Поиск в интернете';
+
+  @override
+  String get projectChatToolWebFetch => 'Чтение веб-страницы';
+
+  @override
+  String get projectChatToolTodoWrite => 'Обновление плана задач';
+
+  @override
+  String get projectChatToolTodoList => 'План задач';
+
+  @override
+  String get projectChatToolNotesWrite => 'Запись заметки';
+
+  @override
+  String get projectChatToolNotesRead => 'Чтение заметок';
+
+  @override
+  String get projectChatToolGoalsSet => 'Постановка цели';
+
+  @override
+  String get projectChatToolGoalsUpdate => 'Обновление цели';
+
+  @override
+  String get projectChatToolGoalsList => 'Список целей';
+
+  @override
+  String get projectChatToolCompact => 'Сжатие контекста';
+
+  @override
+  String get projectChatToolMcpServers => 'Список MCP-серверов';
+
+  @override
+  String get projectChatToolMcpTools => 'Список MCP-инструментов';
+
+  @override
+  String get projectChatToolErrorPrefix => 'Ошибка';
+
+  @override
+  String get projectChatPermissionDenied => 'Действие отклонено';
 
   @override
   String projectChatToolSubagent(String name) {

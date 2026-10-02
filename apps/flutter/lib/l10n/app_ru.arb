@@ -765,7 +765,6 @@
   "cabinetLettersDigitsUnderscore": "Буквы, цифры и подчёркивание",
   "cabinetLowercaseSlugRule": "Строчные латинские буквы, цифры, подчёркивание",
   "cabinetManageCustomTabs": "Пользовательские вкладки",
-  "cabinetMcpTools": "MCP-инструменты",
   "cabinetMetaTables": "Мета-таблицы",
   "cabinetMyCabinetDefault": "Мой кабинет",
   "cabinetNewCabinet": "Новый кабинет",
@@ -783,7 +782,6 @@
       }
     }
   },
-  "cabinetNoMcpTools": "Для этого кабинета нет MCP-инструментов.",
   "cabinetNoMetaTablesYet": "В этом кабинете ещё нет мета-таблиц.",
   "cabinetNoRows": "Нет строк",
   "cabinetNotShipped": "не поставлен",
@@ -1336,6 +1334,21 @@
   "projectChatToolShell": "Запущена команда",
   "projectChatToolMcpGeneric": "MCP",
   "projectChatToolMcp": "MCP: {tool}",
+  "projectChatToolMcpServer": "MCP: {server} · {tool}",
+  "projectChatToolWebSearch": "Поиск в интернете",
+  "projectChatToolWebFetch": "Чтение веб-страницы",
+  "projectChatToolTodoWrite": "Обновление плана задач",
+  "projectChatToolTodoList": "План задач",
+  "projectChatToolNotesWrite": "Запись заметки",
+  "projectChatToolNotesRead": "Чтение заметок",
+  "projectChatToolGoalsSet": "Постановка цели",
+  "projectChatToolGoalsUpdate": "Обновление цели",
+  "projectChatToolGoalsList": "Список целей",
+  "projectChatToolCompact": "Сжатие контекста",
+  "projectChatToolMcpServers": "Список MCP-серверов",
+  "projectChatToolMcpTools": "Список MCP-инструментов",
+  "projectChatToolErrorPrefix": "Ошибка",
+  "projectChatPermissionDenied": "Действие отклонено",
   "@projectChatToolMcp": {
     "placeholders": {
       "tool": {

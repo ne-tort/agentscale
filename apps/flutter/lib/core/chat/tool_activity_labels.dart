@@ -19,14 +19,23 @@ enum ToolKind {
 
 ToolKind normalizeToolKind(String name) {
   final lower = name.toLowerCase().trim();
+  // Agent built-ins ride the runtime both bare (fs.read …) and through the
+  // built-in "openclaw" MCP server (mcp.openclaw.fs.read …) — normalize the
+  // prefix away so panels/grouping treat them identically.
+  if (lower.startsWith('mcp.openclaw.')) {
+    return normalizeToolKind(lower.substring('mcp.openclaw.'.length));
+  }
   if (lower.startsWith('mcp') || lower.contains('mcp__')) return ToolKind.mcp;
   switch (lower) {
     case 'read':
     case 'read_file':
+    case 'fs.read':
       return ToolKind.fileRead;
     case 'write':
+    case 'fs.write':
       return ToolKind.fileWrite;
     case 'edit':
+    case 'fs.edit':
     case 'strreplace':
     case 'str_replace':
       return ToolKind.fileEdit;
@@ -35,19 +44,23 @@ ToolKind normalizeToolKind(String name) {
     case 'unlink':
       return ToolKind.fileDelete;
     case 'glob':
+    case 'search.glob':
       return ToolKind.searchGlob;
     case 'grep':
     case 'ripgrep':
     case 'rg':
+    case 'search.grep':
       return ToolKind.searchGrep;
     case 'ls':
     case 'list_dir':
     case 'listdir':
+    case 'fs.list':
       return ToolKind.listDir;
     case 'shell':
     case 'bash':
     case 'run_terminal_cmd':
     case 'run_command':
+    case 'shell.exec':
       return ToolKind.shell;
     case 'task':
     case 'agent':
@@ -321,12 +334,80 @@ String formatToolPanelBody({
   }
 }
 
+/// Labels for the agent's standard (non-module) MCP utilities — displayed
+/// regardless of server/module config; the wire names come from the OpenClaw
+/// tool registry (openclaw-sdk packages/tools + functional tools).
+String? standardUtilityLabel(AppLocalizations l10n, String bareTool) {
+  switch (bareTool.toLowerCase().trim()) {
+    case 'web.search':
+      return l10n.projectChatToolWebSearch;
+    case 'web.fetch':
+      return l10n.projectChatToolWebFetch;
+    case 'todo.write':
+      return l10n.projectChatToolTodoWrite;
+    case 'todo.list':
+      return l10n.projectChatToolTodoList;
+    case 'notes.write':
+      return l10n.projectChatToolNotesWrite;
+    case 'notes.read':
+      return l10n.projectChatToolNotesRead;
+    case 'goals.set':
+      return l10n.projectChatToolGoalsSet;
+    case 'goals.update':
+      return l10n.projectChatToolGoalsUpdate;
+    case 'goals.list':
+      return l10n.projectChatToolGoalsList;
+    case 'context.compact':
+      return l10n.projectChatToolCompact;
+    case 'agent.spawn':
+      return l10n.projectChatToolSubagent(bareTool);
+    case 'mcp.list_servers':
+      return l10n.projectChatToolMcpServers;
+    case 'mcp.list_tools':
+      return l10n.projectChatToolMcpTools;
+  }
+  return null;
+}
+
+/// Canonical MCP wire name (mcp-server-dot-tool) split into server + tool;
+/// tolerates the legacy internal mcp__server__tool form.
+({String? server, String tool}) splitMcpToolName(String name) {
+  var n = name.trim();
+  if (n.toLowerCase().startsWith('mcp__')) {
+    n = n.substring(5).replaceAll('__', '.');
+  } else if (n.toLowerCase().startsWith('mcp.')) {
+    n = n.substring(4);
+  } else if (n.toLowerCase().startsWith('mcp-')) {
+    n = n.substring(4);
+  }
+  n = n.replaceFirst(RegExp(r'^\.'), '');
+  final dot = n.indexOf('.');
+  if (dot <= 0) return (server: null, tool: n);
+  final server = n.substring(0, dot);
+  final tool = n.substring(dot + 1);
+  if (server.isEmpty || tool.isEmpty) return (server: null, tool: n);
+  return (server: server, tool: tool);
+}
+
+/// Alias lookup for MCP tool display names. Keys: canonical server-qualified
+/// wire names and bare tool names (server-less aliases).
+String? resolveMcpAlias(Map<String, String> aliases, String wireName) {
+  if (aliases.isEmpty) return null;
+  final hit = aliases[wireName];
+  if (hit != null && hit.trim().isNotEmpty) return hit.trim();
+  final parts = splitMcpToolName(wireName);
+  final bare = aliases[parts.tool];
+  if (bare != null && bare.trim().isNotEmpty) return bare.trim();
+  return null;
+}
+
 ({String label, String? detail}) formatToolActivityLabel(
   AppLocalizations l10n, {
   required String name,
   Map<String, dynamic> input = const {},
   Object? output,
   bool pending = false,
+  Map<String, String> mcpAliases = const {},
 }) {
   final kind = normalizeToolKind(name);
   final inMap = normalizeToolInput(input);
@@ -355,13 +436,32 @@ String formatToolPanelBody({
       label = l10n.projectChatToolShell;
       detail = command;
     case ToolKind.mcp:
-      final tool = name.replaceFirst(RegExp(r'^mcp[_-]*', caseSensitive: false), '').trim();
-      label = tool.isNotEmpty ? l10n.projectChatToolMcp(tool) : l10n.projectChatToolMcpGeneric;
+      final parts = splitMcpToolName(name);
+      // Module MCP alias (mcp_aliases meta) wins; mcp.list_servers /
+      // mcp.list_tools are functional agent utilities, not module tools.
+      final alias = resolveMcpAlias(mcpAliases, name);
+      final standard = standardUtilityLabel(l10n, name.toLowerCase());
+      if (alias != null) {
+        label = alias;
+      } else if (standard != null) {
+        label = standard;
+      } else if (parts.server != null && parts.server!.isNotEmpty) {
+        label = l10n.projectChatToolMcpServer(parts.server!, parts.tool);
+      } else {
+        label = parts.tool.isNotEmpty
+            ? l10n.projectChatToolMcp(parts.tool)
+            : l10n.projectChatToolMcpGeneric;
+      }
     case ToolKind.subagent:
       label = l10n.projectChatToolSubagent(name);
     case ToolKind.generic:
-      label = l10n.projectChatToolGeneric(name);
-      detail = command ?? pattern ?? path;
+      final standard = standardUtilityLabel(l10n, name);
+      if (standard != null) {
+        label = standard;
+      } else {
+        label = l10n.projectChatToolGeneric(name);
+        detail = command ?? pattern ?? path;
+      }
   }
 
   if (pending) {

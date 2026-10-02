@@ -765,7 +765,6 @@
   "cabinetLettersDigitsUnderscore": "Letters, digits, underscore",
   "cabinetLowercaseSlugRule": "Lowercase letters, digits, underscore",
   "cabinetManageCustomTabs": "Manage custom tabs",
-  "cabinetMcpTools": "MCP tools",
   "cabinetMetaTables": "Meta tables",
   "cabinetMyCabinetDefault": "My cabinet",
   "cabinetNewCabinet": "New cabinet",
@@ -783,7 +782,6 @@
       }
     }
   },
-  "cabinetNoMcpTools": "No MCP tools exposed for this cabinet.",
   "cabinetNoMetaTablesYet": "No meta tables in this cabinet yet.",
   "cabinetNoRows": "No rows",
   "cabinetNotShipped": "not shipped",
@@ -1342,6 +1340,27 @@
   "projectChatToolShell": "Ran command",
   "projectChatToolMcpGeneric": "MCP",
   "projectChatToolMcp": "MCP: {tool}",
+  "projectChatToolMcpServer": "MCP: {server} · {tool}",
+  "projectChatToolWebSearch": "Web search",
+  "projectChatToolWebFetch": "Fetching web page",
+  "projectChatToolTodoWrite": "Updating task plan",
+  "projectChatToolTodoList": "Task plan",
+  "projectChatToolNotesWrite": "Writing note",
+  "projectChatToolNotesRead": "Reading notes",
+  "projectChatToolGoalsSet": "Setting goal",
+  "projectChatToolGoalsUpdate": "Updating goal",
+  "projectChatToolGoalsList": "Goals",
+  "projectChatToolCompact": "Compacting context",
+  "projectChatToolMcpServers": "MCP servers list",
+  "projectChatToolMcpTools": "MCP tools list",
+  "projectChatToolErrorPrefix": "Error",
+  "projectChatPermissionDenied": "Action denied",
+  "@projectChatToolMcpServer": {
+    "placeholders": {
+      "server": {},
+      "tool": {}
+    }
+  },
   "@projectChatToolMcp": {
     "placeholders": {
       "tool": {
