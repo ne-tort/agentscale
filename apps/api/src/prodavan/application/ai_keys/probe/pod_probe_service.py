@@ -44,6 +44,7 @@ from prodavan.application.agent.adapter_kinds import api_kind_to_bridge_adapter
 from prodavan.application.ai_keys.probe.provider_resolver import ProviderResolver
 from prodavan.config.settings import settings
 from prodavan.domain.ai_keys import ApiKind, ProbeKind, ProbeResult, ProbeStatus, is_http_probe_kind
+from prodavan.domain.ai_keys.http_url import endpoint_path_for
 from prodavan.infrastructure.persistence.models.ai_keys import AiProviderKeyRow
 from prodavan.infrastructure.secrets.store import SecretStore, get_secret_store
 
@@ -141,7 +142,11 @@ class ProbePodService:
         params: dict[str, str] = {"adapter": adapter, "key_id": key_id}
         if endpoint is not None:
             params["base_url"] = endpoint.base_url
-            params["models_path"] = endpoint.models_path
+            # Dedup the shared /vN segment — the bridge concatenates the pair
+            # verbatim; a double segment is a 404 → probe sees 0 models.
+            params["models_path"] = endpoint_path_for(
+                endpoint.base_url, endpoint.models_path
+            )
             params["auth_scheme"] = endpoint.auth_scheme
         start = _now_ms()
         try:
