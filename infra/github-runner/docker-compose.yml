@@ -1,4 +1,4 @@
-# Prodavan GitHub Actions runners — Docker Desktop (Windows-controlled)
+# Agentscale GitHub Actions runners — Docker Desktop (Windows-controlled)
 #
 # Peak parallel jobs in CI Gate: infra + api + flutter + schemas = 4
 # Persistent /cache volume: Flutter SDK, pub, Poetry, pip (project-dedicated runners).
@@ -68,7 +68,7 @@ x-runner-env: &runner-env
 x-runner-volumes: &runner-volumes
   - /var/run/docker.sock:/var/run/docker.sock
   - ${USERPROFILE}/.kube:/home/runner/.kube:ro
-  - prodavan-ci-cache:/cache
+  - agentscale-ci-cache:/cache
 
 services:
   runner-1:
@@ -80,7 +80,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${USERPROFILE}/.kube:/home/runner/.kube:ro
-      - prodavan-ci-cache:/cache
+      - agentscale-ci-cache:/cache
       - runner-1-files:/runner-files
 
   runner-2:
@@ -92,7 +92,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${USERPROFILE}/.kube:/home/runner/.kube:ro
-      - prodavan-ci-cache:/cache
+      - agentscale-ci-cache:/cache
       - runner-2-files:/runner-files
 
   runner-3:
@@ -104,7 +104,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${USERPROFILE}/.kube:/home/runner/.kube:ro
-      - prodavan-ci-cache:/cache
+      - agentscale-ci-cache:/cache
       - runner-3-files:/runner-files
 
   runner-4:
@@ -116,7 +116,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${USERPROFILE}/.kube:/home/runner/.kube:ro
-      - prodavan-ci-cache:/cache
+      - agentscale-ci-cache:/cache
       - runner-4-files:/runner-files
 
   # prodavan-claw CI/images — private repo cannot use ubuntu-latest (no hosted minutes).
@@ -132,7 +132,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${USERPROFILE}/.kube:/home/runner/.kube:ro
-      - prodavan-ci-cache:/cache
+      - agentscale-ci-cache:/cache
       - claw-runner-1-files:/runner-files
 
   claw-runner-2:
@@ -146,10 +146,10 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${USERPROFILE}/.kube:/home/runner/.kube:ro
-      - prodavan-ci-cache:/cache
+      - agentscale-ci-cache:/cache
       - claw-runner-2-files:/runner-files
 
-  # agentscale repo (parent repo of prodavan submodule) - separate REPO_URL.
+  # agentscale repo (parent repo of agentscale submodule) - separate REPO_URL.
   # Start with: docker compose --profile agentscale up -d
   agentscale-runner-1:
     <<: *runner-common
@@ -162,7 +162,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${USERPROFILE}/.kube:/home/runner/.kube:ro
-      - prodavan-ci-cache:/cache
+      - agentscale-ci-cache:/cache
       - agentscale-runner-1-files:/runner-files
 
 networks:
@@ -171,19 +171,19 @@ networks:
     driver: bridge
 
 volumes:
-  prodavan-ci-cache:
-    name: prodavan-ci-cache
+  agentscale-ci-cache:
+    name: agentscale-ci-cache
   runner-1-files:
-    name: prodavan-runner-1-files
+    name: agentscale-runner-1-files
   runner-2-files:
-    name: prodavan-runner-2-files
+    name: agentscale-runner-2-files
   runner-3-files:
-    name: prodavan-runner-3-files
+    name: agentscale-runner-3-files
   runner-4-files:
-    name: prodavan-runner-4-files
+    name: agentscale-runner-4-files
   claw-runner-1-files:
     name: prodavan-claw-runner-1-files
   claw-runner-2-files:
     name: prodavan-claw-runner-2-files
   agentscale-runner-1-files:
-    name: prodavan-agentscale-runner-1-files
+    name: agentscale-agentscale-runner-1-files

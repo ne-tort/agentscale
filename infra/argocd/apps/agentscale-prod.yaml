@@ -1,0 +1,55 @@
+# PROD contour: source = `prod` BRANCH (promotion via PR main → prod),
+# namespace agentscale (+ agentscale-sandboxes inside the overlay).
+# Delivery cadence is deliberately slower than dev (agentscale-dev tracks main).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: agentscale-prod
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: agentscale
+  source:
+    repoURL: https://github.com/ne-tort/agentscale.git
+    targetRevision: prod
+    path: infra/k3s/overlays/prod
+    # Image tags are pinned INSIDE the overlay (promotion PR updates them).
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: agentscale
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - RespectIgnoreDifferences=true
+      - Wait=false
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+  ignoreDifferences:
+    - group: batch
+      kind: Job
+      jsonPointers:
+        - /status
+        - /spec/selector
+        - /spec/template/metadata/labels
+    - group: apps
+      kind: Deployment
+      jsonPointers:
+        - /status
+    - group: apps
+      kind: StatefulSet
+      jsonPointers:
+        - /status
+    - group: ""
+      kind: PersistentVolumeClaim
+      jsonPointers:
+        - /spec/volumeName
+        - /spec/storageClassName
+        - /status

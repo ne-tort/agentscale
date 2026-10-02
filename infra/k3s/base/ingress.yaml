@@ -1,4 +1,4 @@
-# Prodavan ingress — HTTP (web) and HTTPS (websecure) routers.
+# Agentscale ingress — HTTP (web) and HTTPS (websecure) routers.
 #
 # No host filter: dev is reached via arbitrary reverse proxies (punnel/VPN,
 # WSL localhost forwarding) whose Host/SNI is unpredictable; wildcard match
@@ -6,8 +6,7 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: prodavan
-  namespace: prodavan
+  name: agentscale
   annotations:
     argocd.argoproj.io/sync-wave: "25"
     traefik.ingress.kubernetes.io/router.entrypoints: web
@@ -20,21 +19,21 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: prodavan-api
+                name: agentscale-api
                 port:
                   number: 8000
           - path: /health
             pathType: Prefix
             backend:
               service:
-                name: prodavan-api
+                name: agentscale-api
                 port:
                   number: 8000
           - path: /
             pathType: Prefix
             backend:
               service:
-                name: prodavan-web
+                name: agentscale-web
                 port:
                   number: 80
 ---
@@ -44,8 +43,7 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: prodavan-https
-  namespace: prodavan
+  name: agentscale-https
   annotations:
     argocd.argoproj.io/sync-wave: "25"
     traefik.ingress.kubernetes.io/router.entrypoints: websecure
@@ -62,20 +60,20 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: prodavan-api
+                name: agentscale-api
                 port:
                   number: 8000
           - path: /health
             pathType: Prefix
             backend:
               service:
-                name: prodavan-api
+                name: agentscale-api
                 port:
                   number: 8000
           - path: /
             pathType: Prefix
             backend:
               service:
-                name: prodavan-web
+                name: agentscale-web
                 port:
                   number: 80

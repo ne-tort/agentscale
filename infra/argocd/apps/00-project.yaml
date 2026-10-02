@@ -2,20 +2,24 @@
 apiVersion: argoproj.io/v1alpha1
 kind: AppProject
 metadata:
-  name: prodavan
+  name: agentscale
   namespace: argocd
 spec:
-  description: Prodavan k3s (repo + namespace scoped)
+  description: Agentscale k3s (repo + namespace scoped)
   sourceRepos:
     - https://github.com/ne-tort/agentscale.git
   destinations:
-    - namespace: prodavan
+    - namespace: agentscale
       server: https://kubernetes.default.svc
-    - namespace: prodavan-sandboxes
+    - namespace: agentscale-sandboxes
+      server: https://kubernetes.default.svc
+    - namespace: agentscale-dev
+      server: https://kubernetes.default.svc
+    - namespace: agentscale-dev-sandboxes
       server: https://kubernetes.default.svc
     # agent-sandbox-system: platform ns for the sandbox controller/router
     # (App agent-sandbox.yaml, project `agent-sandbox`). Listed here so the
-    # prodavan project may also target it if platform glue ever lands there.
+    # agentscale project may also target it if platform glue ever lands there.
     - namespace: agent-sandbox-system
       server: https://kubernetes.default.svc
   # Overlay includes Namespace; CreateNamespace=true also needs this.
@@ -76,4 +80,4 @@ spec:
         kind: Pod
       - group: batch
         kind: Job
-        name: prodavan-sandbox-probe
+        name: agentscale-sandbox-probe

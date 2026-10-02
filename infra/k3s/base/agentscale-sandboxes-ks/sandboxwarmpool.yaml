@@ -4,14 +4,13 @@
 apiVersion: extensions.agents.x-k8s.io/v1beta1
 kind: SandboxWarmPool
 metadata:
-  name: prodavan-agent-pool
-  namespace: prodavan-sandboxes
+  name: agentscale-agent-pool
   labels:
-    app.kubernetes.io/part-of: prodavan
-    prodavan.io/managed-by: agent-sandbox
+    app.kubernetes.io/part-of: agentscale
+    agentscale.io/managed-by: agent-sandbox
 spec:
   replicas: 2
   updateStrategy:
     type: Recreate
   sandboxTemplateRef:
-    name: prodavan-agent
+    name: agentscale-agent

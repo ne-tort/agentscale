@@ -2,26 +2,26 @@
 apiVersion: v1
 kind: Secret
 metadata:
-  name: prodavan-minio
+  name: agentscale-minio
   labels:
-    app.kubernetes.io/name: prodavan-minio
-    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/name: agentscale-minio
+    app.kubernetes.io/part-of: agentscale
     app.kubernetes.io/component: minio
 stringData:
-  root-user: prodavan
-  root-password: prodavan123
-  api-user: prodavan-api
-  api-password: prodavan-api-secret
+  root-user: agentscale
+  root-password: agentscale123
+  api-user: agentscale-api
+  api-password: agentscale-api-secret
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: prodavan-minio-data
+  name: agentscale-minio-data
   annotations:
     argocd.argoproj.io/sync-wave: "1"
   labels:
-    app.kubernetes.io/name: prodavan-minio
-    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/name: agentscale-minio
+    app.kubernetes.io/part-of: agentscale
     app.kubernetes.io/component: minio
 spec:
   accessModes:
@@ -33,10 +33,10 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: prodavan-minio
+  name: agentscale-minio
   labels:
-    app.kubernetes.io/name: prodavan-minio
-    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/name: agentscale-minio
+    app.kubernetes.io/part-of: agentscale
     app.kubernetes.io/component: minio
 spec:
   ports:
@@ -47,29 +47,29 @@ spec:
       port: 9001
       targetPort: 9001
   selector:
-    app.kubernetes.io/name: prodavan-minio
+    app.kubernetes.io/name: agentscale-minio
 ---
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: prodavan-minio
+  name: agentscale-minio
   labels:
-    app.kubernetes.io/name: prodavan-minio
-    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/name: agentscale-minio
+    app.kubernetes.io/part-of: agentscale
     app.kubernetes.io/component: minio
   annotations:
     argocd.argoproj.io/sync-wave: "1"
 spec:
-  serviceName: prodavan-minio
+  serviceName: agentscale-minio
   replicas: 1
   selector:
     matchLabels:
-      app.kubernetes.io/name: prodavan-minio
+      app.kubernetes.io/name: agentscale-minio
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: prodavan-minio
-        app.kubernetes.io/part-of: prodavan
+        app.kubernetes.io/name: agentscale-minio
+        app.kubernetes.io/part-of: agentscale
         app.kubernetes.io/component: minio
     spec:
       terminationGracePeriodSeconds: 60
@@ -85,12 +85,12 @@ spec:
             - name: MINIO_ROOT_USER
               valueFrom:
                 secretKeyRef:
-                  name: prodavan-minio
+                  name: agentscale-minio
                   key: root-user
             - name: MINIO_ROOT_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: prodavan-minio
+                  name: agentscale-minio
                   key: root-password
             # Local k3s: no phone-home. Browser console stays on :9001 for ops.
             - name: MINIO_UPDATE
@@ -132,18 +132,18 @@ spec:
       volumes:
         - name: data
           persistentVolumeClaim:
-            claimName: prodavan-minio-data
+            claimName: agentscale-minio-data
 ---
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: prodavan-minio-init
+  name: agentscale-minio-init
   labels:
-    app.kubernetes.io/name: prodavan-minio-init
-    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/name: agentscale-minio-init
+    app.kubernetes.io/part-of: agentscale
     app.kubernetes.io/component: minio-init
   annotations:
-    # Sync hook wave 9 — must finish before prodavan-api (wave 10).
+    # Sync hook wave 9 — must finish before agentscale-api (wave 10).
     argocd.argoproj.io/hook: Sync
     argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
     argocd.argoproj.io/sync-wave: "9"
@@ -153,8 +153,8 @@ spec:
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: prodavan-minio-init
-        app.kubernetes.io/part-of: prodavan
+        app.kubernetes.io/name: agentscale-minio-init
+        app.kubernetes.io/part-of: agentscale
     spec:
       restartPolicy: OnFailure
       containers:
@@ -164,22 +164,22 @@ spec:
             - name: MINIO_ROOT_USER
               valueFrom:
                 secretKeyRef:
-                  name: prodavan-minio
+                  name: agentscale-minio
                   key: root-user
             - name: MINIO_ROOT_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: prodavan-minio
+                  name: agentscale-minio
                   key: root-password
             - name: MINIO_API_USER
               valueFrom:
                 secretKeyRef:
-                  name: prodavan-minio
+                  name: agentscale-minio
                   key: api-user
             - name: MINIO_API_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: prodavan-minio
+                  name: agentscale-minio
                   key: api-password
           volumeMounts:
             - name: api-policy
@@ -191,7 +191,7 @@ spec:
             - |
               set -eu
               i=0
-              until mc alias set local http://prodavan-minio:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"; do
+              until mc alias set local http://agentscale-minio:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"; do
                 i=$((i+1))
                 if [ "$i" -gt 60 ]; then exit 1; fi
                 sleep 2
@@ -202,23 +202,23 @@ spec:
                 if [ "$j" -gt 60 ]; then exit 1; fi
                 sleep 2
               done
-              mc mb -p local/prodavan || true
+              mc mb -p local/agentscale || true
               # App bucket must stay private (no anonymous download of workspaces).
-              mc anonymous set none local/prodavan || true
+              mc anonymous set none local/agentscale || true
               # Local SoT uses overwrite semantics; versioning off keeps PVC lean.
-              mc version suspend local/prodavan || true
+              mc version suspend local/agentscale || true
               # mc admin policy update is deprecated; recreate idempotently.
-              mc admin policy remove local prodavan-api-policy 2>/dev/null || true
-              mc admin policy create local prodavan-api-policy /policy/minio-api-policy.json
+              mc admin policy remove local agentscale-api-policy 2>/dev/null || true
+              mc admin policy create local agentscale-api-policy /policy/minio-api-policy.json
               if ! mc admin user info local "$MINIO_API_USER" >/dev/null 2>&1; then
                 mc admin user add local "$MINIO_API_USER" "$MINIO_API_PASSWORD"
               fi
-              mc admin policy attach local prodavan-api-policy --user "$MINIO_API_USER"
+              mc admin policy attach local agentscale-api-policy --user "$MINIO_API_USER"
               # Smoke: service user must head/list bucket before API (wave 10) starts.
-              mc alias set apiuser http://prodavan-minio:9000 "$MINIO_API_USER" "$MINIO_API_PASSWORD"
-              mc ls "apiuser/prodavan" >/dev/null
+              mc alias set apiuser http://agentscale-minio:9000 "$MINIO_API_USER" "$MINIO_API_PASSWORD"
+              mc ls "apiuser/agentscale" >/dev/null
               echo "minio-init: bucket + IAM user ok"
       volumes:
         - name: api-policy
           configMap:
-            name: prodavan-minio-api-policy
+            name: agentscale-minio-api-policy

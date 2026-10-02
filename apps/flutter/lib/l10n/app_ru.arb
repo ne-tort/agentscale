@@ -151,9 +151,15 @@
   "adminQuotasSummary": "{cabinets} · {packages} · {bundleMb}",
   "@adminQuotasSummary": {
     "placeholders": {
-      "cabinets": { "type": "String" },
-      "packages": { "type": "String" },
-      "bundleMb": { "type": "String" }
+      "cabinets": {
+        "type": "String"
+      },
+      "packages": {
+        "type": "String"
+      },
+      "bundleMb": {
+        "type": "String"
+      }
     }
   },
   "adminCreateAiKey": "Создать AI-ключ",
@@ -457,19 +463,25 @@
   "containerDurationDays": "{count, plural, one{{count} д} few{{count} д} many{{count} д} other{{count} д}}",
   "@containerDurationDays": {
     "placeholders": {
-      "count": { "type": "int" }
+      "count": {
+        "type": "int"
+      }
     }
   },
   "containerDurationHours": "{count, plural, one{{count} ч} few{{count} ч} many{{count} ч} other{{count} ч}}",
   "@containerDurationHours": {
     "placeholders": {
-      "count": { "type": "int" }
+      "count": {
+        "type": "int"
+      }
     }
   },
   "containerDurationMinutes": "{count, plural, one{{count} мин} few{{count} мин} many{{count} мин} other{{count} мин}}",
   "@containerDurationMinutes": {
     "placeholders": {
-      "count": { "type": "int" }
+      "count": {
+        "type": "int"
+      }
     }
   },
   "containerObservedPreparing": "Подготовка",
@@ -501,13 +513,17 @@
   "adminDeleteCompanyConfirm": "Удалить компанию «{name}»? Будут отключены сотрудники, приостановлены и удалены проекты (wipe workspace), кабинеты удалятся навсегда.",
   "@adminDeleteCompanyConfirm": {
     "placeholders": {
-      "name": { "type": "String" }
+      "name": {
+        "type": "String"
+      }
     }
   },
   "adminDisableAiKeyConfirm": "Приостановить ключ? Связанные проекты будут приостановлены",
   "@adminDisableAiKeyConfirm": {
     "placeholders": {
-      "name": { "type": "String" }
+      "name": {
+        "type": "String"
+      }
     }
   },
   "adminNoCompaniesBound": "Компании не привязаны",
@@ -531,14 +547,18 @@
   "adminCompanyCabinetsRunning": "{running} / {quota}",
   "@adminCompanyCabinetsRunning": {
     "placeholders": {
-      "running": { "type": "String" },
-      "quota": { "type": "String" }
+      "running": {
+        "type": "String"
+      },
+      "quota": {
+        "type": "String"
+      }
     }
   },
   "adminPreferredProvider": "Провайдер",
   "adminPreferredProviderOptional": "Провайдер",
-  "adminProdavanSubscription": "Подписка Prodavan",
-  "adminProdavanSubscriptionOptional": "Подписка Prodavan",
+  "adminProdavanSubscription": "Подписка Agentscale",
+  "adminProdavanSubscriptionOptional": "Подписка Agentscale",
   "adminProviderValue": "Провайдер: {provider}",
   "@adminProviderValue": {
     "placeholders": {
@@ -992,7 +1012,9 @@
   "errorHttpStatus": "Ошибка запроса (HTTP {status})",
   "@errorHttpStatus": {
     "placeholders": {
-      "status": { "type": "int" }
+      "status": {
+        "type": "int"
+      }
     }
   },
   "errorIdentityProvider": "Не удалось обновить учётные данные. Попробуйте ещё раз.",
@@ -1025,7 +1047,9 @@
   "aiKeyModelsSelected": "Выбрано: {count}",
   "@aiKeyModelsSelected": {
     "placeholders": {
-      "count": { "type": "String" }
+      "count": {
+        "type": "String"
+      }
     }
   },
   "aiKeyModelsAddHint": "ID модели",
@@ -1067,13 +1091,17 @@
   "chatMessageTooLong": "Сообщение слишком длинное (макс. {max} знаков)",
   "@chatMessageTooLong": {
     "placeholders": {
-      "max": { "type": "int" }
+      "max": {
+        "type": "int"
+      }
     }
   },
   "chatTooManyAttachments": "Слишком много вложений (макс. {max})",
   "@chatTooManyAttachments": {
     "placeholders": {
-      "max": { "type": "int" }
+      "max": {
+        "type": "int"
+      }
     }
   },
   "chatFileTooLarge": "Файл слишком большой",
@@ -1081,90 +1109,138 @@
   "chatAttachmentLabel": "Вложение: {name}",
   "@chatAttachmentLabel": {
     "placeholders": {
-      "name": { "type": "String" }
+      "name": {
+        "type": "String"
+      }
     }
   },
   "chatAttachmentJsonLabel": "Вложение: {name} (JSON)",
   "@chatAttachmentJsonLabel": {
     "placeholders": {
-      "name": { "type": "String" }
+      "name": {
+        "type": "String"
+      }
     }
   },
   "chatAttachmentPathLabel": "Вложение: {name} → /workspace/{path}",
   "@chatAttachmentPathLabel": {
     "placeholders": {
-      "name": { "type": "String" },
-      "path": { "type": "String" }
+      "name": {
+        "type": "String"
+      },
+      "path": {
+        "type": "String"
+      }
     }
   },
   "chatAttachmentRowsLabel": "Вложение: {name} ({rows, plural, one{{rows} строка} few{{rows} строки} many{{rows} строк} other{{rows} строки}})",
   "@chatAttachmentRowsLabel": {
     "placeholders": {
-      "name": { "type": "String" },
-      "rows": { "type": "int" }
+      "name": {
+        "type": "String"
+      },
+      "rows": {
+        "type": "int"
+      }
     }
   },
   "projectAgentFailedToStart": "Агент не запустился: {reason}",
   "@projectAgentFailedToStart": {
     "placeholders": {
-      "reason": { "type": "String" }
+      "reason": {
+        "type": "String"
+      }
     }
   },
   "projectChatSidechainOffline": "Sidechain недоступен — контейнер не запущен",
   "projectChatGroupThinking": "Размышление ({count})",
   "@projectChatGroupThinking": {
     "placeholders": {
-      "count": { "type": "int" }
+      "count": {
+        "type": "int"
+      }
     }
   },
   "projectChatGroupFilesEdited": "Изменено {count} файлов",
   "@projectChatGroupFilesEdited": {
     "placeholders": {
-      "count": { "type": "int" }
+      "count": {
+        "type": "int"
+      }
     }
   },
   "projectChatGroupFilesRead": "Прочитано {count} файлов",
   "@projectChatGroupFilesRead": {
     "placeholders": {
-      "count": { "type": "int" }
+      "count": {
+        "type": "int"
+      }
     }
   },
   "projectChatGroupCommands": "Запущено {count} команд",
   "@projectChatGroupCommands": {
     "placeholders": {
-      "count": { "type": "int" }
+      "count": {
+        "type": "int"
+      }
     }
   },
   "projectChatGroupMcp": "MCP: {count} вызовов",
   "@projectChatGroupMcp": {
     "placeholders": {
-      "count": { "type": "int" }
+      "count": {
+        "type": "int"
+      }
     }
   },
   "projectChatGroupDeleted": "Удалено {count} файлов",
   "@projectChatGroupDeleted": {
-    "placeholders": { "count": { "type": "int" } }
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
   },
   "projectChatGroupGlob": "Поиск файлов ({count})",
   "@projectChatGroupGlob": {
-    "placeholders": { "count": { "type": "int" } }
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
   },
   "projectChatGroupGrep": "Поиск ({count})",
   "@projectChatGroupGrep": {
-    "placeholders": { "count": { "type": "int" } }
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
   },
   "projectChatGroupListDir": "Список ({count})",
   "@projectChatGroupListDir": {
-    "placeholders": { "count": { "type": "int" } }
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
   },
   "projectChatGroupGeneric": "Инструменты ({count})",
   "@projectChatGroupGeneric": {
-    "placeholders": { "count": { "type": "int" } }
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
   },
   "projectChatWorking": "Работаю…",
   "projectChatWorked": "Работал · {count} действий",
   "@projectChatWorked": {
-    "placeholders": { "count": { "type": "int" } }
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
   },
   "projectChatAgentWorking": "agentscale работает…",
   "chatCopyMessage": "Копировать ответ",
@@ -1174,8 +1250,12 @@
   "chatModelPricePerMtok": "{priceIn} / {priceOut} $ · 1M токенов",
   "@chatModelPricePerMtok": {
     "placeholders": {
-      "priceIn": { "type": "String" },
-      "priceOut": { "type": "String" }
+      "priceIn": {
+        "type": "String"
+      },
+      "priceOut": {
+        "type": "String"
+      }
     }
   },
   "chatModelDefaultLabel": "По умолчанию",
@@ -1184,51 +1264,91 @@
   "projectChatToolReadFile": "Прочитан файл",
   "projectChatToolReadPath": "Прочитан {path}",
   "@projectChatToolReadPath": {
-    "placeholders": { "path": { "type": "String" } }
+    "placeholders": {
+      "path": {
+        "type": "String"
+      }
+    }
   },
   "projectChatToolWriteFile": "Записан файл",
   "projectChatToolWritePath": "Записан {path}",
   "@projectChatToolWritePath": {
-    "placeholders": { "path": { "type": "String" } }
+    "placeholders": {
+      "path": {
+        "type": "String"
+      }
+    }
   },
   "projectChatToolEditFile": "Изменён файл",
   "projectChatToolEditPath": "Изменён {path}",
   "@projectChatToolEditPath": {
-    "placeholders": { "path": { "type": "String" } }
+    "placeholders": {
+      "path": {
+        "type": "String"
+      }
+    }
   },
   "projectChatToolDeleteFile": "Удалён файл",
   "projectChatToolDeletePath": "Удалён {path}",
   "@projectChatToolDeletePath": {
-    "placeholders": { "path": { "type": "String" } }
+    "placeholders": {
+      "path": {
+        "type": "String"
+      }
+    }
   },
   "projectChatToolGlob": "Поиск файлов",
   "projectChatToolGlobPattern": "Поиск файлов {pattern}",
   "@projectChatToolGlobPattern": {
-    "placeholders": { "pattern": { "type": "String" } }
+    "placeholders": {
+      "pattern": {
+        "type": "String"
+      }
+    }
   },
   "projectChatToolGrep": "Поиск",
   "projectChatToolGrepPattern": "Поиск {pattern}",
   "@projectChatToolGrepPattern": {
-    "placeholders": { "pattern": { "type": "String" } }
+    "placeholders": {
+      "pattern": {
+        "type": "String"
+      }
+    }
   },
   "projectChatToolListDir": "Список файлов",
   "projectChatToolListDirPath": "Список {path}",
   "@projectChatToolListDirPath": {
-    "placeholders": { "path": { "type": "String" } }
+    "placeholders": {
+      "path": {
+        "type": "String"
+      }
+    }
   },
   "projectChatToolShell": "Запущена команда",
   "projectChatToolMcpGeneric": "MCP",
   "projectChatToolMcp": "MCP: {tool}",
   "@projectChatToolMcp": {
-    "placeholders": { "tool": { "type": "String" } }
+    "placeholders": {
+      "tool": {
+        "type": "String"
+      }
+    }
   },
   "projectChatToolSubagent": "Подагент {name}",
   "@projectChatToolSubagent": {
-    "placeholders": { "name": { "type": "String" } }
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
   },
   "projectChatToolGeneric": "Инструмент {name}",
   "@projectChatToolGeneric": {
-    "placeholders": { "name": { "type": "String" } }
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
   },
   "errorAgentProviderNetwork": "AI-провайдер недоступен из контейнера (сеть).",
   "errorAgentProviderRateLimit": "Превышен лимит запросов к AI-провайдеру. Повторите позже.",
@@ -1240,8 +1360,12 @@
   "companyCredentialsCreated": "Логин: {companyId} · пароль: {password}",
   "@companyCredentialsCreated": {
     "placeholders": {
-      "companyId": { "type": "String" },
-      "password": { "type": "String" }
+      "companyId": {
+        "type": "String"
+      },
+      "password": {
+        "type": "String"
+      }
     }
   },
   "companyOwner": "Владелец",
@@ -1287,7 +1411,7 @@
   "navOverview": "Обзор",
   "navManagement": "Управление",
   "navData": "Данные",
-  "navProdavan": "Prodavan",
+  "navProdavan": "Agentscale",
   "projectAgentError": "Ошибка агента",
   "projectApproveAndContinue": "Разрешить и продолжить",
   "projectApproveTool": "Разрешение инструмента",
@@ -1526,7 +1650,9 @@
   "adminDeleteModelConfirm": "Удалить модель «{name}»?",
   "@adminDeleteModelConfirm": {
     "placeholders": {
-      "name": { "type": "String" }
+      "name": {
+        "type": "String"
+      }
     }
   },
   "adminNoModels": "Нет моделей"

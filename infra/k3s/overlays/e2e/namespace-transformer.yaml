@@ -1,9 +1,9 @@
-# unsetOnly: keep prodavan-sandboxes on cross-namespace RBAC (rbac-sandboxes.yaml).
+# unsetOnly: keep agentscale-dev-sandboxes on cross-namespace RBAC (rbac-sandboxes.yaml).
 apiVersion: builtin
 kind: NamespaceTransformer
 metadata:
-  name: prodavan-namespace
-  namespace: prodavan
+  name: agentscale-namespace
+  namespace: agentscale-dev
 unsetOnly: true
 fieldSpecs:
   - path: metadata/namespace

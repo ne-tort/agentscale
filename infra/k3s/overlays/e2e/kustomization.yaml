@@ -9,6 +9,6 @@ transformers:
   - namespace-transformer.yaml
 
 images:
-  - name: ghcr.io/ne-tort/prodavan-api
-    newName: ghcr.io/ne-tort/prodavan-api
+  - name: ghcr.io/ne-tort/agentscale-api
+    newName: ghcr.io/ne-tort/agentscale-api
     newTag: latest

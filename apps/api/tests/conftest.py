@@ -45,7 +45,7 @@ requires_postgres = pytest.mark.skipif(
 )
 
 E2E_BASE_URL = os.getenv("PRODAVAN_E2E_BASE_URL", "http://127.0.0.1:8088").rstrip("/")
-K8S_SANDBOX_NAMESPACE = os.getenv("POD_SANDBOX_NAMESPACE", "prodavan-sandboxes")
+K8S_SANDBOX_NAMESPACE = os.getenv("POD_SANDBOX_NAMESPACE", "agentscale-dev-sandboxes")
 
 
 def _live_e2e_base_url() -> str:

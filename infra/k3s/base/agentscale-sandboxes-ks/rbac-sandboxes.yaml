@@ -1,21 +1,19 @@
-# RBAC for agent-sandbox era (replaces base/prodavan-sandbox/rbac-sandboxes.yaml).
+# RBAC for agent-sandbox era (replaces base/agentscale-sandbox/rbac-sandboxes.yaml).
 # Canon: docs/08-migration/agent-sandbox-adr.md (ADR §1.6). The API no longer CRUDs pods directly —
 # it writes SandboxClaims and reads/patches Sandboxes (CRs reconciled by the
 # agent-sandbox controller). pods/exec is GONE: file/command channel is the router.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: prodavan-project-pod
-  namespace: prodavan-sandboxes
+  name: agentscale-project-pod
   labels:
-    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/part-of: agentscale
 ---
-# API service account permissions in prodavan-sandboxes.
+# API service account permissions in agentscale-sandboxes.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: prodavan-sandbox-claims
-  namespace: prodavan-sandboxes
+  name: agentscale-sandbox-claims
 rules:
 - apiGroups: ["extensions.agents.x-k8s.io"]
   resources: ["sandboxclaims", "sandboxclaims/status"]
@@ -30,13 +28,11 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: prodavan-sandbox-claims
-  namespace: prodavan-sandboxes
+  name: agentscale-sandbox-claims
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
-  name: prodavan-sandbox-claims
+  name: agentscale-sandbox-claims
 subjects:
 - kind: ServiceAccount
-  name: prodavan-api
-  namespace: prodavan
+  name: agentscale-api

@@ -1,6 +1,6 @@
 variable "cluster_name" {
   type    = string
-  default = "prodavan-dev"
+  default = "agentscale-dev"
 }
 
 variable "host_profile" {
@@ -23,7 +23,7 @@ variable "k3s_tls_sans" {
 variable "https_tls_sans" {
   type        = list(string)
   default     = []
-  description = "Entrypoint websecure cert SANs (openssl form, e.g. IP:172.31.156.203, DNS:localhost). Non-empty generates a local CA + leaf, installs it as the Traefik default TLSStore (kube-system/prodavan-tls) and copies the CA to /home/<ssh_user>/prodavan-dev-ca.crt for browser trust import."
+  description = "Entrypoint websecure cert SANs (openssl form, e.g. IP:172.31.156.203, DNS:localhost). Non-empty generates a local CA + leaf, installs it as the Traefik default TLSStore (kube-system/agentscale-tls) and copies the CA to /home/<ssh_user>/agentscale-dev-ca.crt for browser trust import."
 }
 
 variable "runner_kubeconfig_path" {
@@ -75,7 +75,7 @@ variable "ssh_private_key_path" {
 
 variable "remote_repo_path" {
   type        = string
-  description = "Absolute path to prodavan checkout on the SSH host (WSL)."
+  description = "Absolute path to agentscale checkout on the SSH host (WSL)."
 }
 
 variable "kubeconfig_path" {

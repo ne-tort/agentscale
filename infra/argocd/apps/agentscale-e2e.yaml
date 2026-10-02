@@ -1,21 +1,21 @@
 # Manual-sync only — CI/workflow syncs this app to run ephemeral e2e Job.
-# Not part of prodavan-dev (POD_RUNTIME_MODE stays stub on prodavan-api).
+# Not part of agentscale-dev (POD_RUNTIME_MODE stays stub on agentscale-api).
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: prodavan-e2e
+  name: agentscale-e2e
   namespace: argocd
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
-  project: prodavan
+  project: agentscale
   source:
     repoURL: https://github.com/ne-tort/agentscale.git
     targetRevision: main
     path: infra/k3s/overlays/e2e
   destination:
     server: https://kubernetes.default.svc
-    namespace: prodavan
+    namespace: agentscale-dev
   syncPolicy:
     syncOptions:
       - CreateNamespace=false

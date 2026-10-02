@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: agentscale
+  labels:
+    app.kubernetes.io/part-of: agentscale
+    app.kubernetes.io/component: prod

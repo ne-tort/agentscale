@@ -114,18 +114,18 @@ jobs:
         run: |
           set -euo pipefail
           PG_PORT=$((55434 + (${GITHUB_RUN_NUMBER:-0} % 500)))
-          PG_CONTAINER="prodavan-e2e-pg-${GITHUB_RUN_ID:-local}"
+          PG_CONTAINER="agentscale-e2e-pg-${GITHUB_RUN_ID:-local}"
           echo "PG_PORT=${PG_PORT}" >> "${GITHUB_ENV}"
           echo "PG_CONTAINER=${PG_CONTAINER}" >> "${GITHUB_ENV}"
           docker rm -f "${PG_CONTAINER}" 2>/dev/null || true
           docker run -d --name "${PG_CONTAINER}" \
-            -e POSTGRES_USER=prodavan \
-            -e POSTGRES_PASSWORD=prodavan \
-            -e POSTGRES_DB=prodavan \
+            -e POSTGRES_USER=agentscale \
+            -e POSTGRES_PASSWORD=agentscale \
+            -e POSTGRES_DB=agentscale \
             -p "${PG_PORT}:5432" \
             postgres:16.15
           for i in $(seq 1 15); do
-            if docker exec "${PG_CONTAINER}" pg_isready -U prodavan -d prodavan; then
+            if docker exec "${PG_CONTAINER}" pg_isready -U agentscale -d agentscale; then
               exit 0
             fi
             sleep 2
@@ -141,20 +141,20 @@ jobs:
 
       - name: Ensure app role + migrate
         env:
-          DATABASE_URL: postgresql+asyncpg://prodavan:prodavan@${{ env.DB_HOST }}:${{ env.PG_PORT }}/prodavan
+          DATABASE_URL: postgresql+asyncpg://agentscale:agentscale@${{ env.DB_HOST }}:${{ env.PG_PORT }}/agentscale
         run: |
           python - <<'PY'
           import asyncio, asyncpg, os
           host = os.environ["DB_HOST"]
           port = os.environ["PG_PORT"]
           async def main():
-              conn = await asyncpg.connect(f"postgresql://prodavan:prodavan@{host}:{port}/prodavan")
+              conn = await asyncpg.connect(f"postgresql://agentscale:agentscale@{host}:{port}/agentscale")
               try:
-                  await conn.execute("CREATE ROLE prodavan_app LOGIN PASSWORD 'prodavan'")
+                  await conn.execute("CREATE ROLE agentscale_app LOGIN PASSWORD 'agentscale'")
               except Exception:
                   pass
-              await conn.execute("GRANT ALL ON SCHEMA public TO prodavan_app")
-              await conn.execute("GRANT ALL ON DATABASE prodavan TO prodavan_app")
+              await conn.execute("GRANT ALL ON SCHEMA public TO agentscale_app")
+              await conn.execute("GRANT ALL ON DATABASE agentscale TO agentscale_app")
               await conn.close()
           asyncio.run(main())
           PY
@@ -164,16 +164,16 @@ jobs:
           host = os.environ["DB_HOST"]
           port = os.environ["PG_PORT"]
           async def main():
-              conn = await asyncpg.connect(f"postgresql://prodavan:prodavan@{host}:{port}/prodavan")
-              await conn.execute("GRANT ALL ON ALL TABLES IN SCHEMA public TO prodavan_app")
-              await conn.execute("GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO prodavan_app")
+              conn = await asyncpg.connect(f"postgresql://agentscale:agentscale@{host}:{port}/agentscale")
+              await conn.execute("GRANT ALL ON ALL TABLES IN SCHEMA public TO agentscale_app")
+              await conn.execute("GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO agentscale_app")
               await conn.close()
           asyncio.run(main())
           PY
 
       - name: Pytest integration (L2)
         env:
-          DATABASE_URL: postgresql+asyncpg://prodavan_app:prodavan@${{ env.DB_HOST }}:${{ env.PG_PORT }}/prodavan
+          DATABASE_URL: postgresql+asyncpg://agentscale_app:agentscale@${{ env.DB_HOST }}:${{ env.PG_PORT }}/agentscale
           AUTH_MODE: test
           AUTH_TEST_SECRET: dev-only-test-secret-change-me
           KEYCLOAK_INVITE_MODE: fake
@@ -182,7 +182,7 @@ jobs:
 
       - name: Stop Postgres
         if: always()
-        run: docker rm -f "${PG_CONTAINER:-prodavan-e2e-pg}" 2>/dev/null || true
+        run: docker rm -f "${PG_CONTAINER:-agentscale-e2e-pg}" 2>/dev/null || true
 
   dev-preflight:
     needs: gate
@@ -262,7 +262,7 @@ jobs:
       && (needs.integration.result == 'success' || needs.integration.result == 'skipped')
     timeout-minutes: 25
     concurrency:
-      group: prodavan-e2e-k8s-cluster
+      group: agentscale-e2e-k8s-cluster
       cancel-in-progress: true
     runs-on: [self-hosted, linux, docker]
     steps:
@@ -331,14 +331,14 @@ jobs:
         run: |
           set -euo pipefail
           # Mount PR test sources so L3a validates this branch without waiting for Images.
-          kubectl delete configmap prodavan-e2e-conftest prodavan-e2e-k8s-tests \
-            -n prodavan --ignore-not-found --request-timeout=10s
-          kubectl create configmap prodavan-e2e-conftest \
+          kubectl delete configmap agentscale-e2e-conftest agentscale-e2e-k8s-tests \
+            -n agentscale-dev --ignore-not-found --request-timeout=10s
+          kubectl create configmap agentscale-e2e-conftest \
             --from-file=conftest.py=../../apps/api/tests/e2e/conftest.py \
-            -n prodavan
-          kubectl create configmap prodavan-e2e-k8s-tests \
+            -n agentscale-dev
+          kubectl create configmap agentscale-e2e-k8s-tests \
             --from-file=../../apps/api/tests/e2e/k8s \
-            -n prodavan
+            -n agentscale-dev
 
       - name: Run k8s e2e Job (L3a)
         timeout-minutes: 20
@@ -351,8 +351,8 @@ jobs:
         working-directory: infra/ops
         run: |
           poetry run prodavan-ops e2e cleanup || true
-          kubectl delete configmap prodavan-e2e-conftest prodavan-e2e-k8s-tests \
-            -n prodavan --ignore-not-found --request-timeout=10s || true
+          kubectl delete configmap agentscale-e2e-conftest agentscale-e2e-k8s-tests \
+            -n agentscale-dev --ignore-not-found --request-timeout=10s || true
 
   live:
     needs: [gate, dev-preflight, integration]

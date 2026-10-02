@@ -1,6 +1,6 @@
 variable "instance_name" {
   type    = string
-  default = "prodavan-pg"
+  default = "agentscale-pg"
 }
 
 variable "disk_gb" {

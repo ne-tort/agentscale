@@ -1,14 +1,13 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: prodavan-api
-  namespace: prodavan
+  name: agentscale-api
   labels:
-    app: prodavan-api
+    app: agentscale-api
 spec:
   type: ClusterIP
   selector:
-    app: prodavan-api
+    app: agentscale-api
   ports:
     - name: http
       port: 8000

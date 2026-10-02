@@ -15,7 +15,7 @@ wait_node() {
 }
 
 delete_stuck() {
-  for ns in prodavan prodavan-sandboxes; do
+  for ns in agentscale agentscale-dev-sandboxes; do
     while read -r name phase; do
       [ -z "$name" ] && continue
       case "$phase" in

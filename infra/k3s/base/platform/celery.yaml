@@ -2,11 +2,11 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: prodavan-celery-worker
+  name: agentscale-celery-worker
   labels:
-    app: prodavan-celery-worker
-    app.kubernetes.io/name: prodavan-celery-worker
-    app.kubernetes.io/part-of: prodavan
+    app: agentscale-celery-worker
+    app.kubernetes.io/name: agentscale-celery-worker
+    app.kubernetes.io/part-of: agentscale
     app.kubernetes.io/component: celery
   annotations:
     argocd.argoproj.io/sync-wave: "20"
@@ -16,22 +16,22 @@ spec:
     type: Recreate
   selector:
     matchLabels:
-      app: prodavan-celery-worker
+      app: agentscale-celery-worker
   template:
     metadata:
       labels:
-        app: prodavan-celery-worker
-        app.kubernetes.io/name: prodavan-celery-worker
-        app.kubernetes.io/part-of: prodavan
+        app: agentscale-celery-worker
+        app.kubernetes.io/name: agentscale-celery-worker
+        app.kubernetes.io/part-of: agentscale
         app.kubernetes.io/component: celery
     spec:
-      serviceAccountName: prodavan-api
+      serviceAccountName: agentscale-api
       terminationGracePeriodSeconds: 90
       imagePullSecrets:
         - name: ghcr-pull
       containers:
         - name: worker
-          image: ghcr.io/ne-tort/prodavan-api:latest
+          image: ghcr.io/ne-tort/agentscale-api:latest
           imagePullPolicy: IfNotPresent
           # command replaces image ENTRYPOINT; python -m avoids missing console_script PATH issues.
           command:
@@ -39,7 +39,7 @@ spec:
             - -m
             - celery
             - -A
-            - prodavan.core.infra.worker_manager.celery_app
+            - agentscale.core.infra.worker_manager.celery_app
             - worker
             - --loglevel=INFO
             # Default concurrency = CPU count → prefork OOM in 1Gi cgroup on multi-core nodes.
@@ -48,9 +48,9 @@ spec:
             - --max-memory-per-child=350000
           envFrom:
             - configMapRef:
-                name: prodavan-config
+                name: agentscale-config
             - secretRef:
-                name: prodavan-api-secrets
+                name: agentscale-api-secrets
           env:
             # Workers must not race API on alembic (entrypoint also respects this).
             - name: RUN_MIGRATIONS
@@ -89,16 +89,16 @@ spec:
       volumes:
         - name: storage
           persistentVolumeClaim:
-            claimName: prodavan-api-storage
+            claimName: agentscale-api-storage
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: prodavan-celery-beat
+  name: agentscale-celery-beat
   labels:
-    app: prodavan-celery-beat
-    app.kubernetes.io/name: prodavan-celery-beat
-    app.kubernetes.io/part-of: prodavan
+    app: agentscale-celery-beat
+    app.kubernetes.io/name: agentscale-celery-beat
+    app.kubernetes.io/part-of: agentscale
     app.kubernetes.io/component: celery
   annotations:
     argocd.argoproj.io/sync-wave: "20"
@@ -108,13 +108,13 @@ spec:
     type: Recreate
   selector:
     matchLabels:
-      app: prodavan-celery-beat
+      app: agentscale-celery-beat
   template:
     metadata:
       labels:
-        app: prodavan-celery-beat
-        app.kubernetes.io/name: prodavan-celery-beat
-        app.kubernetes.io/part-of: prodavan
+        app: agentscale-celery-beat
+        app.kubernetes.io/name: agentscale-celery-beat
+        app.kubernetes.io/part-of: agentscale
         app.kubernetes.io/component: celery
     spec:
       terminationGracePeriodSeconds: 60
@@ -122,21 +122,21 @@ spec:
         - name: ghcr-pull
       containers:
         - name: beat
-          image: ghcr.io/ne-tort/prodavan-api:latest
+          image: ghcr.io/ne-tort/agentscale-api:latest
           imagePullPolicy: IfNotPresent
           command:
             - python
             - -m
             - celery
             - -A
-            - prodavan.core.infra.worker_manager.celery_app
+            - agentscale.core.infra.worker_manager.celery_app
             - beat
             - --loglevel=INFO
           envFrom:
             - configMapRef:
-                name: prodavan-config
+                name: agentscale-config
             - secretRef:
-                name: prodavan-api-secrets
+                name: agentscale-api-secrets
           env:
             - name: RUN_MIGRATIONS
               value: "0"

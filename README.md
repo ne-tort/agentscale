@@ -1,4 +1,4 @@
-# Prodavan
+# Agentscale
 
 SaaS: **управление Pod'ами через UI**, внутри Pod — **AI-агенты с файлами** (не ChatGPT-обёртка).
 
@@ -14,7 +14,7 @@ SaaS: **управление Pod'ами через UI**, внутри Pod — **
 |------|------------|
 | Frontend | Flutter |
 | Backend | Python 3.12+, FastAPI, Alembic |
-| Runtime | k8s Pods (`prodavan-sandboxes`) + agent SDK |
+| Runtime | k8s Pods (`agentscale-dev-sandboxes`) + agent SDK |
 | DB | PostgreSQL (in-cluster dev) |
 | Infra | **k3s + Argo CD + kustomize** |
 

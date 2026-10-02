@@ -1,0 +1,8 @@
+# Prod sandboxes: base layer as-is (namespace agentscale-sandboxes).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../../base/agentscale-sandboxes-ks
+  - namespace.yaml
+transformers:
+  - namespace-transformer.yaml

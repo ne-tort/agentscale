@@ -1,23 +1,23 @@
-# Minimal prodavan-sandboxes bootstrap for ephemeral e2e Job (not part of kubectl delete -k).
+# Minimal agentscale-dev-sandboxes bootstrap for ephemeral e2e Job (not part of kubectl delete -k).
 # Applied idempotently by prodavan-ops e2e run before overlays/e2e RBAC.
 # Hydrate uses stub mode (no POD_SANDBOX_MINIO_SECRET) — no MinIO required for L3a.
 ---
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: prodavan-sandboxes
+  name: agentscale-dev-sandboxes
   labels:
-    app.kubernetes.io/name: prodavan-sandboxes
-    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/name: agentscale-dev-sandboxes
+    app.kubernetes.io/part-of: agentscale
     app.kubernetes.io/component: sandbox
-    prodavan.io/managed-by: pod-service
+    agentscale.io/managed-by: pod-service
 ---
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: prodavan-project-pod
-  namespace: prodavan-sandboxes
+  name: agentscale-project-pod
+  namespace: agentscale-dev-sandboxes
   labels:
-    app.kubernetes.io/name: prodavan-project-pod
-    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/name: agentscale-project-pod
+    app.kubernetes.io/part-of: agentscale
     app.kubernetes.io/component: project-pod

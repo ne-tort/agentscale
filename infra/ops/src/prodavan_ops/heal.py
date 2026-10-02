@@ -7,7 +7,7 @@ from typing import Iterable
 from prodavan_ops.k8s import kubectl, require_k8s_api, wait_k3s_api_ready
 from prodavan_ops.smoke import smoke
 
-_HEAL_NAMESPACES = ("prodavan", "prodavan-sandboxes")
+_HEAL_NAMESPACES = ("agentscale-dev", "agentscale-dev-sandboxes")
 _STUCK_PHASES = frozenset({"Unknown", "Failed"})
 _STUCK_CONTAINER_REASONS = frozenset({"Init:Error", "Error", "CrashLoopBackOff"})
 

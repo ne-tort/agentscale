@@ -2,18 +2,18 @@
 
 Do **not** commit plaintext `ghcr-pull`. Do **not** mint secrets from CI.
 
-Project sandbox Pods run in **`prodavan-sandboxes`** and need their own `ghcr-pull` (same credentials as `prodavan`).
+Project sandbox Pods run in **`agentscale-dev-sandboxes`** and need their own `ghcr-pull` (same credentials as `agentscale`).
 
 1. Install Sealed Secrets controller once:
    `kubectl apply -k infra/argocd/sealed-secrets`
 2. Create a local docker-registry secret, then seal it for **each** namespace:
    ```text
-   kubectl -n prodavan create secret docker-registry ghcr-pull \
+   kubectl -n agentscale-dev create secret docker-registry ghcr-pull \
      --docker-server=ghcr.io --docker-username=USER --docker-password=TOKEN \
      --dry-run=client -o yaml \
    | kubeseal -o yaml > infra/k3s/overlays/dev/ghcr-pull.sealed.yaml
 
-   kubectl -n prodavan-sandboxes create secret docker-registry ghcr-pull \
+   kubectl -n agentscale-dev-sandboxes create secret docker-registry ghcr-pull \
      --docker-server=ghcr.io --docker-username=USER --docker-password=TOKEN \
      --dry-run=client -o yaml \
    | kubeseal -o yaml > infra/k3s/overlays/dev/sandboxes/ghcr-pull.sealed.yaml
@@ -25,14 +25,14 @@ Terraform bootstrap (`TF_VAR_ghcr_token`) also creates `ghcr-pull` in both names
 
 Argo + Sealed Secrets controller unseal into the cluster. Kubelet pulls from GHCR.
 
-## `pod-agent-bridge-auth` (bridge token — ns `prodavan-sandboxes` only)
+## `pod-agent-bridge-auth` (bridge token — ns `agentscale-dev-sandboxes` only)
 
 - Managed in base:
-  [`base/prodavan-sandboxes-ks/pod-agent-bridge-auth-secret.yaml`](../../base/prodavan-sandboxes-ks/pod-agent-bridge-auth-secret.yaml).
+  [`base/agentscale-dev-sandboxes-ks/pod-agent-bridge-auth-secret.yaml`](../../base/agentscale-dev-sandboxes-ks/pod-agent-bridge-auth-secret.yaml).
   Dev values are placeholders (`k3s-dev-bridge-change-me`) — prod overlays must
   override with a SealedSecret (same flow as `ghcr-pull` above), never commit real values.
-- Exists **only** in namespace `prodavan-sandboxes`: it is consumed by agent-runtime
+- Exists **only** in namespace `agentscale-dev-sandboxes`: it is consumed by agent-runtime
   pods via the SandboxTemplate `BRIDGE_AUTH_TOKEN` env (optional `secretKeyRef`).
-- The `prodavan` API **never reads the token value**: `POD_AGENT_RUNTIME_AUTH_SECRET`
+- The `agentscale` API **never reads the token value**: `POD_AGENT_RUNTIME_AUTH_SECRET`
   in the API configmap carries the secret *name* only (the `secretKeyRef` target) —
   no API-side mount of the value exists.

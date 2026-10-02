@@ -1,9 +1,9 @@
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: prodavan-e2e-runner
-  namespace: prodavan
+  name: agentscale-e2e-runner
+  namespace: agentscale-dev
   labels:
-    app.kubernetes.io/name: prodavan-e2e-runner
-    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/name: agentscale-e2e-runner
+    app.kubernetes.io/part-of: agentscale
     app.kubernetes.io/component: e2e

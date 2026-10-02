@@ -29,11 +29,11 @@
 | Pub | `/cache/pub` (`PUB_CACHE`) | пакеты не перекачиваются |
 | pip / Poetry | `/cache/pip`, `/cache/poetry*` | python-зависимости |
 | kubectl / kustomize / setup-python / setup-node | `/cache/kubectl`, `/cache/kustomize`, `/cache/toolcache` (`RUNNER_TOOL_CACHE`) | инструменты и toolcache |
-| **Docker слои + RUN cache mounts** | persistent buildx builder `prodavan-ci` (docker-container, volume `buildx_buildkit_prodavan-ci0_state`) | слои образов и `--mount=type=cache` (pip/pub внутри Dockerfile) живут между сборками; GC — 50 GiB / 30 дней (`/etc/buildkit/buildkitd.toml`, копия — `buildkitd.toml` здесь) |
+| **Docker слои + RUN cache mounts** | persistent buildx builder `agentscale-ci` (docker-container, volume `buildx_buildkit_agentscale-ci0_state`) | слои образов и `--mount=type=cache` (pip/pub внутри Dockerfile) живут между сборками; GC — 50 GiB / 30 дней (`/etc/buildkit/buildkitd.toml`, копия — `buildkitd.toml` здесь) |
 
 Workflows `CI Images` больше не создают per-job buildkitd и не гоняют `type=local`
 кэш через `/tmp` (кэш жил в контейнере раннера и терялся при любом пересоздании).
-Единственный buildkitd `prodavan-ci` общий для всех job'ов.
+Единственный buildkitd `agentscale-ci` общий для всех job'ов.
 
 ## Dev-кластер (k3s) — на этой же VM
 
@@ -64,10 +64,10 @@ chmod 600 /tmp/runner_tokens.env
 sudo python3 02-runners.py
 
 # 3. persistent buildx builder (idempotent; CI делает то же самое сам)
-sudo -u runner docker buildx create --name prodavan-ci \
+sudo -u runner docker buildx create --name agentscale-ci \
   --driver docker-container --driver-opt network=host \
   --config /etc/buildkit/buildkitd.toml
-sudo -u runner docker buildx use prodavan-ci
+sudo -u runner docker buildx use agentscale-ci
 ```
 
 `02-runners.py` идемпотентен: активные сервисы пропускаются, пересоздаёт только
@@ -90,7 +90,7 @@ docker buildx prune --keep-bytes 20GB     # при необходимости
 
 ```powershell
 cd infra/github-runner
-docker compose stop                  # не down -v: кэш prodavan-ci-cache и volumes
+docker compose stop                  # не down -v: кэш agentscale-ci-cache и volumes
                                      # регистрации держим до полной уверенности
 gh api repos/ne-tort/agentscale/actions/runners --jq '.runners[] | select(.name|startswith("dd-")) | .id'
 # для каждого id: gh api -X DELETE repos/ne-tort/agentscale/actions/runners/<id>

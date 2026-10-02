@@ -3,70 +3,70 @@
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
-  name: prodavan-kafka
+  name: agentscale-kafka
   labels:
-    app.kubernetes.io/name: prodavan-kafka
-    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/name: agentscale-kafka
+    app.kubernetes.io/part-of: agentscale
     app.kubernetes.io/component: kafka
 spec:
   maxUnavailable: 0
   selector:
     matchLabels:
-      app.kubernetes.io/name: prodavan-kafka
+      app.kubernetes.io/name: agentscale-kafka
 ---
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
-  name: prodavan-redis
+  name: agentscale-redis
   labels:
-    app.kubernetes.io/name: prodavan-redis
-    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/name: agentscale-redis
+    app.kubernetes.io/part-of: agentscale
     app.kubernetes.io/component: redis
 spec:
   maxUnavailable: 0
   selector:
     matchLabels:
-      app.kubernetes.io/name: prodavan-redis
+      app.kubernetes.io/name: agentscale-redis
 ---
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
-  name: prodavan-minio
+  name: agentscale-minio
   labels:
-    app.kubernetes.io/name: prodavan-minio
-    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/name: agentscale-minio
+    app.kubernetes.io/part-of: agentscale
     app.kubernetes.io/component: minio
 spec:
   maxUnavailable: 0
   selector:
     matchLabels:
-      app.kubernetes.io/name: prodavan-minio
+      app.kubernetes.io/name: agentscale-minio
 ---
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
-  name: prodavan-postgres
+  name: agentscale-postgres
   labels:
-    app.kubernetes.io/name: prodavan-postgres
-    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/name: agentscale-postgres
+    app.kubernetes.io/part-of: agentscale
     app.kubernetes.io/component: postgres
 spec:
   maxUnavailable: 0
   selector:
     matchLabels:
-      app.kubernetes.io/name: prodavan-postgres
+      app.kubernetes.io/name: agentscale-postgres
 ---
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
-  name: prodavan-opensearch
+  name: agentscale-opensearch
   labels:
-    app.kubernetes.io/name: prodavan-opensearch
-    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/name: agentscale-opensearch
+    app.kubernetes.io/part-of: agentscale
     app.kubernetes.io/component: opensearch
 spec:
   maxUnavailable: 0
   selector:
     matchLabels:
-      app.kubernetes.io/name: prodavan-opensearch
+      app.kubernetes.io/name: agentscale-opensearch
 

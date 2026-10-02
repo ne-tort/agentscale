@@ -3,26 +3,26 @@
 apiVersion: v1
 kind: Secret
 metadata:
-  name: prodavan-mongodb
+  name: agentscale-mongodb
   labels:
-    app.kubernetes.io/name: prodavan-mongodb
-    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/name: agentscale-mongodb
+    app.kubernetes.io/part-of: agentscale
     app.kubernetes.io/component: mongodb
 stringData:
   root-user: root
-  root-password: prodavan-mongo-root
-  app-user: prodavan
-  app-password: prodavan
+  root-password: agentscale-mongo-root
+  app-user: agentscale
+  app-password: agentscale
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: prodavan-mongodb-data
+  name: agentscale-mongodb-data
   annotations:
     argocd.argoproj.io/sync-wave: "1"
   labels:
-    app.kubernetes.io/name: prodavan-mongodb
-    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/name: agentscale-mongodb
+    app.kubernetes.io/part-of: agentscale
     app.kubernetes.io/component: mongodb
 spec:
   accessModes:
@@ -34,10 +34,10 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: prodavan-mongodb
+  name: agentscale-mongodb
   labels:
-    app.kubernetes.io/name: prodavan-mongodb
-    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/name: agentscale-mongodb
+    app.kubernetes.io/part-of: agentscale
     app.kubernetes.io/component: mongodb
 spec:
   ports:
@@ -45,29 +45,29 @@ spec:
       port: 27017
       targetPort: 27017
   selector:
-    app.kubernetes.io/name: prodavan-mongodb
+    app.kubernetes.io/name: agentscale-mongodb
 ---
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: prodavan-mongodb
+  name: agentscale-mongodb
   labels:
-    app.kubernetes.io/name: prodavan-mongodb
-    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/name: agentscale-mongodb
+    app.kubernetes.io/part-of: agentscale
     app.kubernetes.io/component: mongodb
   annotations:
     argocd.argoproj.io/sync-wave: "1"
 spec:
-  serviceName: prodavan-mongodb
+  serviceName: agentscale-mongodb
   replicas: 1
   selector:
     matchLabels:
-      app.kubernetes.io/name: prodavan-mongodb
+      app.kubernetes.io/name: agentscale-mongodb
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: prodavan-mongodb
-        app.kubernetes.io/part-of: prodavan
+        app.kubernetes.io/name: agentscale-mongodb
+        app.kubernetes.io/part-of: agentscale
         app.kubernetes.io/component: mongodb
     spec:
       terminationGracePeriodSeconds: 30
@@ -84,15 +84,15 @@ spec:
             - name: MONGO_INITDB_ROOT_USERNAME
               valueFrom:
                 secretKeyRef:
-                  name: prodavan-mongodb
+                  name: agentscale-mongodb
                   key: root-user
             - name: MONGO_INITDB_ROOT_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: prodavan-mongodb
+                  name: agentscale-mongodb
                   key: root-password
             - name: MONGO_INITDB_DATABASE
-              value: prodavan
+              value: agentscale
           ports:
             - name: mongodb
               containerPort: 27017
@@ -135,15 +135,15 @@ spec:
       volumes:
         - name: data
           persistentVolumeClaim:
-            claimName: prodavan-mongodb-data
+            claimName: agentscale-mongodb-data
 ---
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: prodavan-mongodb-init
+  name: agentscale-mongodb-init
   labels:
-    app.kubernetes.io/name: prodavan-mongodb-init
-    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/name: agentscale-mongodb-init
+    app.kubernetes.io/part-of: agentscale
     app.kubernetes.io/component: mongodb-init
   annotations:
     argocd.argoproj.io/hook: Sync
@@ -155,8 +155,8 @@ spec:
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: prodavan-mongodb-init
-        app.kubernetes.io/part-of: prodavan
+        app.kubernetes.io/name: agentscale-mongodb-init
+        app.kubernetes.io/part-of: agentscale
     spec:
       restartPolicy: OnFailure
       containers:
@@ -166,22 +166,22 @@ spec:
             - name: MONGO_ROOT_USER
               valueFrom:
                 secretKeyRef:
-                  name: prodavan-mongodb
+                  name: agentscale-mongodb
                   key: root-user
             - name: MONGO_ROOT_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: prodavan-mongodb
+                  name: agentscale-mongodb
                   key: root-password
             - name: MONGO_APP_USER
               valueFrom:
                 secretKeyRef:
-                  name: prodavan-mongodb
+                  name: agentscale-mongodb
                   key: app-user
             - name: MONGO_APP_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: prodavan-mongodb
+                  name: agentscale-mongodb
                   key: app-password
           command:
             - /bin/sh
@@ -189,14 +189,14 @@ spec:
             - |
               set -eu
               i=0
-              until mongosh --host prodavan-mongodb --quiet \
+              until mongosh --host agentscale-mongodb --quiet \
                 -u "$MONGO_ROOT_USER" -p "$MONGO_ROOT_PASSWORD" --authenticationDatabase admin \
                 --eval "db.adminCommand('ping')" >/dev/null 2>&1; do
                 i=$((i+1))
                 if [ "$i" -gt 60 ]; then echo "mongodb not ready"; exit 1; fi
                 sleep 2
               done
-              mongosh --host prodavan-mongodb --quiet \
+              mongosh --host agentscale-mongodb --quiet \
                 -u "$MONGO_ROOT_USER" -p "$MONGO_ROOT_PASSWORD" --authenticationDatabase admin \
                 --eval "
                   const user = '$MONGO_APP_USER';
@@ -204,8 +204,8 @@ spec:
                   const admin = db.getSiblingDB('admin');
                   const existing = admin.getUser(user);
                   const roles = [
-                    { role: 'readWrite', db: 'prodavan' },
-                    { role: 'dbAdmin', db: 'prodavan' }
+                    { role: 'readWrite', db: 'agentscale' },
+                    { role: 'dbAdmin', db: 'agentscale' }
                   ];
                   if (!existing) {
                     admin.createUser({ user: user, pwd: pass, roles: roles });
@@ -214,6 +214,6 @@ spec:
                     admin.updateUser(user, { pwd: pass, roles: roles });
                     print('mongodb-init: updated app user ' + user);
                   }
-                  db.getSiblingDB('prodavan').runCommand({ ping: 1 });
+                  db.getSiblingDB('agentscale').runCommand({ ping: 1 });
                   print('mongodb-init: ok');
                 "

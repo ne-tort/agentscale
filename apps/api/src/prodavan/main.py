@@ -29,7 +29,7 @@ def create_app() -> FastAPI:
     install_trace_id_log_filter()
     lifespan_manager = build_lifespan_manager()
     app = FastAPI(
-        title="Prodavan API",
+        title="Agentscale API",
         version=settings.app_version,
         lifespan=lifespan_manager.as_fastapi_lifespan(),
     )

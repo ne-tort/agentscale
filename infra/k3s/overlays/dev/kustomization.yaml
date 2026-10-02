@@ -1,6 +1,7 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
+  - namespace.yaml
   - ../../base
   - postgres.yaml
   - userdb-init.yaml
@@ -13,9 +14,9 @@ patches:
 # Kubelet pulls from GHCR via SealedSecret ghcr-pull — no image import.
 # Third-party brokers are version-pinned in base/platform + postgres.yaml — not :latest.
 images:
-  - name: ghcr.io/ne-tort/prodavan-api
-    newName: ghcr.io/ne-tort/prodavan-api
+  - name: ghcr.io/ne-tort/agentscale-api
+    newName: ghcr.io/ne-tort/agentscale-api
     newTag: latest
-  - name: ghcr.io/ne-tort/prodavan-web
-    newName: ghcr.io/ne-tort/prodavan-web
+  - name: ghcr.io/ne-tort/agentscale-web
+    newName: ghcr.io/ne-tort/agentscale-web
     newTag: latest
