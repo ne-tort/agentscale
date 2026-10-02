@@ -21,6 +21,7 @@ from datetime import UTC, datetime
 
 import httpx
 
+from prodavan.domain.ai_keys.http_url import join_endpoint_url
 from prodavan.domain.ai_keys.probe import ProbeKind, ProbeResult, ProbeStatus
 
 logger = logging.getLogger(__name__)
@@ -42,33 +43,12 @@ def _trim(msg: str) -> str:
 
 
 def _join_url(base_url: str, path: str) -> str:
-    """Join base_url + path without duplicating a shared `/v1` prefix segment.
+    """Join base_url + path (scheme default + shared `/v1` segment dedup).
 
-    Catalog seeds (e.g. ollama) carry base_url ending in `/v1` and models_path
-    `/v1/models` — concatenating them yields `/v1/v1/models` (404, 0 models).
-    When base_url already ends with the path's leading segment (e.g. `/v1`),
-    drop it from the path before joining.
+    Delegates to the shared domain helper so the probe, the pod probe and the
+    live model list build identical provider URLs from the same catalog entry.
     """
-    base = (base_url or "").rstrip("/")
-    # Bare host (user-entered "cheapai.lol/v1" without a scheme) is not a
-    # fetchable URL — default to https.
-    if base and "://" not in base:
-        base = f"https://{base}"
-    p = path or ""
-    if not p.startswith("/"):
-        p = "/" + p
-    # Last path segment of base (e.g. "/v1" for "https://x/v1"); skip the
-    # scheme "//" pseudo-segment so "https://api.openai.com" does not match.
-    seg = ""
-    after_scheme = base.split("://", 1)[-1]
-    slash = after_scheme.rfind("/")
-    if slash >= 1:
-        seg = after_scheme[slash:]
-    if seg and p.startswith(seg + "/"):
-        return base + p[len(seg):]
-    if seg and p == seg:
-        return base
-    return base + p
+    return join_endpoint_url(base_url, path)
 
 
 def _auth_headers(endpoint, secret: str) -> dict[str, str]:
