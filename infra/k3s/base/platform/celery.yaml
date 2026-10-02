@@ -39,7 +39,7 @@ spec:
             - -m
             - celery
             - -A
-            - agentscale.core.infra.worker_manager.celery_app
+            - prodavan.core.infra.worker_manager.celery_app
             - worker
             - --loglevel=INFO
             # Default concurrency = CPU count → prefork OOM in 1Gi cgroup on multi-core nodes.
@@ -129,7 +129,7 @@ spec:
             - -m
             - celery
             - -A
-            - agentscale.core.infra.worker_manager.celery_app
+            - prodavan.core.infra.worker_manager.celery_app
             - beat
             - --loglevel=INFO
           envFrom:
