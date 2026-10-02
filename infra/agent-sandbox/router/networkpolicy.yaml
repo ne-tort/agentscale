@@ -1,8 +1,11 @@
 # NetworkPolicy for the Go sandbox-router. Vendored from
 # agent-sandbox/sandbox-router/deploy/networkpolicy.yaml.
-# Prodavan deltas vs upstream example:
-#   - Ingress :8080 only from namespace `prodavan` (upstream: any namespace) —
-#     only the prodavan API dials the router.
+# Agentscale deltas vs upstream example:
+#   - Ingress :8080 only from the API namespaces of both contours —
+#     `agentscale` (prod) and `agentscale-dev` (dev); only the agentscale API
+#     dials the router. NOTE: the rebrand (prodavan→agentscale, PR #72) renamed
+#     the app namespaces; this selector must list them or every lease push /
+#     bridge send dies with "connection refused" from the API pods.
 #   - Egress to sandbox pods: TCP 3921 (agent-runtime HTTP port) instead of the
 #     upstream example's 8888 — without this every dial to a sandbox 502s.
 #   - Egress OTel rule kept broad (tracing not enabled yet — tighten when it is).
@@ -21,11 +24,14 @@ spec:
       app.kubernetes.io/component: sandbox-router
   policyTypes: ["Ingress", "Egress"]
   ingress:
-  # Proxy traffic — only the prodavan API (namespace prodavan) dials the router.
+  # Proxy traffic — only the agentscale API (both contours) dials the router.
   - from:
     - namespaceSelector:
         matchLabels:
-          kubernetes.io/metadata.name: prodavan
+          kubernetes.io/metadata.name: agentscale
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: agentscale-dev
     ports:
     - protocol: TCP
       port: 8080
@@ -52,11 +58,15 @@ spec:
       port: 53
     - protocol: TCP
       port: 53
-  # Forwarding to sandbox pods (agent-runtime) on the Prodavan sandbox port.
+  # Forwarding to sandbox pods (agent-runtime) — both contours' sandbox
+  # namespaces (agentscale-sandboxes: prod, agentscale-dev-sandboxes: dev).
   - to:
     - namespaceSelector:
         matchLabels:
-          kubernetes.io/metadata.name: prodavan-sandboxes
+          kubernetes.io/metadata.name: agentscale-sandboxes
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: agentscale-dev-sandboxes
     ports:
     - protocol: TCP
       port: 3921

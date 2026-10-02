@@ -33,5 +33,37 @@ patches:
       - op: add
         path: /subjects/0/namespace
         value: agentscale-dev
+  # Base NetworkPolicy names the PROD app namespace (agentscale) in its
+  # namespaceSelectors; in dev the API lives in agentscale-dev. Without this
+  # patch agent-runtimes cannot reach the pod-only API surface (:8001) and
+  # the API cannot hit sandbox pods directly (deprecated path).
+  # (Rule-level `op: replace` — kustomize's JSON6902 chokes on the escaped
+  # `kubernetes.io~1metadata.name` leaf key, so whole rules are swapped.)
+  - target:
+      group: networking.k8s.io
+      version: v1
+      kind: NetworkPolicy
+      name: agentscale-sandboxes-egress
+    patch: |-
+      - op: replace
+        path: /spec/ingress/1
+        value:
+          from:
+          - namespaceSelector:
+              matchLabels:
+                kubernetes.io/metadata.name: agentscale-dev
+          ports:
+          - protocol: TCP
+            port: 3921
+      - op: replace
+        path: /spec/egress/0
+        value:
+          to:
+          - namespaceSelector:
+              matchLabels:
+                kubernetes.io/metadata.name: agentscale-dev
+          ports:
+          - protocol: TCP
+            port: 8001
 transformers:
   - namespace-transformer.yaml
