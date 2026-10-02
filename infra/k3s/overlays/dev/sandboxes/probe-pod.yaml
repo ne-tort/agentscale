@@ -5,7 +5,7 @@
 # The API pushes a short-lived credential lease (POST /v1/credentials/leases),
 # calls GET /v1/models?adapter=...&key_id=..., then revokes the lease — the
 # secret is never persisted (no env, no disk) and dropped from memory in ≤TTL.
-# See agentscale.application.ai_keys.probe.pod_probe_service.ProbePodService.
+# See prodavan.application.ai_keys.probe.pod_probe_service.ProbePodService.
 #
 # Why a separate pod (not a project sandbox): probing must not depend on a
 # running project per company, and must not spend project budget. This pod is
