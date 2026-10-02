@@ -75,6 +75,11 @@ spec:
     spec:
       containers:
         - name: keycloak
+          env:
+            # Issuer fixed to the prod hostPort (base pins 8089 for dev);
+            # must match KEYCLOAK_ISSUER_URL in the configmap below.
+            - name: KC_HOSTNAME
+              value: "http://127.0.0.1:8099"
           ports:
             - containerPort: 8080
               hostPort: 8099

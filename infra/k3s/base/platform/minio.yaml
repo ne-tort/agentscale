@@ -77,9 +77,13 @@ spec:
       securityContext:
         fsGroup: 1000
         fsGroupChangePolicy: OnRootMismatch
+      # ghcr mirror of quay.io/minio (upstream closed anonymous pulls); package
+      # is private on ghcr — pull via the contour ghcr-pull secret.
+      imagePullSecrets:
+        - name: ghcr-pull
       containers:
         - name: minio
-          image: quay.io/minio/minio:RELEASE.2024-10-02T17-50-41Z
+          image: ghcr.io/ne-tort/minio:RELEASE.2024-10-02T17-50-41Z
           args: ["server", "/data", "--address", ":9000", "--console-address", ":9001"]
           env:
             - name: MINIO_ROOT_USER
@@ -157,9 +161,11 @@ spec:
         app.kubernetes.io/part-of: agentscale
     spec:
       restartPolicy: OnFailure
+      imagePullSecrets:
+        - name: ghcr-pull
       containers:
         - name: mc
-          image: quay.io/minio/mc:RELEASE.2024-10-08T09-37-26Z
+          image: ghcr.io/ne-tort/mc:RELEASE.2024-10-08T09-37-26Z
           env:
             - name: MINIO_ROOT_USER
               valueFrom:
