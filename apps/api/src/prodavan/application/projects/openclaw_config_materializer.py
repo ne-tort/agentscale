@@ -175,6 +175,25 @@ def filter_mcp_packages_by_policy(
     return list(packages)
 
 
+def _drop_dup_version_segment(base: str, path: str) -> str:
+    """Drop a duplicated leading version segment from path (base /v1 + path /v1/chat/...).
+
+    Provider forms allow the version in either place (ollama-style base with
+    /v1, or OpenAI-style path /v1/chat/completions). When BOTH carry it the
+    naive concat yields /v1/v1/chat/completions (404 at the gateway).
+    """
+    p = path if path.startswith("/") else f"/{path}"
+    after_scheme = base.split("://", 1)[-1]
+    slash = after_scheme.rfind("/")
+    if slash >= 1:
+        seg = after_scheme[slash:]
+        if seg.startswith("/v") and p.startswith(seg + "/"):
+            return p[len(seg):] or p
+        if seg == p:
+            return "/"
+    return p
+
+
 def build_openclaw_config(
     *,
     company_policy: CompanyAgentRuntimePolicy,
@@ -256,16 +275,21 @@ def build_openclaw_config(
         if provider_endpoint and runtime_adapter == "platform_openclaw":
             base_url = provider_endpoint.get("base_url")
             if base_url:
-                provider_block["base_url"] = str(base_url).rstrip("/")
+                base = str(base_url).rstrip("/")
+                if "://" not in base:
+                    # Bare host entered in the provider form ("cheapai.lol/v1").
+                    base = f"https://{base}"
+                provider_block["base_url"] = base
                 auth_scheme = provider_endpoint.get("auth_scheme")
                 if auth_scheme:
                     provider_block["auth_scheme"] = str(auth_scheme)
-                chat_path = provider_endpoint.get("chat_completions_path")
-                if chat_path:
-                    provider_block["chat_completions_path"] = str(chat_path)
+                chat_path = str(
+                    provider_endpoint.get("chat_completions_path") or "/chat/completions"
+                ).strip() or "/chat/completions"
+                provider_block["chat_completions_path"] = _drop_dup_version_segment(base, chat_path)
                 models_path = provider_endpoint.get("models_path")
                 if models_path:
-                    provider_block["models_path"] = str(models_path)
+                    provider_block["models_path"] = _drop_dup_version_segment(base, str(models_path))
         cfg["provider"] = provider_block
 
     return cfg

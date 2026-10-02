@@ -50,6 +50,10 @@ def _join_url(base_url: str, path: str) -> str:
     drop it from the path before joining.
     """
     base = (base_url or "").rstrip("/")
+    # Bare host (user-entered "cheapai.lol/v1" without a scheme) is not a
+    # fetchable URL — default to https.
+    if base and "://" not in base:
+        base = f"https://{base}"
     p = path or ""
     if not p.startswith("/"):
         p = "/" + p
