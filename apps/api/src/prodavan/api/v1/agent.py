@@ -16,6 +16,9 @@ from prodavan.api.deps import PrincipalDep, SessionDep, get_current_employee
 from prodavan.application.agent import AgentSessionService, AgentTriggerDispatcher
 from prodavan.domain.errors import AppError
 from prodavan.domain.projects import CHAT_MAX_ATTACHMENTS_PER_MESSAGE, CHAT_MAX_MESSAGE_CHARS
+from prodavan.domain.projects.chat_error_policy import (
+    normalize_chat_error_policy,
+)
 from prodavan.infrastructure.persistence.models.identity import EmployeeRow
 
 logger = logging.getLogger(__name__)
@@ -79,6 +82,16 @@ class AppendAgentEventBody(BaseModel):
     at: str | None = Field(default=None, max_length=64)
 
 
+class ChatErrorPolicyBody(BaseModel):
+    """Per-project chat reconnect policy (PUT — partial fields keep defaults)."""
+
+    model_config = {"extra": "forbid"}
+
+    interval_sec: int | None = Field(default=None, ge=1, le=3600)
+    max_attempts: int | None = Field(default=None, ge=0, le=1000)
+    fallback_models: list[str] | None = Field(default=None, max_length=20)
+
+
 EmployeeDep = Annotated[EmployeeRow | None, Depends(get_current_employee)]
 
 
@@ -86,6 +99,53 @@ def _chat_text(text: str, attachment_refs: list[str]) -> str:
     """Keep user text as-is; empty is fine when attachments are present."""
     _ = attachment_refs
     return text.strip()
+
+
+@router.get("/projects/{project_id}/chat-error-policy")
+async def get_chat_error_policy(
+    project_id: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+) -> dict:
+    """Effective chat reconnect policy (stored value or server default)."""
+    from prodavan.application.project_service import ProjectAccessPolicy
+
+    row = await ProjectAccessPolicy(session).require_access(
+        project_id=project_id,
+        principal=principal,
+        employee=employee,
+        write=False,
+        allow_paused=True,
+    )
+    return normalize_chat_error_policy(row.chat_error_policy)
+
+
+@router.put("/projects/{project_id}/chat-error-policy")
+async def put_chat_error_policy(
+    project_id: str,
+    body: ChatErrorPolicyBody,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+) -> dict:
+    """Store the chat reconnect policy (validated; partial fields keep defaults)."""
+    from prodavan.application.project_service import ProjectAccessPolicy
+
+    row = await ProjectAccessPolicy(session).require_access(
+        project_id=project_id,
+        principal=principal,
+        employee=employee,
+        write=True,
+        allow_paused=True,
+    )
+    fields = body.model_dump(exclude_unset=True)
+    # None resets a field to the server default.
+    fields = {k: v for k, v in fields.items() if v is not None}
+    policy = normalize_chat_error_policy(fields)
+    row.chat_error_policy = policy
+    await session.commit()
+    return policy
 
 
 @router.post("/projects/{project_id}/agent/sessions", status_code=201)

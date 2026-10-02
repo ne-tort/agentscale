@@ -43,7 +43,7 @@ spec:
           # Pin to the SAME tag as SandboxTemplate (base/agentscale-dev-sandboxes-ks/sandboxtemplate.yaml):
           # the probe must run the identical runtime build; :latest + Always re-pulls ~97MB on
           # every node restart and can silently diverge from the sandbox runtime.
-          image: ghcr.io/ne-tort/prodavan-agent-runtime:0caea7e6b164 # prodavan-claw@0caea7e6
+          image: ghcr.io/ne-tort/prodavan-agent-runtime:7afb6597e927 # prodavan-claw@7afb659
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

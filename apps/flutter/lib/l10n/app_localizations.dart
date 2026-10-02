@@ -3590,6 +3590,60 @@ abstract class AppLocalizations {
   /// **'agentscale is working…'**
   String get projectChatAgentWorking;
 
+  /// No description provided for @projectChatReconnecting.
+  ///
+  /// In en, this message translates to:
+  /// **'Reconnecting'**
+  String get projectChatReconnecting;
+
+  /// No description provided for @projectChatReconnectingAttempt.
+  ///
+  /// In en, this message translates to:
+  /// **'Reconnecting ({n}/{y})'**
+  String projectChatReconnectingAttempt(Object n, Object y);
+
+  /// No description provided for @projectChatErrorPolicyTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Error handling'**
+  String get projectChatErrorPolicyTitle;
+
+  /// No description provided for @projectChatErrorPolicyInterval.
+  ///
+  /// In en, this message translates to:
+  /// **'Retry interval, sec'**
+  String get projectChatErrorPolicyInterval;
+
+  /// No description provided for @projectChatErrorPolicyInfinite.
+  ///
+  /// In en, this message translates to:
+  /// **'Unlimited attempts'**
+  String get projectChatErrorPolicyInfinite;
+
+  /// No description provided for @projectChatErrorPolicyAttempts.
+  ///
+  /// In en, this message translates to:
+  /// **'Number of attempts'**
+  String get projectChatErrorPolicyAttempts;
+
+  /// No description provided for @projectChatErrorPolicyTryOtherModels.
+  ///
+  /// In en, this message translates to:
+  /// **'Try other models'**
+  String get projectChatErrorPolicyTryOtherModels;
+
+  /// No description provided for @projectChatErrorPolicyFallbackModels.
+  ///
+  /// In en, this message translates to:
+  /// **'Fallback models'**
+  String get projectChatErrorPolicyFallbackModels;
+
+  /// No description provided for @projectChatErrorPolicyFallbackModelsNone.
+  ///
+  /// In en, this message translates to:
+  /// **'None selected'**
+  String get projectChatErrorPolicyFallbackModelsNone;
+
   /// No description provided for @chatCopyMessage.
   ///
   /// In en, this message translates to:

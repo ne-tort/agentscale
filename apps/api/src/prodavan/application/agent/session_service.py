@@ -62,6 +62,7 @@ from prodavan.domain.agent.errors import agent_runtime_unavailable, app_error_fr
 from prodavan.domain.errors import AppError
 from prodavan.domain.identity import Principal
 from prodavan.domain.projects import CHAT_MAX_ATTACHMENTS_PER_MESSAGE, CHAT_MAX_MESSAGE_CHARS
+from prodavan.domain.projects.chat_error_policy import policy_to_send_fields
 from prodavan.infrastructure.persistence.models.agent import AgentEventRow, AgentSessionRow, AgentUsageRow
 from prodavan.infrastructure.persistence.models.identity import EmployeeRow
 from prodavan.infrastructure.persistence.models.modules import ModuleInstanceDataRow
@@ -887,6 +888,7 @@ class AgentSessionService:
                 message=bridge_message,
                 model=send_model,
                 endpoint=runtime_endpoint,
+                retry=policy_to_send_fields(project.chat_error_policy),
                 bootstrap=BridgeSessionBootstrap(
                     session_id=row.id,
                     prodavan_session_id=row.id,

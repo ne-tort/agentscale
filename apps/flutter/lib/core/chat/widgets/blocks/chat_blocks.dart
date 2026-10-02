@@ -504,12 +504,25 @@ class _AssistantStreamBlockState extends State<AssistantStreamBlock> {
 
 /// "agentscale работает…" — turn is streaming but no block streams and no
 /// tool call is pending: the agent is silent between events, and the user
-/// must see it did not stop.
+/// must see it did not stop. With [reconnect] set it renders the
+/// «Попытка реконнекта (n/y)…» line instead (provider-error retry wait).
 class AgentWorkingIndicator extends StatefulWidget {
-  const AgentWorkingIndicator({super.key});
+  const AgentWorkingIndicator({super.key, this.reconnect});
+
+  /// Reconnect attempt info from the runtime status frame; null = working.
+  final ReconnectIndicatorData? reconnect;
 
   @override
   State<AgentWorkingIndicator> createState() => _AgentWorkingIndicatorState();
+}
+
+/// Provider-error reconnect status (chat error policy) for [AgentWorkingIndicator].
+class ReconnectIndicatorData {
+  const ReconnectIndicatorData({this.attempt, this.maxAttempts, this.nextModel});
+
+  final int? attempt;
+  final int? maxAttempts;
+  final String? nextModel;
 }
 
 class _AgentWorkingIndicatorState extends State<AgentWorkingIndicator>
@@ -539,6 +552,16 @@ class _AgentWorkingIndicatorState extends State<AgentWorkingIndicator>
     // The l10n copy ends with "…" — the ellipsis is rendered as animated
     // dots instead, so strip any trailing dots from the base text.
     var label = l10n.projectChatAgentWorking;
+    final reconnect = widget.reconnect;
+    if (reconnect != null) {
+      final attempt = reconnect.attempt;
+      final max = reconnect.maxAttempts;
+      if (attempt != null && max != null && max > 0) {
+        label = l10n.projectChatReconnectingAttempt(attempt, max);
+      } else {
+        label = l10n.projectChatReconnecting;
+      }
+    }
     while (label.endsWith('…') || label.endsWith('.')) {
       label = label.substring(0, label.length - 1);
     }

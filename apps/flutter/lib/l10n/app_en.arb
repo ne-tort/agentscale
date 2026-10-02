@@ -1243,6 +1243,21 @@
     }
   },
   "projectChatAgentWorking": "agentscale is working…",
+  "projectChatReconnecting": "Reconnecting",
+  "projectChatReconnectingAttempt": "Reconnecting ({n}/{y})",
+  "projectChatErrorPolicyTitle": "Error handling",
+  "projectChatErrorPolicyInterval": "Retry interval, sec",
+  "projectChatErrorPolicyInfinite": "Unlimited attempts",
+  "projectChatErrorPolicyAttempts": "Number of attempts",
+  "projectChatErrorPolicyTryOtherModels": "Try other models",
+  "projectChatErrorPolicyFallbackModels": "Fallback models",
+  "projectChatErrorPolicyFallbackModelsNone": "None selected",
+  "@projectChatReconnectingAttempt": {
+    "placeholders": {
+      "n": {},
+      "y": {}
+    }
+  },
   "chatCopyMessage": "Copy reply",
   "chatCopiedMessage": "Copied",
   "chatUsageInputLabel": "input:",

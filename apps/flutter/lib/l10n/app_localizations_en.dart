@@ -2016,6 +2016,35 @@ class AppLocalizationsEn extends AppLocalizations {
   String get projectChatAgentWorking => 'agentscale is working…';
 
   @override
+  String get projectChatReconnecting => 'Reconnecting';
+
+  @override
+  String projectChatReconnectingAttempt(Object n, Object y) {
+    return 'Reconnecting ($n/$y)';
+  }
+
+  @override
+  String get projectChatErrorPolicyTitle => 'Error handling';
+
+  @override
+  String get projectChatErrorPolicyInterval => 'Retry interval, sec';
+
+  @override
+  String get projectChatErrorPolicyInfinite => 'Unlimited attempts';
+
+  @override
+  String get projectChatErrorPolicyAttempts => 'Number of attempts';
+
+  @override
+  String get projectChatErrorPolicyTryOtherModels => 'Try other models';
+
+  @override
+  String get projectChatErrorPolicyFallbackModels => 'Fallback models';
+
+  @override
+  String get projectChatErrorPolicyFallbackModelsNone => 'None selected';
+
+  @override
   String get chatCopyMessage => 'Copy reply';
 
   @override
