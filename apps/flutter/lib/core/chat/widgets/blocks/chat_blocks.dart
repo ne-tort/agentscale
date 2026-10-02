@@ -773,6 +773,7 @@ class ToolActivityBlock extends StatefulWidget {
     this.output,
     this.isError = false,
     this.pending = false,
+    this.mcpAliases = const {},
   });
 
   final String name;
@@ -780,6 +781,9 @@ class ToolActivityBlock extends StatefulWidget {
   final Object? output;
   final bool isError;
   final bool pending;
+
+  /// MCP display aliases (see ChatSessionController.mcpAliases).
+  final Map<String, String> mcpAliases;
 
   @override
   State<ToolActivityBlock> createState() => _ToolActivityBlockState();
@@ -799,6 +803,7 @@ class _ToolActivityBlockState extends State<ToolActivityBlock> {
       input: widget.input,
       output: widget.output,
       pending: widget.pending,
+      mcpAliases: widget.mcpAliases,
     );
     final stats = parseDiffStats(widget.output);
     final panelBody = formatToolPanelBody(
@@ -835,11 +840,14 @@ class _ToolActivityBlockState extends State<ToolActivityBlock> {
 
     final hasPanel = body.trim().isNotEmpty;
 
+    final label = widget.isError
+        ? '${l10n.projectChatToolErrorPrefix}: ${presentation.label}'
+        : presentation.label;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         ChatMutedLine(
-          label: presentation.label,
+          label: label,
           trailing: badge,
           expanded: _open,
           onTap: hasPanel ? () => setState(() => _open = !_open) : null,
@@ -851,33 +859,66 @@ class _ToolActivityBlockState extends State<ToolActivityBlock> {
 }
 
 class ToolCallBlock extends StatelessWidget {
-  const ToolCallBlock({super.key, required this.name, this.input = const {}});
+  const ToolCallBlock({
+    super.key,
+    required this.name,
+    this.input = const {},
+    this.mcpAliases = const {},
+  });
 
   final String name;
   final Map<String, dynamic> input;
+  final Map<String, String> mcpAliases;
 
   @override
   Widget build(BuildContext context) {
-    return ToolActivityBlock(name: name, input: input, pending: true);
+    return ToolActivityBlock(
+      name: name,
+      input: input,
+      pending: true,
+      mcpAliases: mcpAliases,
+    );
   }
 }
 
 class ToolResultBlock extends StatelessWidget {
-  const ToolResultBlock({super.key, required this.name, this.output, this.isError = false});
+  const ToolResultBlock({
+    super.key,
+    required this.name,
+    this.output,
+    this.isError = false,
+    this.mcpAliases = const {},
+  });
 
   final String name;
   final Object? output;
   final bool isError;
+  final Map<String, String> mcpAliases;
 
   @override
   Widget build(BuildContext context) {
-    return ToolActivityBlock(name: name, output: output, isError: isError);
+    return ToolActivityBlock(
+      name: name,
+      output: output,
+      isError: isError,
+      mcpAliases: mcpAliases,
+    );
+  }
+}
+
+String _prettyApprovalInput(Map<String, dynamic> input) {
+  if (input.isEmpty) return '';
+  try {
+    return const JsonEncoder.withIndent('  ').convert(input);
+  } catch (_) {
+    return input.toString();
   }
 }
 
 class ApprovalBlock extends StatelessWidget {
   const ApprovalBlock({
     super.key,
+    this.mcpAliases = const {},
     required this.name,
     required this.approvalId,
     this.input = const {},
@@ -891,17 +932,26 @@ class ApprovalBlock extends StatelessWidget {
   final VoidCallback? onAllow;
   final VoidCallback? onDeny;
 
+  /// MCP display aliases — the title shows the friendly tool label.
+  final Map<String, String> mcpAliases;
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
+    final presentation = formatToolActivityLabel(
+      l10n,
+      name: name.isEmpty ? 'tool' : name,
+      input: input,
+      mcpAliases: mcpAliases,
+    );
     return Padding(
       padding: EdgeInsets.symmetric(vertical: AppSpacing.xs),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(name, style: Theme.of(context).textTheme.titleSmall),
+          Text(presentation.label, style: Theme.of(context).textTheme.titleSmall),
           SizedBox(height: AppSpacing.xs),
-          ChatInsetPanel(child: Text(input.toString())),
+          ChatInsetPanel(child: Text(_prettyApprovalInput(input))),
           SizedBox(height: AppSpacing.sm),
           Row(
             children: [

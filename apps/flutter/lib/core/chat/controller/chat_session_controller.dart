@@ -60,6 +60,11 @@ class ChatSessionController {
   List<Map<String, dynamic>> pendingApprovals = const [];
   List<Map<String, dynamic>> availableModels = const [];
   String? defaultModel;
+
+  /// MCP tool display aliases (mcp_aliases module meta, keyed by canonical
+  /// ``mcp.<server>.<tool>`` and bare tool names) — chat labels use them to
+  /// show «Поиск товара…» instead of raw wire names.
+  Map<String, String> mcpAliases = const {};
   bool hasMoreHistory = false;
   int? oldestSeq;
   int? newestSeq;
@@ -211,6 +216,16 @@ class ChatSessionController {
       error = e;
       notifyImmediate();
     }
+    // Best-effort: MCP display aliases — failures leave the chat on raw wire
+    // names and never block the model list.
+    try {
+      final aliasBody = await api.getProjectMcpAliases(projectId);
+      final raw = aliasBody['aliases'];
+      mcpAliases = raw is Map
+          ? raw.map((k, v) => MapEntry(k.toString(), v.toString()))
+          : const <String, String>{};
+      notify();
+    } catch (_) {}
   }
 
   Future<void> loadTranscript({int? beforeSeq, bool background = false}) async {

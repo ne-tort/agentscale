@@ -144,6 +144,7 @@ class ChatMessageList extends StatefulWidget {
     this.reconnectAttempt,
     this.reconnectMaxAttempts,
     this.reconnectNextModel,
+    this.mcpAliases = const {},
     this.costResolver,
   });
 
@@ -169,6 +170,10 @@ class ChatMessageList extends StatefulWidget {
 
   /// Cost estimate for assistant usage metadata (runtime cost wins).
   final double? Function(String? model, int? inputTokens, int? outputTokens)? costResolver;
+
+  /// MCP tool display aliases (mcp_aliases module meta) — friendly tool
+  /// labels in tool activity/approval blocks.
+  final Map<String, String> mcpAliases;
 
   @override
   State<ChatMessageList> createState() => ChatMessageListState();
@@ -255,6 +260,7 @@ class ChatMessageListState extends State<ChatMessageList> {
       api: widget.api,
       onResolveApproval: widget.onResolveApproval,
       costResolver: widget.costResolver,
+      mcpAliases: widget.mcpAliases,
       turnStreaming: widget.turnStreaming,
     );
   }
@@ -576,6 +582,7 @@ class _ChatScaffoldState extends State<ChatScaffold> {
                                       reconnectAttempt: controller.reconnectAttempt,
                                       reconnectMaxAttempts: controller.reconnectMaxAttempts,
                                       reconnectNextModel: controller.reconnectNextModel,
+                                      mcpAliases: controller.mcpAliases,
                                       costResolver: controller.usageCostUsd,
                                       onResolveApproval: (id, decision) =>
                                           controller.resolveApproval(id, decision),

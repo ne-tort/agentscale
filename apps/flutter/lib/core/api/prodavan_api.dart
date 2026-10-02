@@ -1045,6 +1045,24 @@ class ProdavanApi {
     }
   }
 
+  /// MCP tool display aliases aggregated over the project's bound modules
+  /// (mcp_aliases meta documents), keyed by canonical wire names and bare
+  /// tool names.
+  Future<Map<String, dynamic>> getProjectMcpAliases(String projectId) async {
+    final prevProj = this.projectId;
+    this.projectId = projectId;
+    try {
+      final res = await AuthHttp.get(
+        _uri('/projects/$projectId/mcp-aliases'),
+        extraHeaders: _workHeaders,
+      );
+      _throwIfError(res);
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    } finally {
+      this.projectId = prevProj;
+    }
+  }
+
   /// Per-project chat reconnect policy (provider-error retries).
   Future<Map<String, dynamic>> getProjectChatErrorPolicy(String projectId) async {
     final prevProj = this.projectId;

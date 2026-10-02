@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 from prodavan.api.deps import PrincipalDep, SessionDep, get_current_employee
 from prodavan.api.v1.workspace_bodies import WorkspaceCopyBody, WorkspaceMoveBody
 from prodavan.application.admin.company_service import AdminCompanyService
+from prodavan.application.modules.chat_scope import SESSION_HEADER
 from prodavan.application.pod_service.workspace_service import PodWorkspaceService
 from prodavan.application.project_service import ProjectAccessPolicy, ProjectCommand, ProjectQuery
 from prodavan.application.projects import (
@@ -18,7 +19,6 @@ from prodavan.application.projects import (
     ProjectTriggerService,
 )
 from prodavan.application.projects.signed_ingress import enqueue_signed_trigger
-from prodavan.application.modules.chat_scope import SESSION_HEADER
 from prodavan.domain.errors import AppError
 from prodavan.domain.projects.types import PAUSE_EXEMPT_TRIGGER_KINDS
 from prodavan.infrastructure.persistence.models.identity import EmployeeRow
@@ -483,6 +483,23 @@ class ProjectRuntimeDataBody(BaseModel):
     model_config = {"extra": "forbid"}
 
     body: dict = Field(default_factory=dict)
+
+
+@router.get("/projects/{project_id}/mcp-aliases")
+async def get_project_mcp_aliases(
+    project_id: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+) -> dict:
+    """Chat display aliases for MCP tools, aggregated over bound modules."""
+    from prodavan.application.projects.project_runtime_module_service import (
+        ProjectRuntimeModuleService,
+    )
+
+    return await ProjectRuntimeModuleService(session).mcp_aliases_map(
+        project_id=project_id, principal=principal, employee=employee
+    )
 
 
 @router.get("/projects/{project_id}/runtime-modules")

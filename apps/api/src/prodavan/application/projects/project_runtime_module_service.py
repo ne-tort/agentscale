@@ -163,6 +163,65 @@ class ProjectRuntimeModuleService:
             )
         return out
 
+    async def mcp_aliases_map(
+        self,
+        *,
+        project_id: str,
+        principal: Principal,
+        employee: EmployeeRow | None,
+    ) -> dict[str, Any]:
+        """Chat display aliases for MCP tools, aggregated over bound modules.
+
+        Merges every module's ``mcp_aliases`` meta document (instance doc
+        wins, module template fallback) into a flat lookup keyed by the
+        canonical wire name ``mcp.{server}.{tool}`` plus the bare tool name
+        (server-less aliases / any-server fallbacks).
+        """
+        aliases: dict[str, str] = {}
+        descriptions: dict[str, str] = {}
+        modules = await self.list_modules(
+            project_id=project_id, principal=principal, employee=employee
+        )
+        for mod in modules:
+            module_id = str(mod.get("module_id") or "")
+            if not module_id:
+                continue
+            try:
+                doc = await self.get_meta_document(
+                    project_id=project_id,
+                    module_id=module_id,
+                    slug="mcp_aliases",
+                    principal=principal,
+                    employee=employee,
+                )
+            except AppError:
+                continue
+            body = doc.get("body")
+            items = body if isinstance(body, list) else (
+                body.get("items") if isinstance(body, dict) else None
+            )
+            if not isinstance(items, list):
+                continue
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                tool = str(item.get("tool") or "").strip()
+                label = str(item.get("label") or "").strip()
+                if not tool or not label:
+                    continue
+                server = str(item.get("server") or "").strip()
+                description = str(item.get("description") or "").strip()
+                if server:
+                    key = f"mcp.{server}.{tool}"
+                    aliases[key] = label
+                    if description:
+                        descriptions[key] = description
+                # Bare tool name: server-less alias or any-server fallback.
+                aliases.setdefault(tool, label)
+                if description:
+                    descriptions.setdefault(tool, description)
+        return {"aliases": aliases, "descriptions": descriptions}
+
     async def get_meta_document(
         self,
         *,

@@ -49,6 +49,7 @@ ARRAY_DOCUMENT_SLUGS = frozenset(
         "actions",
         "materialize",
         "mcp_tools",
+        "mcp_aliases",
         "container_env",
         "container_env_secrets",
     }
@@ -92,6 +93,37 @@ def validate_document_body(slug: str, body: Any) -> None:
         return
     if not isinstance(body, list):
         raise _meta_error(f"{slug} body must be a JSON array")
+    if slug == "mcp_aliases":
+        _validate_mcp_aliases(body)
+
+
+def _validate_mcp_aliases(items: list[Any]) -> None:
+    """Chat display aliases for MCP tools: [{tool, label, server?, description?}].
+
+    Keys the chat matches on are the canonical wire names
+    ``mcp.{server}.{tool}`` (server optional — a server-less alias matches
+    any server exposing that tool name).
+    """
+    seen: set[str] = set()
+    for idx, item in enumerate(items):
+        if not isinstance(item, dict):
+            raise _meta_error(f"mcp_aliases[{idx}] must be an object")
+        tool = item.get("tool")
+        if not isinstance(tool, str) or not tool.strip() or len(tool) > 200:
+            raise _meta_error(f"mcp_aliases[{idx}].tool must be a non-empty string (<=200)")
+        server = item.get("server")
+        if server is not None and (not isinstance(server, str) or not server.strip() or len(server) > 100):
+            raise _meta_error(f"mcp_aliases[{idx}].server must be a non-empty string (<=100)")
+        label = item.get("label")
+        if not isinstance(label, str) or not label.strip() or len(label) > 200:
+            raise _meta_error(f"mcp_aliases[{idx}].label must be a non-empty string (<=200)")
+        description = item.get("description")
+        if description is not None and (not isinstance(description, str) or len(description) > 500):
+            raise _meta_error(f"mcp_aliases[{idx}].description must be a string (<=500)")
+        key = f"{(server or '').strip()}::{tool.strip()}"
+        if key in seen:
+            raise _meta_error(f"mcp_aliases: duplicate alias for {key}")
+        seen.add(key)
 
 
 def _validate_materialize_roots(body: Any) -> None:
@@ -136,6 +168,7 @@ def manifest_from_slug_map(slug_map: dict[str, Any]) -> dict[str, list[dict[str,
         "actions": _list_of_maps(slug_map.get("actions")),
         "materialize": _list_of_maps(slug_map.get("materialize")),
         "mcp_tools": _list_of_maps(slug_map.get("mcp_tools")),
+        "mcp_aliases": _list_of_maps(slug_map.get("mcp_aliases")),
         "seed_rows": _parse_seed_items(slug_map.get("seed_rows")),
     }
 

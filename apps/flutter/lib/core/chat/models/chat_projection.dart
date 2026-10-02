@@ -308,10 +308,16 @@ List<ChatBlock> applyStreamEvent(List<ChatBlock> blocks, Map<String, dynamic> ev
       // message immediately so live hover metadata stays in sync.
       _attachUsageInPlace(next, Map<String, dynamic>.from(payload));
       break;
+    case 'permission_denial':
+      next.add(ChatBlock(kind: 'permission_denial', raw: {
+        'name': payload['name'] ?? payload['tool'],
+        'reason': payload['reason'],
+        '_key': _KeyGen.next('permission_denial'),
+      }));
+      break;
     case 'status':
     case 'tool_progress':
     case 'tool_call_delta':
-    case 'system_notice':
       break;
     case 'error':
       next.add(ChatBlock(kind: 'error', raw: {

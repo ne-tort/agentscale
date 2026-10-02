@@ -2180,12 +2180,6 @@ abstract class AppLocalizations {
   /// **'Manage custom tabs'**
   String get cabinetManageCustomTabs;
 
-  /// No description provided for @cabinetMcpTools.
-  ///
-  /// In en, this message translates to:
-  /// **'MCP tools'**
-  String get cabinetMcpTools;
-
   /// No description provided for @cabinetMetaTables.
   ///
   /// In en, this message translates to:
@@ -2245,12 +2239,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'No interpreter registered for view \"{slug}\".'**
   String cabinetNoInterpreterForView(String slug);
-
-  /// No description provided for @cabinetNoMcpTools.
-  ///
-  /// In en, this message translates to:
-  /// **'No MCP tools exposed for this cabinet.'**
-  String get cabinetNoMcpTools;
 
   /// No description provided for @cabinetNoMetaTablesYet.
   ///
@@ -3793,6 +3781,96 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'MCP: {tool}'**
   String projectChatToolMcp(String tool);
+
+  /// No description provided for @projectChatToolMcpServer.
+  ///
+  /// In en, this message translates to:
+  /// **'MCP: {server} · {tool}'**
+  String projectChatToolMcpServer(Object server, Object tool);
+
+  /// No description provided for @projectChatToolWebSearch.
+  ///
+  /// In en, this message translates to:
+  /// **'Web search'**
+  String get projectChatToolWebSearch;
+
+  /// No description provided for @projectChatToolWebFetch.
+  ///
+  /// In en, this message translates to:
+  /// **'Fetching web page'**
+  String get projectChatToolWebFetch;
+
+  /// No description provided for @projectChatToolTodoWrite.
+  ///
+  /// In en, this message translates to:
+  /// **'Updating task plan'**
+  String get projectChatToolTodoWrite;
+
+  /// No description provided for @projectChatToolTodoList.
+  ///
+  /// In en, this message translates to:
+  /// **'Task plan'**
+  String get projectChatToolTodoList;
+
+  /// No description provided for @projectChatToolNotesWrite.
+  ///
+  /// In en, this message translates to:
+  /// **'Writing note'**
+  String get projectChatToolNotesWrite;
+
+  /// No description provided for @projectChatToolNotesRead.
+  ///
+  /// In en, this message translates to:
+  /// **'Reading notes'**
+  String get projectChatToolNotesRead;
+
+  /// No description provided for @projectChatToolGoalsSet.
+  ///
+  /// In en, this message translates to:
+  /// **'Setting goal'**
+  String get projectChatToolGoalsSet;
+
+  /// No description provided for @projectChatToolGoalsUpdate.
+  ///
+  /// In en, this message translates to:
+  /// **'Updating goal'**
+  String get projectChatToolGoalsUpdate;
+
+  /// No description provided for @projectChatToolGoalsList.
+  ///
+  /// In en, this message translates to:
+  /// **'Goals'**
+  String get projectChatToolGoalsList;
+
+  /// No description provided for @projectChatToolCompact.
+  ///
+  /// In en, this message translates to:
+  /// **'Compacting context'**
+  String get projectChatToolCompact;
+
+  /// No description provided for @projectChatToolMcpServers.
+  ///
+  /// In en, this message translates to:
+  /// **'MCP servers list'**
+  String get projectChatToolMcpServers;
+
+  /// No description provided for @projectChatToolMcpTools.
+  ///
+  /// In en, this message translates to:
+  /// **'MCP tools list'**
+  String get projectChatToolMcpTools;
+
+  /// No description provided for @projectChatToolErrorPrefix.
+  ///
+  /// In en, this message translates to:
+  /// **'Error'**
+  String get projectChatToolErrorPrefix;
+
+  /// No description provided for @projectChatPermissionDenied.
+  ///
+  /// In en, this message translates to:
+  /// **'Action denied'**
+  String get projectChatPermissionDenied;
 
   /// No description provided for @projectChatToolSubagent.
   ///

@@ -4184,8 +4184,62 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 },
             },
         ],
-        "mcp_tools": [
+# Chat display aliases for the prodavan-equipment MCP package tools
+        # (keys = wire tool names; labels shown in the chat instead of
+        # "MCP: prodavan-equipment.<tool>"). Editable per-instance via the
+        # module meta editor (slug mcp_aliases).
+        "mcp_aliases": [
             {
+                "server": "prodavan-equipment",
+                "tool": "equipment_catalog_sources",
+                "label": "Источники каталога",
+                "description": "Список каталогов техники с их статусами",
+            },
+            {
+                "server": "prodavan-equipment",
+                "tool": "equipment_catalog_search",
+                "label": "Поиск товара",
+                "description": "Поиск позиций по каталогам техники",
+            },
+            {
+                "server": "prodavan-equipment",
+                "tool": "request_lines_list",
+                "label": "Позиции заявки",
+                "description": "Список позиций текущей заявки",
+            },
+            {
+                "server": "prodavan-equipment",
+                "tool": "request_lines_get",
+                "label": "Позиция заявки",
+                "description": "Позиция заявки по идентификатору",
+            },
+            {
+                "server": "prodavan-equipment",
+                "tool": "request_lines_upsert",
+                "label": "Запись позиции заявки",
+                "description": "Создание или обновление позиции заявки",
+            },
+            {
+                "server": "prodavan-equipment",
+                "tool": "found_groups_list",
+                "label": "Найденные группы",
+                "description": "Список подобранных групп товаров",
+            },
+            {
+                "server": "prodavan-equipment",
+                "tool": "found_groups_get",
+                "label": "Найденная группа",
+                "description": "Подобранная группа товаров по идентификатору",
+            },
+            {
+                "server": "prodavan-equipment",
+                "tool": "found_groups_upsert",
+                "label": "Запись группы товаров",
+                "description": "Создание или обновление подобранной группы",
+            },
+        ],
+        "mcp_tools": [
+                    {
                 "id": "equipment_catalog_list",
                 "name": "equipment_catalog_list",
                 "label": "List equipment catalogs",
