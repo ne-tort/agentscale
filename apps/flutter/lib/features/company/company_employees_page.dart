@@ -164,7 +164,7 @@ class _CompanyEmployeesPageState extends State<CompanyEmployeesPage> {
             ),
           AppInlineAddField(
             title: l10n.companyAddEmployee,
-            hintText: l10n.companyAddEmployee,
+            hintText: l10n.companyAddEmployeeHint,
             validator: (v) => v.trim().length >= 3,
             invalidMessage: l10n.companyPasswordHint,
             onSave: _createEmployee,

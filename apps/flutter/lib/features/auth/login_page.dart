@@ -158,7 +158,9 @@ class _LoginPageState extends State<LoginPage> {
                                 focusNode: _usernameFocus,
                                 enabled: !_connecting,
                                 textInputAction: TextInputAction.next,
-                                decoration: kBorderlessInputDecoration,
+                                decoration: kBorderlessInputDecoration.copyWith(
+                                  hintText: l10n.authLoginHint,
+                                ),
                                 onChanged: (_) => setState(() {}),
                                 onSubmitted: (_) => _passwordFocus.requestFocus(),
                               ),

@@ -1517,13 +1517,13 @@ abstract class AppLocalizations {
   /// No description provided for @adminProdavanSubscription.
   ///
   /// In en, this message translates to:
-  /// **'Prodavan subscription'**
+  /// **'Agentscale subscription'**
   String get adminProdavanSubscription;
 
   /// No description provided for @adminProdavanSubscriptionOptional.
   ///
   /// In en, this message translates to:
-  /// **'Prodavan subscription'**
+  /// **'Agentscale subscription'**
   String get adminProdavanSubscriptionOptional;
 
   /// No description provided for @adminProviderValue.
@@ -4061,7 +4061,7 @@ abstract class AppLocalizations {
   /// No description provided for @navProdavan.
   ///
   /// In en, this message translates to:
-  /// **'Prodavan'**
+  /// **'Agentscale'**
   String get navProdavan;
 
   /// No description provided for @projectAgentError.
@@ -4987,6 +4987,24 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'No models'**
   String get adminNoModels;
+
+  /// No description provided for @adminAddCompanyHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Company name (login: name@agentscale.local)'**
+  String get adminAddCompanyHint;
+
+  /// No description provided for @companyAddEmployeeHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Employee name (login: name@company.local)'**
+  String get companyAddEmployeeHint;
+
+  /// No description provided for @authLoginHint.
+  ///
+  /// In en, this message translates to:
+  /// **'e.g. ivan@company.local'**
+  String get authLoginHint;
 }
 
 class _AppLocalizationsDelegate

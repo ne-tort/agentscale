@@ -164,7 +164,25 @@ class AdminCompanyService:
                     status=422,
                     detail="name required",
                 )
-            company.name = raw_name.strip()
+            new_name = raw_name.strip()
+            if new_name.lower() != company.name.lower():
+                clash = await self._session.execute(
+                    select(CompanyRow.id).where(
+                        func.lower(CompanyRow.name) == new_name.lower(),
+                        CompanyRow.id != company.id,
+                        CompanyRow.deleted_at.is_(None),
+                    )
+                )
+                if clash.scalar_one_or_none() is not None:
+                    raise AppError(
+                        code="CONFLICT",
+                        title="Conflict",
+                        status=409,
+                        detail="company name already exists",
+                    )
+            company.name = new_name
+            # login_slug stays as-is: the login handle is a stable identifier
+            # (renames do not re-issue credentials).
         if "description" in fields:
             description = fields["description"]
             if description is None:
@@ -672,7 +690,7 @@ class AdminCompanyService:
             await publish_register_command(
                 client_ref=f"company:{company.id}",
                 username=login,
-                email=f"{login}@companies.prodavan.local",
+                email=login,
                 password=pwd,
                 realm_roles=[ROLE_COMPANY],
                 display_name=company.name,

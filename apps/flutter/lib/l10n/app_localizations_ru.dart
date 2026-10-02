@@ -838,10 +838,10 @@ class AppLocalizationsRu extends AppLocalizations {
   String get adminPreferredProviderOptional => 'Провайдер';
 
   @override
-  String get adminProdavanSubscription => 'Подписка Prodavan';
+  String get adminProdavanSubscription => 'Подписка Agentscale';
 
   @override
-  String get adminProdavanSubscriptionOptional => 'Подписка Prodavan';
+  String get adminProdavanSubscriptionOptional => 'Подписка Agentscale';
 
   @override
   String adminProviderValue(String provider) {
@@ -2298,7 +2298,7 @@ class AppLocalizationsRu extends AppLocalizations {
   String get navData => 'Данные';
 
   @override
-  String get navProdavan => 'Prodavan';
+  String get navProdavan => 'Agentscale';
 
   @override
   String get projectAgentError => 'Ошибка агента';
@@ -2803,4 +2803,15 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get adminNoModels => 'Нет моделей';
+
+  @override
+  String get adminAddCompanyHint =>
+      'Название компании (вход: название@agentscale.local)';
+
+  @override
+  String get companyAddEmployeeHint =>
+      'Имя сотрудника (вход: имя@компания.local)';
+
+  @override
+  String get authLoginHint => 'например: ivan@company.local';
 }

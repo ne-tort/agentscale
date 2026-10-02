@@ -1655,5 +1655,8 @@
       }
     }
   },
-  "adminNoModels": "Нет моделей"
+  "adminNoModels": "Нет моделей",
+  "adminAddCompanyHint": "Название компании (вход: название@agentscale.local)",
+  "companyAddEmployeeHint": "Имя сотрудника (вход: имя@компания.local)",
+  "authLoginHint": "например: ivan@company.local"
 }
