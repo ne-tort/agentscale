@@ -20,7 +20,7 @@ transformers:
 images:
   - name: ghcr.io/ne-tort/agentscale-api
     newName: ghcr.io/ne-tort/agentscale-api
-    newTag: latest # TODO(prod-bootstrap): pin to the promoted :<sha12>
+    newTag: ef9507670d46
   - name: ghcr.io/ne-tort/agentscale-web
     newName: ghcr.io/ne-tort/agentscale-web
-    newTag: latest # TODO(prod-bootstrap): pin to the promoted :<sha12>
+    newTag: ef9507670d46
