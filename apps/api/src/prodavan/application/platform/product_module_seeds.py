@@ -763,6 +763,65 @@ def mod_files_meta() -> dict[str, list[Any]]:
 
 def mod_mcp_meta() -> dict[str, list[Any]]:
     return {
+        # Chat display aliases for the prodavan-modules platform MCP server
+        # (materialized into every project) — friendly labels instead of
+        # "prodavan-modules · modules_list" in the chat.
+        "mcp_aliases": [
+            {
+                "server": "prodavan-modules",
+                "tool": "modules_list",
+                "label": "Список модулей",
+                "description": "Модули проекта и их настройки",
+            },
+            {
+                "server": "prodavan-modules",
+                "tool": "module_meta_list",
+                "label": "Список настроек модулей",
+                "description": "Мета-документы модулей проекта",
+            },
+            {
+                "server": "prodavan-modules",
+                "tool": "module_meta_get",
+                "label": "Чтение настройки модуля",
+                "description": "Чтение мета-документа модуля",
+            },
+            {
+                "server": "prodavan-modules",
+                "tool": "module_meta_put",
+                "label": "Сохранение настройки модуля",
+                "description": "Запись мета-документа модуля",
+            },
+            {
+                "server": "prodavan-modules",
+                "tool": "module_data_list",
+                "label": "Чтение данных модуля",
+                "description": "Строки таблиц данных модуля",
+            },
+            {
+                "server": "prodavan-modules",
+                "tool": "module_data_create",
+                "label": "Создание записи",
+                "description": "Новая строка в таблице данных модуля",
+            },
+            {
+                "server": "prodavan-modules",
+                "tool": "module_data_update",
+                "label": "Обновление записи",
+                "description": "Изменение строки в таблице данных модуля",
+            },
+            {
+                "server": "prodavan-modules",
+                "tool": "module_data_delete",
+                "label": "Удаление записи",
+                "description": "Удаление строки из таблицы данных модуля",
+            },
+            {
+                "server": "prodavan-modules",
+                "tool": "module_action_invoke",
+                "label": "Действие модуля",
+                "description": "Запуск действия из настроек модуля",
+            },
+        ],
         "tables": [
             {
                 "slug": "mcp_packages",

@@ -82,3 +82,16 @@ def test_equipment_seed_aliases_validate() -> None:
         assert item["server"] == "prodavan-equipment"
         assert item["tool"]
         assert item["label"]
+
+
+def test_modules_seed_aliases_validate() -> None:
+    from prodavan.application.platform.product_module_seeds import mod_mcp_meta
+
+    aliases = mod_mcp_meta().get("mcp_aliases")
+    assert isinstance(aliases, list)
+    assert len(aliases) == 9
+    validate_document_body("mcp_aliases", aliases)
+    for item in aliases:
+        assert item["server"] == "prodavan-modules"
+        assert item["tool"]
+        assert item["label"]

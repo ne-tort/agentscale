@@ -3527,7 +3527,7 @@ abstract class AppLocalizations {
   /// No description provided for @projectChatGroupMcp.
   ///
   /// In en, this message translates to:
-  /// **'MCP: {count} calls'**
+  /// **'{count, plural, one{# tool call} other{# tool calls}}'**
   String projectChatGroupMcp(int count);
 
   /// No description provided for @projectChatGroupDeleted.
@@ -3557,7 +3557,7 @@ abstract class AppLocalizations {
   /// No description provided for @projectChatGroupGeneric.
   ///
   /// In en, this message translates to:
-  /// **'Tools ({count})'**
+  /// **'{count, plural, one{# tool call} other{# tool calls}}'**
   String projectChatGroupGeneric(int count);
 
   /// No description provided for @projectChatWorking.
@@ -3773,19 +3773,19 @@ abstract class AppLocalizations {
   /// No description provided for @projectChatToolMcpGeneric.
   ///
   /// In en, this message translates to:
-  /// **'MCP'**
+  /// **'Tool'**
   String get projectChatToolMcpGeneric;
 
   /// No description provided for @projectChatToolMcp.
   ///
   /// In en, this message translates to:
-  /// **'MCP: {tool}'**
+  /// **'{tool}'**
   String projectChatToolMcp(String tool);
 
   /// No description provided for @projectChatToolMcpServer.
   ///
   /// In en, this message translates to:
-  /// **'MCP: {server} · {tool}'**
+  /// **'{server} · {tool}'**
   String projectChatToolMcpServer(Object server, Object tool);
 
   /// No description provided for @projectChatToolWebSearch.
@@ -3851,13 +3851,13 @@ abstract class AppLocalizations {
   /// No description provided for @projectChatToolMcpServers.
   ///
   /// In en, this message translates to:
-  /// **'MCP servers list'**
+  /// **'Tools list'**
   String get projectChatToolMcpServers;
 
   /// No description provided for @projectChatToolMcpTools.
   ///
   /// In en, this message translates to:
-  /// **'MCP tools list'**
+  /// **'Tools list'**
   String get projectChatToolMcpTools;
 
   /// No description provided for @projectChatToolErrorPrefix.

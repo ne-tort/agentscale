@@ -1183,7 +1183,7 @@
       }
     }
   },
-  "projectChatGroupMcp": "MCP: {count} calls",
+  "projectChatGroupMcp": "{count, plural, one{# tool call} other{# tool calls}}",
   "@projectChatGroupMcp": {
     "placeholders": {
       "count": {
@@ -1223,7 +1223,7 @@
       }
     }
   },
-  "projectChatGroupGeneric": "Tools ({count})",
+  "projectChatGroupGeneric": "{count, plural, one{# tool call} other{# tool calls}}",
   "@projectChatGroupGeneric": {
     "placeholders": {
       "count": {
@@ -1338,9 +1338,9 @@
     }
   },
   "projectChatToolShell": "Ran command",
-  "projectChatToolMcpGeneric": "MCP",
-  "projectChatToolMcp": "MCP: {tool}",
-  "projectChatToolMcpServer": "MCP: {server} · {tool}",
+  "projectChatToolMcpGeneric": "Tool",
+  "projectChatToolMcp": "{tool}",
+  "projectChatToolMcpServer": "{server} · {tool}",
   "projectChatToolWebSearch": "Web search",
   "projectChatToolWebFetch": "Fetching web page",
   "projectChatToolTodoWrite": "Updating task plan",
@@ -1351,8 +1351,8 @@
   "projectChatToolGoalsUpdate": "Updating goal",
   "projectChatToolGoalsList": "Goals",
   "projectChatToolCompact": "Compacting context",
-  "projectChatToolMcpServers": "MCP servers list",
-  "projectChatToolMcpTools": "MCP tools list",
+  "projectChatToolMcpServers": "Tools list",
+  "projectChatToolMcpTools": "Tools list",
   "projectChatToolErrorPrefix": "Error",
   "projectChatPermissionDenied": "Action denied",
   "@projectChatToolMcpServer": {

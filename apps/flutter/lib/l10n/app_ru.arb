@@ -1183,7 +1183,7 @@
       }
     }
   },
-  "projectChatGroupMcp": "MCP: {count} вызовов",
+  "projectChatGroupMcp": "{count, plural, one{# вызов инструмента} few{# вызова инструмента} many{# вызовов инструмента} other{# вызова инструмента}}",
   "@projectChatGroupMcp": {
     "placeholders": {
       "count": {
@@ -1223,7 +1223,7 @@
       }
     }
   },
-  "projectChatGroupGeneric": "Инструменты ({count})",
+  "projectChatGroupGeneric": "{count, plural, one{# вызов инструмента} few{# вызова инструмента} many{# вызовов инструмента} other{# вызова инструмента}}",
   "@projectChatGroupGeneric": {
     "placeholders": {
       "count": {
@@ -1332,9 +1332,9 @@
     }
   },
   "projectChatToolShell": "Запущена команда",
-  "projectChatToolMcpGeneric": "MCP",
-  "projectChatToolMcp": "MCP: {tool}",
-  "projectChatToolMcpServer": "MCP: {server} · {tool}",
+  "projectChatToolMcpGeneric": "Инструмент",
+  "projectChatToolMcp": "{tool}",
+  "projectChatToolMcpServer": "{server} · {tool}",
   "projectChatToolWebSearch": "Поиск в интернете",
   "projectChatToolWebFetch": "Чтение веб-страницы",
   "projectChatToolTodoWrite": "Обновление плана задач",
@@ -1345,8 +1345,8 @@
   "projectChatToolGoalsUpdate": "Обновление цели",
   "projectChatToolGoalsList": "Список целей",
   "projectChatToolCompact": "Сжатие контекста",
-  "projectChatToolMcpServers": "Список MCP-серверов",
-  "projectChatToolMcpTools": "Список MCP-инструментов",
+  "projectChatToolMcpServers": "Список инструментов",
+  "projectChatToolMcpTools": "Список инструментов",
   "projectChatToolErrorPrefix": "Ошибка",
   "projectChatPermissionDenied": "Действие отклонено",
   "@projectChatToolMcp": {
@@ -1356,7 +1356,7 @@
       }
     }
   },
-  "projectChatToolSubagent": "Подагент {name}",
+  "projectChatToolSubagent": "Субагент {name}",
   "@projectChatToolSubagent": {
     "placeholders": {
       "name": {
