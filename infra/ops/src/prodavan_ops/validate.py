@@ -21,13 +21,13 @@ FIRST_PARTY_LATEST = {
     "ghcr.io/ne-tort/prodavan-agent-runtime:latest",
 }
 FORBIDDEN_INFRA_LATEST = re.compile(
-    r"^(postgres:(16|latest)|redis:(7-alpine|7|latest)|mongo:(7|latest)|minio/minio:latest|minio/mc:latest|"
+    r"^(postgres:(16|latest)|redis:(7-alpine|7|latest)|mongo:(7|latest)|ne-tort/minio:latest|ne-tort/mc:latest|"
     r"quay.io/keycloak/keycloak:latest)$"
 )
 REQUIRED_SNIPPETS = (
     "postgres:16.15",
     "redis:7.4.11-alpine",
-    "minio/minio:RELEASE.2024-10-02T17-50-41Z",
+    "ghcr.io/ne-tort/minio:RELEASE.2024-10-02T17-50-41Z",
     "mongo:7.0.14",
     "opensearchproject/opensearch:2.17.1",
     "curlimages/curl:8.10.1",
