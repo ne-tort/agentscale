@@ -4,7 +4,7 @@ kind: Kustomization
 # sandbox-router (Go) — proxy to sandbox Pods via X-Sandbox-* headers.
 # Vendored from agent-sandbox/sandbox-router/deploy/, patched for Prodavan:
 #   - NetworkPolicy egress to sandboxes: 3921 (agent-runtime port), not 8888
-#   - NetworkPolicy ingress on 8080: only from namespace prodavan
+#   - NetworkPolicy ingress on 8080: only from the API namespaces (agentscale, agentscale-dev)
 #   - replicas: 2 (upstream default, kept explicit)
 #   - --cache-enabled=true (Pod-IP fast path; requires rbac.yaml ClusterRole)
 # authz-mode stays upstream default (allow-all) — router is internal-only,

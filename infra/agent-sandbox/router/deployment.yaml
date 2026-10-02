@@ -6,7 +6,7 @@
 #   - authz-mode stays default (allow-all): router is internal-only (no
 #     Ingress route); tokenreview/scoped-token is a later iteration.
 # Plain HTTP only (no TLS) — TLS terminates elsewhere and the router is
-# reachable only from the prodavan namespace (see networkpolicy.yaml).
+# reachable only from the API namespaces — agentscale/agentscale-dev (see networkpolicy.yaml).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
