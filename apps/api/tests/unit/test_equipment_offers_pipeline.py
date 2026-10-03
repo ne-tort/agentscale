@@ -42,6 +42,10 @@ class FakeIO(ModuleRowIO):
     async def list(self, table_slug: str) -> list[dict[str, Any]]:
         return [dict(r) for r in self._tables.get(table_slug, [])]
 
+    async def list_project_wide(self, table_slug: str) -> list[dict[str, Any]]:
+        # Single-bucket fake: project-wide listing equals the plain list.
+        return await self.list(table_slug)
+
     async def create(self, table_slug: str, body: dict[str, Any]) -> dict[str, Any]:
         self._seq += 1
         row = {"row_id": f"row_{self._seq}", "body": dict(body)}
@@ -292,12 +296,25 @@ async def test_pipeline_materialize_best_budget_procurement(io: FakeIO) -> None:
     # --- закупка: Петров (без офферов? есть h2) / Иванов / Сидоров; Луков выключен
     proc = {p["body"]["seller"]: p["body"] for p in io.rows("procurement")}
     assert set(proc) == {"Иванов", "Петров", "Сидоров"}
-    # Иванов: ни один оффер не выбран → суммы 0, но маржа из реестра (15)
+    # Иванов: офферов 2; эффективная позиция line_2 (Кабель, best h4=450)
+    # — Закупка агрегирует бюджетные снапшоты (выбор → best), как Бюджетирование.
     assert proc["Иванов"]["offers_count"] == 2
     assert proc["Иванов"]["margin_pct"] == 15
     assert proc["Иванов"]["delivery_rub"] == 300
-    assert proc["Иванов"]["sum_rub"] == 0
+    assert proc["Иванов"]["sum_rub"] == 450.0
+    assert proc["Иванов"]["selected_count"] == 1
+    assert proc["Иванов"]["sum_margin_rub"] == round(450.0 * 0.15, 2)
+    # Сидоров: эффективная позиция line_1 (best h3=120, qty 2 → 240),
+    # markup default 0.1 (нет в реестре) → маржа 24
     assert proc["Сидоров"]["offers_count"] == 1
+    assert proc["Сидоров"]["sum_rub"] == 240.0
+    assert proc["Сидоров"]["selected_count"] == 1
+    assert proc["Сидоров"]["sum_margin_rub"] == 24.0
+    # Петров: оффер есть, но не эффективен ни для одной позиции — строка
+    # с нулевыми суммами (иначе на Закупках нельзя выбрать его товар)
+    assert proc["Петров"]["offers_count"] == 1
+    assert proc["Петров"]["sum_rub"] == 0.0
+    assert proc["Петров"]["selected_count"] == 0
     # дефолт маржи 10 у Петрова и Сидорова (нет в реестре)
     assert proc["Петров"]["margin_pct"] == 10
     assert proc["Сидоров"]["margin_pct"] == 10

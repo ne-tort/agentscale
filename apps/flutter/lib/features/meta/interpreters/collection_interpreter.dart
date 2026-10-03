@@ -21,11 +21,18 @@ import 'package:prodavan/features/meta/runtime/module_runtime_scope.dart';
 import 'package:prodavan/features/meta/runtime/owner_module_data_controller.dart';
 import 'package:prodavan/features/meta/runtime/runtime_data_adapter.dart';
 import 'package:prodavan/features/meta/module_scaffold_actions.dart';
+import 'package:prodavan/features/meta/widgets/benefit_badge.dart';
 import 'package:prodavan/features/meta/widgets/budget_summary_strip.dart';
 import 'package:prodavan/features/meta/widgets/editable_number_cell.dart';
 import 'package:prodavan/features/meta/widgets/file_upload_field.dart';
 import 'package:prodavan/features/meta/widgets/project_multiselect_field.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
+
+double? _doubleFromUi(Object? raw) {
+  if (raw is num) return raw.toDouble();
+  if (raw is String) return double.tryParse(raw.trim());
+  return null;
+}
 
 class CollectionViewInterpreter extends StatelessWidget {
   const CollectionViewInterpreter({
@@ -86,6 +93,7 @@ class CollectionViewInterpreter extends StatelessWidget {
         final styled = _applyRowStyles(context, uiJson, rawRows);
         var rows = _withSelection(context, uiJson, styled);
         rows = _withEditableCells(context, uiJson, tableSlug, rows);
+        rows = _withBenefitBadges(context, uiJson, l10n, rows);
         final hasInline = _hasInlineAdd(uiJson);
         final hasPoll = _hasActivePoll(uiJson, rawRows, seeds);
         final onLoadAction = _onLoadAction(uiJson);
@@ -107,6 +115,7 @@ class CollectionViewInterpreter extends StatelessWidget {
           primaryColumnLabel: primaryLabel,
           primaryMaxLines: primaryEntry.maxLines,
           primaryMaxWidth: primaryEntry.maxWidth,
+          rowMinHeight: _doubleFromUi(uiJson['row_min_height']),
           toolbar: toolbar,
           empty: EmptyPlaceholder(
             title: emptyTitle.isEmpty ? l10n.adminModuleSeedEmpty : emptyTitle,
@@ -497,6 +506,78 @@ class CollectionViewInterpreter extends StatelessWidget {
 
   /// `editable: true` columns render tap-to-edit cells (numeric) or tap-to-toggle
   /// cells (bool — например include_delivery в «Закупке»).
+  /// `format: "benefit"` columns: solid badges comparing each row's price to
+  /// the current (selected/best) offer of the same position.
+  List<AppEntityRow> _withBenefitBadges(
+    BuildContext context,
+    Map<String, dynamic> uiJson,
+    AppLocalizations l10n,
+    List<AppEntityRow> rows,
+  ) {
+    final raw = uiJson['columns'];
+    if (raw is! List || rows.isEmpty) return rows;
+    final configs = <Map<String, dynamic>>[];
+    for (final c in raw) {
+      if (c is Map && c['format']?.toString() == 'benefit') {
+        configs.add(Map<String, dynamic>.from(c));
+      }
+    }
+    if (configs.isEmpty) return rows;
+
+    Map<String, dynamic> bodyOf(String rowId) {
+      final item = seeds.itemById(rowId);
+      return item is Map && item['body'] is Map
+          ? Map<String, dynamic>.from(item['body'] as Map)
+          : const <String, dynamic>{};
+    }
+
+    final out = List<AppEntityRow>.of(rows);
+    for (final cfg in configs) {
+      final columnId = cfg['field']?.toString();
+      if (columnId == null || columnId.isEmpty) continue;
+      final priceField = cfg['price_field']?.toString() ?? 'price';
+      final currentField = cfg['current_field']?.toString() ?? 'is_selected';
+      final groupField = cfg['group_field']?.toString();
+
+      double? priceOf(String rowId) {
+        final v = bodyOf(rowId)[priceField];
+        if (v is num) return v.toDouble();
+        if (v is String) return double.tryParse(v.trim());
+        return null;
+      }
+
+      final badges = computeBenefitBadges(
+        rowIds: rows.map((r) => r.id),
+        priceOf: priceOf,
+        currentOf: (rowId) => bodyOf(rowId)[currentField] == true,
+        groupOf: (rowId) =>
+            groupField == null ? '' : bodyOf(rowId)[groupField]?.toString() ?? '',
+        l10n: l10n,
+      );
+      if (badges.isEmpty) continue;
+      for (var i = 0; i < out.length; i++) {
+        final row = out[i];
+        final badge = badges[row.id];
+        if (badge == null) continue;
+        final widgets = Map<String, Widget>.from(row.cellWidgets);
+        widgets[columnId] = BenefitBadge(data: badge);
+        out[i] = AppEntityRow(
+          id: row.id,
+          title: row.title,
+          subtitle: row.subtitle,
+          cells: row.cells,
+          cellWidgets: widgets,
+          leading: row.leading,
+          trailing: row.trailing,
+          titleColor: row.titleColor,
+          rowColor: row.rowColor,
+          titleBold: row.titleBold,
+        );
+      }
+    }
+    return out;
+  }
+
   List<AppEntityRow> _withEditableCells(
     BuildContext context,
     Map<String, dynamic> uiJson,

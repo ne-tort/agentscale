@@ -1,4 +1,12 @@
 {
+  "budgetBenefitBest": "Best price",
+  "budgetBenefitSame": "Same",
+  "budgetBenefitDiff": "{diff}%",
+  "@budgetBenefitDiff": {
+    "placeholders": {
+      "diff": {}
+    }
+  },
   "@@locale": "en",
   "adminActiveEmployees": "Active employees",
   "adminEmployeesOnline": "Employees online",

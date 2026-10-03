@@ -95,11 +95,12 @@ class ChatBlockRenderer extends StatelessWidget {
           final input = block.raw['input'] is Map
               ? Map<String, dynamic>.from(block.raw['input'] as Map)
               : const <String, dynamic>{};
+          final pairedOutput = pairedToolResult!.raw['output'];
           return ToolActivityBlock(
             name: block.raw['name'] as String? ?? pairedToolResult!.raw['name'] as String? ?? 'tool',
             input: input,
-            output: pairedToolResult!.raw['output'],
-            isError: pairedToolResult!.raw['is_error'] == true,
+            output: pairedOutput,
+            isError: pairedToolResult!.raw['is_error'] == true || mcpToolFailed(pairedOutput),
             mcpAliases: mcpAliases,
           );
         }
@@ -109,10 +110,11 @@ class ChatBlockRenderer extends StatelessWidget {
           mcpAliases: mcpAliases,
         );
       case 'tool_result':
+        final rawOutput = block.raw['output'];
         return ToolResultBlock(
           name: block.raw['name'] as String? ?? 'tool',
-          output: block.raw['output'],
-          isError: block.raw['is_error'] == true,
+          output: rawOutput,
+          isError: block.raw['is_error'] == true || mcpToolFailed(rawOutput),
           mcpAliases: mcpAliases,
         );
       case 'approval':

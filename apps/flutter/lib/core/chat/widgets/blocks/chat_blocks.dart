@@ -93,12 +93,16 @@ class ChatMutedLine extends StatefulWidget {
     this.trailing,
     this.expanded = false,
     this.onTap,
+    this.color,
   });
 
   final String label;
   final Widget? trailing;
   final bool expanded;
   final VoidCallback? onTap;
+
+  /// Label color override (e.g. failed tool calls render red).
+  final Color? color;
 
   @override
   State<ChatMutedLine> createState() => _ChatMutedLineState();
@@ -124,7 +128,10 @@ class _ChatMutedLineState extends State<ChatMutedLine> {
           child: Row(
             children: [
               Expanded(
-                child: Text(widget.label, style: _mutedTextStyle(context)),
+                child: Text(
+                  widget.label,
+                  style: _mutedTextStyle(context).copyWith(color: widget.color),
+                ),
               ),
               if (widget.trailing != null) widget.trailing!,
               if (widget.onTap != null && showChevron)
@@ -840,14 +847,17 @@ class _ToolActivityBlockState extends State<ToolActivityBlock> {
 
     final hasPanel = body.trim().isNotEmpty;
 
-    final label = widget.isError
-        ? '${l10n.projectChatToolErrorPrefix}: ${presentation.label}'
-        : presentation.label;
+    // Failed call: MCP servers answer {content, isError} without throwing —
+    // the event carries no is_error flag, so detect the envelope too. The
+    // label renders red (the alias text itself), the panel shows
+    // «Запрос/Ответ» (see formatToolPanelBody).
+    final failed = widget.isError || mcpToolFailed(widget.output);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         ChatMutedLine(
-          label: label,
+          label: presentation.label,
+          color: failed ? scheme.error : null,
           trailing: badge,
           expanded: _open,
           onTap: hasPanel ? () => setState(() => _open = !_open) : null,
