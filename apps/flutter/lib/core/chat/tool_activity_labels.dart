@@ -85,11 +85,68 @@ Map<String, dynamic> _asStringKeyedMap(Object? value) {
   return const {};
 }
 
-/// Flatten Cursor SDK wrappers: `{status, value}`, `{success: …}`, `{error: …}`.
+/// True when the raw tool output is an MCP result envelope marked as an
+/// error (`{content: [...], isError: true}` — the MCP server failed but the
+/// call itself resolved, so the event carries no `is_error` flag).
+bool mcpToolFailed(Object? output) {
+  if (output is! Map) return false;
+  final map = _asStringKeyedMap(output);
+  return map['isError'] == true || map['is_error'] == true;
+}
+
+/// Extract the payload from an MCP `content` array: the concatenated text of
+/// the text parts. Returns null when the shape does not match.
+Object? _mcpContentText(Map<String, dynamic> map) {
+  final content = map['content'];
+  if (content is! List) return null;
+  final buf = StringBuffer();
+  var sawText = false;
+  for (final item in content) {
+    if (item is Map && item['type'] == 'text' && item['text'] is String) {
+      buf.write(item['text'] as String);
+      sawText = true;
+    }
+  }
+  return sawText ? buf.toString() : null;
+}
+
+/// Parse a string into JSON when it is a JSON document (MCP text payloads
+/// are JSON strings); non-JSON strings pass through unchanged.
+Object? _parseJsonText(String text) {
+  final t = text.trim();
+  if (!t.startsWith('{') && !t.startsWith('[')) return text;
+  try {
+    return jsonDecode(t);
+  } catch (_) {
+    return text;
+  }
+}
+
+/// Flatten SDK wrappers: MCP `{content: [{text: …}]}`, Cursor
+/// `{status, value}`, `{success: …}`, `{error: …}`.
 Object? unwrapToolPayload(Object? output) {
   if (output == null) return null;
   if (output is! Map) return output;
   final map = _asStringKeyedMap(output);
+
+  // MCP result envelope: the payload rides in content[].text (a JSON
+  // document in string form). Module row results additionally wrap the
+  // meaningful part in `body` — prefer it so the panel shows the payload,
+  // not the row envelope (module_id/instance_id/row_id/session_id/…).
+  if (map.containsKey('content') && map['content'] is List) {
+    final text = _mcpContentText(map);
+    if (text is String) {
+      final parsed = _parseJsonText(text);
+      if (parsed is Map) {
+        final inner = _asStringKeyedMap(parsed);
+        if (inner.containsKey('body') && inner['body'] is Map) {
+          return unwrapToolPayload(inner['body']);
+        }
+        return parsed;
+      }
+      return parsed;
+    }
+  }
 
   if (map.containsKey('value')) return unwrapToolPayload(map['value']);
   if (map.containsKey('success')) return unwrapToolPayload(map['success']);
@@ -101,6 +158,16 @@ Object? unwrapToolPayload(Object? output) {
     return unwrapToolPayload(map['result']);
   }
   return map;
+}
+
+/// Error text of a failed MCP call (the content text), unwrapped.
+String mcpToolErrorText(Object? output) {
+  if (output is Map) {
+    final map = _asStringKeyedMap(output);
+    final text = _mcpContentText(map);
+    if (text is String) return text;
+  }
+  return output?.toString() ?? '';
 }
 
 Map<String, dynamic> normalizeToolInput(Map<String, dynamic> input) {
@@ -326,6 +393,24 @@ String formatToolPanelBody({
       }
       return buf.toString().trim();
     case ToolKind.mcp:
+      // Failed MCP call: show what the AI asked (the input) AND the server's
+      // answer — the pair is what one needs to analyze where the prompt went
+      // wrong (raw envelopes hide the input entirely).
+      if (mcpToolFailed(output)) {
+        final buf = StringBuffer();
+        if (inMap.isNotEmpty) {
+          buf.writeln('Запрос:');
+          buf.writeln(_prettyJson(inMap));
+          buf.writeln();
+        }
+        final errorText = mcpToolErrorText(output).trim();
+        buf.writeln('Ответ:');
+        buf.writeln(errorText.isEmpty ? 'ошибка вызова инструмента' : errorText);
+        return buf.toString().trimRight();
+      }
+      if (unwrapped == null) return '';
+      if (unwrapped is String) return unwrapped;
+      return _prettyJson(unwrapped);
     case ToolKind.subagent:
     case ToolKind.generic:
       if (unwrapped == null) return '';

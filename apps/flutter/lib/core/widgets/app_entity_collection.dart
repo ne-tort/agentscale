@@ -126,6 +126,7 @@ class AppEntityCollection extends StatefulWidget {
     this.enabledOf,
     this.onEnabledChanged,
     this.rowActions = const [],
+    this.rowMinHeight,
   });
 
   final List<AppEntityRow> rows;
@@ -160,6 +161,10 @@ class AppEntityCollection extends StatefulWidget {
 
   /// Custom row actions (preview, download, etc.) shown inline on long-press.
   final List<AppEntityRowAction> rowActions;
+
+  /// Minimum table row height (ui_json `row_min_height`): airy tables like
+  /// the budget raise it above the default 40.
+  final double? rowMinHeight;
 
   @override
   State<AppEntityCollection> createState() => _AppEntityCollectionState();
@@ -479,7 +484,7 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
             showBottomBorder: false,
             columnSpacing: _columnSpacing,
             horizontalMargin: _horizontalMargin,
-            dataRowMinHeight: 40,
+            dataRowMinHeight: widget.rowMinHeight ?? 40,
             dataRowMaxHeight: double.infinity,
             headingRowHeight: widget.showHeader ? 44 : 0,
             headingRowColor: WidgetStatePropertyAll(colors.surface),

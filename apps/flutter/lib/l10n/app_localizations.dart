@@ -98,6 +98,24 @@ abstract class AppLocalizations {
     Locale('ru'),
   ];
 
+  /// No description provided for @budgetBenefitBest.
+  ///
+  /// In en, this message translates to:
+  /// **'Best price'**
+  String get budgetBenefitBest;
+
+  /// No description provided for @budgetBenefitSame.
+  ///
+  /// In en, this message translates to:
+  /// **'Same'**
+  String get budgetBenefitSame;
+
+  /// No description provided for @budgetBenefitDiff.
+  ///
+  /// In en, this message translates to:
+  /// **'{diff}%'**
+  String budgetBenefitDiff(Object diff);
+
   /// No description provided for @adminActiveEmployees.
   ///
   /// In en, this message translates to:

@@ -128,12 +128,14 @@ String formatModuleCell({
 /// Equipment budgeting computed cell (`format: budget_calc` on a column).
 ///
 /// Row body inputs (budget_lines): `price_in` (purchase price, with VAT),
-/// `qty` (default 1), `vat` (default 0.22 — informational, canonical
-/// formulas do not use it), `markup` (default 0.1). Column `variant`:
+/// `qty` (default 1), `vat` (default 0.22), `markup` (default 0.1).
+/// Column `variant` (Excel template canon, шаблон.xlsx):
 /// - `price_out` — price with margin, with VAT: `price_in * (1 + markup)`
-///   (Excel template column K);
+///   (template column K);
+/// - `price_no_vat` — price with margin, without VAT: `price_out / (1 + vat)`
+///   (template column J);
 /// - `margin_total` — margin for the total: `qty * (price_out - price_in)`
-///   (Excel template column O).
+///   (template column O).
 ///
 /// Empty string when `price_in` is missing (nothing to compute from).
 String formatBudgetCalcCell({
@@ -144,10 +146,19 @@ String formatBudgetCalcCell({
   if (priceIn == null) return '';
   final qty = _asDouble(body['qty']) ?? 1.0;
   final markup = _asDouble(body['markup']) ?? 0.1;
+  final vat = _asDouble(body['vat']);
   final priceOut = priceIn * (1 + markup);
-  final value = col['variant']?.toString() == 'margin_total'
-      ? qty * (priceOut - priceIn)
-      : priceOut;
+  final variant = col['variant']?.toString();
+  final double value;
+  switch (variant) {
+    case 'margin_total':
+      value = qty * (priceOut - priceIn);
+    case 'price_no_vat':
+      if (vat == null || vat < 0) return '';
+      value = priceOut / (1 + vat);
+    default:
+      value = priceOut;
+  }
   return value.toStringAsFixed(2);
 }
 

@@ -1,4 +1,7 @@
 {
+  "budgetBenefitBest": "Лучшая цена",
+  "budgetBenefitSame": "Одинаковая",
+  "budgetBenefitDiff": "{diff}%",
   "@@locale": "ru",
   "adminActiveEmployees": "Активные сотрудники",
   "adminEmployeesOnline": "Сотрудники онлайн",

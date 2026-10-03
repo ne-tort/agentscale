@@ -10,6 +10,17 @@ class AppLocalizationsEn extends AppLocalizations {
   AppLocalizationsEn([String locale = 'en']) : super(locale);
 
   @override
+  String get budgetBenefitBest => 'Best price';
+
+  @override
+  String get budgetBenefitSame => 'Same';
+
+  @override
+  String budgetBenefitDiff(Object diff) {
+    return '$diff%';
+  }
+
+  @override
   String get adminActiveEmployees => 'Active employees';
 
   @override

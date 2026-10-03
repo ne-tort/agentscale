@@ -10,6 +10,17 @@ class AppLocalizationsRu extends AppLocalizations {
   AppLocalizationsRu([String locale = 'ru']) : super(locale);
 
   @override
+  String get budgetBenefitBest => 'Лучшая цена';
+
+  @override
+  String get budgetBenefitSame => 'Одинаковая';
+
+  @override
+  String budgetBenefitDiff(Object diff) {
+    return '$diff%';
+  }
+
+  @override
   String get adminActiveEmployees => 'Активные сотрудники';
 
   @override

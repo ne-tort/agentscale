@@ -166,6 +166,54 @@ class ModuleRowIO:
             session_id=self._session_id,
         )
 
+    async def list_project_wide(self, table_slug: str) -> list[dict[str, Any]]:
+        """Rows across ALL chat sessions of the project (Закупка semantics).
+
+        Закупка belongs to the project, not to a single chat: it aggregates
+        data from every chat of the project (budget snapshots = effective
+        selections, offers for counts). Without a project context the call
+        degrades to the plain (session-scoped) [list].
+        """
+        from sqlalchemy import select as sa_select
+
+        from prodavan.application.modules.module_instance_service import (
+            OWNER_PROJECT,
+            ModuleInstanceService,
+        )
+        from prodavan.infrastructure.persistence.models.agent import AgentSessionRow
+
+        if not self._project_id:
+            return await self.list(table_slug)
+        session_ids: list[str] = []
+        if self._session_id:
+            session_ids.append(self._session_id)
+        q = await self._session.execute(
+            sa_select(AgentSessionRow.id).where(
+                AgentSessionRow.project_id == self._project_id
+            )
+        )
+        for row in q.scalars().all():
+            sid = str(row)
+            if sid not in session_ids:
+                session_ids.append(sid)
+        if not session_ids:
+            return []
+        # Same SoT resolution as the project read path (resolve_sot_instance
+        # walks global binds up: local bind → project leaf, global → cabinet).
+        instances = ModuleInstanceService(self._session)
+        instance = await instances.resolve_sot_instance(
+            module_id=MODULE_ID,
+            owner_kind=OWNER_PROJECT,
+            owner_id=self._project_id,
+        )
+        if instance is None:
+            return []
+        return await instances.list_data_rows(
+            instance_id=instance.id,
+            table_slug=table_slug,
+            session_ids=session_ids,
+        )
+
     async def create(self, table_slug: str, body: dict[str, Any]) -> dict[str, Any]:
         if self._project_id:
             from prodavan.application.projects.project_runtime_module_service import (
@@ -330,9 +378,7 @@ class EquipmentPipelineService:
         )
         stats.update(budget_stats)
 
-        proc_stats = await self._sync_procurement(
-            io, lines=lines, offers=offers, registry=registry
-        )
+        proc_stats = await self._sync_procurement(io, registry=registry)
         stats.update(proc_stats)
         return stats
 
@@ -728,6 +774,8 @@ class EquipmentPipelineService:
                 updates["face_price"] = _num_or(face.get("price"), None)
             if body.get("face_seller") != face.get("seller"):
                 updates["face_seller"] = face.get("seller") or ""
+            if body.get("face_brand") != (face.get("brand") or ""):
+                updates["face_brand"] = face.get("brand") or ""
             if body.get("offers_count") != len(group_offers):
                 updates["offers_count"] = len(group_offers)
             if body.get("synced_at") != now:
@@ -972,29 +1020,44 @@ class EquipmentPipelineService:
         self,
         io: ModuleRowIO,
         *,
-        lines: list[dict[str, Any]],
-        offers: list[dict[str, Any]],
         registry: _SellerRegistry,
     ) -> dict[str, Any]:
-        """Таблица «Закупка»: поставщики (включённые) с офферами, агрегаты."""
-        stats = {"procurement_rows": 0, "procurement_created": 0, "procurement_updated": 0}
-        budget_rows = [r for r in await io.list(BUDGET_TABLE) if isinstance(r, dict)]
-        markup_by_line = {
-            str((r.get("body") or {}).get("line_id") or ""): _num_or(
-                (r.get("body") or {}).get("markup"), DEFAULT_MARKUP
-            )
-            for r in budget_rows
-        }
-        qty_by_line = {
-            str(r.get("row_id") or ""): _num_or((r.get("body") or {}).get("qty"), 1.0) or 1.0
-            for r in lines
-        }
+        """Таблица «Закупка»: агрегат по проекту (все чаты), эффективный выбор.
 
-        offers_by_seller: dict[str, list[dict[str, Any]]] = {}
+        Закупка принадлежит проекту, а не одному чату: читает бюджетные
+        снапшоты ВСЕХ чатов проекта (каждый снапшот = эффективный оффер
+        позиции: явный выбор → иначе best, ровно как в «Бюджетировании») и
+        офферы всех чатов (для счётчиков). Своих данных не держит — строки
+        таблицы это вычисляемые агрегаты, пишутся в бакет активного чата
+        (on_load страницы их всегда пересобирает).
+        """
+        stats = {"procurement_rows": 0, "procurement_created": 0, "procurement_updated": 0}
+        budget_rows = [
+            r for r in await io.list_project_wide(BUDGET_TABLE) if isinstance(r, dict)
+        ]
+        offers = [
+            r for r in await io.list_project_wide(OFFERS_TABLE) if isinstance(r, dict)
+        ]
+
+        offers_count_by_seller: dict[str, int] = {}
         for o in offers:
             seller = str((o.get("body") or {}).get("seller") or "").strip()
             if seller:
-                offers_by_seller.setdefault(seller.casefold(), []).append(o)
+                offers_count_by_seller[seller.casefold()] = (
+                    offers_count_by_seller.get(seller.casefold(), 0) + 1
+                )
+
+        # Позиции проекта из бюджетных снапшотов (line_id уникален в рамках
+        # чата; при дубле из другого чата побеждает последний апдейт).
+        lines_by_seller: dict[str, list[dict[str, Any]]] = {}
+        for r in budget_rows:
+            body = r.get("body") or {}
+            line_id = str(body.get("line_id") or "")
+            if not line_id:
+                continue
+            seller = str(body.get("seller") or "").strip()
+            if seller:
+                lines_by_seller.setdefault(seller.casefold(), []).append(body)
 
         proc_rows = [r for r in await io.list(PROCUREMENT_TABLE) if isinstance(r, dict)]
         proc_by_seller = {
@@ -1002,8 +1065,12 @@ class EquipmentPipelineService:
             for r in proc_rows
         }
 
+        # Поставщики с офферами ИЛИ с эффективными позициями: строка нужна
+        # даже без выборов — иначе на Закупках нельзя выбрать его товары.
+        all_sellers = set(offers_count_by_seller) | set(lines_by_seller)
         keep_sellers: set[str] = set()
-        for token, seller_offers in sorted(offers_by_seller.items()):
+        for token in sorted(all_sellers):
+            seller_lines = lines_by_seller.get(token, [])
             seller_entry = registry.find(token)
             if seller_entry is None:
                 continue
@@ -1013,33 +1080,33 @@ class EquipmentPipelineService:
             keep_sellers.add(token)
             display_name = str(seller_body.get("name") or token)
 
-            selected = [
-                o for o in seller_offers if (o.get("body") or {}).get("is_selected") is True
-            ]
             sum_rub = 0.0
             margin_rub = 0.0
-            for o in selected:
-                obody = o.get("body") or {}
-                qty = qty_by_line.get(str(obody.get("line_id") or ""), 1.0) or 1.0
-                price = _num_or(obody.get("price"), 0.0) or 0.0
-                markup = markup_by_line.get(str(obody.get("line_id") or ""), None)
+            for body in seller_lines:
+                qty = _num_or(body.get("qty"), 1.0) or 1.0
+                price = _num_or(body.get("price_in"), 0.0) or 0.0
+                markup = _num_or(body.get("markup"), None)
                 if markup is None:
                     pct = registry.margin_pct(display_name)
                     markup = (pct / 100.0) if pct is not None else DEFAULT_MARKUP
+                # Шаблон.xlsx: маржа за сумму = qty * (цена_с_маржой − вход),
+                # цена_с_маржой = вход * (1 + наценка) → qty * вход * наценка.
                 sum_rub += qty * price
                 margin_rub += qty * price * markup
 
             seller_pct = registry.margin_pct(display_name)
             margin_pct = seller_pct if seller_pct is not None else DEFAULT_MARGIN_PCT
             delivery = _num_or(seller_body.get("delivery_rub"), 0.0) or 0.0
+            offers_count = offers_count_by_seller.get(token, 0)
+            selected_count = len(seller_lines)
 
             existing = proc_by_seller.get(token)
             if existing is None:
                 body = {
                     "seller": display_name,
                     "is_registered": True,
-                    "offers_count": len(seller_offers),
-                    "selected_count": len(selected),
+                    "offers_count": offers_count,
+                    "selected_count": selected_count,
                     "sum_rub": round(sum_rub, 2),
                     "margin_pct": margin_pct,
                     "include_delivery": False,
@@ -1058,8 +1125,8 @@ class EquipmentPipelineService:
             delivery_effective = delivery if include_delivery else 0.0
             updates = {
                 "is_registered": True,
-                "offers_count": len(seller_offers),
-                "selected_count": len(selected),
+                "offers_count": offers_count,
+                "selected_count": selected_count,
                 "sum_rub": round(sum_rub, 2),
                 "delivery_rub": delivery,
                 "sum_margin_rub": round(margin_rub - delivery_effective, 2),
@@ -1076,7 +1143,7 @@ class EquipmentPipelineService:
                 stats["procurement_updated"] += 1
             stats["procurement_rows"] += 1
 
-        # поставщики без офферов / отключённые — строки удаляем
+        # поставщики без позиций / отключённые — строки удаляем
         for token, row in proc_by_seller.items():
             if token not in keep_sellers:
                 await io.delete(PROCUREMENT_TABLE, str(row.get("row_id") or ""))
