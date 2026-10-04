@@ -405,14 +405,18 @@ class ProjectRuntimeModuleService:
         try:
             from prodavan.application.projects.workspace_sync_policy import (
                 defer_or_schedule_project_sync,
+                table_feeds_workspace,
             )
 
-            notification = await defer_or_schedule_project_sync(
-                self._session,
-                project_id=project_id,
-                source="project_module_instance",
-            )
-            remat = notification.rematerialize_alias()
+            if await table_feeds_workspace(
+                self._session, module_id=module_id, table_slug=table_slug
+            ):
+                notification = await defer_or_schedule_project_sync(
+                    self._session,
+                    project_id=project_id,
+                    source="project_module_instance",
+                )
+                remat = notification.rematerialize_alias()
         except Exception:
             logger.exception(
                 "workspace sync after module row write failed project=%s module=%s",
@@ -530,14 +534,18 @@ class ProjectRuntimeModuleService:
         try:
             from prodavan.application.projects.workspace_sync_policy import (
                 defer_or_schedule_project_sync,
+                table_feeds_workspace,
             )
 
-            notification = await defer_or_schedule_project_sync(
-                self._session,
-                project_id=project_id,
-                source="project_module_instance",
-            )
-            remat = notification.rematerialize_alias()
+            if await table_feeds_workspace(
+                self._session, module_id=module_id, table_slug=table_slug
+            ):
+                notification = await defer_or_schedule_project_sync(
+                    self._session,
+                    project_id=project_id,
+                    source="project_module_instance",
+                )
+                remat = notification.rematerialize_alias()
         except Exception:
             logger.exception(
                 "workspace sync after module row write failed project=%s module=%s",
@@ -633,14 +641,18 @@ class ProjectRuntimeModuleService:
         try:
             from prodavan.application.projects.workspace_sync_policy import (
                 defer_or_schedule_project_sync,
+                table_feeds_workspace,
             )
 
-            notification = await defer_or_schedule_project_sync(
-                self._session,
-                project_id=project_id,
-                source="project_module_instance",
-            )
-            remat = notification.rematerialize_alias()
+            if await table_feeds_workspace(
+                self._session, module_id=module_id, table_slug=table_slug
+            ):
+                notification = await defer_or_schedule_project_sync(
+                    self._session,
+                    project_id=project_id,
+                    source="project_module_instance",
+                )
+                remat = notification.rematerialize_alias()
         except Exception:
             logger.exception(
                 "workspace sync after module row write failed project=%s module=%s",

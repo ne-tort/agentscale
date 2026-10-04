@@ -99,6 +99,14 @@ class _ProjectDialogsPageState extends State<ProjectDialogsPage> {
         sessionId: row.id,
       );
       if (!mounted) return;
+      // Удалили активный чат — сбрасываем указатель (единственный случай,
+      // когда «последний открытый чат» обнуляется).
+      if (workContext.selectedSessionId == row.id) {
+        await workContext.selectChat(
+          cabinetId: widget.cabinetId,
+          sessionId: null,
+        );
+      }
       workContext.notifyProjectLifecycleChanged();
       await _reload();
     } catch (e) {

@@ -206,10 +206,8 @@ class CabinetDataController extends ChangeNotifier with ModulePickContextMixin {
         onProjectsRematerialize?.call(scheduled, inline: inline);
         return;
       }
-      if (remat['mode'] == 'deferred') {
-        onWorkspaceOutdated?.call();
-        return;
-      }
+      // mode=deferred без отметок (no-op запись, таблица вне workspace,
+      // sync_failed) — НЕ повод для баннера «Проект требует обновления».
     }
     final outdated = payload?['workspace_outdated'];
     if (outdated is Map && (outdated['marked_outdated'] as int? ?? 0) > 0) {

@@ -1451,6 +1451,13 @@ class AgentSessionService:
         # chat's data outlives it and can leak into other sessions' views.
         # Rows with NULL session_id (chats=all tables: catalogs, sellers …)
         # are never matched and stay intact.
+        # Указатели «активный чат» сотрудников на удаляемую сессию — обнуляем,
+        # иначе клиенты восстановят мёртвый чат при следующем входе.
+        from prodavan.application.agent.chat_sidebar_service import (
+            clear_chat_selection_refs,
+        )
+
+        await clear_chat_selection_refs(self._session, session_id)
         module_rows = await self._session.execute(
             delete(ModuleInstanceDataRow).where(ModuleInstanceDataRow.session_id == session_id)
         )

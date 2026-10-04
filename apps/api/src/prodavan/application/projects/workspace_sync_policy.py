@@ -194,3 +194,77 @@ async def defer_or_schedule_cabinet_sync(
         module_id=module_id,
         source=source,
     )
+
+
+def materialize_source_tables(
+    materialize_body: Any, columns_body: Any
+) -> set[str]:
+    """Table slugs whose rows feed the workspace (materialize rules).
+
+    Explicit ``materialize`` rules (source.type == rows) + auto copy_blob rules
+    derived from ``file.materialize`` columns (same derivation as
+    materialize_planner._auto_rules_from_columns).
+    """
+    tables: set[str] = set()
+    if isinstance(materialize_body, list):
+        for rule in materialize_body:
+            if not isinstance(rule, dict) or rule.get("enabled") is False:
+                continue
+            source = rule.get("source")
+            if not isinstance(source, dict):
+                continue
+            slug = source.get("table_slug")
+            if isinstance(slug, str) and slug.strip():
+                tables.add(slug.strip())
+    if isinstance(columns_body, list):
+        for col in columns_body:
+            if not isinstance(col, dict) or col.get("type") != "file_ref":
+                continue
+            file_block = col.get("file")
+            if not isinstance(file_block, dict):
+                continue
+            mat = file_block.get("materialize")
+            if not isinstance(mat, dict) or not mat.get("enabled"):
+                continue
+            if not str(mat.get("target_template") or "").strip():
+                continue
+            slug = col.get("table_slug")
+            if isinstance(slug, str) and slug.strip():
+                tables.add(slug.strip())
+    return tables
+
+
+async def table_feeds_workspace(
+    session: AsyncSession,
+    *,
+    module_id: str,
+    table_slug: str,
+) -> bool:
+    """True, когда таблица модуля кормит workspace (materialize rules).
+
+    Записи таблиц вне списка (позиции/офферы/бюджет/закупка…) не влияют на
+    workspace пода — они НЕ должны помечать проект «требует обновления».
+    Безопасный дефолт при отсутствии меты — True (старое поведение).
+    """
+    from sqlalchemy import select as sa_select
+
+    from prodavan.infrastructure.persistence.models.modules import (
+        ModuleMetaDocumentRow,
+    )
+
+    q = await session.execute(
+        sa_select(ModuleMetaDocumentRow.slug, ModuleMetaDocumentRow.body).where(
+            ModuleMetaDocumentRow.module_id == module_id,
+            ModuleMetaDocumentRow.slug.in_(("materialize", "columns")),
+        )
+    )
+    docs = {str(slug): body for slug, body in q.all()}
+    materialize_body = docs.get("materialize")
+    columns_body = docs.get("columns")
+    if not isinstance(materialize_body, list) and not isinstance(columns_body, list):
+        return True
+    sources = materialize_source_tables(materialize_body, columns_body)
+    if not sources:
+        return True
+    return table_slug in sources
+

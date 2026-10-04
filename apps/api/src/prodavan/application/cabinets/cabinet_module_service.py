@@ -221,7 +221,7 @@ class CabinetModuleService:
             session_id=stamp_session,
         )
         await self._session.commit()
-        remat = await self._schedule_rematerialize(cabinet_id=cabinet_id, module_id=module_id)
+        remat = await self._schedule_rematerialize(cabinet_id=cabinet_id, module_id=module_id, table_slug=table_slug)
         out = _attach_rematerialize(
             {"module_id": module_id, "instance_id": inst.id, **row},
             remat,
@@ -318,7 +318,7 @@ class CabinetModuleService:
         # Avoid double-commit when nested from set_profile; callers that need
         # rematerialize still commit. Prefer commit for HTTP handlers.
         await self._session.commit()
-        remat = await self._schedule_rematerialize(cabinet_id=cabinet_id, module_id=module_id)
+        remat = await self._schedule_rematerialize(cabinet_id=cabinet_id, module_id=module_id, table_slug=table_slug)
         out = _attach_rematerialize(
             {"module_id": module_id, "instance_id": inst.id, **row},
             remat,
@@ -411,22 +411,27 @@ class CabinetModuleService:
         # on the next list/poll (row survived with 200 OK).
         await self._session.commit()
 
-        from prodavan.application.projects.rematerialize_scheduler import schedule_cabinet_rematerialize
-
-        return await schedule_cabinet_rematerialize(
-            self._session,
-            cabinet_id=cabinet_id,
-            module_id=module_id,
+        return await self._schedule_rematerialize(
+            cabinet_id=cabinet_id, module_id=module_id, table_slug=table_slug
         )
 
     async def _schedule_rematerialize(
-        self, *, cabinet_id: str, module_id: str
+        self, *, cabinet_id: str, module_id: str, table_slug: str
     ) -> dict[str, Any]:
         from prodavan.application.projects.rematerialize_scheduler import (
             schedule_cabinet_rematerialize,
         )
+        from prodavan.application.projects.workspace_sync_policy import (
+            table_feeds_workspace,
+        )
 
         try:
+            if not await table_feeds_workspace(
+                self._session, module_id=module_id, table_slug=table_slug
+            ):
+                # Таблица не кормит workspace (нет materialize-правил на неё) —
+                # запись не должна помечать проекты «требует обновления».
+                return {"mode": "deferred", "marked_outdated": 0, "skipped": True}
             return await schedule_cabinet_rematerialize(
                 self._session,
                 cabinet_id=cabinet_id,

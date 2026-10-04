@@ -610,6 +610,24 @@ async def test_line_status_rolls_back(io: FakeIO) -> None:
     assert body["found_count"] == 0
 
 
+async def test_noop_run_writes_nothing(io: FakeIO) -> None:
+    """Повторный прогон без изменений — НОЛЬ записей (иначе каждый on_load
+    страницы переписывал все группы → ложный «Проект требует обновления»)."""
+    svc = EquipmentPipelineService(session=object())
+    await svc.run(io, materialize=True)
+    io.created.clear()
+    io.updated.clear()
+    io.deleted.clear()
+
+    stats = await svc.run(io, materialize=True)
+    assert io.created == []
+    assert io.updated == []
+    assert io.deleted == []
+    assert stats["offers_created"] == 0
+    assert stats["budget_updated"] == 0
+    assert stats["procurement_updated"] == 0
+
+
 async def test_fx_rate_drift_reprices_offers(io: FakeIO, monkeypatch) -> None:
     """Курс ЦБ изменился, price_orig нет → ₽-цена переоценивается (оффер,
     лицо группы, бюджет). Ручные цены и stale-офферы заморожены."""
