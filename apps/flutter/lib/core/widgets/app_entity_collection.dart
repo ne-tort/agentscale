@@ -31,6 +31,7 @@ class AppEntityColumn {
     this.align = AppEntityColumnAlign.start,
     this.maxLines = 1,
     this.maxWidth,
+    this.selectionOnly = false,
   });
 
   final String id;
@@ -48,6 +49,11 @@ class AppEntityColumn {
   /// Content width cap before ellipsis/truncate. Keeps intrinsic table
   /// width bounded so long values never stretch the column off-screen.
   final double? maxWidth;
+
+  /// Render cell content only while its row is in the long-press selection
+  /// (mutate) mode — for secondary figures that would otherwise overload the
+  /// table (e.g. budget margin).
+  final bool selectionOnly;
 }
 
 class AppEntityRow {
@@ -171,7 +177,7 @@ class AppEntityCollection extends StatefulWidget {
 }
 
 class _AppEntityCollectionState extends State<AppEntityCollection> {
-  static const double _columnSpacing = 12;
+  static const double _columnSpacing = 8;
   static const double _horizontalMargin = 12;
   static const double _primaryMinWidth = 140;
   static const double _flexColumnMinWidth = 96;
@@ -612,7 +618,11 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
   ) {
     final alignment = _alignment(column.align);
     final bodyMedium = Theme.of(context).textTheme.bodyMedium;
-    final widgetCell = row.cellWidgets[column.id];
+    // selection_only: содержимое ячейки — только в режиме выделения строки
+    // (долгий тап → действия удаления); иначе пустая ячейка.
+    final widgetCell = column.selectionOnly && _editFocusId != row.id
+        ? const SizedBox.shrink()
+        : row.cellWidgets[column.id];
     final maxLines = math.max(1, column.maxLines);
     final child = widgetCell ??
         Text(
@@ -627,7 +637,7 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
     // wrapped titles visually merge with their neighbors.
     final vpad = maxLines > 1 ? 6.0 : 2.0;
     final padded = Padding(
-      padding: EdgeInsets.symmetric(vertical: vpad, horizontal: 4),
+      padding: EdgeInsets.symmetric(vertical: vpad, horizontal: 2),
       child: child,
     );
     final cap = column.width ?? column.maxWidth;

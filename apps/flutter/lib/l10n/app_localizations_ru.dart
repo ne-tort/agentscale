@@ -13,6 +13,9 @@ class AppLocalizationsRu extends AppLocalizations {
   String get budgetBenefitBest => 'Лучшая цена';
 
   @override
+  String get budgetBenefitSingle => 'Единственный';
+
+  @override
   String get budgetBenefitSame => 'Одинаковая';
 
   @override

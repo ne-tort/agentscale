@@ -29,7 +29,7 @@ def _equipment_mcp_list_header() -> dict[str, Any]:
         "table_slug": "equipment_mcp",
         "ensure_row": {
             "name": "prodavan-equipment",
-            "version": "2.1.0",
+            "version": "2.1.1",
             "enabled": True,
         },
         "fields": [
@@ -1437,6 +1437,25 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
             },
             {
                 "table_slug": "found_groups",
+                "name": "face_priority",
+                "label": {"ru": "Лицо — приоритетный поставщик", "en": "Face priority"},
+                "type": "bool",
+                "required": False,
+                "default": False,
+                "read_only": True,
+                "hidden": True,
+            },
+            {
+                "table_slug": "found_groups",
+                "name": "alternatives_count",
+                "label": {"ru": "Альтернативы", "en": "Alternatives"},
+                "type": "number",
+                "required": False,
+                "default": 0,
+                "read_only": True,
+            },
+            {
+                "table_slug": "found_groups",
                 "name": "best_offer_id",
                 "label": {"ru": "Лучший оффер", "en": "Best offer"},
                 "type": "text",
@@ -2467,7 +2486,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "field": "part_number",
                             "label": {"ru": "Партномер", "en": "P/N"},
                             "max_lines": 2,
-                            "max_width": 130,
+                            "max_width": 100,
                         },
                         # Markup takes the supplier column's slot (supplier
                         # dropped by request; markup editable in place).
@@ -2515,11 +2534,14 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                         },
                         {
                             "field": "margin_total",
-                            "label": {"ru": "Маржа за сумму", "en": "Margin total"},
+                            "label": {"ru": "Маржа", "en": "Margin"},
                             "format": "budget_calc",
                             "variant": "margin_total",
                             "align": "end",
-                            "max_width": 140,
+                            "max_width": 150,
+                            # показываем только в режиме выделения строки
+                            # (долгий тап → удаление) — иначе таблица перегружена
+                            "selection_only": True,
                         },
                     ],
                     # computed columns are Flutter-side; backend ships raw fields
@@ -2858,11 +2880,6 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "align": "end",
                             "max_width": 100,
                         },
-                        {
-                            "field": "status",
-                            "label": {"ru": "Статус", "en": "Status"},
-                            "max_width": 110,
-                        },
                     ],
                     "row_tap": {"kind": "open_view", "view": "groups_for_line"},
                     "inline_add": {"field": "title", "title": "Добавить позицию"},
@@ -2937,6 +2954,12 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "max_width": 150,
                         },
                         {
+                            "field": "alternatives_count",
+                            "label": {"ru": "Альтернативы", "en": "Alternatives"},
+                            "align": "end",
+                            "max_width": 110,
+                        },
+                        {
                             "field": "benefit",
                             "label": {"ru": "Выгода", "en": "Benefit"},
                             "format": "benefit",
@@ -2948,12 +2971,13 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     ],
                     "sort": [
                         {"field": "rank", "dir": "asc"},
+                        {"field": "face_priority", "dir": "desc"},
                         {"field": "face_price", "dir": "asc"},
                     ],
-                    # устаревшее лицо (позиция пропала из каталога) важнее best
+                    # Цвет строки — только warning устаревшего лица; «лучшая»
+                    # подсветка живёт в бейдже «Выгода», а не всей строке.
                     "row_style": [
                         {"when": {"field": "face_stale", "eq": True}, "accent": "warning"},
-                        {"when": {"field": "is_best", "eq": True}, "accent": "success"},
                     ],
                     "context_bind": {"line_id": "contextRowId"},
                     "row_tap": {"kind": "open_view", "view": "offers_for_group"},
@@ -2989,7 +3013,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "field": "part_number",
                             "label": {"ru": "Партномер", "en": "P/N"},
                             "max_lines": 2,
-                            "max_width": 130,
+                            "max_width": 100,
                         },
                         {
                             "field": "price",
@@ -3086,6 +3110,12 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "max_width": 150,
                         },
                         {
+                            "field": "alternatives_count",
+                            "label": {"ru": "Альтернативы", "en": "Alternatives"},
+                            "align": "end",
+                            "max_width": 110,
+                        },
+                        {
                             "field": "benefit",
                             "label": {"ru": "Выгода", "en": "Benefit"},
                             "format": "benefit",
@@ -3100,12 +3130,13 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     ],
                     "sort": [
                         {"field": "rank", "dir": "asc"},
+                        {"field": "face_priority", "dir": "desc"},
                         {"field": "face_price", "dir": "asc"},
                     ],
-                    # устаревшее лицо (позиция пропала из каталога) важнее best
+                    # Цвет строки — только warning устаревшего лица; «лучшая»
+                    # подсветка живёт в бейдже «Выгода», а не всей строке.
                     "row_style": [
                         {"when": {"field": "face_stale", "eq": True}, "accent": "warning"},
-                        {"when": {"field": "is_best", "eq": True}, "accent": "success"},
                     ],
                     "row_tap": {"kind": "open_view", "view": "offers_for_group"},
                     "list_header": _equipment_mcp_list_header(),
@@ -4554,7 +4585,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "row_id": "equipment_mcp_default",
                     "body": {
                         "name": "prodavan-equipment",
-                        "version": "2.1.0",
+                        "version": "2.1.1",
                         "enabled": True,
                     },
                 },

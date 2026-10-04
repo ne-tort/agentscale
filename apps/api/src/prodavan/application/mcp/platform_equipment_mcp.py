@@ -9,7 +9,7 @@ from prodavan.application.mcp.bridge_env import platform_mcp_bridge_env_refs
 from prodavan.infrastructure.projects.workspace import WorkspaceLayoutWriter
 
 PACKAGE_NAME = "prodavan-equipment"
-PACKAGE_VERSION = "2.1.0"
+PACKAGE_VERSION = "2.1.1"
 
 _TOOL_NAMES = (
     "equipment_catalog_sources",

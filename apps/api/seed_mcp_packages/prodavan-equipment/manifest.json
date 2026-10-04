@@ -2,7 +2,7 @@
   "format": "mcp.package",
   "format_version": 1,
   "name": "prodavan-equipment",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "entry": {
     "command": "python",
     "args": [

@@ -1,5 +1,6 @@
 {
   "budgetBenefitBest": "Best price",
+  "budgetBenefitSingle": "Only option",
   "budgetBenefitSame": "Same",
   "budgetBenefitDiff": "{diff}%",
   "@budgetBenefitDiff": {

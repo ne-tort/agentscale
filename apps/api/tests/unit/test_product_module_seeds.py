@@ -6,7 +6,8 @@ from prodavan.application.platform.product_module_seeds import (
     mod_equipment_meta,
     mod_files_meta,
     mod_mcp_meta,
-    mod_prompts_meta,)
+    mod_prompts_meta,
+)
 from prodavan.application.platform.product_module_upsert import upsert_product_modules
 
 
@@ -549,8 +550,17 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     }
     assert groups_list["ui_json"]["sort"] == [
         {"field": "rank", "dir": "asc"},
+        {"field": "face_priority", "dir": "desc"},
         {"field": "face_price", "dir": "asc"},
     ]
+    # «Альтернативы» + «Выгода» в списке групп; цвет строк — только stale-warning
+    group_fields = [c["field"] for c in groups_list["ui_json"]["columns"]]
+    assert "alternatives_count" in group_fields
+    assert "benefit" in group_fields
+    assert all(
+        r.get("when", {}).get("field") != "is_best"
+        for r in groups_list["ui_json"]["row_style"]
+    )
     assert any(
         c["name"] == "brand" and c["table_slug"] == "found_offers" for c in meta["columns"]
     )

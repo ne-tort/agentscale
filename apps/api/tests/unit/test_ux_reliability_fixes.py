@@ -46,6 +46,11 @@ async def test_cabinet_delete_data_row_commits(monkeypatch) -> None:
     monkeypatch.setattr(svc, "_cabinet_sot", _cabinet_sot)
     monkeypatch.setattr(svc._instances, "delete_data_row", _delete)
     monkeypatch.setattr(svc._instances, "resolve_tables_body", _tables_body)
+    # delete читает строку для каскада mod_equipment (catalogs не каскадируются)
+    async def _get_row(**kwargs):  # noqa: ANN003
+        return {"row_id": "row_1", "body": {"name": "DB"}, "session_id": None}
+
+    monkeypatch.setattr(svc._instances, "get_data_row", _get_row)
     import prodavan.application.projects.rematerialize_scheduler as remat
 
     monkeypatch.setattr(

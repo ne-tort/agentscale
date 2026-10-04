@@ -134,8 +134,8 @@ String formatModuleCell({
 ///   (template column K);
 /// - `price_no_vat` — price with margin, without VAT: `price_out / (1 + vat)`
 ///   (template column J);
-/// - `margin_total` — margin for the total: `qty * (price_out - price_in)`
-///   (template column O).
+/// - `margin_total` — margin for the total as `{n} ({y}%)`:
+///   `qty * (price_out - price_in)` ₽ + markup % (template column O).
 ///
 /// Empty string when `price_in` is missing (nothing to compute from).
 String formatBudgetCalcCell({
@@ -152,7 +152,9 @@ String formatBudgetCalcCell({
   final double value;
   switch (variant) {
     case 'margin_total':
-      value = qty * (priceOut - priceIn);
+      // «Маржа»: {сумма ₽} ({наценка %}) — наценка строки и есть маржа-%.
+      final marginRub = qty * (priceOut - priceIn);
+      return '${marginRub.toStringAsFixed(2)} (${(markup * 100).toStringAsFixed(1)}%)';
     case 'price_no_vat':
       if (vat == null || vat < 0) return '';
       value = priceOut / (1 + vat);
