@@ -885,7 +885,10 @@ class EquipmentPipelineService:
                 updates["face_stale"] = want_face_stale
             if body.get("offers_count") != len(group_offers):
                 updates["offers_count"] = len(group_offers)
-            if body.get("synced_at") != now:
+            # synced_at — метка сверки с OS; пишем только вместе с реальными
+            # изменениями, иначе каждый прогон переписывает все группы
+            # (write-amplification → ложный «Проект требует обновления»).
+            if updates:
                 updates["synced_at"] = now
             if updates:
                 body.update(updates)
@@ -1135,6 +1138,8 @@ class EquipmentPipelineService:
                 if _num_or(body.get("markup"), None) != want_markup or source != want_source:
                     body["markup"] = want_markup
                     body["markup_source"] = want_source
+            if body == (existing.get("body") or {}):
+                continue  # без изменений — не пишем (write-amplification)
             await io.update(BUDGET_TABLE, row_id, body)
             stats["budget_updated"] += 1
         return stats

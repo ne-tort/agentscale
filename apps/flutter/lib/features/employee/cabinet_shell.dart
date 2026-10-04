@@ -291,19 +291,11 @@ class _CabinetShellState extends State<CabinetShell> {
         if (selected != workContext.selectedProjectId) {
           workContext.setSelectedProjectId(selected);
         }
-        final active = workContext.selectedSessionId;
-        if (active != null) {
-          // Keep the open chat while it is present in ANY project branch.
-          final stillThere = groups.any(
-            (g) =>
-                (g['chats'] as List?)
-                    ?.any((c) => c is Map && c['session_id'] == active) ==
-                true,
-          );
-          if (!stillThere) {
-            workContext.setSelectedSessionId(null);
-          }
-        }
+        // Указатель активного чата НЕ сбрасываем по составу списка: сайдбар
+        // намеренно скрывает пустые чаты (без сообщений/черновика), а чат
+        // другого (paused) проекта тоже выпадает из веток — оба случая не
+        // означают удаления. Сброс — только когда чат реально удалён
+        // (delete-действие, 404 при загрузке, self-heal в get_selection).
       });
     } catch (_) {
       /* ignore */

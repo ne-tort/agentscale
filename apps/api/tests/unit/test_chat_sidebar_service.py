@@ -104,6 +104,47 @@ async def test_get_selection_empty() -> None:
 
 
 @pytest.mark.asyncio
+async def test_get_selection_heals_dangling_chat_pointer() -> None:
+    """Указатель активного чата указывает на удалённую сессию → None + запись
+    залечена (self-heal), чтобы клиент не восстанавливал мёртвый чат."""
+    sel = MagicMock()
+    sel.project_id = "proj_1"
+    sel.chat_session_id = "sess_gone"
+    session = AsyncMock()
+    # selection row есть, AgentSessionRow — нет (удалён/GC)
+    session.get = AsyncMock(side_effect=[sel, None])
+    session.commit = AsyncMock()
+    svc = ChatSidebarService(session)
+    with patch.object(svc._cabinets, "require_access", new=AsyncMock()):
+        out = await svc.get_selection(
+            cabinet_id="cab_1", principal=_principal(), employee=_employee()
+        )
+    assert out["chat_session_id"] is None
+    assert out["project_id"] == "proj_1"
+    assert sel.chat_session_id is None
+    session.commit.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_get_selection_keeps_live_chat_pointer() -> None:
+    """Живой чат (в т.ч. скрытый из сайдбара пустышка) — указатель НЕ трогаем."""
+    sel = MagicMock()
+    sel.project_id = "proj_1"
+    sel.chat_session_id = "sess_1"
+    session = AsyncMock()
+    session.get = AsyncMock(side_effect=[sel, _session_row(sid="sess_1")])
+    session.commit = AsyncMock()
+    svc = ChatSidebarService(session)
+    with patch.object(svc._cabinets, "require_access", new=AsyncMock()):
+        out = await svc.get_selection(
+            cabinet_id="cab_1", principal=_principal(), employee=_employee()
+        )
+    assert out["chat_session_id"] == "sess_1"
+    assert sel.chat_session_id == "sess_1"
+    session.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_set_selection_creates_row() -> None:
     session = AsyncMock()
     session.get = AsyncMock(side_effect=[_project(), None])
@@ -378,6 +419,7 @@ async def test_sidebar_keeps_young_empty_shells_from_gc() -> None:
             _rows_result([]),
             project_sess,
             no_events,  # event check for old empty shell
+            MagicMock(),  # clear_chat_selection_refs UPDATE (указатели на чат)
         ]
     )
     session.commit = AsyncMock()
