@@ -75,7 +75,7 @@ def test_equipment_seed_aliases_validate() -> None:
 
     aliases = mod_equipment_meta().get("mcp_aliases")
     assert isinstance(aliases, list)
-    assert len(aliases) == 8
+    assert len(aliases) == 10  # +delete-инструменты (v2.1.0)
     validate_document_body("mcp_aliases", aliases)
     # Every item must carry a non-empty server-qualified tool + label.
     for item in aliases:

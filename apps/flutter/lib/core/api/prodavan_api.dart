@@ -24,7 +24,8 @@ class ProdavanApi {
         if (projectId != null) 'X-Project-Id': projectId!,
       };
 
-  Uri _uri(String path) => Uri.parse('$baseUrl$path');
+  Uri _uri(String path, [Map<String, String>? query]) =>
+      Uri.parse('$baseUrl$path').replace(queryParameters: query);
 
   Future<Map<String, dynamic>> me() async {
     final res = await AuthHttp.get(_uri('/me'), extraHeaders: _workHeaders);
@@ -301,9 +302,13 @@ class ProdavanApi {
     required String moduleId,
     required String tableSlug,
     String? sessionId,
+    bool chatsAll = false,
   }) async {
     final res = await AuthHttp.get(
-      _uri('/projects/$projectId/runtime-modules/$moduleId/data/$tableSlug'),
+      _uri(
+        '/projects/$projectId/runtime-modules/$moduleId/data/$tableSlug',
+        chatsAll ? const {'chats': 'all'} : null,
+      ),
       extraHeaders: {
         ..._workHeaders,
         if (sessionId != null && sessionId.isNotEmpty)

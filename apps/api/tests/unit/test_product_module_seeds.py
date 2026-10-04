@@ -203,6 +203,24 @@ def test_equipment_meta_hub_on_data_placement() -> None:
             "procurement_list", "supplier_offers"} <= view_slugs
     assert "found_offers_list" not in view_slugs
     assert "offers_for_line" not in view_slugs
+    # «Закупка» — проектный агрегат: общий датасет (chats=all), а не per-chat
+    # зеркала; дрилл-даун поставщика читает офферы всех чатов проекта.
+    tables = {t["slug"]: t for t in meta["tables"]}
+    assert tables["procurement"]["scope"]["chats"] == "all"
+    assert tables["found_offers"]["scope"]["chats"] == "current"
+    supplier_offers = next(v for v in meta["views"] if v["slug"] == "supplier_offers")
+    assert supplier_offers["ui_json"]["data_scope"] == {"chats": "all"}
+    # лицо группы: флаг «устарело» для warning-подсветки + колонка hidden
+    fg_cols = {c["name"]: c for c in meta["columns"] if c["table_slug"] == "found_groups"}
+    assert fg_cols["face_stale"]["hidden"] is True
+    groups_list_view = next(v for v in meta["views"] if v["slug"] == "found_groups_list")
+    assert groups_list_view["ui_json"]["row_style"][0] == {
+        "when": {"field": "face_stale", "eq": True},
+        "accent": "warning",
+    }
+    # MCP: у агента есть delete-инструменты; статусы позиций ему не принадлежат
+    alias_tools = {a["tool"] for a in meta["mcp_aliases"]}
+    assert {"request_lines_delete", "found_groups_delete"} <= alias_tools
     assert not any(r["target"]["format"] == "merge_mapped_sqlite" for r in meta["materialize"])
     assert any(r["id"] == "catalog_manifest" for r in meta["materialize"])
     # s4b is fully removed (table, views, hub tile, materialize, env)
@@ -560,9 +578,12 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     form_cols = [f["column"] for f in form["ui_json"]["fields"]]
     assert "catalog_id" not in form_cols
     assert "source_title" not in form_cols
-    line_field = next(f for f in form["ui_json"]["fields"] if f["column"] == "line_id")
-    assert line_field["widget"] == "type_ref_picker"
-    assert line_field["pick_view"] == "request_lines_pick"
+    # связующие/вычисляемые поля в форме не редактируются: связь с позицией и
+    # группой, точность и флаги выбора/staleness принадлежат пайплайну
+    assert "line_id" not in form_cols
+    assert "match_kind" not in form_cols
+    assert "is_selected" not in form_cols
+    assert "is_stale" not in form_cols
     pick = next(v for v in meta["views"] if v["slug"] == "request_lines_pick")
     also = pick["ui_json"]["selection"]["set_on_context"]["also_copy"]
     assert {"from": "title", "to": "source_title"} in also

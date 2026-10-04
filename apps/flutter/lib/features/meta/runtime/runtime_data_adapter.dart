@@ -46,6 +46,14 @@ class RuntimeDataAdapter extends ChangeNotifier {
   List<dynamic> entityRows(String tableSlug, Map<String, dynamic> uiJson) =>
       _inner.entityRows(tableSlug, uiJson);
 
+  /// Кросс-чатовые вьюхи (`ui_json.data_scope.chats == 'all'`, Закупка):
+  /// ленивая проектно-широкая подгрузка строк таблицы.
+  bool tableNeedsCrossChat(String tableSlug) =>
+      _inner.tableNeedsCrossChat(tableSlug);
+
+  Future<void> ensureCrossChat(String tableSlug) =>
+      _inner.ensureCrossChat(tableSlug);
+
   /// The wrapped controller (module action invocation from tab hosts).
   CabinetDataController get controller => _inner;
 
