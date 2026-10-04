@@ -69,6 +69,16 @@ class CollectionViewInterpreter extends StatelessWidget {
     if (tableSlug.isEmpty) {
       return EmptyPlaceholder(title: l10n.adminMetaInvalid);
     }
+    final uiJson0 = Map<String, dynamic>.from(ui);
+    // Кросс-чатовая вьюха (Закупка → товары поставщика): подгружаем строки
+    // всех чатов проекта один раз; дальше они обновляются через loadAll.
+    final dataScope = uiJson0['data_scope'];
+    if (dataScope is Map && dataScope['chats'] == 'all') {
+      final s = seeds;
+      if (s is RuntimeDataAdapter) {
+        unawaited(s.ensureCrossChat(tableSlug));
+      }
+    }
 
     return ListenableBuilder(
       listenable: seeds is Listenable ? seeds as Listenable : ValueNotifier(0),

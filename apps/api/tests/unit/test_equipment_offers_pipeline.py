@@ -398,12 +398,17 @@ async def test_procurement_apply_updates_registry_and_budget(io: FakeIO) -> None
     assert b2["markup"] == 0.25
     assert b2["markup_source"] == "seller"
 
-    # пересчёт строк закупки: доставка включена, выбранных нет → маржа −300
+    # Агрегаты пересчитаны ТЕМ ЖЕ проходом, что и sync: эффективные позиции
+    # (бюджетные снапшоты), а не только явные чекбоксы — суммы не обнуляются.
+    # Иванов: line_2 (Кабель, 450) × маржа 25% = 112.5; доставка 300 включена.
     proc = next(p for p in io.rows("procurement") if p["body"]["seller"] == "Иванов")["body"]
     assert proc["include_delivery"] is True
     assert proc["delivery_rub"] == 300
-    assert proc["sum_margin_rub"] == -300.0
-    assert proc["sum_with_margin_rub"] == 300.0
+    assert proc["margin_pct"] == 25
+    assert proc["sum_rub"] == 450.0
+    assert proc["selected_count"] == 1
+    assert proc["sum_margin_rub"] == pytest.approx(-187.5)
+    assert proc["sum_with_margin_rub"] == pytest.approx(862.5)
 
 
 async def test_budget_manual_markup_survives(io: FakeIO) -> None:
@@ -461,6 +466,214 @@ def _patch_os_monkey(docs: list[dict[str, Any]]) -> None:
             return _FakeResult([SimpleNamespace(source=d) for d in docs])
 
     osm.get_search_index_service = lambda: _FakeSvc()
+
+
+async def test_disabled_seller_offers_are_frozen_not_stale(io: FakeIO) -> None:
+    """Отключённый поставщик ≠ «позиция исчезла из каталога»: его офферы
+    замирают без warning-флага is_stale (и без обновления цен)."""
+    svc = EquipmentPipelineService(session=object())
+    await svc.run(io, materialize=True)
+    by_hash = {o["body"]["src_hash"]: o for o in io.rows("found_offers")}
+    assert by_hash["h3"]["body"]["is_stale"] is False
+
+    # отключаем Сидорова; док h3 на месте
+    await io.update(
+        "trusted_sellers",
+        "seller_sidorov",
+        {**io.body("trusted_sellers", "seller_sidorov"), "is_enabled": False},
+    )
+    await svc.run(io, materialize=True)
+    by_hash = {o["body"]["src_hash"]: o for o in io.rows("found_offers")}
+    assert by_hash["h3"]["body"]["is_stale"] is False
+    # автовыбор уходит от отключённого поставщика: best/лицо — Петров (90)
+    assert by_hash["h3"]["body"]["is_best"] is False
+    assert by_hash["h2"]["body"]["is_best"] is True
+    grp1 = io.body("found_groups", "grp_1")
+    assert grp1["face_seller"] == "Петров"
+
+    # док h3 пропал из выдачи, но поставщик всё ещё отключён — warning'а нет
+    docs2 = [d for d in DOCS if d["src_hash"] != "h3"]
+    _patch_os_monkey(docs2)
+    await svc.run(io, materialize=True)
+    by_hash = {o["body"]["src_hash"]: o for o in io.rows("found_offers")}
+    assert by_hash["h3"]["body"]["is_stale"] is False
+
+    # включили обратно, а дока нет — вот теперь честный stale
+    await io.update(
+        "trusted_sellers",
+        "seller_sidorov",
+        {**io.body("trusted_sellers", "seller_sidorov"), "is_enabled": True},
+    )
+    await svc.run(io, materialize=True)
+    by_hash = {o["body"]["src_hash"]: o for o in io.rows("found_offers")}
+    assert by_hash["h3"]["body"]["is_stale"] is True
+    assert by_hash["h3"]["body"]["price"] == 120.0  # цена не тронута
+
+
+async def test_unsupported_currency_doc_skipped(io: FakeIO) -> None:
+    """Документ в валюте вне RUB/USD/EUR не должен ронять пайплайн (enum
+    колонки currency) — такой оффер пропускается с warning в логе."""
+    docs2 = DOCS + [
+        _doc("h9", part_number="ABC-123", title="Товар A Юанев", supplier="Юанев",
+             price_num=10.0, currency="CNY"),
+    ]
+    _patch_os_monkey(docs2)
+    svc = EquipmentPipelineService(session=object())
+    stats = await svc.run(io, materialize=True)
+    assert stats["offers_created"] == 3  # h2, h3, h4 — как раньше
+    by_hash = {o["body"]["src_hash"]: o for o in io.rows("found_offers")}
+    assert "h9" not in by_hash
+    # и поставщик не авто-регистрируется (оффера нет)
+    assert all(s["body"]["name"] != "Юанев" for s in io.rows("trusted_sellers"))
+
+
+async def test_orphan_groups_and_offers_cleaned(io: FakeIO) -> None:
+    """Группа с несуществующей позицией (позицию удалили) чистится вместе
+    с офферами — иначе мусор висит в «Найденных товарах» вечно."""
+    io._tables["found_groups"].append(
+        {
+            "row_id": "grp_gone",
+            "body": {
+                "line_id": "line_deleted",
+                "part_number": "ZZ-1",
+                "match_kind": "exact",
+            },
+        }
+    )
+    io._tables["found_offers"].append(
+        {
+            "row_id": "offer_orphan",
+            "body": {"group_id": "grp_gone", "line_id": "line_deleted",
+                     "title": "сирота", "src_hash": "hGone"},
+        }
+    )
+    svc = EquipmentPipelineService(session=object())
+    stats = await svc.run(io, materialize=False)
+    assert stats["groups_deleted"] == 1
+    assert ("found_groups", "grp_gone") in io.deleted
+    assert ("found_offers", "offer_orphan") in io.deleted
+
+
+async def test_builds_follow_offer_prices(io: FakeIO) -> None:
+    """«Сборка» связана с офферами: components_count/price_total пересчитываются
+    пайплайном при обновлении цен (а не только в момент выбора в UI)."""
+    svc = EquipmentPipelineService(session=object())
+    await svc.run(io, materialize=True)
+    h2 = next(o for o in io.rows("found_offers") if o["body"]["src_hash"] == "h2")
+    item = await io.create(
+        "equipment_items", {"name": "Память", "offer_id": h2["row_id"], "qty": 2}
+    )
+    await io.create(
+        "equipment_builds", {"name": "ПК", "slots": {"etype_ram": item["row_id"]}}
+    )
+    await svc.run(io, materialize=False)
+    build = io.rows("equipment_builds")[0]["body"]
+    assert build["components_count"] == 1
+    assert build["price_total"] == 180.0  # 90 × 2
+
+    # цена h2 выросла 90 → 95 — сборка следует за сверкой с каталогом
+    docs2 = [dict(d) for d in DOCS]
+    for d in docs2:
+        if d["src_hash"] == "h2":
+            d["price_num"] = 95.0
+            d["price"] = "95"
+    _patch_os_monkey(docs2)
+    await svc.run(io, materialize=True)
+    build = io.rows("equipment_builds")[0]["body"]
+    assert build["price_total"] == 190.0
+
+
+async def test_line_status_rolls_back(io: FakeIO) -> None:
+    """Статус позиции вычислим целиком: протухший selected_offer_id очищается,
+    matched без находок откатывается в open."""
+    svc = EquipmentPipelineService(session=object())
+    await svc.run(io, materialize=True)
+    assert io.body("request_lines", "line_1")["status"] == "matched"
+
+    # битая ссылка на выбранный оффер → matched + очистка ссылки
+    await io.update(
+        "request_lines",
+        "line_1",
+        {**io.body("request_lines", "line_1"), "selected_offer_id": "ghost", "status": "selected"},
+    )
+    await svc.run(io, materialize=False)
+    body = io.body("request_lines", "line_1")
+    assert body["status"] == "matched"
+    assert body["selected_offer_id"] is None
+
+    # все группы позиции удалены → open
+    await io.delete("found_groups", "grp_1")
+    await io.delete("found_groups", "grp_2")
+    await svc.run(io, materialize=False)
+    body = io.body("request_lines", "line_1")
+    assert body["status"] == "open"
+    assert body["found_count"] == 0
+
+
+async def test_fx_rate_drift_reprices_offers(io: FakeIO, monkeypatch) -> None:
+    """Курс ЦБ изменился, price_orig нет → ₽-цена переоценивается (оффер,
+    лицо группы, бюджет). Ручные цены и stale-офферы заморожены."""
+    svc = EquipmentPipelineService(session=object())
+    await svc.run(io, materialize=True)
+    by_hash = {o["body"]["src_hash"]: o for o in io.rows("found_offers")}
+    h4_id = by_hash["h4"]["row_id"]
+    assert by_hash["h4"]["body"]["price"] == 450.0  # 5 USD × 90 (фейк-курс)
+
+    async def _convert_100(*, price: float, currency: str) -> tuple[float, str]:
+        if currency == "RUB":
+            return float(price), "RUB"
+        return round(float(price) * 100.0, 2), currency
+
+    monkeypatch.setattr(fx_mod, "convert_offer_price", _convert_100)
+    stats = await svc.run(io, materialize=True)  # те же доки, новый курс
+    assert stats["offers_fx_repriced"] == 1  # только h4 валютный
+    h4 = next(o for o in io.rows("found_offers") if o["body"]["src_hash"] == "h4")["body"]
+    assert h4["price"] == 500.0
+    assert h4["price_orig"] == 5.0  # исходная цена каталога не менялась
+    assert io.body("found_groups", "grp_3")["face_price"] == 500.0
+    b2 = next(b for b in io.rows("budget_lines") if b["body"]["line_id"] == "line_2")["body"]
+    assert b2["price_in"] == 500.0
+
+    # ручная цена заморожена даже при дрейфе курса
+    await io.update(
+        "found_offers", h4_id, {**io.body("found_offers", h4_id), "manual": {"price": True}}
+    )
+
+    async def _convert_110(*, price: float, currency: str) -> tuple[float, str]:
+        if currency == "RUB":
+            return float(price), "RUB"
+        return round(float(price) * 110.0, 2), currency
+
+    monkeypatch.setattr(fx_mod, "convert_offer_price", _convert_110)
+    stats = await svc.run(io, materialize=True)
+    assert stats["offers_fx_repriced"] == 0
+    assert io.body("found_offers", h4_id)["price"] == 500.0
+
+    # stale (позиция пропала из каталога) — цена тоже заморожена
+    await io.update(
+        "found_offers",
+        h4_id,
+        {**io.body("found_offers", h4_id), "manual": {}, "is_stale": True},
+    )
+    stats = await svc.run(io, materialize=False)
+    assert stats["offers_fx_repriced"] == 0
+    assert io.body("found_offers", h4_id)["price"] == 500.0
+
+
+async def test_group_face_stale_flag(io: FakeIO) -> None:
+    """Все офферы группы исчезли из каталога → лицо устарело (warning в UI)."""
+    svc = EquipmentPipelineService(session=object())
+    await svc.run(io, materialize=True)
+    # флаг пишется при смене; отсутствие ключа == False (дефолт колонки)
+    assert io.body("found_groups", "grp_1").get("face_stale") is not True
+
+    docs2 = [d for d in DOCS if d["src_hash"] not in {"h1", "h2", "h3"}]
+    _patch_os_monkey(docs2)
+    await svc.run(io, materialize=True)
+    grp1 = io.body("found_groups", "grp_1")
+    assert grp1["face_stale"] is True
+    # is_best не снимается — группа лучшая, хоть и устаревшая
+    assert grp1["is_best"] is True
 
 
 def test_group_keys() -> None:

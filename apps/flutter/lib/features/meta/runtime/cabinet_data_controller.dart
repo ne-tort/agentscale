@@ -37,6 +37,65 @@ class CabinetDataController extends ChangeNotifier with ModulePickContextMixin {
 
   List<Map<String, dynamic>> get items => List.unmodifiable(_items);
 
+  /// Cross-chat («Закупка») rows per table: views with
+  /// `ui_json.data_scope.chats == 'all'` read these instead of the
+  /// session-scoped [_items]. Loaded lazily via [ensureCrossChat] and
+  /// refreshed together with the regular data in [loadAll].
+  final Map<String, List<Map<String, dynamic>>> _crossChatItems = {};
+  final Set<String> _crossChatRequested = {};
+  final Set<String> _crossChatLoading = {};
+
+  /// Whether [tableSlug] needs project-wide rows (any view opted in).
+  bool tableNeedsCrossChat(String tableSlug) {
+    for (final view in _manifest.views) {
+      if (view['table_slug'] != tableSlug) continue;
+      final ui = view['ui_json'];
+      if (ui is Map) {
+        final scope = ui['data_scope'];
+        if (scope is Map && scope['chats'] == 'all') return true;
+      }
+    }
+    return false;
+  }
+
+  /// Ensure project-wide rows for [tableSlug] are loading/loaded (no-op in
+  /// the cabinet contour — no chats there). One-shot per table: дальнейшие
+  /// обновления приезжают через [loadAll] → [_reloadCrossChat].
+  Future<void> ensureCrossChat(String tableSlug) async {
+    if (!_useProjectInstance) return;
+    if (_crossChatItems.containsKey(tableSlug)) return;
+    if (_crossChatLoading.contains(tableSlug)) return;
+    _crossChatRequested.add(tableSlug);
+    _crossChatLoading.add(tableSlug);
+    try {
+      await _loadCrossChat(tableSlug);
+    } finally {
+      _crossChatLoading.remove(tableSlug);
+    }
+  }
+
+  Future<void> _loadCrossChat(String tableSlug) async {
+    final rows = await api.listProjectRuntimeModuleDataRows(
+      projectId: projectId!,
+      moduleId: moduleId,
+      tableSlug: tableSlug,
+      chatsAll: true,
+    );
+    _crossChatItems[tableSlug] = [
+      for (final row in rows)
+        {
+          'table_slug': tableSlug,
+          'row_id': row['row_id'],
+          // session_id самой строки — запись (правка/выбор) идёт в её чат.
+          'session_id': row['session_id']?.toString(),
+          'body': row['body'] is Map
+              ? Map<String, dynamic>.from(row['body'] as Map)
+              : <String, dynamic>{},
+        },
+    ];
+    notifyListeners();
+  }
+
   Future<void> loadAll() async {
     final next = <Map<String, dynamic>>[];
     for (final table in _manifest.tables) {
@@ -59,6 +118,7 @@ class CabinetDataController extends ChangeNotifier with ModulePickContextMixin {
         next.add({
           'table_slug': slug,
           'row_id': row['row_id'],
+          'session_id': row['session_id']?.toString(),
           'body': row['body'] is Map
               ? Map<String, dynamic>.from(row['body'] as Map)
               : <String, dynamic>{},
@@ -66,12 +126,29 @@ class CabinetDataController extends ChangeNotifier with ModulePickContextMixin {
       }
     }
     if (_itemsFingerprint(next) == _itemsFingerprint(_items)) {
+      // Сессионные данные не изменились — но кросс-чатовые таблицы могли.
+      await _reloadCrossChat();
       return;
     }
     _items
       ..clear()
       ..addAll(next);
     notifyListeners();
+    await _reloadCrossChat();
+  }
+
+  Future<void> _reloadCrossChat() async {
+    for (final tableSlug in _crossChatRequested.toList()) {
+      if (_crossChatLoading.contains(tableSlug)) continue;
+      _crossChatLoading.add(tableSlug);
+      try {
+        await _loadCrossChat(tableSlug);
+      } catch (_) {
+        // best-effort: кросс-чатовая подгрузка не должна ломать экран
+      } finally {
+        _crossChatLoading.remove(tableSlug);
+      }
+    }
   }
 
   String _itemsFingerprint(List<Map<String, dynamic>> items) {
@@ -96,6 +173,13 @@ class CabinetDataController extends ChangeNotifier with ModulePickContextMixin {
   Map<String, dynamic>? itemById(String rowId) {
     for (final item in _items) {
       if (item['row_id'] == rowId) return item;
+    }
+    // Кросс-чатовые строки (Закупка → товары поставщика): выбор/правка
+    // находятся по row_id и здесь.
+    for (final rows in _crossChatItems.values) {
+      for (final item in rows) {
+        if (item['row_id'] == rowId) return item;
+      }
     }
     return null;
   }
@@ -165,6 +249,10 @@ class CabinetDataController extends ChangeNotifier with ModulePickContextMixin {
     final item = itemById(rowId);
     if (item == null) return;
     final tableSlug = item['table_slug'] as String;
+    // Строка из другого чата (кросс-чатовая Закупка) пишется в свой бакет.
+    final rowSession = item['session_id'] as String?;
+    final effectiveSession =
+        (rowSession != null && rowSession.isNotEmpty) ? rowSession : sessionId;
     final updated = _useProjectInstance
         ? await api.updateProjectRuntimeModuleDataRow(
             projectId: projectId!,
@@ -172,7 +260,7 @@ class CabinetDataController extends ChangeNotifier with ModulePickContextMixin {
             tableSlug: tableSlug,
             rowId: rowId,
             body: body,
-            sessionId: sessionId,
+            sessionId: effectiveSession,
           )
         : await api.updateModuleDataRow(
             cabinetId: cabinetId,
@@ -180,19 +268,33 @@ class CabinetDataController extends ChangeNotifier with ModulePickContextMixin {
             tableSlug: tableSlug,
             rowId: rowId,
             body: body,
-            sessionId: sessionId,
+            sessionId: effectiveSession,
           );
     _emitRematerialize(updated);
+    final updatedBody = updated['body'];
+    _replaceItem(
+      rowId,
+      updatedBody is Map ? Map<String, dynamic>.from(updatedBody) : body,
+    );
+    notifyListeners();
+  }
+
+  void _replaceItem(String rowId, Map<String, dynamic> body) {
+    final nextBody = Map<String, dynamic>.from(body);
     for (var i = 0; i < _items.length; i++) {
       if (_items[i]['row_id'] == rowId) {
-        _items[i] = {
-          ..._items[i],
-          'body': Map<String, dynamic>.from(updated['body'] as Map? ?? body),
-        };
-        break;
+        _items[i] = {..._items[i], 'body': nextBody};
+        return;
       }
     }
-    notifyListeners();
+    for (final rows in _crossChatItems.values) {
+      for (var i = 0; i < rows.length; i++) {
+        if (rows[i]['row_id'] == rowId) {
+          rows[i] = {...rows[i], 'body': nextBody};
+          return;
+        }
+      }
+    }
   }
 
   Future<void> patchField(String rowId, String field, dynamic value) async {
@@ -206,23 +308,29 @@ class CabinetDataController extends ChangeNotifier with ModulePickContextMixin {
     if (item == null) {
       throw StateError('module data row not found: $rowId');
     }
+    final rowSession = item['session_id'] as String?;
+    final effectiveSession =
+        (rowSession != null && rowSession.isNotEmpty) ? rowSession : sessionId;
     final deleted = _useProjectInstance
         ? await api.deleteProjectRuntimeModuleDataRow(
             projectId: projectId!,
             moduleId: moduleId,
             tableSlug: item['table_slug'] as String,
             rowId: rowId,
-            sessionId: sessionId,
+            sessionId: effectiveSession,
           )
         : await api.deleteModuleDataRow(
             cabinetId: cabinetId,
             moduleId: moduleId,
             tableSlug: item['table_slug'] as String,
             rowId: rowId,
-            sessionId: sessionId,
+            sessionId: effectiveSession,
           );
     _emitRematerialize(deleted);
     _items.removeWhere((i) => i['row_id'] == rowId);
+    for (final rows in _crossChatItems.values) {
+      rows.removeWhere((i) => i['row_id'] == rowId);
+    }
     notifyListeners();
   }
 
@@ -268,7 +376,14 @@ class CabinetDataController extends ChangeNotifier with ModulePickContextMixin {
             .toList()
         : <Map<String, dynamic>>[];
 
-    final dataRows = itemsForTable(tableSlug);
+    // Кросс-чатовая вьюха (Закупка → товары поставщика): строки всех чатов
+    // проекта, пока они загружены; до первой загрузки — сессионный список.
+    final dataScope = uiJson['data_scope'];
+    final wantsCrossChat =
+        dataScope is Map && dataScope['chats'] == 'all';
+    final dataRows = wantsCrossChat && _crossChatItems.containsKey(tableSlug)
+        ? _crossChatItems[tableSlug]!
+        : itemsForTable(tableSlug);
     return dataRows.map((item) {
       final rowId = item['row_id'] as String? ?? '';
       final body = item['body'] is Map

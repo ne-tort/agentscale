@@ -172,6 +172,7 @@ class ModuleActionExecutor:
                 row_id=row_id,
                 principal=principal,
                 employee=employee,
+                project_id=project_id,
                 session_id=session_id,
             )
 
@@ -1228,6 +1229,7 @@ class ModuleActionExecutor:
         row_id: str | None,
         principal: Principal,
         employee: EmployeeRow | None,
+        project_id: str | None = None,
         session_id: str | None = None,
     ) -> dict[str, Any]:
         table_slug = params.get("table_slug")
@@ -1255,40 +1257,52 @@ class ModuleActionExecutor:
                 detail="data.select_row requires params.group_by",
             )
 
-        rows = await self._modules.list_data_rows(
-            cabinet_id=cabinet_id,
-            module_id=module_id,
-            table_slug=table_slug,
-            principal=principal,
-            employee=employee,
-            session_id=session_id,
-        )
+        from prodavan.application.modules.chat_scope import resolve_session_id
+        from prodavan.application.modules.equipment_offers_service import ModuleRowIO
+
+        def _io(sid: str | None) -> ModuleRowIO:
+            return ModuleRowIO(
+                self._session,
+                cabinet_id=cabinet_id,
+                project_id=project_id,
+                principal=principal,
+                employee=employee,
+                session_id=sid,
+            )
+
+        active_sid = resolve_session_id(session_id)
+        io = _io(active_sid)
+        rows = await io.list(table_slug)
         target = next((r for r in rows if str(r.get("row_id")) == row_id), None)
+        if target is None and project_id:
+            # Кросс-чатовый выбор (Закупка → товары поставщика): строка может
+            # жить в бакете ДРУГОГО чата проекта — ищем её проектно-широко и
+            # работаем дальше в ЕЁ сессии (чекбоксы/родитель её чата).
+            wide = await io.list_project_wide(table_slug)
+            target = next((r for r in wide if str(r.get("row_id")) == row_id), None)
+            if target is not None:
+                row_session = str(target.get("session_id") or "").strip()
+                if row_session and row_session != active_sid:
+                    io = _io(row_session)
+                    rows = await io.list(table_slug)
         if target is None:
             raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="row not found")
         body = dict(target.get("body") or {})
         group_val = body.get(group_by)
+        # Повторный клик по уже выбранной строке — снятие выбора (возврат
+        # позиции к автовыбору best пайплайном).
+        want_target = body.get(select_field) is not True
         updated = 0
         for row in rows:
             b = dict(row.get("body") or {})
             if b.get(group_by) != group_val:
                 continue
             rid = str(row.get("row_id"))
-            want = rid == row_id
+            want = rid == row_id and want_target
             if bool(b.get(select_field)) is want:
                 continue
             b[select_field] = want
-            await self._modules.update_data_row(
-                cabinet_id=cabinet_id,
-                module_id=module_id,
-                table_slug=table_slug,
-                row_id=rid,
-                body=b,
-                principal=principal,
-                employee=employee,
-                run_actions=False,
-                session_id=session_id,
-            )
+            await io.update(table_slug, rid, b)
             updated += 1
 
         parent = params.get("parent") if isinstance(params.get("parent"), dict) else None
@@ -1298,43 +1312,45 @@ class ModuleActionExecutor:
             set_field = parent.get("set_field") or "selected_offer_id"
             parent_id = body.get(id_from) if isinstance(id_from, str) else None
             if isinstance(parent_table, str) and parent_table and parent_id:
-                parent_rows = await self._modules.list_data_rows(
-                    cabinet_id=cabinet_id,
-                    module_id=module_id,
-                    table_slug=parent_table,
-                    principal=principal,
-                    employee=employee,
-                    session_id=session_id,
-                )
+                parent_rows = await io.list(parent_table)
                 for prow in parent_rows:
                     if str(prow.get("row_id")) == str(parent_id):
                         pb = dict(prow.get("body") or {})
-                        pb[str(set_field)] = row_id
-                        pb["status"] = "selected"
-                        await self._modules.update_data_row(
-                            cabinet_id=cabinet_id,
-                            module_id=module_id,
-                            table_slug=parent_table,
-                            row_id=str(prow.get("row_id")),
-                            body=pb,
-                            principal=principal,
-                            employee=employee,
-                            run_actions=False,
-                            session_id=session_id,
-                        )
+                        pb[str(set_field)] = row_id if want_target else None
+                        pb["status"] = "selected" if want_target else "matched"
+                        await io.update(parent_table, str(prow.get("row_id")), pb)
                         break
 
         # Best-offer swap: keep the budget snapshot in sync (equipment
-        # budget_sync action watches the offers table).
+        # budget_sync action watches the offers table). Сначала пересчёт чата
+        # целевой строки (его бюджет/статусы), затем — активного чата (зеркало
+        # «Закупки»), если это разные чаты.
+        row_session = str(target.get("session_id") or "").strip() or active_sid
         await self.maybe_auto_budget_sync(
             cabinet_id=cabinet_id,
             module_id=module_id,
             table_slug=table_slug,
             principal=principal,
             employee=employee,
-            session_id=session_id,
+            project_id=project_id,
+            session_id=row_session,
         )
-        return {"kind": "data.select_row", "row_id": row_id, "updated": updated}
+        if row_session != active_sid:
+            await self.maybe_auto_budget_sync(
+                cabinet_id=cabinet_id,
+                module_id=module_id,
+                table_slug=table_slug,
+                principal=principal,
+                employee=employee,
+                project_id=project_id,
+                session_id=active_sid,
+            )
+        return {
+            "kind": "data.select_row",
+            "row_id": row_id,
+            "updated": updated,
+            "selected": want_target,
+        }
 
     async def _index_tabular(
         self,

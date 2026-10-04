@@ -550,11 +550,23 @@ async def list_project_runtime_module_data(
     session: SessionDep,
     employee: EmployeeDep,
     x_prodavan_session_id: str | None = Header(default=None, alias=SESSION_HEADER),
+    chats: str | None = None,
 ) -> dict:
     from prodavan.application.projects.project_runtime_module_service import (
         ProjectRuntimeModuleService,
     )
 
+    if (chats or "").strip().lower() == "all":
+        # Проектно-широкое чтение chats=current таблицы (Закупка → товары
+        # поставщика): строки всех чатов проекта одним списком.
+        items = await ProjectRuntimeModuleService(session).list_data_rows_all_chats(
+            project_id=project_id,
+            module_id=module_id,
+            table_slug=table_slug,
+            principal=principal,
+            employee=employee,
+        )
+        return {"items": items}
     items = await ProjectRuntimeModuleService(session).list_data_rows(
         project_id=project_id,
         module_id=module_id,

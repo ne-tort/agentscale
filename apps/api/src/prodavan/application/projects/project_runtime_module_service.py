@@ -285,6 +285,69 @@ class ProjectRuntimeModuleService:
             for row in rows
         ]
 
+    async def list_data_rows_all_chats(
+        self,
+        *,
+        project_id: str,
+        module_id: str,
+        table_slug: str,
+        principal: Principal,
+        employee: EmployeeRow | None,
+    ) -> list[dict[str, Any]]:
+        """Project-wide read of a chats=current table (Закупка drill-down).
+
+        Строки всех чатов проекта (+ синтетический «main») одним списком;
+        у каждой строки есть session_id — запись через select_row идёт в
+        бакет самой строки. Для chats=all таблиц эквивалентно обычному list.
+        """
+        from prodavan.application.modules.chat_scope import (
+            CHAT_SCOPE_CURRENT,
+            DEFAULT_CHAT_SESSION_ID,
+        )
+        from prodavan.application.modules.chat_scope_ops import resolve_table_chats_scope
+
+        table_slug = check_table_slug(table_slug)
+        await self._require_project(
+            project_id=project_id, principal=principal, employee=employee, write=False
+        )
+        inst = await self._sot_for_project(
+            project_id=project_id, module_id=module_id, write=False
+        )
+        chats = await resolve_table_chats_scope(
+            self._instances,
+            instance_id=inst.id,
+            module_id=module_id,
+            table_slug=table_slug,
+        )
+        if chats != CHAT_SCOPE_CURRENT:
+            rows = await self._instances.list_data_rows(
+                instance_id=inst.id, table_slug=table_slug
+            )
+        else:
+            from sqlalchemy import select as sa_select
+
+            from prodavan.infrastructure.persistence.models.agent import AgentSessionRow
+
+            q = await self._session.execute(
+                sa_select(AgentSessionRow.id).where(
+                    AgentSessionRow.project_id == project_id
+                )
+            )
+            session_ids = [str(s) for s in q.scalars().all()]
+            if DEFAULT_CHAT_SESSION_ID not in session_ids:
+                session_ids.append(DEFAULT_CHAT_SESSION_ID)
+            rows = await self._instances.list_data_rows(
+                instance_id=inst.id, table_slug=table_slug, session_ids=session_ids
+            )
+        return [
+            {
+                "module_id": module_id,
+                "instance_id": inst.id,
+                **row,
+            }
+            for row in rows
+        ]
+
     async def create_data_row(
         self,
         *,
