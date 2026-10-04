@@ -104,6 +104,12 @@ abstract class AppLocalizations {
   /// **'Best price'**
   String get budgetBenefitBest;
 
+  /// No description provided for @budgetBenefitSingle.
+  ///
+  /// In en, this message translates to:
+  /// **'Only option'**
+  String get budgetBenefitSingle;
+
   /// No description provided for @budgetBenefitSame.
   ///
   /// In en, this message translates to:

@@ -374,10 +374,13 @@ class CabinetModuleService:
         delete_session = await self._chat_scope_session(
             inst=inst, module_id=module_id, table_slug=table_slug, session_id=session_id
         )
-        if delete_session is not None:
+        # existing нужен для session-check (chats=current) и каскада mod_equipment
+        existing = None
+        if delete_session is not None or module_id == "mod_equipment":
             existing = await self._instances.get_data_row(
                 instance_id=inst.id, table_slug=table_slug, row_id=row_id
             )
+        if delete_session is not None:
             if existing is None or (existing.get("session_id") or "").strip() != delete_session:
                 raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="row not found")
         ok = await self._instances.delete_data_row(
@@ -385,6 +388,24 @@ class CabinetModuleService:
         )
         if not ok:
             raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="row not found")
+        if module_id == "mod_equipment" and existing is not None:
+            # Связанные данные позиции заказчика удаляются вместе с ней:
+            # позиция → группы/офферы/бюджет; строка бюджета → вся цепочка.
+            from prodavan.application.modules.equipment_offers_service import (
+                cascade_equipment_delete,
+            )
+
+            await cascade_equipment_delete(
+                self._session,
+                cabinet_id=cabinet_id,
+                project_id=None,
+                table_slug=table_slug,
+                row_id=row_id,
+                row_body=existing.get("body") if isinstance(existing.get("body"), dict) else {},
+                principal=principal,
+                employee=employee,
+                session_id=str(existing.get("session_id") or "") or None,
+            )
         if module_id == "mod_equipment" and table_slug == "catalogs":
             try:
                 from prodavan.application.modules.equipment_catalog_opensearch import (

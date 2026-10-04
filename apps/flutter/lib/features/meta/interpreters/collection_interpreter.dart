@@ -491,6 +491,7 @@ class CollectionViewInterpreter extends StatelessWidget {
         width: c['width'] is num ? (c['width'] as num).toDouble() : null,
         maxWidth: c['max_width'] is num ? (c['max_width'] as num).toDouble() : null,
         maxLines: c['max_lines'] is num ? (c['max_lines'] as num).toInt().clamp(1, 8) : 1,
+        selectionOnly: c['selection_only'] == true,
         align: switch (alignRaw) {
           'center' => AppEntityColumnAlign.center,
           'end' => AppEntityColumnAlign.end,

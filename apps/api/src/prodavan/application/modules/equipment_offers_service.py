@@ -15,6 +15,7 @@ Responsibility split (docs/WAVE7-ARCHITECTURE.md):
 
 from __future__ import annotations
 
+import contextvars
 import logging
 from datetime import UTC, datetime
 from typing import Any
@@ -27,6 +28,13 @@ from prodavan.domain.identity import Principal
 from prodavan.infrastructure.persistence.models.identity import EmployeeRow
 
 logger = logging.getLogger(__name__)
+
+# Re-entrancy guard: каскадное удаление пишет через ModuleRowIO → сервисные
+# delete_data_row снова зовут хук; флаг останавливает рекурсию (каскад
+# итеративно покрывает связанные таблицы сам).
+_IN_CASCADE_DELETE: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "equipment_cascade_delete", default=False
+)
 
 MODULE_ID = "mod_equipment"
 GROUPS_TABLE = "found_groups"
@@ -864,11 +872,16 @@ class EquipmentPipelineService:
             if best_offer is not None:
                 best_id = str(best_offer.get("row_id") or "")
             face = (face_offer or {}).get("body") or {}
+            # приоритетный поставщик лица группы — бьёт цену внутри одной
+            # точности (match_kind) при выборе лучшей группы позиции
+            face_priority = bool(face) and registry.is_priority(str(face.get("seller") or ""))
 
             updates: dict[str, Any] = {}
             want_rank = MATCH_ORDER.get(_valid_match_kind(body.get("match_kind")), 3)
             if body.get("rank") != want_rank:
                 updates["rank"] = want_rank
+            if bool(body.get("face_priority")) is not face_priority:
+                updates["face_priority"] = face_priority
             if body.get("best_offer_id") != best_id:
                 updates["best_offer_id"] = best_id
             if body.get("face_title") != face.get("title"):
@@ -905,12 +918,15 @@ class EquipmentPipelineService:
                     await io.update(OFFERS_TABLE, str(o.get("row_id") or ""), obody)
                     o["body"] = obody
 
-        # лучшая группа позиции: точность → цена лица
+        # лучшая группа позиции: точность → приоритетный поставщик → цена лица.
+        # Приоритет бьёт цену ТОЛЬКО внутри одной точности: аналог приоритетного
+        # поставщика никогда не вытесняет exact-группу.
         for line_id, line_groups in groups_by_line.items():
             ranked = sorted(
                 line_groups,
                 key=lambda g: (
                     MATCH_ORDER.get(_valid_match_kind((g.get("body") or {}).get("match_kind")), 3),
+                    0 if (g.get("body") or {}).get("face_priority") is True else 1,
                     _num_or((g.get("body") or {}).get("face_price"), float("inf"))
                     if _num_or((g.get("body") or {}).get("face_price"), None) is not None
                     else float("inf"),
@@ -921,12 +937,20 @@ class EquipmentPipelineService:
                 g for g in ranked if _num_or((g.get("body") or {}).get("face_price"), None) is not None
             ]
             winner = str((with_offers[0].get("row_id") if with_offers else "") or "")
+            # «Альтернативы»: другие группы позиции с живыми офферами.
+            alternatives = max(0, len(with_offers) - 1)
             for g in ranked:
                 gid = str(g.get("row_id") or "")
                 want = gid != "" and gid == winner
                 body = dict(g.get("body") or {})
+                want_alternatives = alternatives if body.get("offers_count") else 0
+                updates: dict[str, Any] = {}
                 if bool(body.get("is_best")) is not want:
-                    body["is_best"] = want
+                    updates["is_best"] = want
+                if _num_or(body.get("alternatives_count"), 0) != want_alternatives:
+                    updates["alternatives_count"] = want_alternatives
+                if updates:
+                    body.update(updates)
                     await io.update(GROUPS_TABLE, gid, body)
                     g["body"] = body
                     stats["groups_updated"] += 1
@@ -1405,6 +1429,81 @@ class EquipmentPipelineService:
 def _valid_match_kind(raw: Any) -> str:
     kind = str(raw or "").strip().lower()
     return kind if kind in MATCH_KINDS else MATCH_ANALOG
+
+
+async def cascade_equipment_delete(
+    session: AsyncSession,
+    *,
+    cabinet_id: str,
+    project_id: str | None,
+    table_slug: str,
+    row_id: str,
+    row_body: dict[str, Any],
+    principal: Principal,
+    employee: EmployeeRow | None,
+    session_id: str | None,
+    io: ModuleRowIO | None = None,
+) -> dict[str, int]:
+    """Каскадное удаление связанных строк mod_equipment.
+
+    Связь по позиции заказчика (request_lines.row_id):
+    - удаление позиции → её found_groups + found_offers + budget_lines;
+    - удаление строки бюджета → корневая позиция со всем каскадом;
+    - удаление found_groups → её офферы.
+
+    Записи идут через ModuleRowIO(run_actions=False) в бакете чата самой
+    строки (session_id), пайплайн дочищает остатки на следующем прогоне.
+    """
+    if table_slug not in (LINES_TABLE, BUDGET_TABLE, GROUPS_TABLE):
+        return {}
+    if _IN_CASCADE_DELETE.get():
+        return {}  # каскад уже идёт — не рекурсируем через сервисные хуки
+    _IN_CASCADE_DELETE.set(True)
+    try:
+        if io is None:
+            io = ModuleRowIO(
+                session,
+                cabinet_id=cabinet_id,
+                project_id=project_id,
+                principal=principal,
+                employee=employee,
+                session_id=session_id,
+            )
+        deleted: dict[str, int] = {}
+
+        async def _delete_where(table: str, field: str, value: str) -> None:
+            for row in await io.list(table):
+                body = row.get("body") or {}
+                if str(body.get(field) or "") != value:
+                    continue
+                rid = str(row.get("row_id") or "")
+                if await io.delete(table, rid):
+                    deleted[table] = deleted.get(table, 0) + 1
+
+        async def _cascade_line(line_id: str) -> None:
+            # офферы — по line_id и по группам позиции (страховка на разрыв дубля)
+            await _delete_where(OFFERS_TABLE, "line_id", line_id)
+            await _delete_where(GROUPS_TABLE, "line_id", line_id)
+            await _delete_where(BUDGET_TABLE, "line_id", line_id)
+
+        if table_slug == LINES_TABLE:
+            await _cascade_line(row_id)
+        elif table_slug == BUDGET_TABLE:
+            line_id = str(row_body.get("line_id") or "")
+            if line_id:
+                # удаляем корневую позицию — она подтянет свой каскад
+                lines = await io.list(LINES_TABLE)
+                line = next(
+                    (r for r in lines if str(r.get("row_id") or "") == line_id), None
+                )
+                if line is not None and await io.delete(LINES_TABLE, line_id):
+                    deleted[LINES_TABLE] = deleted.get(LINES_TABLE, 0) + 1
+                await _cascade_line(line_id)
+        elif table_slug == GROUPS_TABLE:
+            await _delete_where(OFFERS_TABLE, "group_id", row_id)
+        return deleted
+    finally:
+        _IN_CASCADE_DELETE.set(False)
 
 
 def mark_manual_overrides(

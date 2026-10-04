@@ -604,17 +604,39 @@ class ProjectRuntimeModuleService:
         employee: EmployeeRow | None,
     ) -> dict[str, Any]:
         table_slug = check_table_slug(table_slug)
-        await self._require_project(
+        project = await self._require_project(
             project_id=project_id, principal=principal, employee=employee, write=True
         )
         inst = await self._sot_for_project(
             project_id=project_id, module_id=module_id, write=True
+        )
+        # Тело и сессия строки нужны каскаду mod_equipment (до удаления).
+        existing = await self._instances.get_data_row(
+            instance_id=inst.id, table_slug=table_slug, row_id=row_id
         )
         ok = await self._instances.delete_data_row(
             instance_id=inst.id, table_slug=table_slug, row_id=row_id
         )
         if not ok:
             raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="row not found")
+        if module_id == "mod_equipment" and existing is not None:
+            # Связанные данные позиции заказчика удаляются вместе с ней:
+            # позиция → группы/офферы/бюджет; строка бюджета → вся цепочка.
+            from prodavan.application.modules.equipment_offers_service import (
+                cascade_equipment_delete,
+            )
+
+            await cascade_equipment_delete(
+                self._session,
+                cabinet_id=str(project.cabinet_id or ""),
+                project_id=project_id,
+                table_slug=table_slug,
+                row_id=row_id,
+                row_body=existing.get("body") if isinstance(existing.get("body"), dict) else {},
+                principal=principal,
+                employee=employee,
+                session_id=str(existing.get("session_id") or "") or None,
+            )
         if module_id == "mod_equipment" and table_slug == "catalogs":
             try:
                 from prodavan.application.modules.equipment_catalog_opensearch import (

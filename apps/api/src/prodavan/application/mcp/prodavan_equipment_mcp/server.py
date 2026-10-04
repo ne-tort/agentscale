@@ -9,7 +9,7 @@ Env:
 Catalog search goes through Pod Bridge → OpenSearch (no local SQLite / EQUIPMENT_*).
 SoT rows go through Bridge JWT (:8001).
 
-WAVE7 responsibility split (v2.1.0):
+WAVE7 responsibility split (v2.1.1):
   agent — request_lines (customer positions) + found_groups (candidate selection:
            part numbers, aliases, match category); NEVER writes found_offers;
   platform pipeline — materializes found_offers from OpenSearch by group keys,
@@ -75,7 +75,10 @@ TOOLS: list[dict[str, Any]] = [
             "Hits include: part_number, title, brand, price, price_num, supplier, "
             "lead_time, currency, catalog_id, source_catalog, in_stock, "
             "match_rank (exact_pn|pn_prefix|title|other), match_rank_order, and "
-            "src_hash — the stable catalog position id (sha1 of supplier|title). "
+            "src_hash — the stable catalog position id (sha1 of supplier|title); "
+            "copy src_hash into found_groups.aliases_hash for hits WITHOUT a "
+            "part_number, and collect every spelling of the same P/N into "
+            "aliases_pn. "
             "USE the hits to decide candidates: then record your selection with "
             "found_groups_upsert (part_number + aliases + match_kind). "
             "Do NOT copy products/prices into found_offers — the platform "
@@ -210,18 +213,25 @@ TOOLS: list[dict[str, Any]] = [
         "description": (
             "Create or update a found_groups row — THE tool to record which products "
             "match a customer position. One row = one part-number group for one "
-            "request line. On create: line_id MUST be request_lines.row_id "
+            "request line; record EVERY distinct candidate part number as its own group. "
+            "On create: line_id MUST be request_lines.row_id "
             "(from request_lines_list) AND at least one of part_number / "
             "aliases_pn / aliases_hash is required. "
+            "part_number — canonical P/N of the group. aliases_pn — ALL other "
+            "spellings of the SAME part number you saw across suppliers in the "
+            "catalog hits (comma-separated). aliases_hash — src_hash ids of catalog "
+            "hits that belong to this group but carry NO part number (copy the "
+            "src_hash from equipment_catalog_search hits). "
             "match_kind — how well THIS group matches the customer position: "
-            "'exact' (точное совпадение), 'analog' (аналог), 'doubt' (есть сомнения "
-            "в точности; analog and doubt are DIFFERENT categories). "
-            "aliases_pn — other spellings of the same part number used by other "
-            "suppliers (comma-separated). aliases_hash — catalog src_hash ids of "
-            "positions that belong to this group but carry no part number. "
+            "'exact' (точное совпадение по P/N), 'analog' (функциональный аналог), "
+            "'doubt' (есть сомнения в точности; analog and doubt are DIFFERENT "
+            "categories). "
             "The platform materializes ALL catalog offers for the group keys "
-            "(part number + aliases), refreshes prices and computes best offers, "
-            "«Закупка» and budget — you only pick groups and their match category. "
+            "(P/N + aliases_pn + aliases_hash) into «Найденные товары», refreshes "
+            "prices from OpenSearch and auto-selects the best: cheapest offer wins, "
+            "but a PRIORITY supplier beats price within the same match tier; "
+            "analog/doubt groups never outrank exact ones regardless of supplier. "
+            "The user can override the choice manually in the UI. "
             "Do NOT write found_offers (no such tool): offers/prices are owned by "
             "the platform. "
             "PATCH merges: omit = leave; null = clear. Optional: note, project_ids."
@@ -543,7 +553,7 @@ def _handle(msg: dict[str, Any]) -> dict[str, Any] | None:
             "result": {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "prodavan-equipment", "version": "2.1.0"},
+                "serverInfo": {"name": "prodavan-equipment", "version": "2.1.1"},
             },
         }
     if method == "notifications/initialized":

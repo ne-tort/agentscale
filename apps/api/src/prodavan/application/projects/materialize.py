@@ -293,7 +293,10 @@ class ProjectMaterializeService:
             provider_key_id=provider_key_id,
             provider_endpoint=provider_endpoint,
             mcp_packages=mcp_packages,
-            max_turns=12,
+            # 12 хватало только на 4-6 позиций подбора (поиск+запись на
+            # позицию — 2-3 тул-кола); прогон обрывался с reason=max_turns.
+            # Страж расхода — budget.max_tokens (company policy), не турн-кап.
+            max_turns=50,
         )
         writer.write_text_file(
             relative_path=openclaw_config_relative_path(),

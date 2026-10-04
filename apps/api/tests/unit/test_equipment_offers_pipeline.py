@@ -628,6 +628,111 @@ async def test_noop_run_writes_nothing(io: FakeIO) -> None:
     assert stats["procurement_updated"] == 0
 
 
+async def test_priority_seller_wins_only_within_same_match_tier(io: FakeIO) -> None:
+    """Приоритетный поставщик бьёт цену ТОЛЬКО внутри одной точности:
+    exact+приоритет > exact+дешевле; analog+приоритет НЕ вытесняет exact."""
+    docs2 = DOCS + [
+        # XYZ-1: только Петров 95 (не приоритет) — дешевле Сидорова из grp_1
+        _doc("h7", part_number="XYZ-1", title="Деталь X Петров", supplier="Петров", price_num=95.0),
+        # AN-1: Сидоров 50 (приоритет, дёшево) — но группа analog
+        _doc("h9", part_number="AN-1", title="Аналог Сидоров", supplier="Сидоров", price_num=50.0),
+    ]
+    _patch_os_monkey(docs2)
+    await io.create(
+        "found_groups",
+        {"line_id": "line_1", "part_number": "XYZ-1", "match_kind": "exact"},
+    )
+    await io.create(
+        "found_groups",
+        {"line_id": "line_1", "part_number": "AN-1", "match_kind": "analog"},
+    )
+    svc = EquipmentPipelineService(session=object())
+    await svc.run(io, materialize=True)
+
+    grp_x = next(g for g in io.rows("found_groups") if g["body"]["part_number"] == "XYZ-1")
+    grp_an = next(g for g in io.rows("found_groups") if g["body"]["part_number"] == "AN-1")
+    grp1 = io.body("found_groups", "grp_1")
+    # grp_1: лицо — приоритетный Сидоров (120); grp_x — Петров (95).
+    # Одинаковая точность (exact) → приоритет бьёт цену: лучшая = grp_1.
+    assert grp1["face_priority"] is True
+    assert grp1["is_best"] is True
+    # face_priority/is_best пишутся при смене; отсутствие ключа == False (дефолт)
+    assert grp_x["body"].get("face_priority") is not True
+    assert grp_x["body"].get("is_best") is not True
+    # analog с приоритетным и дешёвым оффером exact-группы не вытесняет
+    assert grp_an["body"].get("is_best") is not True
+
+    # «Альтернативы»: у line_1 три группы с офферами (grp_1, grp_x, grp_an) → 2;
+    # grp_2 без офферов → 0; у line_2 одна группа → 0.
+    assert grp1["alternatives_count"] == 2
+    assert grp_x["body"]["alternatives_count"] == 2
+    # пишется при смене; отсутствие ключа == 0 (дефолт колонки)
+    assert (io.body("found_groups", "grp_2").get("alternatives_count") or 0) == 0
+    assert (io.body("found_groups", "grp_3").get("alternatives_count") or 0) == 0
+
+
+async def test_cascade_delete_line_removes_related_rows(io: FakeIO) -> None:
+    """Удаление позиции заказчика сносит её группы, офферы и строку бюджета;
+    удаление строки бюджета сносит саму позицию со всей цепочкой."""
+    from prodavan.application.modules.equipment_offers_service import (
+        cascade_equipment_delete,
+    )
+
+    svc = EquipmentPipelineService(session=object())
+    await svc.run(io, materialize=True)
+    assert any(b["body"]["line_id"] == "line_1" for b in io.rows("budget_lines"))
+
+    # сервисы удаляют целевую строку сами, каскад — связанные
+    await io.delete("request_lines", "line_1")
+    deleted = await cascade_equipment_delete(
+        object(),  # type: ignore[arg-type] — FakeIO не трогает session
+        cabinet_id="cab_1",
+        project_id=None,
+        table_slug="request_lines",
+        row_id="line_1",
+        row_body={"title": "SSD 1TB"},
+        principal=None,  # type: ignore[arg-type]
+        employee=None,
+        session_id=None,
+        io=io,
+    )
+    assert deleted["found_groups"] == 2  # grp_1 + grp_2
+    assert deleted["found_offers"] >= 3  # h1..h3 по line_id
+    assert deleted["budget_lines"] == 1
+    assert not io.rows("found_groups") or all(
+        g["body"]["line_id"] != "line_1" for g in io.rows("found_groups")
+    )
+    assert all(
+        (o["body"].get("line_id") or "") != "line_1" for o in io.rows("found_offers")
+    )
+    assert all(b["body"]["line_id"] != "line_1" for b in io.rows("budget_lines"))
+    # line_2 цел
+    assert io.rows("request_lines")[0]["row_id"] == "line_2"
+
+    # удаление строки бюджета line_2 → сносит позицию и её цепочку
+    b2 = io.rows("budget_lines")[0]
+    await io.delete("budget_lines", b2["row_id"])
+    deleted2 = await cascade_equipment_delete(
+        object(),  # type: ignore[arg-type]
+        cabinet_id="cab_1",
+        project_id=None,
+        table_slug="budget_lines",
+        row_id=b2["row_id"],
+        row_body=dict(b2["body"]),
+        principal=None,  # type: ignore[arg-type]
+        employee=None,
+        session_id=None,
+        io=io,
+    )
+    assert deleted2.get("request_lines") == 1
+    assert deleted2.get("found_groups") == 1  # grp_3
+    assert io.rows("request_lines") == []
+    assert io.rows("found_groups") == []
+    assert all(
+        (o["body"].get("line_id") or "") != "line_2" for o in io.rows("found_offers")
+    )
+
+
 async def test_fx_rate_drift_reprices_offers(io: FakeIO, monkeypatch) -> None:
     """Курс ЦБ изменился, price_orig нет → ₽-цена переоценивается (оффер,
     лицо группы, бюджет). Ручные цены и stale-офферы заморожены."""

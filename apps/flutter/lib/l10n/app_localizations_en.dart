@@ -13,6 +13,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get budgetBenefitBest => 'Best price';
 
   @override
+  String get budgetBenefitSingle => 'Only option';
+
+  @override
   String get budgetBenefitSame => 'Same';
 
   @override

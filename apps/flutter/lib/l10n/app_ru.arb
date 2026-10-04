@@ -1,5 +1,6 @@
 {
   "budgetBenefitBest": "Лучшая цена",
+  "budgetBenefitSingle": "Единственный",
   "budgetBenefitSame": "Одинаковая",
   "budgetBenefitDiff": "{diff}%",
   "@@locale": "ru",
