@@ -43,7 +43,10 @@ def test_templates_meta_contract() -> None:
     assert "templates_list" in views and "template_form" in views
     hub = next(v for v in meta["views"] if v["slug"] == "equipment_hub")["ui_json"]
     tiles = [i.get("target", {}).get("view") for i in hub.get("items", [])]
-    assert "templates_list" in tiles
+    assert "templates_list" not in tiles  # шаблоны уехали в хаб «Управление»
+    mgmt_hub = next(v for v in meta["views"] if v["slug"] == "equipment_hub_management")["ui_json"]
+    mgmt_tiles = [i.get("target", {}).get("view") for i in mgmt_hub.get("items", [])]
+    assert "templates_list" in mgmt_tiles
     seeds = [s for s in meta["seed_rows"]["items"] if s.get("table_slug") == "templates"]
     assert {s["body"]["template_type"] for s in seeds} == {
         "budget",
@@ -171,7 +174,7 @@ def test_collection_views_use_inline_add_without_primary_action() -> None:
 
 def test_equipment_meta_hub_on_data_placement() -> None:
     meta = mod_equipment_meta()
-    tab = meta["tabs"][0]
+    tab = next(t for t in meta["tabs"] if t["id"] == "tab_equipment")
     assert tab["view_slug"] == "equipment_hub"
     assert tab["nav"]["placement"] == "data"
     assert tab["default_project_bind"] == "global"
@@ -324,13 +327,33 @@ def test_equipment_meta_hub_on_data_placement() -> None:
 
     hub = next(v for v in meta["views"] if v["slug"] == "equipment_hub")
     hub_titles = {i["title"] for i in hub["ui_json"]["items"]}
+    # Данные: рабочие таблицы подбора
     assert "Характеристики оборудования" in hub_titles
-    assert "Типы комплектующих" in hub_titles
     assert "Сборка" in hub_titles
-    assert "Поставщики" in hub_titles
-    assert "Интернет магазины" in hub_titles
     assert "Бюджетирование" in hub_titles
+    assert "Позиции заказчика" in hub_titles
+    assert "Найденные товары" in hub_titles
+    assert "Закупка" in hub_titles
+    # Управление уехало в отдельный хаб
+    assert "Типы комплектующих" not in hub_titles
+    assert "Поставщики" not in hub_titles
+    assert "Базы данных" not in hub_titles
+    assert "Интернет магазины" not in hub_titles
+    assert "Шаблоны" not in hub_titles
     assert "S4B" not in hub_titles
+    mgmt_hub = next(v for v in meta["views"] if v["slug"] == "equipment_hub_management")
+    mgmt_titles = {i["title"] for i in mgmt_hub["ui_json"]["items"]}
+    assert mgmt_titles == {
+        "Базы данных",
+        "Типы комплектующих",
+        "Поставщики",
+        "Интернет магазины",
+        "Шаблоны",
+    }
+    tabs = {t["id"]: t for t in meta["tabs"]}
+    assert tabs["tab_equipment"]["nav"]["placement"] == "data"
+    assert tabs["tab_equipment_management"]["nav"]["placement"] == "management"
+    assert tabs["tab_equipment_management"]["view_slug"] == "equipment_hub_management"
     budget_view = next(v for v in meta["views"] if v["slug"] == "budget_lines_list")
     assert budget_view["table_slug"] == "budget_lines"
     assert budget_view["ui_json"]["row_tap"] == {
