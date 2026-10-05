@@ -56,9 +56,12 @@ spec:
           value: "1"
         - name: PORT
           value: "3921"
-        # Web search is proxied through the Agentscale API (dev default).
+        # Web search is proxied through the Agentscale API. Значение
+        # `prodavan_api` — id провайдера, который знает агент-рантайм
+        # (openclaw-sdk tools/web.ts); `agentscale_api` принимается рантаймом
+        # начиная с образа после алиас-фикса (prodavan-claw).
         - name: OPENCLAW_WEB_SEARCH_PROVIDER
-          value: agentscale_api
+          value: prodavan_api
         # Optional bridge token for API → agent calls (secret in this namespace).
         - name: BRIDGE_AUTH_TOKEN
           valueFrom:
