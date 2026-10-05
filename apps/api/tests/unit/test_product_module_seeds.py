@@ -194,6 +194,7 @@ def test_equipment_meta_hub_on_data_placement() -> None:
         "procurement",
         "equipment_prompts",
         "mcp_tool_overrides",
+        "document_fields",
     }
     kinds = {a["kind"] for a in meta["actions"]}
     assert "content.index_opensearch" in kinds

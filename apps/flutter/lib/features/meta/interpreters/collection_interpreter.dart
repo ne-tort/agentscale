@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/preferences/app_value_preference.dart';
 import 'package:prodavan/core/theme/app_color_tokens.dart';
+import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_entity_collection.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_icon_button.dart';
@@ -23,6 +24,7 @@ import 'package:prodavan/features/meta/runtime/runtime_data_adapter.dart';
 import 'package:prodavan/features/meta/module_scaffold_actions.dart';
 import 'package:prodavan/features/meta/widgets/benefit_badge.dart';
 import 'package:prodavan/features/meta/widgets/budget_summary_strip.dart';
+import 'package:prodavan/features/meta/widgets/document_fields_panel.dart';
 import 'package:prodavan/features/meta/widgets/editable_number_cell.dart';
 import 'package:prodavan/features/meta/widgets/file_upload_field.dart';
 import 'package:prodavan/features/meta/widgets/project_multiselect_field.dart';
@@ -125,6 +127,7 @@ class CollectionViewInterpreter extends StatelessWidget {
           primaryColumnLabel: primaryLabel,
           primaryMaxLines: primaryEntry.maxLines,
           primaryMaxWidth: primaryEntry.maxWidth,
+          primaryWidth: primaryEntry.width,
           rowMinHeight: _doubleFromUi(uiJson['row_min_height']),
           toolbar: toolbar,
           empty: EmptyPlaceholder(
@@ -178,14 +181,20 @@ class CollectionViewInterpreter extends StatelessWidget {
         // layout - otherwise the early return below hides it for views
         // without inline add / headers / poll (the budget view).
         final summary = _summary(uiJson);
+        final docFields = _docFieldsConfig(uiJson);
         if (!hasInline &&
             !_hasContextHeader(uiJson) &&
             !_hasListHeader(uiJson) &&
             !hasPoll &&
             onLoadAction == null &&
-            summary == null) {
+            summary == null &&
+            docFields == null) {
           return collection;
         }
+
+        final docFieldsPanel = docFields == null
+            ? null
+            : _buildDocFieldsPanel(docFields, context);
 
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -201,7 +210,22 @@ class CollectionViewInterpreter extends StatelessWidget {
                 uiJson: uiJson,
                 rows: rawRows,
               ),
-            if (summary != null) summary,
+            if (summary != null || docFieldsPanel != null)
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (summary != null) Expanded(flex: 3, child: summary),
+                  if (docFieldsPanel != null)
+                    Expanded(
+                      flex: 2,
+                      child: Padding(
+                        // у сводки свой lr-md/xs-top паддинг — выравниваем панель
+                        padding: const EdgeInsets.fromLTRB(0, AppSpacing.xs, AppSpacing.md, 0),
+                        child: docFieldsPanel,
+                      ),
+                    ),
+                ],
+              ),
             if (_hasListHeader(uiJson))
               _CollectionListHeader(
                 headerConfig: Map<String, dynamic>.from(uiJson['list_header'] as Map),
@@ -732,6 +756,66 @@ class CollectionViewInterpreter extends StatelessWidget {
 
   String _tableSlugOf(Map<String, dynamic> uiJson) {
     return view['table_slug'] as String? ?? '';
+  }
+
+  /// `ui_json.doc_fields` — панель реквизитов документов (Бюджетирование).
+  Map<String, dynamic>? _docFieldsConfig(Map<String, dynamic> uiJson) {
+    final raw = uiJson['doc_fields'];
+    if (raw is! Map) return null;
+    final tableSlug = raw['table_slug']?.toString() ?? '';
+    if (tableSlug.isEmpty) return null;
+    final fieldsRaw = raw['fields'];
+    if (fieldsRaw is! List) return null;
+    final fields = fieldsRaw
+        .whereType<Map>()
+        .map((f) => f['column']?.toString() ?? '')
+        .where((f) => f.isNotEmpty)
+        .toList();
+    if (fields.isEmpty) return null;
+    return {
+      'table_slug': tableSlug,
+      'title': raw['title'],
+      'fields': fields,
+    };
+  }
+
+  Widget? _buildDocFieldsPanel(
+    Map<String, dynamic> config,
+    BuildContext context,
+  ) {
+    if (readOnly) return null;
+    final tableSlug = config['table_slug'] as String;
+    final fields = (config['fields'] as List).cast<String>();
+    final locale = Localizations.localeOf(context);
+    final l10n = AppLocalizations.of(context);
+    // подписи полей из меты модуля (колонки document_fields)
+    final labels = <String, String>{};
+    for (final col in manifest.columnsForTable(tableSlug)) {
+      final name = col['name']?.toString() ?? '';
+      if (name.isEmpty) continue;
+      labels[name] = resolveMetaLabel(col['label'], l10n, locale: locale);
+    }
+    return DocumentFieldsPanel(
+      tableSlug: tableSlug,
+      title: config['title'],
+      fields: fields,
+      labels: labels,
+      itemsForTable: (slug) => _allItems(seeds, slug)
+          .map((m) => Map<String, dynamic>.from(m))
+          .toList(),
+      itemById: (rowId) {
+        final item = seeds.itemById(rowId);
+        return item is Map ? Map<String, dynamic>.from(item) : null;
+      },
+      createRow: (slug) async {
+        final created = seeds.createRow(slug);
+        return created is Future ? await created as String : created as String;
+      },
+      upsertBody: (rowId, body) async {
+        final upd = seeds.upsertBody(rowId, body);
+        if (upd is Future) await upd;
+      },
+    );
   }
 
   List<Map> _allItems(dynamic seeds, String tableSlug) {
