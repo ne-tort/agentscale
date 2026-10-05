@@ -296,25 +296,29 @@ async def test_pipeline_materialize_best_budget_procurement(io: FakeIO) -> None:
     # --- закупка: Петров (без офферов? есть h2) / Иванов / Сидоров; Луков выключен
     proc = {p["body"]["seller"]: p["body"] for p in io.rows("procurement")}
     assert set(proc) == {"Иванов", "Петров", "Сидоров"}
-    # Иванов: офферов 2; эффективная позиция line_2 (Кабель, best h4=450)
-    # — Закупка агрегирует бюджетные снапшоты (выбор → best), как Бюджетирование.
+    # Иванов: офферов 2; эффективная позиция line_2 (Кабель, best h4=450).
+    # Доставка (300) — всегда расход: маржа = 450×0.15 − 300.
     assert proc["Иванов"]["offers_count"] == 2
     assert proc["Иванов"]["margin_pct"] == 15
     assert proc["Иванов"]["delivery_rub"] == 300
     assert proc["Иванов"]["sum_rub"] == 450.0
     assert proc["Иванов"]["selected_count"] == 1
-    assert proc["Иванов"]["sum_margin_rub"] == round(450.0 * 0.15, 2)
+    assert proc["Иванов"]["qty_total"] == 1
+    assert proc["Иванов"]["sum_margin_rub"] == round(450.0 * 0.15 - 300, 2)
+    assert proc["Иванов"]["sum_with_margin_rub"] == round(450.0 * 1.15 + 300, 2)
     # Сидоров: эффективная позиция line_1 (best h3=120, qty 2 → 240),
-    # markup default 0.1 (нет в реестре) → маржа 24
+    # markup default 0.1 (нет в реестре) → маржа 24, доставки нет
     assert proc["Сидоров"]["offers_count"] == 1
     assert proc["Сидоров"]["sum_rub"] == 240.0
     assert proc["Сидоров"]["selected_count"] == 1
+    assert proc["Сидоров"]["qty_total"] == 2
     assert proc["Сидоров"]["sum_margin_rub"] == 24.0
     # Петров: оффер есть, но не эффективен ни для одной позиции — строка
     # с нулевыми суммами (иначе на Закупках нельзя выбрать его товар)
     assert proc["Петров"]["offers_count"] == 1
     assert proc["Петров"]["sum_rub"] == 0.0
     assert proc["Петров"]["selected_count"] == 0
+    assert proc["Петров"]["qty_total"] == 0
     # дефолт маржи 10 у Петрова и Сидорова (нет в реестре)
     assert proc["Петров"]["margin_pct"] == 10
     assert proc["Сидоров"]["margin_pct"] == 10
@@ -731,6 +735,73 @@ async def test_cascade_delete_line_removes_related_rows(io: FakeIO) -> None:
     assert all(
         (o["body"].get("line_id") or "") != "line_2" for o in io.rows("found_offers")
     )
+
+
+async def test_match_label_and_stock_and_offer_annotations(io: FakeIO) -> None:
+    """match_label с «(под заказ)» при отсутствии наличия; per-offer
+    аннотации: alternatives_count (другие поставщики позиции) + benefit_label."""
+    docs2 = [dict(d) for d in DOCS]
+    for d in docs2:
+        if d["src_hash"] == "h2":
+            d["in_stock"] = False  # Петров — под заказ
+    _patch_os_monkey(docs2)
+    svc = EquipmentPipelineService(session=object())
+    await svc.run(io, materialize=True)
+
+    by_hash = {o["body"]["src_hash"]: o for o in io.rows("found_offers") if o["body"].get("src_hash")}
+    # grp_1 exact; лицо — Сидоров (приоритетный, в наличии) → «Точное»
+    grp1 = io.body("found_groups", "grp_1")
+    assert grp1["match_label"] == "Точное"
+    assert grp1["face_in_stock"] is True
+    # best оффера grp_1 — Сидоров (приоритет); Петров под заказ уступает не по
+    # best, но его match_label несёт суффикс
+    assert by_hash["h2"]["body"]["match_label"] == "Точное (под заказ)"
+    assert by_hash["h3"]["body"]["match_label"] == "Точное"
+    # alternatives: у офферов line_1 три поставщика → у каждого 2 альтернативы
+    assert by_hash["h1"]["body"]["alternatives_count"] == 2
+    # benefit: эффективный — best grp_1 = h3 (Сидоров). h3 → «Выбран»,
+    # h2 (90 дешевле 120) → «+25.0%» (выгода относительно выбранного)
+    assert by_hash["h3"]["body"]["benefit_label"] == "Выбран"
+    assert by_hash["h2"]["body"]["benefit_label"] == "+25.0%"
+    assert by_hash["h2"]["body"]["benefit_tone"] == "better"
+    # line_2: единственный оффер (h4) → «Единственный»... он же эффективный
+    # (выбора нет — эффективный = best) → «Выбран» важнее
+    assert by_hash["h4"]["body"]["benefit_label"] == "Выбран"
+
+
+async def test_best_offer_stock_is_last_tiebreak(io: FakeIO) -> None:
+    """Наличие — последний критерий внутри группы: приоритет → цена → наличие."""
+    # h1 убран (у него ручная цена), h3 убран (приоритет) — чистый тест на
+    # Петрове (90, в наличии) и Смирнове (80, под заказ)
+    docs2 = [d for d in DOCS if d["src_hash"] not in ("h1", "h3", "h4")]
+    docs2.append(
+        _doc("h8", part_number="ABC123", title="Товар A Смирнов", supplier="Смирнов",
+             price_num=80.0, in_stock=False)
+    )
+    _patch_os_monkey(docs2)
+    svc = EquipmentPipelineService(session=object())
+    await svc.run(io, materialize=True)
+    by_hash = {o["body"]["src_hash"]: o for o in io.rows("found_offers") if o["body"].get("src_hash")}
+    # цена важнее наличия: дешевле+под заказ ВЫИГРЫВАЕТ, лицо помечено
+    assert by_hash["h8"]["body"]["is_best"] is True
+    grp1 = io.body("found_groups", "grp_1")
+    assert grp1["face_price"] == 80.0
+    assert grp1["face_in_stock"] is False
+    assert grp1["match_label"] == "Точное (под заказ)"
+
+    # при равной цене — в наличии выигрывает
+    docs3 = [dict(d) for d in docs2]
+    for d in docs3:
+        if d["src_hash"] == "h8":
+            d["in_stock"] = False
+        if d["src_hash"] == "h2":
+            d["price_num"] = 80.0
+            d["price"] = "80"
+    _patch_os_monkey(docs3)
+    await svc.run(io, materialize=True)
+    by_hash = {o["body"]["src_hash"]: o for o in io.rows("found_offers") if o["body"].get("src_hash")}
+    assert by_hash["h2"]["body"]["is_best"] is True
+    assert io.body("found_groups", "grp_1")["match_label"] == "Точное"
 
 
 async def test_fx_rate_drift_reprices_offers(io: FakeIO, monkeypatch) -> None:

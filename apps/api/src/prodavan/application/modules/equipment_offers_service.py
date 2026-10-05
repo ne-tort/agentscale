@@ -875,6 +875,10 @@ class EquipmentPipelineService:
             # приоритетный поставщик лица группы — бьёт цену внутри одной
             # точности (match_kind) при выборе лучшей группы позиции
             face_priority = bool(face) and registry.is_priority(str(face.get("seller") or ""))
+            face_in_stock = bool(face) and face.get("in_stock") is True
+            want_match_label = _match_label(
+                _valid_match_kind(body.get("match_kind")), face_in_stock
+            )
 
             updates: dict[str, Any] = {}
             want_rank = MATCH_ORDER.get(_valid_match_kind(body.get("match_kind")), 3)
@@ -882,6 +886,10 @@ class EquipmentPipelineService:
                 updates["rank"] = want_rank
             if bool(body.get("face_priority")) is not face_priority:
                 updates["face_priority"] = face_priority
+            if bool(body.get("face_in_stock")) is not face_in_stock:
+                updates["face_in_stock"] = face_in_stock
+            if str(body.get("match_label") or "") != want_match_label:
+                updates["match_label"] = want_match_label
             if body.get("best_offer_id") != best_id:
                 updates["best_offer_id"] = best_id
             if body.get("face_title") != face.get("title"):
@@ -990,18 +998,97 @@ class EquipmentPipelineService:
                 await io.update(LINES_TABLE, line_id, body)
                 line["body"] = body
                 stats["lines_updated"] += 1
+
+        # Per-оффер аннотации для «Товаров поставщика»: «Выгода» (против
+        # эффективного выбора позиции), «Альтернативы» (офферы других
+        # поставщиков той же позиции), «Совпадение» с «(под заказ)».
+        stats["offers_annotated"] = await self._annotate_offers(
+            io, lines=lines, groups=groups, offers=offers, best_group_by_line=best_group_by_line
+        )
         return stats
+
+    async def _annotate_offers(
+        self,
+        io: ModuleRowIO,
+        *,
+        lines: list[dict[str, Any]],
+        groups: list[dict[str, Any]],
+        offers: list[dict[str, Any]],
+        best_group_by_line: dict[str, str],
+    ) -> int:
+        offers_by_line: dict[str, list[dict[str, Any]]] = {}
+        for o in offers:
+            lid = str((o.get("body") or {}).get("line_id") or "")
+            if lid:
+                offers_by_line.setdefault(lid, []).append(o)
+        groups_by_id = {str(g.get("row_id") or ""): g for g in groups}
+        annotated = 0
+        for line in lines:
+            line_id = str(line.get("row_id") or "")
+            line_offers = offers_by_line.get(line_id) or []
+            if not line_offers:
+                continue
+            line_body = line.get("body") or {}
+            # эффективный выбор позиции: ручной ?? best-группа → её best-оффер
+            effective_id = str(line_body.get("selected_offer_id") or "")
+            if not effective_id:
+                best_gid = best_group_by_line.get(line_id) or ""
+                g = groups_by_id.get(best_gid)
+                if g is not None:
+                    effective_id = str((g.get("body") or {}).get("best_offer_id") or "")
+            effective = next(
+                (o for o in line_offers if str(o.get("row_id") or "") == effective_id), None
+            )
+            ref_price = _num_or((effective or {}).get("body", {}).get("price"), None)
+
+            for o in line_offers:
+                body = dict(o.get("body") or {})
+                seller_cf = str(body.get("seller") or "").strip().casefold()
+                alternatives = sum(
+                    1
+                    for other in line_offers
+                    if str(other.get("row_id") or "") != str(o.get("row_id") or "")
+                    and str((other.get("body") or {}).get("seller") or "").strip().casefold()
+                    != seller_cf
+                    and (other.get("body") or {}).get("is_stale") is not True
+                )
+                price = _num_or(body.get("price"), None)
+                label, tone = _benefit_label(
+                    is_effective=str(o.get("row_id") or "") == effective_id,
+                    price=price,
+                    reference=ref_price,
+                    total_offers=len(line_offers),
+                )
+                updates: dict[str, Any] = {}
+                if _num_or(body.get("alternatives_count"), None) != alternatives:
+                    updates["alternatives_count"] = alternatives
+                if str(body.get("benefit_label") or "") != label:
+                    updates["benefit_label"] = label
+                if str(body.get("benefit_tone") or "") != tone:
+                    updates["benefit_tone"] = tone
+                want_match_label = _match_label(
+                    _valid_match_kind(body.get("match_kind")), body.get("in_stock") is True
+                )
+                if str(body.get("match_label") or "") != want_match_label:
+                    updates["match_label"] = want_match_label
+                if updates:
+                    body.update(updates)
+                    await io.update(OFFERS_TABLE, str(o.get("row_id") or ""), body)
+                    o["body"] = body
+                    annotated += 1
+        return annotated
 
     def _best_offer(
         self,
         offers: list[dict[str, Any]],
         registry: _SellerRegistry | None = None,
     ) -> dict[str, Any] | None:
-        """best-оффер группы: живой приоритетный → живой мин. цена → stale/disabled.
+        """best-оффер группы: живой приоритетный → цена → наличие → stale.
 
-        Stale (пропал из каталога) и офферы отключённых поставщиков уступают
-        живым: автовыбор не должен уводить бюджет к поставщику, у которого
-        не закупаемся. Ручной выбор (is_selected) это не ограничивает.
+        Порядок критериев (ТЗ): точность решается уровнем группы; внутри
+        группы — приоритетный поставщик бьёт цену, дальше цена, наличие
+        (под заказ уступает) — последним. Stale/disabled уступают живым.
+        Ручной выбор (is_selected) это не ограничивает.
         """
         def key(o: dict[str, Any]) -> tuple:
             body = o.get("body") or {}
@@ -1014,6 +1101,7 @@ class EquipmentPipelineService:
                 1 if (body.get("is_stale") is True or disabled) else 0,
                 0 if body.get("priority") is True else 1,
                 price if price is not None else float("inf"),
+                0 if body.get("in_stock") is True else 1,
                 str(o.get("row_id") or ""),
             )
 
@@ -1286,9 +1374,11 @@ class EquipmentPipelineService:
 
             sum_rub = 0.0
             margin_rub = 0.0
+            qty_total = 0.0
             seller_pct = registry.margin_pct(display_name)
             for body in seller_lines:
                 qty = _num_or(body.get("qty"), 1.0) or 1.0
+                qty_total += qty
                 price = _num_or(body.get("price_in"), 0.0) or 0.0
                 # Эффективная маржа строки: ручная правка — из бюджета; иначе
                 # актуальная маржа поставщика из реестра (бюджетные строки
@@ -1308,18 +1398,20 @@ class EquipmentPipelineService:
             selected_count = len(seller_lines)
 
             existing = proc_by_seller.get(token)
+            # Доставка поставщика (из реестра) — всегда расход: вычитается из
+            # маржи. Отдельного включения больше нет (колонка убрана из UI).
             if existing is None:
                 body = {
                     "seller": display_name,
                     "is_registered": True,
                     "offers_count": offers_count,
                     "selected_count": selected_count,
+                    "qty_total": qty_total,
                     "sum_rub": round(sum_rub, 2),
                     "margin_pct": margin_pct,
-                    "include_delivery": False,
                     "delivery_rub": delivery,
-                    "sum_margin_rub": round(margin_rub, 2),
-                    "sum_with_margin_rub": round(sum_rub + margin_rub, 2),
+                    "sum_margin_rub": round(margin_rub - delivery, 2),
+                    "sum_with_margin_rub": round(sum_rub + margin_rub + delivery, 2),
                 }
                 await io.create(PROCUREMENT_TABLE, body)
                 stats["procurement_created"] += 1
@@ -1328,16 +1420,15 @@ class EquipmentPipelineService:
 
             row_id = str(existing.get("row_id") or "")
             body = dict(existing.get("body") or {})
-            include_delivery = bool(body.get("include_delivery"))
-            delivery_effective = delivery if include_delivery else 0.0
             updates = {
                 "is_registered": True,
                 "offers_count": offers_count,
                 "selected_count": selected_count,
+                "qty_total": qty_total,
                 "sum_rub": round(sum_rub, 2),
                 "delivery_rub": delivery,
-                "sum_margin_rub": round(margin_rub - delivery_effective, 2),
-                "sum_with_margin_rub": round(sum_rub + margin_rub + delivery_effective, 2),
+                "sum_margin_rub": round(margin_rub - delivery, 2),
+                "sum_with_margin_rub": round(sum_rub + margin_rub + delivery, 2),
                 # margin_pct — зеркало реестра поставщиков: правка в «Закупке»
                 # пишется в реестр через procurement_apply, обратная связь
                 # приходит отсюда. Расхождений быть не должно.
@@ -1540,6 +1631,44 @@ def mark_manual_overrides(
 
 def _score_for_match(match_kind: str) -> float:
     return {MATCH_EXACT: 1.0, MATCH_ANALOG: 0.5, MATCH_DOUBT: 0.25}.get(match_kind, 0.5)
+
+
+_MATCH_LABELS = {
+    MATCH_EXACT: "Точное",
+    MATCH_ANALOG: "Аналог",
+    MATCH_DOUBT: "Есть сомнения",
+}
+
+
+def _match_label(match_kind: str, in_stock: bool) -> str:
+    """«Совпадение» для UI: «Точное» / «Аналог» / «Есть сомнения» +
+    « (под заказ)», когда позиции нет в наличии."""
+    base = _MATCH_LABELS.get(match_kind, "Аналог")
+    return base if in_stock else f"{base} (под заказ)"
+
+
+def _benefit_label(
+    *, is_effective: bool, price: float | None, reference: float | None, total_offers: int
+) -> tuple[str, str]:
+    """Бейдж «Выгода» для оффера (серверная версия Flutter computeBenefitBadges —
+    в срезе одного поставщика конкуренты позиции не видны, поэтому считает бэк).
+
+    Возвращает (label, tone): tone ∈ best|better|worse|same — красит бейдж.
+    """
+    if is_effective:
+        return "Выбран", "best"
+    if total_offers <= 1:
+        return "Единственный", "same"
+    if price is None or reference is None or reference <= 0:
+        return "", "same"
+    if price == reference:
+        return "Одинаковая", "same"
+    savings_pct = (reference - price) / reference * 100
+    if abs(savings_pct) < 0.5:
+        return "Одинаковая", "same"
+    if savings_pct > 0:
+        return f"+{savings_pct:.1f}%", "better"
+    return f"−{abs(savings_pct):.1f}%", "worse"
 
 
 class _SellerRegistry:
