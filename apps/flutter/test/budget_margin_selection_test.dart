@@ -7,8 +7,8 @@ import 'package:prodavan/features/meta/module_meta_manifest.dart';
 import 'package:prodavan/features/meta/preview/seed_data_controller.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
-/// Регрессия: «Маржа» в Бюджетировании — контент «{n} ({y}%)», виден по
-/// selection_only только у выделенной строки (долгий тап), не пустое поле.
+/// «Маржа» в Бюджетировании: контент «{n} ({y}%)» виден всегда;
+/// колонка действий (корзина) — только в режиме выделения (долгий тап).
 void main() {
   final budgetView = {
     'slug': 'budget_lines_list',
@@ -28,7 +28,6 @@ void main() {
           'format': 'budget_calc',
           'variant': 'margin_total',
           'align': 'end',
-          'selection_only': true,
         },
       ],
     },
@@ -54,7 +53,7 @@ void main() {
         ],
       });
 
-  testWidgets('margin cell shows "{n} ({y}%)" only for the selected row', (tester) async {
+  testWidgets('margin always visible; delete action appears on selection', (tester) async {
     await tester.pumpWidget(
       MaterialApp(
         locale: const Locale('ru'),
@@ -76,17 +75,17 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    // без выделения: партномер/цена видны, колонка «Маржа» скрыта целиком
-    // (нет ни заголовка, ни пустой ячейки — иначе выглядит как баг)
+    // без выделения: маржа видна всегда с нужным форматом, корзины нет
     expect(find.text('ABC-1'), findsOneWidget);
     expect(find.text('100.0'), findsOneWidget);
-    expect(find.text('20.00 (10.0%)'), findsNothing);
-    expect(find.text('Маржа'), findsNothing);
+    expect(find.text('Маржа'), findsOneWidget);
+    expect(find.text('20.00 (10.0%)'), findsOneWidget);
+    expect(find.byIcon(Icons.delete_outline), findsNothing);
 
-    // долгий тап по строке → режим выделения → колонка появляется со значением
+    // долгий тап по строке → режим выделения → корзина появляется
     await tester.longPress(find.text('SSD 1TB'));
     await tester.pumpAndSettle();
-    expect(find.text('Маржа'), findsOneWidget);
+    expect(find.byIcon(Icons.delete_outline), findsOneWidget);
     expect(find.text('20.00 (10.0%)'), findsOneWidget);
   });
 }
