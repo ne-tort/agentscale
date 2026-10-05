@@ -192,6 +192,8 @@ def test_equipment_meta_hub_on_data_placement() -> None:
         "equipment_mcp",
         "budget_lines",
         "procurement",
+        "equipment_prompts",
+        "mcp_tool_overrides",
     }
     kinds = {a["kind"] for a in meta["actions"]}
     assert "content.index_opensearch" in kinds
@@ -349,6 +351,8 @@ def test_equipment_meta_hub_on_data_placement() -> None:
         "Поставщики",
         "Интернет магазины",
         "Шаблоны",
+        "Промпты",
+        "Инструкции MCP",
     }
     tabs = {t["id"]: t for t in meta["tabs"]}
     assert tabs["tab_equipment"]["nav"]["placement"] == "data"
@@ -575,6 +579,7 @@ def test_equipment_meta_hub_on_data_placement() -> None:
         {"field": "rank", "dir": "asc"},
         {"field": "face_priority", "dir": "desc"},
         {"field": "face_price", "dir": "asc"},
+        {"field": "face_in_stock", "dir": "desc"},
     ]
     # «Альтернативы» + «Выгода» в списке групп; цвет строк — только stale-warning
     group_fields = [c["field"] for c in groups_list["ui_json"]["columns"]]

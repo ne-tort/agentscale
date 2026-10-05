@@ -29,7 +29,7 @@ def _equipment_mcp_list_header() -> dict[str, Any]:
         "table_slug": "equipment_mcp",
         "ensure_row": {
             "name": "prodavan-equipment",
-            "version": "2.1.1",
+            "version": "2.2.0",
             "enabled": True,
         },
         "fields": [
@@ -1050,6 +1050,23 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "enabled": True,
                 "scope": {"projects": "all", "chats": "current"},
             },
+            # Промпты подбора техники (управляемые инструкции; мердж в workspace
+            # через prompt_paths/fragments — совместим с mod_prompts).
+            {
+                "slug": "equipment_prompts",
+                "label": {"ru": "Промпты", "en": "Prompts"},
+                "storage_kind": "json_document",
+                "enabled": True,
+                "scope": {"projects": "all", "chats": "all"},
+            },
+            # Оверрайды инструкций MCP-инструментов (описания тулзов агента).
+            {
+                "slug": "mcp_tool_overrides",
+                "label": {"ru": "Инструкции MCP", "en": "MCP instructions"},
+                "storage_kind": "json_document",
+                "enabled": True,
+                "scope": {"projects": "all", "chats": "all"},
+            },
             # WAVE7: «Закупка» — агрегат по поставщикам (материализуется пайплайном).
             # chats=all: общий проектный датасет (агрегатор между чатами), а не
             # per-chat зеркала — строки одни на проект, видны из любого чата.
@@ -1447,6 +1464,25 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
             },
             {
                 "table_slug": "found_groups",
+                "name": "face_in_stock",
+                "label": {"ru": "Лицо в наличии", "en": "Face in stock"},
+                "type": "bool",
+                "required": False,
+                "default": False,
+                "read_only": True,
+                "hidden": True,
+            },
+            {
+                "table_slug": "found_groups",
+                "name": "match_label",
+                "label": {"ru": "Совпадение", "en": "Match"},
+                "type": "text",
+                "required": False,
+                "default": "",
+                "read_only": True,
+            },
+            {
+                "table_slug": "found_groups",
                 "name": "alternatives_count",
                 "label": {"ru": "Альтернативы", "en": "Alternatives"},
                 "type": "number",
@@ -1664,6 +1700,43 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "type": "json",
                 "required": False,
                 "default": {},
+            },
+            {
+                "table_slug": "found_offers",
+                "name": "alternatives_count",
+                "label": {"ru": "Альтернативы", "en": "Alternatives"},
+                "type": "number",
+                "required": False,
+                "default": 0,
+                "read_only": True,
+            },
+            {
+                "table_slug": "found_offers",
+                "name": "benefit_label",
+                "label": {"ru": "Выгода", "en": "Benefit"},
+                "type": "text",
+                "required": False,
+                "default": "",
+                "read_only": True,
+            },
+            {
+                "table_slug": "found_offers",
+                "name": "benefit_tone",
+                "label": {"ru": "Тон выгоды", "en": "Benefit tone"},
+                "type": "text",
+                "required": False,
+                "default": "",
+                "read_only": True,
+                "hidden": True,
+            },
+            {
+                "table_slug": "found_offers",
+                "name": "match_label",
+                "label": {"ru": "Совпадение", "en": "Match"},
+                "type": "text",
+                "required": False,
+                "default": "",
+                "read_only": True,
             },
             _project_ids_column("found_offers"),
             {
@@ -2163,10 +2236,19 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
             {
                 "table_slug": "procurement",
                 "name": "selected_count",
-                "label": {"ru": "Выбрано", "en": "Selected"},
+                "label": {"ru": "Товаров", "en": "Products"},
                 "type": "number",
                 "required": False,
                 "default": 0,
+            },
+            {
+                "table_slug": "procurement",
+                "name": "qty_total",
+                "label": {"ru": "Количество", "en": "Quantity"},
+                "type": "number",
+                "required": False,
+                "default": 0,
+                "read_only": True,
             },
             {
                 "table_slug": "procurement",
@@ -2183,14 +2265,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "type": "number",
                 "required": False,
             },
-            {
-                "table_slug": "procurement",
-                "name": "include_delivery",
-                "label": {"ru": "Включить доставку", "en": "Include delivery"},
-                "type": "bool",
-                "required": False,
-                "default": False,
-            },
+
             {
                 "table_slug": "procurement",
                 "name": "delivery_rub",
@@ -2216,6 +2291,70 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "default": 0,
             },
             _project_ids_column("procurement"),
+            {
+                "table_slug": "equipment_prompts",
+                "name": "name",
+                "label": {"ru": "Название", "en": "Name"},
+                "type": "text",
+                "required": True,
+            },
+            {
+                "table_slug": "equipment_prompts",
+                "name": "path",
+                "label": {"ru": "Путь в workspace", "en": "Workspace path"},
+                "type": "text",
+                "required": False,
+                "default": "prompts/equipment",
+            },
+            {
+                "table_slug": "equipment_prompts",
+                "name": "files_json",
+                "label": {"ru": "Промпты", "en": "Prompts"},
+                "type": "json",
+                "required": False,
+                "default": [],
+            },
+            {
+                "table_slug": "equipment_prompts",
+                "name": "enabled",
+                "label": {"ru": "Включён", "en": "Enabled"},
+                "type": "bool",
+                "required": False,
+                "default": True,
+            },
+            _project_ids_column("equipment_prompts"),
+            {
+                "table_slug": "mcp_tool_overrides",
+                "name": "tool",
+                "label": {"ru": "Инструмент", "en": "Tool"},
+                "type": "text",
+                "required": True,
+            },
+            {
+                "table_slug": "mcp_tool_overrides",
+                "name": "description",
+                "label": {"ru": "Описание (замена)", "en": "Description (replace)"},
+                "type": "text",
+                "required": False,
+                "default": "",
+            },
+            {
+                "table_slug": "mcp_tool_overrides",
+                "name": "extra_instructions",
+                "label": {"ru": "Доп. инструкции (добавить)", "en": "Extra instructions (append)"},
+                "type": "text",
+                "required": False,
+                "default": "",
+            },
+            {
+                "table_slug": "mcp_tool_overrides",
+                "name": "enabled",
+                "label": {"ru": "Включено", "en": "Enabled"},
+                "type": "bool",
+                "required": False,
+                "default": True,
+            },
+            _project_ids_column("mcp_tool_overrides"),
         ],
         "views": [
             {
@@ -2874,7 +3013,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                         "title": {"ru": "Найденные товары", "en": "Found products"}
                     },
                     "title_field": "face_title",
-                    "subtitle_fields": ["part_number", "match_kind", "note"],
+                    "subtitle_fields": ["part_number", "match_label", "note"],
                     # сверка с OpenSearch при открытии (дрилл-даун позиции/бюджета)
                     "on_load": {"action": "equipment_pipeline_sync"},
                     "columns": [
@@ -2897,9 +3036,9 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "max_width": 140,
                         },
                         {
-                            "field": "match_kind",
+                            "field": "match_label",
                             "label": {"ru": "Совпадение", "en": "Match"},
-                            "max_width": 110,
+                            "max_width": 150,
                         },
                         {
                             "field": "face_price",
@@ -2933,6 +3072,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                         {"field": "rank", "dir": "asc"},
                         {"field": "face_priority", "dir": "desc"},
                         {"field": "face_price", "dir": "asc"},
+                        {"field": "face_in_stock", "dir": "desc"},
                     ],
                     # Цвет строки — только warning устаревшего лица; «лучшая»
                     # подсветка живёт в бейдже «Выгода», а не всей строке.
@@ -3019,7 +3159,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "version": 1,
                     "kind": "collection",
                     "title_field": "face_title",
-                    "subtitle_fields": ["part_number", "match_kind", "note"],
+                    "subtitle_fields": ["part_number", "match_label", "note"],
                     "scaffold": {
                         "title": {"ru": "Найденные товары", "en": "Found products"},
                         "actions": [
@@ -3053,9 +3193,9 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "max_width": 140,
                         },
                         {
-                            "field": "match_kind",
+                            "field": "match_label",
                             "label": {"ru": "Совпадение", "en": "Match"},
-                            "max_width": 110,
+                            "max_width": 150,
                         },
                         {
                             "field": "face_price",
@@ -3092,6 +3232,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                         {"field": "rank", "dir": "asc"},
                         {"field": "face_priority", "dir": "desc"},
                         {"field": "face_price", "dir": "asc"},
+                        {"field": "face_in_stock", "dir": "desc"},
                     ],
                     # Цвет строки — только warning устаревшего лица; «лучшая»
                     # подсветка живёт в бейдже «Выгода», а не всей строке.
@@ -3139,7 +3280,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                         "title": {"ru": "Закупка", "en": "Procurement"},
                     },
                     "title_field": "seller",
-                    "subtitle_fields": ["selected_count"],
+                    "subtitle_fields": ["selected_count", "qty_total"],
                     # сверка с OpenSearch при открытии таблицы
                     "on_load": {"action": "equipment_pipeline_sync"},
                     "columns": [
@@ -3151,9 +3292,15 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                         },
                         {
                             "field": "selected_count",
-                            "label": {"ru": "Выбрано", "en": "Selected"},
+                            "label": {"ru": "Товаров", "en": "Products"},
                             "align": "end",
                             "max_width": 90,
+                        },
+                        {
+                            "field": "qty_total",
+                            "label": {"ru": "Количество", "en": "Quantity"},
+                            "align": "end",
+                            "max_width": 100,
                         },
                         {
                             "field": "sum_rub",
@@ -3168,13 +3315,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "max_width": 100,
                             "editable": True,
                         },
-                        {
-                            "field": "include_delivery",
-                            "label": {"ru": "Доставка", "en": "Delivery"},
-                            "format": "bool_yes_no",
-                            "max_width": 90,
-                            "editable": True,
-                        },
+
                         {
                             "field": "delivery_rub",
                             "label": {"ru": "Доставка ₽", "en": "Delivery RUB"},
@@ -3189,9 +3330,10 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                         },
                         {
                             "field": "sum_margin_rub",
-                            "label": {"ru": "Маржа ₽", "en": "Margin RUB"},
+                            "label": {"ru": "Маржа", "en": "Margin"},
+                            "format": "margin_pair",
                             "align": "end",
-                            "max_width": 120,
+                            "max_width": 150,
                         },
                     ],
                     "row_tap": {
@@ -3233,13 +3375,13 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "field": "title",
                             "label": {"ru": "Товар", "en": "Product"},
                             "max_lines": 3,
-                            "max_width": 240,
+                            "max_width": 220,
                         },
                         {
                             "field": "part_number",
                             "label": {"ru": "Партномер", "en": "P/N"},
                             "max_lines": 2,
-                            "max_width": 120,
+                            "max_width": 110,
                         },
                         {
                             "field": "price",
@@ -3248,15 +3390,22 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "max_width": 110,
                         },
                         {
-                            "field": "in_stock",
-                            "label": {"ru": "Наличие", "en": "Stock"},
-                            "format": "bool_yes_no",
-                            "max_width": 90,
+                            "field": "benefit_label",
+                            "label": {"ru": "Выгода", "en": "Benefit"},
+                            "format": "benefit_static",
+                            "align": "center",
+                            "max_width": 130,
                         },
                         {
-                            "field": "lead_time",
-                            "label": {"ru": "Срок", "en": "Lead time"},
-                            "max_width": 110,
+                            "field": "alternatives_count",
+                            "label": {"ru": "Альтернативы", "en": "Alternatives"},
+                            "align": "end",
+                            "max_width": 100,
+                        },
+                        {
+                            "field": "match_label",
+                            "label": {"ru": "Совпадение", "en": "Match"},
+                            "max_width": 150,
                         },
                     ],
                     # чекбокс: один выбранный товар на позицию заказчика
@@ -3265,6 +3414,10 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                         {
                             "when": {"field": "is_stale", "eq": True},
                             "accent": "warning",
+                        },
+                        {
+                            "when": {"field": "is_selected", "eq": True},
+                            "accent": "success",
                         },
                         {
                             "when": {"field": "priority", "eq": True},
@@ -3279,7 +3432,10 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                         "control": "checkbox",
                         "placement": "trailing",
                     },
-                    "row_tap": {"kind": "open_form", "view": "found_offers_form"},
+                    # тап по строке = выбрать/снять товар для позиции
+                    # (select_offer_primary тогглит, пайплайн пересчитывает
+                    # бюджет/закупку/лица групп — связь с другими таблицами)
+                    "row_tap": {"kind": "invoke_action", "action": "select_offer_primary"},
                     "empty": _empty("Нет товаров", "No offers", icon="shopping_cart"),
                 },
             },
@@ -3995,6 +4151,81 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 },
             },
         {
+                "slug": "equipment_prompts_list",
+                "table_slug": "equipment_prompts",
+                "kind": "collection",
+                "ui_json": {
+                    "version": 1,
+                    "kind": "collection",
+                    "scaffold": {"title": {"ru": "Промпты подбора", "en": "Selection prompts"}},
+                    "title_field": "name",
+                    "subtitle_fields": ["path"],
+                    "columns": [
+                        {"field": "name", "label": {"ru": "Название", "en": "Name"}},
+                        {"field": "path", "label": {"ru": "Путь", "en": "Path"}},
+                        {"field": "files_json", "label": {"ru": "Промптов", "en": "Prompts"}, "format": "list_count"},
+                        {"field": "enabled", "label": {"ru": "Включён", "en": "Enabled"}, "format": "bool_yes_no"},
+                    ],
+                    "row_tap": {"kind": "open_form", "view": "equipment_prompt_settings"},
+                    "inline_add": {"field": "name", "title": "Добавить промпт"},
+                    "empty": _empty("Нет промптов", "No prompts", icon="psychology_outlined"),
+                },
+            },
+            {
+                "slug": "equipment_prompt_settings",
+                "table_slug": "equipment_prompts",
+                "kind": "detail",
+                "ui_json": {
+                    "version": 1,
+                    "kind": "detail",
+                    "mode": "edit",
+                    "title": {"ru": "Промпт подбора", "en": "Selection prompt"},
+                    "fields": [
+                        {"column": "name", "widget": "value", "icon": "label_outline"},
+                        {"column": "path", "widget": "value", "icon": "folder_outlined"},
+                        {"column": "enabled", "widget": "switch", "icon": "toggle_on"},
+                        {"column": "files_json", "widget": "prompt_files_editor"},
+                    ],
+                },
+            },
+            {
+                "slug": "mcp_tool_overrides_list",
+                "table_slug": "mcp_tool_overrides",
+                "kind": "collection",
+                "ui_json": {
+                    "version": 1,
+                    "kind": "collection",
+                    "scaffold": {"title": {"ru": "Инструкции MCP", "en": "MCP instructions"}},
+                    "title_field": "tool",
+                    "subtitle_fields": ["description"],
+                    "columns": [
+                        {"field": "tool", "label": {"ru": "Инструмент", "en": "Tool"}},
+                        {"field": "description", "label": {"ru": "Описание", "en": "Description"}, "max_lines": 2},
+                        {"field": "enabled", "label": {"ru": "Включено", "en": "Enabled"}, "format": "bool_yes_no"},
+                    ],
+                    "row_tap": {"kind": "open_form", "view": "mcp_tool_override_form"},
+                    "inline_add": {"field": "tool", "title": "Добавить переопределение"},
+                    "empty": _empty("Нет переопределений", "No overrides", icon="tune"),
+                },
+            },
+            {
+                "slug": "mcp_tool_override_form",
+                "table_slug": "mcp_tool_overrides",
+                "kind": "form",
+                "ui_json": {
+                    "version": 1,
+                    "kind": "form",
+                    "mode": "edit",
+                    "title": {"ru": "Инструкция MCP", "en": "MCP instruction"},
+                    "fields": [
+                        {"column": "tool", "widget": "value"},
+                        {"column": "description", "widget": "text"},
+                        {"column": "extra_instructions", "widget": "text"},
+                        {"column": "enabled", "widget": "switch"},
+                    ],
+                },
+            },
+        {
                 "slug": "templates_list",
                 "table_slug": "templates",
                 "kind": "collection",
@@ -4095,6 +4326,16 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "title": "Шаблоны",
                             "icon": "upload_file",
                             "target": {"kind": "view", "view": "templates_list"},
+                        },
+                        {
+                            "title": "Промпты",
+                            "icon": "psychology_outlined",
+                            "target": {"kind": "view", "view": "equipment_prompts_list"},
+                        },
+                        {
+                            "title": "Инструкции MCP",
+                            "icon": "tune",
+                            "target": {"kind": "view", "view": "mcp_tool_overrides_list"},
                         },
                     ],
                 },
@@ -4297,6 +4538,18 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
             },
         ],
         "materialize": [
+            {
+                "id": "equipment_prompts_files",
+                "enabled": True,
+                "when": ["project.created", "project.resumed", "project.sync"],
+                "priority": 11,
+                "source": {
+                    "type": "rows",
+                    "table_slug": "equipment_prompts",
+                    "filter": {"enabled": True},
+                },
+                "target": {"workspace_path": ".", "format": "prompt_paths"},
+            },
             {
                 "id": "catalog_manifest",
                 "enabled": True,
@@ -4593,7 +4846,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "row_id": "equipment_mcp_default",
                     "body": {
                         "name": "prodavan-equipment",
-                        "version": "2.1.1",
+                        "version": "2.2.0",
                         "enabled": True,
                     },
                 },

@@ -67,7 +67,10 @@ class BudgetSummaryStrip extends StatelessWidget {
       qtyTotal += qty;
     }
     final margin = sale - buy;
-    final marginPct = sale > 0 ? margin / sale : 0.0;
+    // Маржа % — наценка от закупки (margin/buy), та же база, что у наценки
+    // строк (row.markup): 10% в строках ↔ 10% в итоге. Раньше делилось на
+    // продажу (margin/sale) — отсюда «10% в строках, но 9.1% в итоге».
+    final marginPct = buy > 0 ? margin / buy : 0.0;
     final qtyLabel = qtyTotal == qtyTotal.roundToDouble()
         ? qtyTotal.toInt().toString()
         : qtyTotal.toStringAsFixed(1);

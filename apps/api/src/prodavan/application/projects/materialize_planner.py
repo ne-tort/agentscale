@@ -499,7 +499,11 @@ class MaterializePlanner:
                 )
             ]
         if fmt == "prompt_paths":
-            if not active_profile_id:
+            # Профиль нужен только правилам с плейсхолдером {{active_profile_id}}
+            # (mod_prompts). Правила других модулей (напр. equipment_prompts)
+            # профилей не знают — их фрагменты мерджатся по workspace_path.
+            needs_profile = "{{active_profile_id}}" in str(source.get("filter") or "")
+            if needs_profile and not active_profile_id:
                 return []
             return _expand_prompt_path_ops(
                 rows=rows,

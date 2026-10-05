@@ -28,8 +28,9 @@ from prodavan.domain.identity import Principal
 def test_materialize_source_tables_equipment_seed() -> None:
     meta = mod_equipment_meta()
     sources = materialize_source_tables(meta["materialize"], meta["columns"])
-    # catalogs → workspace manifest, equipment_mcp → MCP zip package
-    assert sources == {"catalogs", "equipment_mcp"}
+    # catalogs → workspace manifest, equipment_mcp → MCP zip,
+    # equipment_prompts → промпты подбора (prompt_paths в workspace)
+    assert sources == {"catalogs", "equipment_mcp", "equipment_prompts"}
 
 
 def test_materialize_source_tables_empty_defaults_safe() -> None:

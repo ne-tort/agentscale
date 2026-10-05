@@ -144,6 +144,14 @@ class CollectionViewInterpreter extends StatelessWidget {
               return;
             }
             final rowTap = uiJson['row_tap'];
+            if (rowTap is Map && rowTap['kind'] == 'invoke_action') {
+              // тап по строке вызывает экшен (напр. выбор оффера в «Закупке»)
+              final actionId = rowTap['action']?.toString() ?? '';
+              if (actionId.isNotEmpty) {
+                unawaited(_invokeAction(context, actionId, rowId: row.id));
+              }
+              return;
+            }
             if (rowTap is Map && onOpenForm != null) {
               final kind = rowTap['kind'] as String?;
               final targetView = rowTap['view'] as String?;
@@ -533,6 +541,17 @@ class CollectionViewInterpreter extends StatelessWidget {
         configs.add(Map<String, dynamic>.from(c));
       }
     }
+    // benefit_static: серверный бейдж (пайплайн пишет benefit_label/tone) —
+    // используется там, где конкуренты позиции не видны в списке (Закупка).
+    final staticConfigs = <Map<String, dynamic>>[];
+    for (final c in raw) {
+      if (c is Map && c['format']?.toString() == 'benefit_static') {
+        staticConfigs.add(Map<String, dynamic>.from(c));
+      }
+    }
+    if (staticConfigs.isNotEmpty) {
+      rows = _withStaticBenefitBadges(rows, staticConfigs);
+    }
     if (configs.isEmpty) return rows;
 
     Map<String, dynamic> bodyOf(String rowId) {
@@ -587,6 +606,54 @@ class CollectionViewInterpreter extends StatelessWidget {
       }
     }
     return out;
+  }
+
+  /// benefit_static: бейдж из серверных полей benefit_label/benefit_tone
+  /// (их пишет equipment pipeline; виджет-окраска как у клиентского benefit).
+  List<AppEntityRow> _withStaticBenefitBadges(
+    List<AppEntityRow> rows,
+    List<Map<String, dynamic>> configs,
+  ) {
+    BenefitTone toneOf(String raw) => switch (raw) {
+          'best' => BenefitTone.best,
+          'better' => BenefitTone.better,
+          'worse' => BenefitTone.worse,
+          _ => BenefitTone.same,
+        };
+    return rows.map((row) {
+      final item = seeds.itemById(row.id);
+      final body = item is Map && item['body'] is Map
+          ? Map<String, dynamic>.from(item['body'] as Map)
+          : const <String, dynamic>{};
+      var widgets = Map<String, Widget>.from(row.cellWidgets);
+      var changed = false;
+      for (final cfg in configs) {
+        final columnId = cfg['field']?.toString() ?? '';
+        if (columnId.isEmpty) continue;
+        final label = body['benefit_label']?.toString() ?? '';
+        if (label.isEmpty) continue;
+        widgets[columnId] = BenefitBadge(
+          data: BenefitBadgeData(
+            label: label,
+            tone: toneOf(body['benefit_tone']?.toString() ?? ''),
+          ),
+        );
+        changed = true;
+      }
+      if (!changed) return row;
+      return AppEntityRow(
+        id: row.id,
+        title: row.title,
+        subtitle: row.subtitle,
+        cells: row.cells,
+        cellWidgets: widgets,
+        leading: row.leading,
+        trailing: row.trailing,
+        titleColor: row.titleColor,
+        rowColor: row.rowColor,
+        titleBold: row.titleBold,
+      );
+    }).toList();
   }
 
   List<AppEntityRow> _withEditableCells(

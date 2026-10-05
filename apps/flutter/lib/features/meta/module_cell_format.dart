@@ -91,6 +91,17 @@ String formatModuleCell({
   if (format == 'bool_yes_no') {
     return raw == true ? 'Да' : 'Нет';
   }
+  if (format == 'margin_pair') {
+    // «Закупка»: маржа как «{₽} ({pct}%)» — sum_margin_rub + margin_pct.
+    final rub = _asDouble(body['sum_margin_rub']) ?? 0;
+    final pct = _asDouble(body['margin_pct']) ?? 0;
+    return '${rub.toStringAsFixed(2)} (${pct.toStringAsFixed(1)}%)';
+  }
+  if (format == 'benefit_static') {
+    // Серверный бейдж «Выгода» (пайплайн считает per-offer): текст из
+    // benefit_label; тон красит виджет в collection_interpreter.
+    return body['benefit_label']?.toString() ?? '';
+  }
   if (format == 'budget_calc') {
     // Equipment budgeting: computed cell, value lives in col['variant'].
     return formatBudgetCalcCell(body: body, col: col);

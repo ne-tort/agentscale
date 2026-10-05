@@ -537,6 +537,51 @@ def _call_tool(name: str, arguments: dict[str, Any]) -> Any:
     raise RuntimeError(f"unknown tool: {name}")
 
 
+def _load_tool_overrides() -> dict[str, dict[str, str]]:
+    """UI-управляемые переопределения инструкций (таблица mcp_tool_overrides).
+
+    Читается на каждый tools/list (подключение/перезагрузка MCP): правки из
+    «Управление → Подбор техники → Инструкции MCP» подхватываются без правок
+    кода. Сбой чтения никогда не ломает список инструментов.
+    """
+    try:
+        rows = _list_rows(DEFAULT_MODULE_ID, "mcp_tool_overrides")
+    except Exception:
+        return {}
+    out: dict[str, dict[str, str]] = {}
+    for r in rows:
+        body = r.get("body") if isinstance(r.get("body"), dict) else r
+        if not isinstance(body, dict) or body.get("enabled") is False:
+            continue
+        tool = str(body.get("tool") or "").strip()
+        if not tool:
+            continue
+        out[tool] = {
+            "description": str(body.get("description") or "").strip(),
+            "extra": str(body.get("extra_instructions") or "").strip(),
+        }
+    return out
+
+
+def _tools_with_overrides() -> list[dict[str, Any]]:
+    """TOOLS + переопределения описаний из UI (description заменяет,
+    extra_instructions дописывается)."""
+    overrides = _load_tool_overrides()
+    if not overrides:
+        return TOOLS
+    out: list[dict[str, Any]] = []
+    for t in TOOLS:
+        ov = overrides.get(str(t.get("name") or ""))
+        if not ov:
+            out.append(t)
+            continue
+        desc = ov["description"] or str(t.get("description") or "")
+        if ov["extra"]:
+            desc = desc.rstrip() + "\n\n" + ov["extra"]
+        out.append({**t, "description": desc})
+    return out
+
+
 def _result_text(payload: Any) -> dict[str, Any]:
     text = payload if isinstance(payload, str) else json.dumps(payload, ensure_ascii=False, indent=2)
     return {"content": [{"type": "text", "text": text}]}
@@ -553,13 +598,13 @@ def _handle(msg: dict[str, Any]) -> dict[str, Any] | None:
             "result": {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "prodavan-equipment", "version": "2.1.1"},
+                "serverInfo": {"name": "prodavan-equipment", "version": "2.2.0"},
             },
         }
     if method == "notifications/initialized":
         return None
     if method == "tools/list":
-        return {"jsonrpc": "2.0", "id": mid, "result": {"tools": TOOLS}}
+        return {"jsonrpc": "2.0", "id": mid, "result": {"tools": _tools_with_overrides()}}
     if method == "tools/call":
         name = str(params.get("name") or "")
         arguments = params.get("arguments") if isinstance(params.get("arguments"), dict) else {}
