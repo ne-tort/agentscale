@@ -334,6 +334,26 @@ def register_tasks(app) -> None:
         )
         return run_async(_run())
 
+    @app.task(name=job_names.AGENT_RUN_STALL_SWEEP, bind=False)
+    def agent_run_stall_sweep() -> dict[str, Any]:
+        from prodavan.application.agent.run_stall import AgentRunStallService
+        from prodavan.infrastructure.persistence.database import get_session_factory
+
+        async def _run() -> dict[str, Any]:
+            async def _sweep() -> dict[str, Any]:
+                factory = get_session_factory()
+                async with factory() as session:
+                    return await AgentRunStallService(session).sweep_all()
+
+            return await run_with_job_lock(
+                "agent_run_stall_sweep",
+                ttl_sec=300,
+                fn=_sweep,
+            )
+
+        logger.info("celery task %s", job_names.AGENT_RUN_STALL_SWEEP)
+        return run_async(_run())
+
     @app.task(name=job_names.SWEEP_EQUIPMENT_CATALOG_REINDEX, bind=False)
     def sweep_equipment_catalog_reindex() -> dict[str, Any]:
         from prodavan.application.modules.equipment_catalog_reindex_sweep import (

@@ -2227,11 +2227,6 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "kind": "hub",
                     "items": [
                         {
-                            "title": "Базы данных",
-                            "icon": "storage",
-                            "target": {"kind": "view", "view": "catalogs_list"},
-                        },
-                        {
                             "title": "Позиции заказчика",
                             "icon": "list_alt",
                             "target": {"kind": "view", "view": "request_lines_list"},
@@ -2259,14 +2254,6 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "scope": {"active_chat": "required"},
                         },
                         {
-                            "title": "Типы комплектующих",
-                            "icon": "category",
-                            "target": {
-                                "kind": "view",
-                                "view": "equipment_types_list",
-                            },
-                        },
-                        {
                             "title": "Сборка",
                             "icon": "precision_manufacturing",
                             "target": {
@@ -2283,30 +2270,6 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                                 "view": "budget_lines_list",
                             },
                             "scope": {"active_chat": "required"},
-                        },
-                        {
-                            "title": "Поставщики",
-                            "icon": "local_shipping",
-                            "target": {
-                                "kind": "view",
-                                "view": "trusted_sellers_list",
-                            },
-                        },
-                        {
-                            "title": "Интернет магазины",
-                            "icon": "language",
-                            "target": {
-                                "kind": "view",
-                                "view": "web_shops_list",
-                            },
-                        },
-                        {
-                            "title": "Шаблоны",
-                            "icon": "upload_file",
-                            "target": {
-                                "kind": "view",
-                                "view": "templates_list",
-                            },
                         },
                     ],
                 },
@@ -4103,8 +4066,56 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     ],
                 },
             },
+            {
+                "slug": "equipment_hub_management",
+                "table_slug": "catalogs",
+                "kind": "hub",
+                "ui_json": {
+                    "version": 1,
+                    "kind": "hub",
+                    "items": [
+                        {
+                            "title": "Базы данных",
+                            "icon": "storage",
+                            "target": {"kind": "view", "view": "catalogs_list"},
+                        },
+                        {
+                            "title": "Типы комплектующих",
+                            "icon": "category",
+                            "target": {"kind": "view", "view": "equipment_types_list"},
+                        },
+                        {
+                            "title": "Поставщики",
+                            "icon": "local_shipping",
+                            "target": {"kind": "view", "view": "trusted_sellers_list"},
+                        },
+                        {
+                            "title": "Интернет магазины",
+                            "icon": "language",
+                            "target": {"kind": "view", "view": "web_shops_list"},
+                        },
+                        {
+                            "title": "Шаблоны",
+                            "icon": "upload_file",
+                            "target": {"kind": "view", "view": "templates_list"},
+                        },
+                    ],
+                },
+            },
 ],
         "tabs": [
+            {
+                "id": "tab_equipment_management",
+                "title": "Подбор техники",
+                "subtitle": "Базы данных, поставщики, типы и шаблоны",
+                "order": 5,
+                "icon": "precision_manufacturing",
+                "view_slug": "equipment_hub_management",
+                "table_slug": "catalogs",
+                "enabled": True,
+                "default_project_bind": "global",
+                "nav": {"contour": "employee", "placement": "management"},
+            },
             {
                 "id": "tab_equipment",
                 "title": "Подбор техники",
