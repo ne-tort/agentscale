@@ -446,20 +446,26 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
 
     return LayoutBuilder(
       builder: (context, constraints) {
+        // selection_only колонки скрываются ЦЕЛИКОМ, пока ни одна строка не в
+        // режиме выделения (долгий тап) — иначе таблица показывает пустую
+        // колонку-заглушку. В режиме выделения колонка появляется со значениями.
+        final effectiveColumns = widget.columns
+            .where((c) => !c.selectionOnly || _editFocusId != null)
+            .toList();
         final maxTableWidth = AppBreakpoints.contentMaxWidth;
         final parentWidth = constraints.maxWidth.isFinite
             ? constraints.maxWidth
             : maxTableWidth;
         final tableWidth = parentWidth.clamp(0.0, maxTableWidth).toDouble();
         final primaryLabel = widget.primaryColumnLabel ?? l10n.commonEntity;
-        final fixedWidth = widget.columns.fold<double>(
+        final fixedWidth = effectiveColumns.fold<double>(
           0,
           (sum, c) => sum + (c.width ?? 0),
         );
         // Bounded columns cap the intrinsic width; the true minimum is the
         // sum of the caps (not the 96px floor) so the scroll threshold
         // matches what DataTable will actually lay out.
-        final flexMin = widget.columns
+        final flexMin = effectiveColumns
             .where((c) => c.width == null)
             .fold<double>(
               0,
@@ -472,7 +478,7 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
             fixedWidth +
             flexMin +
             mutateMin +
-            widget.columns.length * _columnSpacing;
+            effectiveColumns.length * _columnSpacing;
         final showActionsCol = _mutateEnabled;
 
         final table = Theme(
@@ -506,7 +512,7 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
                       )
                     : const SizedBox.shrink(),
               ),
-              ...widget.columns.map(
+              ...effectiveColumns.map(
                 (c) => DataColumn(
                   label: widget.showHeader
                       ? Align(
@@ -552,7 +558,7 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
                         child: _primaryCellContent(row, bodyMedium),
                       ),
                     ),
-                    for (final col in widget.columns)
+                    for (final col in effectiveColumns)
                       _dataCell(context, row, col),
                     if (showActionsCol)
                       DataCell(
@@ -618,11 +624,7 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
   ) {
     final alignment = _alignment(column.align);
     final bodyMedium = Theme.of(context).textTheme.bodyMedium;
-    // selection_only: содержимое ячейки — только в режиме выделения строки
-    // (долгий тап → действия удаления); иначе пустая ячейка.
-    final widgetCell = column.selectionOnly && _editFocusId != row.id
-        ? const SizedBox.shrink()
-        : row.cellWidgets[column.id];
+    final widgetCell = row.cellWidgets[column.id];
     final maxLines = math.max(1, column.maxLines);
     final child = widgetCell ??
         Text(
