@@ -7,31 +7,45 @@ import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/features/meta/meta_label.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
-/// Панель реквизитов документов (КП/Спецификация) — singleton-строка таблицы
-/// `document_fields` активного чата. Ставится рядом со сводкой бюджета:
-/// то, что нельзя вывести из данных (стороны, номера договоров, сроки),
-/// вводится здесь и подставляется в шаблоны при экспорте.
+/// Панель реквизитов документов (КП/Спецификация) в «Бюджетировании».
+///
+/// Две группы singleton-строк:
+/// - компания (`document_company_fields`, chats=all — весь кабинет): наша
+///   сторона, город, приложение, сроки; значения сразу подставлены дефолтами
+///   колонок (из шаблона) и живут персистентно;
+/// - сделка (`document_fields`, chats=current): покупатель, номера договора/
+///   спецификации (автогенерация «0001» из seq-счётчиков компании), адреса.
 class DocumentFieldsPanel extends StatefulWidget {
   const DocumentFieldsPanel({
     super.key,
-    required this.tableSlug,
+    required this.companyTable,
+    required this.dealTable,
     required this.title,
-    required this.fields,
+    required this.companyTitle,
+    required this.dealTitle,
+    required this.companyFields,
+    required this.dealFields,
     required this.labels,
+    required this.defaults,
     required this.itemsForTable,
-    required this.itemById,
     required this.createRow,
     required this.upsertBody,
   });
 
-  final String tableSlug;
+  final String companyTable;
+  final String dealTable;
   final Object? title;
-  final List<String> fields;
+  final Object? companyTitle;
+  final Object? dealTitle;
 
-  /// column → label (resolved from the module meta).
+  /// column names (company group).
+  final List<String> companyFields;
+
+  /// {column, auto?} entries (deal group); auto = seq-колонка компании.
+  final List<Map<String, dynamic>> dealFields;
   final Map<String, String> labels;
+  final Map<String, Object?> defaults;
   final List<Map<String, dynamic>> Function(String tableSlug) itemsForTable;
-  final Map<String, dynamic>? Function(String rowId) itemById;
   final Future<String> Function(String tableSlug) createRow;
   final Future<void> Function(String rowId, Map<String, dynamic> body) upsertBody;
 
@@ -40,10 +54,14 @@ class DocumentFieldsPanel extends StatefulWidget {
 }
 
 class _DocumentFieldsPanelState extends State<DocumentFieldsPanel> {
-  String? _rowId;
+  String? _companyId;
+  String? _dealId;
   final Map<String, TextEditingController> _controllers = {};
   Timer? _saveTimer;
-  bool _loading = true;
+
+  // какие авто-номера мы присвоили из seq (для инкремента при сохранении)
+  String? _assignedContract;
+  String? _assignedSpec;
 
   @override
   void initState() {
@@ -51,18 +69,47 @@ class _DocumentFieldsPanelState extends State<DocumentFieldsPanel> {
     _load();
   }
 
+  Map<String, dynamic> _bodyOf(String table) {
+    final items = widget.itemsForTable(table);
+    if (items.isEmpty) return {};
+    final body = items.first['body'];
+    return body is Map ? Map<String, dynamic>.from(body) : {};
+  }
+
   void _load() {
-    final items = widget.itemsForTable(widget.tableSlug);
-    final row = items.isEmpty ? null : items.first;
-    _rowId = row?['row_id'] as String?;
-    final body = row?['body'] is Map
-        ? Map<String, dynamic>.from(row!['body'] as Map)
-        : const <String, dynamic>{};
-    for (final field in widget.fields) {
-      _controllers[field] =
-          TextEditingController(text: body[field]?.toString() ?? '');
+    final company = _bodyOf(widget.companyTable);
+    final deal = _bodyOf(widget.dealTable);
+    _companyId = company.isEmpty ? null : widget.itemsForTable(widget.companyTable).first['row_id'] as String?;
+    _dealId = deal.isEmpty ? null : widget.itemsForTable(widget.dealTable).first['row_id'] as String?;
+
+    for (final f in widget.companyFields) {
+      _controllers[f] = TextEditingController(
+        text: (company[f] ?? widget.defaults[f] ?? '').toString(),
+      );
     }
-    _loading = false;
+    final contractSeq = _asInt(company['contract_seq']) ?? 0;
+    final specSeq = _asInt(company['spec_seq']) ?? 0;
+    for (final entry in widget.dealFields) {
+      final f = entry['column']?.toString() ?? '';
+      if (f.isEmpty) continue;
+      var initial = (deal[f] ?? widget.defaults[f] ?? '').toString();
+      if (initial.isEmpty && entry['auto'] == 'contract_seq') {
+        initial = _seqLabel(contractSeq + 1);
+        _assignedContract = initial;
+      } else if (initial.isEmpty && entry['auto'] == 'spec_seq') {
+        initial = _seqLabel(specSeq + 1);
+        _assignedSpec = initial;
+      }
+      _controllers[f] = TextEditingController(text: initial);
+    }
+  }
+
+  String _seqLabel(int n) => n.toString().padLeft(4, '0');
+
+  int? _asInt(Object? raw) {
+    if (raw is num) return raw.toInt();
+    if (raw is String) return int.tryParse(raw.trim());
+    return null;
   }
 
   @override
@@ -76,36 +123,96 @@ class _DocumentFieldsPanelState extends State<DocumentFieldsPanel> {
 
   void _scheduleSave() {
     _saveTimer?.cancel();
-    _saveTimer = Timer(const Duration(milliseconds: 600), () async {
-      final body = <String, dynamic>{
-        for (final field in widget.fields)
-          field: _numField(field) ? _numOrNull(field) : _controllers[field]?.text,
-      };
-      try {
-        if (_rowId == null) {
-          _rowId = await widget.createRow(widget.tableSlug);
-        }
-        await widget.upsertBody(_rowId!, body);
-      } catch (_) {
-        // best-effort: реквизиты не должны ронять экран
-      }
-    });
+    _saveTimer = Timer(const Duration(milliseconds: 600), _save);
   }
 
-  bool _numField(String field) => field == 'kp_valid_days';
+  Future<void> _save() async {
+    try {
+      final loadedCompany = _bodyOf(widget.companyTable);
+      final companyBody = <String, dynamic>{
+        for (final f in widget.companyFields) f: _value(f),
+      };
+      // авто-номера заняли seq: счётчик компании догоняем до выданного номера
+      for (final pair in [
+        ('contract_seq', _assignedContract),
+        ('spec_seq', _assignedSpec),
+      ]) {
+        final field = pair.$1;
+        final assigned = pair.$2;
+        if (assigned == null) continue;
+        final current = _asInt(loadedCompany[field]) ?? 0;
+        final used = _asInt(assigned) ?? 0;
+        if (used > current) companyBody[field] = used;
+      }
+      _companyId ??= await widget.createRow(widget.companyTable);
+      await widget.upsertBody(_companyId!, companyBody);
 
-  Object? _numOrNull(String field) {
-    final raw = _controllers[field]?.text.trim() ?? '';
-    if (raw.isEmpty) return null;
-    return num.tryParse(raw);
+      final dealBody = <String, dynamic>{};
+      for (final entry in widget.dealFields) {
+        final f = entry['column']?.toString() ?? '';
+        if (f.isEmpty) continue;
+        dealBody[f] = _value(f);
+      }
+      _dealId ??= await widget.createRow(widget.dealTable);
+      await widget.upsertBody(_dealId!, dealBody);
+    } catch (_) {
+      // реквизиты не должны ронять экран
+    }
+  }
+
+  Object? _value(String field) {
+    final raw = _controllers[field]?.text ?? '';
+    if (field == 'kp_valid_days') {
+      return raw.isEmpty ? null : num.tryParse(raw);
+    }
+    return raw;
+  }
+
+  Widget _field(String column) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppSpacing.xs),
+      child: TextField(
+        controller: _controllers[column],
+        style: Theme.of(context).textTheme.bodySmall,
+        decoration: InputDecoration(
+          isDense: true,
+          labelText: widget.labels[column] ?? column,
+          labelStyle: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
+          border: const OutlineInputBorder(),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+        ),
+        keyboardType: column == 'kp_valid_days' ? TextInputType.number : TextInputType.text,
+        onChanged: (_) => _scheduleSave(),
+      ),
+    );
+  }
+
+  Widget _section(Object? title, List<Widget> children) {
+    final l10n = AppLocalizations.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(bottom: AppSpacing.xs / 2),
+          child: Text(
+            resolveMetaLabel(title, l10n),
+            style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                  fontWeight: FontWeight.w600,
+                  color: context.appColors.muted,
+                ),
+          ),
+        ),
+        ...children,
+      ],
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final colors = context.appColors;
-    final scheme = Theme.of(context).colorScheme;
-    if (_loading) return const SizedBox.shrink();
     return Container(
       padding: const EdgeInsets.all(AppSpacing.sm),
       decoration: BoxDecoration(
@@ -119,44 +226,23 @@ class _DocumentFieldsPanelState extends State<DocumentFieldsPanel> {
         children: [
           Text(
             resolveMetaLabel(widget.title, l10n),
-            style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                  fontWeight: FontWeight.w600,
-                ),
+            style: Theme.of(context)
+                .textTheme
+                .titleSmall
+                ?.copyWith(fontWeight: FontWeight.w600),
           ),
           const SizedBox(height: AppSpacing.xs),
-          Flexible(
-            child: SingleChildScrollView(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  for (final field in widget.fields)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: AppSpacing.xs),
-                      child: TextField(
-                        controller: _controllers[field],
-                        style: Theme.of(context).textTheme.bodySmall,
-                        decoration: InputDecoration(
-                          isDense: true,
-                          labelText: widget.labels[field] ?? field,
-                          labelStyle: TextStyle(
-                            fontSize: 11,
-                            color: scheme.onSurfaceVariant,
-                          ),
-                          border: const OutlineInputBorder(),
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 8,
-                          ),
-                        ),
-                        keyboardType: _numField(field)
-                            ? TextInputType.number
-                            : TextInputType.text,
-                        onChanged: (_) => _scheduleSave(),
-                      ),
-                    ),
-                ],
-              ),
-            ),
+          _section(
+            widget.companyTitle,
+            widget.companyFields.map(_field).toList(),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          _section(
+            widget.dealTitle,
+            [
+              for (final entry in widget.dealFields)
+                _field(entry['column']?.toString() ?? ''),
+            ],
           ),
         ],
       ),

@@ -134,6 +134,7 @@ class AppEntityCollection extends StatefulWidget {
     this.onEnabledChanged,
     this.rowActions = const [],
     this.rowMinHeight,
+    this.externalScroll = false,
   });
 
   final List<AppEntityRow> rows;
@@ -178,6 +179,11 @@ class AppEntityCollection extends StatefulWidget {
   /// Minimum table row height (ui_json `row_min_height`): airy tables like
   /// the budget raise it above the default 40.
   final double? rowMinHeight;
+
+  /// Таблица/список занимают свою естественную высоту, скроллит родительская
+  /// страница (вместо внутреннего вертикального скролла коллекции). Для
+  /// страниц, где над таблицей есть другие виджеты (сводка, панели).
+  final bool externalScroll;
 
   @override
   State<AppEntityCollection> createState() => _AppEntityCollectionState();
@@ -372,8 +378,10 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
   Widget build(BuildContext context) {
     final effective = _effectiveMode(context);
 
+    final body = _body(context, effective);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: widget.externalScroll ? MainAxisSize.min : MainAxisSize.max,
       children: [
         if (widget.toolbar != null)
           Padding(
@@ -383,7 +391,7 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
             ),
             child: Row(children: [...?widget.toolbar, const Spacer()]),
           ),
-        Expanded(child: _body(context, effective)),
+        widget.externalScroll ? body : Expanded(child: body),
       ],
     );
   }
@@ -399,6 +407,10 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
     if (mode == AppEntityCollectionMode.list) {
       final bodyMedium = Theme.of(context).textTheme.bodyMedium;
       return ListView.builder(
+        shrinkWrap: widget.externalScroll,
+        physics: widget.externalScroll
+            ? const NeverScrollableScrollPhysics()
+            : null,
         padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
         itemCount: widget.rows.length,
         itemBuilder: (context, i) {
@@ -621,6 +633,10 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
             ),
           ),
         );
+        if (widget.externalScroll) {
+          // Высота = естественная высота таблицы: скроллит страница.
+          return tableBody;
+        }
         return SingleChildScrollView(
           scrollDirection: Axis.vertical,
           child: tableBody,
