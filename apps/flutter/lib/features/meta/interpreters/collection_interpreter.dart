@@ -129,6 +129,7 @@ class CollectionViewInterpreter extends StatelessWidget {
           primaryMaxWidth: primaryEntry.maxWidth,
           primaryWidth: primaryEntry.width,
           rowMinHeight: _doubleFromUi(uiJson['row_min_height']),
+          externalScroll: true,
           toolbar: toolbar,
           empty: EmptyPlaceholder(
             title: emptyTitle.isEmpty ? l10n.adminModuleSeedEmpty : emptyTitle,
@@ -189,15 +190,17 @@ class CollectionViewInterpreter extends StatelessWidget {
             onLoadAction == null &&
             summary == null &&
             docFields == null) {
-          return collection;
+          return SingleChildScrollView(child: collection);
         }
 
         final docFieldsPanel = docFields == null
             ? null
             : _buildDocFieldsPanel(docFields, context);
 
-        return Column(
+        return SingleChildScrollView(
+          child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
           children: [
             if (onLoadAction != null)
               _CollectionOnLoad(
@@ -249,8 +252,9 @@ class CollectionViewInterpreter extends StatelessWidget {
                 seeds: seeds,
                 contextRowId: contextRowId,
               ),
-            Expanded(child: collection),
+            collection,
           ],
+          ),
         );
       },
     );
@@ -758,24 +762,33 @@ class CollectionViewInterpreter extends StatelessWidget {
     return view['table_slug'] as String? ?? '';
   }
 
-  /// `ui_json.doc_fields` — панель реквизитов документов (Бюджетирование).
+  /// `ui_json.doc_fields` — панель реквизитов документов (Бюджетирование):
+  /// компания (весь кабинет) + сделка (чат).
   Map<String, dynamic>? _docFieldsConfig(Map<String, dynamic> uiJson) {
     final raw = uiJson['doc_fields'];
     if (raw is! Map) return null;
-    final tableSlug = raw['table_slug']?.toString() ?? '';
-    if (tableSlug.isEmpty) return null;
-    final fieldsRaw = raw['fields'];
-    if (fieldsRaw is! List) return null;
-    final fields = fieldsRaw
+    final companyTable = raw['company_table']?.toString() ?? '';
+    final dealTable = raw['deal_table']?.toString() ?? '';
+    if (companyTable.isEmpty || dealTable.isEmpty) return null;
+    final companyFields = (raw['company_fields'] as List? ?? const [])
         .whereType<Map>()
         .map((f) => f['column']?.toString() ?? '')
         .where((f) => f.isNotEmpty)
         .toList();
-    if (fields.isEmpty) return null;
+    final dealFields = (raw['deal_fields'] as List? ?? const [])
+        .whereType<Map>()
+        .where((f) => (f['column']?.toString() ?? '').isNotEmpty)
+        .map((f) => Map<String, dynamic>.from(f))
+        .toList();
+    if (companyFields.isEmpty && dealFields.isEmpty) return null;
     return {
-      'table_slug': tableSlug,
+      'company_table': companyTable,
+      'deal_table': dealTable,
       'title': raw['title'],
-      'fields': fields,
+      'company_title': raw['company_title'],
+      'deal_title': raw['deal_title'],
+      'company_fields': companyFields,
+      'deal_fields': dealFields,
     };
   }
 
@@ -784,29 +797,34 @@ class CollectionViewInterpreter extends StatelessWidget {
     BuildContext context,
   ) {
     if (readOnly) return null;
-    final tableSlug = config['table_slug'] as String;
-    final fields = (config['fields'] as List).cast<String>();
+    final companyTable = config['company_table'] as String;
+    final dealTable = config['deal_table'] as String;
     final locale = Localizations.localeOf(context);
     final l10n = AppLocalizations.of(context);
-    // подписи полей из меты модуля (колонки document_fields)
+    // подписи и дефолты (из шаблона) — из меты колонок обеих таблиц
     final labels = <String, String>{};
-    for (final col in manifest.columnsForTable(tableSlug)) {
-      final name = col['name']?.toString() ?? '';
-      if (name.isEmpty) continue;
-      labels[name] = resolveMetaLabel(col['label'], l10n, locale: locale);
+    final defaults = <String, Object?>{};
+    for (final tableSlug in {companyTable, dealTable}) {
+      for (final col in manifest.columnsForTable(tableSlug)) {
+        final name = col['name']?.toString() ?? '';
+        if (name.isEmpty) continue;
+        labels[name] = resolveMetaLabel(col['label'], l10n, locale: locale);
+        if (col.containsKey('default')) defaults[name] = col['default'];
+      }
     }
     return DocumentFieldsPanel(
-      tableSlug: tableSlug,
+      companyTable: companyTable,
+      dealTable: dealTable,
       title: config['title'],
-      fields: fields,
+      companyTitle: config['company_title'],
+      dealTitle: config['deal_title'],
+      companyFields: (config['company_fields'] as List).cast<String>(),
+      dealFields: (config['deal_fields'] as List).cast<Map<String, dynamic>>(),
       labels: labels,
+      defaults: defaults,
       itemsForTable: (slug) => _allItems(seeds, slug)
           .map((m) => Map<String, dynamic>.from(m))
           .toList(),
-      itemById: (rowId) {
-        final item = seeds.itemById(rowId);
-        return item is Map ? Map<String, dynamic>.from(item) : null;
-      },
       createRow: (slug) async {
         final created = seeds.createRow(slug);
         return created is Future ? await created as String : created as String;

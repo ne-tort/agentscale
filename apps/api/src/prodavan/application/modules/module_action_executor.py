@@ -705,25 +705,33 @@ class ModuleActionExecutor:
         employee: EmployeeRow | None,
         session_id: str | None = None,
     ) -> dict[str, Any]:
-        """Реквизиты документов (document_fields, первый непустой row чата)."""
-        table = str(params.get("fields_table") or "document_fields")
-        try:
-            rows = await self._list_rows_for_scope(
-                cabinet_id=cabinet_id,
-                project_id=None,
-                module_id=module_id,
-                table_slug=table,
-                principal=principal,
-                employee=employee,
-                session_id=session_id,
-            )
-        except AppError:
-            return {}
-        for row in rows:
-            body = row.get("body") if isinstance(row, dict) else None
-            if isinstance(body, dict) and body:
-                return body
-        return {}
+        """Реквизиты документов: компания (кабинет, персистентно) + сделка (чат).
+
+        Company-строка даёт устойчивые реквизиты поставщика/города/сроков;
+        deal-строка перекрывает их значениями конкретной сделки.
+        """
+        merged: dict[str, Any] = {}
+        for table_key in ("company_fields_table", "fields_table"):
+            default = "document_company_fields" if table_key == "company_fields_table" else "document_fields"
+            table = str(params.get(table_key) or default)
+            try:
+                rows = await self._list_rows_for_scope(
+                    cabinet_id=cabinet_id,
+                    project_id=None,
+                    module_id=module_id,
+                    table_slug=table,
+                    principal=principal,
+                    employee=employee,
+                    session_id=session_id,
+                )
+            except AppError:
+                continue
+            for row in rows:
+                body = row.get("body") if isinstance(row, dict) else None
+                if isinstance(body, dict) and body:
+                    merged.update(body)
+                    break
+        return merged
 
     async def maybe_auto_budget_sync(
         self,

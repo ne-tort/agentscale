@@ -194,6 +194,7 @@ def test_equipment_meta_hub_on_data_placement() -> None:
         "procurement",
         "equipment_prompts",
         "mcp_tool_overrides",
+        "document_company_fields",
         "document_fields",
     }
     kinds = {a["kind"] for a in meta["actions"]}
@@ -214,6 +215,10 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     # зеркала; дрилл-даун поставщика читает офферы всех чатов проекта.
     tables = {t["slug"]: t for t in meta["tables"]}
     assert tables["procurement"]["scope"]["chats"] == "all"
+    # Реквизиты компании — кабинетный контур (одинаковы во всех чатах),
+    # deal-реквизиты — per-chat
+    assert tables["document_company_fields"]["scope"] == {"projects": "all", "chats": "all"}
+    assert tables["document_fields"]["scope"]["chats"] == "current"
     assert tables["found_offers"]["scope"]["chats"] == "current"
     supplier_offers = next(v for v in meta["views"] if v["slug"] == "supplier_offers")
     assert supplier_offers["ui_json"]["data_scope"] == {"chats": "all"}
@@ -371,6 +376,32 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     assert "price_in" in budget_cols
     assert any(c.get("format") == "budget_calc" and c.get("variant") == "price_out" for c in budget_view["ui_json"]["columns"])
     assert any(c.get("format") == "budget_calc" and c.get("variant") == "margin_total" for c in budget_view["ui_json"]["columns"])
+    # Реквизиты документов: компания (кабинет) + сделка (чат); дефолты
+    # компании = значения из шаблона (сразу подставляются в форму); номера
+    # договора/спецификации автогенерируются в UI из seq-счётчиков.
+    doc_fields = budget_view["ui_json"]["doc_fields"]
+    assert doc_fields["company_table"] == "document_company_fields"
+    assert doc_fields["deal_table"] == "document_fields"
+    company_panel_cols = [f["column"] for f in doc_fields["company_fields"]]
+    assert {"supplier_name", "city", "app_number", "lead_time_note"} <= set(company_panel_cols)
+    auto = {f["column"]: f["auto"] for f in doc_fields["deal_fields"] if "auto" in f}
+    assert auto == {"contract_number": "contract_seq", "spec_number": "spec_seq"}
+    company_cols = {
+        c["name"]: c for c in meta["columns"] if c["table_slug"] == "document_company_fields"
+    }
+    assert company_cols["supplier_name"]["default"] == 'ООО "ИТ Взлёт"'
+    assert company_cols["city"]["default"] == "г. Москва"
+    assert company_cols["app_number"]["default"] == "1"
+    assert company_cols["kp_valid_days"]["default"] == 2
+    assert company_cols["contract_seq"]["hidden"] is True
+    assert company_cols["spec_seq"]["hidden"] is True
+    deal_cols = {c["name"] for c in meta["columns"] if c["table_slug"] == "document_fields"}
+    assert {"customer_name", "contract_number", "spec_number", "delivery_address"} <= deal_cols
+    # экспорты КП/Спецификации/бюджета мерджат компанию и сделку
+    for action_id in ("budget_export", "kp_export", "spec_export"):
+        params = action_map[action_id]["params"]
+        assert params["company_fields_table"] == "document_company_fields"
+        assert params["fields_table"] == "document_fields"
     budget_columns = {c["name"] for c in meta["columns"] if c["table_slug"] == "budget_lines"}
     assert {"line_id", "title", "part_number", "seller", "qty", "price_in", "vat", "markup"} <= budget_columns
     assert not any("s4b" in v["slug"] for v in meta["views"])

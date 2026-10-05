@@ -569,6 +569,68 @@ async def test_kp_export_builds_pdf_directly(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_document_fields_body_merges_company_and_deal(monkeypatch) -> None:
+    """Реквизиты документов: компания (весь кабинет) — база, сделка (чат)
+    перекрывает; пустые строки пропускаются."""
+    executor = _executor()
+    seen: list[str] = []
+
+    async def _rows(**kwargs):  # noqa: ANN003
+        seen.append(kwargs["table_slug"])
+        if kwargs["table_slug"] == "document_company_fields":
+            return [{"row_id": "c1", "body": {
+                "supplier_name": 'ООО "ИТ Взлёт"',
+                "city": "г. Москва",
+                "app_number": "1",
+            }}]
+        if kwargs["table_slug"] == "document_fields":
+            return [
+                {"row_id": "d0", "body": {}},
+                {"row_id": "d1", "body": {"city": "г. Тверь", "customer_name": "ООО «Ромашка»"}},
+            ]
+        return []
+
+    monkeypatch.setattr(executor, "_list_rows_for_scope", _rows)
+    merged = await executor._document_fields_body(
+        cabinet_id="cab_1",
+        module_id="mod_equipment",
+        params={},
+        principal=Principal(sub="u1", roles=frozenset()),
+        employee=None,
+        session_id="main",
+    )
+    assert seen == ["document_company_fields", "document_fields"]
+    assert merged == {
+        "supplier_name": 'ООО "ИТ Взлёт"',  # из компании
+        "city": "г. Тверь",  # сделка перекрыла город компании
+        "app_number": "1",
+        "customer_name": "ООО «Ромашка»",
+    }
+
+
+@pytest.mark.asyncio
+async def test_document_fields_body_survives_missing_company_table(monkeypatch) -> None:
+    """Старые кабинеты без company-таблицы: export не падает, берёт сделку."""
+    executor = _executor()
+
+    async def _rows(**kwargs):  # noqa: ANN003
+        if kwargs["table_slug"] == "document_company_fields":
+            raise AppError(code="NOT_FOUND", title="Not Found", status=404)
+        return [{"row_id": "d1", "body": {"contract_number": "0001"}}]
+
+    monkeypatch.setattr(executor, "_list_rows_for_scope", _rows)
+    merged = await executor._document_fields_body(
+        cabinet_id="cab_1",
+        module_id="mod_equipment",
+        params={},
+        principal=Principal(sub="u1", roles=frozenset()),
+        employee=None,
+        session_id="main",
+    )
+    assert merged == {"contract_number": "0001"}
+
+
+@pytest.mark.asyncio
 async def test_spec_export_builds_pdf_with_russian_date(monkeypatch) -> None:
     executor = _executor()
 
