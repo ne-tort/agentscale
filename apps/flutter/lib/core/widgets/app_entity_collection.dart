@@ -124,6 +124,7 @@ class AppEntityCollection extends StatefulWidget {
     this.primaryColumnLabel,
     this.primaryMaxLines = 2,
     this.primaryMaxWidth = 360,
+    this.primaryWidth,
     this.showHeader = true,
     this.onCopy,
     this.onDelete,
@@ -148,6 +149,12 @@ class AppEntityCollection extends StatefulWidget {
   /// 2 wrapped lines inside 360px.
   final int primaryMaxLines;
   final double? primaryMaxWidth;
+
+  /// Фиксированная ширина первой (title) колонки. Без неё DataTable отдаёт
+  /// ей весь избыток ширины (единственная текстовая колонка получает
+  /// IntrinsicColumnWidth(flex:1)) — «короткое имя поставщика» растягивается
+  /// на пол-экрана, а числовые колонки жмутся.
+  final double? primaryWidth;
 
   /// When false (table mode), hides the heading row entirely.
   final bool showHeader;
@@ -477,7 +484,7 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
         final showActionsCol = _mutateEnabled && _editFocusId != null;
         final mutateMin = showActionsCol ? _mutateTrailingMinWidth : 0;
         final minTableWidth = _horizontalMargin * 2 +
-            (widget.primaryMaxWidth ?? _primaryMinWidth) +
+            (widget.primaryWidth ?? widget.primaryMaxWidth ?? _primaryMinWidth) +
             fixedWidth +
             flexMin +
             mutateMin +
@@ -507,6 +514,9 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
 
             columns: [
               DataColumn(
+                columnWidth: widget.primaryWidth == null
+                    ? null
+                    : FixedColumnWidth(widget.primaryWidth!),
                 label: widget.showHeader
                     ? Align(
                         alignment: Alignment.centerLeft,

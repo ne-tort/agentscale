@@ -1040,6 +1040,14 @@ class EquipmentPipelineService:
                 (o for o in line_offers if str(o.get("row_id") or "") == effective_id), None
             )
             ref_price = _num_or((effective or {}).get("body", {}).get("price"), None)
+            prices = [
+                p
+                for p in (
+                    _num_or((o.get("body") or {}).get("price"), None) for o in line_offers
+                )
+                if p is not None and p > 0
+            ]
+            min_price = min(prices) if prices else None
 
             for o in line_offers:
                 body = dict(o.get("body") or {})
@@ -1053,10 +1061,12 @@ class EquipmentPipelineService:
                     and (other.get("body") or {}).get("is_stale") is not True
                 )
                 price = _num_or(body.get("price"), None)
+                is_effective = str(o.get("row_id") or "") == effective_id
                 label, tone = _benefit_label(
-                    is_effective=str(o.get("row_id") or "") == effective_id,
+                    is_effective=is_effective,
                     price=price,
                     reference=ref_price,
+                    min_price=min_price,
                     total_offers=len(line_offers),
                 )
                 updates: dict[str, Any] = {}
@@ -1066,6 +1076,8 @@ class EquipmentPipelineService:
                     updates["benefit_label"] = label
                 if str(body.get("benefit_tone") or "") != tone:
                     updates["benefit_tone"] = tone
+                if bool(body.get("is_effective")) is not is_effective:
+                    updates["is_effective"] = is_effective
                 want_match_label = _match_label(
                     _valid_match_kind(body.get("match_kind")), body.get("in_stock") is True
                 )
@@ -1648,20 +1660,39 @@ def _match_label(match_kind: str, in_stock: bool) -> str:
 
 
 def _benefit_label(
-    *, is_effective: bool, price: float | None, reference: float | None, total_offers: int
+    *,
+    is_effective: bool,
+    price: float | None,
+    reference: float | None,
+    min_price: float | None,
+    total_offers: int,
 ) -> tuple[str, str]:
-    """Бейдж «Выгода» для оффера (серверная версия Flutter computeBenefitBadges —
-    в срезе одного поставщика конкуренты позиции не видны, поэтому считает бэк).
+    """Бейдж «Выгода» для оффера — та же семантика, что в клиентском
+    computeBenefitBadges ( Flutter benefit_badge.dart):
 
-    Возвращает (label, tone): tone ∈ best|better|worse|same — красит бейдж.
+    - единственный оффер позиции → «Единственный»;
+    - эффективный (выбранный ?? best) и при этом минимальная цена →
+      «Лучшая цена»;
+    - эффективный, но дороже минимума → переплата «−n%» (красный);
+    - остальные → выгода относительно эффективной цены: «+n%» зелёный
+      (дешевле), «−n%» красный (дороже), «Одинаковая» при разнице <0.5%.
+
+    Возвращает (label, tone): tone ∈ best|better|worse|same.
     """
-    if is_effective:
-        return "Выбран", "best"
     if total_offers <= 1:
         return "Единственный", "same"
-    if price is None or reference is None or reference <= 0:
+    if price is None:
         return "", "same"
-    if price == reference:
+    if is_effective:
+        if min_price is not None and price <= min_price + 0.005:
+            return "Лучшая цена", "best"
+        if min_price and min_price > 0:
+            overpay = (min_price - price) / min_price * 100
+            return f"−{abs(overpay):.1f}%", "worse"
+        return "", "same"
+    if reference is None or reference <= 0:
+        return "", "same"
+    if abs(price - reference) <= 0.005:
         return "Одинаковая", "same"
     savings_pct = (reference - price) / reference * 100
     if abs(savings_pct) < 0.5:

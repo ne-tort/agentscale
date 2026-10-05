@@ -1059,6 +1059,15 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "enabled": True,
                 "scope": {"projects": "all", "chats": "all"},
             },
+            # Реквизиты документов (КП/Спецификация): то, что нельзя вывести
+            # из данных — стороны, номера договоров, сроки, адреса.
+            {
+                "slug": "document_fields",
+                "label": {"ru": "Реквизиты документов", "en": "Document details"},
+                "storage_kind": "json_document",
+                "enabled": True,
+                "scope": {"projects": "all", "chats": "current"},
+            },
             # Оверрайды инструкций MCP-инструментов (описания тулзов агента).
             {
                 "slug": "mcp_tool_overrides",
@@ -1721,6 +1730,16 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
             },
             {
                 "table_slug": "found_offers",
+                "name": "is_effective",
+                "label": {"ru": "Текущий выбор позиции", "en": "Effective choice"},
+                "type": "bool",
+                "required": False,
+                "default": False,
+                "read_only": True,
+                "hidden": True,
+            },
+            {
+                "table_slug": "found_offers",
                 "name": "benefit_tone",
                 "label": {"ru": "Тон выгоды", "en": "Benefit tone"},
                 "type": "text",
@@ -2355,6 +2374,147 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "default": True,
             },
             _project_ids_column("mcp_tool_overrides"),
+            {
+                "table_slug": "document_fields",
+                "name": "supplier_name",
+                "label": {"ru": "Поставщик", "en": "Supplier"},
+                "type": "text",
+                "required": False,
+            },
+            {
+                "table_slug": "document_fields",
+                "name": "supplier_inn",
+                "label": {"ru": "ИНН поставщика", "en": "Supplier INN"},
+                "type": "text",
+                "required": False,
+            },
+            {
+                "table_slug": "document_fields",
+                "name": "supplier_kpp",
+                "label": {"ru": "КПП поставщика", "en": "Supplier KPP"},
+                "type": "text",
+                "required": False,
+            },
+            {
+                "table_slug": "document_fields",
+                "name": "supplier_address",
+                "label": {"ru": "Адрес поставщика", "en": "Supplier address"},
+                "type": "text",
+                "required": False,
+            },
+            {
+                "table_slug": "document_fields",
+                "name": "supplier_email",
+                "label": {"ru": "Email поставщика", "en": "Supplier email"},
+                "type": "text",
+                "required": False,
+            },
+            {
+                "table_slug": "document_fields",
+                "name": "supplier_signatory",
+                "label": {"ru": "Подписант поставщика", "en": "Supplier signatory"},
+                "type": "text",
+                "required": False,
+            },
+            {
+                "table_slug": "document_fields",
+                "name": "customer_name",
+                "label": {"ru": "Покупатель", "en": "Customer"},
+                "type": "text",
+                "required": False,
+            },
+            {
+                "table_slug": "document_fields",
+                "name": "customer_signatory",
+                "label": {"ru": "Подписант покупателя", "en": "Customer signatory"},
+                "type": "text",
+                "required": False,
+            },
+            {
+                "table_slug": "document_fields",
+                "name": "customer_basis",
+                "label": {"ru": "Основание покупателя", "en": "Customer basis"},
+                "type": "text",
+                "required": False,
+            },
+            {
+                "table_slug": "document_fields",
+                "name": "city",
+                "label": {"ru": "Город", "en": "City"},
+                "type": "text",
+                "required": False,
+            },
+            {
+                "table_slug": "document_fields",
+                "name": "spec_number",
+                "label": {"ru": "№ спецификации", "en": "Spec number"},
+                "type": "text",
+                "required": False,
+            },
+            {
+                "table_slug": "document_fields",
+                "name": "app_number",
+                "label": {"ru": "№ приложения", "en": "Appendix number"},
+                "type": "text",
+                "required": False,
+            },
+            {
+                "table_slug": "document_fields",
+                "name": "contract_number",
+                "label": {"ru": "№ договора", "en": "Contract number"},
+                "type": "text",
+                "required": False,
+            },
+            {
+                "table_slug": "document_fields",
+                "name": "contract_date",
+                "label": {"ru": "Дата договора", "en": "Contract date"},
+                "type": "text",
+                "required": False,
+            },
+            {
+                "table_slug": "document_fields",
+                "name": "delivery_place",
+                "label": {"ru": "Условия доставки", "en": "Delivery terms"},
+                "type": "text",
+                "required": False,
+            },
+            {
+                "table_slug": "document_fields",
+                "name": "delivery_address",
+                "label": {"ru": "Адрес поставки", "en": "Delivery address"},
+                "type": "text",
+                "required": False,
+            },
+            {
+                "table_slug": "document_fields",
+                "name": "delivery_days",
+                "label": {"ru": "Срок поставки (раб. дней)", "en": "Delivery days"},
+                "type": "text",
+                "required": False,
+            },
+            {
+                "table_slug": "document_fields",
+                "name": "payment_days",
+                "label": {"ru": "Срок оплаты (раб. дней)", "en": "Payment days"},
+                "type": "text",
+                "required": False,
+            },
+            {
+                "table_slug": "document_fields",
+                "name": "lead_time_note",
+                "label": {"ru": "Срок поставки (примечание)", "en": "Lead time note"},
+                "type": "text",
+                "required": False,
+            },
+            {
+                "table_slug": "document_fields",
+                "name": "kp_valid_days",
+                "label": {"ru": "КП действует, дней", "en": "KP valid days"},
+                "type": "number",
+                "required": False,
+                "default": 2,
+            },
         ],
         "views": [
             {
@@ -2576,6 +2736,34 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     # Comfortable row padding for the budget table (default
                     # dataRowMinHeight 40 → taller airy rows; ui_json knob,
                     # see AppEntityCollection).
+                    # Панель реквизитов документов — справа от суммаризатора:
+                    # поля, которые нельзя вывести из данных. Singleton-строка чата.
+                    "doc_fields": {
+                        "table_slug": "document_fields",
+                        "title": {"ru": "Реквизиты документов", "en": "Document details"},
+                        "fields": [
+                            {"column": "supplier_name"},
+                            {"column": "supplier_inn"},
+                            {"column": "supplier_kpp"},
+                            {"column": "supplier_address"},
+                            {"column": "supplier_email"},
+                            {"column": "supplier_signatory"},
+                            {"column": "customer_name"},
+                            {"column": "customer_signatory"},
+                            {"column": "customer_basis"},
+                            {"column": "city"},
+                            {"column": "spec_number"},
+                            {"column": "app_number"},
+                            {"column": "contract_number"},
+                            {"column": "contract_date"},
+                            {"column": "delivery_place"},
+                            {"column": "delivery_address"},
+                            {"column": "delivery_days"},
+                            {"column": "payment_days"},
+                            {"column": "lead_time_note"},
+                            {"column": "kp_valid_days"},
+                        ],
+                    },
                     "row_min_height": 52,
                     "columns": [
                         {
@@ -3288,7 +3476,9 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "field": "seller",
                             "label": {"ru": "Поставщик", "en": "Supplier"},
                             "max_lines": 2,
-                            "max_width": 200,
+                            # фиксированная ширина: имя поставщика короткое,
+                            # а без width DataTable растягивает первую колонку
+                            "width": 220,
                         },
                         {
                             "field": "selected_count",
@@ -3307,13 +3497,6 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "label": {"ru": "Сумма ₽", "en": "Sum RUB"},
                             "align": "end",
                             "max_width": 130,
-                        },
-                        {
-                            "field": "margin_pct",
-                            "label": {"ru": "Маржа %", "en": "Margin %"},
-                            "align": "end",
-                            "max_width": 100,
-                            "editable": True,
                         },
 
                         {
@@ -3415,8 +3598,11 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "when": {"field": "is_stale", "eq": True},
                             "accent": "warning",
                         },
+                        # эффективный выбор позиции (selected ?? best) — зелёный
+                        # сразу, без клика: это связанное состояние из других
+                        # таблиц (бюджет/группы), а не локальный UI-стейт
                         {
-                            "when": {"field": "is_selected", "eq": True},
+                            "when": {"field": "is_effective", "eq": True},
                             "accent": "success",
                         },
                         {
@@ -4510,6 +4696,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "params": {
                     "budget_table": "budget_lines",
                     "lines_table": "request_lines",
+                    "fields_table": "document_fields",
                 },
                 "trigger": {"on": []},
                 "ui": {"placement": ["toolbar", "scaffold"], "icon": "download"},
@@ -4521,6 +4708,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "enabled": True,
                 "params": {
                     "budget_table": "budget_lines",
+                    "fields_table": "document_fields",
                 },
                 "trigger": {"on": []},
                 "ui": {"placement": ["toolbar", "scaffold"], "icon": "picture_as_pdf"},
@@ -4532,6 +4720,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "enabled": True,
                 "params": {
                     "budget_table": "budget_lines",
+                    "fields_table": "document_fields",
                 },
                 "trigger": {"on": []},
                 "ui": {"placement": ["toolbar", "scaffold"], "icon": "table_view"},

@@ -759,14 +759,18 @@ async def test_match_label_and_stock_and_offer_annotations(io: FakeIO) -> None:
     assert by_hash["h3"]["body"]["match_label"] == "Точное"
     # alternatives: у офферов line_1 три поставщика → у каждого 2 альтернативы
     assert by_hash["h1"]["body"]["alternatives_count"] == 2
-    # benefit: эффективный — best grp_1 = h3 (Сидоров). h3 → «Выбран»,
-    # h2 (90 дешевле 120) → «+25.0%» (выгода относительно выбранного)
-    assert by_hash["h3"]["body"]["benefit_label"] == "Выбран"
+    # benefit: эффективный — best grp_1 = h3 (Сидоров 120), минимум линии —
+    # h2 (90). Эффективный дороже минимума → переплата «−33.3%» (красный);
+    # h2 дешевле эффективного → «+25.0%» (зелёный). «Выбран» больше не бейдж —
+    # выбор виден зелёной строкой (is_effective).
+    assert by_hash["h3"]["body"]["benefit_label"] == "−33.3%"
+    assert by_hash["h3"]["body"]["benefit_tone"] == "worse"
+    assert by_hash["h3"]["body"]["is_effective"] is True
     assert by_hash["h2"]["body"]["benefit_label"] == "+25.0%"
     assert by_hash["h2"]["body"]["benefit_tone"] == "better"
-    # line_2: единственный оффер (h4) → «Единственный»... он же эффективный
-    # (выбора нет — эффективный = best) → «Выбран» важнее
-    assert by_hash["h4"]["body"]["benefit_label"] == "Выбран"
+    assert by_hash["h2"]["body"].get("is_effective") is not True
+    # line_2: единственный оффер (h4) → «Единственный»
+    assert by_hash["h4"]["body"]["benefit_label"] == "Единственный"
 
 
 async def test_best_offer_stock_is_last_tiebreak(io: FakeIO) -> None:
