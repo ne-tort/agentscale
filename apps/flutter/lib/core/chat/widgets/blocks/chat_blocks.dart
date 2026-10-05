@@ -181,13 +181,74 @@ class ChatCodePanel extends StatelessWidget {
         color: scheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(8),
       ),
-      child: Text(
-        text,
-        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              fontFamily: 'monospace',
-              color: scheme.onSurface.withValues(alpha: 0.88),
+      child: Stack(
+        children: [
+          Padding(
+            // место под кнопку копирования в правом нижнем углу
+            padding: const EdgeInsets.only(right: 28, bottom: 4),
+            child: Text(
+              text,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    fontFamily: 'monospace',
+                    color: scheme.onSurface.withValues(alpha: 0.88),
+                  ),
             ),
+          ),
+          Positioned(
+            right: 0,
+            bottom: 0,
+            child: _CopyPanelButton(text: text),
+          ),
+        ],
       ),
+    );
+  }
+}
+
+/// Копия содержимого панели (результат MCP/тулзы) в буфер — иконка справа внизу.
+class _CopyPanelButton extends StatefulWidget {
+  const _CopyPanelButton({required this.text});
+
+  final String text;
+
+  @override
+  State<_CopyPanelButton> createState() => _CopyPanelButtonState();
+}
+
+class _CopyPanelButtonState extends State<_CopyPanelButton> {
+  bool _copied = false;
+  Timer? _timer;
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _copy() async {
+    await Clipboard.setData(ClipboardData(text: widget.text));
+    if (!mounted) return;
+    setState(() => _copied = true);
+    _timer?.cancel();
+    _timer = Timer(const Duration(seconds: 2), () {
+      if (mounted) setState(() => _copied = false);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return IconButton(
+      visualDensity: VisualDensity.compact,
+      iconSize: 16,
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+      tooltip: MaterialLocalizations.of(context).copyButtonLabel,
+      icon: Icon(
+        _copied ? Icons.check : Icons.copy_outlined,
+        color: _copied ? scheme.primary : scheme.onSurfaceVariant,
+      ),
+      onPressed: _copy,
     );
   }
 }
