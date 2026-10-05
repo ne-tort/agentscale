@@ -472,14 +472,16 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
               (sum, c) =>
                   sum + (c.maxWidth ?? _flexColumnMinWidth).clamp(_flexColumnMinWidth, 1000),
             );
-        final mutateMin = _mutateEnabled ? _mutateTrailingMinWidth : 0;
+        // Колонка действий (корзина и пр.) — только в режиме выделения строки
+        // (долгий тап); в обычном режиме справа ничего не висит.
+        final showActionsCol = _mutateEnabled && _editFocusId != null;
+        final mutateMin = showActionsCol ? _mutateTrailingMinWidth : 0;
         final minTableWidth = _horizontalMargin * 2 +
             (widget.primaryMaxWidth ?? _primaryMinWidth) +
             fixedWidth +
             flexMin +
             mutateMin +
             effectiveColumns.length * _columnSpacing;
-        final showActionsCol = _mutateEnabled;
 
         final table = Theme(
           data: Theme.of(context).copyWith(

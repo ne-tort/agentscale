@@ -2449,7 +2449,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "field": "part_number",
                             "label": {"ru": "Партномер", "en": "P/N"},
                             "max_lines": 2,
-                            "max_width": 100,
+                            "max_width": 80,
                         },
                         # Markup takes the supplier column's slot (supplier
                         # dropped by request; markup editable in place).
@@ -2502,9 +2502,6 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "variant": "margin_total",
                             "align": "end",
                             "max_width": 150,
-                            # показываем только в режиме выделения строки
-                            # (долгий тап → удаление) — иначе таблица перегружена
-                            "selection_only": True,
                         },
                     ],
                     # computed columns are Flutter-side; backend ships raw fields
@@ -2976,7 +2973,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "field": "part_number",
                             "label": {"ru": "Партномер", "en": "P/N"},
                             "max_lines": 2,
-                            "max_width": 100,
+                            "max_width": 80,
                         },
                         {
                             "field": "price",

@@ -10,7 +10,7 @@ abstract final class AppBreakpoints {
 
   /// Max width of the main content column (chrome / rail sit outside this).
   /// 1200 = 1000 * 1.2 — wide module tables (budget, suppliers) need the room.
-  static const double contentMaxWidth = 1200;
+  static const double contentMaxWidth = 1440;
 
   static bool isNarrow(BuildContext context) =>
       MediaQuery.sizeOf(context).width < narrowMax;
