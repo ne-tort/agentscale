@@ -22,7 +22,7 @@ transformers:
 images:
   - name: ghcr.io/ne-tort/agentscale-api
     newName: ghcr.io/ne-tort/agentscale-api
-    newTag: 0e6dce6b84a2
+    newTag: 8128bd7d6b1b
   - name: ghcr.io/ne-tort/agentscale-web
     newName: ghcr.io/ne-tort/agentscale-web
-    newTag: 0e6dce6b84a2
+    newTag: 8128bd7d6b1b
