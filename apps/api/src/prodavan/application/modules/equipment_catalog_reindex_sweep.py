@@ -54,8 +54,9 @@ def _interval_hours(row: dict[str, Any]) -> float:
 
 
 def _stale_indexing(row: dict[str, Any], *, now: datetime) -> bool:
-    """True when a row is stuck in ``indexing`` (worker died mid-index)."""
-    if str(row.get("status") or "").strip().lower() != "indexing":
+    """True when a row is stuck in ``indexing``/``queued`` (worker died
+    mid-index, or the queued task was lost with a purged broker queue)."""
+    if str(row.get("status") or "").strip().lower() not in {"indexing", "queued"}:
         return False
     started = _parse_iso(row.get("indexing_started_at"))
     if started is None:

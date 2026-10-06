@@ -879,7 +879,7 @@ class ModuleActionExecutor:
             if not isinstance(body.get(source_column), dict):
                 continue
             status = str(body.get(status_col) or "")
-            if status == "indexing":
+            if status in {"indexing", "queued"}:
                 continue
             artifact_col = str(params.get("artifact_column") or "artifact_ref")
             source_ref = body.get(source_column)
@@ -986,7 +986,7 @@ class ModuleActionExecutor:
                 continue
             body = target.get("body") if isinstance(target.get("body"), dict) else {}
             status_col = str(params.get("status_column") or "status")
-            if str(body.get(status_col) or "") == "indexing":
+            if str(body.get(status_col) or "") in {"indexing", "queued"}:
                 continue
             try:
                 await self._index_opensearch(
@@ -1075,7 +1075,7 @@ class ModuleActionExecutor:
                     continue
             # remote_table may be empty when DSN already has /dbname (default SQL table).
             status = str(body.get(status_col) or "")
-            if status == "indexing":
+            if status in {"indexing", "queued"}:
                 continue
             probe_key = (
                 f"{field_value_as_secret_ref(body.get(dsn_col))}|"
@@ -1793,8 +1793,12 @@ class ModuleActionExecutor:
                 "reason": "column_map incomplete",
             }
 
-        body[status_col] = "indexing"
+        # «В очереди» вместо «В процессе»: задачу ещё не начал воркер.
+        # indexing + indexing_started_at перезапишет run_index при реальном
+        # старте; поле времени здесь — возраст очереди для stuck-heal sweep.
+        body[status_col] = "queued"
         body[error_col] = None
+        body["indexing_started_at"] = datetime.now(UTC).isoformat()
         await self._update_row_for_scope(
             cabinet_id=cabinet_id,
             project_id=project_id,
@@ -1834,7 +1838,7 @@ class ModuleActionExecutor:
             }
         return {
             "kind": "content.index_opensearch",
-            "status": "indexing",
+            "status": "queued",
             "row_id": row_id,
             "enqueued": bool(enq.get("enqueued")),
             "task_id": enq.get("task_id"),
