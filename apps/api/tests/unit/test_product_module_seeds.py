@@ -222,6 +222,8 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     assert tables["found_offers"]["scope"]["chats"] == "current"
     supplier_offers = next(v for v in meta["views"] if v["slug"] == "supplier_offers")
     assert supplier_offers["ui_json"]["data_scope"] == {"chats": "all"}
+    # дрилл-даун из «Закупки»: заголовок с именем поставщика из контекстной строки
+    assert supplier_offers["ui_json"]["scaffold"]["title_template"]["ru"] == "Товары {seller}"
     # лицо группы: флаг «устарело» для warning-подсветки + колонка hidden
     fg_cols = {c["name"]: c for c in meta["columns"] if c["table_slug"] == "found_groups"}
     assert fg_cols["face_stale"]["hidden"] is True
@@ -382,10 +384,18 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     doc_fields = budget_view["ui_json"]["doc_fields"]
     assert doc_fields["company_table"] == "document_company_fields"
     assert doc_fields["deal_table"] == "document_fields"
+    # две карточки в линию без общего заголовка: «Поставщик» + «Сделка»
+    assert "title" not in doc_fields
+    assert doc_fields["company_title"]["ru"] == "Поставщик"
+    assert doc_fields["deal_title"]["ru"] == "Сделка"
     company_panel_cols = [f["column"] for f in doc_fields["company_fields"]]
     assert {"supplier_name", "city", "app_number", "lead_time_note"} <= set(company_panel_cols)
     auto = {f["column"]: f["auto"] for f in doc_fields["deal_fields"] if "auto" in f}
-    assert auto == {"contract_number": "contract_seq", "spec_number": "spec_seq"}
+    assert auto == {
+        "contract_number": "contract_seq",
+        "spec_number": "spec_seq",
+        "contract_date": "today",
+    }
     company_cols = {
         c["name"]: c for c in meta["columns"] if c["table_slug"] == "document_company_fields"
     }

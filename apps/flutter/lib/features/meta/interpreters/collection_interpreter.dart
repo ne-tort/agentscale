@@ -217,7 +217,9 @@ class CollectionViewInterpreter extends StatelessWidget {
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  if (summary != null) Expanded(flex: 3, child: summary),
+                  // три равных блока в линию: сводка | Поставщик | Сделка
+                  // (панель реквизитов сама делит свои 2/3 на две карточки)
+                  if (summary != null) Expanded(child: summary),
                   if (docFieldsPanel != null)
                     Expanded(
                       flex: 2,
@@ -784,7 +786,6 @@ class CollectionViewInterpreter extends StatelessWidget {
     return {
       'company_table': companyTable,
       'deal_table': dealTable,
-      'title': raw['title'],
       'company_title': raw['company_title'],
       'deal_title': raw['deal_title'],
       'company_fields': companyFields,
@@ -815,7 +816,6 @@ class CollectionViewInterpreter extends StatelessWidget {
     return DocumentFieldsPanel(
       companyTable: companyTable,
       dealTable: dealTable,
-      title: config['title'],
       companyTitle: config['company_title'],
       dealTitle: config['deal_title'],
       companyFields: (config['company_fields'] as List).cast<String>(),
