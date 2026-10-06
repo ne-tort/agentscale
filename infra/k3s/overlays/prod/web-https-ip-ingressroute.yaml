@@ -1,0 +1,39 @@
+# HTTPS-доступ к prod по адресу ВМ: https://172.31.156.203
+#
+# Kubernetes Ingress не принимает IP в spec.rules[].host («must be a DNS
+# name, not an IP address»), поэтому маршрут живёт в Traefik IngressRoute:
+# матчер Host(`IP`) валиден для CRD, а явный priority поднимает его выше
+# wildcard-роутеров dev-контура на том же entrypoint websecure.
+#
+# TLS: без secretName → дефолтный TLSStore (kube-system/agentscale-tls);
+# его сертификат содержит SAN IP:172.31.156.203, а браузер не отправляет SNI
+# для IP-литералов — совпадение имени чистое.
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: agentscale-https-ip
+  annotations:
+    argocd.argoproj.io/sync-wave: "25"
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: "Host(`172.31.156.203`) && PathPrefix(`/api`)"
+      kind: Rule
+      priority: 1020
+      services:
+        - name: agentscale-api
+          port: 8000
+    - match: "Host(`172.31.156.203`) && PathPrefix(`/health`)"
+      kind: Rule
+      priority: 1020
+      services:
+        - name: agentscale-api
+          port: 8000
+    - match: "Host(`172.31.156.203`)"
+      kind: Rule
+      priority: 1010
+      services:
+        - name: agentscale-web
+          port: 80
+  tls: {}
