@@ -92,7 +92,9 @@ class _DocumentFieldsPanelState extends State<DocumentFieldsPanel> {
     for (final entry in widget.dealFields) {
       final f = entry['column']?.toString() ?? '';
       if (f.isEmpty) continue;
-      var initial = (deal[f] ?? widget.defaults[f] ?? '').toString();
+      // значение сделки важнее; для полей, переехавших из группы компании
+      // (сроки), фолбэк на company-строку, затем дефолт шаблона
+      var initial = (deal[f] ?? company[f] ?? widget.defaults[f] ?? '').toString();
       if (initial.isEmpty && entry['auto'] == 'contract_seq') {
         initial = _seqLabel(contractSeq + 1);
         _assignedContract = initial;

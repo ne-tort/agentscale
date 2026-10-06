@@ -389,7 +389,11 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     assert doc_fields["company_title"]["ru"] == "Поставщик"
     assert doc_fields["deal_title"]["ru"] == "Сделка"
     company_panel_cols = [f["column"] for f in doc_fields["company_fields"]]
-    assert {"supplier_name", "city", "app_number", "lead_time_note"} <= set(company_panel_cols)
+    assert {"supplier_name", "city", "app_number", "kp_valid_days"} <= set(company_panel_cols)
+    # сроки поставки/оплаты — сделочные (per-chat), не кабинетные
+    assert not {"delivery_days", "payment_days", "lead_time_note"} & set(company_panel_cols)
+    deal_panel_cols = [f["column"] for f in doc_fields["deal_fields"]]
+    assert {"delivery_days", "payment_days", "lead_time_note"} <= set(deal_panel_cols)
     auto = {f["column"]: f["auto"] for f in doc_fields["deal_fields"] if "auto" in f}
     assert auto == {
         "contract_number": "contract_seq",
@@ -405,8 +409,10 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     assert company_cols["kp_valid_days"]["default"] == 2
     assert company_cols["contract_seq"]["hidden"] is True
     assert company_cols["spec_seq"]["hidden"] is True
+    assert not {"delivery_days", "payment_days", "lead_time_note"} & set(company_cols)
     deal_cols = {c["name"] for c in meta["columns"] if c["table_slug"] == "document_fields"}
     assert {"customer_name", "contract_number", "spec_number", "delivery_address"} <= deal_cols
+    assert {"delivery_days", "payment_days", "lead_time_note"} <= deal_cols
     # экспорты КП/Спецификации/бюджета мерджат компанию и сделку
     for action_id in ("budget_export", "kp_export", "spec_export"):
         params = action_map[action_id]["params"]
