@@ -26,6 +26,7 @@ const _companyFields = ['supplier_name', 'city', 'app_number'];
 const _dealFields = [
   {'column': 'customer_name'},
   {'column': 'contract_number', 'auto': 'contract_seq'},
+  {'column': 'contract_date', 'auto': 'today'},
   {'column': 'spec_number', 'auto': 'spec_seq'},
 ];
 const _labels = {
@@ -34,6 +35,7 @@ const _labels = {
   'app_number': '№ приложения',
   'customer_name': 'Покупатель',
   'contract_number': '№ договора',
+  'contract_date': 'Дата договора',
   'spec_number': '№ спецификации',
 };
 const _defaults = {
@@ -43,16 +45,32 @@ const _defaults = {
   'customer_name': 'ООО «Ромашка»',
 };
 
+const _monthsGenRu = [
+  'января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
+  'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря',
+];
+
+/// 1:1 с _todayRu панели (и fmt_date_ru рендера документов).
+String _todayRu() {
+  final now = DateTime.now();
+  final day = now.day.toString().padLeft(2, '0');
+  return '«$day» ${_monthsGenRu[now.month - 1]} ${now.year} г.';
+}
+
+String _textOf(WidgetTester tester, String label) => tester
+    .widget<TextField>(find.widgetWithText(TextField, label))
+    .controller!
+    .text;
+
 void main() {
-  testWidgets('дефолты из шаблона подставляются сразу, номера генерятся 0001',
+  testWidgets('две карточки без общего заголовка; дефолты и авто-значения сразу',
       (tester) async {
     var created = 0;
     final upserts = <(String, Map<String, dynamic>)>[];
     await tester.pumpWidget(_wrap(DocumentFieldsPanel(
       companyTable: _companyTable,
       dealTable: _dealTable,
-      title: const {'ru': 'Реквизиты документов'},
-      companyTitle: const {'ru': 'Поставщик (кабинет)'},
+      companyTitle: const {'ru': 'Поставщик'},
       dealTitle: const {'ru': 'Сделка'},
       companyFields: _companyFields,
       dealFields: _dealFields.map((m) => Map<String, dynamic>.from(m)).toList(),
@@ -69,26 +87,17 @@ void main() {
     )));
     await tester.pumpAndSettle();
 
-    expect(find.text('Реквизиты документов'), findsOneWidget);
-    expect(find.text('Поставщик (кабинет)'), findsOneWidget);
+    // заголовки карточек есть, общего «Реквизиты документов» нет
+    expect(find.text('Поставщик (кабинет)'), findsNothing);
+    expect(find.text('Реквизиты документов'), findsNothing);
+    expect(find.text('Сделка'), findsOneWidget);
     // дефолты сразу в полях (строк ещё нет)
-    expect(
-      tester.widget<TextField>(find.widgetWithText(TextField, 'Поставщик')).controller?.text,
-      'ООО "ИТ Взлёт"',
-    );
-    expect(
-      tester.widget<TextField>(find.widgetWithText(TextField, 'Город')).controller?.text,
-      'г. Москва',
-    );
-    // авто-номера из seq=0 → 0001
-    expect(
-      tester.widget<TextField>(find.widgetWithText(TextField, '№ договора')).controller?.text,
-      '0001',
-    );
-    expect(
-      tester.widget<TextField>(find.widgetWithText(TextField, '№ спецификации')).controller?.text,
-      '0001',
-    );
+    expect(_textOf(tester, 'Поставщик'), 'ООО "ИТ Взлёт"');
+    expect(_textOf(tester, 'Город'), 'г. Москва');
+    // авто-номера из seq=0 → 0001; дата договора → сегодня
+    expect(_textOf(tester, '№ договора'), '0001');
+    expect(_textOf(tester, '№ спецификации'), '0001');
+    expect(_textOf(tester, 'Дата договора'), _todayRu());
 
     await tester.enterText(find.widgetWithText(TextField, 'Покупатель'), 'ООО Клиент');
     await tester.pump(const Duration(milliseconds: 700)); // debounce → save
@@ -107,18 +116,18 @@ void main() {
     expect(dealId, 'row_2');
     expect(dealBody['customer_name'], 'ООО Клиент');
     expect(dealBody['contract_number'], '0001');
+    expect(dealBody['contract_date'], _todayRu());
     expect(dealBody['spec_number'], '0001');
   });
 
-  testWidgets('сохранённые значения перекрывают дефолты, номера продолжаются из seq',
+  testWidgets('сохранённые значения перекрывают дефолты и авто-значения',
       (tester) async {
     var created = 0;
     final upserts = <(String, Map<String, dynamic>)>[];
     await tester.pumpWidget(_wrap(DocumentFieldsPanel(
       companyTable: _companyTable,
       dealTable: _dealTable,
-      title: const {'ru': 'Реквизиты документов'},
-      companyTitle: const {'ru': 'Поставщик (кабинет)'},
+      companyTitle: const {'ru': 'Поставщик'},
       dealTitle: const {'ru': 'Сделка'},
       companyFields: _companyFields,
       dealFields: _dealFields.map((m) => Map<String, dynamic>.from(m)).toList(),
@@ -138,7 +147,10 @@ void main() {
         _dealTable => [
             {
               'row_id': 'd1',
-              'body': {'customer_name': 'ООО Сохранённый'},
+              'body': {
+                'customer_name': 'ООО Сохранённый',
+                'contract_date': '«01» января 2026 г.',
+              },
             }
           ],
         _ => const [],
@@ -154,27 +166,14 @@ void main() {
     await tester.pumpAndSettle();
 
     // тело строки важнее дефолта; отсутствующее поле берёт дефолт
-    expect(
-      tester.widget<TextField>(find.widgetWithText(TextField, 'Поставщик')).controller?.text,
-      'ООО Рог и Копыта',
-    );
-    expect(
-      tester.widget<TextField>(find.widgetWithText(TextField, 'Город')).controller?.text,
-      'г. Москва',
-    );
-    expect(
-      tester.widget<TextField>(find.widgetWithText(TextField, 'Покупатель')).controller?.text,
-      'ООО Сохранённый',
-    );
+    expect(_textOf(tester, 'Поставщик'), 'ООО Рог и Копыта');
+    expect(_textOf(tester, 'Город'), 'г. Москва');
+    expect(_textOf(tester, 'Покупатель'), 'ООО Сохранённый');
+    // сохранённая дата не перезаписывается сегодняшней
+    expect(_textOf(tester, 'Дата договора'), '«01» января 2026 г.');
     // seq 5/7 → следующие номера 0006/0008
-    expect(
-      tester.widget<TextField>(find.widgetWithText(TextField, '№ договора')).controller?.text,
-      '0006',
-    );
-    expect(
-      tester.widget<TextField>(find.widgetWithText(TextField, '№ спецификации')).controller?.text,
-      '0008',
-    );
+    expect(_textOf(tester, '№ договора'), '0006');
+    expect(_textOf(tester, '№ спецификации'), '0008');
 
     await tester.enterText(find.widgetWithText(TextField, 'Город'), 'г. Тверь');
     await tester.pump(const Duration(milliseconds: 700));
@@ -191,6 +190,7 @@ void main() {
     final (dealId, dealBody) = upserts[1];
     expect(dealId, 'd1');
     expect(dealBody['contract_number'], '0006');
+    expect(dealBody['contract_date'], '«01» января 2026 г.');
     expect(dealBody['spec_number'], '0008');
   });
 }

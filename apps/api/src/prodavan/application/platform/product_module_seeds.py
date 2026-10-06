@@ -2788,9 +2788,8 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "doc_fields": {
                         "company_table": "document_company_fields",
                         "deal_table": "document_fields",
-                        "title": {"ru": "Реквизиты документов", "en": "Document details"},
-                        "company_title": {"ru": "Наша компания (весь кабинет)", "en": "Our company (cabinet-wide)"},
-                        "deal_title": {"ru": "Сделка (этот чат)", "en": "Deal (this chat)"},
+                        "company_title": {"ru": "Поставщик", "en": "Supplier"},
+                        "deal_title": {"ru": "Сделка", "en": "Deal"},
                         "company_fields": [
                             {"column": "supplier_name"},
                             {"column": "supplier_inn"},
@@ -2811,7 +2810,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             {"column": "customer_signatory"},
                             {"column": "customer_basis"},
                             {"column": "contract_number", "auto": "contract_seq"},
-                            {"column": "contract_date"},
+                            {"column": "contract_date", "auto": "today"},
                             {"column": "spec_number", "auto": "spec_seq"},
                             {"column": "delivery_address"},
                         ],
@@ -3591,6 +3590,9 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "kind": "collection",
                     "scaffold": {
                         "title": {"ru": "Товары поставщика", "en": "Supplier offers"},
+                        # заголовок дрилл-дауна из «Закупки»: имя поставщика
+                        # подставляется из тела контекстной строки (seller)
+                        "title_template": {"ru": "Товары {seller}", "en": "{seller} offers"},
                     },
                     # Закупка агрегирует ВСЕ чаты проекта — дрилл-даун тоже:
                     # офферы поставщика из всех позиций всех заказов (чатов).

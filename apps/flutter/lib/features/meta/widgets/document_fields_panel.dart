@@ -7,20 +7,21 @@ import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/features/meta/meta_label.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
-/// Панель реквизитов документов (КП/Спецификация) в «Бюджетировании».
+/// Панель реквизитов документов (КП/Спецификация) в «Бюджетировании»:
+/// две карточки в одну линию — «Поставщик» и «Сделка» (без общего заголовка).
 ///
 /// Две группы singleton-строк:
 /// - компания (`document_company_fields`, chats=all — весь кабинет): наша
 ///   сторона, город, приложение, сроки; значения сразу подставлены дефолтами
 ///   колонок (из шаблона) и живут персистентно;
 /// - сделка (`document_fields`, chats=current): покупатель, номера договора/
-///   спецификации (автогенерация «0001» из seq-счётчиков компании), адреса.
+///   спецификации (автогенерация «0001» из seq-счётчиков компании), дата
+///   договора (по умолчанию сегодняшняя), адреса.
 class DocumentFieldsPanel extends StatefulWidget {
   const DocumentFieldsPanel({
     super.key,
     required this.companyTable,
     required this.dealTable,
-    required this.title,
     required this.companyTitle,
     required this.dealTitle,
     required this.companyFields,
@@ -34,7 +35,6 @@ class DocumentFieldsPanel extends StatefulWidget {
 
   final String companyTable;
   final String dealTable;
-  final Object? title;
   final Object? companyTitle;
   final Object? dealTitle;
 
@@ -99,9 +99,24 @@ class _DocumentFieldsPanelState extends State<DocumentFieldsPanel> {
       } else if (initial.isEmpty && entry['auto'] == 'spec_seq') {
         initial = _seqLabel(specSeq + 1);
         _assignedSpec = initial;
+      } else if (initial.isEmpty && entry['auto'] == 'today') {
+        // дата договора по умолчанию — сегодня (формат рендера документов)
+        initial = _todayRu();
       }
       _controllers[f] = TextEditingController(text: initial);
     }
+  }
+
+  static const _monthsGenRu = [
+    'января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
+    'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря',
+  ];
+
+  /// «DD» месяца YYYY г. — 1:1 с fmt_date_ru из equipment_docs_render.
+  String _todayRu() {
+    final now = DateTime.now();
+    final day = now.day.toString().padLeft(2, '0');
+    return '«$day» ${_monthsGenRu[now.month - 1]} ${now.year} г.';
   }
 
   String _seqLabel(int n) => n.toString().padLeft(4, '0');
@@ -188,29 +203,35 @@ class _DocumentFieldsPanelState extends State<DocumentFieldsPanel> {
     );
   }
 
-  Widget _section(Object? title, List<Widget> children) {
-    final l10n = AppLocalizations.of(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      mainAxisSize: MainAxisSize.min,
+  @override
+  Widget build(BuildContext context) {
+    // две независимые карточки в одну линию (без общего заголовка):
+    // «Поставщик» и «Сделка» — в ряду со сводкой бюджета их строит
+    // CollectionViewInterpreter.
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Padding(
-          padding: const EdgeInsets.only(bottom: AppSpacing.xs / 2),
-          child: Text(
-            resolveMetaLabel(title, l10n),
-            style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                  fontWeight: FontWeight.w600,
-                  color: context.appColors.muted,
-                ),
+        Expanded(
+          child: _card(
+            widget.companyTitle,
+            widget.companyFields.map(_field).toList(),
           ),
         ),
-        ...children,
+        const SizedBox(width: AppSpacing.sm),
+        Expanded(
+          child: _card(
+            widget.dealTitle,
+            [
+              for (final entry in widget.dealFields)
+                _field(entry['column']?.toString() ?? ''),
+            ],
+          ),
+        ),
       ],
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
+  Widget _card(Object? title, List<Widget> children) {
     final l10n = AppLocalizations.of(context);
     final colors = context.appColors;
     return Container(
@@ -224,26 +245,17 @@ class _DocumentFieldsPanelState extends State<DocumentFieldsPanel> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(
-            resolveMetaLabel(widget.title, l10n),
-            style: Theme.of(context)
-                .textTheme
-                .titleSmall
-                ?.copyWith(fontWeight: FontWeight.w600),
+          Padding(
+            padding: const EdgeInsets.only(bottom: AppSpacing.xs / 2),
+            child: Text(
+              resolveMetaLabel(title, l10n),
+              style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
+                    color: colors.muted,
+                  ),
+            ),
           ),
-          const SizedBox(height: AppSpacing.xs),
-          _section(
-            widget.companyTitle,
-            widget.companyFields.map(_field).toList(),
-          ),
-          const SizedBox(height: AppSpacing.sm),
-          _section(
-            widget.dealTitle,
-            [
-              for (final entry in widget.dealFields)
-                _field(entry['column']?.toString() ?? ''),
-            ],
-          ),
+          ...children,
         ],
       ),
     );
