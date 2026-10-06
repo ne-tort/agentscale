@@ -4,6 +4,11 @@ from __future__ import annotations
 
 from typing import Any
 
+from prodavan.application.platform.equipment_prompt_content import (
+    EQUIPMENT_AGENTS_MD,
+    EQUIPMENT_RULES_FILES,
+)
+
 # Default prompt path cards for profile_default (empty files_json until edited).
 _PROMPT_PATH_SEEDS: list[tuple[str, str, str]] = [
     ("path_agents", "AGENTS.md", ""),
@@ -258,6 +263,54 @@ def _equipment_type_seed_rows() -> list[dict[str, Any]]:
             },
         }
         for t in _EQUIPMENT_TYPE_SEEDS
+    ]
+
+
+def _equipment_prompt_seed_rows() -> list[dict[str, Any]]:
+    """Default «Подбор техники» prompts seeded into every instance.
+
+    Row 1: AGENTS.md at the workspace root — auto-injected into the agent
+    system message by the claw runtime (rules_import=auto).
+    Row 2: module rules in prompts/equipment/*.md — read by the agent
+    on demand. Both are template rows: `_apply_seed_rows_to_instances`
+    never overwrites bodies edited from the UI.
+    """
+    return [
+        {
+            "table_slug": "equipment_prompts",
+            "row_id": "equipment_prompts_agents_default",
+            "body": {
+                "name": "AGENTS.md (системный)",
+                "path": "",
+                "files_json": [
+                    {
+                        "id": "agents_md_default",
+                        "name": "AGENTS.md",
+                        "priority": 10,
+                        "body": EQUIPMENT_AGENTS_MD,
+                    }
+                ],
+                "enabled": True,
+            },
+        },
+        {
+            "table_slug": "equipment_prompts",
+            "row_id": "equipment_prompts_rules_default",
+            "body": {
+                "name": "Правила подбора (системные)",
+                "path": "prompts/equipment",
+                "files_json": [
+                    {
+                        "id": f"rules_default_{name}",
+                        "name": name,
+                        "priority": priority,
+                        "body": body,
+                    }
+                    for name, body, priority in EQUIPMENT_RULES_FILES
+                ],
+                "enabled": True,
+            },
+        },
     ]
 
 
@@ -5092,7 +5145,8 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "active": True,
                 },
             },
-*_equipment_type_seed_rows(),
+                *_equipment_type_seed_rows(),
+                *_equipment_prompt_seed_rows(),
                 {
                     "table_slug": "equipment_mcp",
                     "row_id": "equipment_mcp_default",
