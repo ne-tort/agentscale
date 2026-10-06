@@ -193,4 +193,46 @@ void main() {
     expect(dealBody['contract_date'], '«01» января 2026 г.');
     expect(dealBody['spec_number'], '0008');
   });
+
+  testWidgets('поле, переехавшее из компании, подтягивает старое значение оттуда',
+      (tester) async {
+    final upserts = <(String, Map<String, dynamic>)>[];
+    await tester.pumpWidget(_wrap(DocumentFieldsPanel(
+      companyTable: _companyTable,
+      dealTable: _dealTable,
+      companyTitle: const {'ru': 'Поставщик'},
+      dealTitle: const {'ru': 'Сделка'},
+      companyFields: const ['supplier_name'],
+      dealFields: const [
+        {'column': 'delivery_days'},
+      ].map((m) => Map<String, dynamic>.from(m)).toList(),
+      labels: const {'supplier_name': 'Поставщик', 'delivery_days': 'Срок поставки'},
+      defaults: const {'supplier_name': 'ООО "ИТ Взлёт"', 'delivery_days': '7 (семи)'},
+      itemsForTable: (slug) => switch (slug) {
+        // сроки раньше жили в company-строке — значение должно переехать в deal
+        _companyTable => [
+            {
+              'row_id': 'c1',
+              'body': {'delivery_days': '5 (пяти)'},
+            }
+          ],
+        _ => const [],
+      },
+      createRow: (slug) async => 'new_$slug',
+      upsertBody: (rowId, body) async {
+        upserts.add((rowId, body));
+      },
+    )));
+    await tester.pumpAndSettle();
+
+    expect(_textOf(tester, 'Срок поставки'), '5 (пяти)');
+
+    await tester.enterText(find.widgetWithText(TextField, 'Срок поставки'), '10 (десяти)');
+    await tester.pump(const Duration(milliseconds: 700));
+    await tester.pumpAndSettle();
+
+    // сохранение пишет поле в сделочную строку
+    final dealUpsert = upserts.firstWhere((u) => u.$1 == 'new_${_dealTable}');
+    expect(dealUpsert.$2['delivery_days'], '10 (десяти)');
+  });
 }
