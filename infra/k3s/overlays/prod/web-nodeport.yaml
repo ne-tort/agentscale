@@ -1,0 +1,20 @@
+# Прямой доступ к prod-UI по адресу ВМ:порт (http://<vm-ip>:30090) — помимо
+# host-pinned ingress (agentscale.local). web-nginx сам проксирует /api и
+# /health на agentscale-api:8000, поэтому порт отдаёт всё приложение одним
+# origin (CORS не задействован).
+apiVersion: v1
+kind: Service
+metadata:
+  name: agentscale-web-nodeport
+  labels:
+    app: agentscale-web-nodeport
+    app.kubernetes.io/part-of: agentscale
+spec:
+  type: NodePort
+  selector:
+    app: agentscale-web
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      nodePort: 30090
