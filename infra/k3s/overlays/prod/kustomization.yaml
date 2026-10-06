@@ -13,6 +13,7 @@ resources:
   - postgres.yaml
   - userdb-init.yaml
   - web-nodeport.yaml
+  - web-https-ip-ingressroute.yaml
   - sandboxes
 patches:
   - path: patch-prod.yaml
