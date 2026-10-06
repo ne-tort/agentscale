@@ -440,18 +440,36 @@ class _LocalTabularSource:
         return None
 
 
-class _RemoteSqlSource:
-    """Opened remote PostgreSQL source: connection + optional COUNT(*)."""
+#: строк на один round-trip серверного курсора; 500 давало ~100 c на батч
+#: через NAT до удалённой БД — укрупняем, чтобы реже ходить по сети.
+_REMOTE_CURSOR_PREFETCH = 2000
 
-    def __init__(self, conn: Any, from_sql: str, total_rows: int | None) -> None:
+
+class _RemoteSqlSource:
+    """Opened remote PostgreSQL source: connection + optional COUNT(*).
+
+    ``columns`` — квотированный список колонок для проекции (вместо SELECT *):
+    удалённые таблицы бывают широкими, а маппингу нужны только колонки
+    column_map; None → SELECT * (фолбэк).
+    """
+
+    def __init__(
+        self,
+        conn: Any,
+        from_sql: str,
+        total_rows: int | None,
+        columns: list[str] | None = None,
+    ) -> None:
         self._conn = conn
         self._from_sql = from_sql
         self.total_rows = total_rows
+        self._columns = columns
 
     async def aiter_rows(self) -> AsyncIterator[dict[str, Any]]:
-        stmt = await self._conn.prepare(f"SELECT * FROM {self._from_sql}")  # noqa: S608
+        cols_sql = ", ".join(self._columns) if self._columns else "*"
+        stmt = await self._conn.prepare(f"SELECT {cols_sql} FROM {self._from_sql}")  # noqa: S608
         async with self._conn.transaction():
-            async for record in stmt.cursor(prefetch=500):
+            async for record in stmt.cursor(prefetch=_REMOTE_CURSOR_PREFETCH):
                 yield dict(record)
 
     async def aclose(self) -> None:
@@ -537,7 +555,48 @@ async def _open_remote_source(
     except Exception:
         logger.exception("remote COUNT(*) failed — progress will be indeterminate")
         total = None
-    return _RemoteSqlSource(conn, from_sql, total)
+    columns = await _remote_projection_columns(
+        conn,
+        schema=schema,
+        table=tbl,
+        wanted=_normalize_column_map(body.get("column_map")).keys(),
+        quote=quote_ident,
+    )
+    return _RemoteSqlSource(conn, from_sql, total, columns=columns)
+
+
+async def _remote_projection_columns(
+    conn: Any,
+    *,
+    schema: str | None,
+    table: str,
+    wanted: Any,
+    quote: Any,
+) -> list[str] | None:
+    """Квотированные колонки для SELECT вместо *: column_map ∩ information_schema.
+
+    None (→ SELECT *) когда список колонок узнать не удалось или маппинг не
+    покрыт — проекция не должна ломать индексацию при устаревшем column_map.
+    """
+    try:
+        rows = await conn.fetch(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_schema = $1 AND table_name = $2",
+            schema or "public",
+            table,
+        )
+    except Exception:
+        logger.exception("remote columns probe failed — falling back to SELECT *")
+        return None
+    actual = {str(r[0]) for r in rows}
+    if not actual:
+        return None
+    wanted_list = [str(w) for w in wanted if str(w).strip()]
+    projected = [w for w in wanted_list if w in actual]
+    # title/price обязательны маппингу; если проекция их не покрывает — SELECT *
+    if not projected or len(projected) != len(set(projected)):
+        return None
+    return [quote(c) for c in dict.fromkeys(projected)]
 
 
 async def _index_opened_source(
