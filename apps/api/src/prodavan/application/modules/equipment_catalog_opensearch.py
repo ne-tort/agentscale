@@ -555,11 +555,13 @@ async def _open_remote_source(
     except Exception:
         logger.exception("remote COUNT(*) failed — progress will be indeterminate")
         total = None
+    # column_map направлен {canonical → source}: проекцию строим из ЗНАЧЕНИЙ
+    # (имён колонок источника), не из ключей
     columns = await _remote_projection_columns(
         conn,
         schema=schema,
         table=tbl,
-        wanted=_normalize_column_map(body.get("column_map")).keys(),
+        wanted=_normalize_column_map(body.get("column_map")).values(),
         quote=quote_ident,
     )
     return _RemoteSqlSource(conn, from_sql, total, columns=columns)
@@ -592,7 +594,15 @@ async def _remote_projection_columns(
     if not actual:
         return None
     wanted_list = [str(w) for w in wanted if str(w).strip()]
-    projected = [w for w in wanted_list if w in actual]
+    # currency-heal в apply_column_map сканирует ВСЕ исходные колонки на
+    # currency-подобные имена — проекция обязана их сохранить
+    from prodavan.application.modules.equipment_catalog_search import (
+        _CURRENCY_HEADER_RE,
+    )
+
+    currency_like = [c for c in actual if _CURRENCY_HEADER_RE.match(c.strip())]
+    projected = list(dict.fromkeys([*wanted_list, *currency_like]))
+    projected = [w for w in projected if w in actual]
     # title/price обязательны маппингу; если проекция их не покрывает — SELECT *
     if not projected or len(projected) != len(set(projected)):
         return None
