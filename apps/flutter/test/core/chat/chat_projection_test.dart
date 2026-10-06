@@ -358,4 +358,46 @@ void main() {
       expect(blocks.single.key, keyBefore);
     });
   });
+
+  test('tool_call_delta показывает placeholder вызова сразу (id-матчинг)', () {
+    var blocks = <ChatBlock>[];
+    blocks = applyStreamEvent(blocks, {
+      'type': 'text_delta',
+      'data': {'text': 'Распараллелю'},
+    });
+    blocks = applyStreamEvent(blocks, {
+      'type': 'tool_call_delta',
+      'data': {'id': 'call_1', 'name': 'agent_spawn', 'partial_json': ''},
+    });
+    // placeholder появился сразу — не ждём полного tool_call
+    expect(blocks.where((b) => b.kind == 'tool_call'), hasLength(1));
+    final placeholder = blocks.firstWhere((b) => b.kind == 'tool_call');
+    // wire-имя agent_spawn → каноническое agent.spawn (лейблы «Субагент …»)
+    expect(placeholder.raw['name'], 'agent.spawn');
+
+    // повторные дельты не плодят блоки
+    blocks = applyStreamEvent(blocks, {
+      'type': 'tool_call_delta',
+      'data': {'id': 'call_1', 'name': 'agent_spawn', 'partial_json': '{"task":"a'},
+    });
+    expect(blocks.where((b) => b.kind == 'tool_call'), hasLength(1));
+
+    // полный tool_call с тем же id ЗАМЕНЯЕТ placeholder, не дублирует
+    blocks = applyStreamEvent(blocks, {
+      'type': 'tool_call',
+      'data': {'id': 'call_1', 'name': 'agent.spawn', 'input': {'task': 'подбор', 'agent_type': 'default'}},
+    });
+    final calls = blocks.where((b) => b.kind == 'tool_call').toList();
+    expect(calls, hasLength(1));
+    expect(calls.first.raw['name'], 'agent.spawn');
+    expect(calls.first.raw['input'], isNotEmpty);
+  });
+
+  test('tool_call без дельты работает как раньше (новый блок)', () {
+    var blocks = applyStreamEvent([], {
+      'type': 'tool_call',
+      'data': {'id': 'call_9', 'name': 'mcp.openclaw.fs.list', 'input': {'path': '/tmp'}},
+    });
+    expect(blocks.where((b) => b.kind == 'tool_call'), hasLength(1));
+  });
 }
