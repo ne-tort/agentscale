@@ -181,6 +181,13 @@ class WorkerManager(LifespanResource):
             visibility_timeout=21600,
             broker_transport_options={"visibility_timeout": 21600},
         )
+        # Длинные индексации каталогов — в отдельную очередь `indexing`
+        # (deployment agentscale-celery-indexer, concurrency=2): основной
+        # воркер (concurrency=1) не блокируется на часы, sweep-задачи
+        # отзывчивы, несколько каталогов индексируются параллельно.
+        app.conf.task_routes = {
+            job_names.INDEX_EQUIPMENT_CATALOG: {"queue": "indexing"},
+        }
         beat: dict[str, dict[str, Any]] = {}
         interval = schedule(run_every=self._trigger_interval_sec)
         if self._schedule_trigger_drain:

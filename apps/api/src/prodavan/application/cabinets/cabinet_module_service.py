@@ -410,7 +410,12 @@ class CabinetModuleService:
             try:
                 from prodavan.application.modules.equipment_catalog_opensearch import (
                     delete_equipment_catalog_index,
+                    revoke_catalog_index_task,
                 )
+
+                # сначала гасим celery-задачу (terminate), иначе её heartbeat
+                # воскресит удалённую строку, а стрим продолжит грузить источник
+                revoke_catalog_index_task(row_id)
 
                 cab = await self._session.get(CabinetInstanceRow, cabinet_id)
                 company_id = str(cab.company_id) if cab is not None and cab.company_id else ""

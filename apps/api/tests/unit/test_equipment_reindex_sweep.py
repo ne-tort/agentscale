@@ -20,6 +20,17 @@ def test_stale_indexing_requires_status() -> None:
     assert not sweep._stale_indexing({}, now=_now())
 
 
+def test_stale_queued_row_is_stale() -> None:
+    """queued без старта (потерянная задача/очередь) лечится как indexing."""
+    started = _now() - timedelta(minutes=sweep.STALE_INDEXING_MINUTES + 1)
+    assert sweep._stale_indexing({"status": "queued", "indexing_started_at": started.isoformat()}, now=_now())
+
+
+def test_fresh_queued_row_is_not_stale() -> None:
+    body = {"status": "queued", "indexing_started_at": _now().isoformat()}
+    assert not sweep._stale_indexing(body, now=_now())
+
+
 def test_stale_indexing_legacy_row_without_heartbeat() -> None:
     # Row created before the heartbeat feature: treated as stale once so it
     # gets re-enqueued and gains indexing_started_at.

@@ -157,3 +157,98 @@ spec:
             limits:
               cpu: 300m
               memory: 512Mi
+---
+# Отдельный воркер очереди `indexing` — длинные задачи индексации каталогов
+# не занимают слот основного воркера (concurrency=1): sweep/drain остаются
+# отзывчивыми, а несколько каталогов индексируются параллельно.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agentscale-celery-indexer
+  labels:
+    app: agentscale-celery-indexer
+    app.kubernetes.io/name: agentscale-celery-indexer
+    app.kubernetes.io/part-of: agentscale
+    app.kubernetes.io/component: celery
+  annotations:
+    argocd.argoproj.io/sync-wave: "20"
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: agentscale-celery-indexer
+  template:
+    metadata:
+      labels:
+        app: agentscale-celery-indexer
+        app.kubernetes.io/name: agentscale-celery-indexer
+        app.kubernetes.io/part-of: agentscale
+        app.kubernetes.io/component: celery
+    spec:
+      serviceAccountName: agentscale-api
+      # индексация стримит удалённый источник долго: graceful-период больше, чтобы
+      # SIGTERM не рвал стрим на середине (acks_late всё равно реквьюит).
+      terminationGracePeriodSeconds: 120
+      imagePullSecrets:
+        - name: ghcr-pull
+      containers:
+        - name: indexer
+          image: ghcr.io/ne-tort/agentscale-api:latest
+          imagePullPolicy: IfNotPresent
+          command:
+            - python
+            - -m
+            - celery
+            - -A
+            - prodavan.core.infra.worker_manager.celery_app
+            - worker
+            - --loglevel=INFO
+            - -Q
+            - indexing
+            - --concurrency=2
+            - --prefetch-multiplier=1
+            - --max-memory-per-child=350000
+          envFrom:
+            - configMapRef:
+                name: agentscale-config
+            - secretRef:
+                name: agentscale-api-secrets
+          env:
+            - name: RUN_MIGRATIONS
+              value: "0"
+          volumeMounts:
+            - name: storage
+              mountPath: /data/storage
+          readinessProbe:
+            exec:
+              command:
+                - python
+                - -c
+                - "import os; os.kill(1, 0)"
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 6
+          livenessProbe:
+            exec:
+              command:
+                - python
+                - -c
+                - "import os; os.kill(1, 0)"
+            initialDelaySeconds: 20
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 384Mi
+            limits:
+              cpu: "1"
+              memory: 768Mi
+      volumes:
+        - name: storage
+          persistentVolumeClaim:
+            claimName: agentscale-api-storage
