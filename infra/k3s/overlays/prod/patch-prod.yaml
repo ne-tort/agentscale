@@ -136,7 +136,11 @@ spec:
                   number: 80
 ---
 # Prod HTTPS router: SNI host-pinned; cert from the default TLSStore
-# (kube-system/agentscale-tls, SAN includes DNS:agentscale.local).
+# (kube-system/agentscale-tls, SAN includes DNS:agentscale.local AND
+# IP:172.31.156.203 — terraform template agentscale-tls.sh.tpl).
+# Вторая host-rule — прямой доступ по адресу ВМ: https://172.31.156.203
+# (браузер не шлёт SNI для IP → терминируемся дефолтным сертом с IP-SAN;
+# Host-rule длиннее wildcard-правила dev-контура → traefik маршрутизирует в prod).
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -147,6 +151,30 @@ spec:
         - agentscale.local
   rules:
     - host: agentscale.local
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: agentscale-api
+                port:
+                  number: 8000
+          - path: /health
+            pathType: Prefix
+            backend:
+              service:
+                name: agentscale-api
+                port:
+                  number: 8000
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: agentscale-web
+                port:
+                  number: 80
+    - host: 172.31.156.203
       http:
         paths:
           - path: /api
