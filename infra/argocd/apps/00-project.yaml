@@ -66,6 +66,10 @@ spec:
       kind: Ingress
     - group: networking.k8s.io
       kind: NetworkPolicy
+    # Traefik CRD: prod-контур маршрутизирует HTTPS по IP-адресу ВМ через
+    # IngressRoute (k8s Ingress запрещает IP в host); traefik.io/v1alpha1.
+    - group: traefik.io
+      kind: IngressRoute
   # Orphan monitoring is AppProject-scoped (not Application.spec) — warn only, no auto-delete.
   orphanedResources:
     warn: true
