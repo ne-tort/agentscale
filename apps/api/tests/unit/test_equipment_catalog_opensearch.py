@@ -7,7 +7,6 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from prodavan.application.modules.equipment_catalog_opensearch import (
-    OS_NAMESPACE,
     PLATFORM_OS_COMPANY_ID,
     catalog_doc_id,
     catalog_os_index_name,
@@ -281,3 +280,117 @@ async def test_run_index_progress_heartbeats_persisted(monkeypatch) -> None:
     assert bodies[-1]["indexed_count"] == 10
     assert bodies[-1]["total_rows"] == 10
     assert bodies[-1]["row_count"] == 10
+
+
+# ------------------------------------------------- remote source projection
+
+
+class _FakeTx:
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        return False
+
+
+class _FakeCursor:
+    def __init__(self, rows) -> None:
+        self._rows = list(rows)
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        if not self._rows:
+            raise StopAsyncIteration
+        return self._rows.pop(0)
+
+
+class _FakeStmt:
+    def __init__(self, sql, rows) -> None:
+        self.sql = sql
+        self.rows = rows
+        self.prefetch = None
+
+    def cursor(self, prefetch=None):
+        self.prefetch = prefetch
+        return _FakeCursor(self.rows)
+
+
+class _FakeRemoteConn:
+    def __init__(self, rows=None, columns=None, raise_on_fetch=False) -> None:
+        self.rows = rows or []
+        self.columns = columns
+        self.raise_on_fetch = raise_on_fetch
+        self.prepared: list = []
+
+    async def prepare(self, sql):
+        stmt = _FakeStmt(sql, self.rows)
+        self.prepared.append(stmt)
+        return stmt
+
+    def transaction(self):
+        return _FakeTx()
+
+    async def fetch(self, sql, *args):
+        if self.raise_on_fetch:
+            raise RuntimeError("boom")
+        return self.columns or []
+
+
+@pytest.mark.asyncio
+async def test_remote_source_projects_columns_and_bigger_prefetch() -> None:
+    from prodavan.application.modules.equipment_catalog_opensearch import (
+        _REMOTE_CURSOR_PREFETCH,
+        _RemoteSqlSource,
+    )
+
+    conn = _FakeRemoteConn(rows=[{"title": "a"}, {"title": "b"}])
+    source = _RemoteSqlSource(conn, '"public"."t"', 2, columns=['"title"', '"price"'])
+    out = [row async for row in source.aiter_rows()]
+    assert len(out) == 2
+    # проекция вместо SELECT * и укрупнённый prefetch (NAT round-trips)
+    assert conn.prepared[0].sql == 'SELECT "title", "price" FROM "public"."t"'
+    assert conn.prepared[0].prefetch == _REMOTE_CURSOR_PREFETCH
+    assert _REMOTE_CURSOR_PREFETCH > 500
+
+
+@pytest.mark.asyncio
+async def test_remote_source_star_without_columns() -> None:
+    from prodavan.application.modules.equipment_catalog_opensearch import _RemoteSqlSource
+
+    conn = _FakeRemoteConn(rows=[{"title": "a"}])
+    source = _RemoteSqlSource(conn, '"t"', 1)
+    _ = [row async for row in source.aiter_rows()]
+    assert conn.prepared[0].sql == 'SELECT * FROM "t"'
+
+
+@pytest.mark.asyncio
+async def test_projection_columns_intersection_quoted() -> None:
+    from prodavan.application.modules.equipment_catalog_opensearch import (
+        _remote_projection_columns,
+    )
+
+    conn = _FakeRemoteConn(columns=[("title",), ("price",), ("extra",)])
+    cols = await _remote_projection_columns(
+        conn, schema="public", table="t", wanted=["title", "price", "missing"], quote=lambda s: f'"{s}"'
+    )
+    assert cols == ['"title"', '"price"']
+
+
+@pytest.mark.asyncio
+async def test_projection_columns_fallback_to_star() -> None:
+    from prodavan.application.modules.equipment_catalog_opensearch import (
+        _remote_projection_columns,
+    )
+
+    q = lambda s: s  # noqa: E731
+    # information_schema недоступен → None (SELECT *)
+    conn = _FakeRemoteConn(raise_on_fetch=True)
+    assert await _remote_projection_columns(conn, schema=None, table="t", wanted=["title"], quote=q) is None
+    # таблица не найдена → None
+    conn2 = _FakeRemoteConn(columns=[])
+    assert await _remote_projection_columns(conn2, schema=None, table="t", wanted=["title"], quote=q) is None
+    # пустой column_map → None
+    conn3 = _FakeRemoteConn(columns=[("title",)])
+    assert await _remote_projection_columns(conn3, schema=None, table="t", wanted=[], quote=q) is None
