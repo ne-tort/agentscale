@@ -243,12 +243,23 @@ List<ChatBlock> applyStreamEvent(List<ChatBlock> blocks, Map<String, dynamic> ev
       // Close streaming assistant so post-tool text starts a new block (no glue).
       _closeStreamingKind(next, 'assistant_markdown');
       _closeStreamingKind(next, 'thinking');
-      next.add(ChatBlock(kind: 'tool_call', raw: {
+      // если это дельта-placeholder с тем же id — заменяем его полноценным
+      // вызовом (имя уже каноническое, input распарсен)
+      final callId = payload['id']?.toString() ?? '';
+      final callIdx = callId.isEmpty
+          ? -1
+          : next.indexWhere((b) => b.kind == 'tool_call' && b.id == callId);
+      final callRaw = {
         'id': payload['id'],
         'name': payload['name'],
         'input': payload['input'] ?? {},
         '_key': _KeyGen.next('tool_call'),
-      }));
+      };
+      if (callIdx >= 0) {
+        next[callIdx] = ChatBlock(kind: 'tool_call', raw: callRaw);
+      } else {
+        next.add(ChatBlock(kind: 'tool_call', raw: callRaw));
+      }
       break;
     case 'tool_result':
       next.add(ChatBlock(kind: 'tool_result', raw: {
@@ -320,7 +331,35 @@ List<ChatBlock> applyStreamEvent(List<ChatBlock> blocks, Map<String, dynamic> ev
       break;
     case 'status':
     case 'tool_progress':
+      break;
     case 'tool_call_delta':
+      // Модель стримит аргументы вызова (могут быть мегабайтными — промпты
+      // спавна субагентов). UI должен показать «вызывает инструмент» СРАЗУ,
+      // а не крутить спиннер молча: placeholder-блок tool_call по id,
+      // который заменит полноценный tool_call (same id) по завершении.
+      final deltaId = payload['id']?.toString() ?? '';
+      final deltaNameRaw = payload['name']?.toString() ?? '';
+      if (deltaId.isEmpty || deltaNameRaw.isEmpty) break;
+      // wire-имя провайдера заменяет точки подчёркиваниями (agent.spawn →
+      // agent_spawn) — вернем каноническое имя для лейблов
+      final deltaName = deltaNameRaw == 'agent_spawn' ? 'agent.spawn' : deltaNameRaw;
+      final idx = next.indexWhere(
+        (b) => b.kind == 'tool_call' && b.id == deltaId,
+      );
+      if (idx >= 0) {
+        // placeholder уже есть — обновляем имя (первый дельта-чанк мог
+        // приехать без имени), не плодим блоки
+        if (next[idx].raw['name'] == null || (next[idx].raw['name'] as String).isEmpty) {
+          next[idx] = next[idx].copyWithRaw({'name': deltaName});
+        }
+        break;
+      }
+      next.add(ChatBlock(kind: 'tool_call', raw: {
+        'id': deltaId,
+        'name': deltaName,
+        'input': const <String, dynamic>{},
+        '_key': _KeyGen.next('tool_call'),
+      }));
       break;
     case 'error':
       // Легаси-маркер старой версии run-stall сторожа: stall обрабатывается
