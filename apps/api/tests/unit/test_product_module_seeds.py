@@ -485,8 +485,8 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     assert "section_title" not in slots_field
 
     seed_items = meta["seed_rows"]["items"]
-    # 14 base seeds + 3 built-in template rows
-    assert len(seed_items) == 17
+    # 14 base seeds + 3 built-in template rows + 2 prompt rows
+    assert len(seed_items) == 19
     by_row = {s["row_id"]: s for s in seed_items}
     assert "tpl_budget_builtin" in by_row
     assert by_row["etype_cpu"]["body"]["name"] if "etype_cpu" in by_row else True
@@ -502,6 +502,35 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     assert mcp_seed["body"]["enabled"] is True
     assert mcp_seed["body"]["name"] == "prodavan-equipment"
     assert seed_items[-1]["row_id"] == "equipment_mcp_default"
+
+    # Системные промпты подбора: AGENTS.md в корне + правила в prompts/equipment
+    prompts_seed = [s for s in seed_items if s["table_slug"] == "equipment_prompts"]
+    assert {s["row_id"] for s in prompts_seed} == {
+        "equipment_prompts_agents_default",
+        "equipment_prompts_rules_default",
+    }
+    agents_seed = next(s for s in prompts_seed if s["row_id"] == "equipment_prompts_agents_default")
+    assert agents_seed["body"]["path"] == ""
+    assert agents_seed["body"]["enabled"] is True
+    agents_file = agents_seed["body"]["files_json"][0]
+    assert agents_file["name"] == "AGENTS.md"
+    assert agents_file["body"].lstrip().startswith("# Prodavan")
+    assert "found_groups" in agents_file["body"]
+    assert "equipment_catalog_search" in agents_file["body"]
+    rules_seed = next(s for s in prompts_seed if s["row_id"] == "equipment_prompts_rules_default")
+    assert rules_seed["body"]["path"] == "prompts/equipment"
+    assert rules_seed["body"]["enabled"] is True
+    rule_names = [f["name"] for f in rules_seed["body"]["files_json"]]
+    assert rule_names == [
+        "10-request.md",
+        "20-search.md",
+        "30-identify.md",
+        "40-groups.md",
+        "50-rank.md",
+    ]
+    assert all(f["body"].strip() for f in rules_seed["body"]["files_json"])
+    priorities = [f["priority"] for f in rules_seed["body"]["files_json"]]
+    assert priorities == sorted(priorities)
 
     sellers_list = next(v for v in meta["views"] if v["slug"] == "trusted_sellers_list")
     assert sellers_list["ui_json"]["inline_add"]["field"] == "name"
