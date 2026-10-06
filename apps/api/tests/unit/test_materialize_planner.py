@@ -352,6 +352,48 @@ def test_prompt_paths_without_profile_placeholder_expand() -> None:
     assert ops[0].workspace_path == "prompts/equipment/selection.md"
 
 
+def test_equipment_prompt_seed_rows_materialize_layout() -> None:
+    """Сид-строки mod_equipment разворачиваются в правильные файлы:
+    AGENTS.md в корне workspace (авто-подхват claw-агентом) + правила
+    в prompts/equipment/*.md; после stitch — raw-записи с теми же телами."""
+    from prodavan.application.platform.product_module_seeds import mod_equipment_meta
+
+    from prodavan.application.projects.materialize_planner import _stitch_prompt_fragment_ops
+
+    items = mod_equipment_meta()["seed_rows"]["items"]
+    rows = [
+        {"row_id": it["row_id"], **it["body"]}
+        for it in items
+        if it["table_slug"] == "equipment_prompts"
+    ]
+    assert len(rows) == 2
+
+    ops = _expand_prompt_path_ops(
+        rows=rows,
+        rule_id="equipment_prompts_files",
+        module_id="mod_equipment",
+    )
+    by_path = {o.workspace_path: o for o in ops}
+    assert set(by_path) == {
+        "AGENTS.md",
+        "prompts/equipment/10-request.md",
+        "prompts/equipment/20-search.md",
+        "prompts/equipment/30-identify.md",
+        "prompts/equipment/40-groups.md",
+        "prompts/equipment/50-rank.md",
+    }
+    agents_md = by_path["AGENTS.md"]
+    assert agents_md.row_body["body_md"].lstrip().startswith("# Prodavan")
+    assert "found_groups" in agents_md.row_body["body_md"]
+    assert all(o.format == "prompt_fragment" for o in ops)
+
+    stitched = _stitch_prompt_fragment_ops(ops)
+    assert {o.workspace_path for o in stitched} == set(by_path)
+    assert all(o.format == "raw" for o in stitched)
+    stitched_agents = next(o for o in stitched if o.workspace_path == "AGENTS.md")
+    assert stitched_agents.row_body["body_md"] == agents_md.row_body["body_md"]
+
+
 def test_prompt_paths_with_profile_placeholder_need_profile() -> None:
     """mod_prompts: правило с {{active_profile_id}} без активного профиля → []."""
     import asyncio
