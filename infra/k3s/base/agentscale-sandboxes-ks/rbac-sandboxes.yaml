@@ -24,6 +24,11 @@ rules:
 - apiGroups: ["metrics.k8s.io"]
   resources: ["pods"]
   verbs: ["get", "list"]
+# pod reconcile (list_managed_pods) и cleanup (delete_pod) ходят в core API
+# песочничного ns напрямую — без этого reconcile падает с 403 (pods is forbidden)
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch", "delete"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
