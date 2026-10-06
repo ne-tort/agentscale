@@ -23,13 +23,19 @@ class AiKeyIntegrationType {
     'claude_code',
     'claude_agent_sdk',
   );
+
+  /// Grok (xAI) через SuperGrok-подписку: OAuth device-code, секрет ключа —
+  /// токены, сервер обновляет их сам. Статический API-ключ — тип apiKey.
+  static const xaiOauth = AiKeyIntegrationType._('xai_oauth', 'xai', 'xai_oauth');
   static const apiKey = AiKeyIntegrationType._('api_key', null, null);
 
-  static const all = [cursorSdk, codexSdk, claudeSdk, apiKey];
+  static const all = [cursorSdk, codexSdk, claudeSdk, xaiOauth, apiKey];
 
   static const sdkApiKinds = {'cursor_sdk', 'codex_sdk', 'claude_agent_sdk'};
 
   bool get isApiKey => id == apiKey.id;
+
+  bool get isXaiOauth => id == xaiOauth.id;
 
   static AiKeyIntegrationType fromKey({
     required String provider,
@@ -59,6 +65,8 @@ IconData? catalogIconForName(String? name) {
       return Icons.hub_outlined;
     case 'terminal_outlined':
       return Icons.terminal_outlined;
+    case 'bolt_outlined':
+      return Icons.bolt_outlined;
     default:
       return Icons.cloud_outlined;
   }

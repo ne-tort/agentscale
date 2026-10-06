@@ -31,26 +31,26 @@ void main() {
       );
     });
 
-    test('margin_total = qty * (price_out - price_in)', () {
+    test('margin_total = {qty * (price_out - price_in)} ({markup %})', () {
       expect(
         cell({'price_in': 100.0, 'qty': 3, 'markup': 0.25}, marginTotalCol),
-        '75.00',
+        '75.00 (25.0%)',
       );
     });
 
     test('default markup 0.1 when absent', () {
       expect(cell({'price_in': 100.0}, priceOutCol), '110.00');
-      expect(cell({'price_in': 100.0, 'qty': 2}, marginTotalCol), '20.00');
+      expect(cell({'price_in': 100.0, 'qty': 2}, marginTotalCol), '20.00 (10.0%)');
     });
 
     test('default qty 1 when absent', () {
-      expect(cell({'price_in': 100.0, 'markup': 0.5}, marginTotalCol), '50.00');
+      expect(cell({'price_in': 100.0, 'markup': 0.5}, marginTotalCol), '50.00 (50.0%)');
     });
 
     test('vat (default 0.22) does not change the canonical formulas', () {
       final body = {'price_in': 100.0, 'qty': 2, 'vat': 0.22, 'markup': 0.1};
       expect(cell(body, priceOutCol), '110.00');
-      expect(cell(body, marginTotalCol), '20.00');
+      expect(cell(body, marginTotalCol), '20.00 (10.0%)');
       // Explicit zero VAT changes nothing either — price_in is with VAT.
       expect(cell({...body, 'vat': 0.0}, priceOutCol), '110.00');
     });
@@ -68,7 +68,7 @@ void main() {
       );
       expect(
         cell({'price_in': '200', 'qty': '2', 'markup': '0.5'}, marginTotalCol),
-        '200.00',
+        '200.00 (50.0%)',
       );
     });
 

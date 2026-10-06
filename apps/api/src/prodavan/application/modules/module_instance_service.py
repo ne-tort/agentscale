@@ -574,6 +574,7 @@ class ModuleInstanceService:
         instance_id: str,
         table_slug: str,
         session_id: str | None = None,
+        session_ids: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         stmt = (
             select(ModuleInstanceDataRow)
@@ -585,6 +586,10 @@ class ModuleInstanceService:
         )
         if session_id is not None:
             stmt = stmt.where(ModuleInstanceDataRow.session_id == session_id)
+        elif session_ids is not None:
+            if not session_ids:
+                return []
+            stmt = stmt.where(ModuleInstanceDataRow.session_id.in_(session_ids))
         q = await self._session.execute(stmt)
         return [self._serialize_data_row(r) for r in q.scalars().all()]
 

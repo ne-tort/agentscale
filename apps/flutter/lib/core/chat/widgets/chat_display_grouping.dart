@@ -80,7 +80,7 @@ bool _continuesWorkRun(ChatDisplayPair item) =>
 
 bool _isHardBoundary(ChatBlock block) {
   return switch (block.kind) {
-    'user' || 'approval' || 'plan' || 'usage' || 'error' || 'subagent' => true,
+    'user' || 'approval' || 'plan' || 'usage' || 'error' || 'subagent' || 'permission_denial' => true,
     'assistant_markdown' => block.text.trim().isNotEmpty && !block.isStreaming,
     _ => false,
   };

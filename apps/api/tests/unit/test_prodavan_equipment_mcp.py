@@ -19,12 +19,48 @@ def test_tools_list_contains_catalog_and_sot_tools() -> None:
     assert "found_groups_upsert" in names
     assert "found_groups_list" in names
     assert not any(n.startswith("found_offers_") for n in names)
+    # v2.1.0: delete-инструменты; статус позиции агенту не принадлежит
+    assert "request_lines_delete" in names
+    assert "found_groups_delete" in names
+    upsert = next(t for t in listed["result"]["tools"] if t["name"] == "request_lines_upsert")
+    assert "status" not in upsert["inputSchema"]["properties"]
     assert (
         mcp_server._handle({"jsonrpc": "2.0", "id": 9, "method": "initialize"})["result"][
             "serverInfo"
         ]["version"]
-        == "2.0.0"
+        == "2.2.0"
     )
+
+
+def test_delete_tools_call_pod_delete(monkeypatch) -> None:
+    monkeypatch.setenv("PRODAVAN_API_BASE_URL", "http://api.example/api/v1")
+    monkeypatch.setenv("PRODAVAN_AUTH_TOKEN", "tok")
+    monkeypatch.setenv("PRODAVAN_PROJECT_ID", "proj-1")
+
+    calls: list[tuple] = []
+
+    def fake_http(method, path, payload=None, *, session_id=None):
+        calls.append((method, path))
+        return {"deleted": True}
+
+    with patch.object(mcp_server, "_http", side_effect=fake_http):
+        for i, (tool, row) in enumerate(
+            [("request_lines_delete", "l1"), ("found_groups_delete", "g1")], start=10
+        ):
+            resp = mcp_server._handle(
+                {
+                    "jsonrpc": "2.0",
+                    "id": i,
+                    "method": "tools/call",
+                    "params": {"name": tool, "arguments": {"row_id": row}},
+                }
+            )
+            assert resp is not None
+            assert resp["result"].get("isError") is not True
+    assert calls == [
+        ("DELETE", "/projects/proj-1/modules/mod_equipment/data/request_lines/l1"),
+        ("DELETE", "/projects/proj-1/modules/mod_equipment/data/found_groups/g1"),
+    ]
 
 
 def test_catalog_search_calls_pod_api(monkeypatch) -> None:
@@ -205,3 +241,49 @@ def test_found_groups_tool_docs_teach_selection() -> None:
     assert "found_offers" in desc
     search_tool = next(t for t in mcp_server.TOOLS if t["name"] == "equipment_catalog_search")
     assert "src_hash" in search_tool["description"]
+
+
+def test_tools_list_applies_ui_overrides(monkeypatch) -> None:
+    """mcp_tool_overrides (UI): description заменяет, extra_instructions дописывает."""
+    monkeypatch.setenv("PRODAVAN_API_BASE_URL", "http://api.example/api/v1")
+    monkeypatch.setenv("PRODAVAN_AUTH_TOKEN", "tok")
+    monkeypatch.setenv("PRODAVAN_PROJECT_ID", "proj-1")
+
+    rows = [
+        {"row_id": "r1", "body": {
+            "tool": "equipment_catalog_search",
+            "description": "Мой поиск по каталогу.",
+            "extra_instructions": "Всегда указывай src_hash.",
+            "enabled": True,
+        }},
+        {"row_id": "r2", "body": {
+            "tool": "request_lines_list",
+            "description": "Не используй.",
+            "enabled": False,  # выключен — игнор
+        }},
+    ]
+
+    with patch.object(mcp_server, "_list_rows", return_value=rows):
+        resp = mcp_server._handle({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+    tools = resp["result"]["tools"]
+    search = next(t for t in tools if t["name"] == "equipment_catalog_search")
+    assert search["description"].startswith("Мой поиск по каталогу.")
+    assert "Всегда указывай src_hash." in search["description"]
+    # выключенный оверрайд не применяется
+    rl = next(t for t in tools if t["name"] == "request_lines_list")
+    assert "Не используй" not in rl["description"]
+
+
+def test_tools_list_survives_override_fetch_failure(monkeypatch) -> None:
+    """Сбой чтения оверрайдов не ломает tools/list (дефолтные описания)."""
+    monkeypatch.setenv("PRODAVAN_API_BASE_URL", "http://api.example/api/v1")
+    monkeypatch.setenv("PRODAVAN_AUTH_TOKEN", "tok")
+    monkeypatch.setenv("PRODAVAN_PROJECT_ID", "proj-1")
+
+    def _boom(*a, **k):  # noqa: ANN001, ANN002
+        raise RuntimeError("bridge down")
+
+    with patch.object(mcp_server, "_list_rows", side_effect=_boom):
+        resp = mcp_server._handle({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+    names = {t["name"] for t in resp["result"]["tools"]}
+    assert "equipment_catalog_search" in names

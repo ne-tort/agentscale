@@ -29,7 +29,7 @@ void main() {
       expect(find.text('36 006,00 ₽'), findsOneWidget);
       // Маржа: 3 501
       expect(find.text('3 501,00 ₽'), findsOneWidget);
-      expect(find.text('9,7 %'), findsOneWidget);
+      expect(find.text('10,8 %'), findsOneWidget); // 3501/32505 — наценка от закупки
       expect(find.text('Продажа без НДС'), findsOneWidget);
       expect(find.text('НДС'), findsOneWidget);
     });
@@ -42,7 +42,7 @@ void main() {
       );
       expect(find.text('0,00 ₽'), findsNWidgets(5));
       expect(find.text('Позиций'), findsOneWidget);
-      expect(find.text('0,0 %'), findsOneWidget); // margin % with zero sale
+      expect(find.text('0,0 %'), findsOneWidget); // margin % with zero purchase
     });
   });
 

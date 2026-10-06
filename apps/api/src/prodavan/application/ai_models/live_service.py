@@ -22,6 +22,7 @@ from prodavan.application.ai_models.resolution import resolve_ui_default
 from prodavan.application.ai_models.service import AiModelsService
 from prodavan.config.settings import settings
 from prodavan.domain.ai_keys import is_http_probe_kind
+from prodavan.domain.ai_keys.http_url import endpoint_path_for
 from prodavan.domain.errors import AppError
 from prodavan.infrastructure.persistence.models.projects import ProjectPodRow, ProjectRow
 
@@ -202,7 +203,13 @@ class AiModelsLiveService:
             )
             if provider_endpoint is not None:
                 params["base_url"] = provider_endpoint.base_url
-                params["models_path"] = provider_endpoint.models_path
+                # Dedup the shared /vN segment (base "https://x/v1" + path
+                # "/v1/models") — the bridge concatenates the pair verbatim,
+                # a double segment is a 404 and the model list comes back
+                # empty → 503 MODELS_UNAVAILABLE.
+                params["models_path"] = endpoint_path_for(
+                    provider_endpoint.base_url, provider_endpoint.models_path
+                )
                 params["auth_scheme"] = provider_endpoint.auth_scheme
         url = f"{runtime_endpoint.base_url}/v1/models"
         # Transient pod/bridge flaps (pod busy, cold conntrack, brief 5xx)

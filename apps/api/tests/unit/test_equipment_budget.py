@@ -438,15 +438,17 @@ async def test_kp_export_saves_and_converts(monkeypatch) -> None:
         executor, "_resolve_documents_company_id", AsyncMock(return_value="co1")
     )
     saved: dict = {}
+    converts: list = []
 
     async def _save(_self, data, **kwargs):  # noqa: ANN003
         saved["filename"] = kwargs["filename"]
-        saved["size"] = len(data)
+        saved["mime"] = kwargs["mime"]
+        saved["head"] = bytes(data)[:5]
         return {"asset_id": "a1", "version_id": "v1", "filename": kwargs["filename"]}
 
     async def _convert(_self, ref, **kwargs):  # noqa: ANN003
-        assert kwargs["target_format"] == "pdf"
-        return {"asset_id": "a2", "version_id": "v2", "filename": "kp.pdf"}
+        converts.append(kwargs)
+        raise AssertionError("Gotenberg convert больше не используется")
 
     monkeypatch.setattr(
         "prodavan.application.documents.service.DocumentsService.save_document", _save
@@ -465,13 +467,14 @@ async def test_kp_export_saves_and_converts(monkeypatch) -> None:
         },
     )
     assert out["kind"] == "equipment.kp_export"
-    assert out["file_ref"]["asset_id"] == "a2"
+    assert out["file_ref"]["asset_id"] == "a1"
     assert out["rows"] == 1
-    assert saved["filename"] == "commercial-proposal.xlsx"
-    assert saved["size"] > 0
+    assert saved["filename"] == "commercial-proposal.pdf"
+    assert saved["mime"] == "application/pdf"
+    assert saved["head"] == b"%PDF-"
+    assert converts == []
 
 
-@pytest.mark.asyncio
 async def test_spec_export_kind(monkeypatch) -> None:
     executor = _executor()
 
@@ -511,4 +514,171 @@ async def test_spec_export_kind(monkeypatch) -> None:
         },
     )
     assert out["kind"] == "equipment.spec_export"
-    assert out["file_ref"]["asset_id"] == "a2"
+    # PDF строится из данных: одна запись, без Gotenberg-конвертации
+    assert out["file_ref"]["asset_id"] == "a1"
+
+
+@pytest.mark.asyncio
+async def test_kp_export_builds_pdf_directly(monkeypatch) -> None:
+    """КП/Спецификация PDF теперь строится из данных (ReportLab) — без
+    Gotenberg-конвертации: save_document получает готовый application/pdf."""
+    executor = _executor()
+
+    async def _rows(**kwargs):  # noqa: ANN003
+        if kwargs["table_slug"] == "budget_lines":
+            return [
+                {"row_id": "b1", "body": {"title": "SSD 1TB Samsung", "qty": 2,
+                                          "price_in": 10000, "vat": 0.22, "markup": 0.1}},
+                {"row_id": "b2", "body": {"title": "Коммутатор Cisco 48p", "qty": 1,
+                                          "price_in": 250000, "vat": 0.22, "markup": 0.15}},
+            ]
+        if kwargs["table_slug"] == "document_fields":
+            return [{"row_id": "df1", "body": {"contract_number": "2026/1", "city": "г. Москва"}}]
+        return []
+
+    monkeypatch.setattr(executor, "_list_rows_for_scope", _rows)
+    monkeypatch.setattr(
+        executor, "_resolve_documents_company_id", AsyncMock(return_value="co1")
+    )
+    saved: dict = {}
+    ref = {"asset_id": "a", "version_id": "v", "filename": "commercial-proposal.pdf"}
+
+    async def _save(_self, data, **kwargs):  # noqa: ANN003
+        saved["data"] = data
+        saved.update(kwargs)
+        return ref
+
+    monkeypatch.setattr(
+        "prodavan.application.documents.service.DocumentsService.save_document", _save
+    )
+
+    out = await _invoke(
+        executor,
+        monkeypatch,
+        {
+            "id": "kp_export",
+            "kind": "equipment.kp_export",
+            "params": {"budget_table": "budget_lines", "fields_table": "document_fields"},
+        },
+    )
+    assert out["kind"] == "equipment.kp_export"
+    assert out["file_ref"] == ref
+    assert saved["filename"] == "commercial-proposal.pdf"
+    assert saved["mime"] == "application/pdf"
+    assert bytes(saved["data"])[:5] == b"%PDF-"
+
+
+@pytest.mark.asyncio
+async def test_document_fields_body_merges_company_and_deal(monkeypatch) -> None:
+    """Реквизиты документов: компания (весь кабинет) — база, сделка (чат)
+    перекрывает; пустые строки пропускаются."""
+    executor = _executor()
+    seen: list[str] = []
+
+    async def _rows(**kwargs):  # noqa: ANN003
+        seen.append(kwargs["table_slug"])
+        if kwargs["table_slug"] == "document_company_fields":
+            return [{"row_id": "c1", "body": {
+                "supplier_name": 'ООО "ИТ Взлёт"',
+                "city": "г. Москва",
+                "app_number": "1",
+            }}]
+        if kwargs["table_slug"] == "document_fields":
+            return [
+                {"row_id": "d0", "body": {}},
+                {"row_id": "d1", "body": {"city": "г. Тверь", "customer_name": "ООО «Ромашка»"}},
+            ]
+        return []
+
+    monkeypatch.setattr(executor, "_list_rows_for_scope", _rows)
+    merged = await executor._document_fields_body(
+        cabinet_id="cab_1",
+        module_id="mod_equipment",
+        params={},
+        principal=Principal(sub="u1", roles=frozenset()),
+        employee=None,
+        session_id="main",
+    )
+    assert seen == ["document_company_fields", "document_fields"]
+    assert merged == {
+        "supplier_name": 'ООО "ИТ Взлёт"',  # из компании
+        "city": "г. Тверь",  # сделка перекрыла город компании
+        "app_number": "1",
+        "customer_name": "ООО «Ромашка»",
+    }
+
+
+@pytest.mark.asyncio
+async def test_document_fields_body_survives_missing_company_table(monkeypatch) -> None:
+    """Старые кабинеты без company-таблицы: export не падает, берёт сделку."""
+    executor = _executor()
+
+    async def _rows(**kwargs):  # noqa: ANN003
+        if kwargs["table_slug"] == "document_company_fields":
+            raise AppError(code="NOT_FOUND", title="Not Found", status=404)
+        return [{"row_id": "d1", "body": {"contract_number": "0001"}}]
+
+    monkeypatch.setattr(executor, "_list_rows_for_scope", _rows)
+    merged = await executor._document_fields_body(
+        cabinet_id="cab_1",
+        module_id="mod_equipment",
+        params={},
+        principal=Principal(sub="u1", roles=frozenset()),
+        employee=None,
+        session_id="main",
+    )
+    assert merged == {"contract_number": "0001"}
+
+
+@pytest.mark.asyncio
+async def test_spec_export_builds_pdf_with_russian_date(monkeypatch) -> None:
+    executor = _executor()
+
+    async def _rows(**kwargs):  # noqa: ANN003
+        if kwargs["table_slug"] == "budget_lines":
+            return [
+                {"row_id": "b1", "body": {"title": "Сервер HPE DL380 Gen10 Plus", "qty": 1,
+                                          "price_in": 1500000, "vat": 0.22, "markup": 0.12}},
+            ]
+        return []
+
+    monkeypatch.setattr(executor, "_list_rows_for_scope", _rows)
+    monkeypatch.setattr(
+        executor, "_resolve_documents_company_id", AsyncMock(return_value="co1")
+    )
+    saved: dict = {}
+
+    async def _save(_self, data, **kwargs):  # noqa: ANN003
+        saved["data"] = data
+        saved.update(kwargs)
+        return {"asset_id": "a", "version_id": "v"}
+
+    monkeypatch.setattr(
+        "prodavan.application.documents.service.DocumentsService.save_document", _save
+    )
+    out = await _invoke(
+        executor,
+        monkeypatch,
+        {
+            "id": "spec_export",
+            "kind": "equipment.spec_export",
+            "params": {"budget_table": "budget_lines", "fields_table": "document_fields"},
+        },
+    )
+    assert out["kind"] == "equipment.spec_export"
+    assert saved["filename"] == "specification.pdf"
+    assert bytes(saved["data"])[:5] == b"%PDF-"
+
+
+def test_rubles_in_words_and_date_ru() -> None:
+    from datetime import date
+
+    from prodavan.application.modules.equipment_docs_render import (
+        fmt_date_ru,
+        rubles_in_words,
+    )
+
+    assert rubles_in_words(100000) == "сто тысяч руб. 00 коп."
+    assert rubles_in_words(1234.56) == "одна тысяча двести тридцать четыре руб. 56 коп."
+    assert rubles_in_words(2000.0) == "две тысячи руб. 00 коп."  # женский род тысяч
+    assert fmt_date_ru(date(2026, 10, 5)) == "«05» октября 2026 г."

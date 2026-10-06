@@ -15,6 +15,7 @@ Responsibility split (docs/WAVE7-ARCHITECTURE.md):
 
 from __future__ import annotations
 
+import contextvars
 import logging
 from datetime import UTC, datetime
 from typing import Any
@@ -27,6 +28,13 @@ from prodavan.domain.identity import Principal
 from prodavan.infrastructure.persistence.models.identity import EmployeeRow
 
 logger = logging.getLogger(__name__)
+
+# Re-entrancy guard: каскадное удаление пишет через ModuleRowIO → сервисные
+# delete_data_row снова зовут хук; флаг останавливает рекурсию (каскад
+# итеративно покрывает связанные таблицы сам).
+_IN_CASCADE_DELETE: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "equipment_cascade_delete", default=False
+)
 
 MODULE_ID = "mod_equipment"
 GROUPS_TABLE = "found_groups"
@@ -48,6 +56,9 @@ DEFAULT_MARGIN_PCT = 10.0
 
 # Поля оффера, синхронизируемые пайплайном; ручные правки хранятся в body.manual
 # (dict «поле → true») и поверх синхронизации не перезаписываются.
+# Только «каталожные» поля: связующие (line_id/group_id), ключ сверки (src_hash),
+# точность (match_kind) и признак приоритета (priority) вычисляются пайплайном —
+# ручное переопределение рвёт связность и потому не поддерживается.
 SYNCED_OFFER_FIELDS = (
     "title",
     "brand",
@@ -56,15 +67,12 @@ SYNCED_OFFER_FIELDS = (
     "price",
     "price_orig",
     "currency",
-    "src_hash",
-    "catalog_id",
     "lead_time",
     "in_stock",
-    "priority",
-    "match_kind",
-    "line_id",
-    "group_id",
 )
+
+# Валюты, которые умеет FX и схема колонки found_offers.currency.
+SUPPORTED_CURRENCIES = frozenset({"RUB", "USD", "EUR"})
 
 
 def alias_tokens(raw: Any) -> list[str]:
@@ -164,6 +172,59 @@ class ModuleRowIO:
             principal=self._principal,
             employee=self._employee,
             session_id=self._session_id,
+        )
+
+    async def list_project_wide(self, table_slug: str) -> list[dict[str, Any]]:
+        """Rows across ALL chat sessions of the project (Закупка semantics).
+
+        Закупка belongs to the project, not to a single chat: it aggregates
+        data from every chat of the project (budget snapshots = effective
+        selections, offers for counts). Without a project context the call
+        degrades to the plain (session-scoped) [list].
+        """
+        from sqlalchemy import select as sa_select
+
+        from prodavan.application.modules.module_instance_service import (
+            OWNER_PROJECT,
+            ModuleInstanceService,
+        )
+        from prodavan.infrastructure.persistence.models.agent import AgentSessionRow
+
+        if not self._project_id:
+            return await self.list(table_slug)
+        session_ids: list[str] = []
+        if self._session_id:
+            session_ids.append(self._session_id)
+        q = await self._session.execute(
+            sa_select(AgentSessionRow.id).where(
+                AgentSessionRow.project_id == self._project_id
+            )
+        )
+        for row in q.scalars().all():
+            sid = str(row)
+            if sid not in session_ids:
+                session_ids.append(sid)
+        # Синтетический бакет «main» (записи вне активного чата) — тоже проект.
+        from prodavan.application.modules.chat_scope import DEFAULT_CHAT_SESSION_ID
+
+        if DEFAULT_CHAT_SESSION_ID not in session_ids:
+            session_ids.append(DEFAULT_CHAT_SESSION_ID)
+        if not session_ids:
+            return []
+        # Same SoT resolution as the project read path (resolve_sot_instance
+        # walks global binds up: local bind → project leaf, global → cabinet).
+        instances = ModuleInstanceService(self._session)
+        instance = await instances.resolve_sot_instance(
+            module_id=MODULE_ID,
+            owner_kind=OWNER_PROJECT,
+            owner_id=self._project_id,
+        )
+        if instance is None:
+            return []
+        return await instances.list_data_rows(
+            instance_id=instance.id,
+            table_slug=table_slug,
+            session_ids=session_ids,
         )
 
     async def create(self, table_slug: str, body: dict[str, Any]) -> dict[str, Any]:
@@ -286,13 +347,16 @@ class EquipmentPipelineService:
             "kind": "equipment.pipeline",
             "materialize": bool(materialize),
             "groups": 0,
+            "groups_deleted": 0,
             "offers_created": 0,
             "offers_updated": 0,
             "offers_stale": 0,
             "offers_deleted": 0,
+            "offers_fx_repriced": 0,
             "sellers_created": 0,
             "budget_created": 0,
             "budget_updated": 0,
+            "builds_updated": 0,
             "procurement_rows": 0,
             "checked": 0,
         }
@@ -301,6 +365,31 @@ class EquipmentPipelineService:
         groups = [r for r in await io.list(GROUPS_TABLE) if isinstance(r, dict)]
         offers = [r for r in await io.list(OFFERS_TABLE) if isinstance(r, dict)]
         sellers = [r for r in await io.list(SELLERS_TABLE) if isinstance(r, dict)]
+
+        # Группы-сироты (позиция заказчика удалена) — чистим вместе с офферами,
+        # иначе мусорные группы продолжают материализоваться и висеть в UI.
+        line_ids = {str(r.get("row_id") or "") for r in lines}
+        live_groups: list[dict[str, Any]] = []
+        for g in groups:
+            gid = str(g.get("row_id") or "")
+            line_id = str((g.get("body") or {}).get("line_id") or "")
+            if line_id and line_id in line_ids:
+                live_groups.append(g)
+                continue
+            if await io.delete(GROUPS_TABLE, gid):
+                stats["groups_deleted"] += 1
+                orphan_ids = {
+                    str(o.get("row_id") or "")
+                    for o in offers
+                    if str((o.get("body") or {}).get("group_id") or "") == gid
+                }
+                for oid in orphan_ids:
+                    if await io.delete(OFFERS_TABLE, oid):
+                        stats["offers_deleted"] += 1
+                offers = [
+                    o for o in offers if str(o.get("row_id") or "") not in orphan_ids
+                ]
+        groups = live_groups
         stats["groups"] = len(groups)
 
         registry = _SellerRegistry(sellers)
@@ -311,6 +400,12 @@ class EquipmentPipelineService:
             )
             stats.update(offers_stats)
             # перечитываем офферы после материализации
+            offers = [r for r in await io.list(OFFERS_TABLE) if isinstance(r, dict)]
+
+        # ₽-цены валютных офферов следуют за курсом ЦБ: дрейф курса без смены
+        # price_orig тоже переоценивает оффер (stale/ручные цены заморожены).
+        stats["offers_fx_repriced"] = await self._reprice_fx(io, offers=offers)
+        if stats["offers_fx_repriced"]:
             offers = [r for r in await io.list(OFFERS_TABLE) if isinstance(r, dict)]
 
         # авто-регистрация поставщиков из офферов (до best/закупки)
@@ -330,9 +425,10 @@ class EquipmentPipelineService:
         )
         stats.update(budget_stats)
 
-        proc_stats = await self._sync_procurement(
-            io, lines=lines, offers=offers, registry=registry
-        )
+        # «Сборка»: цена/состав следуют за актуальными ценами офферов.
+        stats["builds_updated"] = await self._sync_builds(io, offers=offers)
+
+        proc_stats = await self._sync_procurement(io, registry=registry)
         stats.update(proc_stats)
         return stats
 
@@ -444,6 +540,8 @@ class EquipmentPipelineService:
                         match_kind=match_kind,
                         source_title=source_title,
                     )
+                    if body is None:
+                        continue
                     await io.create(OFFERS_TABLE, body)
                     stats["offers_created"] += 1
                 else:
@@ -461,7 +559,9 @@ class EquipmentPipelineService:
                         )
                         stats["offers_updated"] += 1
 
-        # позиция исчезла из каталога → is_stale (цена не трогается)
+        # позиция исчезла из каталога → is_stale (цена не трогается).
+        # Офферы отключённых поставщиков — НЕ stale: позиция в каталоге есть,
+        # она просто исключена из поиска; строка замирает без warning'а.
         for (gid, h), offer in offers_by_key.items():
             if (gid, h) in seen_keys or not h:
                 continue
@@ -469,6 +569,8 @@ class EquipmentPipelineService:
             if rid in deleted_ids:
                 continue
             body = dict(offer.get("body") or {})
+            if registry.is_disabled(str(body.get("seller") or "")):
+                continue
             if body.get("is_stale") is not True:
                 body["is_stale"] = True
                 await io.update(OFFERS_TABLE, rid, body)
@@ -558,10 +660,18 @@ class EquipmentPipelineService:
         line_id: str,
         match_kind: str,
         source_title: str = "",
-    ) -> dict[str, Any]:
+    ) -> dict[str, Any] | None:
+        """Тело оффера из OS-дока; None — док пропущен (неподдерживаемая валюта)."""
         from prodavan.application.modules.equipment_fx import convert_offer_price
 
         currency = str(doc.get("currency") or "RUB").upper() or "RUB"
+        if currency not in SUPPORTED_CURRENCIES:
+            logger.warning(
+                "equipment pipeline: skip doc src_hash=%s — unsupported currency %r",
+                doc.get("src_hash"),
+                currency,
+            )
+            return None
         price_num = _float_or_none(doc.get("price_num"))
         if price_num is None:
             price_num = parse_price(str(doc.get("price") or ""))
@@ -641,7 +751,15 @@ class EquipmentPipelineService:
         # переопределение ценовой связки (price/price_orig/currency)
         # защищает её целиком — синхронизация не актуализирует её.
         price_manual = any(k in manual for k in ("price", "price_orig", "currency"))
-        if price_num is not None and not price_manual:
+        if currency not in SUPPORTED_CURRENCIES:
+            # Неподдерживаемая валюта: цену не синкаем (конвертировать нечем),
+            # остальные поля уже обновлены выше.
+            logger.warning(
+                "equipment pipeline: skip price sync src_hash=%s — unsupported currency %r",
+                doc.get("src_hash"),
+                currency,
+            )
+        elif price_num is not None and not price_manual:
             cur = str(body.get("currency") or "RUB").upper()
             if cur != currency:
                 body["currency"] = currency
@@ -658,6 +776,45 @@ class EquipmentPipelineService:
                 changed = True
         offer["body"] = body
         return changed
+
+    # ------------------------------------------------------------------ best
+
+    async def _reprice_fx(
+        self,
+        io: ModuleRowIO,
+        *,
+        offers: list[dict[str, Any]],
+    ) -> int:
+        """Переоценка ₽-цены валютных офферов по текущему курсу ЦБ.
+
+        Срабатывает и на дрейф курса при неизменном price_orig (merge по доку
+        такой случай не трогает — сравнение идёт в исходной валюте). Заморожены:
+        stale-офферы (позиция пропала из каталога — цену не меняем) и цены с
+        ручным переопределением (manual price/price_orig/currency).
+        """
+        from prodavan.application.modules.equipment_fx import convert_offer_price
+
+        updated = 0
+        for offer in offers:
+            body = dict(offer.get("body") or {})
+            currency = str(body.get("currency") or "RUB").upper()
+            if currency == "RUB" or currency not in SUPPORTED_CURRENCIES:
+                continue
+            if body.get("is_stale") is True:
+                continue
+            manual = body.get("manual") if isinstance(body.get("manual"), dict) else {}
+            if any(k in manual for k in ("price", "price_orig", "currency")):
+                continue
+            orig = _float_or_none(body.get("price_orig"))
+            if orig is None:
+                continue
+            rub, _ = await convert_offer_price(price=orig, currency=currency)
+            current = _float_or_none(body.get("price"))
+            if current is None or abs(rub - current) > 0.005:
+                body["price"] = rub
+                await io.update(OFFERS_TABLE, str(offer.get("row_id") or ""), body)
+                updated += 1
+        return updated
 
     # ------------------------------------------------------------------ best
 
@@ -708,18 +865,31 @@ class EquipmentPipelineService:
                 (o for o in group_offers if (o.get("body") or {}).get("is_selected") is True),
                 None,
             )
-            best_offer = self._best_offer(group_offers)
+            best_offer = self._best_offer(group_offers, registry)
             face_offer = selected if selected is not None else best_offer
 
             best_id = ""
             if best_offer is not None:
                 best_id = str(best_offer.get("row_id") or "")
             face = (face_offer or {}).get("body") or {}
+            # приоритетный поставщик лица группы — бьёт цену внутри одной
+            # точности (match_kind) при выборе лучшей группы позиции
+            face_priority = bool(face) and registry.is_priority(str(face.get("seller") or ""))
+            face_in_stock = bool(face) and face.get("in_stock") is True
+            want_match_label = _match_label(
+                _valid_match_kind(body.get("match_kind")), face_in_stock
+            )
 
             updates: dict[str, Any] = {}
             want_rank = MATCH_ORDER.get(_valid_match_kind(body.get("match_kind")), 3)
             if body.get("rank") != want_rank:
                 updates["rank"] = want_rank
+            if bool(body.get("face_priority")) is not face_priority:
+                updates["face_priority"] = face_priority
+            if bool(body.get("face_in_stock")) is not face_in_stock:
+                updates["face_in_stock"] = face_in_stock
+            if str(body.get("match_label") or "") != want_match_label:
+                updates["match_label"] = want_match_label
             if body.get("best_offer_id") != best_id:
                 updates["best_offer_id"] = best_id
             if body.get("face_title") != face.get("title"):
@@ -728,9 +898,18 @@ class EquipmentPipelineService:
                 updates["face_price"] = _num_or(face.get("price"), None)
             if body.get("face_seller") != face.get("seller"):
                 updates["face_seller"] = face.get("seller") or ""
+            if body.get("face_brand") != (face.get("brand") or ""):
+                updates["face_brand"] = face.get("brand") or ""
+            # лицо группы устарело (позиция пропала из каталога) → warning в UI
+            want_face_stale = bool(face) and face.get("is_stale") is True
+            if bool(body.get("face_stale")) is not want_face_stale:
+                updates["face_stale"] = want_face_stale
             if body.get("offers_count") != len(group_offers):
                 updates["offers_count"] = len(group_offers)
-            if body.get("synced_at") != now:
+            # synced_at — метка сверки с OS; пишем только вместе с реальными
+            # изменениями, иначе каждый прогон переписывает все группы
+            # (write-amplification → ложный «Проект требует обновления»).
+            if updates:
                 updates["synced_at"] = now
             if updates:
                 body.update(updates)
@@ -747,12 +926,15 @@ class EquipmentPipelineService:
                     await io.update(OFFERS_TABLE, str(o.get("row_id") or ""), obody)
                     o["body"] = obody
 
-        # лучшая группа позиции: точность → цена лица
+        # лучшая группа позиции: точность → приоритетный поставщик → цена лица.
+        # Приоритет бьёт цену ТОЛЬКО внутри одной точности: аналог приоритетного
+        # поставщика никогда не вытесняет exact-группу.
         for line_id, line_groups in groups_by_line.items():
             ranked = sorted(
                 line_groups,
                 key=lambda g: (
                     MATCH_ORDER.get(_valid_match_kind((g.get("body") or {}).get("match_kind")), 3),
+                    0 if (g.get("body") or {}).get("face_priority") is True else 1,
                     _num_or((g.get("body") or {}).get("face_price"), float("inf"))
                     if _num_or((g.get("body") or {}).get("face_price"), None) is not None
                     else float("inf"),
@@ -763,12 +945,20 @@ class EquipmentPipelineService:
                 g for g in ranked if _num_or((g.get("body") or {}).get("face_price"), None) is not None
             ]
             winner = str((with_offers[0].get("row_id") if with_offers else "") or "")
+            # «Альтернативы»: другие группы позиции с живыми офферами.
+            alternatives = max(0, len(with_offers) - 1)
             for g in ranked:
                 gid = str(g.get("row_id") or "")
                 want = gid != "" and gid == winner
                 body = dict(g.get("body") or {})
+                want_alternatives = alternatives if body.get("offers_count") else 0
+                updates: dict[str, Any] = {}
                 if bool(body.get("is_best")) is not want:
-                    body["is_best"] = want
+                    updates["is_best"] = want
+                if _num_or(body.get("alternatives_count"), 0) != want_alternatives:
+                    updates["alternatives_count"] = want_alternatives
+                if updates:
+                    body.update(updates)
                     await io.update(GROUPS_TABLE, gid, body)
                     g["body"] = body
                     stats["groups_updated"] += 1
@@ -794,26 +984,136 @@ class EquipmentPipelineService:
                 for o in offers
                 if str((o.get("body") or {}).get("line_id") or "") == line_id
             }
-            if selected_ok and str(body.get("status") or "") != "selected":
-                updates["status"] = "selected"
-            elif not selected_ok and found > 0 and str(body.get("status") or "") == "open":
-                updates["status"] = "matched"
+            # Статус позиции полностью вычислим: валидный выбор → selected,
+            # есть группы с офферами → matched, иначе → open. Откатывает и
+            # протухший selected (оффер удалён/снят), и matched без находок.
+            want_status = "selected" if selected_ok else ("matched" if found > 0 else "open")
+            if str(body.get("status") or "") != want_status:
+                updates["status"] = want_status
+            if not selected_ok and body.get("selected_offer_id"):
+                # битая ссылка на выбранный оффер — очищаем
+                updates["selected_offer_id"] = None
             if updates:
                 body.update(updates)
                 await io.update(LINES_TABLE, line_id, body)
                 line["body"] = body
                 stats["lines_updated"] += 1
+
+        # Per-оффер аннотации для «Товаров поставщика»: «Выгода» (против
+        # эффективного выбора позиции), «Альтернативы» (офферы других
+        # поставщиков той же позиции), «Совпадение» с «(под заказ)».
+        stats["offers_annotated"] = await self._annotate_offers(
+            io, lines=lines, groups=groups, offers=offers, best_group_by_line=best_group_by_line
+        )
         return stats
 
-    def _best_offer(self, offers: list[dict[str, Any]]) -> dict[str, Any] | None:
-        """best-оффер группы: живой приоритетный → живой мин. цена → stale."""
+    async def _annotate_offers(
+        self,
+        io: ModuleRowIO,
+        *,
+        lines: list[dict[str, Any]],
+        groups: list[dict[str, Any]],
+        offers: list[dict[str, Any]],
+        best_group_by_line: dict[str, str],
+    ) -> int:
+        offers_by_line: dict[str, list[dict[str, Any]]] = {}
+        for o in offers:
+            lid = str((o.get("body") or {}).get("line_id") or "")
+            if lid:
+                offers_by_line.setdefault(lid, []).append(o)
+        groups_by_id = {str(g.get("row_id") or ""): g for g in groups}
+        annotated = 0
+        for line in lines:
+            line_id = str(line.get("row_id") or "")
+            line_offers = offers_by_line.get(line_id) or []
+            if not line_offers:
+                continue
+            line_body = line.get("body") or {}
+            # эффективный выбор позиции: ручной ?? best-группа → её best-оффер
+            effective_id = str(line_body.get("selected_offer_id") or "")
+            if not effective_id:
+                best_gid = best_group_by_line.get(line_id) or ""
+                g = groups_by_id.get(best_gid)
+                if g is not None:
+                    effective_id = str((g.get("body") or {}).get("best_offer_id") or "")
+            effective = next(
+                (o for o in line_offers if str(o.get("row_id") or "") == effective_id), None
+            )
+            ref_price = _num_or((effective or {}).get("body", {}).get("price"), None)
+            prices = [
+                p
+                for p in (
+                    _num_or((o.get("body") or {}).get("price"), None) for o in line_offers
+                )
+                if p is not None and p > 0
+            ]
+            min_price = min(prices) if prices else None
+
+            for o in line_offers:
+                body = dict(o.get("body") or {})
+                seller_cf = str(body.get("seller") or "").strip().casefold()
+                alternatives = sum(
+                    1
+                    for other in line_offers
+                    if str(other.get("row_id") or "") != str(o.get("row_id") or "")
+                    and str((other.get("body") or {}).get("seller") or "").strip().casefold()
+                    != seller_cf
+                    and (other.get("body") or {}).get("is_stale") is not True
+                )
+                price = _num_or(body.get("price"), None)
+                is_effective = str(o.get("row_id") or "") == effective_id
+                label, tone = _benefit_label(
+                    is_effective=is_effective,
+                    price=price,
+                    reference=ref_price,
+                    min_price=min_price,
+                    total_offers=len(line_offers),
+                )
+                updates: dict[str, Any] = {}
+                if _num_or(body.get("alternatives_count"), None) != alternatives:
+                    updates["alternatives_count"] = alternatives
+                if str(body.get("benefit_label") or "") != label:
+                    updates["benefit_label"] = label
+                if str(body.get("benefit_tone") or "") != tone:
+                    updates["benefit_tone"] = tone
+                if bool(body.get("is_effective")) is not is_effective:
+                    updates["is_effective"] = is_effective
+                want_match_label = _match_label(
+                    _valid_match_kind(body.get("match_kind")), body.get("in_stock") is True
+                )
+                if str(body.get("match_label") or "") != want_match_label:
+                    updates["match_label"] = want_match_label
+                if updates:
+                    body.update(updates)
+                    await io.update(OFFERS_TABLE, str(o.get("row_id") or ""), body)
+                    o["body"] = body
+                    annotated += 1
+        return annotated
+
+    def _best_offer(
+        self,
+        offers: list[dict[str, Any]],
+        registry: _SellerRegistry | None = None,
+    ) -> dict[str, Any] | None:
+        """best-оффер группы: живой приоритетный → цена → наличие → stale.
+
+        Порядок критериев (ТЗ): точность решается уровнем группы; внутри
+        группы — приоритетный поставщик бьёт цену, дальше цена, наличие
+        (под заказ уступает) — последним. Stale/disabled уступают живым.
+        Ручной выбор (is_selected) это не ограничивает.
+        """
         def key(o: dict[str, Any]) -> tuple:
             body = o.get("body") or {}
             price = _num_or(body.get("price"), None)
+            disabled = (
+                registry is not None
+                and registry.is_disabled(str(body.get("seller") or ""))
+            )
             return (
-                1 if body.get("is_stale") is True else 0,
+                1 if (body.get("is_stale") is True or disabled) else 0,
                 0 if body.get("priority") is True else 1,
                 price if price is not None else float("inf"),
+                0 if body.get("in_stock") is True else 1,
                 str(o.get("row_id") or ""),
             )
 
@@ -962,9 +1262,55 @@ class EquipmentPipelineService:
                 if _num_or(body.get("markup"), None) != want_markup or source != want_source:
                     body["markup"] = want_markup
                     body["markup_source"] = want_source
+            if body == (existing.get("body") or {}):
+                continue  # без изменений — не пишем (write-amplification)
             await io.update(BUDGET_TABLE, row_id, body)
             stats["budget_updated"] += 1
         return stats
+
+    # ---------------------------------------------------------------- сборка
+
+    async def _sync_builds(
+        self,
+        io: ModuleRowIO,
+        *,
+        offers: list[dict[str, Any]],
+    ) -> int:
+        """equipment_builds: components_count/price_total из slots → items → offers.
+
+        UI пересчитывает сборку в момент выбора комплектующего; пайплайн
+        догоняет её при обновлении цен/состава офферов (связь с OpenSearch).
+        """
+        items = [r for r in await io.list("equipment_items") if isinstance(r, dict)]
+        builds = [r for r in await io.list("equipment_builds") if isinstance(r, dict)]
+        if not builds:
+            return 0
+        items_by_id = {str(r.get("row_id") or ""): r for r in items}
+        offers_by_id = {str(r.get("row_id") or ""): r for r in offers}
+        updated = 0
+        for build in builds:
+            body = dict(build.get("body") or {})
+            slots = body.get("slots")
+            slots = slots if isinstance(slots, dict) else {}
+            count = 0
+            total = 0.0
+            for item_id in slots.values():
+                item = items_by_id.get(str(item_id or ""))
+                if item is None:
+                    continue
+                count += 1
+                ibody = item.get("body") or {}
+                qty = _num_or(ibody.get("qty"), 1.0) or 1.0
+                offer = offers_by_id.get(str(ibody.get("offer_id") or ""))
+                price = _num_or((offer or {}).get("body", {}).get("price"), 0.0) if offer else 0.0
+                total += (price or 0.0) * qty
+            total = round(total, 2)
+            if body.get("components_count") != count or _num_or(body.get("price_total"), 0.0) != total:
+                body["components_count"] = count
+                body["price_total"] = total
+                await io.update("equipment_builds", str(build.get("row_id") or ""), body)
+                updated += 1
+        return updated
 
     # ---------------------------------------------------------------- закупка
 
@@ -972,38 +1318,63 @@ class EquipmentPipelineService:
         self,
         io: ModuleRowIO,
         *,
-        lines: list[dict[str, Any]],
-        offers: list[dict[str, Any]],
         registry: _SellerRegistry,
     ) -> dict[str, Any]:
-        """Таблица «Закупка»: поставщики (включённые) с офферами, агрегаты."""
-        stats = {"procurement_rows": 0, "procurement_created": 0, "procurement_updated": 0}
-        budget_rows = [r for r in await io.list(BUDGET_TABLE) if isinstance(r, dict)]
-        markup_by_line = {
-            str((r.get("body") or {}).get("line_id") or ""): _num_or(
-                (r.get("body") or {}).get("markup"), DEFAULT_MARKUP
-            )
-            for r in budget_rows
-        }
-        qty_by_line = {
-            str(r.get("row_id") or ""): _num_or((r.get("body") or {}).get("qty"), 1.0) or 1.0
-            for r in lines
-        }
+        """Таблица «Закупка»: агрегат по проекту (все чаты), эффективный выбор.
 
-        offers_by_seller: dict[str, list[dict[str, Any]]] = {}
+        Закупка принадлежит проекту, а не одному чату: читает бюджетные
+        снапшоты ВСЕХ чатов проекта (каждый снапшот = эффективный оффер
+        позиции: явный выбор → иначе best, ровно как в «Бюджетировании») и
+        офферы всех чатов (для счётчиков). Своих данных не держит — строки
+        таблицы это вычисляемые агрегаты, пишутся в бакет активного чата
+        (on_load страницы их всегда пересобирает).
+        """
+        stats = {"procurement_rows": 0, "procurement_created": 0, "procurement_updated": 0}
+        budget_rows = [
+            r for r in await io.list_project_wide(BUDGET_TABLE) if isinstance(r, dict)
+        ]
+        offers = [
+            r for r in await io.list_project_wide(OFFERS_TABLE) if isinstance(r, dict)
+        ]
+
+        offers_count_by_seller: dict[str, int] = {}
         for o in offers:
             seller = str((o.get("body") or {}).get("seller") or "").strip()
             if seller:
-                offers_by_seller.setdefault(seller.casefold(), []).append(o)
+                offers_count_by_seller[seller.casefold()] = (
+                    offers_count_by_seller.get(seller.casefold(), 0) + 1
+                )
+
+        # Позиции проекта из бюджетных снапшотов (line_id уникален в рамках
+        # чата; при дубле из другого чата побеждает последний апдейт).
+        lines_by_seller: dict[str, list[dict[str, Any]]] = {}
+        for r in budget_rows:
+            body = r.get("body") or {}
+            line_id = str(body.get("line_id") or "")
+            if not line_id:
+                continue
+            seller = str(body.get("seller") or "").strip()
+            if seller:
+                lines_by_seller.setdefault(seller.casefold(), []).append(body)
 
         proc_rows = [r for r in await io.list(PROCUREMENT_TABLE) if isinstance(r, dict)]
-        proc_by_seller = {
-            str((r.get("body") or {}).get("seller") or "").strip().casefold(): r
-            for r in proc_rows
-        }
+        proc_by_seller: dict[str, dict[str, Any]] = {}
+        for r in proc_rows:
+            token = str((r.get("body") or {}).get("seller") or "").strip().casefold()
+            if not token:
+                continue
+            if token in proc_by_seller:
+                # дубль строки поставщика в бакете — лишнюю удаляем
+                await io.delete(PROCUREMENT_TABLE, str(r.get("row_id") or ""))
+                continue
+            proc_by_seller[token] = r
 
+        # Поставщики с офферами ИЛИ с эффективными позициями: строка нужна
+        # даже без выборов — иначе на Закупках нельзя выбрать его товары.
+        all_sellers = set(offers_count_by_seller) | set(lines_by_seller)
         keep_sellers: set[str] = set()
-        for token, seller_offers in sorted(offers_by_seller.items()):
+        for token in sorted(all_sellers):
+            seller_lines = lines_by_seller.get(token, [])
             seller_entry = registry.find(token)
             if seller_entry is None:
                 continue
@@ -1013,39 +1384,46 @@ class EquipmentPipelineService:
             keep_sellers.add(token)
             display_name = str(seller_body.get("name") or token)
 
-            selected = [
-                o for o in seller_offers if (o.get("body") or {}).get("is_selected") is True
-            ]
             sum_rub = 0.0
             margin_rub = 0.0
-            for o in selected:
-                obody = o.get("body") or {}
-                qty = qty_by_line.get(str(obody.get("line_id") or ""), 1.0) or 1.0
-                price = _num_or(obody.get("price"), 0.0) or 0.0
-                markup = markup_by_line.get(str(obody.get("line_id") or ""), None)
-                if markup is None:
-                    pct = registry.margin_pct(display_name)
-                    markup = (pct / 100.0) if pct is not None else DEFAULT_MARKUP
+            qty_total = 0.0
+            seller_pct = registry.margin_pct(display_name)
+            for body in seller_lines:
+                qty = _num_or(body.get("qty"), 1.0) or 1.0
+                qty_total += qty
+                price = _num_or(body.get("price_in"), 0.0) or 0.0
+                # Эффективная маржа строки: ручная правка — из бюджета; иначе
+                # актуальная маржа поставщика из реестра (бюджетные строки
+                # других чатов могут ещё не догнать смену margin_pct).
+                if str(body.get("markup_source") or "") == "manual":
+                    markup = _num_or(body.get("markup"), DEFAULT_MARKUP)
+                else:
+                    markup = (seller_pct / 100.0) if seller_pct is not None else DEFAULT_MARKUP
+                # Шаблон.xlsx: маржа за сумму = qty * (цена_с_маржой − вход),
+                # цена_с_маржой = вход * (1 + наценка) → qty * вход * наценка.
                 sum_rub += qty * price
                 margin_rub += qty * price * markup
 
-            seller_pct = registry.margin_pct(display_name)
             margin_pct = seller_pct if seller_pct is not None else DEFAULT_MARGIN_PCT
             delivery = _num_or(seller_body.get("delivery_rub"), 0.0) or 0.0
+            offers_count = offers_count_by_seller.get(token, 0)
+            selected_count = len(seller_lines)
 
             existing = proc_by_seller.get(token)
+            # Доставка поставщика (из реестра) — всегда расход: вычитается из
+            # маржи. Отдельного включения больше нет (колонка убрана из UI).
             if existing is None:
                 body = {
                     "seller": display_name,
                     "is_registered": True,
-                    "offers_count": len(seller_offers),
-                    "selected_count": len(selected),
+                    "offers_count": offers_count,
+                    "selected_count": selected_count,
+                    "qty_total": qty_total,
                     "sum_rub": round(sum_rub, 2),
                     "margin_pct": margin_pct,
-                    "include_delivery": False,
                     "delivery_rub": delivery,
-                    "sum_margin_rub": round(margin_rub, 2),
-                    "sum_with_margin_rub": round(sum_rub + margin_rub, 2),
+                    "sum_margin_rub": round(margin_rub - delivery, 2),
+                    "sum_with_margin_rub": round(sum_rub + margin_rub + delivery, 2),
                 }
                 await io.create(PROCUREMENT_TABLE, body)
                 stats["procurement_created"] += 1
@@ -1054,21 +1432,20 @@ class EquipmentPipelineService:
 
             row_id = str(existing.get("row_id") or "")
             body = dict(existing.get("body") or {})
-            include_delivery = bool(body.get("include_delivery"))
-            delivery_effective = delivery if include_delivery else 0.0
             updates = {
                 "is_registered": True,
-                "offers_count": len(seller_offers),
-                "selected_count": len(selected),
+                "offers_count": offers_count,
+                "selected_count": selected_count,
+                "qty_total": qty_total,
                 "sum_rub": round(sum_rub, 2),
                 "delivery_rub": delivery,
-                "sum_margin_rub": round(margin_rub - delivery_effective, 2),
-                "sum_with_margin_rub": round(sum_rub + margin_rub + delivery_effective, 2),
+                "sum_margin_rub": round(margin_rub - delivery, 2),
+                "sum_with_margin_rub": round(sum_rub + margin_rub + delivery, 2),
+                # margin_pct — зеркало реестра поставщиков: правка в «Закупке»
+                # пишется в реестр через procurement_apply, обратная связь
+                # приходит отсюда. Расхождений быть не должно.
+                "margin_pct": margin_pct,
             }
-            # margin_pct — редактируемое поле; sync не затирает пользовательское
-            # значение (ожидает procurement_apply → реестр поставщиков)
-            if _num_or(body.get("margin_pct"), None) is None:
-                updates["margin_pct"] = margin_pct
             changed = any(body.get(k) != v for k, v in updates.items())
             if changed:
                 body.update(updates)
@@ -1076,7 +1453,7 @@ class EquipmentPipelineService:
                 stats["procurement_updated"] += 1
             stats["procurement_rows"] += 1
 
-        # поставщики без офферов / отключённые — строки удаляем
+        # поставщики без позиций / отключённые — строки удаляем
         for token, row in proc_by_seller.items():
             if token not in keep_sellers:
                 await io.delete(PROCUREMENT_TABLE, str(row.get("row_id") or ""))
@@ -1090,7 +1467,13 @@ class EquipmentPipelineService:
         *,
         row_id: str,
     ) -> dict[str, Any]:
-        """Ручная правка строки «Закупка»: маржа/доставка → реестр и бюджет."""
+        """Ручная правка строки «Закупка»: маржа → реестр и бюджетные строки.
+
+        Маржа поставщика живёт в trusted_sellers (реестр общий на контур):
+        правка в «Закупке» пишется туда, дальше агрегаты пересобираются тем же
+        «проектным» проходом, что и обычный sync (_sync_procurement) — иначе
+        суммы строки после apply расходятся с суммами после sync.
+        """
         proc_rows = [r for r in await io.list(PROCUREMENT_TABLE) if isinstance(r, dict)]
         row = next((r for r in proc_rows if str(r.get("row_id")) == row_id), None)
         if row is None:
@@ -1113,8 +1496,11 @@ class EquipmentPipelineService:
                 seller_body["margin_pct"] = margin_pct
                 await io.update(SELLERS_TABLE, entry_id, seller_body)
                 sellers_updated += 1
+                entry["body"] = seller_body
 
-        # маржа поставщика → бюджетные строки (не ручные)
+        # маржа поставщика → бюджетные строки активного чата (не ручные);
+        # строки других чатов обновит их собственный прогон пайплайна, а
+        # агрегаты «Закупки» уже считаются по актуальной марже реестра.
         budget_rows = [r for r in await io.list(BUDGET_TABLE) if isinstance(r, dict)]
         budget_updated = 0
         for b in budget_rows:
@@ -1131,59 +1517,96 @@ class EquipmentPipelineService:
                 await io.update(BUDGET_TABLE, str(b.get("row_id") or ""), bbody)
                 budget_updated += 1
 
-        # пересчёт агрегатов этой строки закупки
-        lines = [r for r in await io.list(LINES_TABLE) if isinstance(r, dict)]
-        offers = [r for r in await io.list(OFFERS_TABLE) if isinstance(r, dict)]
-        seller_offers = [
-            o
-            for o in offers
-            if str((o.get("body") or {}).get("seller") or "").strip().casefold() == token
-        ]
-        budget_rows = [r for r in await io.list(BUDGET_TABLE) if isinstance(r, dict)]
-        markup_by_line = {
-            str((r.get("body") or {}).get("line_id") or ""): _num_or(
-                (r.get("body") or {}).get("markup"), DEFAULT_MARKUP
-            )
-            for r in budget_rows
-        }
-        qty_by_line = {
-            str(r.get("row_id") or ""): _num_or((r.get("body") or {}).get("qty"), 1.0) or 1.0
-            for r in lines
-        }
-        selected = [o for o in seller_offers if (o.get("body") or {}).get("is_selected") is True]
-        sum_rub = 0.0
-        margin_rub = 0.0
-        for o in selected:
-            obody = o.get("body") or {}
-            qty = qty_by_line.get(str(obody.get("line_id") or ""), 1.0) or 1.0
-            price = _num_or(obody.get("price"), 0.0) or 0.0
-            markup = markup_by_line.get(str(obody.get("line_id") or ""), DEFAULT_MARKUP)
-            sum_rub += qty * price
-            margin_rub += qty * price * markup
-        delivery = _num_or(body.get("delivery_rub"), 0.0) or 0.0
-        include_delivery = bool(body.get("include_delivery"))
-        delivery_effective = delivery if include_delivery else 0.0
-        body.update(
-            {
-                "offers_count": len(seller_offers),
-                "selected_count": len(selected),
-                "sum_rub": round(sum_rub, 2),
-                "sum_margin_rub": round(margin_rub - delivery_effective, 2),
-                "sum_with_margin_rub": round(sum_rub + margin_rub + delivery_effective, 2),
-            }
-        )
-        await io.update(PROCUREMENT_TABLE, row_id, body)
+        # Агрегаты строки — единым проектным проходом (бюджетные снапшоты всех
+        # чатов, выбор ?? best), а не только по чекбоксам активного чата.
+        proc_stats = await self._sync_procurement(io, registry=registry)
         return {
             "kind": "equipment.procurement_apply",
             "row_id": row_id,
             "sellers_updated": sellers_updated,
             "budget_updated": budget_updated,
+            **proc_stats,
         }
 
 
 def _valid_match_kind(raw: Any) -> str:
     kind = str(raw or "").strip().lower()
     return kind if kind in MATCH_KINDS else MATCH_ANALOG
+
+
+async def cascade_equipment_delete(
+    session: AsyncSession,
+    *,
+    cabinet_id: str,
+    project_id: str | None,
+    table_slug: str,
+    row_id: str,
+    row_body: dict[str, Any],
+    principal: Principal,
+    employee: EmployeeRow | None,
+    session_id: str | None,
+    io: ModuleRowIO | None = None,
+) -> dict[str, int]:
+    """Каскадное удаление связанных строк mod_equipment.
+
+    Связь по позиции заказчика (request_lines.row_id):
+    - удаление позиции → её found_groups + found_offers + budget_lines;
+    - удаление строки бюджета → корневая позиция со всем каскадом;
+    - удаление found_groups → её офферы.
+
+    Записи идут через ModuleRowIO(run_actions=False) в бакете чата самой
+    строки (session_id), пайплайн дочищает остатки на следующем прогоне.
+    """
+    if table_slug not in (LINES_TABLE, BUDGET_TABLE, GROUPS_TABLE):
+        return {}
+    if _IN_CASCADE_DELETE.get():
+        return {}  # каскад уже идёт — не рекурсируем через сервисные хуки
+    _IN_CASCADE_DELETE.set(True)
+    try:
+        if io is None:
+            io = ModuleRowIO(
+                session,
+                cabinet_id=cabinet_id,
+                project_id=project_id,
+                principal=principal,
+                employee=employee,
+                session_id=session_id,
+            )
+        deleted: dict[str, int] = {}
+
+        async def _delete_where(table: str, field: str, value: str) -> None:
+            for row in await io.list(table):
+                body = row.get("body") or {}
+                if str(body.get(field) or "") != value:
+                    continue
+                rid = str(row.get("row_id") or "")
+                if await io.delete(table, rid):
+                    deleted[table] = deleted.get(table, 0) + 1
+
+        async def _cascade_line(line_id: str) -> None:
+            # офферы — по line_id и по группам позиции (страховка на разрыв дубля)
+            await _delete_where(OFFERS_TABLE, "line_id", line_id)
+            await _delete_where(GROUPS_TABLE, "line_id", line_id)
+            await _delete_where(BUDGET_TABLE, "line_id", line_id)
+
+        if table_slug == LINES_TABLE:
+            await _cascade_line(row_id)
+        elif table_slug == BUDGET_TABLE:
+            line_id = str(row_body.get("line_id") or "")
+            if line_id:
+                # удаляем корневую позицию — она подтянет свой каскад
+                lines = await io.list(LINES_TABLE)
+                line = next(
+                    (r for r in lines if str(r.get("row_id") or "") == line_id), None
+                )
+                if line is not None and await io.delete(LINES_TABLE, line_id):
+                    deleted[LINES_TABLE] = deleted.get(LINES_TABLE, 0) + 1
+                await _cascade_line(line_id)
+        elif table_slug == GROUPS_TABLE:
+            await _delete_where(OFFERS_TABLE, "group_id", row_id)
+        return deleted
+    finally:
+        _IN_CASCADE_DELETE.set(False)
 
 
 def mark_manual_overrides(
@@ -1220,6 +1643,63 @@ def mark_manual_overrides(
 
 def _score_for_match(match_kind: str) -> float:
     return {MATCH_EXACT: 1.0, MATCH_ANALOG: 0.5, MATCH_DOUBT: 0.25}.get(match_kind, 0.5)
+
+
+_MATCH_LABELS = {
+    MATCH_EXACT: "Точное",
+    MATCH_ANALOG: "Аналог",
+    MATCH_DOUBT: "Есть сомнения",
+}
+
+
+def _match_label(match_kind: str, in_stock: bool) -> str:
+    """«Совпадение» для UI: «Точное» / «Аналог» / «Есть сомнения» +
+    « (под заказ)», когда позиции нет в наличии."""
+    base = _MATCH_LABELS.get(match_kind, "Аналог")
+    return base if in_stock else f"{base} (под заказ)"
+
+
+def _benefit_label(
+    *,
+    is_effective: bool,
+    price: float | None,
+    reference: float | None,
+    min_price: float | None,
+    total_offers: int,
+) -> tuple[str, str]:
+    """Бейдж «Выгода» для оффера — та же семантика, что в клиентском
+    computeBenefitBadges ( Flutter benefit_badge.dart):
+
+    - единственный оффер позиции → «Единственный»;
+    - эффективный (выбранный ?? best) и при этом минимальная цена →
+      «Лучшая цена»;
+    - эффективный, но дороже минимума → переплата «−n%» (красный);
+    - остальные → выгода относительно эффективной цены: «+n%» зелёный
+      (дешевле), «−n%» красный (дороже), «Одинаковая» при разнице <0.5%.
+
+    Возвращает (label, tone): tone ∈ best|better|worse|same.
+    """
+    if total_offers <= 1:
+        return "Единственный", "same"
+    if price is None:
+        return "", "same"
+    if is_effective:
+        if min_price is not None and price <= min_price + 0.005:
+            return "Лучшая цена", "best"
+        if min_price and min_price > 0:
+            overpay = (min_price - price) / min_price * 100
+            return f"−{abs(overpay):.1f}%", "worse"
+        return "", "same"
+    if reference is None or reference <= 0:
+        return "", "same"
+    if abs(price - reference) <= 0.005:
+        return "Одинаковая", "same"
+    savings_pct = (reference - price) / reference * 100
+    if abs(savings_pct) < 0.5:
+        return "Одинаковая", "same"
+    if savings_pct > 0:
+        return f"+{savings_pct:.1f}%", "better"
+    return f"−{abs(savings_pct):.1f}%", "worse"
 
 
 class _SellerRegistry:

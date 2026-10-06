@@ -221,7 +221,7 @@ class CabinetModuleService:
             session_id=stamp_session,
         )
         await self._session.commit()
-        remat = await self._schedule_rematerialize(cabinet_id=cabinet_id, module_id=module_id)
+        remat = await self._schedule_rematerialize(cabinet_id=cabinet_id, module_id=module_id, table_slug=table_slug)
         out = _attach_rematerialize(
             {"module_id": module_id, "instance_id": inst.id, **row},
             remat,
@@ -318,7 +318,7 @@ class CabinetModuleService:
         # Avoid double-commit when nested from set_profile; callers that need
         # rematerialize still commit. Prefer commit for HTTP handlers.
         await self._session.commit()
-        remat = await self._schedule_rematerialize(cabinet_id=cabinet_id, module_id=module_id)
+        remat = await self._schedule_rematerialize(cabinet_id=cabinet_id, module_id=module_id, table_slug=table_slug)
         out = _attach_rematerialize(
             {"module_id": module_id, "instance_id": inst.id, **row},
             remat,
@@ -374,10 +374,13 @@ class CabinetModuleService:
         delete_session = await self._chat_scope_session(
             inst=inst, module_id=module_id, table_slug=table_slug, session_id=session_id
         )
-        if delete_session is not None:
+        # existing нужен для session-check (chats=current) и каскада mod_equipment
+        existing = None
+        if delete_session is not None or module_id == "mod_equipment":
             existing = await self._instances.get_data_row(
                 instance_id=inst.id, table_slug=table_slug, row_id=row_id
             )
+        if delete_session is not None:
             if existing is None or (existing.get("session_id") or "").strip() != delete_session:
                 raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="row not found")
         ok = await self._instances.delete_data_row(
@@ -385,6 +388,24 @@ class CabinetModuleService:
         )
         if not ok:
             raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="row not found")
+        if module_id == "mod_equipment" and existing is not None:
+            # Связанные данные позиции заказчика удаляются вместе с ней:
+            # позиция → группы/офферы/бюджет; строка бюджета → вся цепочка.
+            from prodavan.application.modules.equipment_offers_service import (
+                cascade_equipment_delete,
+            )
+
+            await cascade_equipment_delete(
+                self._session,
+                cabinet_id=cabinet_id,
+                project_id=None,
+                table_slug=table_slug,
+                row_id=row_id,
+                row_body=existing.get("body") if isinstance(existing.get("body"), dict) else {},
+                principal=principal,
+                employee=employee,
+                session_id=str(existing.get("session_id") or "") or None,
+            )
         if module_id == "mod_equipment" and table_slug == "catalogs":
             try:
                 from prodavan.application.modules.equipment_catalog_opensearch import (
@@ -411,22 +432,27 @@ class CabinetModuleService:
         # on the next list/poll (row survived with 200 OK).
         await self._session.commit()
 
-        from prodavan.application.projects.rematerialize_scheduler import schedule_cabinet_rematerialize
-
-        return await schedule_cabinet_rematerialize(
-            self._session,
-            cabinet_id=cabinet_id,
-            module_id=module_id,
+        return await self._schedule_rematerialize(
+            cabinet_id=cabinet_id, module_id=module_id, table_slug=table_slug
         )
 
     async def _schedule_rematerialize(
-        self, *, cabinet_id: str, module_id: str
+        self, *, cabinet_id: str, module_id: str, table_slug: str
     ) -> dict[str, Any]:
         from prodavan.application.projects.rematerialize_scheduler import (
             schedule_cabinet_rematerialize,
         )
+        from prodavan.application.projects.workspace_sync_policy import (
+            table_feeds_workspace,
+        )
 
         try:
+            if not await table_feeds_workspace(
+                self._session, module_id=module_id, table_slug=table_slug
+            ):
+                # Таблица не кормит workspace (нет materialize-правил на неё) —
+                # запись не должна помечать проекты «требует обновления».
+                return {"mode": "deferred", "marked_outdated": 0, "skipped": True}
             return await schedule_cabinet_rematerialize(
                 self._session,
                 cabinet_id=cabinet_id,

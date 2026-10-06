@@ -23,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.application.agent.adapter_kinds import (
     BRIDGE_ADAPTER_KINDS,
-    api_kind_to_bridge_adapter,
+    api_kind_to_bridge_adapter,  # noqa: F401 — re-export (session_service, live_service import it from here)
 )
 from prodavan.application.agent.project_bind import bind_project_runtime
 from prodavan.application.agent.runtime_auth import runtime_auth_headers
@@ -398,6 +398,7 @@ class OpenClawBridgeBootstrap:
         model: str | None = None,
         bootstrap: BridgeSessionBootstrap | None = None,
         endpoint: RuntimeEndpoint | None = None,
+        retry: dict | None = None,
     ) -> AsyncIterator[AgentEvent]:
         """Proxy send to Pod agent-runtime; yields normalized AgentEvent stream.
 
@@ -405,6 +406,8 @@ class OpenClawBridgeBootstrap:
         hot path already resolved it for the lease push) — saves a duplicate
         runtime_view + claim status fetch per message. The recoverable-error
         retry still re-resolves from scratch.
+        ``retry``: SendRetryPolicy send-body fields (chat reconnect policy)
+        — forwarded on every attempt.
         """
         if not settings.pod_agent_runtime_enabled:
             return
@@ -451,6 +454,7 @@ class OpenClawBridgeBootstrap:
                 session_id=session_id,
                 message=message,
                 model=model,
+                retry=retry,
             ):
                 if (
                     not retried
@@ -495,16 +499,21 @@ class OpenClawBridgeBootstrap:
         session_id: str,
         message: str,
         model: str | None,
+        retry: dict | None = None,
     ) -> AsyncIterator[AgentEvent]:
         # Fresh bridge JWT before every send: the token TTL (24h) is shorter
         # than a sandbox lifetime; a stale token makes runtime→API
         # callbacks 401. Re-bind is idempotent and throttled by mark/TTL.
         await ensure_recent_bind(self._session, project_id, endpoint=endpoint)
         url = f"{endpoint.base_url}/v1/sessions/{session_id}/send"
-        body: dict[str, str] = {"message": message}
+        body: dict = {"message": message}
         bridge_model = sanitize_runtime_model(model)
         if bridge_model:
             body["model"] = bridge_model
+        if retry:
+            # SendRetryPolicy (chat reconnect policy) — provider-error
+            # reconnects with interval/attempt budget + fallback models.
+            body.update(retry)
 
         try:
             yielded = False

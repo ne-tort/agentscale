@@ -92,7 +92,11 @@ class AiKeyProbeService:
             )
 
         try:
-            secret = self._secrets.get(row.secret_ref)
+            # xai_oauth: секрет — JSON-блоб токенов; probe обязан бить по xAI
+            # свежим access_token (единый резолвер AiKeysService)
+            from prodavan.application.ai_keys.service import AiKeysService
+
+            secret = await AiKeysService(self._session, secrets=self._secrets).effective_secret_for_row(row)
         except Exception as exc:
             logger.warning("probe: secret fetch failed key=%s: %s", row.id, exc)
             return _ProbeContext(

@@ -31,6 +31,7 @@ class AppEntityColumn {
     this.align = AppEntityColumnAlign.start,
     this.maxLines = 1,
     this.maxWidth,
+    this.selectionOnly = false,
   });
 
   final String id;
@@ -48,6 +49,11 @@ class AppEntityColumn {
   /// Content width cap before ellipsis/truncate. Keeps intrinsic table
   /// width bounded so long values never stretch the column off-screen.
   final double? maxWidth;
+
+  /// Render cell content only while its row is in the long-press selection
+  /// (mutate) mode — for secondary figures that would otherwise overload the
+  /// table (e.g. budget margin).
+  final bool selectionOnly;
 }
 
 class AppEntityRow {
@@ -118,6 +124,7 @@ class AppEntityCollection extends StatefulWidget {
     this.primaryColumnLabel,
     this.primaryMaxLines = 2,
     this.primaryMaxWidth = 360,
+    this.primaryWidth,
     this.showHeader = true,
     this.onCopy,
     this.onDelete,
@@ -126,6 +133,8 @@ class AppEntityCollection extends StatefulWidget {
     this.enabledOf,
     this.onEnabledChanged,
     this.rowActions = const [],
+    this.rowMinHeight,
+    this.externalScroll = false,
   });
 
   final List<AppEntityRow> rows;
@@ -141,6 +150,12 @@ class AppEntityCollection extends StatefulWidget {
   /// 2 wrapped lines inside 360px.
   final int primaryMaxLines;
   final double? primaryMaxWidth;
+
+  /// Фиксированная ширина первой (title) колонки. Без неё DataTable отдаёт
+  /// ей весь избыток ширины (единственная текстовая колонка получает
+  /// IntrinsicColumnWidth(flex:1)) — «короткое имя поставщика» растягивается
+  /// на пол-экрана, а числовые колонки жмутся.
+  final double? primaryWidth;
 
   /// When false (table mode), hides the heading row entirely.
   final bool showHeader;
@@ -161,12 +176,21 @@ class AppEntityCollection extends StatefulWidget {
   /// Custom row actions (preview, download, etc.) shown inline on long-press.
   final List<AppEntityRowAction> rowActions;
 
+  /// Minimum table row height (ui_json `row_min_height`): airy tables like
+  /// the budget raise it above the default 40.
+  final double? rowMinHeight;
+
+  /// Таблица/список занимают свою естественную высоту, скроллит родительская
+  /// страница (вместо внутреннего вертикального скролла коллекции). Для
+  /// страниц, где над таблицей есть другие виджеты (сводка, панели).
+  final bool externalScroll;
+
   @override
   State<AppEntityCollection> createState() => _AppEntityCollectionState();
 }
 
 class _AppEntityCollectionState extends State<AppEntityCollection> {
-  static const double _columnSpacing = 12;
+  static const double _columnSpacing = 8;
   static const double _horizontalMargin = 12;
   static const double _primaryMinWidth = 140;
   static const double _flexColumnMinWidth = 96;
@@ -354,8 +378,10 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
   Widget build(BuildContext context) {
     final effective = _effectiveMode(context);
 
+    final body = _body(context, effective);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: widget.externalScroll ? MainAxisSize.min : MainAxisSize.max,
       children: [
         if (widget.toolbar != null)
           Padding(
@@ -365,7 +391,7 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
             ),
             child: Row(children: [...?widget.toolbar, const Spacer()]),
           ),
-        Expanded(child: _body(context, effective)),
+        widget.externalScroll ? body : Expanded(child: body),
       ],
     );
   }
@@ -381,6 +407,10 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
     if (mode == AppEntityCollectionMode.list) {
       final bodyMedium = Theme.of(context).textTheme.bodyMedium;
       return ListView.builder(
+        shrinkWrap: widget.externalScroll,
+        physics: widget.externalScroll
+            ? const NeverScrollableScrollPhysics()
+            : null,
         padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
         itemCount: widget.rows.length,
         itemBuilder: (context, i) {
@@ -435,34 +465,42 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
 
     return LayoutBuilder(
       builder: (context, constraints) {
+        // selection_only колонки скрываются ЦЕЛИКОМ, пока ни одна строка не в
+        // режиме выделения (долгий тап) — иначе таблица показывает пустую
+        // колонку-заглушку. В режиме выделения колонка появляется со значениями.
+        final effectiveColumns = widget.columns
+            .where((c) => !c.selectionOnly || _editFocusId != null)
+            .toList();
         final maxTableWidth = AppBreakpoints.contentMaxWidth;
         final parentWidth = constraints.maxWidth.isFinite
             ? constraints.maxWidth
             : maxTableWidth;
         final tableWidth = parentWidth.clamp(0.0, maxTableWidth).toDouble();
         final primaryLabel = widget.primaryColumnLabel ?? l10n.commonEntity;
-        final fixedWidth = widget.columns.fold<double>(
+        final fixedWidth = effectiveColumns.fold<double>(
           0,
           (sum, c) => sum + (c.width ?? 0),
         );
         // Bounded columns cap the intrinsic width; the true minimum is the
         // sum of the caps (not the 96px floor) so the scroll threshold
         // matches what DataTable will actually lay out.
-        final flexMin = widget.columns
+        final flexMin = effectiveColumns
             .where((c) => c.width == null)
             .fold<double>(
               0,
               (sum, c) =>
                   sum + (c.maxWidth ?? _flexColumnMinWidth).clamp(_flexColumnMinWidth, 1000),
             );
-        final mutateMin = _mutateEnabled ? _mutateTrailingMinWidth : 0;
+        // Колонка действий (корзина и пр.) — только в режиме выделения строки
+        // (долгий тап); в обычном режиме справа ничего не висит.
+        final showActionsCol = _mutateEnabled && _editFocusId != null;
+        final mutateMin = showActionsCol ? _mutateTrailingMinWidth : 0;
         final minTableWidth = _horizontalMargin * 2 +
-            (widget.primaryMaxWidth ?? _primaryMinWidth) +
+            (widget.primaryWidth ?? widget.primaryMaxWidth ?? _primaryMinWidth) +
             fixedWidth +
             flexMin +
             mutateMin +
-            widget.columns.length * _columnSpacing;
-        final showActionsCol = _mutateEnabled;
+            effectiveColumns.length * _columnSpacing;
 
         final table = Theme(
           data: Theme.of(context).copyWith(
@@ -479,7 +517,7 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
             showBottomBorder: false,
             columnSpacing: _columnSpacing,
             horizontalMargin: _horizontalMargin,
-            dataRowMinHeight: 40,
+            dataRowMinHeight: widget.rowMinHeight ?? 40,
             dataRowMaxHeight: double.infinity,
             headingRowHeight: widget.showHeader ? 44 : 0,
             headingRowColor: WidgetStatePropertyAll(colors.surface),
@@ -488,6 +526,9 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
 
             columns: [
               DataColumn(
+                columnWidth: widget.primaryWidth == null
+                    ? null
+                    : FixedColumnWidth(widget.primaryWidth!),
                 label: widget.showHeader
                     ? Align(
                         alignment: Alignment.centerLeft,
@@ -495,7 +536,7 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
                       )
                     : const SizedBox.shrink(),
               ),
-              ...widget.columns.map(
+              ...effectiveColumns.map(
                 (c) => DataColumn(
                   label: widget.showHeader
                       ? Align(
@@ -541,7 +582,7 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
                         child: _primaryCellContent(row, bodyMedium),
                       ),
                     ),
-                    for (final col in widget.columns)
+                    for (final col in effectiveColumns)
                       _dataCell(context, row, col),
                     if (showActionsCol)
                       DataCell(
@@ -592,6 +633,10 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
             ),
           ),
         );
+        if (widget.externalScroll) {
+          // Высота = естественная высота таблицы: скроллит страница.
+          return tableBody;
+        }
         return SingleChildScrollView(
           scrollDirection: Axis.vertical,
           child: tableBody,
@@ -622,7 +667,7 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
     // wrapped titles visually merge with their neighbors.
     final vpad = maxLines > 1 ? 6.0 : 2.0;
     final padded = Padding(
-      padding: EdgeInsets.symmetric(vertical: vpad, horizontal: 4),
+      padding: EdgeInsets.symmetric(vertical: vpad, horizontal: 2),
       child: child,
     );
     final cap = column.width ?? column.maxWidth;

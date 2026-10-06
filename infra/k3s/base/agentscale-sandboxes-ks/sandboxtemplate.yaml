@@ -36,7 +36,7 @@ spec:
       - name: agent-runtime
         # Versioned tag — bumped by PR when prodavan-claw image is rebuilt.
         # TODO: keep in sync with ghcr.io/ne-tort/prodavan-agent-runtime releases.
-        image: ghcr.io/ne-tort/prodavan-agent-runtime:c01dbd48d83c # prodavan-claw@c01dbd4 (subagent MCP profiles: canonical mcp.openclaw.* names, default profile = inherit parent pool incl. MCP; legacy bare names normalized)
+        image: ghcr.io/ne-tort/prodavan-agent-runtime:fc837fe807ed # prodavan-claw@fc837fe (web.search: алиасы q/search_query + agentscale_api)
         imagePullPolicy: IfNotPresent
         # Static platform env — claims cannot carry env
         # (envVarsInjectionPolicy: Disallowed), so all boot-time config lives
@@ -56,9 +56,12 @@ spec:
           value: "1"
         - name: PORT
           value: "3921"
-        # Web search is proxied through the Agentscale API (dev default).
+        # Web search is proxied through the Agentscale API. Значение
+        # `prodavan_api` — id провайдера, который знает агент-рантайм
+        # (openclaw-sdk tools/web.ts); `agentscale_api` принимается рантаймом
+        # начиная с образа после алиас-фикса (prodavan-claw).
         - name: OPENCLAW_WEB_SEARCH_PROVIDER
-          value: agentscale_api
+          value: prodavan_api
         # Optional bridge token for API → agent calls (secret in this namespace).
         - name: BRIDGE_AUTH_TOKEN
           valueFrom:

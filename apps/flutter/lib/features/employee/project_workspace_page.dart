@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/chat/controller/chat_session_controller.dart';
 import 'package:prodavan/core/chat/widgets/chat_scaffold.dart';
+import 'package:prodavan/core/api/prodavan_api.dart';
 import 'package:prodavan/core/containers/container_runtime_presenter.dart';
 import 'package:prodavan/core/jobs/app_job_store.dart';
 import 'package:prodavan/core/jobs/project_wake_flow.dart';
@@ -123,6 +124,16 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
           _lastSnackError = err;
           showAgentChatSnack(context, err);
           _chat.error = null;
+          // Чат удалён/не существует (GC пустышки, каскад) — указатель
+          // «последний открытый чат» обнуляем только в этом случае.
+          if (err is ProdavanApiException && err.statusCode == 404) {
+            unawaited(
+              workContext.selectChat(
+                cabinetId: widget.cabinetId,
+                sessionId: null,
+              ),
+            );
+          }
         }
         // Turn end (success or error): streaming flipped true→false — the
         // transcript changed server-side, so let the owner refresh the

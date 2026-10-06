@@ -25,6 +25,8 @@ class CompanyRow(Base):
     phone: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # Org Keycloak principal (independent entity — not an Employee row).
     keycloak_sub: Mapped[str | None] = mapped_column(String(120), unique=True, nullable=True)
+    # Login slug derived from the (unique) name; handle = {slug}@agentscale.local.
+    login_slug: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
     login_email: Mapped[str | None] = mapped_column(String(320), nullable=True, index=True)
     subscription_ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     subscription_lifetime: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
@@ -46,7 +48,8 @@ class EmployeeRow(Base):
 
     id: Mapped[str] = mapped_column(String(40), primary_key=True, default=lambda: _id("emp"))
     keycloak_sub: Mapped[str | None] = mapped_column(String(120), unique=True, nullable=True)
-    login: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    # Full login handle: {name}@{company}.local (globally unique by construction).
+    login: Mapped[str] = mapped_column(String(200), unique=True, nullable=False, index=True)
     email: Mapped[str] = mapped_column(String(320), nullable=False, index=True)
     contact_email: Mapped[str | None] = mapped_column(String(320), nullable=True)
     display_name: Mapped[str | None] = mapped_column(String(200), nullable=True)

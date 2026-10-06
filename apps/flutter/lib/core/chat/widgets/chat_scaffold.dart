@@ -140,6 +140,11 @@ class ChatMessageList extends StatefulWidget {
     this.onLoadOlder,
     this.turnStreaming = false,
     this.showWorkingIndicator = false,
+    this.showReconnectIndicator = false,
+    this.reconnectAttempt,
+    this.reconnectMaxAttempts,
+    this.reconnectNextModel,
+    this.mcpAliases = const {},
     this.costResolver,
   });
 
@@ -156,8 +161,19 @@ class ChatMessageList extends StatefulWidget {
   /// "agentscale работает…" while the turn streams but the agent is silent.
   final bool showWorkingIndicator;
 
+  /// «Попытка реконнекта…» while the runtime waits out a provider error
+  /// (chat error policy) before retrying the model call.
+  final bool showReconnectIndicator;
+  final int? reconnectAttempt;
+  final int? reconnectMaxAttempts;
+  final String? reconnectNextModel;
+
   /// Cost estimate for assistant usage metadata (runtime cost wins).
   final double? Function(String? model, int? inputTokens, int? outputTokens)? costResolver;
+
+  /// MCP tool display aliases (mcp_aliases module meta) — friendly tool
+  /// labels in tool activity/approval blocks.
+  final Map<String, String> mcpAliases;
 
   @override
   State<ChatMessageList> createState() => ChatMessageListState();
@@ -244,6 +260,7 @@ class ChatMessageListState extends State<ChatMessageList> {
       api: widget.api,
       onResolveApproval: widget.onResolveApproval,
       costResolver: widget.costResolver,
+      mcpAliases: widget.mcpAliases,
       turnStreaming: widget.turnStreaming,
     );
   }
@@ -349,7 +366,18 @@ class ChatMessageListState extends State<ChatMessageList> {
     // reverse:true — first child is visual bottom (newest). The working
     // indicator is the newest thing in the list while it shows.
     final children = <Widget>[
-      if (widget.showWorkingIndicator)
+      if (widget.showReconnectIndicator)
+        SizedBox(
+          key: const ValueKey('agent-reconnect-indicator'),
+          child: AgentWorkingIndicator(
+            reconnect: ReconnectIndicatorData(
+              attempt: widget.reconnectAttempt,
+              maxAttempts: widget.reconnectMaxAttempts,
+              nextModel: widget.reconnectNextModel,
+            ),
+          ),
+        )
+      else if (widget.showWorkingIndicator)
         const SizedBox(
           key: ValueKey('agent-working-indicator'),
           child: AgentWorkingIndicator(),
@@ -550,6 +578,11 @@ class _ChatScaffoldState extends State<ChatScaffold> {
                                           : null,
                                       turnStreaming: controller.streaming,
                                       showWorkingIndicator: controller.showWorkingIndicator,
+                                      showReconnectIndicator: controller.showReconnectIndicator,
+                                      reconnectAttempt: controller.reconnectAttempt,
+                                      reconnectMaxAttempts: controller.reconnectMaxAttempts,
+                                      reconnectNextModel: controller.reconnectNextModel,
+                                      mcpAliases: controller.mcpAliases,
                                       costResolver: controller.usageCostUsd,
                                       onResolveApproval: (id, decision) =>
                                           controller.resolveApproval(id, decision),

@@ -498,6 +498,25 @@ class AdminApi {
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
+  /// xAI (Grok) OAuth device-code: старт — ссылка и код для браузера.
+  Future<Map<String, dynamic>> startAiKeyXaiDevice({required String keyId}) async {
+    final res = await AuthHttp.post(_uri('/admin/ai-keys/$keyId/oauth/xai/device'));
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  /// Статус device-code авторизации (сервер заодно поллит xAI).
+  Future<Map<String, dynamic>> getAiKeyXaiDevice({required String keyId}) async {
+    final res = await AuthHttp.get(_uri('/admin/ai-keys/$keyId/oauth/xai/device'));
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<void> cancelAiKeyXaiDevice({required String keyId}) async {
+    final res = await AuthHttp.delete(_uri('/admin/ai-keys/$keyId/oauth/xai/device'));
+    _throwIfError(res);
+  }
+
   Future<Map<String, dynamic>> getLastProbeAiKey({required String keyId}) async {
     final res = await AuthHttp.get(_uri('/admin/ai-keys/$keyId/probe'));
     _throwIfError(res);

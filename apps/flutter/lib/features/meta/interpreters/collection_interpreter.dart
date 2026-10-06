@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/preferences/app_value_preference.dart';
 import 'package:prodavan/core/theme/app_color_tokens.dart';
+import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_entity_collection.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_icon_button.dart';
@@ -21,11 +22,19 @@ import 'package:prodavan/features/meta/runtime/module_runtime_scope.dart';
 import 'package:prodavan/features/meta/runtime/owner_module_data_controller.dart';
 import 'package:prodavan/features/meta/runtime/runtime_data_adapter.dart';
 import 'package:prodavan/features/meta/module_scaffold_actions.dart';
+import 'package:prodavan/features/meta/widgets/benefit_badge.dart';
 import 'package:prodavan/features/meta/widgets/budget_summary_strip.dart';
+import 'package:prodavan/features/meta/widgets/document_fields_panel.dart';
 import 'package:prodavan/features/meta/widgets/editable_number_cell.dart';
 import 'package:prodavan/features/meta/widgets/file_upload_field.dart';
 import 'package:prodavan/features/meta/widgets/project_multiselect_field.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
+
+double? _doubleFromUi(Object? raw) {
+  if (raw is num) return raw.toDouble();
+  if (raw is String) return double.tryParse(raw.trim());
+  return null;
+}
 
 class CollectionViewInterpreter extends StatelessWidget {
   const CollectionViewInterpreter({
@@ -62,6 +71,16 @@ class CollectionViewInterpreter extends StatelessWidget {
     if (tableSlug.isEmpty) {
       return EmptyPlaceholder(title: l10n.adminMetaInvalid);
     }
+    final uiJson0 = Map<String, dynamic>.from(ui);
+    // Кросс-чатовая вьюха (Закупка → товары поставщика): подгружаем строки
+    // всех чатов проекта один раз; дальше они обновляются через loadAll.
+    final dataScope = uiJson0['data_scope'];
+    if (dataScope is Map && dataScope['chats'] == 'all') {
+      final s = seeds;
+      if (s is RuntimeDataAdapter) {
+        unawaited(s.ensureCrossChat(tableSlug));
+      }
+    }
 
     return ListenableBuilder(
       listenable: seeds is Listenable ? seeds as Listenable : ValueNotifier(0),
@@ -86,6 +105,7 @@ class CollectionViewInterpreter extends StatelessWidget {
         final styled = _applyRowStyles(context, uiJson, rawRows);
         var rows = _withSelection(context, uiJson, styled);
         rows = _withEditableCells(context, uiJson, tableSlug, rows);
+        rows = _withBenefitBadges(context, uiJson, l10n, rows);
         final hasInline = _hasInlineAdd(uiJson);
         final hasPoll = _hasActivePoll(uiJson, rawRows, seeds);
         final onLoadAction = _onLoadAction(uiJson);
@@ -107,6 +127,9 @@ class CollectionViewInterpreter extends StatelessWidget {
           primaryColumnLabel: primaryLabel,
           primaryMaxLines: primaryEntry.maxLines,
           primaryMaxWidth: primaryEntry.maxWidth,
+          primaryWidth: primaryEntry.width,
+          rowMinHeight: _doubleFromUi(uiJson['row_min_height']),
+          externalScroll: true,
           toolbar: toolbar,
           empty: EmptyPlaceholder(
             title: emptyTitle.isEmpty ? l10n.adminModuleSeedEmpty : emptyTitle,
@@ -125,6 +148,14 @@ class CollectionViewInterpreter extends StatelessWidget {
               return;
             }
             final rowTap = uiJson['row_tap'];
+            if (rowTap is Map && rowTap['kind'] == 'invoke_action') {
+              // тап по строке вызывает экшен (напр. выбор оффера в «Закупке»)
+              final actionId = rowTap['action']?.toString() ?? '';
+              if (actionId.isNotEmpty) {
+                unawaited(_invokeAction(context, actionId, rowId: row.id));
+              }
+              return;
+            }
             if (rowTap is Map && onOpenForm != null) {
               final kind = rowTap['kind'] as String?;
               final targetView = rowTap['view'] as String?;
@@ -151,17 +182,25 @@ class CollectionViewInterpreter extends StatelessWidget {
         // layout - otherwise the early return below hides it for views
         // without inline add / headers / poll (the budget view).
         final summary = _summary(uiJson);
+        final docFields = _docFieldsConfig(uiJson);
         if (!hasInline &&
             !_hasContextHeader(uiJson) &&
             !_hasListHeader(uiJson) &&
             !hasPoll &&
             onLoadAction == null &&
-            summary == null) {
-          return collection;
+            summary == null &&
+            docFields == null) {
+          return SingleChildScrollView(child: collection);
         }
 
-        return Column(
+        final docFieldsPanel = docFields == null
+            ? null
+            : _buildDocFieldsPanel(docFields, context);
+
+        return SingleChildScrollView(
+          child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
           children: [
             if (onLoadAction != null)
               _CollectionOnLoad(
@@ -174,7 +213,24 @@ class CollectionViewInterpreter extends StatelessWidget {
                 uiJson: uiJson,
                 rows: rawRows,
               ),
-            if (summary != null) summary,
+            if (summary != null || docFieldsPanel != null)
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // три равных блока в линию: сводка | Поставщик | Сделка
+                  // (панель реквизитов сама делит свои 2/3 на две карточки)
+                  if (summary != null) Expanded(child: summary),
+                  if (docFieldsPanel != null)
+                    Expanded(
+                      flex: 2,
+                      child: Padding(
+                        // у сводки свой lr-md/xs-top паддинг — выравниваем панель
+                        padding: const EdgeInsets.fromLTRB(0, AppSpacing.xs, AppSpacing.md, 0),
+                        child: docFieldsPanel,
+                      ),
+                    ),
+                ],
+              ),
             if (_hasListHeader(uiJson))
               _CollectionListHeader(
                 headerConfig: Map<String, dynamic>.from(uiJson['list_header'] as Map),
@@ -198,8 +254,9 @@ class CollectionViewInterpreter extends StatelessWidget {
                 seeds: seeds,
                 contextRowId: contextRowId,
               ),
-            Expanded(child: collection),
+            collection,
           ],
+          ),
         );
       },
     );
@@ -472,6 +529,7 @@ class CollectionViewInterpreter extends StatelessWidget {
         width: c['width'] is num ? (c['width'] as num).toDouble() : null,
         maxWidth: c['max_width'] is num ? (c['max_width'] as num).toDouble() : null,
         maxLines: c['max_lines'] is num ? (c['max_lines'] as num).toInt().clamp(1, 8) : 1,
+        selectionOnly: c['selection_only'] == true,
         align: switch (alignRaw) {
           'center' => AppEntityColumnAlign.center,
           'end' => AppEntityColumnAlign.end,
@@ -497,6 +555,137 @@ class CollectionViewInterpreter extends StatelessWidget {
 
   /// `editable: true` columns render tap-to-edit cells (numeric) or tap-to-toggle
   /// cells (bool — например include_delivery в «Закупке»).
+  /// `format: "benefit"` columns: solid badges comparing each row's price to
+  /// the current (selected/best) offer of the same position.
+  List<AppEntityRow> _withBenefitBadges(
+    BuildContext context,
+    Map<String, dynamic> uiJson,
+    AppLocalizations l10n,
+    List<AppEntityRow> rows,
+  ) {
+    final raw = uiJson['columns'];
+    if (raw is! List || rows.isEmpty) return rows;
+    final configs = <Map<String, dynamic>>[];
+    for (final c in raw) {
+      if (c is Map && c['format']?.toString() == 'benefit') {
+        configs.add(Map<String, dynamic>.from(c));
+      }
+    }
+    // benefit_static: серверный бейдж (пайплайн пишет benefit_label/tone) —
+    // используется там, где конкуренты позиции не видны в списке (Закупка).
+    final staticConfigs = <Map<String, dynamic>>[];
+    for (final c in raw) {
+      if (c is Map && c['format']?.toString() == 'benefit_static') {
+        staticConfigs.add(Map<String, dynamic>.from(c));
+      }
+    }
+    if (staticConfigs.isNotEmpty) {
+      rows = _withStaticBenefitBadges(rows, staticConfigs);
+    }
+    if (configs.isEmpty) return rows;
+
+    Map<String, dynamic> bodyOf(String rowId) {
+      final item = seeds.itemById(rowId);
+      return item is Map && item['body'] is Map
+          ? Map<String, dynamic>.from(item['body'] as Map)
+          : const <String, dynamic>{};
+    }
+
+    final out = List<AppEntityRow>.of(rows);
+    for (final cfg in configs) {
+      final columnId = cfg['field']?.toString();
+      if (columnId == null || columnId.isEmpty) continue;
+      final priceField = cfg['price_field']?.toString() ?? 'price';
+      final currentField = cfg['current_field']?.toString() ?? 'is_selected';
+      final groupField = cfg['group_field']?.toString();
+
+      double? priceOf(String rowId) {
+        final v = bodyOf(rowId)[priceField];
+        if (v is num) return v.toDouble();
+        if (v is String) return double.tryParse(v.trim());
+        return null;
+      }
+
+      final badges = computeBenefitBadges(
+        rowIds: rows.map((r) => r.id),
+        priceOf: priceOf,
+        currentOf: (rowId) => bodyOf(rowId)[currentField] == true,
+        groupOf: (rowId) =>
+            groupField == null ? '' : bodyOf(rowId)[groupField]?.toString() ?? '',
+        l10n: l10n,
+      );
+      if (badges.isEmpty) continue;
+      for (var i = 0; i < out.length; i++) {
+        final row = out[i];
+        final badge = badges[row.id];
+        if (badge == null) continue;
+        final widgets = Map<String, Widget>.from(row.cellWidgets);
+        widgets[columnId] = BenefitBadge(data: badge);
+        out[i] = AppEntityRow(
+          id: row.id,
+          title: row.title,
+          subtitle: row.subtitle,
+          cells: row.cells,
+          cellWidgets: widgets,
+          leading: row.leading,
+          trailing: row.trailing,
+          titleColor: row.titleColor,
+          rowColor: row.rowColor,
+          titleBold: row.titleBold,
+        );
+      }
+    }
+    return out;
+  }
+
+  /// benefit_static: бейдж из серверных полей benefit_label/benefit_tone
+  /// (их пишет equipment pipeline; виджет-окраска как у клиентского benefit).
+  List<AppEntityRow> _withStaticBenefitBadges(
+    List<AppEntityRow> rows,
+    List<Map<String, dynamic>> configs,
+  ) {
+    BenefitTone toneOf(String raw) => switch (raw) {
+          'best' => BenefitTone.best,
+          'better' => BenefitTone.better,
+          'worse' => BenefitTone.worse,
+          _ => BenefitTone.same,
+        };
+    return rows.map((row) {
+      final item = seeds.itemById(row.id);
+      final body = item is Map && item['body'] is Map
+          ? Map<String, dynamic>.from(item['body'] as Map)
+          : const <String, dynamic>{};
+      var widgets = Map<String, Widget>.from(row.cellWidgets);
+      var changed = false;
+      for (final cfg in configs) {
+        final columnId = cfg['field']?.toString() ?? '';
+        if (columnId.isEmpty) continue;
+        final label = body['benefit_label']?.toString() ?? '';
+        if (label.isEmpty) continue;
+        widgets[columnId] = BenefitBadge(
+          data: BenefitBadgeData(
+            label: label,
+            tone: toneOf(body['benefit_tone']?.toString() ?? ''),
+          ),
+        );
+        changed = true;
+      }
+      if (!changed) return row;
+      return AppEntityRow(
+        id: row.id,
+        title: row.title,
+        subtitle: row.subtitle,
+        cells: row.cells,
+        cellWidgets: widgets,
+        leading: row.leading,
+        trailing: row.trailing,
+        titleColor: row.titleColor,
+        rowColor: row.rowColor,
+        titleBold: row.titleBold,
+      );
+    }).toList();
+  }
+
   List<AppEntityRow> _withEditableCells(
     BuildContext context,
     Map<String, dynamic> uiJson,
@@ -573,6 +762,78 @@ class CollectionViewInterpreter extends StatelessWidget {
 
   String _tableSlugOf(Map<String, dynamic> uiJson) {
     return view['table_slug'] as String? ?? '';
+  }
+
+  /// `ui_json.doc_fields` — панель реквизитов документов (Бюджетирование):
+  /// компания (весь кабинет) + сделка (чат).
+  Map<String, dynamic>? _docFieldsConfig(Map<String, dynamic> uiJson) {
+    final raw = uiJson['doc_fields'];
+    if (raw is! Map) return null;
+    final companyTable = raw['company_table']?.toString() ?? '';
+    final dealTable = raw['deal_table']?.toString() ?? '';
+    if (companyTable.isEmpty || dealTable.isEmpty) return null;
+    final companyFields = (raw['company_fields'] as List? ?? const [])
+        .whereType<Map>()
+        .map((f) => f['column']?.toString() ?? '')
+        .where((f) => f.isNotEmpty)
+        .toList();
+    final dealFields = (raw['deal_fields'] as List? ?? const [])
+        .whereType<Map>()
+        .where((f) => (f['column']?.toString() ?? '').isNotEmpty)
+        .map((f) => Map<String, dynamic>.from(f))
+        .toList();
+    if (companyFields.isEmpty && dealFields.isEmpty) return null;
+    return {
+      'company_table': companyTable,
+      'deal_table': dealTable,
+      'company_title': raw['company_title'],
+      'deal_title': raw['deal_title'],
+      'company_fields': companyFields,
+      'deal_fields': dealFields,
+    };
+  }
+
+  Widget? _buildDocFieldsPanel(
+    Map<String, dynamic> config,
+    BuildContext context,
+  ) {
+    if (readOnly) return null;
+    final companyTable = config['company_table'] as String;
+    final dealTable = config['deal_table'] as String;
+    final locale = Localizations.localeOf(context);
+    final l10n = AppLocalizations.of(context);
+    // подписи и дефолты (из шаблона) — из меты колонок обеих таблиц
+    final labels = <String, String>{};
+    final defaults = <String, Object?>{};
+    for (final tableSlug in {companyTable, dealTable}) {
+      for (final col in manifest.columnsForTable(tableSlug)) {
+        final name = col['name']?.toString() ?? '';
+        if (name.isEmpty) continue;
+        labels[name] = resolveMetaLabel(col['label'], l10n, locale: locale);
+        if (col.containsKey('default')) defaults[name] = col['default'];
+      }
+    }
+    return DocumentFieldsPanel(
+      companyTable: companyTable,
+      dealTable: dealTable,
+      companyTitle: config['company_title'],
+      dealTitle: config['deal_title'],
+      companyFields: (config['company_fields'] as List).cast<String>(),
+      dealFields: (config['deal_fields'] as List).cast<Map<String, dynamic>>(),
+      labels: labels,
+      defaults: defaults,
+      itemsForTable: (slug) => _allItems(seeds, slug)
+          .map((m) => Map<String, dynamic>.from(m))
+          .toList(),
+      createRow: (slug) async {
+        final created = seeds.createRow(slug);
+        return created is Future ? await created as String : created as String;
+      },
+      upsertBody: (rowId, body) async {
+        final upd = seeds.upsertBody(rowId, body);
+        if (upd is Future) await upd;
+      },
+    );
   }
 
   List<Map> _allItems(dynamic seeds, String tableSlug) {

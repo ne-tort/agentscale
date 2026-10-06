@@ -126,17 +126,20 @@ async def create_company(
         admin_email=body.admin_email,
         admin_display_name=body.admin_display_name,
     )
+    from prodavan.domain.companies.login import company_effective_login
+
+    handle = company_effective_login(company)
     out: dict = {
         "company": {
             "id": company.id,
             "name": company.name,
             "description": company.description,
-            "username": company.id,
+            "username": handle,
             "keycloak_sub": company.keycloak_sub,
             "contact_email": company.contact_email,
         },
         "credentials": {
-            "username": company.id,
+            "username": handle,
             "password_set": True,
         },
     }

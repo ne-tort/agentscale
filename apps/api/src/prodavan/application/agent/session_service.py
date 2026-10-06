@@ -62,6 +62,7 @@ from prodavan.domain.agent.errors import agent_runtime_unavailable, app_error_fr
 from prodavan.domain.errors import AppError
 from prodavan.domain.identity import Principal
 from prodavan.domain.projects import CHAT_MAX_ATTACHMENTS_PER_MESSAGE, CHAT_MAX_MESSAGE_CHARS
+from prodavan.domain.projects.chat_error_policy import policy_to_send_fields
 from prodavan.infrastructure.persistence.models.agent import AgentEventRow, AgentSessionRow, AgentUsageRow
 from prodavan.infrastructure.persistence.models.identity import EmployeeRow
 from prodavan.infrastructure.persistence.models.modules import ModuleInstanceDataRow
@@ -696,6 +697,7 @@ class AgentSessionService:
         principal: Principal,
         employee: EmployeeRow | None,
         model: str | None = None,
+        stall_retry: bool = False,
     ) -> dict:
         events_out: list[dict] = []
         async for event in self._iter_send_events(
@@ -706,6 +708,7 @@ class AgentSessionService:
             principal=principal,
             employee=employee,
             model=model,
+            stall_retry=stall_retry,
         ):
             events_out.append(event)
         await self._session.commit()
@@ -721,6 +724,7 @@ class AgentSessionService:
         principal: Principal,
         employee: EmployeeRow | None,
         model: str | None = None,
+        stall_retry: bool = False,
     ) -> AsyncIterator[dict]:
         project = await self._projects.require_access(
             project_id=project_id, principal=principal, employee=employee, write=True
@@ -813,6 +817,10 @@ class AgentSessionService:
 
         seq += 1
         user_payload: dict = {"text": display_text}
+        if stall_retry:
+            # повтор run-stall сторожа: UI не дублирует пузырь пользователя,
+            # а сторож считает такие сообщения частью цепочки ретраев
+            user_payload["stall_retry"] = True
         if refs:
             user_payload["attachment_refs"] = list(refs)
         if delivery is not None:
@@ -887,6 +895,7 @@ class AgentSessionService:
                 message=bridge_message,
                 model=send_model,
                 endpoint=runtime_endpoint,
+                retry=policy_to_send_fields(project.chat_error_policy),
                 bootstrap=BridgeSessionBootstrap(
                     session_id=row.id,
                     prodavan_session_id=row.id,
@@ -1449,6 +1458,13 @@ class AgentSessionService:
         # chat's data outlives it and can leak into other sessions' views.
         # Rows with NULL session_id (chats=all tables: catalogs, sellers …)
         # are never matched and stay intact.
+        # Указатели «активный чат» сотрудников на удаляемую сессию — обнуляем,
+        # иначе клиенты восстановят мёртвый чат при следующем входе.
+        from prodavan.application.agent.chat_sidebar_service import (
+            clear_chat_selection_refs,
+        )
+
+        await clear_chat_selection_refs(self._session, session_id)
         module_rows = await self._session.execute(
             delete(ModuleInstanceDataRow).where(ModuleInstanceDataRow.session_id == session_id)
         )

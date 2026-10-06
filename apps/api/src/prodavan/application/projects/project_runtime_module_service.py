@@ -163,6 +163,65 @@ class ProjectRuntimeModuleService:
             )
         return out
 
+    async def mcp_aliases_map(
+        self,
+        *,
+        project_id: str,
+        principal: Principal,
+        employee: EmployeeRow | None,
+    ) -> dict[str, Any]:
+        """Chat display aliases for MCP tools, aggregated over bound modules.
+
+        Merges every module's ``mcp_aliases`` meta document (instance doc
+        wins, module template fallback) into a flat lookup keyed by the
+        canonical wire name ``mcp.{server}.{tool}`` plus the bare tool name
+        (server-less aliases / any-server fallbacks).
+        """
+        aliases: dict[str, str] = {}
+        descriptions: dict[str, str] = {}
+        modules = await self.list_modules(
+            project_id=project_id, principal=principal, employee=employee
+        )
+        for mod in modules:
+            module_id = str(mod.get("module_id") or "")
+            if not module_id:
+                continue
+            try:
+                doc = await self.get_meta_document(
+                    project_id=project_id,
+                    module_id=module_id,
+                    slug="mcp_aliases",
+                    principal=principal,
+                    employee=employee,
+                )
+            except AppError:
+                continue
+            body = doc.get("body")
+            items = body if isinstance(body, list) else (
+                body.get("items") if isinstance(body, dict) else None
+            )
+            if not isinstance(items, list):
+                continue
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                tool = str(item.get("tool") or "").strip()
+                label = str(item.get("label") or "").strip()
+                if not tool or not label:
+                    continue
+                server = str(item.get("server") or "").strip()
+                description = str(item.get("description") or "").strip()
+                if server:
+                    key = f"mcp.{server}.{tool}"
+                    aliases[key] = label
+                    if description:
+                        descriptions[key] = description
+                # Bare tool name: server-less alias or any-server fallback.
+                aliases.setdefault(tool, label)
+                if description:
+                    descriptions.setdefault(tool, description)
+        return {"aliases": aliases, "descriptions": descriptions}
+
     async def get_meta_document(
         self,
         *,
@@ -217,6 +276,69 @@ class ProjectRuntimeModuleService:
         rows = await self._instances.list_data_rows(
             instance_id=inst.id, table_slug=table_slug, session_id=filter_sid
         )
+        return [
+            {
+                "module_id": module_id,
+                "instance_id": inst.id,
+                **row,
+            }
+            for row in rows
+        ]
+
+    async def list_data_rows_all_chats(
+        self,
+        *,
+        project_id: str,
+        module_id: str,
+        table_slug: str,
+        principal: Principal,
+        employee: EmployeeRow | None,
+    ) -> list[dict[str, Any]]:
+        """Project-wide read of a chats=current table (Закупка drill-down).
+
+        Строки всех чатов проекта (+ синтетический «main») одним списком;
+        у каждой строки есть session_id — запись через select_row идёт в
+        бакет самой строки. Для chats=all таблиц эквивалентно обычному list.
+        """
+        from prodavan.application.modules.chat_scope import (
+            CHAT_SCOPE_CURRENT,
+            DEFAULT_CHAT_SESSION_ID,
+        )
+        from prodavan.application.modules.chat_scope_ops import resolve_table_chats_scope
+
+        table_slug = check_table_slug(table_slug)
+        await self._require_project(
+            project_id=project_id, principal=principal, employee=employee, write=False
+        )
+        inst = await self._sot_for_project(
+            project_id=project_id, module_id=module_id, write=False
+        )
+        chats = await resolve_table_chats_scope(
+            self._instances,
+            instance_id=inst.id,
+            module_id=module_id,
+            table_slug=table_slug,
+        )
+        if chats != CHAT_SCOPE_CURRENT:
+            rows = await self._instances.list_data_rows(
+                instance_id=inst.id, table_slug=table_slug
+            )
+        else:
+            from sqlalchemy import select as sa_select
+
+            from prodavan.infrastructure.persistence.models.agent import AgentSessionRow
+
+            q = await self._session.execute(
+                sa_select(AgentSessionRow.id).where(
+                    AgentSessionRow.project_id == project_id
+                )
+            )
+            session_ids = [str(s) for s in q.scalars().all()]
+            if DEFAULT_CHAT_SESSION_ID not in session_ids:
+                session_ids.append(DEFAULT_CHAT_SESSION_ID)
+            rows = await self._instances.list_data_rows(
+                instance_id=inst.id, table_slug=table_slug, session_ids=session_ids
+            )
         return [
             {
                 "module_id": module_id,
@@ -283,14 +405,18 @@ class ProjectRuntimeModuleService:
         try:
             from prodavan.application.projects.workspace_sync_policy import (
                 defer_or_schedule_project_sync,
+                table_feeds_workspace,
             )
 
-            notification = await defer_or_schedule_project_sync(
-                self._session,
-                project_id=project_id,
-                source="project_module_instance",
-            )
-            remat = notification.rematerialize_alias()
+            if await table_feeds_workspace(
+                self._session, module_id=module_id, table_slug=table_slug
+            ):
+                notification = await defer_or_schedule_project_sync(
+                    self._session,
+                    project_id=project_id,
+                    source="project_module_instance",
+                )
+                remat = notification.rematerialize_alias()
         except Exception:
             logger.exception(
                 "workspace sync after module row write failed project=%s module=%s",
@@ -408,14 +534,18 @@ class ProjectRuntimeModuleService:
         try:
             from prodavan.application.projects.workspace_sync_policy import (
                 defer_or_schedule_project_sync,
+                table_feeds_workspace,
             )
 
-            notification = await defer_or_schedule_project_sync(
-                self._session,
-                project_id=project_id,
-                source="project_module_instance",
-            )
-            remat = notification.rematerialize_alias()
+            if await table_feeds_workspace(
+                self._session, module_id=module_id, table_slug=table_slug
+            ):
+                notification = await defer_or_schedule_project_sync(
+                    self._session,
+                    project_id=project_id,
+                    source="project_module_instance",
+                )
+                remat = notification.rematerialize_alias()
         except Exception:
             logger.exception(
                 "workspace sync after module row write failed project=%s module=%s",
@@ -474,17 +604,39 @@ class ProjectRuntimeModuleService:
         employee: EmployeeRow | None,
     ) -> dict[str, Any]:
         table_slug = check_table_slug(table_slug)
-        await self._require_project(
+        project = await self._require_project(
             project_id=project_id, principal=principal, employee=employee, write=True
         )
         inst = await self._sot_for_project(
             project_id=project_id, module_id=module_id, write=True
+        )
+        # Тело и сессия строки нужны каскаду mod_equipment (до удаления).
+        existing = await self._instances.get_data_row(
+            instance_id=inst.id, table_slug=table_slug, row_id=row_id
         )
         ok = await self._instances.delete_data_row(
             instance_id=inst.id, table_slug=table_slug, row_id=row_id
         )
         if not ok:
             raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="row not found")
+        if module_id == "mod_equipment" and existing is not None:
+            # Связанные данные позиции заказчика удаляются вместе с ней:
+            # позиция → группы/офферы/бюджет; строка бюджета → вся цепочка.
+            from prodavan.application.modules.equipment_offers_service import (
+                cascade_equipment_delete,
+            )
+
+            await cascade_equipment_delete(
+                self._session,
+                cabinet_id=str(project.cabinet_id or ""),
+                project_id=project_id,
+                table_slug=table_slug,
+                row_id=row_id,
+                row_body=existing.get("body") if isinstance(existing.get("body"), dict) else {},
+                principal=principal,
+                employee=employee,
+                session_id=str(existing.get("session_id") or "") or None,
+            )
         if module_id == "mod_equipment" and table_slug == "catalogs":
             try:
                 from prodavan.application.modules.equipment_catalog_opensearch import (
@@ -511,14 +663,18 @@ class ProjectRuntimeModuleService:
         try:
             from prodavan.application.projects.workspace_sync_policy import (
                 defer_or_schedule_project_sync,
+                table_feeds_workspace,
             )
 
-            notification = await defer_or_schedule_project_sync(
-                self._session,
-                project_id=project_id,
-                source="project_module_instance",
-            )
-            remat = notification.rematerialize_alias()
+            if await table_feeds_workspace(
+                self._session, module_id=module_id, table_slug=table_slug
+            ):
+                notification = await defer_or_schedule_project_sync(
+                    self._session,
+                    project_id=project_id,
+                    source="project_module_instance",
+                )
+                remat = notification.rematerialize_alias()
         except Exception:
             logger.exception(
                 "workspace sync after module row write failed project=%s module=%s",

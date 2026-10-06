@@ -146,15 +146,16 @@ data:
   POD_AGENT_RUNTIME_AUTH_SECRET: pod-agent-bridge-auth
   # Cross-ns (sandbox -> app ns) URL: dev contour app ns is agentscale-dev.
   POD_AGENT_RUNTIME_API_BASE_URL: http://agentscale-api.agentscale-dev.svc:8001/api/v1
-  POD_AGENT_RUNTIME_IMAGE: ghcr.io/ne-tort/prodavan-agent-runtime:c01dbd48d83c
+  POD_AGENT_RUNTIME_IMAGE: ghcr.io/ne-tort/prodavan-agent-runtime:fc837fe807ed
   POD_AGENT_RUNTIME_BOOTSTRAP_ENABLED: "true"
   # CLAW-WEB — web.search provider config. The sandbox agent-runtime never
-  # reaches SearxNG directly: `provider=agentscale_api` makes the built-in
-  # web.search tool POST to the API proxy on the pod surface (:8001), which
-  # forwards to SearxNG with per-pod rate-limit + metrics. OPENCLAW_WEB_SEARCH_URL
+  # reaches SearxNG directly: `provider=prodavan_api` (id провайдера в
+  # openclaw-sdk tools/web.ts) makes the built-in web.search tool POST to the
+  # API proxy on the pod surface (:8001), which forwards to SearxNG with
+  # per-pod rate-limit + metrics. OPENCLAW_WEB_SEARCH_URL
   # is left empty — the SDK derives the endpoint from PRODAVAN_API_BASE_URL +
   # PRODAVAN_PROJECT_ID (both injected into the pod by pod_spec).
-  POD_AGENT_RUNTIME_WEB_SEARCH_PROVIDER: "agentscale_api"
+  POD_AGENT_RUNTIME_WEB_SEARCH_PROVIDER: "prodavan_api"
   POD_AGENT_RUNTIME_WEB_SEARCH_URL: ""
   # Backend SearxNG URL the *API application* proxies to. Reachable only from
   # the API pod (agentscale ns), never from the sandbox namespace (NetworkPolicy
