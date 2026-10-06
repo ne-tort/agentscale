@@ -6,7 +6,8 @@ from prodavan.application.platform.product_module_seeds import (
     mod_equipment_meta,
     mod_files_meta,
     mod_mcp_meta,
-    mod_prompts_meta,)
+    mod_prompts_meta,
+)
 from prodavan.application.platform.product_module_upsert import upsert_product_modules
 
 
@@ -42,7 +43,10 @@ def test_templates_meta_contract() -> None:
     assert "templates_list" in views and "template_form" in views
     hub = next(v for v in meta["views"] if v["slug"] == "equipment_hub")["ui_json"]
     tiles = [i.get("target", {}).get("view") for i in hub.get("items", [])]
-    assert "templates_list" in tiles
+    assert "templates_list" not in tiles  # шаблоны уехали в хаб «Управление»
+    mgmt_hub = next(v for v in meta["views"] if v["slug"] == "equipment_hub_management")["ui_json"]
+    mgmt_tiles = [i.get("target", {}).get("view") for i in mgmt_hub.get("items", [])]
+    assert "templates_list" in mgmt_tiles
     seeds = [s for s in meta["seed_rows"]["items"] if s.get("table_slug") == "templates"]
     assert {s["body"]["template_type"] for s in seeds} == {
         "budget",
@@ -170,7 +174,7 @@ def test_collection_views_use_inline_add_without_primary_action() -> None:
 
 def test_equipment_meta_hub_on_data_placement() -> None:
     meta = mod_equipment_meta()
-    tab = meta["tabs"][0]
+    tab = next(t for t in meta["tabs"] if t["id"] == "tab_equipment")
     assert tab["view_slug"] == "equipment_hub"
     assert tab["nav"]["placement"] == "data"
     assert tab["default_project_bind"] == "global"
@@ -188,6 +192,10 @@ def test_equipment_meta_hub_on_data_placement() -> None:
         "equipment_mcp",
         "budget_lines",
         "procurement",
+        "equipment_prompts",
+        "mcp_tool_overrides",
+        "document_company_fields",
+        "document_fields",
     }
     kinds = {a["kind"] for a in meta["actions"]}
     assert "content.index_opensearch" in kinds
@@ -203,6 +211,30 @@ def test_equipment_meta_hub_on_data_placement() -> None:
             "procurement_list", "supplier_offers"} <= view_slugs
     assert "found_offers_list" not in view_slugs
     assert "offers_for_line" not in view_slugs
+    # «Закупка» — проектный агрегат: общий датасет (chats=all), а не per-chat
+    # зеркала; дрилл-даун поставщика читает офферы всех чатов проекта.
+    tables = {t["slug"]: t for t in meta["tables"]}
+    assert tables["procurement"]["scope"]["chats"] == "all"
+    # Реквизиты компании — кабинетный контур (одинаковы во всех чатах),
+    # deal-реквизиты — per-chat
+    assert tables["document_company_fields"]["scope"] == {"projects": "all", "chats": "all"}
+    assert tables["document_fields"]["scope"]["chats"] == "current"
+    assert tables["found_offers"]["scope"]["chats"] == "current"
+    supplier_offers = next(v for v in meta["views"] if v["slug"] == "supplier_offers")
+    assert supplier_offers["ui_json"]["data_scope"] == {"chats": "all"}
+    # дрилл-даун из «Закупки»: заголовок с именем поставщика из контекстной строки
+    assert supplier_offers["ui_json"]["scaffold"]["title_template"]["ru"] == "Товары {seller}"
+    # лицо группы: флаг «устарело» для warning-подсветки + колонка hidden
+    fg_cols = {c["name"]: c for c in meta["columns"] if c["table_slug"] == "found_groups"}
+    assert fg_cols["face_stale"]["hidden"] is True
+    groups_list_view = next(v for v in meta["views"] if v["slug"] == "found_groups_list")
+    assert groups_list_view["ui_json"]["row_style"][0] == {
+        "when": {"field": "face_stale", "eq": True},
+        "accent": "warning",
+    }
+    # MCP: у агента есть delete-инструменты; статусы позиций ему не принадлежат
+    alias_tools = {a["tool"] for a in meta["mcp_aliases"]}
+    assert {"request_lines_delete", "found_groups_delete"} <= alias_tools
     assert not any(r["target"]["format"] == "merge_mapped_sqlite" for r in meta["materialize"])
     assert any(r["id"] == "catalog_manifest" for r in meta["materialize"])
     # s4b is fully removed (table, views, hub tile, materialize, env)
@@ -305,13 +337,35 @@ def test_equipment_meta_hub_on_data_placement() -> None:
 
     hub = next(v for v in meta["views"] if v["slug"] == "equipment_hub")
     hub_titles = {i["title"] for i in hub["ui_json"]["items"]}
+    # Данные: рабочие таблицы подбора
     assert "Характеристики оборудования" in hub_titles
-    assert "Типы комплектующих" in hub_titles
     assert "Сборка" in hub_titles
-    assert "Поставщики" in hub_titles
-    assert "Интернет магазины" in hub_titles
     assert "Бюджетирование" in hub_titles
+    assert "Позиции заказчика" in hub_titles
+    assert "Найденные товары" in hub_titles
+    assert "Закупка" in hub_titles
+    # Управление уехало в отдельный хаб
+    assert "Типы комплектующих" not in hub_titles
+    assert "Поставщики" not in hub_titles
+    assert "Базы данных" not in hub_titles
+    assert "Интернет магазины" not in hub_titles
+    assert "Шаблоны" not in hub_titles
     assert "S4B" not in hub_titles
+    mgmt_hub = next(v for v in meta["views"] if v["slug"] == "equipment_hub_management")
+    mgmt_titles = {i["title"] for i in mgmt_hub["ui_json"]["items"]}
+    assert mgmt_titles == {
+        "Базы данных",
+        "Типы комплектующих",
+        "Поставщики",
+        "Интернет магазины",
+        "Шаблоны",
+        "Промпты",
+        "Инструкции MCP",
+    }
+    tabs = {t["id"]: t for t in meta["tabs"]}
+    assert tabs["tab_equipment"]["nav"]["placement"] == "data"
+    assert tabs["tab_equipment_management"]["nav"]["placement"] == "management"
+    assert tabs["tab_equipment_management"]["view_slug"] == "equipment_hub_management"
     budget_view = next(v for v in meta["views"] if v["slug"] == "budget_lines_list")
     assert budget_view["table_slug"] == "budget_lines"
     assert budget_view["ui_json"]["row_tap"] == {
@@ -324,6 +378,46 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     assert "price_in" in budget_cols
     assert any(c.get("format") == "budget_calc" and c.get("variant") == "price_out" for c in budget_view["ui_json"]["columns"])
     assert any(c.get("format") == "budget_calc" and c.get("variant") == "margin_total" for c in budget_view["ui_json"]["columns"])
+    # Реквизиты документов: компания (кабинет) + сделка (чат); дефолты
+    # компании = значения из шаблона (сразу подставляются в форму); номера
+    # договора/спецификации автогенерируются в UI из seq-счётчиков.
+    doc_fields = budget_view["ui_json"]["doc_fields"]
+    assert doc_fields["company_table"] == "document_company_fields"
+    assert doc_fields["deal_table"] == "document_fields"
+    # две карточки в линию без общего заголовка: «Поставщик» + «Сделка»
+    assert "title" not in doc_fields
+    assert doc_fields["company_title"]["ru"] == "Поставщик"
+    assert doc_fields["deal_title"]["ru"] == "Сделка"
+    company_panel_cols = [f["column"] for f in doc_fields["company_fields"]]
+    assert {"supplier_name", "city", "app_number", "kp_valid_days"} <= set(company_panel_cols)
+    # сроки поставки/оплаты — сделочные (per-chat), не кабинетные
+    assert not {"delivery_days", "payment_days", "lead_time_note"} & set(company_panel_cols)
+    deal_panel_cols = [f["column"] for f in doc_fields["deal_fields"]]
+    assert {"delivery_days", "payment_days", "lead_time_note"} <= set(deal_panel_cols)
+    auto = {f["column"]: f["auto"] for f in doc_fields["deal_fields"] if "auto" in f}
+    assert auto == {
+        "contract_number": "contract_seq",
+        "spec_number": "spec_seq",
+        "contract_date": "today",
+    }
+    company_cols = {
+        c["name"]: c for c in meta["columns"] if c["table_slug"] == "document_company_fields"
+    }
+    assert company_cols["supplier_name"]["default"] == 'ООО "ИТ Взлёт"'
+    assert company_cols["city"]["default"] == "г. Москва"
+    assert company_cols["app_number"]["default"] == "1"
+    assert company_cols["kp_valid_days"]["default"] == 2
+    assert company_cols["contract_seq"]["hidden"] is True
+    assert company_cols["spec_seq"]["hidden"] is True
+    assert not {"delivery_days", "payment_days", "lead_time_note"} & set(company_cols)
+    deal_cols = {c["name"] for c in meta["columns"] if c["table_slug"] == "document_fields"}
+    assert {"customer_name", "contract_number", "spec_number", "delivery_address"} <= deal_cols
+    assert {"delivery_days", "payment_days", "lead_time_note"} <= deal_cols
+    # экспорты КП/Спецификации/бюджета мерджат компанию и сделку
+    for action_id in ("budget_export", "kp_export", "spec_export"):
+        params = action_map[action_id]["params"]
+        assert params["company_fields_table"] == "document_company_fields"
+        assert params["fields_table"] == "document_fields"
     budget_columns = {c["name"] for c in meta["columns"] if c["table_slug"] == "budget_lines"}
     assert {"line_id", "title", "part_number", "seller", "qty", "price_in", "vat", "markup"} <= budget_columns
     assert not any("s4b" in v["slug"] for v in meta["views"])
@@ -531,8 +625,18 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     }
     assert groups_list["ui_json"]["sort"] == [
         {"field": "rank", "dir": "asc"},
+        {"field": "face_priority", "dir": "desc"},
         {"field": "face_price", "dir": "asc"},
+        {"field": "face_in_stock", "dir": "desc"},
     ]
+    # «Альтернативы» + «Выгода» в списке групп; цвет строк — только stale-warning
+    group_fields = [c["field"] for c in groups_list["ui_json"]["columns"]]
+    assert "alternatives_count" in group_fields
+    assert "benefit" in group_fields
+    assert all(
+        r.get("when", {}).get("field") != "is_best"
+        for r in groups_list["ui_json"]["row_style"]
+    )
     assert any(
         c["name"] == "brand" and c["table_slug"] == "found_offers" for c in meta["columns"]
     )
@@ -560,9 +664,12 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     form_cols = [f["column"] for f in form["ui_json"]["fields"]]
     assert "catalog_id" not in form_cols
     assert "source_title" not in form_cols
-    line_field = next(f for f in form["ui_json"]["fields"] if f["column"] == "line_id")
-    assert line_field["widget"] == "type_ref_picker"
-    assert line_field["pick_view"] == "request_lines_pick"
+    # связующие/вычисляемые поля в форме не редактируются: связь с позицией и
+    # группой, точность и флаги выбора/staleness принадлежат пайплайну
+    assert "line_id" not in form_cols
+    assert "match_kind" not in form_cols
+    assert "is_selected" not in form_cols
+    assert "is_stale" not in form_cols
     pick = next(v for v in meta["views"] if v["slug"] == "request_lines_pick")
     also = pick["ui_json"]["selection"]["set_on_context"]["also_copy"]
     assert {"from": "title", "to": "source_title"} in also

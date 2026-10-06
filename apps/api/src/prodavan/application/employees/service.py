@@ -8,7 +8,7 @@ from sqlalchemy.orm import selectinload
 
 from prodavan.application.auth.register import publish_register_command
 from prodavan.domain.companies.login import validate_login_username
-from prodavan.domain.employees.login import employee_effective_login, employee_kc_email
+from prodavan.domain.employees.login import employee_effective_login, employee_login_handle
 from prodavan.domain.errors import AppError
 from prodavan.domain.identity import ROLE_EMPLOYEE, EmployeeStatus, MembershipRole, Principal
 from prodavan.domain.lifecycle import employee_is_soft_deleted, soft_deleted_at_now
@@ -18,6 +18,20 @@ from prodavan.infrastructure.persistence.models.identity import EmployeeRow, Mem
 class EmployeesCommandService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
+
+    async def _company_login_slug(self, company_id: str) -> str:
+        from prodavan.infrastructure.persistence.models.identity import CompanyRow
+
+        company = await self._session.get(CompanyRow, company_id)
+        if company is None:
+            raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Company not found")
+        slug = (company.login_slug or "").strip()
+        if not slug:
+            # Pre-migration row (should not exist): derive from name.
+            from prodavan.domain.companies.login import slugify_company_name
+
+            slug = slugify_company_name(company.name)
+        return slug
 
     async def _login_taken(self, login: str, *, exclude_id: str | None = None) -> bool:
         q = select(EmployeeRow.id).where(
@@ -29,19 +43,32 @@ class EmployeesCommandService:
         row = await self._session.execute(q)
         return row.scalar_one_or_none() is not None
 
-    async def _assign_login(self, employee: EmployeeRow, *, candidate: str | None = None) -> None:
+    async def _assign_login(
+        self,
+        employee: EmployeeRow,
+        *,
+        candidate: str | None = None,
+        company_login_slug: str | None = None,
+    ) -> None:
         raw = (candidate or "").strip()
         if len(raw) >= 3:
             try:
-                login = validate_login_username(raw)
+                local = validate_login_username(raw)
             except AppError:
-                login = None
+                local = None
         else:
-            login = None
-        if login is None or await self._login_taken(login, exclude_id=employee.id):
+            local = None
+        if local is not None and company_login_slug:
+            handle = employee_login_handle(local, company_login_slug)
+            if not await self._login_taken(handle, exclude_id=employee.id):
+                employee.login = handle
+                return
+        if local is None:
+            employee.login = employee.id
+        elif await self._login_taken(local, exclude_id=employee.id):
             employee.login = employee.id
         else:
-            employee.login = login
+            employee.login = local
 
     async def upsert_invited(
         self,
@@ -49,6 +76,7 @@ class EmployeesCommandService:
         email: str,
         display_name: str | None,
         keycloak_user_id: str | None = None,
+        company_login_slug: str | None = None,
     ) -> EmployeeRow:
         email_l = email.lower().strip()
         existing = await self._session.execute(
@@ -59,16 +87,21 @@ class EmployeesCommandService:
         employee = existing.scalars().first()
         if employee is None:
             local = email_l.split("@", 1)[0] if "@" in email_l else email_l
+            handle = (
+                employee_login_handle(local, company_login_slug)
+                if company_login_slug
+                else (local or "pending")
+            )
             employee = EmployeeRow(
                 email=email_l,
-                login=local[:64] or "pending",
+                login=handle[:200],
                 display_name=display_name,
                 status=EmployeeStatus.INVITED,
                 keycloak_sub=keycloak_user_id,
             )
             self._session.add(employee)
             await self._session.flush()
-            await self._assign_login(employee, candidate=local)
+            await self._assign_login(employee, candidate=local, company_login_slug=company_login_slug)
             return employee
         if keycloak_user_id is not None and employee.keycloak_sub is None:
             employee.keycloak_sub = keycloak_user_id
@@ -124,17 +157,19 @@ class EmployeesCommandService:
                 status=422,
                 detail="contact_email must be an email when provided",
             )
-        if await self._login_taken(login_val):
+        company_slug = await self._company_login_slug(company_id)
+        handle = employee_login_handle(login_val, company_slug)
+        if await self._login_taken(handle):
             raise AppError(
                 code="CONFLICT",
                 title="Conflict",
                 status=409,
-                detail="login already in use",
+                detail="employee name already used in this company",
             )
 
-        kc_email = employee_kc_email(login_val)
+        kc_email = handle
         employee = EmployeeRow(
-            login=login_val,
+            login=handle,
             email=kc_email,
             contact_email=contact,
             display_name=display_name,
@@ -154,7 +189,7 @@ class EmployeesCommandService:
 
         await publish_register_command(
             client_ref=f"employee:{employee.id}",
-            username=login_val,
+            username=handle,
             email=kc_email,
             password=pwd,
             realm_roles=[ROLE_EMPLOYEE],

@@ -172,6 +172,7 @@ class ModuleActionExecutor:
                 row_id=row_id,
                 principal=principal,
                 employee=employee,
+                project_id=project_id,
                 session_id=session_id,
             )
 
@@ -486,6 +487,34 @@ class ModuleActionExecutor:
         )
         data = fill_budget_workbook(template, bodies, {})
 
+        # Листы КП/Спецификация пересоздаются из данных (openpyxl): формульные
+        # 4-слотовые листы bundled-шаблона больше не используются.
+        fields_body = await self._document_fields_body(
+            cabinet_id=cabinet_id,
+            module_id=module_id,
+            params=params,
+            principal=principal,
+            employee=employee,
+            session_id=session_id,
+        )
+        try:
+            import io as _io
+
+            import openpyxl
+
+            from prodavan.application.modules.equipment_docs_render import (
+                build_doc_model,
+                rebuild_kp_spec_sheets,
+            )
+
+            wb = openpyxl.load_workbook(_io.BytesIO(data))
+            rebuild_kp_spec_sheets(wb, build_doc_model(bodies, fields_body))
+            out = _io.BytesIO()
+            wb.save(out)
+            data = out.getvalue()
+        except Exception:
+            logger.exception("budget export: КП/Спецификация sheets rebuild failed")
+
         company_id = await self._resolve_documents_company_id(
             cabinet_id=cabinet_id, project_id=project_id
         )
@@ -589,10 +618,6 @@ class ModuleActionExecutor:
     ) -> dict[str, Any]:
         """Fill the standalone КП/Спецификация template and convert to PDF."""
         from prodavan.application.documents.service import DocumentsService
-        from prodavan.application.modules.equipment_budget import (
-            fill_kp_workbook,
-            load_default_template,
-        )
 
         budget_table = str(params.get("budget_table") or "budget_lines")
         rows = await self._list_rows_for_scope(
@@ -614,14 +639,33 @@ class ModuleActionExecutor:
             )
 
         template_type = "specification" if spec else "commercial_proposal"
-        template = await self._resolve_export_template(
+        _ = template_type
+        # PDF строится из данных (ReportLab): границы/переносы/ширины/даты/
+        # суммы прописью детерминированы — Gotenberg/LibreOffice больше не
+        # участвует (съезжавшие шапки/подвалы, 4 формульных слота КП).
+        from prodavan.application.modules.equipment_docs_render import (
+            build_doc_model,
+            build_kp_pdf,
+            build_spec_pdf,
+        )
+
+        fields_body = await self._document_fields_body(
             cabinet_id=cabinet_id,
-            template_type=template_type,
+            module_id=module_id,
+            params=params,
             principal=principal,
             employee=employee,
-            fallback=load_default_template(template_type),
+            session_id=session_id,
         )
-        data = fill_kp_workbook(template, bodies, template_type)
+        model = build_doc_model(bodies, fields_body)
+        if not model.items:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="no priced budget lines to export",
+            )
+        data = build_spec_pdf(model) if spec else build_kp_pdf(model)
 
         company_id = await self._resolve_documents_company_id(
             cabinet_id=cabinet_id, project_id=project_id
@@ -637,30 +681,57 @@ class ModuleActionExecutor:
         base_name = "specification" if spec else "commercial-proposal"
         ref = await service.save_document(
             data,
-            filename=f"{base_name}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            filename=f"{base_name}.pdf",
+            mime="application/pdf",
             company_id=company_id,
             cabinet_id=cabinet_id or None,
             project_id=project_id,
             principal=principal,
             employee=employee,
-        )
-        converted = await service.convert(
-            ref,
-            filename=f"{base_name}.xlsx",
-            target_format="pdf",
-            company_id=company_id,
-            cabinet_id=cabinet_id or None,
-            project_id=project_id,
-            principal=principal,
-            employee=employee,
-            session=self._session,
         )
         return {
             "kind": "equipment.spec_export" if spec else "equipment.kp_export",
-            "file_ref": converted,
+            "file_ref": ref,
             "rows": len(bodies),
         }
+
+    async def _document_fields_body(
+        self,
+        *,
+        cabinet_id: str,
+        module_id: str,
+        params: dict[str, Any],
+        principal: Principal,
+        employee: EmployeeRow | None,
+        session_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Реквизиты документов: компания (кабинет, персистентно) + сделка (чат).
+
+        Company-строка даёт устойчивые реквизиты поставщика/города/сроков;
+        deal-строка перекрывает их значениями конкретной сделки.
+        """
+        merged: dict[str, Any] = {}
+        for table_key in ("company_fields_table", "fields_table"):
+            default = "document_company_fields" if table_key == "company_fields_table" else "document_fields"
+            table = str(params.get(table_key) or default)
+            try:
+                rows = await self._list_rows_for_scope(
+                    cabinet_id=cabinet_id,
+                    project_id=None,
+                    module_id=module_id,
+                    table_slug=table,
+                    principal=principal,
+                    employee=employee,
+                    session_id=session_id,
+                )
+            except AppError:
+                continue
+            for row in rows:
+                body = row.get("body") if isinstance(row, dict) else None
+                if isinstance(body, dict) and body:
+                    merged.update(body)
+                    break
+        return merged
 
     async def maybe_auto_budget_sync(
         self,
@@ -1228,6 +1299,7 @@ class ModuleActionExecutor:
         row_id: str | None,
         principal: Principal,
         employee: EmployeeRow | None,
+        project_id: str | None = None,
         session_id: str | None = None,
     ) -> dict[str, Any]:
         table_slug = params.get("table_slug")
@@ -1255,40 +1327,52 @@ class ModuleActionExecutor:
                 detail="data.select_row requires params.group_by",
             )
 
-        rows = await self._modules.list_data_rows(
-            cabinet_id=cabinet_id,
-            module_id=module_id,
-            table_slug=table_slug,
-            principal=principal,
-            employee=employee,
-            session_id=session_id,
-        )
+        from prodavan.application.modules.chat_scope import resolve_session_id
+        from prodavan.application.modules.equipment_offers_service import ModuleRowIO
+
+        def _io(sid: str | None) -> ModuleRowIO:
+            return ModuleRowIO(
+                self._session,
+                cabinet_id=cabinet_id,
+                project_id=project_id,
+                principal=principal,
+                employee=employee,
+                session_id=sid,
+            )
+
+        active_sid = resolve_session_id(session_id)
+        io = _io(active_sid)
+        rows = await io.list(table_slug)
         target = next((r for r in rows if str(r.get("row_id")) == row_id), None)
+        if target is None and project_id:
+            # Кросс-чатовый выбор (Закупка → товары поставщика): строка может
+            # жить в бакете ДРУГОГО чата проекта — ищем её проектно-широко и
+            # работаем дальше в ЕЁ сессии (чекбоксы/родитель её чата).
+            wide = await io.list_project_wide(table_slug)
+            target = next((r for r in wide if str(r.get("row_id")) == row_id), None)
+            if target is not None:
+                row_session = str(target.get("session_id") or "").strip()
+                if row_session and row_session != active_sid:
+                    io = _io(row_session)
+                    rows = await io.list(table_slug)
         if target is None:
             raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="row not found")
         body = dict(target.get("body") or {})
         group_val = body.get(group_by)
+        # Повторный клик по уже выбранной строке — снятие выбора (возврат
+        # позиции к автовыбору best пайплайном).
+        want_target = body.get(select_field) is not True
         updated = 0
         for row in rows:
             b = dict(row.get("body") or {})
             if b.get(group_by) != group_val:
                 continue
             rid = str(row.get("row_id"))
-            want = rid == row_id
+            want = rid == row_id and want_target
             if bool(b.get(select_field)) is want:
                 continue
             b[select_field] = want
-            await self._modules.update_data_row(
-                cabinet_id=cabinet_id,
-                module_id=module_id,
-                table_slug=table_slug,
-                row_id=rid,
-                body=b,
-                principal=principal,
-                employee=employee,
-                run_actions=False,
-                session_id=session_id,
-            )
+            await io.update(table_slug, rid, b)
             updated += 1
 
         parent = params.get("parent") if isinstance(params.get("parent"), dict) else None
@@ -1298,43 +1382,45 @@ class ModuleActionExecutor:
             set_field = parent.get("set_field") or "selected_offer_id"
             parent_id = body.get(id_from) if isinstance(id_from, str) else None
             if isinstance(parent_table, str) and parent_table and parent_id:
-                parent_rows = await self._modules.list_data_rows(
-                    cabinet_id=cabinet_id,
-                    module_id=module_id,
-                    table_slug=parent_table,
-                    principal=principal,
-                    employee=employee,
-                    session_id=session_id,
-                )
+                parent_rows = await io.list(parent_table)
                 for prow in parent_rows:
                     if str(prow.get("row_id")) == str(parent_id):
                         pb = dict(prow.get("body") or {})
-                        pb[str(set_field)] = row_id
-                        pb["status"] = "selected"
-                        await self._modules.update_data_row(
-                            cabinet_id=cabinet_id,
-                            module_id=module_id,
-                            table_slug=parent_table,
-                            row_id=str(prow.get("row_id")),
-                            body=pb,
-                            principal=principal,
-                            employee=employee,
-                            run_actions=False,
-                            session_id=session_id,
-                        )
+                        pb[str(set_field)] = row_id if want_target else None
+                        pb["status"] = "selected" if want_target else "matched"
+                        await io.update(parent_table, str(prow.get("row_id")), pb)
                         break
 
         # Best-offer swap: keep the budget snapshot in sync (equipment
-        # budget_sync action watches the offers table).
+        # budget_sync action watches the offers table). Сначала пересчёт чата
+        # целевой строки (его бюджет/статусы), затем — активного чата (зеркало
+        # «Закупки»), если это разные чаты.
+        row_session = str(target.get("session_id") or "").strip() or active_sid
         await self.maybe_auto_budget_sync(
             cabinet_id=cabinet_id,
             module_id=module_id,
             table_slug=table_slug,
             principal=principal,
             employee=employee,
-            session_id=session_id,
+            project_id=project_id,
+            session_id=row_session,
         )
-        return {"kind": "data.select_row", "row_id": row_id, "updated": updated}
+        if row_session != active_sid:
+            await self.maybe_auto_budget_sync(
+                cabinet_id=cabinet_id,
+                module_id=module_id,
+                table_slug=table_slug,
+                principal=principal,
+                employee=employee,
+                project_id=project_id,
+                session_id=active_sid,
+            )
+        return {
+            "kind": "data.select_row",
+            "row_id": row_id,
+            "updated": updated,
+            "selected": want_target,
+        }
 
     async def _index_tabular(
         self,

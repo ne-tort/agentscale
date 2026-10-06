@@ -239,7 +239,6 @@ def test_pick_active_profile_filters_by_project_ids() -> None:
 def test_merge_mapped_sqlite_skips_remote_source_kind() -> None:
     """Remote catalogs stay live — merge ops must only include local rows."""
     import asyncio
-    from types import SimpleNamespace
     from unittest.mock import AsyncMock
 
     planner = MaterializePlanner(session=None)  # type: ignore[arg-type]
@@ -312,3 +311,69 @@ def test_active_profile_paths_only_expand_matching_profile() -> None:
         "body_md": "from A",
         "fragment_id": "prompt_paths_files_0_0",
     }
+
+
+def test_prompt_paths_without_profile_placeholder_expand() -> None:
+    """equipment_prompts (без профиля): prompt_paths правила без плейсхолдера
+    {{active_profile_id}} разворачиваются и без активного профиля."""
+    import asyncio
+    from unittest.mock import AsyncMock
+
+    planner = MaterializePlanner(session=None)  # type: ignore[arg-type]
+    planner._fetch_rows = AsyncMock(  # type: ignore[method-assign]
+        return_value=[
+            {
+                "row_id": "ep1",
+                "path": "prompts/equipment",
+                "files_json": [{"name": "selection", "body": "Инструкция подбора"}],
+                "enabled": True,
+            }
+        ]
+    )
+    ops = asyncio.run(
+        planner._plan_rows_ops(
+            module_id="mod_equipment",
+            rule_id="equipment_prompts_files",
+            source={
+                "type": "rows",
+                "table_slug": "equipment_prompts",
+                "filter": {"enabled": True},
+            },
+            target={"workspace_path": ".", "format": "prompt_paths"},
+            fmt="prompt_paths",
+            active_profile_id=None,
+            project_id="proj_1",
+            cabinet_id="cab_1",
+            priority=11,
+        )
+    )
+    assert len(ops) == 1
+    assert ops[0].format == "prompt_fragment"
+    assert ops[0].workspace_path == "prompts/equipment/selection.md"
+
+
+def test_prompt_paths_with_profile_placeholder_need_profile() -> None:
+    """mod_prompts: правило с {{active_profile_id}} без активного профиля → []."""
+    import asyncio
+    from unittest.mock import AsyncMock
+
+    planner = MaterializePlanner(session=None)  # type: ignore[arg-type]
+    planner._fetch_rows = AsyncMock(return_value=[])  # type: ignore[method-assign]
+    ops = asyncio.run(
+        planner._plan_rows_ops(
+            module_id="mod_prompts",
+            rule_id="prompt_paths_files",
+            source={
+                "type": "rows",
+                "table_slug": "prompt_paths",
+                "filter": {"profile_id": "{{active_profile_id}}"},
+            },
+            target={"workspace_path": ".", "format": "prompt_paths"},
+            fmt="prompt_paths",
+            active_profile_id=None,
+            project_id="proj_1",
+            cabinet_id="cab_1",
+            priority=10,
+        )
+    )
+    assert ops == []

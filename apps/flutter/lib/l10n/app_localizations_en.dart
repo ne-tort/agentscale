@@ -10,6 +10,20 @@ class AppLocalizationsEn extends AppLocalizations {
   AppLocalizationsEn([String locale = 'en']) : super(locale);
 
   @override
+  String get budgetBenefitBest => 'Best price';
+
+  @override
+  String get budgetBenefitSingle => 'Only option';
+
+  @override
+  String get budgetBenefitSame => 'Same';
+
+  @override
+  String budgetBenefitDiff(Object diff) {
+    return '$diff%';
+  }
+
+  @override
   String get adminActiveEmployees => 'Active employees';
 
   @override
@@ -272,6 +286,44 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get adminTypeApiKey => 'API key';
+
+  @override
+  String get adminTypeGrokOauth => 'Grok (xAI OAuth)';
+
+  @override
+  String get aiKeyGrokAuthTitle => 'Grok authorization';
+
+  @override
+  String get aiKeyGrokAuthSubtitle =>
+      'SuperGrok subscription — sign in via link';
+
+  @override
+  String get aiKeyGrokAuthHint =>
+      'Open the link, sign in to your SuperGrok account and confirm the code. Tokens are stored on the server and refreshed automatically.';
+
+  @override
+  String get aiKeyGrokAuthOpenLink => 'Open authorization page';
+
+  @override
+  String get aiKeyGrokAuthCode => 'Confirmation code';
+
+  @override
+  String get aiKeyGrokAuthWaiting => 'Waiting for confirmation…';
+
+  @override
+  String get aiKeyGrokAuthDone => 'Authorization successful';
+
+  @override
+  String get aiKeyGrokAuthDenied => 'Access denied';
+
+  @override
+  String get aiKeyGrokAuthExpired => 'The code expired — start again';
+
+  @override
+  String get aiKeyGrokAuthError => 'Authorization error';
+
+  @override
+  String get aiKeyGrokAuthRestart => 'Start again';
 
   @override
   String get adminNextRenewal => 'Subscription';
@@ -833,10 +885,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get adminPreferredProviderOptional => 'Provider';
 
   @override
-  String get adminProdavanSubscription => 'Prodavan subscription';
+  String get adminProdavanSubscription => 'Agentscale subscription';
 
   @override
-  String get adminProdavanSubscriptionOptional => 'Prodavan subscription';
+  String get adminProdavanSubscriptionOptional => 'Agentscale subscription';
 
   @override
   String adminProviderValue(String provider) {
@@ -1220,9 +1272,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get cabinetManageCustomTabs => 'Manage custom tabs';
 
   @override
-  String get cabinetMcpTools => 'MCP tools';
-
-  @override
   String get cabinetMetaTables => 'Meta tables';
 
   @override
@@ -1253,9 +1302,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String cabinetNoInterpreterForView(String slug) {
     return 'No interpreter registered for view \"$slug\".';
   }
-
-  @override
-  String get cabinetNoMcpTools => 'No MCP tools exposed for this cabinet.';
 
   @override
   String get cabinetNoMetaTablesYet => 'No meta tables in this cabinet yet.';
@@ -1976,7 +2022,13 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String projectChatGroupMcp(int count) {
-    return 'MCP: $count calls';
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '# tool calls',
+      one: '# tool call',
+    );
+    return '$_temp0';
   }
 
   @override
@@ -2001,7 +2053,13 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String projectChatGroupGeneric(int count) {
-    return 'Tools ($count)';
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '# tool calls',
+      one: '# tool call',
+    );
+    return '$_temp0';
   }
 
   @override
@@ -2014,6 +2072,35 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get projectChatAgentWorking => 'agentscale is working…';
+
+  @override
+  String get projectChatReconnecting => 'Reconnecting';
+
+  @override
+  String projectChatReconnectingAttempt(Object n, Object y) {
+    return 'Reconnecting ($n/$y)';
+  }
+
+  @override
+  String get projectChatErrorPolicyTitle => 'Error handling';
+
+  @override
+  String get projectChatErrorPolicyInterval => 'Retry interval, sec';
+
+  @override
+  String get projectChatErrorPolicyInfinite => 'Unlimited attempts';
+
+  @override
+  String get projectChatErrorPolicyAttempts => 'Number of attempts';
+
+  @override
+  String get projectChatErrorPolicyTryOtherModels => 'Try other models';
+
+  @override
+  String get projectChatErrorPolicyFallbackModels => 'Fallback models';
+
+  @override
+  String get projectChatErrorPolicyFallbackModelsNone => 'None selected';
 
   @override
   String get chatCopyMessage => 'Copy reply';
@@ -2101,12 +2188,59 @@ class AppLocalizationsEn extends AppLocalizations {
   String get projectChatToolShell => 'Ran command';
 
   @override
-  String get projectChatToolMcpGeneric => 'MCP';
+  String get projectChatToolMcpGeneric => 'Tool';
 
   @override
   String projectChatToolMcp(String tool) {
-    return 'MCP: $tool';
+    return '$tool';
   }
+
+  @override
+  String projectChatToolMcpServer(Object server, Object tool) {
+    return '$server · $tool';
+  }
+
+  @override
+  String get projectChatToolWebSearch => 'Web search';
+
+  @override
+  String get projectChatToolWebFetch => 'Fetching web page';
+
+  @override
+  String get projectChatToolTodoWrite => 'Updating task plan';
+
+  @override
+  String get projectChatToolTodoList => 'Task plan';
+
+  @override
+  String get projectChatToolNotesWrite => 'Writing note';
+
+  @override
+  String get projectChatToolNotesRead => 'Reading notes';
+
+  @override
+  String get projectChatToolGoalsSet => 'Setting goal';
+
+  @override
+  String get projectChatToolGoalsUpdate => 'Updating goal';
+
+  @override
+  String get projectChatToolGoalsList => 'Goals';
+
+  @override
+  String get projectChatToolCompact => 'Compacting context';
+
+  @override
+  String get projectChatToolMcpServers => 'Tools list';
+
+  @override
+  String get projectChatToolMcpTools => 'Tools list';
+
+  @override
+  String get projectChatToolErrorPrefix => 'Error';
+
+  @override
+  String get projectChatPermissionDenied => 'Action denied';
 
   @override
   String projectChatToolSubagent(String name) {
@@ -2283,7 +2417,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get navData => 'Data';
 
   @override
-  String get navProdavan => 'Prodavan';
+  String get navProdavan => 'Agentscale';
 
   @override
   String get projectAgentError => 'Agent error';
@@ -2786,4 +2920,15 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get adminNoModels => 'No models';
+
+  @override
+  String get adminAddCompanyHint =>
+      'Company name (login: name@agentscale.local)';
+
+  @override
+  String get companyAddEmployeeHint =>
+      'Employee name (login: name@company.local)';
+
+  @override
+  String get authLoginHint => 'company@agentscale.local';
 }

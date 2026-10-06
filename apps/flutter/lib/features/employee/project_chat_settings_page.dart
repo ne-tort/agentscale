@@ -12,6 +12,7 @@ import 'package:prodavan/core/widgets/app_status_banner.dart';
 import 'package:prodavan/core/widgets/app_trailing_chevron.dart';
 import 'package:prodavan/core/widgets/session_metrics_wrap.dart';
 import 'package:prodavan/features/employee/cabinet_project_settings_page.dart';
+import 'package:prodavan/features/employee/project_chat_error_policy_page.dart';
 import 'package:prodavan/features/employee/project_chat_model_select_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
@@ -226,6 +227,15 @@ class _ProjectChatSettingsPageState extends State<ProjectChatSettingsPage> {
               enabled: enabled,
               onTap: _pickModel,
             ),
+          AppNavPreference(
+            title: l10n.projectChatErrorPolicyTitle,
+            icon: Icons.error_outline,
+            onTap: () => ProjectChatErrorPolicyPage.push(
+              context,
+              projectId: widget.projectId,
+              controller: controller,
+            ),
+          ),
           AppNavPreference(
             title: l10n.chatDeleteDialog,
             icon: Icons.delete_outline,

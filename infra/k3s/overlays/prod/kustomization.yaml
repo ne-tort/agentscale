@@ -12,6 +12,7 @@ resources:
   - ../../base
   - postgres.yaml
   - userdb-init.yaml
+  - web-nodeport.yaml
   - sandboxes
 patches:
   - path: patch-prod.yaml
@@ -20,7 +21,7 @@ transformers:
 images:
   - name: ghcr.io/ne-tort/agentscale-api
     newName: ghcr.io/ne-tort/agentscale-api
-    newTag: ef9507670d46
+    newTag: ce9d8e9dfde3
   - name: ghcr.io/ne-tort/agentscale-web
     newName: ghcr.io/ne-tort/agentscale-web
-    newTag: ef9507670d46
+    newTag: ce9d8e9dfde3

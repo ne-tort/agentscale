@@ -44,16 +44,29 @@ class EntitlementService:
         return q.scalar_one_or_none()
 
     async def ensure_company_principal(self, principal: Principal) -> CompanyRow | None:
-        """Resolve Company org principal by keycloak_sub or username==company_id."""
+        """Resolve Company org principal by keycloak_sub, handle, or legacy company id."""
         if not principal.is_company_principal:
             return None
         company = await self.get_company_by_sub(principal.sub)
         if company is not None:
             return company
-        # Soft-bind: KC username is company id.
+        # Soft-bind by KC username: `{slug}@agentscale.local` (new) or
+        # legacy `co_…` id (users provisioned before login handles).
         if principal.username:
             uname = principal.username.strip()
-            company = await self._session.get(CompanyRow, uname)
+            company = None
+            if uname.startswith("co_"):
+                company = await self._session.get(CompanyRow, uname)
+            else:
+                slug = uname.split("@", 1)[0] if "@" in uname else None
+                if slug:
+                    q = await self._session.execute(
+                        select(CompanyRow).where(
+                            CompanyRow.login_slug == slug,
+                            CompanyRow.deleted_at.is_(None),
+                        )
+                    )
+                    company = q.scalars().first()
             if company is not None and company.deleted_at is None and (
                 company.keycloak_sub is None or company.keycloak_sub == principal.sub
             ):

@@ -9,11 +9,13 @@ Env:
 Catalog search goes through Pod Bridge → OpenSearch (no local SQLite / EQUIPMENT_*).
 SoT rows go through Bridge JWT (:8001).
 
-WAVE7 responsibility split (v2.0.0):
+WAVE7 responsibility split (v2.1.1):
   agent — request_lines (customer positions) + found_groups (candidate selection:
            part numbers, aliases, match category); NEVER writes found_offers;
   platform pipeline — materializes found_offers from OpenSearch by group keys,
            refreshes prices, computes best offers / «Закупка» / budget snapshot.
+           request_lines status / found_count / selected_offer_id are owned by
+           the pipeline too — the agent never sets them.
 
 Linking IDs (visible to the agent — no hidden ids):
   - request_lines.row_id  → pass as found_groups.line_id (позиция заказчика)
@@ -33,7 +35,6 @@ from collections.abc import Sequence
 from typing import Any
 
 DEFAULT_MODULE_ID = "mod_equipment"
-LINE_STATUSES = frozenset({"open", "matched", "selected"})
 MATCH_KINDS = frozenset({"exact", "analog", "doubt"})
 
 
@@ -74,7 +75,10 @@ TOOLS: list[dict[str, Any]] = [
             "Hits include: part_number, title, brand, price, price_num, supplier, "
             "lead_time, currency, catalog_id, source_catalog, in_stock, "
             "match_rank (exact_pn|pn_prefix|title|other), match_rank_order, and "
-            "src_hash — the stable catalog position id (sha1 of supplier|title). "
+            "src_hash — the stable catalog position id (sha1 of supplier|title); "
+            "copy src_hash into found_groups.aliases_hash for hits WITHOUT a "
+            "part_number, and collect every spelling of the same P/N into "
+            "aliases_pn. "
             "USE the hits to decide candidates: then record your selection with "
             "found_groups_upsert (part_number + aliases + match_kind). "
             "Do NOT copy products/prices into found_offers — the platform "
@@ -138,8 +142,9 @@ TOOLS: list[dict[str, Any]] = [
         "description": (
             "Create or update a request_lines row (позиция заказчика). title required on "
             "create. PATCH merges: omit a field to leave it unchanged; pass null to clear. "
-            "Optional: part_number, qty, status (open|matched|selected), project_ids. "
-            "found_count and selected_offer_id are managed by the platform — do not set them."
+            "Optional: part_number, qty, project_ids. "
+            "status, found_count and selected_offer_id are computed by the platform "
+            "pipeline — do not set them."
         ),
         "inputSchema": {
             "type": "object",
@@ -149,12 +154,25 @@ TOOLS: list[dict[str, Any]] = [
                 "title": {"type": "string"},
                 "part_number": {"type": ["string", "null"]},
                 "qty": {"type": ["number", "integer", "null"]},
-                "status": {
-                    "type": ["string", "null"],
-                    "enum": ["open", "matched", "selected", None],
-                },
                 "project_ids": {"type": ["array", "null"], "items": {"type": "string"}},
             },
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "request_lines_delete",
+        "description": (
+            "Delete a request_lines row by row_id. Its found_groups and materialized "
+            "offers are cleaned up by the platform pipeline automatically. Use it to drop "
+            "duplicated or mistaken customer positions."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "module_id": {"type": "string", "default": DEFAULT_MODULE_ID},
+                "row_id": {"type": "string"},
+            },
+            "required": ["row_id"],
             "additionalProperties": False,
         },
     },
@@ -195,18 +213,25 @@ TOOLS: list[dict[str, Any]] = [
         "description": (
             "Create or update a found_groups row — THE tool to record which products "
             "match a customer position. One row = one part-number group for one "
-            "request line. On create: line_id MUST be request_lines.row_id "
+            "request line; record EVERY distinct candidate part number as its own group. "
+            "On create: line_id MUST be request_lines.row_id "
             "(from request_lines_list) AND at least one of part_number / "
             "aliases_pn / aliases_hash is required. "
+            "part_number — canonical P/N of the group. aliases_pn — ALL other "
+            "spellings of the SAME part number you saw across suppliers in the "
+            "catalog hits (comma-separated). aliases_hash — src_hash ids of catalog "
+            "hits that belong to this group but carry NO part number (copy the "
+            "src_hash from equipment_catalog_search hits). "
             "match_kind — how well THIS group matches the customer position: "
-            "'exact' (точное совпадение), 'analog' (аналог), 'doubt' (есть сомнения "
-            "в точности; analog and doubt are DIFFERENT categories). "
-            "aliases_pn — other spellings of the same part number used by other "
-            "suppliers (comma-separated). aliases_hash — catalog src_hash ids of "
-            "positions that belong to this group but carry no part number. "
+            "'exact' (точное совпадение по P/N), 'analog' (функциональный аналог), "
+            "'doubt' (есть сомнения в точности; analog and doubt are DIFFERENT "
+            "categories). "
             "The platform materializes ALL catalog offers for the group keys "
-            "(part number + aliases), refreshes prices and computes best offers, "
-            "«Закупка» and budget — you only pick groups and their match category. "
+            "(P/N + aliases_pn + aliases_hash) into «Найденные товары», refreshes "
+            "prices from OpenSearch and auto-selects the best: cheapest offer wins, "
+            "but a PRIORITY supplier beats price within the same match tier; "
+            "analog/doubt groups never outrank exact ones regardless of supplier. "
+            "The user can override the choice manually in the UI. "
             "Do NOT write found_offers (no such tool): offers/prices are owned by "
             "the platform. "
             "PATCH merges: omit = leave; null = clear. Optional: note, project_ids."
@@ -243,6 +268,22 @@ TOOLS: list[dict[str, Any]] = [
                 },
                 "project_ids": {"type": ["array", "null"], "items": {"type": "string"}},
             },
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "found_groups_delete",
+        "description": (
+            "Delete a found_groups row by row_id. Materialized offers of the group are "
+            "removed by the platform pipeline. Use it to drop a mistaken candidate group."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "module_id": {"type": "string", "default": DEFAULT_MODULE_ID},
+                "row_id": {"type": "string"},
+            },
+            "required": ["row_id"],
             "additionalProperties": False,
         },
     },
@@ -337,9 +378,6 @@ def _pick_present(arguments: dict[str, Any], keys: Sequence[str]) -> dict[str, A
 def _validate_line_body(body: dict[str, Any], *, creating: bool) -> None:
     if creating and not str(body.get("title") or "").strip():
         raise RuntimeError("title is required when creating request_lines")
-    if "status" in body and body["status"] is not None:
-        if str(body["status"]) not in LINE_STATUSES:
-            raise RuntimeError(f"status must be one of {sorted(LINE_STATUSES)}")
 
 
 def _validate_group_body(body: dict[str, Any], *, creating: bool) -> None:
@@ -417,7 +455,6 @@ def _call_tool(name: str, arguments: dict[str, Any]) -> Any:
             "title",
             "part_number",
             "qty",
-            "status",
             "project_ids",
         )
         body = _pick_present(arguments, keys)
@@ -436,6 +473,15 @@ def _call_tool(name: str, arguments: dict[str, Any]) -> Any:
             "POST",
             _data_path(mid, "request_lines"),
             {"body": body},
+            session_id=sid,
+        )
+    if name == "request_lines_delete":
+        row_id = str(arguments.get("row_id") or "").strip()
+        if not row_id:
+            raise RuntimeError("row_id is required for request_lines_delete")
+        return _http(
+            "DELETE",
+            _data_path(mid, "request_lines", row_id),
             session_id=sid,
         )
 
@@ -478,8 +524,62 @@ def _call_tool(name: str, arguments: dict[str, Any]) -> Any:
             {"body": body},
             session_id=sid,
         )
+    if name == "found_groups_delete":
+        row_id = str(arguments.get("row_id") or "").strip()
+        if not row_id:
+            raise RuntimeError("row_id is required for found_groups_delete")
+        return _http(
+            "DELETE",
+            _data_path(mid, "found_groups", row_id),
+            session_id=sid,
+        )
 
     raise RuntimeError(f"unknown tool: {name}")
+
+
+def _load_tool_overrides() -> dict[str, dict[str, str]]:
+    """UI-управляемые переопределения инструкций (таблица mcp_tool_overrides).
+
+    Читается на каждый tools/list (подключение/перезагрузка MCP): правки из
+    «Управление → Подбор техники → Инструкции MCP» подхватываются без правок
+    кода. Сбой чтения никогда не ломает список инструментов.
+    """
+    try:
+        rows = _list_rows(DEFAULT_MODULE_ID, "mcp_tool_overrides")
+    except Exception:
+        return {}
+    out: dict[str, dict[str, str]] = {}
+    for r in rows:
+        body = r.get("body") if isinstance(r.get("body"), dict) else r
+        if not isinstance(body, dict) or body.get("enabled") is False:
+            continue
+        tool = str(body.get("tool") or "").strip()
+        if not tool:
+            continue
+        out[tool] = {
+            "description": str(body.get("description") or "").strip(),
+            "extra": str(body.get("extra_instructions") or "").strip(),
+        }
+    return out
+
+
+def _tools_with_overrides() -> list[dict[str, Any]]:
+    """TOOLS + переопределения описаний из UI (description заменяет,
+    extra_instructions дописывается)."""
+    overrides = _load_tool_overrides()
+    if not overrides:
+        return TOOLS
+    out: list[dict[str, Any]] = []
+    for t in TOOLS:
+        ov = overrides.get(str(t.get("name") or ""))
+        if not ov:
+            out.append(t)
+            continue
+        desc = ov["description"] or str(t.get("description") or "")
+        if ov["extra"]:
+            desc = desc.rstrip() + "\n\n" + ov["extra"]
+        out.append({**t, "description": desc})
+    return out
 
 
 def _result_text(payload: Any) -> dict[str, Any]:
@@ -498,13 +598,13 @@ def _handle(msg: dict[str, Any]) -> dict[str, Any] | None:
             "result": {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "prodavan-equipment", "version": "2.0.0"},
+                "serverInfo": {"name": "prodavan-equipment", "version": "2.2.0"},
             },
         }
     if method == "notifications/initialized":
         return None
     if method == "tools/list":
-        return {"jsonrpc": "2.0", "id": mid, "result": {"tools": TOOLS}}
+        return {"jsonrpc": "2.0", "id": mid, "result": {"tools": _tools_with_overrides()}}
     if method == "tools/call":
         name = str(params.get("name") or "")
         arguments = params.get("arguments") if isinstance(params.get("arguments"), dict) else {}

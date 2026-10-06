@@ -96,6 +96,10 @@ data:
   KEYCLOAK_ISSUER_URL: http://127.0.0.1:8099/realms/agentscale
   # Cross-ns (sandbox -> app ns) URL: prod contour app ns is agentscale.
   POD_AGENT_RUNTIME_API_BASE_URL: http://agentscale-api.agentscale.svc:8001/api/v1
+  # web.search: тот же прокси-контур, что в dev — провайдер prodavan_api
+  # (раньше ключ отсутствовал → web.search был выключен на prod).
+  POD_AGENT_RUNTIME_WEB_SEARCH_PROVIDER: "prodavan_api"
+  POD_AGENT_RUNTIME_WEB_SEARCH_URL: ""
   WEB_SEARCH_BACKEND_URL: "http://searxng.agentscale.svc:8080/search"
   POD_PROBE_ENABLED: "false"
 ---

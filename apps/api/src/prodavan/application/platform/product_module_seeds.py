@@ -29,7 +29,7 @@ def _equipment_mcp_list_header() -> dict[str, Any]:
         "table_slug": "equipment_mcp",
         "ensure_row": {
             "name": "prodavan-equipment",
-            "version": "2.0.0",
+            "version": "2.2.0",
             "enabled": True,
         },
         "fields": [
@@ -763,6 +763,65 @@ def mod_files_meta() -> dict[str, list[Any]]:
 
 def mod_mcp_meta() -> dict[str, list[Any]]:
     return {
+        # Chat display aliases for the prodavan-modules platform MCP server
+        # (materialized into every project) — friendly labels instead of
+        # "prodavan-modules · modules_list" in the chat.
+        "mcp_aliases": [
+            {
+                "server": "prodavan-modules",
+                "tool": "modules_list",
+                "label": "Список модулей",
+                "description": "Модули проекта и их настройки",
+            },
+            {
+                "server": "prodavan-modules",
+                "tool": "module_meta_list",
+                "label": "Список настроек модулей",
+                "description": "Мета-документы модулей проекта",
+            },
+            {
+                "server": "prodavan-modules",
+                "tool": "module_meta_get",
+                "label": "Чтение настройки модуля",
+                "description": "Чтение мета-документа модуля",
+            },
+            {
+                "server": "prodavan-modules",
+                "tool": "module_meta_put",
+                "label": "Сохранение настройки модуля",
+                "description": "Запись мета-документа модуля",
+            },
+            {
+                "server": "prodavan-modules",
+                "tool": "module_data_list",
+                "label": "Чтение данных модуля",
+                "description": "Строки таблиц данных модуля",
+            },
+            {
+                "server": "prodavan-modules",
+                "tool": "module_data_create",
+                "label": "Создание записи",
+                "description": "Новая строка в таблице данных модуля",
+            },
+            {
+                "server": "prodavan-modules",
+                "tool": "module_data_update",
+                "label": "Обновление записи",
+                "description": "Изменение строки в таблице данных модуля",
+            },
+            {
+                "server": "prodavan-modules",
+                "tool": "module_data_delete",
+                "label": "Удаление записи",
+                "description": "Удаление строки из таблицы данных модуля",
+            },
+            {
+                "server": "prodavan-modules",
+                "tool": "module_action_invoke",
+                "label": "Действие модуля",
+                "description": "Запуск действия из настроек модуля",
+            },
+        ],
         "tables": [
             {
                 "slug": "mcp_packages",
@@ -921,7 +980,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
             },
             {
                 "slug": "found_offers",
-                "label": {"ru": "Найденные товары", "en": "Found offers"},
+                "label": {"ru": "Предложения поставщиков", "en": "Supplier offers"},
                 "storage_kind": "json_document",
                 "enabled": True,
                 "scope": {"projects": "all", "chats": "current"},
@@ -991,13 +1050,51 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "enabled": True,
                 "scope": {"projects": "all", "chats": "current"},
             },
+            # Промпты подбора техники (управляемые инструкции; мердж в workspace
+            # через prompt_paths/fragments — совместим с mod_prompts).
+            {
+                "slug": "equipment_prompts",
+                "label": {"ru": "Промпты", "en": "Prompts"},
+                "storage_kind": "json_document",
+                "enabled": True,
+                "scope": {"projects": "all", "chats": "all"},
+            },
+            # Реквизиты НАШЕЙ стороны + устойчивые условия: живут на уровне
+            # кабинета (chats=all) — одинаковы во всех чатах/проектах и сразу
+            # подставляются в форму (дефолты колонок = значения из шаблона).
+            {
+                "slug": "document_company_fields",
+                "label": {"ru": "Реквизиты компании", "en": "Company details"},
+                "storage_kind": "json_document",
+                "enabled": True,
+                "scope": {"projects": "all", "chats": "all"},
+            },
+            # Реквизиты документов (КП/Спецификация): то, что нельзя вывести
+            # из данных — стороны, номера договоров, сроки, адреса.
+            {
+                "slug": "document_fields",
+                "label": {"ru": "Реквизиты документов", "en": "Document details"},
+                "storage_kind": "json_document",
+                "enabled": True,
+                "scope": {"projects": "all", "chats": "current"},
+            },
+            # Оверрайды инструкций MCP-инструментов (описания тулзов агента).
+            {
+                "slug": "mcp_tool_overrides",
+                "label": {"ru": "Инструкции MCP", "en": "MCP instructions"},
+                "storage_kind": "json_document",
+                "enabled": True,
+                "scope": {"projects": "all", "chats": "all"},
+            },
             # WAVE7: «Закупка» — агрегат по поставщикам (материализуется пайплайном).
+            # chats=all: общий проектный датасет (агрегатор между чатами), а не
+            # per-chat зеркала — строки одни на проект, видны из любого чата.
             {
                 "slug": "procurement",
                 "label": {"ru": "Закупка", "en": "Procurement"},
                 "storage_kind": "json_document",
                 "enabled": True,
-                "scope": {"projects": "all", "chats": "current"},
+                "scope": {"projects": "all", "chats": "all"},
             },
         ],
         "columns": [
@@ -1359,6 +1456,61 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
             },
             {
                 "table_slug": "found_groups",
+                "name": "face_brand",
+                "label": {"ru": "Бренд (лицо группы)", "en": "Face brand"},
+                "type": "text",
+                "required": False,
+            },
+            {
+                "table_slug": "found_groups",
+                "name": "face_stale",
+                "label": {"ru": "Лицо устарело", "en": "Face stale"},
+                "type": "bool",
+                "required": False,
+                "default": False,
+                "read_only": True,
+                "hidden": True,
+            },
+            {
+                "table_slug": "found_groups",
+                "name": "face_priority",
+                "label": {"ru": "Лицо — приоритетный поставщик", "en": "Face priority"},
+                "type": "bool",
+                "required": False,
+                "default": False,
+                "read_only": True,
+                "hidden": True,
+            },
+            {
+                "table_slug": "found_groups",
+                "name": "face_in_stock",
+                "label": {"ru": "Лицо в наличии", "en": "Face in stock"},
+                "type": "bool",
+                "required": False,
+                "default": False,
+                "read_only": True,
+                "hidden": True,
+            },
+            {
+                "table_slug": "found_groups",
+                "name": "match_label",
+                "label": {"ru": "Совпадение", "en": "Match"},
+                "type": "text",
+                "required": False,
+                "default": "",
+                "read_only": True,
+            },
+            {
+                "table_slug": "found_groups",
+                "name": "alternatives_count",
+                "label": {"ru": "Альтернативы", "en": "Alternatives"},
+                "type": "number",
+                "required": False,
+                "default": 0,
+                "read_only": True,
+            },
+            {
+                "table_slug": "found_groups",
                 "name": "best_offer_id",
                 "label": {"ru": "Лучший оффер", "en": "Best offer"},
                 "type": "text",
@@ -1567,6 +1719,53 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "type": "json",
                 "required": False,
                 "default": {},
+            },
+            {
+                "table_slug": "found_offers",
+                "name": "alternatives_count",
+                "label": {"ru": "Альтернативы", "en": "Alternatives"},
+                "type": "number",
+                "required": False,
+                "default": 0,
+                "read_only": True,
+            },
+            {
+                "table_slug": "found_offers",
+                "name": "benefit_label",
+                "label": {"ru": "Выгода", "en": "Benefit"},
+                "type": "text",
+                "required": False,
+                "default": "",
+                "read_only": True,
+            },
+            {
+                "table_slug": "found_offers",
+                "name": "is_effective",
+                "label": {"ru": "Текущий выбор позиции", "en": "Effective choice"},
+                "type": "bool",
+                "required": False,
+                "default": False,
+                "read_only": True,
+                "hidden": True,
+            },
+            {
+                "table_slug": "found_offers",
+                "name": "benefit_tone",
+                "label": {"ru": "Тон выгоды", "en": "Benefit tone"},
+                "type": "text",
+                "required": False,
+                "default": "",
+                "read_only": True,
+                "hidden": True,
+            },
+            {
+                "table_slug": "found_offers",
+                "name": "match_label",
+                "label": {"ru": "Совпадение", "en": "Match"},
+                "type": "text",
+                "required": False,
+                "default": "",
+                "read_only": True,
             },
             _project_ids_column("found_offers"),
             {
@@ -1987,6 +2186,16 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "type": "number",
                 "required": False,
             },
+            # бренд выбранного оффера (снапшот; для экспортов/аналитики)
+            {
+                "table_slug": "budget_lines",
+                "name": "brand",
+                "label": {"ru": "Бренд", "en": "Brand"},
+                "type": "text",
+                "required": False,
+                "read_only": True,
+                "hidden": True,
+            },
             {
                 "table_slug": "budget_lines",
                 "name": "vat",
@@ -2056,10 +2265,19 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
             {
                 "table_slug": "procurement",
                 "name": "selected_count",
-                "label": {"ru": "Выбрано", "en": "Selected"},
+                "label": {"ru": "Товаров", "en": "Products"},
                 "type": "number",
                 "required": False,
                 "default": 0,
+            },
+            {
+                "table_slug": "procurement",
+                "name": "qty_total",
+                "label": {"ru": "Количество", "en": "Quantity"},
+                "type": "number",
+                "required": False,
+                "default": 0,
+                "read_only": True,
             },
             {
                 "table_slug": "procurement",
@@ -2076,14 +2294,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "type": "number",
                 "required": False,
             },
-            {
-                "table_slug": "procurement",
-                "name": "include_delivery",
-                "label": {"ru": "Включить доставку", "en": "Include delivery"},
-                "type": "bool",
-                "required": False,
-                "default": False,
-            },
+
             {
                 "table_slug": "procurement",
                 "name": "delivery_rub",
@@ -2109,6 +2320,247 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "default": 0,
             },
             _project_ids_column("procurement"),
+            {
+                "table_slug": "equipment_prompts",
+                "name": "name",
+                "label": {"ru": "Название", "en": "Name"},
+                "type": "text",
+                "required": True,
+            },
+            {
+                "table_slug": "equipment_prompts",
+                "name": "path",
+                "label": {"ru": "Путь в workspace", "en": "Workspace path"},
+                "type": "text",
+                "required": False,
+                "default": "prompts/equipment",
+            },
+            {
+                "table_slug": "equipment_prompts",
+                "name": "files_json",
+                "label": {"ru": "Промпты", "en": "Prompts"},
+                "type": "json",
+                "required": False,
+                "default": [],
+            },
+            {
+                "table_slug": "equipment_prompts",
+                "name": "enabled",
+                "label": {"ru": "Включён", "en": "Enabled"},
+                "type": "bool",
+                "required": False,
+                "default": True,
+            },
+            _project_ids_column("equipment_prompts"),
+            {
+                "table_slug": "mcp_tool_overrides",
+                "name": "tool",
+                "label": {"ru": "Инструмент", "en": "Tool"},
+                "type": "text",
+                "required": True,
+            },
+            {
+                "table_slug": "mcp_tool_overrides",
+                "name": "description",
+                "label": {"ru": "Описание (замена)", "en": "Description (replace)"},
+                "type": "text",
+                "required": False,
+                "default": "",
+            },
+            {
+                "table_slug": "mcp_tool_overrides",
+                "name": "extra_instructions",
+                "label": {"ru": "Доп. инструкции (добавить)", "en": "Extra instructions (append)"},
+                "type": "text",
+                "required": False,
+                "default": "",
+            },
+            {
+                "table_slug": "mcp_tool_overrides",
+                "name": "enabled",
+                "label": {"ru": "Включено", "en": "Enabled"},
+                "type": "bool",
+                "required": False,
+                "default": True,
+            },
+            _project_ids_column("mcp_tool_overrides"),
+            {
+                "table_slug": "document_company_fields",
+                "name": "supplier_name",
+                "label": {"ru": "Поставщик", "en": "Supplier"},
+                "type": "text",
+                "required": False,
+                "default": 'ООО "ИТ Взлёт"',
+            },
+            {
+                "table_slug": "document_company_fields",
+                "name": "supplier_inn",
+                "label": {"ru": "ИНН поставщика", "en": "Supplier INN"},
+                "type": "text",
+                "required": False,
+                "default": "7716960580",
+            },
+            {
+                "table_slug": "document_company_fields",
+                "name": "supplier_kpp",
+                "label": {"ru": "КПП поставщика", "en": "Supplier KPP"},
+                "type": "text",
+                "required": False,
+                "default": "771601001",
+            },
+            {
+                "table_slug": "document_company_fields",
+                "name": "supplier_address",
+                "label": {"ru": "Адрес поставщика", "en": "Supplier address"},
+                "type": "text",
+                "required": False,
+                "default": "127282, г. Москва, Чермянский проезд, д. 5, стр. 1",
+            },
+            {
+                "table_slug": "document_company_fields",
+                "name": "supplier_email",
+                "label": {"ru": "Email поставщика", "en": "Supplier email"},
+                "type": "text",
+                "required": False,
+                "default": "info@itvzlet.ru",
+            },
+            {
+                "table_slug": "document_company_fields",
+                "name": "supplier_signatory",
+                "label": {"ru": "Подписант поставщика", "en": "Supplier signatory"},
+                "type": "text",
+                "required": False,
+                "default": "Троцкий А.В.",
+            },
+            {
+                "table_slug": "document_company_fields",
+                "name": "city",
+                "label": {"ru": "Город", "en": "City"},
+                "type": "text",
+                "required": False,
+                "default": "г. Москва",
+            },
+            {
+                "table_slug": "document_company_fields",
+                "name": "app_number",
+                "label": {"ru": "№ приложения", "en": "Appendix number"},
+                "type": "text",
+                "required": False,
+                "default": "1",
+            },
+            {
+                "table_slug": "document_company_fields",
+                "name": "delivery_place",
+                "label": {"ru": "Условия доставки", "en": "Delivery terms"},
+                "type": "text",
+                "required": False,
+                "default": "склада Заказчика",
+            },
+            {
+                "table_slug": "document_company_fields",
+                "name": "kp_valid_days",
+                "label": {"ru": "КП действует, дней", "en": "KP valid days"},
+                "type": "number",
+                "required": False,
+                "default": 2,
+            },
+            {
+                "table_slug": "document_company_fields",
+                "name": "contract_seq",
+                "label": {"ru": "Счётчик № договоров", "en": "Contract seq"},
+                "type": "number",
+                "required": False,
+                "default": 0,
+                "read_only": True,
+                "hidden": True,
+            },
+            {
+                "table_slug": "document_company_fields",
+                "name": "spec_seq",
+                "label": {"ru": "Счётчик № спецификаций", "en": "Spec seq"},
+                "type": "number",
+                "required": False,
+                "default": 0,
+                "read_only": True,
+                "hidden": True,
+            },
+            {
+                "table_slug": "document_fields",
+                "name": "customer_name",
+                "label": {"ru": "Покупатель", "en": "Customer"},
+                "type": "text",
+                "required": False,
+                "default": "ООО «Ромашка»",
+            },
+            {
+                "table_slug": "document_fields",
+                "name": "customer_signatory",
+                "label": {"ru": "Подписант покупателя", "en": "Customer signatory"},
+                "type": "text",
+                "required": False,
+                "default": "Иванов И.И.",
+            },
+            {
+                "table_slug": "document_fields",
+                "name": "customer_basis",
+                "label": {"ru": "Основание покупателя", "en": "Customer basis"},
+                "type": "text",
+                "required": False,
+                "default": "Устава",
+            },
+            {
+                "table_slug": "document_fields",
+                "name": "contract_number",
+                "label": {"ru": "№ договора", "en": "Contract number"},
+                "type": "text",
+                "required": False,
+            },
+            {
+                "table_slug": "document_fields",
+                "name": "contract_date",
+                "label": {"ru": "Дата договора", "en": "Contract date"},
+                "type": "text",
+                "required": False,
+            },
+            {
+                "table_slug": "document_fields",
+                "name": "spec_number",
+                "label": {"ru": "№ спецификации", "en": "Spec number"},
+                "type": "text",
+                "required": False,
+            },
+            {
+                "table_slug": "document_fields",
+                "name": "delivery_address",
+                "label": {"ru": "Адрес поставки", "en": "Delivery address"},
+                "type": "text",
+                "required": False,
+                "default": "125167, г. Москва, Ленинградский пр., д. 37, пом. 21/10",
+            },
+            {
+                "table_slug": "document_fields",
+                "name": "delivery_days",
+                "label": {"ru": "Срок поставки (раб. дней)", "en": "Delivery days"},
+                "type": "text",
+                "required": False,
+                "default": "7 (семи)",
+            },
+            {
+                "table_slug": "document_fields",
+                "name": "payment_days",
+                "label": {"ru": "Срок оплаты (раб. дней)", "en": "Payment days"},
+                "type": "text",
+                "required": False,
+                "default": "30 (тридцати)",
+            },
+            {
+                "table_slug": "document_fields",
+                "name": "lead_time_note",
+                "label": {"ru": "Срок поставки (примечание)", "en": "Lead time note"},
+                "type": "text",
+                "required": False,
+                "default": "10-12 недель",
+            },
         ],
         "views": [
             {
@@ -2119,11 +2571,6 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "version": 1,
                     "kind": "hub",
                     "items": [
-                        {
-                            "title": "Базы данных",
-                            "icon": "storage",
-                            "target": {"kind": "view", "view": "catalogs_list"},
-                        },
                         {
                             "title": "Позиции заказчика",
                             "icon": "list_alt",
@@ -2152,14 +2599,6 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "scope": {"active_chat": "required"},
                         },
                         {
-                            "title": "Типы комплектующих",
-                            "icon": "category",
-                            "target": {
-                                "kind": "view",
-                                "view": "equipment_types_list",
-                            },
-                        },
-                        {
                             "title": "Сборка",
                             "icon": "precision_manufacturing",
                             "target": {
@@ -2176,30 +2615,6 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                                 "view": "budget_lines_list",
                             },
                             "scope": {"active_chat": "required"},
-                        },
-                        {
-                            "title": "Поставщики",
-                            "icon": "local_shipping",
-                            "target": {
-                                "kind": "view",
-                                "view": "trusted_sellers_list",
-                            },
-                        },
-                        {
-                            "title": "Интернет магазины",
-                            "icon": "language",
-                            "target": {
-                                "kind": "view",
-                                "view": "web_shops_list",
-                            },
-                        },
-                        {
-                            "title": "Шаблоны",
-                            "icon": "upload_file",
-                            "target": {
-                                "kind": "view",
-                                "view": "templates_list",
-                            },
                         },
                     ],
                 },
@@ -2357,29 +2772,71 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                         "icon": "request_quote",
                         "label": {"ru": "Бюджетирование", "en": "Budget"},
                     },
+                    # сверка цен с OpenSearch при открытии (price_in ← офферы)
+                    "on_load": {"action": "equipment_pipeline_sync"},
                     "title_field": "title",
-                    "subtitle_fields": ["part_number", "seller"],
+                    "subtitle_fields": ["part_number"],
                     # Totals strip above the table (Flutter-side computation from
                     # the same budget_lines bodies the table renders).
                     "summary": {"kind": "budget_totals"},
+                    # Comfortable row padding for the budget table (default
+                    # dataRowMinHeight 40 → taller airy rows; ui_json knob,
+                    # see AppEntityCollection).
+                    # Панель реквизитов документов — справа от суммаризатора:
+                    # поля, которые нельзя вывести из данных. Две группы:
+                    # компания (singleton на весь кабинет) + сделка (singleton чата).
+                    "doc_fields": {
+                        "company_table": "document_company_fields",
+                        "deal_table": "document_fields",
+                        "company_title": {"ru": "Поставщик", "en": "Supplier"},
+                        "deal_title": {"ru": "Сделка", "en": "Deal"},
+                        "company_fields": [
+                            {"column": "supplier_name"},
+                            {"column": "supplier_inn"},
+                            {"column": "supplier_kpp"},
+                            {"column": "supplier_address"},
+                            {"column": "supplier_email"},
+                            {"column": "supplier_signatory"},
+                            {"column": "city"},
+                            {"column": "app_number"},
+                            {"column": "delivery_place"},
+                            {"column": "kp_valid_days"},
+                        ],
+                        "deal_fields": [
+                            {"column": "customer_name"},
+                            {"column": "customer_signatory"},
+                            {"column": "customer_basis"},
+                            {"column": "contract_number", "auto": "contract_seq"},
+                            {"column": "contract_date", "auto": "today"},
+                            {"column": "spec_number", "auto": "spec_seq"},
+                            {"column": "delivery_address"},
+                            {"column": "delivery_days"},
+                            {"column": "payment_days"},
+                            {"column": "lead_time_note"},
+                        ],
+                    },
+                    "row_min_height": 52,
                     "columns": [
                         {
                             "field": "title",
                             "label": {"ru": "Наименование", "en": "Title"},
-                            "max_lines": 3,
-                            "max_width": 300,
+                            "max_lines": 2,
+                            "max_width": 240,
                         },
                         {
                             "field": "part_number",
                             "label": {"ru": "Партномер", "en": "P/N"},
                             "max_lines": 2,
-                            "max_width": 150,
+                            "max_width": 80,
                         },
+                        # Markup takes the supplier column's slot (supplier
+                        # dropped by request; markup editable in place).
                         {
-                            "field": "seller",
-                            "label": {"ru": "Поставщик", "en": "Supplier"},
-                            "max_lines": 2,
-                            "max_width": 170,
+                            "field": "markup",
+                            "label": {"ru": "Наценка", "en": "Markup"},
+                            "align": "end",
+                            "max_width": 110,
+                            "editable": True,
                         },
                         {
                             "field": "qty",
@@ -2397,23 +2854,24 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "field": "vat",
                             "label": {"ru": "НДС", "en": "VAT"},
                             "align": "end",
-                            "max_width": 110,
-                            "editable": True,
-                        },
-                        {
-                            "field": "markup",
-                            "label": {"ru": "Наценка", "en": "Markup"},
-                            "align": "end",
-                            "max_width": 110,
+                            "max_width": 100,
                             "editable": True,
                         },
                         {
                             "field": "price_out",
-                            "label": {"ru": "Цена с маржой", "en": "Price out"},
+                            "label": {"ru": "Цена с маржой, с НДС", "en": "Price out w/ VAT"},
                             "format": "budget_calc",
                             "variant": "price_out",
                             "align": "end",
-                            "max_width": 140,
+                            "max_width": 150,
+                        },
+                        {
+                            "field": "price_no_vat",
+                            "label": {"ru": "Цена без НДС", "en": "Price w/o VAT"},
+                            "format": "budget_calc",
+                            "variant": "price_no_vat",
+                            "align": "end",
+                            "max_width": 130,
                         },
                         {
                             "field": "margin_total",
@@ -2421,12 +2879,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "format": "budget_calc",
                             "variant": "margin_total",
                             "align": "end",
-                            "max_width": 130,
-                        },
-                        {
-                            "field": "brand",
-                            "label": {"ru": "Бренд", "en": "Brand"},
-                            "max_width": 110,
+                            "max_width": 150,
                         },
                     ],
                     # computed columns are Flutter-side; backend ships raw fields
@@ -2765,11 +3218,6 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "align": "end",
                             "max_width": 100,
                         },
-                        {
-                            "field": "status",
-                            "label": {"ru": "Статус", "en": "Status"},
-                            "max_width": 110,
-                        },
                     ],
                     "row_tap": {"kind": "open_view", "view": "groups_for_line"},
                     "inline_add": {"field": "title", "title": "Добавить позицию"},
@@ -2804,24 +3252,32 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                         "title": {"ru": "Найденные товары", "en": "Found products"}
                     },
                     "title_field": "face_title",
-                    "subtitle_fields": ["part_number", "match_kind"],
+                    "subtitle_fields": ["part_number", "match_label", "note"],
+                    # сверка с OpenSearch при открытии (дрилл-даун позиции/бюджета)
+                    "on_load": {"action": "equipment_pipeline_sync"},
                     "columns": [
                         {
                             "field": "face_title",
                             "label": {"ru": "Товар", "en": "Product"},
                             "max_lines": 3,
-                            "max_width": 280,
+                            "max_width": 260,
+                        },
+                        {
+                            "field": "face_brand",
+                            "label": {"ru": "Бренд", "en": "Brand"},
+                            "max_lines": 2,
+                            "max_width": 110,
                         },
                         {
                             "field": "part_number",
                             "label": {"ru": "Партномер", "en": "P/N"},
                             "max_lines": 2,
-                            "max_width": 150,
+                            "max_width": 140,
                         },
                         {
-                            "field": "match_kind",
+                            "field": "match_label",
                             "label": {"ru": "Совпадение", "en": "Match"},
-                            "max_width": 120,
+                            "max_width": 150,
                         },
                         {
                             "field": "face_price",
@@ -2833,22 +3289,34 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "field": "face_seller",
                             "label": {"ru": "Поставщик", "en": "Supplier"},
                             "max_lines": 2,
-                            "max_width": 160,
+                            "max_width": 150,
                         },
                         {
-                            "field": "offers_count",
-                            "label": {"ru": "Предл.", "en": "Offers"},
+                            "field": "alternatives_count",
+                            "label": {"ru": "Альтернативы", "en": "Alternatives"},
                             "align": "end",
-                            "max_width": 90,
+                            "max_width": 110,
+                        },
+                        {
+                            "field": "benefit",
+                            "label": {"ru": "Выгода", "en": "Benefit"},
+                            "format": "benefit",
+                            "price_field": "face_price",
+                            "current_field": "is_best",
+                            "align": "center",
+                            "max_width": 130,
                         },
                     ],
                     "sort": [
                         {"field": "rank", "dir": "asc"},
+                        {"field": "face_priority", "dir": "desc"},
                         {"field": "face_price", "dir": "asc"},
+                        {"field": "face_in_stock", "dir": "desc"},
                     ],
-                    # лучшая группа позиции (точность → цена) — зелёным
+                    # Цвет строки — только warning устаревшего лица; «лучшая»
+                    # подсветка живёт в бейдже «Выгода», а не всей строке.
                     "row_style": [
-                        {"when": {"field": "is_best", "eq": True}, "accent": "success"},
+                        {"when": {"field": "face_stale", "eq": True}, "accent": "warning"},
                     ],
                     "context_bind": {"line_id": "contextRowId"},
                     "row_tap": {"kind": "open_view", "view": "offers_for_group"},
@@ -2884,7 +3352,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "field": "part_number",
                             "label": {"ru": "Партномер", "en": "P/N"},
                             "max_lines": 2,
-                            "max_width": 130,
+                            "max_width": 80,
                         },
                         {
                             "field": "price",
@@ -2930,7 +3398,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "version": 1,
                     "kind": "collection",
                     "title_field": "face_title",
-                    "subtitle_fields": ["part_number", "match_kind"],
+                    "subtitle_fields": ["part_number", "match_label", "note"],
                     "scaffold": {
                         "title": {"ru": "Найденные товары", "en": "Found products"},
                         "actions": [
@@ -2949,18 +3417,24 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "field": "face_title",
                             "label": {"ru": "Товар", "en": "Product"},
                             "max_lines": 3,
-                            "max_width": 280,
+                            "max_width": 260,
+                        },
+                        {
+                            "field": "face_brand",
+                            "label": {"ru": "Бренд", "en": "Brand"},
+                            "max_lines": 2,
+                            "max_width": 110,
                         },
                         {
                             "field": "part_number",
                             "label": {"ru": "Партномер", "en": "P/N"},
                             "max_lines": 2,
-                            "max_width": 150,
+                            "max_width": 140,
                         },
                         {
-                            "field": "match_kind",
+                            "field": "match_label",
                             "label": {"ru": "Совпадение", "en": "Match"},
-                            "max_width": 120,
+                            "max_width": 150,
                         },
                         {
                             "field": "face_price",
@@ -2972,21 +3446,37 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "field": "face_seller",
                             "label": {"ru": "Поставщик", "en": "Supplier"},
                             "max_lines": 2,
-                            "max_width": 160,
+                            "max_width": 150,
                         },
                         {
-                            "field": "offers_count",
-                            "label": {"ru": "Предл.", "en": "Offers"},
+                            "field": "alternatives_count",
+                            "label": {"ru": "Альтернативы", "en": "Alternatives"},
                             "align": "end",
-                            "max_width": 90,
+                            "max_width": 110,
+                        },
+                        {
+                            "field": "benefit",
+                            "label": {"ru": "Выгода", "en": "Benefit"},
+                            "format": "benefit",
+                            "price_field": "face_price",
+                            "current_field": "is_best",
+                            # общий список группует все позиции — выгода
+                            # считается внутри каждой позиции отдельно
+                            "group_field": "line_id",
+                            "align": "center",
+                            "max_width": 130,
                         },
                     ],
                     "sort": [
                         {"field": "rank", "dir": "asc"},
+                        {"field": "face_priority", "dir": "desc"},
                         {"field": "face_price", "dir": "asc"},
+                        {"field": "face_in_stock", "dir": "desc"},
                     ],
+                    # Цвет строки — только warning устаревшего лица; «лучшая»
+                    # подсветка живёт в бейдже «Выгода», а не всей строке.
                     "row_style": [
-                        {"when": {"field": "is_best", "eq": True}, "accent": "success"},
+                        {"when": {"field": "face_stale", "eq": True}, "accent": "warning"},
                     ],
                     "row_tap": {"kind": "open_view", "view": "offers_for_group"},
                     "list_header": _equipment_mcp_list_header(),
@@ -3002,30 +3492,17 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "kind": "form",
                     "mode": "edit",
                     "title": {"ru": "Найденный товар", "en": "Offer"},
+                    # Только «каталожные» поля: связь с позицией/группой, точность
+                    # и флаги выбора/staleness вычисляет пайплайн — ручная правка
+                    # рвёт связность (см. SYNCED_OFFER_FIELDS).
                     "fields": [
                         {"column": "title", "widget": "value"},
-                        {
-                            "column": "line_id",
-                            "widget": "type_ref_picker",
-                            "pick_view": "request_lines_pick",
-                            "title_field": "source_title",
-                            "icon": "request_page",
-                            "empty_style": "warning",
-                            "empty_label": {
-                                "ru": "Не выбран",
-                                "en": "Not selected",
-                            },
-                            "label": {"ru": "Запрос", "en": "Request"},
-                        },
                         {"column": "brand", "widget": "value"},
                         {"column": "part_number", "widget": "value"},
                         {"column": "seller", "widget": "value"},
                         {"column": "price", "widget": "value"},
                         {"column": "price_orig", "widget": "value"},
                         {"column": "currency", "widget": "choice"},
-                        {"column": "match_kind", "widget": "choice"},
-                        {"column": "is_selected", "widget": "switch"},
-                        {"column": "is_stale", "widget": "switch"},
                         {"column": "in_stock", "widget": "switch"},
                         {"column": "lead_time", "widget": "value"},
                     ],
@@ -3042,7 +3519,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                         "title": {"ru": "Закупка", "en": "Procurement"},
                     },
                     "title_field": "seller",
-                    "subtitle_fields": ["offers_count", "selected_count"],
+                    "subtitle_fields": ["selected_count", "qty_total"],
                     # сверка с OpenSearch при открытии таблицы
                     "on_load": {"action": "equipment_pipeline_sync"},
                     "columns": [
@@ -3050,19 +3527,21 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "field": "seller",
                             "label": {"ru": "Поставщик", "en": "Supplier"},
                             "max_lines": 2,
-                            "max_width": 200,
-                        },
-                        {
-                            "field": "offers_count",
-                            "label": {"ru": "Товаров", "en": "Offers"},
-                            "align": "end",
-                            "max_width": 90,
+                            # фиксированная ширина: имя поставщика короткое,
+                            # а без width DataTable растягивает первую колонку
+                            "width": 220,
                         },
                         {
                             "field": "selected_count",
-                            "label": {"ru": "Выбрано", "en": "Selected"},
+                            "label": {"ru": "Товаров", "en": "Products"},
                             "align": "end",
                             "max_width": 90,
+                        },
+                        {
+                            "field": "qty_total",
+                            "label": {"ru": "Количество", "en": "Quantity"},
+                            "align": "end",
+                            "max_width": 100,
                         },
                         {
                             "field": "sum_rub",
@@ -3070,20 +3549,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "align": "end",
                             "max_width": 130,
                         },
-                        {
-                            "field": "margin_pct",
-                            "label": {"ru": "Маржа %", "en": "Margin %"},
-                            "align": "end",
-                            "max_width": 100,
-                            "editable": True,
-                        },
-                        {
-                            "field": "include_delivery",
-                            "label": {"ru": "Доставка", "en": "Delivery"},
-                            "format": "bool_yes_no",
-                            "max_width": 90,
-                            "editable": True,
-                        },
+
                         {
                             "field": "delivery_rub",
                             "label": {"ru": "Доставка ₽", "en": "Delivery RUB"},
@@ -3098,9 +3564,10 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                         },
                         {
                             "field": "sum_margin_rub",
-                            "label": {"ru": "Маржа ₽", "en": "Margin RUB"},
+                            "label": {"ru": "Маржа", "en": "Margin"},
+                            "format": "margin_pair",
                             "align": "end",
-                            "max_width": 120,
+                            "max_width": 150,
                         },
                     ],
                     "row_tap": {
@@ -3123,7 +3590,15 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "kind": "collection",
                     "scaffold": {
                         "title": {"ru": "Товары поставщика", "en": "Supplier offers"},
+                        # заголовок дрилл-дауна из «Закупки»: имя поставщика
+                        # подставляется из тела контекстной строки (seller)
+                        "title_template": {"ru": "Товары {seller}", "en": "{seller} offers"},
                     },
+                    # Закупка агрегирует ВСЕ чаты проекта — дрилл-даун тоже:
+                    # офферы поставщика из всех позиций всех заказов (чатов).
+                    # Выбор чекбоксом пишется в бакет чата самой строки
+                    # (select_offer_primary: сессия берётся из строки).
+                    "data_scope": {"chats": "all"},
                     "title_field": "title",
                     "subtitle_fields": ["seller", "part_number"],
                     "columns": [
@@ -3137,13 +3612,13 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "field": "title",
                             "label": {"ru": "Товар", "en": "Product"},
                             "max_lines": 3,
-                            "max_width": 260,
+                            "max_width": 220,
                         },
                         {
                             "field": "part_number",
                             "label": {"ru": "Партномер", "en": "P/N"},
                             "max_lines": 2,
-                            "max_width": 130,
+                            "max_width": 110,
                         },
                         {
                             "field": "price",
@@ -3152,15 +3627,22 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "max_width": 110,
                         },
                         {
-                            "field": "match_kind",
-                            "label": {"ru": "Совпадение", "en": "Match"},
-                            "max_width": 110,
+                            "field": "benefit_label",
+                            "label": {"ru": "Выгода", "en": "Benefit"},
+                            "format": "benefit_static",
+                            "align": "center",
+                            "max_width": 130,
                         },
                         {
-                            "field": "in_stock",
-                            "label": {"ru": "Наличие", "en": "Stock"},
-                            "format": "bool_yes_no",
-                            "max_width": 90,
+                            "field": "alternatives_count",
+                            "label": {"ru": "Альтернативы", "en": "Alternatives"},
+                            "align": "end",
+                            "max_width": 100,
+                        },
+                        {
+                            "field": "match_label",
+                            "label": {"ru": "Совпадение", "en": "Match"},
+                            "max_width": 150,
                         },
                     ],
                     # чекбокс: один выбранный товар на позицию заказчика
@@ -3169,6 +3651,13 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                         {
                             "when": {"field": "is_stale", "eq": True},
                             "accent": "warning",
+                        },
+                        # эффективный выбор позиции (selected ?? best) — зелёный
+                        # сразу, без клика: это связанное состояние из других
+                        # таблиц (бюджет/группы), а не локальный UI-стейт
+                        {
+                            "when": {"field": "is_effective", "eq": True},
+                            "accent": "success",
                         },
                         {
                             "when": {"field": "priority", "eq": True},
@@ -3181,8 +3670,12 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                         "field": "is_selected",
                         "action": "select_offer_primary",
                         "control": "checkbox",
+                        "placement": "trailing",
                     },
-                    "row_tap": {"kind": "open_form", "view": "found_offers_form"},
+                    # тап по строке = выбрать/снять товар для позиции
+                    # (select_offer_primary тогглит, пайплайн пересчитывает
+                    # бюджет/закупку/лица групп — связь с другими таблицами)
+                    "row_tap": {"kind": "invoke_action", "action": "select_offer_primary"},
                     "empty": _empty("Нет товаров", "No offers", icon="shopping_cart"),
                 },
             },
@@ -3898,6 +4391,81 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 },
             },
         {
+                "slug": "equipment_prompts_list",
+                "table_slug": "equipment_prompts",
+                "kind": "collection",
+                "ui_json": {
+                    "version": 1,
+                    "kind": "collection",
+                    "scaffold": {"title": {"ru": "Промпты подбора", "en": "Selection prompts"}},
+                    "title_field": "name",
+                    "subtitle_fields": ["path"],
+                    "columns": [
+                        {"field": "name", "label": {"ru": "Название", "en": "Name"}},
+                        {"field": "path", "label": {"ru": "Путь", "en": "Path"}},
+                        {"field": "files_json", "label": {"ru": "Промптов", "en": "Prompts"}, "format": "list_count"},
+                        {"field": "enabled", "label": {"ru": "Включён", "en": "Enabled"}, "format": "bool_yes_no"},
+                    ],
+                    "row_tap": {"kind": "open_form", "view": "equipment_prompt_settings"},
+                    "inline_add": {"field": "name", "title": "Добавить промпт"},
+                    "empty": _empty("Нет промптов", "No prompts", icon="psychology_outlined"),
+                },
+            },
+            {
+                "slug": "equipment_prompt_settings",
+                "table_slug": "equipment_prompts",
+                "kind": "detail",
+                "ui_json": {
+                    "version": 1,
+                    "kind": "detail",
+                    "mode": "edit",
+                    "title": {"ru": "Промпт подбора", "en": "Selection prompt"},
+                    "fields": [
+                        {"column": "name", "widget": "value", "icon": "label_outline"},
+                        {"column": "path", "widget": "value", "icon": "folder_outlined"},
+                        {"column": "enabled", "widget": "switch", "icon": "toggle_on"},
+                        {"column": "files_json", "widget": "prompt_files_editor"},
+                    ],
+                },
+            },
+            {
+                "slug": "mcp_tool_overrides_list",
+                "table_slug": "mcp_tool_overrides",
+                "kind": "collection",
+                "ui_json": {
+                    "version": 1,
+                    "kind": "collection",
+                    "scaffold": {"title": {"ru": "Инструкции MCP", "en": "MCP instructions"}},
+                    "title_field": "tool",
+                    "subtitle_fields": ["description"],
+                    "columns": [
+                        {"field": "tool", "label": {"ru": "Инструмент", "en": "Tool"}},
+                        {"field": "description", "label": {"ru": "Описание", "en": "Description"}, "max_lines": 2},
+                        {"field": "enabled", "label": {"ru": "Включено", "en": "Enabled"}, "format": "bool_yes_no"},
+                    ],
+                    "row_tap": {"kind": "open_form", "view": "mcp_tool_override_form"},
+                    "inline_add": {"field": "tool", "title": "Добавить переопределение"},
+                    "empty": _empty("Нет переопределений", "No overrides", icon="tune"),
+                },
+            },
+            {
+                "slug": "mcp_tool_override_form",
+                "table_slug": "mcp_tool_overrides",
+                "kind": "form",
+                "ui_json": {
+                    "version": 1,
+                    "kind": "form",
+                    "mode": "edit",
+                    "title": {"ru": "Инструкция MCP", "en": "MCP instruction"},
+                    "fields": [
+                        {"column": "tool", "widget": "value"},
+                        {"column": "description", "widget": "text"},
+                        {"column": "extra_instructions", "widget": "text"},
+                        {"column": "enabled", "widget": "switch"},
+                    ],
+                },
+            },
+        {
                 "slug": "templates_list",
                 "table_slug": "templates",
                 "kind": "collection",
@@ -3966,8 +4534,66 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     ],
                 },
             },
+            {
+                "slug": "equipment_hub_management",
+                "table_slug": "catalogs",
+                "kind": "hub",
+                "ui_json": {
+                    "version": 1,
+                    "kind": "hub",
+                    "items": [
+                        {
+                            "title": "Базы данных",
+                            "icon": "storage",
+                            "target": {"kind": "view", "view": "catalogs_list"},
+                        },
+                        {
+                            "title": "Типы комплектующих",
+                            "icon": "category",
+                            "target": {"kind": "view", "view": "equipment_types_list"},
+                        },
+                        {
+                            "title": "Поставщики",
+                            "icon": "local_shipping",
+                            "target": {"kind": "view", "view": "trusted_sellers_list"},
+                        },
+                        {
+                            "title": "Интернет магазины",
+                            "icon": "language",
+                            "target": {"kind": "view", "view": "web_shops_list"},
+                        },
+                        {
+                            "title": "Шаблоны",
+                            "icon": "upload_file",
+                            "target": {"kind": "view", "view": "templates_list"},
+                        },
+                        {
+                            "title": "Промпты",
+                            "icon": "psychology_outlined",
+                            "target": {"kind": "view", "view": "equipment_prompts_list"},
+                        },
+                        {
+                            "title": "Инструкции MCP",
+                            "icon": "tune",
+                            "target": {"kind": "view", "view": "mcp_tool_overrides_list"},
+                        },
+                    ],
+                },
+            },
 ],
         "tabs": [
+            {
+                "id": "tab_equipment_management",
+                "title": "Подбор техники",
+                "subtitle": "Базы данных, поставщики, типы и шаблоны",
+                "order": 5,
+                "icon": "precision_manufacturing",
+                "view_slug": "equipment_hub_management",
+                "table_slug": "catalogs",
+                "enabled": True,
+                "default_project_bind": "global",
+                "nav": {"contour": "employee", "placement": "management"},
+            },
             {
                 "id": "tab_equipment",
                 "title": "Подбор техники",
@@ -4124,6 +4750,8 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "params": {
                     "budget_table": "budget_lines",
                     "lines_table": "request_lines",
+                    "fields_table": "document_fields",
+                    "company_fields_table": "document_company_fields",
                 },
                 "trigger": {"on": []},
                 "ui": {"placement": ["toolbar", "scaffold"], "icon": "download"},
@@ -4135,6 +4763,8 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "enabled": True,
                 "params": {
                     "budget_table": "budget_lines",
+                    "fields_table": "document_fields",
+                    "company_fields_table": "document_company_fields",
                 },
                 "trigger": {"on": []},
                 "ui": {"placement": ["toolbar", "scaffold"], "icon": "picture_as_pdf"},
@@ -4146,12 +4776,26 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "enabled": True,
                 "params": {
                     "budget_table": "budget_lines",
+                    "fields_table": "document_fields",
+                    "company_fields_table": "document_company_fields",
                 },
                 "trigger": {"on": []},
                 "ui": {"placement": ["toolbar", "scaffold"], "icon": "table_view"},
             },
         ],
         "materialize": [
+            {
+                "id": "equipment_prompts_files",
+                "enabled": True,
+                "when": ["project.created", "project.resumed", "project.sync"],
+                "priority": 11,
+                "source": {
+                    "type": "rows",
+                    "table_slug": "equipment_prompts",
+                    "filter": {"enabled": True},
+                },
+                "target": {"workspace_path": ".", "format": "prompt_paths"},
+            },
             {
                 "id": "catalog_manifest",
                 "enabled": True,
@@ -4184,8 +4828,74 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 },
             },
         ],
-        "mcp_tools": [
+# Chat display aliases for the prodavan-equipment MCP package tools
+        # (keys = wire tool names; labels shown in the chat instead of
+        # "MCP: prodavan-equipment.<tool>"). Editable per-instance via the
+        # module meta editor (slug mcp_aliases).
+        "mcp_aliases": [
             {
+                "server": "prodavan-equipment",
+                "tool": "equipment_catalog_sources",
+                "label": "Источники каталога",
+                "description": "Список каталогов техники с их статусами",
+            },
+            {
+                "server": "prodavan-equipment",
+                "tool": "equipment_catalog_search",
+                "label": "Поиск товара",
+                "description": "Поиск позиций по каталогам техники",
+            },
+            {
+                "server": "prodavan-equipment",
+                "tool": "request_lines_list",
+                "label": "Позиции заявки",
+                "description": "Список позиций текущей заявки",
+            },
+            {
+                "server": "prodavan-equipment",
+                "tool": "request_lines_get",
+                "label": "Позиция заявки",
+                "description": "Позиция заявки по идентификатору",
+            },
+            {
+                "server": "prodavan-equipment",
+                "tool": "request_lines_upsert",
+                "label": "Запись позиции заявки",
+                "description": "Создание или обновление позиции заявки",
+            },
+            {
+                "server": "prodavan-equipment",
+                "tool": "request_lines_delete",
+                "label": "Удаление позиции заявки",
+                "description": "Удаление позиции заявки (с группами и офферами)",
+            },
+            {
+                "server": "prodavan-equipment",
+                "tool": "found_groups_list",
+                "label": "Найденные группы",
+                "description": "Список подобранных групп товаров",
+            },
+            {
+                "server": "prodavan-equipment",
+                "tool": "found_groups_get",
+                "label": "Найденная группа",
+                "description": "Подобранная группа товаров по идентификатору",
+            },
+            {
+                "server": "prodavan-equipment",
+                "tool": "found_groups_upsert",
+                "label": "Запись группы товаров",
+                "description": "Создание или обновление подобранной группы",
+            },
+            {
+                "server": "prodavan-equipment",
+                "tool": "found_groups_delete",
+                "label": "Удаление группы товаров",
+                "description": "Удаление подобранной группы (с её офферами)",
+            },
+        ],
+        "mcp_tools": [
+                    {
                 "id": "equipment_catalog_list",
                 "name": "equipment_catalog_list",
                 "label": "List equipment catalogs",
@@ -4382,7 +5092,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "row_id": "equipment_mcp_default",
                     "body": {
                         "name": "prodavan-equipment",
-                        "version": "2.0.0",
+                        "version": "2.2.0",
                         "enabled": True,
                     },
                 },

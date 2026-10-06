@@ -24,7 +24,8 @@ class ProdavanApi {
         if (projectId != null) 'X-Project-Id': projectId!,
       };
 
-  Uri _uri(String path) => Uri.parse('$baseUrl$path');
+  Uri _uri(String path, [Map<String, String>? query]) =>
+      Uri.parse('$baseUrl$path').replace(queryParameters: query);
 
   Future<Map<String, dynamic>> me() async {
     final res = await AuthHttp.get(_uri('/me'), extraHeaders: _workHeaders);
@@ -301,9 +302,13 @@ class ProdavanApi {
     required String moduleId,
     required String tableSlug,
     String? sessionId,
+    bool chatsAll = false,
   }) async {
     final res = await AuthHttp.get(
-      _uri('/projects/$projectId/runtime-modules/$moduleId/data/$tableSlug'),
+      _uri(
+        '/projects/$projectId/runtime-modules/$moduleId/data/$tableSlug',
+        chatsAll ? const {'chats': 'all'} : null,
+      ),
       extraHeaders: {
         ..._workHeaders,
         if (sessionId != null && sessionId.isNotEmpty)
@@ -1038,6 +1043,66 @@ class ProdavanApi {
     this.projectId = projectId;
     try {
       final res = await AuthHttp.get(_uri('/projects/$projectId/models/live'), extraHeaders: _workHeaders);
+      _throwIfError(res);
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    } finally {
+      this.projectId = prevProj;
+    }
+  }
+
+  /// MCP tool display aliases aggregated over the project's bound modules
+  /// (mcp_aliases meta documents), keyed by canonical wire names and bare
+  /// tool names.
+  Future<Map<String, dynamic>> getProjectMcpAliases(String projectId) async {
+    final prevProj = this.projectId;
+    this.projectId = projectId;
+    try {
+      final res = await AuthHttp.get(
+        _uri('/projects/$projectId/mcp-aliases'),
+        extraHeaders: _workHeaders,
+      );
+      _throwIfError(res);
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    } finally {
+      this.projectId = prevProj;
+    }
+  }
+
+  /// Per-project chat reconnect policy (provider-error retries).
+  Future<Map<String, dynamic>> getProjectChatErrorPolicy(String projectId) async {
+    final prevProj = this.projectId;
+    this.projectId = projectId;
+    try {
+      final res = await AuthHttp.get(
+        _uri('/projects/$projectId/chat-error-policy'),
+        extraHeaders: _workHeaders,
+      );
+      _throwIfError(res);
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    } finally {
+      this.projectId = prevProj;
+    }
+  }
+
+  /// PUT the chat reconnect policy; null fields keep the server defaults.
+  Future<Map<String, dynamic>> putProjectChatErrorPolicy(
+    String projectId, {
+    int? intervalSec,
+    int? maxAttempts,
+    List<String>? fallbackModels,
+  }) async {
+    final prevProj = this.projectId;
+    this.projectId = projectId;
+    try {
+      final body = <String, dynamic>{};
+      if (intervalSec != null) body['interval_sec'] = intervalSec;
+      if (maxAttempts != null) body['max_attempts'] = maxAttempts;
+      if (fallbackModels != null) body['fallback_models'] = fallbackModels;
+      final res = await AuthHttp.put(
+        _uri('/projects/$projectId/chat-error-policy'),
+        body: jsonEncode(body),
+        extraHeaders: _workHeaders,
+      );
       _throwIfError(res);
       return jsonDecode(res.body) as Map<String, dynamic>;
     } finally {

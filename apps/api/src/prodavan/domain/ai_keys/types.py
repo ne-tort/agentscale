@@ -10,6 +10,7 @@ class AiProvider(StrEnum):
     CURSOR = "cursor"
     CODEX = "codex"
     CLAUDE_CODE = "claude_code"
+    XAI = "xai"
 
 
 class ApiKind(StrEnum):
@@ -21,6 +22,9 @@ class ApiKind(StrEnum):
     OPENROUTER = "openrouter"
     CLI_SUBSCRIPTION = "cli_subscription"
     CUSTOM = "custom"
+    # xAI (Grok) через OAuth device-code: секрет = JSON-блоб токенов,
+    # access_token обновляется сервером (refresh_token ротацией)
+    XAI_OAUTH = "xai_oauth"
 
 
 class KeyStatus(StrEnum):
@@ -39,6 +43,7 @@ RUNTIME_API_KINDS: frozenset[str] = frozenset(
         ApiKind.ANTHROPIC_API,
         ApiKind.OPENROUTER,
         ApiKind.CUSTOM,
+        ApiKind.XAI_OAUTH,
     }
 )
 

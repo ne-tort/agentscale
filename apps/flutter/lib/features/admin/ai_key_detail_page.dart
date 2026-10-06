@@ -9,6 +9,7 @@ import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/app_confirm_page.dart';
 import 'package:prodavan/core/widgets/app_status_banner.dart';
+import 'package:prodavan/features/company/ai_key_grok_oauth_page.dart';
 import 'package:prodavan/features/admin/ai_http_provider_select_page.dart';import 'package:prodavan/features/admin/ai_key_integration_type.dart';
 import 'package:prodavan/features/admin/admin_ai_key_models_page.dart';
 import 'package:prodavan/core/preferences/app_probe_preference.dart';
@@ -128,6 +129,8 @@ class _AdminAiKeyDetailPageState extends State<AdminAiKeyDetailPage> {
         return l10n.adminTypeCodexSdk;
       case 'claude_agent_sdk':
         return l10n.adminTypeClaudeSdk;
+      case 'xai_oauth':
+        return l10n.adminTypeGrokOauth;
       default:
         return l10n.adminTypeApiKey;
     }
@@ -136,6 +139,16 @@ class _AdminAiKeyDetailPageState extends State<AdminAiKeyDetailPage> {
   String _providerSubtitle(AppLocalizations l10n) {
     final apiKind = _key?['api_kind'] as String? ?? '';
     final provider = _key?['provider'] as String? ?? '';
+    // Explicit catalog link wins: custom+codex keys match several entries
+    // (seeded Ollama + user-added endpoints) — only the linked one is real.
+    final entryId = _key?['catalog_entry_id'] as String?;
+    if (entryId != null && entryId.isNotEmpty) {
+      for (final p in _httpProviders) {
+        if (p['id'] == entryId) {
+          return p['title'] as String? ?? p['id'] as String;
+        }
+      }
+    }
     for (final p in _httpProviders) {
       final payload = (p['payload'] as Map?)?.cast<String, dynamic>() ?? {};
       if (payload['api_kind'] == apiKind &&
@@ -167,9 +180,23 @@ class _AdminAiKeyDetailPageState extends State<AdminAiKeyDetailPage> {
     await _load();
   }
 
+  /// Device-code авторизация Grok (платформенный ключ).
+  Future<void> _openGrokAuth() async {
+    final ok = await Navigator.of(context).push<bool>(
+      MaterialPageRoute<bool>(
+        builder: (_) => AiKeyGrokOauthPage(
+          start: () => adminContext.api.startAiKeyXaiDevice(keyId: widget.keyId),
+          status: () => adminContext.api.getAiKeyXaiDevice(keyId: widget.keyId),
+        ),
+      ),
+    );
+    if (ok == true) await _load();
+  }
+
   Future<void> _pickProvider() async {
     final item = await AiHttpProviderSelectPage.push(
       context,
+      selectedEntryId: _key?['catalog_entry_id'] as String?,
       selectedApiKind: _key?['api_kind'] as String?,
       selectedProvider: _key?['provider'] as String?,
     );
@@ -312,7 +339,17 @@ class _AdminAiKeyDetailPageState extends State<AdminAiKeyDetailPage> {
               subtitle: Text(_providerSubtitle(l10n)),
               onTap: _pickProvider,
             ),
-          AppValuePreference<String>(
+          if (type.isXaiOauth)
+            AppNavPreference(
+              title: l10n.aiKeyGrokAuthTitle,
+              icon: Icons.bolt_outlined,
+              subtitle: Text(
+                hasSecret ? l10n.aiKeyGrokAuthDone : l10n.aiKeyGrokAuthSubtitle,
+              ),
+              onTap: _openGrokAuth,
+            ),
+          if (!type.isXaiOauth)
+            AppValuePreference<String>(
             title: l10n.commonSecret,
             icon: Icons.key_outlined,
             value: '',

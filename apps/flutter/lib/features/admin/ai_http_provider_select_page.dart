@@ -289,17 +289,58 @@ class _AiHttpProviderEditPageState extends State<AiHttpProviderEditPage> {
     return AiHttpProviderPayload.agentProviderForApiKind(_apiKind);
   }
 
+  /// Bare host ("cheapai.lol/v1") without a scheme is not a valid endpoint —
+  /// default to https:// on save.
+  String _normalizeBase(String raw) {
+    final v = raw.trim();
+    if (v.isEmpty || v.startsWith('http://') || v.startsWith('https://')) {
+      return v;
+    }
+    return 'https://$v';
+  }
+
+  /// Drop the version segment from the path when the base already ends with it
+  /// (base "…/v1" + path "/v1/chat/completions" → "/chat/completions"): the
+  /// naive concat would request /v1/v1/chat/completions (404 at the gateway).
+  String _dropDupVersionSegment(String base, String rawPath) {
+    var p = rawPath.trim();
+    if (p.isEmpty) return p;
+    if (!p.startsWith('/')) p = '/$p';
+    final afterScheme = base.split('://').last;
+    final slash = afterScheme.lastIndexOf('/');
+    if (slash < 1) return p;
+    final seg = afterScheme.substring(slash);
+    if (seg.startsWith('/v') && p.startsWith('$seg/')) {
+      final dropped = p.substring(seg.length);
+      return dropped.isEmpty ? p : dropped;
+    }
+    return p;
+  }
+
   Map<String, dynamic> get _payload {
     final openaiCompat = _apiKind != 'anthropic_api';
+    final base = _normalizeBase(_baseUrl);
     return {
       AiHttpProviderPayload.apiKind: _apiKind,
       AiHttpProviderPayload.agentProvider: _resolvedAgentProvider,
-      AiHttpProviderPayload.baseUrl: _baseUrl.trim(),
+      AiHttpProviderPayload.baseUrl: base,
       AiHttpProviderPayload.openaiCompatible: openaiCompat,
       AiHttpProviderPayload.authScheme: _authScheme,
-      AiHttpProviderPayload.chatCompletionsPath: _chatPath.trim(),
-      AiHttpProviderPayload.modelsPath: _modelsPath.trim(),
+      AiHttpProviderPayload.chatCompletionsPath:
+          _dropDupVersionSegment(base, _chatPath),
+      AiHttpProviderPayload.modelsPath:
+          _dropDupVersionSegment(base, _modelsPath),
     };
+  }
+
+  /// Full chat endpoint the runtime will call (base + chat path) — shown so
+  /// the composed URL is visible while editing.
+  String get _composedChatUrl {
+    final base = _normalizeBase(_baseUrl);
+    if (base.isEmpty) return '';
+    var p = _dropDupVersionSegment(base, _chatPath);
+    if (!p.startsWith('/')) p = '/$p';
+    return '$base$p';
   }
 
   String? _hostSubtitle() {
@@ -364,6 +405,19 @@ class _AiHttpProviderEditPageState extends State<AiHttpProviderEditPage> {
                 setState(() {});
               },
             ),
+            if (_composedChatUrl.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: AppSpacing.lg,
+                  vertical: AppSpacing.xs,
+                ),
+                child: Text(
+                  'POST $_composedChatUrl',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Theme.of(context).colorScheme.outline,
+                      ),
+                ),
+              ),
             AppChoicePreference<String>(
               title: l10n.adminHttpAuthScheme,
               icon: Icons.key_outlined,

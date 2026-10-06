@@ -1,4 +1,13 @@
 {
+  "budgetBenefitBest": "Best price",
+  "budgetBenefitSingle": "Only option",
+  "budgetBenefitSame": "Same",
+  "budgetBenefitDiff": "{diff}%",
+  "@budgetBenefitDiff": {
+    "placeholders": {
+      "diff": {}
+    }
+  },
   "@@locale": "en",
   "adminActiveEmployees": "Active employees",
   "adminEmployeesOnline": "Employees online",
@@ -231,6 +240,18 @@
   "adminTypeCodexSdk": "Codex SDK",
   "adminTypeClaudeSdk": "Claude Agent SDK",
   "adminTypeApiKey": "API key",
+  "adminTypeGrokOauth": "Grok (xAI OAuth)",
+  "aiKeyGrokAuthTitle": "Grok authorization",
+  "aiKeyGrokAuthSubtitle": "SuperGrok subscription — sign in via link",
+  "aiKeyGrokAuthHint": "Open the link, sign in to your SuperGrok account and confirm the code. Tokens are stored on the server and refreshed automatically.",
+  "aiKeyGrokAuthOpenLink": "Open authorization page",
+  "aiKeyGrokAuthCode": "Confirmation code",
+  "aiKeyGrokAuthWaiting": "Waiting for confirmation…",
+  "aiKeyGrokAuthDone": "Authorization successful",
+  "aiKeyGrokAuthDenied": "Access denied",
+  "aiKeyGrokAuthExpired": "The code expired — start again",
+  "aiKeyGrokAuthError": "Authorization error",
+  "aiKeyGrokAuthRestart": "Start again",
   "adminNextRenewal": "Subscription",
   "adminAddHttpProvider": "Add HTTP endpoint",
   "adminHttpEndpoint": "HTTP endpoint",
@@ -765,7 +786,6 @@
   "cabinetLettersDigitsUnderscore": "Letters, digits, underscore",
   "cabinetLowercaseSlugRule": "Lowercase letters, digits, underscore",
   "cabinetManageCustomTabs": "Manage custom tabs",
-  "cabinetMcpTools": "MCP tools",
   "cabinetMetaTables": "Meta tables",
   "cabinetMyCabinetDefault": "My cabinet",
   "cabinetNewCabinet": "New cabinet",
@@ -783,7 +803,6 @@
       }
     }
   },
-  "cabinetNoMcpTools": "No MCP tools exposed for this cabinet.",
   "cabinetNoMetaTablesYet": "No meta tables in this cabinet yet.",
   "cabinetNoRows": "No rows",
   "cabinetNotShipped": "not shipped",
@@ -1185,7 +1204,7 @@
       }
     }
   },
-  "projectChatGroupMcp": "MCP: {count} calls",
+  "projectChatGroupMcp": "{count, plural, one{# tool call} other{# tool calls}}",
   "@projectChatGroupMcp": {
     "placeholders": {
       "count": {
@@ -1225,7 +1244,7 @@
       }
     }
   },
-  "projectChatGroupGeneric": "Tools ({count})",
+  "projectChatGroupGeneric": "{count, plural, one{# tool call} other{# tool calls}}",
   "@projectChatGroupGeneric": {
     "placeholders": {
       "count": {
@@ -1243,6 +1262,21 @@
     }
   },
   "projectChatAgentWorking": "agentscale is working…",
+  "projectChatReconnecting": "Reconnecting",
+  "projectChatReconnectingAttempt": "Reconnecting ({n}/{y})",
+  "projectChatErrorPolicyTitle": "Error handling",
+  "projectChatErrorPolicyInterval": "Retry interval, sec",
+  "projectChatErrorPolicyInfinite": "Unlimited attempts",
+  "projectChatErrorPolicyAttempts": "Number of attempts",
+  "projectChatErrorPolicyTryOtherModels": "Try other models",
+  "projectChatErrorPolicyFallbackModels": "Fallback models",
+  "projectChatErrorPolicyFallbackModelsNone": "None selected",
+  "@projectChatReconnectingAttempt": {
+    "placeholders": {
+      "n": {},
+      "y": {}
+    }
+  },
   "chatCopyMessage": "Copy reply",
   "chatCopiedMessage": "Copied",
   "chatUsageInputLabel": "input:",
@@ -1325,8 +1359,29 @@
     }
   },
   "projectChatToolShell": "Ran command",
-  "projectChatToolMcpGeneric": "MCP",
-  "projectChatToolMcp": "MCP: {tool}",
+  "projectChatToolMcpGeneric": "Tool",
+  "projectChatToolMcp": "{tool}",
+  "projectChatToolMcpServer": "{server} · {tool}",
+  "projectChatToolWebSearch": "Web search",
+  "projectChatToolWebFetch": "Fetching web page",
+  "projectChatToolTodoWrite": "Updating task plan",
+  "projectChatToolTodoList": "Task plan",
+  "projectChatToolNotesWrite": "Writing note",
+  "projectChatToolNotesRead": "Reading notes",
+  "projectChatToolGoalsSet": "Setting goal",
+  "projectChatToolGoalsUpdate": "Updating goal",
+  "projectChatToolGoalsList": "Goals",
+  "projectChatToolCompact": "Compacting context",
+  "projectChatToolMcpServers": "Tools list",
+  "projectChatToolMcpTools": "Tools list",
+  "projectChatToolErrorPrefix": "Error",
+  "projectChatPermissionDenied": "Action denied",
+  "@projectChatToolMcpServer": {
+    "placeholders": {
+      "server": {},
+      "tool": {}
+    }
+  },
   "@projectChatToolMcp": {
     "placeholders": {
       "tool": {
@@ -1662,5 +1717,8 @@
       }
     }
   },
-  "adminNoModels": "No models"
+  "adminNoModels": "No models",
+  "adminAddCompanyHint": "Company name (login: name@agentscale.local)",
+  "companyAddEmployeeHint": "Employee name (login: name@company.local)",
+  "authLoginHint": "company@agentscale.local"
 }

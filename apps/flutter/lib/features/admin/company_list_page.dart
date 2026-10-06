@@ -171,7 +171,7 @@ class _AdminCompanyListPageState extends State<AdminCompanyListPage> {
         children: [
           AppInlineAddField(
             title: l10n.adminAddCompany,
-            hintText: l10n.adminAddCompany,
+            hintText: l10n.adminAddCompanyHint,
             validator: (v) => v.trim().isNotEmpty,
             invalidMessage: l10n.commonRequired,
             onSave: _createCompany,

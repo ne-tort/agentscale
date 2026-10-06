@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.application.auth.register import publish_register_command
 from prodavan.application.employees.service import EmployeesCommandService
-from prodavan.domain.companies.login import company_effective_login
+from prodavan.domain.companies.login import company_effective_login, slugify_company_name
 from prodavan.domain.errors import AppError
 from prodavan.domain.identity import ROLE_COMPANY, ROLE_EMPLOYEE, MembershipRole, Principal
 from prodavan.infrastructure.persistence.models.identity import CompanyRow, EmployeeRow
@@ -48,8 +49,40 @@ class CompaniesCommandService:
                 detail="contact_email must be an email when provided",
             )
 
+        name_clean = name.strip()
+        clash = await self._session.execute(
+            select(CompanyRow.id).where(
+                func.lower(CompanyRow.name) == name_clean.lower(),
+                CompanyRow.deleted_at.is_(None),
+            )
+        )
+        if clash.scalar_one_or_none() is not None:
+            raise AppError(
+                code="CONFLICT",
+                title="Conflict",
+                status=409,
+                detail="company name already exists",
+            )
+        login_slug = slugify_company_name(name_clean)
+        slug_clash = await self._session.execute(
+            select(CompanyRow.id).where(
+                CompanyRow.login_slug == login_slug,
+                CompanyRow.deleted_at.is_(None),
+            )
+        )
+        if slug_clash.scalar_one_or_none() is not None:
+            # Name differs but maps to the same slug (translit collisions):
+            # the handle namespace is the slug — protect it too.
+            raise AppError(
+                code="CONFLICT",
+                title="Conflict",
+                status=409,
+                detail="company login handle already exists (name too similar)",
+            )
+
         company = CompanyRow(
-            name=name.strip(),
+            name=name_clean,
+            login_slug=login_slug,
             description=description.strip() if description and description.strip() else None,
             contact_email=contact,
             login_email=None,
@@ -71,6 +104,7 @@ class CompaniesCommandService:
             employee = await self._employees.upsert_invited(
                 email=email_raw.lower(),
                 display_name=admin_display_name,
+                company_login_slug=login_slug,
             )
             from prodavan.application.relations.commands import RelationsCommand
 
@@ -89,10 +123,12 @@ class CompaniesCommandService:
         await publish_register_command(
             client_ref=f"company:{company.id}",
             username=login,
-            email=f"{login}@companies.prodavan.local",
+            # Company keycloak email = the handle ({slug}@agentscale.local):
+            # loginWithEmailAllowed lets users sign in by it too.
+            email=login,
             password=pwd,
             realm_roles=[ROLE_COMPANY],
-            display_name=name.strip(),
+            display_name=name_clean,
         )
         if employee is not None:
             from prodavan.domain.employees.login import employee_effective_login
@@ -135,7 +171,7 @@ class CompaniesCommandService:
             client_ref=f"company:{company.id}",
             sub=sub,
             username=company_effective_login(company),
-            email=f"{company_effective_login(company)}@companies.prodavan.local",
+            email=company_effective_login(company),
         )
         enq = enqueue_cascade_company_deleted(company.id, actor_sub=principal.sub)
         out: dict = {
@@ -181,7 +217,7 @@ class CompaniesCommandService:
             await publish_register_command(
                 client_ref=f"company:{company.id}",
                 username=login,
-                email=f"{login}@companies.prodavan.local",
+                email=login,
                 password=None,
                 realm_roles=[ROLE_COMPANY],
                 display_name=company.name,
@@ -196,7 +232,7 @@ class CompaniesCommandService:
 
     async def purge(self, company_id: str, *, principal: Principal) -> dict:
         """Hard-purge company after soft-delete: require children already soft/purged, then wipe."""
-        from sqlalchemy import select
+        from sqlalchemy import func, select
 
         from prodavan.application.cabinets.instance_service import CabinetInstanceService
         from prodavan.application.project_service import ProjectCommand, ProjectQuery

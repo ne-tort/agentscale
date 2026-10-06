@@ -1,4 +1,8 @@
 {
+  "budgetBenefitBest": "Лучшая цена",
+  "budgetBenefitSingle": "Единственный",
+  "budgetBenefitSame": "Одинаковая",
+  "budgetBenefitDiff": "{diff}%",
   "@@locale": "ru",
   "adminActiveEmployees": "Активные сотрудники",
   "adminEmployeesOnline": "Сотрудники онлайн",
@@ -231,6 +235,18 @@
   "adminTypeCodexSdk": "Codex SDK",
   "adminTypeClaudeSdk": "Claude Agent SDK",
   "adminTypeApiKey": "API key",
+  "adminTypeGrokOauth": "Grok (xAI OAuth)",
+  "aiKeyGrokAuthTitle": "Авторизация Grok",
+  "aiKeyGrokAuthSubtitle": "Подписка SuperGrok — вход по ссылке",
+  "aiKeyGrokAuthHint": "Откройте ссылку, войдите в аккаунт SuperGrok и подтвердите код. Токены хранятся на сервере и обновляются автоматически.",
+  "aiKeyGrokAuthOpenLink": "Открыть страницу авторизации",
+  "aiKeyGrokAuthCode": "Код подтверждения",
+  "aiKeyGrokAuthWaiting": "Ожидаем подтверждения…",
+  "aiKeyGrokAuthDone": "Авторизация выполнена",
+  "aiKeyGrokAuthDenied": "Доступ запрещён",
+  "aiKeyGrokAuthExpired": "Код истёк — начните заново",
+  "aiKeyGrokAuthError": "Ошибка авторизации",
+  "aiKeyGrokAuthRestart": "Начать заново",
   "adminNextRenewal": "Подписка",
   "adminAddHttpProvider": "Добавить HTTP endpoint",
   "adminHttpEndpoint": "HTTP endpoint",
@@ -765,7 +781,6 @@
   "cabinetLettersDigitsUnderscore": "Буквы, цифры и подчёркивание",
   "cabinetLowercaseSlugRule": "Строчные латинские буквы, цифры, подчёркивание",
   "cabinetManageCustomTabs": "Пользовательские вкладки",
-  "cabinetMcpTools": "MCP-инструменты",
   "cabinetMetaTables": "Мета-таблицы",
   "cabinetMyCabinetDefault": "Мой кабинет",
   "cabinetNewCabinet": "Новый кабинет",
@@ -783,7 +798,6 @@
       }
     }
   },
-  "cabinetNoMcpTools": "Для этого кабинета нет MCP-инструментов.",
   "cabinetNoMetaTablesYet": "В этом кабинете ещё нет мета-таблиц.",
   "cabinetNoRows": "Нет строк",
   "cabinetNotShipped": "не поставлен",
@@ -1185,7 +1199,7 @@
       }
     }
   },
-  "projectChatGroupMcp": "MCP: {count} вызовов",
+  "projectChatGroupMcp": "{count, plural, one{# вызов инструмента} few{# вызова инструмента} many{# вызовов инструмента} other{# вызова инструмента}}",
   "@projectChatGroupMcp": {
     "placeholders": {
       "count": {
@@ -1225,7 +1239,7 @@
       }
     }
   },
-  "projectChatGroupGeneric": "Инструменты ({count})",
+  "projectChatGroupGeneric": "{count, plural, one{# вызов инструмента} few{# вызова инструмента} many{# вызовов инструмента} other{# вызова инструмента}}",
   "@projectChatGroupGeneric": {
     "placeholders": {
       "count": {
@@ -1243,6 +1257,15 @@
     }
   },
   "projectChatAgentWorking": "agentscale работает…",
+  "projectChatReconnecting": "Попытка реконнекта",
+  "projectChatReconnectingAttempt": "Попытка реконнекта ({n}/{y})",
+  "projectChatErrorPolicyTitle": "Обработка ошибок",
+  "projectChatErrorPolicyInterval": "Интервал между попытками, сек",
+  "projectChatErrorPolicyInfinite": "Бесконечные попытки",
+  "projectChatErrorPolicyAttempts": "Количество попыток",
+  "projectChatErrorPolicyTryOtherModels": "Пробовать другие модели",
+  "projectChatErrorPolicyFallbackModels": "Модели для подмены",
+  "projectChatErrorPolicyFallbackModelsNone": "Не выбраны",
   "chatCopyMessage": "Копировать ответ",
   "chatCopiedMessage": "Скопировано",
   "chatUsageInputLabel": "вход:",
@@ -1325,8 +1348,23 @@
     }
   },
   "projectChatToolShell": "Запущена команда",
-  "projectChatToolMcpGeneric": "MCP",
-  "projectChatToolMcp": "MCP: {tool}",
+  "projectChatToolMcpGeneric": "Инструмент",
+  "projectChatToolMcp": "{tool}",
+  "projectChatToolMcpServer": "{server} · {tool}",
+  "projectChatToolWebSearch": "Поиск в интернете",
+  "projectChatToolWebFetch": "Чтение веб-страницы",
+  "projectChatToolTodoWrite": "Обновление плана задач",
+  "projectChatToolTodoList": "План задач",
+  "projectChatToolNotesWrite": "Запись заметки",
+  "projectChatToolNotesRead": "Чтение заметок",
+  "projectChatToolGoalsSet": "Постановка цели",
+  "projectChatToolGoalsUpdate": "Обновление цели",
+  "projectChatToolGoalsList": "Список целей",
+  "projectChatToolCompact": "Сжатие контекста",
+  "projectChatToolMcpServers": "Список инструментов",
+  "projectChatToolMcpTools": "Список инструментов",
+  "projectChatToolErrorPrefix": "Ошибка",
+  "projectChatPermissionDenied": "Действие отклонено",
   "@projectChatToolMcp": {
     "placeholders": {
       "tool": {
@@ -1334,7 +1372,7 @@
       }
     }
   },
-  "projectChatToolSubagent": "Подагент {name}",
+  "projectChatToolSubagent": "Субагент {name}",
   "@projectChatToolSubagent": {
     "placeholders": {
       "name": {
@@ -1655,5 +1693,8 @@
       }
     }
   },
-  "adminNoModels": "Нет моделей"
+  "adminNoModels": "Нет моделей",
+  "adminAddCompanyHint": "Название компании (вход: название@agentscale.local)",
+  "companyAddEmployeeHint": "Имя сотрудника (вход: имя@компания.local)",
+  "authLoginHint": "company@agentscale.local"
 }

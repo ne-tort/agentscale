@@ -208,3 +208,29 @@ async def admin_update_key_models(
     )
     await session.commit()
     return out
+
+
+# ---------------------------------------------------------------------------
+# xAI (Grok) OAuth — device-code flow (admin-контур платформенных ключей).
+# ---------------------------------------------------------------------------
+
+
+@router.post("/{key_id}/oauth/xai/device")
+async def start_key_xai_device(admin: PlatformAdminDep, session: SessionDep, key_id: str) -> dict:
+    from prodavan.application.ai_keys.oauth.xai_oauth import XaiOAuthService
+
+    return await XaiOAuthService(session).start_device_flow(key_id, principal=admin)
+
+
+@router.get("/{key_id}/oauth/xai/device")
+async def get_key_xai_device(admin: PlatformAdminDep, session: SessionDep, key_id: str) -> dict:
+    from prodavan.application.ai_keys.oauth.xai_oauth import XaiOAuthService
+
+    return await XaiOAuthService(session).device_flow_status(key_id, principal=admin)
+
+
+@router.delete("/{key_id}/oauth/xai/device", status_code=204)
+async def cancel_key_xai_device(admin: PlatformAdminDep, session: SessionDep, key_id: str) -> None:
+    from prodavan.application.ai_keys.oauth.xai_oauth import XaiOAuthService
+
+    await XaiOAuthService(session).cancel_device_flow(key_id)

@@ -83,6 +83,18 @@ def _split_visible(
     return visible, to_gc
 
 
+
+async def clear_chat_selection_refs(session: AsyncSession, session_id: str) -> None:
+    """Обнулить указатели «активный чат» (chat_session_id) на удаляемую сессию."""
+    from sqlalchemy import update as sa_update
+
+    await session.execute(
+        sa_update(EmployeeProjectSelectionRow)
+        .where(EmployeeProjectSelectionRow.chat_session_id == session_id)
+        .values(chat_session_id=None)
+    )
+
+
 class ChatSidebarService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -101,10 +113,20 @@ class ChatSidebarService:
         row = await self._session.get(
             EmployeeProjectSelectionRow, {"employee_id": employee.id, "cabinet_id": cabinet_id}
         )
+        chat_session_id = getattr(row, "chat_session_id", None) if row else None
+        if row is not None and chat_session_id:
+            # Указатель на активный чат = «последний открытый чат»: живёт, пока
+            # жив сам чат. Сессия удалена (юзером или GC пустышек) → сбрасываем
+            # и залечиваем запись, чтобы клиент не восстанавливал мёртвый чат.
+            session_row = await self._session.get(AgentSessionRow, chat_session_id)
+            if session_row is None:
+                row.chat_session_id = None
+                await self._session.commit()
+                chat_session_id = None
         return {
             "cabinet_id": cabinet_id,
             "project_id": row.project_id if row else None,
-            "chat_session_id": getattr(row, "chat_session_id", None) if row else None,
+            "chat_session_id": chat_session_id,
         }
 
     async def set_selection(
@@ -365,6 +387,7 @@ class ChatSidebarService:
             )
             if ev.scalar_one_or_none() is not None:
                 continue
+            await clear_chat_selection_refs(self._session, row.id)
             await self._session.delete(row)
         if empty_to_gc:
             await self._session.commit()

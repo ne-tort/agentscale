@@ -98,6 +98,30 @@ abstract class AppLocalizations {
     Locale('ru'),
   ];
 
+  /// No description provided for @budgetBenefitBest.
+  ///
+  /// In en, this message translates to:
+  /// **'Best price'**
+  String get budgetBenefitBest;
+
+  /// No description provided for @budgetBenefitSingle.
+  ///
+  /// In en, this message translates to:
+  /// **'Only option'**
+  String get budgetBenefitSingle;
+
+  /// No description provided for @budgetBenefitSame.
+  ///
+  /// In en, this message translates to:
+  /// **'Same'**
+  String get budgetBenefitSame;
+
+  /// No description provided for @budgetBenefitDiff.
+  ///
+  /// In en, this message translates to:
+  /// **'{diff}%'**
+  String budgetBenefitDiff(Object diff);
+
   /// No description provided for @adminActiveEmployees.
   ///
   /// In en, this message translates to:
@@ -535,6 +559,78 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'API key'**
   String get adminTypeApiKey;
+
+  /// No description provided for @adminTypeGrokOauth.
+  ///
+  /// In en, this message translates to:
+  /// **'Grok (xAI OAuth)'**
+  String get adminTypeGrokOauth;
+
+  /// No description provided for @aiKeyGrokAuthTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Grok authorization'**
+  String get aiKeyGrokAuthTitle;
+
+  /// No description provided for @aiKeyGrokAuthSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'SuperGrok subscription — sign in via link'**
+  String get aiKeyGrokAuthSubtitle;
+
+  /// No description provided for @aiKeyGrokAuthHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Open the link, sign in to your SuperGrok account and confirm the code. Tokens are stored on the server and refreshed automatically.'**
+  String get aiKeyGrokAuthHint;
+
+  /// No description provided for @aiKeyGrokAuthOpenLink.
+  ///
+  /// In en, this message translates to:
+  /// **'Open authorization page'**
+  String get aiKeyGrokAuthOpenLink;
+
+  /// No description provided for @aiKeyGrokAuthCode.
+  ///
+  /// In en, this message translates to:
+  /// **'Confirmation code'**
+  String get aiKeyGrokAuthCode;
+
+  /// No description provided for @aiKeyGrokAuthWaiting.
+  ///
+  /// In en, this message translates to:
+  /// **'Waiting for confirmation…'**
+  String get aiKeyGrokAuthWaiting;
+
+  /// No description provided for @aiKeyGrokAuthDone.
+  ///
+  /// In en, this message translates to:
+  /// **'Authorization successful'**
+  String get aiKeyGrokAuthDone;
+
+  /// No description provided for @aiKeyGrokAuthDenied.
+  ///
+  /// In en, this message translates to:
+  /// **'Access denied'**
+  String get aiKeyGrokAuthDenied;
+
+  /// No description provided for @aiKeyGrokAuthExpired.
+  ///
+  /// In en, this message translates to:
+  /// **'The code expired — start again'**
+  String get aiKeyGrokAuthExpired;
+
+  /// No description provided for @aiKeyGrokAuthError.
+  ///
+  /// In en, this message translates to:
+  /// **'Authorization error'**
+  String get aiKeyGrokAuthError;
+
+  /// No description provided for @aiKeyGrokAuthRestart.
+  ///
+  /// In en, this message translates to:
+  /// **'Start again'**
+  String get aiKeyGrokAuthRestart;
 
   /// No description provided for @adminNextRenewal.
   ///
@@ -1517,13 +1613,13 @@ abstract class AppLocalizations {
   /// No description provided for @adminProdavanSubscription.
   ///
   /// In en, this message translates to:
-  /// **'Prodavan subscription'**
+  /// **'Agentscale subscription'**
   String get adminProdavanSubscription;
 
   /// No description provided for @adminProdavanSubscriptionOptional.
   ///
   /// In en, this message translates to:
-  /// **'Prodavan subscription'**
+  /// **'Agentscale subscription'**
   String get adminProdavanSubscriptionOptional;
 
   /// No description provided for @adminProviderValue.
@@ -2180,12 +2276,6 @@ abstract class AppLocalizations {
   /// **'Manage custom tabs'**
   String get cabinetManageCustomTabs;
 
-  /// No description provided for @cabinetMcpTools.
-  ///
-  /// In en, this message translates to:
-  /// **'MCP tools'**
-  String get cabinetMcpTools;
-
   /// No description provided for @cabinetMetaTables.
   ///
   /// In en, this message translates to:
@@ -2245,12 +2335,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'No interpreter registered for view \"{slug}\".'**
   String cabinetNoInterpreterForView(String slug);
-
-  /// No description provided for @cabinetNoMcpTools.
-  ///
-  /// In en, this message translates to:
-  /// **'No MCP tools exposed for this cabinet.'**
-  String get cabinetNoMcpTools;
 
   /// No description provided for @cabinetNoMetaTablesYet.
   ///
@@ -3539,7 +3623,7 @@ abstract class AppLocalizations {
   /// No description provided for @projectChatGroupMcp.
   ///
   /// In en, this message translates to:
-  /// **'MCP: {count} calls'**
+  /// **'{count, plural, one{# tool call} other{# tool calls}}'**
   String projectChatGroupMcp(int count);
 
   /// No description provided for @projectChatGroupDeleted.
@@ -3569,7 +3653,7 @@ abstract class AppLocalizations {
   /// No description provided for @projectChatGroupGeneric.
   ///
   /// In en, this message translates to:
-  /// **'Tools ({count})'**
+  /// **'{count, plural, one{# tool call} other{# tool calls}}'**
   String projectChatGroupGeneric(int count);
 
   /// No description provided for @projectChatWorking.
@@ -3589,6 +3673,60 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'agentscale is working…'**
   String get projectChatAgentWorking;
+
+  /// No description provided for @projectChatReconnecting.
+  ///
+  /// In en, this message translates to:
+  /// **'Reconnecting'**
+  String get projectChatReconnecting;
+
+  /// No description provided for @projectChatReconnectingAttempt.
+  ///
+  /// In en, this message translates to:
+  /// **'Reconnecting ({n}/{y})'**
+  String projectChatReconnectingAttempt(Object n, Object y);
+
+  /// No description provided for @projectChatErrorPolicyTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Error handling'**
+  String get projectChatErrorPolicyTitle;
+
+  /// No description provided for @projectChatErrorPolicyInterval.
+  ///
+  /// In en, this message translates to:
+  /// **'Retry interval, sec'**
+  String get projectChatErrorPolicyInterval;
+
+  /// No description provided for @projectChatErrorPolicyInfinite.
+  ///
+  /// In en, this message translates to:
+  /// **'Unlimited attempts'**
+  String get projectChatErrorPolicyInfinite;
+
+  /// No description provided for @projectChatErrorPolicyAttempts.
+  ///
+  /// In en, this message translates to:
+  /// **'Number of attempts'**
+  String get projectChatErrorPolicyAttempts;
+
+  /// No description provided for @projectChatErrorPolicyTryOtherModels.
+  ///
+  /// In en, this message translates to:
+  /// **'Try other models'**
+  String get projectChatErrorPolicyTryOtherModels;
+
+  /// No description provided for @projectChatErrorPolicyFallbackModels.
+  ///
+  /// In en, this message translates to:
+  /// **'Fallback models'**
+  String get projectChatErrorPolicyFallbackModels;
+
+  /// No description provided for @projectChatErrorPolicyFallbackModelsNone.
+  ///
+  /// In en, this message translates to:
+  /// **'None selected'**
+  String get projectChatErrorPolicyFallbackModelsNone;
 
   /// No description provided for @chatCopyMessage.
   ///
@@ -3731,14 +3869,104 @@ abstract class AppLocalizations {
   /// No description provided for @projectChatToolMcpGeneric.
   ///
   /// In en, this message translates to:
-  /// **'MCP'**
+  /// **'Tool'**
   String get projectChatToolMcpGeneric;
 
   /// No description provided for @projectChatToolMcp.
   ///
   /// In en, this message translates to:
-  /// **'MCP: {tool}'**
+  /// **'{tool}'**
   String projectChatToolMcp(String tool);
+
+  /// No description provided for @projectChatToolMcpServer.
+  ///
+  /// In en, this message translates to:
+  /// **'{server} · {tool}'**
+  String projectChatToolMcpServer(Object server, Object tool);
+
+  /// No description provided for @projectChatToolWebSearch.
+  ///
+  /// In en, this message translates to:
+  /// **'Web search'**
+  String get projectChatToolWebSearch;
+
+  /// No description provided for @projectChatToolWebFetch.
+  ///
+  /// In en, this message translates to:
+  /// **'Fetching web page'**
+  String get projectChatToolWebFetch;
+
+  /// No description provided for @projectChatToolTodoWrite.
+  ///
+  /// In en, this message translates to:
+  /// **'Updating task plan'**
+  String get projectChatToolTodoWrite;
+
+  /// No description provided for @projectChatToolTodoList.
+  ///
+  /// In en, this message translates to:
+  /// **'Task plan'**
+  String get projectChatToolTodoList;
+
+  /// No description provided for @projectChatToolNotesWrite.
+  ///
+  /// In en, this message translates to:
+  /// **'Writing note'**
+  String get projectChatToolNotesWrite;
+
+  /// No description provided for @projectChatToolNotesRead.
+  ///
+  /// In en, this message translates to:
+  /// **'Reading notes'**
+  String get projectChatToolNotesRead;
+
+  /// No description provided for @projectChatToolGoalsSet.
+  ///
+  /// In en, this message translates to:
+  /// **'Setting goal'**
+  String get projectChatToolGoalsSet;
+
+  /// No description provided for @projectChatToolGoalsUpdate.
+  ///
+  /// In en, this message translates to:
+  /// **'Updating goal'**
+  String get projectChatToolGoalsUpdate;
+
+  /// No description provided for @projectChatToolGoalsList.
+  ///
+  /// In en, this message translates to:
+  /// **'Goals'**
+  String get projectChatToolGoalsList;
+
+  /// No description provided for @projectChatToolCompact.
+  ///
+  /// In en, this message translates to:
+  /// **'Compacting context'**
+  String get projectChatToolCompact;
+
+  /// No description provided for @projectChatToolMcpServers.
+  ///
+  /// In en, this message translates to:
+  /// **'Tools list'**
+  String get projectChatToolMcpServers;
+
+  /// No description provided for @projectChatToolMcpTools.
+  ///
+  /// In en, this message translates to:
+  /// **'Tools list'**
+  String get projectChatToolMcpTools;
+
+  /// No description provided for @projectChatToolErrorPrefix.
+  ///
+  /// In en, this message translates to:
+  /// **'Error'**
+  String get projectChatToolErrorPrefix;
+
+  /// No description provided for @projectChatPermissionDenied.
+  ///
+  /// In en, this message translates to:
+  /// **'Action denied'**
+  String get projectChatPermissionDenied;
 
   /// No description provided for @projectChatToolSubagent.
   ///
@@ -4061,7 +4289,7 @@ abstract class AppLocalizations {
   /// No description provided for @navProdavan.
   ///
   /// In en, this message translates to:
-  /// **'Prodavan'**
+  /// **'Agentscale'**
   String get navProdavan;
 
   /// No description provided for @projectAgentError.
@@ -4987,6 +5215,24 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'No models'**
   String get adminNoModels;
+
+  /// No description provided for @adminAddCompanyHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Company name (login: name@agentscale.local)'**
+  String get adminAddCompanyHint;
+
+  /// No description provided for @companyAddEmployeeHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Employee name (login: name@company.local)'**
+  String get companyAddEmployeeHint;
+
+  /// No description provided for @authLoginHint.
+  ///
+  /// In en, this message translates to:
+  /// **'company@agentscale.local'**
+  String get authLoginHint;
 }
 
 class _AppLocalizationsDelegate

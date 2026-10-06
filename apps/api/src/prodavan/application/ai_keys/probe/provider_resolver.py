@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.application.catalog.service import CATALOG_AI_HTTP_PROVIDERS
 from prodavan.domain.ai_keys import ApiKind
+from prodavan.domain.ai_keys.http_url import ensure_scheme
 from prodavan.infrastructure.persistence.models.catalog import ReferenceCatalogEntryRow
 
 logger = logging.getLogger(__name__)
@@ -138,7 +139,12 @@ class ProviderResolver:
                 ProviderEndpoint(
                     catalog_id=row.id,
                     title=row.title or row.id,
-                    base_url=str(payload["base_url"]).rstrip("/"),
+                    # Scheme-less user-entered hosts ("cheapai.lol/v1") are not
+                    # fetchable URLs — default to https (PR #79 normalized the
+                    # UI/materializer/probe; the resolver feeds live models,
+                    # the pod probe and the materialized project config, so it
+                    # must not pass the raw payload through either).
+                    base_url=ensure_scheme(str(payload["base_url"]).rstrip("/")),
                     api_kind=str(payload.get("api_kind") or ""),
                     agent_provider=str(payload.get("agent_provider") or ""),
                     auth_scheme=str(payload.get("auth_scheme") or "bearer"),

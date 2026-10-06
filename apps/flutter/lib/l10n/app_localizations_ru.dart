@@ -10,6 +10,20 @@ class AppLocalizationsRu extends AppLocalizations {
   AppLocalizationsRu([String locale = 'ru']) : super(locale);
 
   @override
+  String get budgetBenefitBest => 'Лучшая цена';
+
+  @override
+  String get budgetBenefitSingle => 'Единственный';
+
+  @override
+  String get budgetBenefitSame => 'Одинаковая';
+
+  @override
+  String budgetBenefitDiff(Object diff) {
+    return '$diff%';
+  }
+
+  @override
   String get adminActiveEmployees => 'Активные сотрудники';
 
   @override
@@ -272,6 +286,43 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get adminTypeApiKey => 'API key';
+
+  @override
+  String get adminTypeGrokOauth => 'Grok (xAI OAuth)';
+
+  @override
+  String get aiKeyGrokAuthTitle => 'Авторизация Grok';
+
+  @override
+  String get aiKeyGrokAuthSubtitle => 'Подписка SuperGrok — вход по ссылке';
+
+  @override
+  String get aiKeyGrokAuthHint =>
+      'Откройте ссылку, войдите в аккаунт SuperGrok и подтвердите код. Токены хранятся на сервере и обновляются автоматически.';
+
+  @override
+  String get aiKeyGrokAuthOpenLink => 'Открыть страницу авторизации';
+
+  @override
+  String get aiKeyGrokAuthCode => 'Код подтверждения';
+
+  @override
+  String get aiKeyGrokAuthWaiting => 'Ожидаем подтверждения…';
+
+  @override
+  String get aiKeyGrokAuthDone => 'Авторизация выполнена';
+
+  @override
+  String get aiKeyGrokAuthDenied => 'Доступ запрещён';
+
+  @override
+  String get aiKeyGrokAuthExpired => 'Код истёк — начните заново';
+
+  @override
+  String get aiKeyGrokAuthError => 'Ошибка авторизации';
+
+  @override
+  String get aiKeyGrokAuthRestart => 'Начать заново';
 
   @override
   String get adminNextRenewal => 'Подписка';
@@ -838,10 +889,10 @@ class AppLocalizationsRu extends AppLocalizations {
   String get adminPreferredProviderOptional => 'Провайдер';
 
   @override
-  String get adminProdavanSubscription => 'Подписка Prodavan';
+  String get adminProdavanSubscription => 'Подписка Agentscale';
 
   @override
-  String get adminProdavanSubscriptionOptional => 'Подписка Prodavan';
+  String get adminProdavanSubscriptionOptional => 'Подписка Agentscale';
 
   @override
   String adminProviderValue(String provider) {
@@ -1230,9 +1281,6 @@ class AppLocalizationsRu extends AppLocalizations {
   String get cabinetManageCustomTabs => 'Пользовательские вкладки';
 
   @override
-  String get cabinetMcpTools => 'MCP-инструменты';
-
-  @override
   String get cabinetMetaTables => 'Мета-таблицы';
 
   @override
@@ -1263,9 +1311,6 @@ class AppLocalizationsRu extends AppLocalizations {
   String cabinetNoInterpreterForView(String slug) {
     return 'Нет интерпретатора для представления «$slug».';
   }
-
-  @override
-  String get cabinetNoMcpTools => 'Для этого кабинета нет MCP-инструментов.';
 
   @override
   String get cabinetNoMetaTablesYet => 'В этом кабинете ещё нет мета-таблиц.';
@@ -1992,7 +2037,15 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String projectChatGroupMcp(int count) {
-    return 'MCP: $count вызовов';
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '# вызова инструмента',
+      many: '# вызовов инструмента',
+      few: '# вызова инструмента',
+      one: '# вызов инструмента',
+    );
+    return '$_temp0';
   }
 
   @override
@@ -2017,7 +2070,15 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String projectChatGroupGeneric(int count) {
-    return 'Инструменты ($count)';
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '# вызова инструмента',
+      many: '# вызовов инструмента',
+      few: '# вызова инструмента',
+      one: '# вызов инструмента',
+    );
+    return '$_temp0';
   }
 
   @override
@@ -2030,6 +2091,35 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get projectChatAgentWorking => 'agentscale работает…';
+
+  @override
+  String get projectChatReconnecting => 'Попытка реконнекта';
+
+  @override
+  String projectChatReconnectingAttempt(Object n, Object y) {
+    return 'Попытка реконнекта ($n/$y)';
+  }
+
+  @override
+  String get projectChatErrorPolicyTitle => 'Обработка ошибок';
+
+  @override
+  String get projectChatErrorPolicyInterval => 'Интервал между попытками, сек';
+
+  @override
+  String get projectChatErrorPolicyInfinite => 'Бесконечные попытки';
+
+  @override
+  String get projectChatErrorPolicyAttempts => 'Количество попыток';
+
+  @override
+  String get projectChatErrorPolicyTryOtherModels => 'Пробовать другие модели';
+
+  @override
+  String get projectChatErrorPolicyFallbackModels => 'Модели для подмены';
+
+  @override
+  String get projectChatErrorPolicyFallbackModelsNone => 'Не выбраны';
 
   @override
   String get chatCopyMessage => 'Копировать ответ';
@@ -2117,16 +2207,63 @@ class AppLocalizationsRu extends AppLocalizations {
   String get projectChatToolShell => 'Запущена команда';
 
   @override
-  String get projectChatToolMcpGeneric => 'MCP';
+  String get projectChatToolMcpGeneric => 'Инструмент';
 
   @override
   String projectChatToolMcp(String tool) {
-    return 'MCP: $tool';
+    return '$tool';
   }
 
   @override
+  String projectChatToolMcpServer(Object server, Object tool) {
+    return '$server · $tool';
+  }
+
+  @override
+  String get projectChatToolWebSearch => 'Поиск в интернете';
+
+  @override
+  String get projectChatToolWebFetch => 'Чтение веб-страницы';
+
+  @override
+  String get projectChatToolTodoWrite => 'Обновление плана задач';
+
+  @override
+  String get projectChatToolTodoList => 'План задач';
+
+  @override
+  String get projectChatToolNotesWrite => 'Запись заметки';
+
+  @override
+  String get projectChatToolNotesRead => 'Чтение заметок';
+
+  @override
+  String get projectChatToolGoalsSet => 'Постановка цели';
+
+  @override
+  String get projectChatToolGoalsUpdate => 'Обновление цели';
+
+  @override
+  String get projectChatToolGoalsList => 'Список целей';
+
+  @override
+  String get projectChatToolCompact => 'Сжатие контекста';
+
+  @override
+  String get projectChatToolMcpServers => 'Список инструментов';
+
+  @override
+  String get projectChatToolMcpTools => 'Список инструментов';
+
+  @override
+  String get projectChatToolErrorPrefix => 'Ошибка';
+
+  @override
+  String get projectChatPermissionDenied => 'Действие отклонено';
+
+  @override
   String projectChatToolSubagent(String name) {
-    return 'Подагент $name';
+    return 'Субагент $name';
   }
 
   @override
@@ -2298,7 +2435,7 @@ class AppLocalizationsRu extends AppLocalizations {
   String get navData => 'Данные';
 
   @override
-  String get navProdavan => 'Prodavan';
+  String get navProdavan => 'Agentscale';
 
   @override
   String get projectAgentError => 'Ошибка агента';
@@ -2803,4 +2940,15 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get adminNoModels => 'Нет моделей';
+
+  @override
+  String get adminAddCompanyHint =>
+      'Название компании (вход: название@agentscale.local)';
+
+  @override
+  String get companyAddEmployeeHint =>
+      'Имя сотрудника (вход: имя@компания.local)';
+
+  @override
+  String get authLoginHint => 'company@agentscale.local';
 }

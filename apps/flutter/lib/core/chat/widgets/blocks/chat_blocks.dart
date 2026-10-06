@@ -93,12 +93,16 @@ class ChatMutedLine extends StatefulWidget {
     this.trailing,
     this.expanded = false,
     this.onTap,
+    this.color,
   });
 
   final String label;
   final Widget? trailing;
   final bool expanded;
   final VoidCallback? onTap;
+
+  /// Label color override (e.g. failed tool calls render red).
+  final Color? color;
 
   @override
   State<ChatMutedLine> createState() => _ChatMutedLineState();
@@ -124,7 +128,10 @@ class _ChatMutedLineState extends State<ChatMutedLine> {
           child: Row(
             children: [
               Expanded(
-                child: Text(widget.label, style: _mutedTextStyle(context)),
+                child: Text(
+                  widget.label,
+                  style: _mutedTextStyle(context).copyWith(color: widget.color),
+                ),
               ),
               if (widget.trailing != null) widget.trailing!,
               if (widget.onTap != null && showChevron)
@@ -174,13 +181,74 @@ class ChatCodePanel extends StatelessWidget {
         color: scheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(8),
       ),
-      child: Text(
-        text,
-        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              fontFamily: 'monospace',
-              color: scheme.onSurface.withValues(alpha: 0.88),
+      child: Stack(
+        children: [
+          Padding(
+            // место под кнопку копирования в правом нижнем углу
+            padding: const EdgeInsets.only(right: 28, bottom: 4),
+            child: Text(
+              text,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    fontFamily: 'monospace',
+                    color: scheme.onSurface.withValues(alpha: 0.88),
+                  ),
             ),
+          ),
+          Positioned(
+            right: 0,
+            bottom: 0,
+            child: _CopyPanelButton(text: text),
+          ),
+        ],
       ),
+    );
+  }
+}
+
+/// Копия содержимого панели (результат MCP/тулзы) в буфер — иконка справа внизу.
+class _CopyPanelButton extends StatefulWidget {
+  const _CopyPanelButton({required this.text});
+
+  final String text;
+
+  @override
+  State<_CopyPanelButton> createState() => _CopyPanelButtonState();
+}
+
+class _CopyPanelButtonState extends State<_CopyPanelButton> {
+  bool _copied = false;
+  Timer? _timer;
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _copy() async {
+    await Clipboard.setData(ClipboardData(text: widget.text));
+    if (!mounted) return;
+    setState(() => _copied = true);
+    _timer?.cancel();
+    _timer = Timer(const Duration(seconds: 2), () {
+      if (mounted) setState(() => _copied = false);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return IconButton(
+      visualDensity: VisualDensity.compact,
+      iconSize: 16,
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+      tooltip: MaterialLocalizations.of(context).copyButtonLabel,
+      icon: Icon(
+        _copied ? Icons.check : Icons.copy_outlined,
+        color: _copied ? scheme.primary : scheme.onSurfaceVariant,
+      ),
+      onPressed: _copy,
     );
   }
 }
@@ -504,12 +572,25 @@ class _AssistantStreamBlockState extends State<AssistantStreamBlock> {
 
 /// "agentscale работает…" — turn is streaming but no block streams and no
 /// tool call is pending: the agent is silent between events, and the user
-/// must see it did not stop.
+/// must see it did not stop. With [reconnect] set it renders the
+/// «Попытка реконнекта (n/y)…» line instead (provider-error retry wait).
 class AgentWorkingIndicator extends StatefulWidget {
-  const AgentWorkingIndicator({super.key});
+  const AgentWorkingIndicator({super.key, this.reconnect});
+
+  /// Reconnect attempt info from the runtime status frame; null = working.
+  final ReconnectIndicatorData? reconnect;
 
   @override
   State<AgentWorkingIndicator> createState() => _AgentWorkingIndicatorState();
+}
+
+/// Provider-error reconnect status (chat error policy) for [AgentWorkingIndicator].
+class ReconnectIndicatorData {
+  const ReconnectIndicatorData({this.attempt, this.maxAttempts, this.nextModel});
+
+  final int? attempt;
+  final int? maxAttempts;
+  final String? nextModel;
 }
 
 class _AgentWorkingIndicatorState extends State<AgentWorkingIndicator>
@@ -539,6 +620,16 @@ class _AgentWorkingIndicatorState extends State<AgentWorkingIndicator>
     // The l10n copy ends with "…" — the ellipsis is rendered as animated
     // dots instead, so strip any trailing dots from the base text.
     var label = l10n.projectChatAgentWorking;
+    final reconnect = widget.reconnect;
+    if (reconnect != null) {
+      final attempt = reconnect.attempt;
+      final max = reconnect.maxAttempts;
+      if (attempt != null && max != null && max > 0) {
+        label = l10n.projectChatReconnectingAttempt(attempt, max);
+      } else {
+        label = l10n.projectChatReconnecting;
+      }
+    }
     while (label.endsWith('…') || label.endsWith('.')) {
       label = label.substring(0, label.length - 1);
     }
@@ -750,6 +841,7 @@ class ToolActivityBlock extends StatefulWidget {
     this.output,
     this.isError = false,
     this.pending = false,
+    this.mcpAliases = const {},
   });
 
   final String name;
@@ -757,6 +849,9 @@ class ToolActivityBlock extends StatefulWidget {
   final Object? output;
   final bool isError;
   final bool pending;
+
+  /// MCP display aliases (see ChatSessionController.mcpAliases).
+  final Map<String, String> mcpAliases;
 
   @override
   State<ToolActivityBlock> createState() => _ToolActivityBlockState();
@@ -776,6 +871,7 @@ class _ToolActivityBlockState extends State<ToolActivityBlock> {
       input: widget.input,
       output: widget.output,
       pending: widget.pending,
+      mcpAliases: widget.mcpAliases,
     );
     final stats = parseDiffStats(widget.output);
     final panelBody = formatToolPanelBody(
@@ -812,11 +908,17 @@ class _ToolActivityBlockState extends State<ToolActivityBlock> {
 
     final hasPanel = body.trim().isNotEmpty;
 
+    // Failed call: MCP servers answer {content, isError} without throwing —
+    // the event carries no is_error flag, so detect the envelope too. The
+    // label renders red (the alias text itself), the panel shows
+    // «Запрос/Ответ» (see formatToolPanelBody).
+    final failed = widget.isError || mcpToolFailed(widget.output);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         ChatMutedLine(
           label: presentation.label,
+          color: failed ? scheme.error : null,
           trailing: badge,
           expanded: _open,
           onTap: hasPanel ? () => setState(() => _open = !_open) : null,
@@ -828,33 +930,66 @@ class _ToolActivityBlockState extends State<ToolActivityBlock> {
 }
 
 class ToolCallBlock extends StatelessWidget {
-  const ToolCallBlock({super.key, required this.name, this.input = const {}});
+  const ToolCallBlock({
+    super.key,
+    required this.name,
+    this.input = const {},
+    this.mcpAliases = const {},
+  });
 
   final String name;
   final Map<String, dynamic> input;
+  final Map<String, String> mcpAliases;
 
   @override
   Widget build(BuildContext context) {
-    return ToolActivityBlock(name: name, input: input, pending: true);
+    return ToolActivityBlock(
+      name: name,
+      input: input,
+      pending: true,
+      mcpAliases: mcpAliases,
+    );
   }
 }
 
 class ToolResultBlock extends StatelessWidget {
-  const ToolResultBlock({super.key, required this.name, this.output, this.isError = false});
+  const ToolResultBlock({
+    super.key,
+    required this.name,
+    this.output,
+    this.isError = false,
+    this.mcpAliases = const {},
+  });
 
   final String name;
   final Object? output;
   final bool isError;
+  final Map<String, String> mcpAliases;
 
   @override
   Widget build(BuildContext context) {
-    return ToolActivityBlock(name: name, output: output, isError: isError);
+    return ToolActivityBlock(
+      name: name,
+      output: output,
+      isError: isError,
+      mcpAliases: mcpAliases,
+    );
+  }
+}
+
+String _prettyApprovalInput(Map<String, dynamic> input) {
+  if (input.isEmpty) return '';
+  try {
+    return const JsonEncoder.withIndent('  ').convert(input);
+  } catch (_) {
+    return input.toString();
   }
 }
 
 class ApprovalBlock extends StatelessWidget {
   const ApprovalBlock({
     super.key,
+    this.mcpAliases = const {},
     required this.name,
     required this.approvalId,
     this.input = const {},
@@ -868,17 +1003,26 @@ class ApprovalBlock extends StatelessWidget {
   final VoidCallback? onAllow;
   final VoidCallback? onDeny;
 
+  /// MCP display aliases — the title shows the friendly tool label.
+  final Map<String, String> mcpAliases;
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
+    final presentation = formatToolActivityLabel(
+      l10n,
+      name: name.isEmpty ? 'tool' : name,
+      input: input,
+      mcpAliases: mcpAliases,
+    );
     return Padding(
       padding: EdgeInsets.symmetric(vertical: AppSpacing.xs),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(name, style: Theme.of(context).textTheme.titleSmall),
+          Text(presentation.label, style: Theme.of(context).textTheme.titleSmall),
           SizedBox(height: AppSpacing.xs),
-          ChatInsetPanel(child: Text(input.toString())),
+          ChatInsetPanel(child: Text(_prettyApprovalInput(input))),
           SizedBox(height: AppSpacing.sm),
           Row(
             children: [
