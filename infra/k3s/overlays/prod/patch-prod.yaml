@@ -94,6 +94,11 @@ data:
   CORS_FORBID_WILDCARD_ORIGIN: "true"
   # Issuer via prod keycloak hostPort.
   KEYCLOAK_ISSUER_URL: http://127.0.0.1:8099/realms/agentscale
+  # agent-sandbox cutover (Wave 3), as in dev: the API writes SandboxClaims,
+  # pods are created by the agent-sandbox controller. Base default "k8s" makes
+  # the API create pods itself → 403 (sandbox RBAC forbids pods:create by
+  # design, see base/agentscale-sandboxes-ks/rbac-sandboxes.yaml).
+  POD_RUNTIME_MODE: "sandbox"
   # Cross-ns (sandbox -> app ns) URL: prod contour app ns is agentscale.
   POD_AGENT_RUNTIME_API_BASE_URL: http://agentscale-api.agentscale.svc:8001/api/v1
   # web.search: тот же прокси-контур, что в dev — провайдер prodavan_api
