@@ -112,6 +112,7 @@ spec:
                     --eval "db.adminCommand('ping')"
             initialDelaySeconds: 15
             periodSeconds: 10
+            timeoutSeconds: 10
             failureThreshold: 6
           livenessProbe:
             exec:
@@ -126,6 +127,10 @@ spec:
                     --eval "db.adminCommand('ping')"
             initialDelaySeconds: 40
             periodSeconds: 20
+            # mongosh-ping на нагруженной ноде бывает дольше секунды —
+            # дефолдный timeout=1s ронял под по liveness (6+ рестартов)
+            timeoutSeconds: 10
+            failureThreshold: 6
           resources:
             requests:
               cpu: 100m
