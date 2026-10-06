@@ -189,6 +189,8 @@ class _AdminAiKeyListPageState extends State<AdminAiKeyListPage> {
         return l10n.adminTypeCodexSdk;
       case 'claude_agent_sdk':
         return l10n.adminTypeClaudeSdk;
+      case 'xai_oauth':
+        return l10n.adminTypeGrokOauth;
       default:
         return l10n.adminTypeApiKey;
     }

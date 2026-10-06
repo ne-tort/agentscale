@@ -288,6 +288,44 @@ class AppLocalizationsEn extends AppLocalizations {
   String get adminTypeApiKey => 'API key';
 
   @override
+  String get adminTypeGrokOauth => 'Grok (xAI OAuth)';
+
+  @override
+  String get aiKeyGrokAuthTitle => 'Grok authorization';
+
+  @override
+  String get aiKeyGrokAuthSubtitle =>
+      'SuperGrok subscription — sign in via link';
+
+  @override
+  String get aiKeyGrokAuthHint =>
+      'Open the link, sign in to your SuperGrok account and confirm the code. Tokens are stored on the server and refreshed automatically.';
+
+  @override
+  String get aiKeyGrokAuthOpenLink => 'Open authorization page';
+
+  @override
+  String get aiKeyGrokAuthCode => 'Confirmation code';
+
+  @override
+  String get aiKeyGrokAuthWaiting => 'Waiting for confirmation…';
+
+  @override
+  String get aiKeyGrokAuthDone => 'Authorization successful';
+
+  @override
+  String get aiKeyGrokAuthDenied => 'Access denied';
+
+  @override
+  String get aiKeyGrokAuthExpired => 'The code expired — start again';
+
+  @override
+  String get aiKeyGrokAuthError => 'Authorization error';
+
+  @override
+  String get aiKeyGrokAuthRestart => 'Start again';
+
+  @override
   String get adminNextRenewal => 'Subscription';
 
   @override
