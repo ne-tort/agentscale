@@ -32,7 +32,7 @@ from prodavan.infrastructure.persistence.models.projects import ProjectRow
 from prodavan.infrastructure.secrets.file_store import new_key_id
 from prodavan.infrastructure.secrets.store import SecretStore, get_secret_store
 
-PROVIDERS = frozenset({"cursor", "codex", "claude_code"})
+PROVIDERS = frozenset({"cursor", "codex", "claude_code", "xai"})
 API_KINDS = frozenset(k.value for k in ApiKind)
 KEY_EXPIRING_SOON_DAYS = 14
 _SYSTEM_PRINCIPAL = Principal(sub="system:lazy-expire")
@@ -610,6 +610,15 @@ class AiKeysService:
 
     async def rotate_secret(self, key_id: str, secret: str, *, principal: Principal | None = None) -> dict:
         row = await self._get_row(key_id)
+        if row.api_kind == ApiKind.XAI_OAUTH.value:
+            # секрет Grok-ключа — OAuth-токены: обновляются авторизацией,
+            # ручная ротация сломала бы refresh-контракт
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="xAI (Grok) key secret is managed by OAuth — use the authorization flow",
+            )
         old_ref = row.secret_ref
         row.secret_ref = self._secrets.put(key_id, secret)
         if old_ref and old_ref != row.secret_ref:
@@ -825,7 +834,16 @@ class AiKeysService:
         row = await self._get_row(key_id)
         if not (row.secret_ref or "").strip():
             raise AppError(code="NO_SECRET", title="No secret", status=404, detail="key has no secret")
-        return self._secrets.get(row.secret_ref)
+        secret = self._secrets.get(row.secret_ref)
+        if row.api_kind == ApiKind.XAI_OAUTH.value:
+            # секрет xAI-ключа — JSON-блоб OAuth-токенов: наружу (lease/probe)
+            # отдаётся только свежий access_token (авто-refresh с ротацией)
+            from prodavan.application.ai_keys.oauth.xai_oauth import XaiOAuthService
+
+            return await XaiOAuthService(self._session, secrets=self._secrets).ensure_fresh_access_token(
+                row, secret
+            )
+        return secret
 
     def _validate_provider_kind(self, provider: str, api_kind: str) -> None:
         if provider not in PROVIDERS:

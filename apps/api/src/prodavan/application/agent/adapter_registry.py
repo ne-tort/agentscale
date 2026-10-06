@@ -16,6 +16,7 @@ _PLATFORM_RUNTIME_KINDS = frozenset(
         ApiKind.ANTHROPIC_API,
         ApiKind.OPENROUTER,
         ApiKind.CUSTOM,
+        ApiKind.XAI_OAUTH,
     }
 )
 

@@ -66,6 +66,25 @@ _AI_HTTP_SEED: list[dict[str, Any]] = [
         },
     },
     {
+        # Grok через SuperGrok-подписку: OAuth device-code (api_kind xai_oauth),
+        # сервер хранит и обновляет токены; API OpenAI-совместимый.
+        "id": "xai",
+        "title": "xAI (Grok)",
+        "subtitle": "api.x.ai — SuperGrok OAuth",
+        "icon_name": "bolt_outlined",
+        "sort_order": 35,
+        "payload": {
+            "api_kind": "xai_oauth",
+            "agent_provider": "xai",
+            "base_url": "https://api.x.ai/v1",
+            "openai_compatible": True,
+            "auth_scheme": "bearer",
+            "chat_completions_path": "/chat/completions",
+            "models_path": "/models",
+            "supports_models_list": True,
+        },
+    },
+    {
         "id": "cursor",
         "title": "Cursor (Dashboard API)",
         "subtitle": "api.cursor.com",

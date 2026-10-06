@@ -204,6 +204,7 @@ def test_provider_to_default_api_kind() -> None:
 
 def test_api_kind_to_provider_dialect() -> None:
     assert api_kind_to_provider_dialect("openrouter") == "openai_compat"
+    assert api_kind_to_provider_dialect("xai_oauth") == "openai_compat"
     assert api_kind_to_provider_dialect("anthropic_api") == "anthropic_messages"
     assert api_kind_to_provider_dialect("cursor_sdk") is None
 

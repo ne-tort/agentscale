@@ -322,3 +322,57 @@ async def probe_company_key_model(
     await EntitlementService(session).require_company_actor(principal, company_id, employee=employee)
     await AiKeysService(session).require_company_key_visible(key_id, company_id)
     return await AiKeyProbeService(session).probe_model(key_id, body.model, principal=principal)
+
+
+# ---------------------------------------------------------------------------
+# xAI (Grok) OAuth — device-code flow: старт/статус(поллинг)/отмена.
+# Токены живут в секрете ключа; после успеха ключ активен и работает как
+# обычный HTTP-провайдер (lease-push отдаёт свежий access_token).
+# ---------------------------------------------------------------------------
+
+
+@router.post("/{key_id}/oauth/xai/device")
+async def start_company_key_xai_device(
+    company_id: str,
+    key_id: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: Annotated[EmployeeRow | None, Depends(get_current_employee)],
+) -> dict:
+    """Старт device-code авторизации Grok: ссылка + код для браузера пользователя."""
+    from prodavan.application.ai_keys.oauth.xai_oauth import XaiOAuthService
+
+    await EntitlementService(session).require_company_actor(principal, company_id, employee=employee)
+    await AiKeysService(session).require_company_writable_key(key_id, company_id)
+    return await XaiOAuthService(session).start_device_flow(key_id, principal=principal)
+
+
+@router.get("/{key_id}/oauth/xai/device")
+async def get_company_key_xai_device(
+    company_id: str,
+    key_id: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: Annotated[EmployeeRow | None, Depends(get_current_employee)],
+) -> dict:
+    """Статус авторизации; каждый вызов делает один poll token-эндпоинта xAI."""
+    from prodavan.application.ai_keys.oauth.xai_oauth import XaiOAuthService
+
+    await EntitlementService(session).require_company_actor(principal, company_id, employee=employee)
+    await AiKeysService(session).require_company_writable_key(key_id, company_id)
+    return await XaiOAuthService(session).device_flow_status(key_id, principal=principal)
+
+
+@router.delete("/{key_id}/oauth/xai/device", status_code=204)
+async def cancel_company_key_xai_device(
+    company_id: str,
+    key_id: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: Annotated[EmployeeRow | None, Depends(get_current_employee)],
+) -> None:
+    from prodavan.application.ai_keys.oauth.xai_oauth import XaiOAuthService
+
+    await EntitlementService(session).require_company_actor(principal, company_id, employee=employee)
+    await AiKeysService(session).require_company_writable_key(key_id, company_id)
+    await XaiOAuthService(session).cancel_device_flow(key_id)

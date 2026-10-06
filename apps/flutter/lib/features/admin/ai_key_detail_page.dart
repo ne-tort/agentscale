@@ -9,6 +9,7 @@ import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/app_confirm_page.dart';
 import 'package:prodavan/core/widgets/app_status_banner.dart';
+import 'package:prodavan/features/company/ai_key_grok_oauth_page.dart';
 import 'package:prodavan/features/admin/ai_http_provider_select_page.dart';import 'package:prodavan/features/admin/ai_key_integration_type.dart';
 import 'package:prodavan/features/admin/admin_ai_key_models_page.dart';
 import 'package:prodavan/core/preferences/app_probe_preference.dart';
@@ -128,6 +129,8 @@ class _AdminAiKeyDetailPageState extends State<AdminAiKeyDetailPage> {
         return l10n.adminTypeCodexSdk;
       case 'claude_agent_sdk':
         return l10n.adminTypeClaudeSdk;
+      case 'xai_oauth':
+        return l10n.adminTypeGrokOauth;
       default:
         return l10n.adminTypeApiKey;
     }
@@ -175,6 +178,19 @@ class _AdminAiKeyDetailPageState extends State<AdminAiKeyDetailPage> {
       clearCatalogEntryId: true,
     );
     await _load();
+  }
+
+  /// Device-code авторизация Grok (платформенный ключ).
+  Future<void> _openGrokAuth() async {
+    final ok = await Navigator.of(context).push<bool>(
+      MaterialPageRoute<bool>(
+        builder: (_) => AiKeyGrokOauthPage(
+          start: () => adminContext.api.startAiKeyXaiDevice(keyId: widget.keyId),
+          status: () => adminContext.api.getAiKeyXaiDevice(keyId: widget.keyId),
+        ),
+      ),
+    );
+    if (ok == true) await _load();
   }
 
   Future<void> _pickProvider() async {
@@ -323,7 +339,17 @@ class _AdminAiKeyDetailPageState extends State<AdminAiKeyDetailPage> {
               subtitle: Text(_providerSubtitle(l10n)),
               onTap: _pickProvider,
             ),
-          AppValuePreference<String>(
+          if (type.isXaiOauth)
+            AppNavPreference(
+              title: l10n.aiKeyGrokAuthTitle,
+              icon: Icons.bolt_outlined,
+              subtitle: Text(
+                hasSecret ? l10n.aiKeyGrokAuthDone : l10n.aiKeyGrokAuthSubtitle,
+              ),
+              onTap: _openGrokAuth,
+            ),
+          if (!type.isXaiOauth)
+            AppValuePreference<String>(
             title: l10n.commonSecret,
             icon: Icons.key_outlined,
             value: '',

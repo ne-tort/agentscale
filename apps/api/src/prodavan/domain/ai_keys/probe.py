@@ -65,6 +65,7 @@ HTTP_PROBE_API_KINDS: frozenset[str] = frozenset(
         "anthropic_api",
         "openrouter",
         "custom",
+        "xai_oauth",
         "cursor_sdk",
         "codex_sdk",
         "claude_agent_sdk",

@@ -560,6 +560,78 @@ abstract class AppLocalizations {
   /// **'API key'**
   String get adminTypeApiKey;
 
+  /// No description provided for @adminTypeGrokOauth.
+  ///
+  /// In en, this message translates to:
+  /// **'Grok (xAI OAuth)'**
+  String get adminTypeGrokOauth;
+
+  /// No description provided for @aiKeyGrokAuthTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Grok authorization'**
+  String get aiKeyGrokAuthTitle;
+
+  /// No description provided for @aiKeyGrokAuthSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'SuperGrok subscription — sign in via link'**
+  String get aiKeyGrokAuthSubtitle;
+
+  /// No description provided for @aiKeyGrokAuthHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Open the link, sign in to your SuperGrok account and confirm the code. Tokens are stored on the server and refreshed automatically.'**
+  String get aiKeyGrokAuthHint;
+
+  /// No description provided for @aiKeyGrokAuthOpenLink.
+  ///
+  /// In en, this message translates to:
+  /// **'Open authorization page'**
+  String get aiKeyGrokAuthOpenLink;
+
+  /// No description provided for @aiKeyGrokAuthCode.
+  ///
+  /// In en, this message translates to:
+  /// **'Confirmation code'**
+  String get aiKeyGrokAuthCode;
+
+  /// No description provided for @aiKeyGrokAuthWaiting.
+  ///
+  /// In en, this message translates to:
+  /// **'Waiting for confirmation…'**
+  String get aiKeyGrokAuthWaiting;
+
+  /// No description provided for @aiKeyGrokAuthDone.
+  ///
+  /// In en, this message translates to:
+  /// **'Authorization successful'**
+  String get aiKeyGrokAuthDone;
+
+  /// No description provided for @aiKeyGrokAuthDenied.
+  ///
+  /// In en, this message translates to:
+  /// **'Access denied'**
+  String get aiKeyGrokAuthDenied;
+
+  /// No description provided for @aiKeyGrokAuthExpired.
+  ///
+  /// In en, this message translates to:
+  /// **'The code expired — start again'**
+  String get aiKeyGrokAuthExpired;
+
+  /// No description provided for @aiKeyGrokAuthError.
+  ///
+  /// In en, this message translates to:
+  /// **'Authorization error'**
+  String get aiKeyGrokAuthError;
+
+  /// No description provided for @aiKeyGrokAuthRestart.
+  ///
+  /// In en, this message translates to:
+  /// **'Start again'**
+  String get aiKeyGrokAuthRestart;
+
   /// No description provided for @adminNextRenewal.
   ///
   /// In en, this message translates to:

@@ -17,6 +17,7 @@ _PROVIDER_DEFAULT_API_KIND: dict[str, str] = {
     "cursor": ApiKind.CURSOR_SDK,
     "codex": ApiKind.CODEX_SDK,
     "claude_code": ApiKind.CLAUDE_AGENT_SDK,
+    "xai": ApiKind.XAI_OAUTH,
 }
 
 # OpenClaw builtin tool ids — canonical MCP names (unified surface: built-ins
@@ -66,7 +67,13 @@ def api_kind_to_provider_dialect(api_kind: str | None) -> str | None:
         return None
     if api_kind in {ApiKind.ANTHROPIC_API, ApiKind.CLAUDE_AGENT_SDK}:
         return "anthropic_messages"
-    if api_kind in {ApiKind.OPENAI_API, ApiKind.OPENROUTER, ApiKind.CUSTOM, ApiKind.CODEX_SDK}:
+    if api_kind in {
+        ApiKind.OPENAI_API,
+        ApiKind.OPENROUTER,
+        ApiKind.CUSTOM,
+        ApiKind.CODEX_SDK,
+        ApiKind.XAI_OAUTH,
+    }:
         return "openai_compat"
     return None
 
