@@ -394,3 +394,37 @@ async def test_projection_columns_fallback_to_star() -> None:
     # пустой column_map → None
     conn3 = _FakeRemoteConn(columns=[("title",)])
     assert await _remote_projection_columns(conn3, schema=None, table="t", wanted=[], quote=q) is None
+
+
+@pytest.mark.asyncio
+async def test_projection_includes_currency_like_columns() -> None:
+    """currency-heal в apply_column_map сканирует все исходные колонки —
+    проекция обязана сохранять currency-подобные, даже если они не в map."""
+    from prodavan.application.modules.equipment_catalog_opensearch import (
+        _remote_projection_columns,
+    )
+
+    conn = _FakeRemoteConn(columns=[("name",), ("price",), ("currency",), ("extra",)])
+    cols = await _remote_projection_columns(
+        conn, schema="public", table="t", wanted=["name", "price"], quote=lambda s: f'"{s}"'
+    )
+    assert cols == ['"name"', '"price"', '"currency"']
+
+
+@pytest.mark.asyncio
+async def test_projection_uses_map_values_semantics() -> None:
+    """column_map = {canonical → source}: в проекцию идут ЗНАЧЕНИЯ (name/pn),
+    а не канонические ключи (title/part_number) — регрессия пустого индекса."""
+    from prodavan.application.modules.equipment_catalog_opensearch import (
+        _normalize_column_map,
+        _remote_projection_columns,
+    )
+
+    cmap = _normalize_column_map({"title": "name", "price": "price", "part_number": "pn"})
+    assert set(cmap.values()) == {"name", "price", "pn"}
+    conn = _FakeRemoteConn(columns=[("name",), ("price",), ("pn",), ("title",)])
+    cols = await _remote_projection_columns(
+        conn, schema=None, table="t", wanted=cmap.values(), quote=lambda s: f'"{s}"'
+    )
+    assert cols is not None
+    assert '"name"' in cols and '"pn"' in cols
