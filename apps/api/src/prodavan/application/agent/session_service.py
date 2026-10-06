@@ -697,6 +697,7 @@ class AgentSessionService:
         principal: Principal,
         employee: EmployeeRow | None,
         model: str | None = None,
+        stall_retry: bool = False,
     ) -> dict:
         events_out: list[dict] = []
         async for event in self._iter_send_events(
@@ -707,6 +708,7 @@ class AgentSessionService:
             principal=principal,
             employee=employee,
             model=model,
+            stall_retry=stall_retry,
         ):
             events_out.append(event)
         await self._session.commit()
@@ -722,6 +724,7 @@ class AgentSessionService:
         principal: Principal,
         employee: EmployeeRow | None,
         model: str | None = None,
+        stall_retry: bool = False,
     ) -> AsyncIterator[dict]:
         project = await self._projects.require_access(
             project_id=project_id, principal=principal, employee=employee, write=True
@@ -814,6 +817,10 @@ class AgentSessionService:
 
         seq += 1
         user_payload: dict = {"text": display_text}
+        if stall_retry:
+            # повтор run-stall сторожа: UI не дублирует пузырь пользователя,
+            # а сторож считает такие сообщения частью цепочки ретраев
+            user_payload["stall_retry"] = True
         if refs:
             user_payload["attachment_refs"] = list(refs)
         if delivery is not None:

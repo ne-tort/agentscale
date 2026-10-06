@@ -13,6 +13,48 @@ void main() {
     expect(blocks.first.isStreaming, isTrue);
   });
 
+  test('stall_retry user_message не рендерится вторым пузырём', () {
+    var blocks = applyStreamEvent([], {
+      'type': 'user_message',
+      'data': {'text': 'подбери SSD'},
+    });
+    blocks = applyStreamEvent(blocks, {
+      'type': 'user_message',
+      'data': {'text': 'подбери SSD', 'stall_retry': true},
+    });
+    final userBlocks = blocks.where((b) => b.kind == 'user').toList();
+    expect(userBlocks.length, 1);
+  });
+
+  test('reconnect-статусы сторожа невидимы в транскрипте', () {
+    var blocks = applyStreamEvent([], {
+      'type': 'status',
+      'data': {'phase': 'reconnect', 'attempt': 1, 'stall': true},
+    });
+    blocks = applyStreamEvent(blocks, {
+      'type': 'done',
+      'data': {'reason': 'stalled', 'stalled': true},
+    });
+    expect(blocks, isEmpty);
+  });
+
+  test('легаси error CHAT_RUN_STALLED не рендерится', () {
+    final blocks = applyStreamEvent([], {
+      'type': 'error',
+      'data': {
+        'code': 'CHAT_RUN_STALLED',
+        'message': 'Ответ агента прервался без завершения…',
+      },
+    });
+    expect(blocks, isEmpty);
+    // остальные ошибки — как раньше
+    final other = applyStreamEvent([], {
+      'type': 'error',
+      'data': {'code': 'PROVIDER_TIMEOUT', 'message': 'provider request timed out'},
+    });
+    expect(other.single.kind, 'error');
+  });
+
   test('applyStreamEvent does not swallow suffix-overlap incremental chunks', () {
     // Wire is already incremental; "lo" after "Hello" must append, not overlap-merge away.
     var blocks = applyStreamEvent([], {
