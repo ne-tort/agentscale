@@ -821,7 +821,7 @@ class AiKeysService:
             )
             raise AppError(code="NO_AI_KEY", title="No AI key", status=404, detail=detail)
 
-        secret = self._secrets.get(chosen.secret_ref)
+        secret = await self.effective_secret_for_row(chosen)
         return ResolvedCredential(
             key_id=chosen.id,
             provider=chosen.provider,
@@ -834,10 +834,18 @@ class AiKeysService:
         row = await self._get_row(key_id)
         if not (row.secret_ref or "").strip():
             raise AppError(code="NO_SECRET", title="No secret", status=404, detail="key has no secret")
+        return await self.effective_secret_for_row(row)
+
+    async def effective_secret_for_row(self, row: AiProviderKeyRow) -> str:
+        """Секрет ключа в форме для наружного потребления.
+
+        Все контуры (lease-push, probe, CreateOpts, live-models) обязаны брать
+        секрет ТОЛЬКО отсюда: для xai_oauth в хранилище лежит JSON-блоб
+        OAuth-токенов, а наружу отдаётся свежий access_token (авто-refresh
+        с ротацией refresh_token); для остальных видов — как есть.
+        """
         secret = self._secrets.get(row.secret_ref)
         if row.api_kind == ApiKind.XAI_OAUTH.value:
-            # секрет xAI-ключа — JSON-блоб OAuth-токенов: наружу (lease/probe)
-            # отдаётся только свежий access_token (авто-refresh с ротацией)
             from prodavan.application.ai_keys.oauth.xai_oauth import XaiOAuthService
 
             return await XaiOAuthService(self._session, secrets=self._secrets).ensure_fresh_access_token(
@@ -1084,7 +1092,7 @@ class AiKeysService:
             )
             raise AppError(code="NO_AI_KEY", title="No AI key", status=404, detail=detail)
 
-        secret = self._secrets.get(chosen.secret_ref)
+        secret = await self.effective_secret_for_row(chosen)
         return ResolvedCredential(
             key_id=chosen.id,
             provider=chosen.provider,

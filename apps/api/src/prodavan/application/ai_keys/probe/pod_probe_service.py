@@ -261,7 +261,11 @@ class ProbePodService:
         if not ref:
             return None
         try:
-            secret = self._secrets.get(ref)
+            # единый резолвер: xai_oauth отдаёт свежий access_token, а не
+            # JSON-блоб токенов (иначе lease несёт в под невалидный bearer)
+            from prodavan.application.ai_keys.service import AiKeysService
+
+            secret = await AiKeysService(self._session, secrets=self._secrets).effective_secret_for_row(row)
         except Exception as exc:
             logger.warning("probe pod: secret fetch failed key=%s: %s", row.id, exc)
             return None

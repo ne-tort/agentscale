@@ -343,3 +343,46 @@ def test_token_blob_roundtrip() -> None:
     assert blob["expires_at"] == (now + timedelta(seconds=600)).isoformat()
     assert parse_token_blob("not json") is None
     assert parse_token_blob(json.dumps({"v": 1})) is None
+
+
+# --------------------------------------------------- контуры потребления секрета
+
+
+@pytest.mark.asyncio
+async def test_pod_probe_resolve_secret_returns_access_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Регрессия: pod-probe пушил в lease ВЕСЬ JSON-блоб как bearer — xAI
+    отвечал 400, bridge глушил его в 200 {models: []}. Lease обязан нести
+    access_token."""
+    from prodavan.application.ai_keys.probe.pod_probe_service import ProbePodService
+
+    secrets = FakeSecrets()
+    expires = (datetime.now(tz=UTC) + timedelta(minutes=30)).isoformat()
+    ref = secrets.put("aik_grok1", json.dumps({
+        "v": 1, "access_token": "acc_pod", "refresh_token": "ref", "id_token": None, "expires_at": expires,
+    }))
+    row = _key_row(secret_ref=ref)
+    _script_posts(monkeypatch, [])  # токен свежий — HTTP не нужен
+
+    svc = ProbePodService(FakeSession(row), secrets=secrets)  # type: ignore[arg-type]
+    secret = await svc._resolve_secret(row)
+    assert secret == "acc_pod"
+
+
+@pytest.mark.asyncio
+async def test_effective_secret_for_row_passthrough_and_xai(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Единый резолвер: обычный ключ — как есть, xai_oauth — access_token."""
+    from prodavan.application.ai_keys.service import AiKeysService
+
+    secrets = FakeSecrets()
+    plain_ref = secrets.put("aik_plain", "sk-static")
+    plain_row = _key_row(api_kind="openai_api", secret_ref=plain_ref)
+    svc = AiKeysService(FakeSession(plain_row), secrets=secrets)  # type: ignore[arg-type]
+    assert await svc.effective_secret_for_row(plain_row) == "sk-static"
+
+    expires = (datetime.now(tz=UTC) + timedelta(minutes=30)).isoformat()
+    xai_ref = secrets.put("aik_grok1", json.dumps({
+        "v": 1, "access_token": "acc_eff", "refresh_token": "ref", "id_token": None, "expires_at": expires,
+    }))
+    xai_row = _key_row(secret_ref=xai_ref)
+    _script_posts(monkeypatch, [])
+    assert await svc.effective_secret_for_row(xai_row) == "acc_eff"
