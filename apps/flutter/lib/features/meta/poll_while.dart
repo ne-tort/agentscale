@@ -21,7 +21,8 @@ class PollWhileConfig {
   /// Body field to watch (e.g. `status`).
   final String field;
 
-  /// Value that keeps polling active (e.g. `indexing`).
+  /// Value (or list of values) that keeps polling active
+  /// (e.g. `indexing` or `["queued", "indexing"]`).
   final Object? equals;
 
   /// Reload interval.
@@ -29,6 +30,9 @@ class PollWhileConfig {
 
   bool matches(Object? actual) {
     final expected = equals;
+    if (expected is List) {
+      return expected.any((e) => actual?.toString() == e?.toString());
+    }
     if (expected is bool) return (actual == true) == expected;
     return actual?.toString() == expected?.toString();
   }

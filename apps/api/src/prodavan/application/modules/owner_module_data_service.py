@@ -279,7 +279,10 @@ class OwnerModuleDataService:
             from prodavan.application.modules.equipment_catalog_opensearch import (
                 delete_equipment_catalog_index,
                 resolve_equipment_catalog_tenancy,
+                revoke_catalog_index_task,
             )
+
+            revoke_catalog_index_task(row_id)
 
             company_id, cabinet_id, project_id = await resolve_equipment_catalog_tenancy(
                 self._session, instance_id=inst.id

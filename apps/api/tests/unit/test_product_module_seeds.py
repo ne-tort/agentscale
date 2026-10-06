@@ -270,17 +270,20 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     status_field = next(f for f in settings["ui_json"]["fields"] if f["column"] == "status")
     assert status_field.get("read_only") is True
     assert status_field.get("trailing_action", {}).get("action_id") == "index_catalog_opensearch"
-    assert settings["ui_json"]["poll_while"]["equals"] == "indexing"
+    assert settings["ui_json"]["poll_while"]["equals"] == ["queued", "indexing"]
     assert status_field.get("accent_map") == {
         "draft": "warning",
+        "queued": "warning",
         "indexing": "warning",
         "ready": "success",
         "error": "error",
     }
     status_col = next(c for c in meta["columns"] if c["table_slug"] == "catalogs" and c["name"] == "status")
     assert status_col["enum"]["labels"]["draft"] == "Без индексирования"
+    assert status_col["enum"]["labels"]["queued"] == "В очереди"
     assert status_col["enum"]["labels"]["indexing"] == "В процессе"
     assert status_col["enum"]["labels"]["ready"] == "Обработано"
+    assert status_col["enum"]["values"] == ["draft", "queued", "indexing", "ready", "error"]
     assert "remote_dsn" in field_cols
     assert "remote_table" in field_cols
     assert "remote_database" in field_cols
@@ -296,7 +299,7 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     assert "status" in list_fields
     assert catalogs_list["ui_json"]["poll_while"] == {
         "field": "status",
-        "equals": "indexing",
+        "equals": ["queued", "indexing"],
         "interval_ms": 3000,
     }
     status_cell = next(

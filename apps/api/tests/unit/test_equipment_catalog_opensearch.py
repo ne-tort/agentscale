@@ -428,3 +428,78 @@ async def test_projection_uses_map_values_semantics() -> None:
     )
     assert cols is not None
     assert '"name"' in cols and '"pn"' in cols
+
+
+@pytest.mark.asyncio
+async def test_run_index_aborts_when_row_deleted(monkeypatch) -> None:
+    """Каталог удалён посреди индексации: задача прерывается и НЕ воскрешает
+    строку upsert'ом (регрессия «удаление не работает»)."""
+    from prodavan.application.modules import equipment_catalog_opensearch as mod
+
+    row = {
+        "body": {
+            "name": "cat",
+            "source_kind": "local",
+            "column_map": {"title": "Name", "price": "Cost"},
+            "source_file": {"storage_key": "k"},
+        }
+    }
+    inst = MagicMock()
+    # первый get (старт) — строка жива; после первого батча — удалена
+    inst.get_data_row = AsyncMock(side_effect=[row, row, None, None, None])
+    snapshots: list[dict] = []
+
+    async def _upsert(**kwargs):  # noqa: ANN003
+        snapshots.append(dict(kwargs.get("body") or {}))
+
+    inst.upsert_data_row = AsyncMock(side_effect=_upsert)
+    session = MagicMock()
+    session.commit = AsyncMock()
+    monkeypatch.setattr(mod, "ModuleInstanceService", lambda _s: inst)
+    monkeypatch.setattr(
+        "prodavan.application.search_index.publish.emit_equipment_catalog_index_accepted",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        "prodavan.application.search_index.publish.emit_equipment_catalog_index_completed",
+        AsyncMock(),
+    )
+
+    class _Src:
+        total_rows = 10
+
+        async def aiter_rows(self):
+            for i in range(10):
+                yield {"Name": f"item {i}", "Cost": "1"}
+
+        async def aclose(self):
+            return None
+
+    monkeypatch.setattr(mod, "_open_local_source", AsyncMock(return_value=_Src()))
+
+    svc = MagicMock()
+
+    async def _bulk(**kwargs):
+        return MagicMock(indexed=len(kwargs.get("documents") or []))
+
+    svc.bulk_index = AsyncMock(side_effect=_bulk)
+    svc.delete_index = AsyncMock(return_value=True)
+    svc.ensure_index = AsyncMock()
+    monkeypatch.setattr(mod, "get_search_index_service", lambda: svc)
+
+    out = await mod.run_index_equipment_catalog(
+        session, instance_id="inst1", row_id="row1", company_id="co1"
+    )
+    assert out["ok"] is False
+    assert out["error"] == "row_deleted"
+    # после удаления ни одного upsert'а (строка не воскрешена), статус ready не пишется
+    assert all(s.get("status") != "ready" for s in snapshots)
+
+
+def test_revoke_catalog_index_task_survives_without_celery() -> None:
+    """В тестах/локалке celery_app может быть None — revoke не должен падать."""
+    from prodavan.application.modules.equipment_catalog_opensearch import (
+        revoke_catalog_index_task,
+    )
+
+    revoke_catalog_index_task("row_x")  # no raise

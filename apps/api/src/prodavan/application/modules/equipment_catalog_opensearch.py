@@ -305,8 +305,14 @@ async def run_index_equipment_catalog(
         )
         return {"ok": False, "error": str(exc)[:300], "row_id": row_id}
 
+    async def _row_alive() -> bool:
+        row_now = await inst_svc.get_data_row(
+            instance_id=instance_id, table_slug="catalogs", row_id=row_id
+        )
+        return row_now is not None
+
     # Expose the discovered row count early so UI shows «0 из y».
-    if source.total_rows is not None:
+    if source.total_rows is not None and await _row_alive():
         body["total_rows"] = source.total_rows
         await inst_svc.upsert_data_row(
             instance_id=instance_id, table_slug="catalogs", row_id=row_id, body=body
@@ -314,7 +320,13 @@ async def run_index_equipment_catalog(
         await session.commit()
 
     async def _persist_progress(indexed: int, total: int | None) -> None:
-        """Heartbeat: row body update after each bulk chunk (x из y)."""
+        """Heartbeat: row body update after each bulk chunk (x из y).
+
+        Если строку удалили (пользователь удалил каталог посреди индексации) —
+        upsert ВОСКРЕСИЛ бы её; вместо этого прерываем задачу.
+        """
+        if not await _row_alive():
+            raise CatalogRowDeleted(row_id)
         body["indexed_count"] = indexed
         if total is not None:
             body["total_rows"] = total
@@ -358,14 +370,20 @@ async def run_index_equipment_catalog(
             index_name=index_name,
             on_progress=_persist_progress,
         )
+    except CatalogRowDeleted:
+        # каталог удалён пользователем посреди индексации — строку НЕ
+        # воскрешаем, индекс уже снёс delete-путь, выходим тихо
+        logger.info("equipment catalog row deleted mid-index row=%s — aborting", row_id)
+        return {"ok": False, "error": "row_deleted", "row_id": row_id}
     except Exception as exc:
         logger.exception("equipment os index failed row=%s", row_id)
         body["status"] = "error"
         body["error"] = str(exc)[:500]
-        await inst_svc.upsert_data_row(
-            instance_id=instance_id, table_slug="catalogs", row_id=row_id, body=body
-        )
-        await session.commit()
+        if await _row_alive():
+            await inst_svc.upsert_data_row(
+                instance_id=instance_id, table_slug="catalogs", row_id=row_id, body=body
+            )
+            await session.commit()
         await emit_equipment_catalog_index_completed(
             session=None,
             company_id=cid,
@@ -380,6 +398,10 @@ async def run_index_equipment_catalog(
         return {"ok": False, "error": str(exc)[:300], "row_id": row_id}
     finally:
         await source.aclose()
+
+    if not await _row_alive():
+        logger.info("equipment catalog row deleted before finalize row=%s", row_id)
+        return {"ok": False, "error": "row_deleted", "row_id": row_id}
 
     body["status"] = "ready"
     body["error"] = None
@@ -789,6 +811,31 @@ def enqueue_or_run_index_equipment_catalog(
         "task_id": task_id,
         "row_id": row_id,
     }
+
+
+class CatalogRowDeleted(Exception):
+    """Строка каталога удалена посреди индексации — задача тихо прерывается."""
+
+
+def revoke_catalog_index_task(row_id: str) -> None:
+    """Отозвать (terminate) celery-задачу индексации строки.
+
+    Вызывается при удалении каталога: без этого задача продолжает стримить
+    источник, а её heartbeat upsert'ом воскрешает удалённую строку.
+    """
+    try:
+        from prodavan.core.infra.worker_manager import celery_app
+        from prodavan.core.jobs import names as job_names
+
+        if celery_app is None:
+            return
+        celery_app.control.revoke(
+            f"{job_names.INDEX_EQUIPMENT_CATALOG}:{row_id}",
+            terminate=True,
+            signal="SIGTERM",
+        )
+    except Exception:
+        logger.exception("revoke catalog index task failed row=%s", row_id)
 
 
 async def delete_equipment_catalog_index(

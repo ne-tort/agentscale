@@ -1221,9 +1221,10 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "required": True,
                 "default": "draft",
                 "enum": {
-                    "values": ["draft", "indexing", "ready", "error"],
+                    "values": ["draft", "queued", "indexing", "ready", "error"],
                     "labels": {
                         "draft": "Без индексирования",
+                        "queued": "В очереди",
                         "indexing": "В процессе",
                         "ready": "Обработано",
                         "error": "Ошибка",
@@ -2647,13 +2648,17 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     ],
                     "poll_while": {
                         "field": "status",
-                        "equals": "indexing",
+                        "equals": ["queued", "indexing"],
                         "interval_ms": 3000,
                     },
                     "row_style": [
                         {
                             "when": {"field": "status", "eq": "error"},
                             "accent": "error",
+                        },
+                        {
+                            "when": {"field": "status", "eq": "queued"},
+                            "accent": "warning",
                         },
                         {
                             "when": {"field": "status", "eq": "indexing"},
@@ -2902,7 +2907,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "title": {"ru": "Настройки БД", "en": "Database settings"},
                     "poll_while": {
                         "field": "status",
-                        "equals": "indexing",
+                        "equals": ["queued", "indexing"],
                         "interval_ms": 3000,
                     },
                     "fields": [
@@ -2922,6 +2927,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             },
                             "accent_map": {
                                 "draft": "warning",
+                                "queued": "warning",
                                 "indexing": "warning",
                                 "ready": "success",
                                 "error": "error",
@@ -3050,7 +3056,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                                     },
                                     {
                                         "field": "status",
-                                        "in": ["draft", "ready", "indexing"],
+                                        "in": ["draft", "ready", "queued", "indexing"],
                                     },
                                     {
                                         "any": [
@@ -3086,7 +3092,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                                     },
                                     {
                                         "field": "status",
-                                        "in": ["draft", "ready", "indexing"],
+                                        "in": ["draft", "ready", "queued", "indexing"],
                                     },
                                     {
                                         "any": [

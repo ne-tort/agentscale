@@ -18,9 +18,10 @@ void main() {
       'field': 'status',
       'format': 'index_progress',
       'enum': {
-        'values': ['draft', 'indexing', 'ready', 'error'],
+        'values': ['draft', 'queued', 'indexing', 'ready', 'error'],
         'labels': {
           'draft': 'Без индексирования',
+          'queued': 'В очереди',
           'indexing': 'В процессе',
           'ready': 'Обработано',
           'error': 'Ошибка',
@@ -50,6 +51,7 @@ void main() {
     test('non-indexing statuses fall through to enum labels', () {
       expect(cell({'status': 'ready'}, col), 'Обработано');
       expect(cell({'status': 'error'}, col), 'Ошибка');
+      expect(cell({'status': 'queued'}, col), 'В очереди');
     });
 
     test('stringified numbers are parsed', () {
@@ -84,6 +86,18 @@ void main() {
         parsePollWhile({'field': 'status', 'equals': 'x', 'interval_ms': 0}),
         isNull,
       );
+    });
+
+    test('list equals matches any value (queued/indexing)', () {
+      final config = parsePollWhile({
+        'field': 'status',
+        'equals': ['queued', 'indexing'],
+        'interval_ms': 3000,
+      });
+      expect(config!.matches('queued'), isTrue);
+      expect(config.matches('indexing'), isTrue);
+      expect(config.matches('ready'), isFalse);
+      expect(config.matches('error'), isFalse);
     });
 
     test('bool equals matches truthiness', () {
