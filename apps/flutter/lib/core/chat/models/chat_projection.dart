@@ -191,6 +191,9 @@ List<ChatBlock> applyStreamEvent(List<ChatBlock> blocks, Map<String, dynamic> ev
 
   switch (type) {
     case 'user_message':
+      // Повтор run-stall сторожа (stall_retry) — не второй пузырь пользователя:
+      // ретрай обслуживается reconnect-системой и в транскрипте невидим.
+      if (payload['stall_retry'] == true) break;
       final userRaw = Map<String, dynamic>.from(payload);
       final idx = next.indexWhere((b) => b.kind == 'user');
       if (idx >= 0) {
@@ -320,6 +323,9 @@ List<ChatBlock> applyStreamEvent(List<ChatBlock> blocks, Map<String, dynamic> ev
     case 'tool_call_delta':
       break;
     case 'error':
+      // Легаси-маркер старой версии run-stall сторожа: stall обрабатывается
+      // reconnect-системой (status-кадры), такие error-события не рендерим.
+      if (payload['code'] == 'CHAT_RUN_STALLED') break;
       next.add(ChatBlock(kind: 'error', raw: {
         'code': payload['code'],
         'message': payload['message'] ?? 'Agent error',
