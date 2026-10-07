@@ -23,6 +23,8 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
+from prodavan.application.documents.editing.xlsx_xml_patch import sanitize_sheet_text
+
 _ASSETS = Path(__file__).resolve().parent / "assets"
 FONT_REGULAR = "DejaVuSans"
 FONT_BOLD = "DejaVuSans-Bold"
@@ -276,11 +278,12 @@ def build_doc_model(
         price_out = round(price_in * (1 + markup), 2)
         model.items.append(
             DocItem(
-                title=str(body.get("title") or "").strip() or "Не найден",
+                title=sanitize_sheet_text(str(body.get("title") or "")).strip()
+                or "Не найден",
                 qty=qty,
                 price_out=price_out,
                 total=round(qty * price_out, 2),
-                part_number=str(body.get("part_number") or "").strip(),
+                part_number=sanitize_sheet_text(str(body.get("part_number") or "")).strip(),
                 lead_time=model.fields.lead_time_note,
             )
         )
