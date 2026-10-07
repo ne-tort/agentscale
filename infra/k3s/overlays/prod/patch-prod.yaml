@@ -142,6 +142,8 @@ spec:
 ---
 # Prod HTTPS router: SNI host-pinned; cert from the default TLSStore
 # (kube-system/agentscale-tls, SAN includes DNS:agentscale.local).
+# Доступ по IP-адресу ВМ — web-https-ip-ingressroute.yaml (k8s Ingress
+# не принимает IP в host: "must be a DNS name, not an IP address").
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:

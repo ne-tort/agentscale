@@ -6,9 +6,15 @@ surface: real stdio MCP server for built-ins, hot MCP management via API,
 multi-turn dialog with history. Uses claude-fable-5.1 (stable on cheapai).
 """
 from __future__ import annotations
-import os, socket, subprocess, time, json
-from typing import Any
-import httpx, pytest
+
+import json
+import os
+import socket
+import subprocess
+import time
+
+import httpx
+import pytest
 
 pytestmark = [pytest.mark.bridge_e2e]
 

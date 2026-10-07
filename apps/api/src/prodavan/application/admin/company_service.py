@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import asdict
 from datetime import UTC, datetime
 
 from sqlalchemy import func, select
@@ -12,8 +13,6 @@ from prodavan.application.metrics.aggregator import CompanyMetricsAggregator
 from prodavan.application.metrics.read_service import MetricsReadService
 from prodavan.application.tenant_infra.quota import TenantInfraQuotaService
 from prodavan.config.settings import settings
-from dataclasses import asdict
-
 from prodavan.domain.admin import (
     CompanyAgentRuntimePolicy,
     CompanyCabinetQuota,

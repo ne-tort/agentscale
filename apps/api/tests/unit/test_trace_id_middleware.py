@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
 from starlette.testclient import TestClient
 
 from prodavan.api.exception_handlers import register_exception_handlers

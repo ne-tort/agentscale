@@ -395,6 +395,7 @@ class OpenClawBridgeBootstrap:
         project_id: str,
         session_id: str,
         message: str,
+        images: list[dict] | None = None,
         model: str | None = None,
         bootstrap: BridgeSessionBootstrap | None = None,
         endpoint: RuntimeEndpoint | None = None,
@@ -408,6 +409,8 @@ class OpenClawBridgeBootstrap:
         retry still re-resolves from scratch.
         ``retry``: SendRetryPolicy send-body fields (chat reconnect policy)
         — forwarded on every attempt.
+        ``images``: vision images on the new user turn ({mime, data_base64})
+        — forwarded as send-body ``images`` (SendRequestSchema validates).
         """
         if not settings.pod_agent_runtime_enabled:
             return
@@ -453,6 +456,7 @@ class OpenClawBridgeBootstrap:
                 project_id=project_id,
                 session_id=session_id,
                 message=message,
+                images=images,
                 model=model,
                 retry=retry,
             ):
@@ -498,6 +502,7 @@ class OpenClawBridgeBootstrap:
         project_id: str,
         session_id: str,
         message: str,
+        images: list[dict] | None = None,
         model: str | None,
         retry: dict | None = None,
     ) -> AsyncIterator[AgentEvent]:
@@ -507,6 +512,8 @@ class OpenClawBridgeBootstrap:
         await ensure_recent_bind(self._session, project_id, endpoint=endpoint)
         url = f"{endpoint.base_url}/v1/sessions/{session_id}/send"
         body: dict = {"message": message}
+        if images:
+            body["images"] = images
         bridge_model = sanitize_runtime_model(model)
         if bridge_model:
             body["model"] = bridge_model

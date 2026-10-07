@@ -357,7 +357,6 @@ def test_equipment_prompt_seed_rows_materialize_layout() -> None:
     AGENTS.md в корне workspace (авто-подхват claw-агентом) + правила
     в prompts/equipment/*.md; после stitch — raw-записи с теми же телами."""
     from prodavan.application.platform.product_module_seeds import mod_equipment_meta
-
     from prodavan.application.projects.materialize_planner import _stitch_prompt_fragment_ops
 
     items = mod_equipment_meta()["seed_rows"]["items"]
