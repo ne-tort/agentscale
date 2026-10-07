@@ -312,3 +312,56 @@ async def test_build_workbook_streams_rows() -> None:
     assert ws["A2"].value == "S0"
     assert ws["A4"].value == "S2"
     assert ws.freeze_panes == "A2"
+
+
+def test_sanitize_sheet_text_strips_control_chars() -> None:
+    """Управляющие символы XML 1.0 вычищаются; таб/перевод строки остаются."""
+    from prodavan.application.documents.editing.xlsx_xml_patch import (
+        sanitize_sheet_text,
+    )
+
+    assert sanitize_sheet_text("a\x00b\x08c\x0bd\x0ce\x1ff") == "abcdef"
+    assert sanitize_sheet_text("keep\ttab\nnl\r cr") == "keep\ttab\nnl\r cr"
+    assert sanitize_sheet_text("bad\ufeff\ufffe\uffff") == "bad\ufeff"
+
+
+def test_master_price_row_values_strips_illegal_chars() -> None:
+    """Название с управляющими символами (из каталога) не роняет ячейки."""
+    row = doc_to_master_row(
+        {
+            "supplier": "Zip\x07Zip",
+            "brand": "B",
+            "part_number": "PN\x08",
+            "title": "01-012 Spring Face Up HS-1 \x01***\x1f (Original)\x0b",
+            "in_stock": True,
+            "price_num": 10.0,
+            "currency": "RUB",
+            "src_hash": "h",
+        }
+    )
+    values = master_price_row_values(row)
+    for v in values:
+        if isinstance(v, str):
+            assert not any(ord(ch) < 0x20 and ch not in "\t\n\r" for ch in v), repr(v)
+    assert "\x01" not in values[4]
+    assert values[0] == "ZipZip"
+    assert values[3] == "PN"
+
+
+def test_render_workbook_survives_illegal_chars() -> None:
+    """Рендер xlsx с «грязным» названием не бросает IllegalCharacterError."""
+    dirty = doc_to_master_row(
+        {
+            "supplier": "S",
+            "title": "T\x00\x1fitle\x0b",
+            "part_number": "PN",
+            "in_stock": False,
+            "price_num": None,
+            "currency": "RUB",
+            "src_hash": "h",
+        }
+    )
+    data = render_master_price_workbook(_template_bytes(), [dirty])
+    ws = openpyxl.load_workbook(io.BytesIO(data))["Прайс"]
+    assert ws["E2"].value == "Title"
+

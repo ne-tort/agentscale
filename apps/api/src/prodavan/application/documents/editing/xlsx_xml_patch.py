@@ -14,6 +14,7 @@ directly; template formulas keep their caches refreshed instead.
 from __future__ import annotations
 
 import io
+import re
 import zipfile
 from typing import Any
 from xml.etree import ElementTree as ET
@@ -28,6 +29,17 @@ XR3 = "http://schemas.microsoft.com/office/spreadsheetml/2016/revision3"
 
 XDR = "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"
 DRAWINGML = "http://schemas.openxmlformats.org/drawingml/2006/main"
+
+# Управляющие символы, недопустимые в XML 1.0 / листах Excel (тот же набор,
+# что openpyxl ILLEGAL_CHARACTERS_RE, плюс XML non-characters U+FFFE/FFFF).
+# Приходят из каталожных данных (парсеры прайсов поставщиков) и роняют
+# экспорт: openpyxl — IllegalCharacterError, голый ET — невалидный XML.
+_ILLEGAL_SHEET_CHARS_RE = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f\ufffe\uffff]")
+
+
+def sanitize_sheet_text(value: str) -> str:
+    """Убирает символы, с которыми файл xlsx не откроется/не соберётся."""
+    return _ILLEGAL_SHEET_CHARS_RE.sub("", value)
 
 
 def register_namespaces() -> None:
@@ -159,6 +171,7 @@ def set_text(cell: ET.Element, value: str) -> None:
     cell.set("t", "inlineStr")
     is_el = ET.SubElement(cell, _q("is"))
     t = ET.SubElement(is_el, _q("t"))
+    value = sanitize_sheet_text(value)
     if value[:1].isspace() or value[-1:].isspace():
         t.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
     t.text = value
