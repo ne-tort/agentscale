@@ -19,6 +19,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from prodavan.application.documents.editing.xlsx_xml_patch import sanitize_sheet_text
 from prodavan.application.modules.equipment_catalog_opensearch import (
     OS_NAMESPACE,
     catalog_os_index_name,
@@ -142,7 +143,7 @@ def _currency_cell(currency: str) -> str:
 def master_price_row_values(row: dict[str, Any]) -> list[Any]:
     """Строка виртуальной таблицы → ячейки A–K шаблона Commerce."""
     qty = _qty_cell(bool(row.get("in_stock")))
-    return [
+    values = [
         row.get("supplier") or "",
         row.get("category") or "",
         row.get("brand") or "",
@@ -155,6 +156,9 @@ def master_price_row_values(row: dict[str, Any]) -> list[Any]:
         _currency_cell(str(row.get("currency") or "")),
         _price_cell(row.get("rrc")),
     ]
+    # В каталожных названиях попадаются управляющие символы (парсеры
+    # поставщиков) — openpyxl на них роняет весь экспорт (IllegalCharacterError).
+    return [sanitize_sheet_text(v) if isinstance(v, str) else v for v in values]
 
 
 async def try_list_virtual_page(
