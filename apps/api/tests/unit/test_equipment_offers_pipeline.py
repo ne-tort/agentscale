@@ -940,8 +940,10 @@ async def test_group_without_offers_shows_pn_face_and_honest_label(monkeypatch) 
 
     grp = io.body("found_groups", "grp_z")
     assert grp["offers_count"] == 0
-    assert grp["face_title"] == "ZZZ-999"
-    assert grp["match_label"] == "Точное (нет офферов)"
+    # без офферов лицо пустое (UI рисует «Нет оффера» warning), PN — из позиции
+    assert grp["face_title"] == ""
+    assert grp["line_part_number"] == "ZZZ-999"
+    assert grp["match_label"] == "Точное"
     assert grp.get("face_price") is None
 
 

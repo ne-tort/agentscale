@@ -2808,6 +2808,21 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "kind": "hub",
                     "items": [
                         {
+                            "title": "Бюджетирование",
+                            "icon": "request_quote",
+                            "target": {
+                                "kind": "view",
+                                "view": "budget_lines_list",
+                            },
+                            "scope": {"active_chat": "required"},
+                        },
+                        {
+                            "title": "Закупка",
+                            "icon": "shopping_cart",
+                            "target": {"kind": "view", "view": "procurement_list"},
+                            "scope": {"active_chat": "required"},
+                        },
+                        {
                             "title": "Позиции заказчика",
                             "icon": "list_alt",
                             "target": {"kind": "view", "view": "request_lines_list"},
@@ -2817,12 +2832,6 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "title": "Найденные товары",
                             "icon": "inventory_2",
                             "target": {"kind": "view", "view": "found_groups_list"},
-                            "scope": {"active_chat": "required"},
-                        },
-                        {
-                            "title": "Закупка",
-                            "icon": "shopping_cart",
-                            "target": {"kind": "view", "view": "procurement_list"},
                             "scope": {"active_chat": "required"},
                         },
                         {
@@ -2840,15 +2849,6 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "target": {
                                 "kind": "view",
                                 "view": "equipment_builds_list",
-                            },
-                            "scope": {"active_chat": "required"},
-                        },
-                        {
-                            "title": "Бюджетирование",
-                            "icon": "request_quote",
-                            "target": {
-                                "kind": "view",
-                                "view": "budget_lines_list",
                             },
                             "scope": {"active_chat": "required"},
                         },
@@ -3685,6 +3685,9 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     },
                     # сверка с OpenSearch при открытии таблицы
                     "on_load": {"action": "equipment_pipeline_sync"},
+                    # без офферов: «Товар» = «Нет оффера» warning; продавец/бренд — прочерк
+                    "no_offers_placeholder": {"text": "Нет оффера"},
+                    "dash_empty_fields": ["face_seller", "face_brand"],
                     "columns": [
                         {
                             "field": "face_title",
@@ -3703,6 +3706,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "label": {"ru": "Партномер", "en": "P/N"},
                             "max_lines": 2,
                             "max_width": 140,
+                            "format": "pn_fallback",
                         },
                         {
                             "field": "match_label",
@@ -3712,7 +3716,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                         {
                             "field": "face_price",
                             "label": {"ru": "Цена ₽", "en": "Price RUB"},
-                            "format": "offer_price",
+                            "format": "face_price",
                             "align": "end",
                             "max_width": 110,
                         },

@@ -739,7 +739,8 @@ def test_budget_price_warning_and_offers_sort_seeds() -> None:
     # «Уточняйте»/без цены: face-цена группы тоже честная надпись
     groups_view = next(v for v in meta["views"] if v["slug"] == "found_groups_list")
     face_col = next(c for c in groups_view["ui_json"]["columns"] if c["field"] == "face_price")
-    assert face_col["format"] == "offer_price"
+    # без офферов — прочерк; с офферами и без цены — «Нет цены» (face_price)
+    assert face_col["format"] == "face_price"
 
     # бюджет: match_kind снапшот + warning на наименовании/P/N аналогов и сомнений
     assert any(
