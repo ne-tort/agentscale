@@ -6,13 +6,13 @@ from datetime import UTC, datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from prodavan.application.modules.company_module_service import CompanyModuleService
 from prodavan.application.modules.module_instance_service import (
     OWNER_COMPANY,
     OWNER_PLATFORM,
     PLATFORM_OWNER_ID,
 )
 from prodavan.application.modules.module_service import ModuleService
-from prodavan.application.modules.company_module_service import CompanyModuleService
 from prodavan.domain.errors import AppError
 from prodavan.infrastructure.secrets.owner_module_secret_store import (
     get_owner_module_secret_store,

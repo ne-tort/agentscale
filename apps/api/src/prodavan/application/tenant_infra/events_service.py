@@ -14,7 +14,6 @@ from prodavan.application.tenant_infra.publish import emit_tenant_infra_event
 from prodavan.application.tenant_infra.quota import TenantInfraQuotaService, enforce_ops_rate, quota_exceeded
 from prodavan.core.events.envelope import EventEnvelope
 from prodavan.core.infra.cache import cache_get, cache_set
-from prodavan.domain.errors import AppError
 
 _MEMORY_LOGS: dict[str, list[dict[str, Any]]] = {}
 

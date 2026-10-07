@@ -7,10 +7,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from prodavan.application.admin.company_service import AdminCompanyService
 from prodavan.application.pod_service.command import PodCommand
 from prodavan.application.pod_service.lifecycle_emitter import PodLifecycleEmitter
 from prodavan.application.project_service.command import ProjectCommand
-from prodavan.application.admin.company_service import AdminCompanyService
 from prodavan.domain.errors import AppError
 from prodavan.domain.identity import Principal
 from prodavan.domain.pods import PodDesiredState, PodStatus

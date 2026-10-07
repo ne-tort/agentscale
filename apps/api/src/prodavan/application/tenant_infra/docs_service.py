@@ -14,7 +14,6 @@ from prodavan.application.tenant_infra.publish import emit_tenant_infra_event
 from prodavan.application.tenant_infra.quota import TenantInfraQuotaService, enforce_ops_rate, quota_exceeded
 from prodavan.core.infra.mongo_manager import get_document_store_service
 from prodavan.domain.document_store.types import validate_collection
-from prodavan.domain.errors import AppError
 
 TENANT_DOCS_NS = "tenant_infra"
 _COL_INDEX_SUFFIX = "__docs_cols"

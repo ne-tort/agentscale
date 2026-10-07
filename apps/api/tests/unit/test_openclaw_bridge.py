@@ -221,6 +221,68 @@ async def test_iter_send_events_parses_sse() -> None:
 
 
 @pytest.mark.asyncio
+async def test_iter_send_events_forwards_images_in_body() -> None:
+    """Vision images ride with the send body as {mime, data_base64} entries."""
+    session = MagicMock()
+    k8s = MagicMock()
+    _mock_running_pod(k8s)
+
+    class _StreamResponse:
+        status_code = 200
+
+        async def aread(self) -> bytes:
+            return b""
+
+        def aiter_lines(self):
+            async def _gen():
+                yield 'data: {"type":"done","data":{"reason":"completed"}}'
+                yield "data: [DONE]"
+
+            return _gen()
+
+    class _StreamCtx:
+        def __init__(self, response: _StreamResponse) -> None:
+            self._response = response
+
+        async def __aenter__(self):
+            return self._response
+
+        async def __aexit__(self, *args):
+            return None
+
+    mock_http = MagicMock()
+    mock_http.__aenter__ = AsyncMock(return_value=mock_http)
+    mock_http.__aexit__ = AsyncMock(return_value=None)
+    mock_http.stream = MagicMock(return_value=_StreamCtx(_StreamResponse()))
+
+    bootstrap = OpenClawBridgeBootstrap(session, k8s_client=k8s, http_client=lambda **_: mock_http)
+
+    with (
+        patch("prodavan.application.agent.openclaw_bridge.settings") as mock_settings,
+        patch(
+            "prodavan.application.pod_service.query.PodQuery.runtime_view",
+            new=AsyncMock(return_value=_running_runtime_view()),
+        ),
+        patch.object(_real_settings, "pod_agent_runtime_token", "bridge-token"),
+    ):
+        mock_settings.pod_agent_runtime_enabled = True
+        mock_settings.pod_agent_runtime_port = 3921
+        events = [
+            event
+            async for event in bootstrap.iter_send_events(
+                project_id="prj_1",
+                session_id="ags_abc",
+                message="что на скриншоте?",
+                images=[{"mime": "image/png", "data_base64": "aGVsbG8="}],
+            )
+        ]
+
+    assert events[-1].type == AgentEventType.DONE
+    body = mock_http.stream.call_args.kwargs["json"]
+    assert body["images"] == [{"mime": "image/png", "data_base64": "aGVsbG8="}]
+
+
+@pytest.mark.asyncio
 async def test_iter_send_events_empty_stream_yields_error() -> None:
     session = MagicMock()
     k8s = MagicMock()

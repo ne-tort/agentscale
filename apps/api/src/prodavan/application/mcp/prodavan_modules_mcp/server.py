@@ -13,6 +13,7 @@ import urllib.error
 import urllib.request
 from typing import Any
 
+
 def _env() -> tuple[str, str, str]:
     api = (os.environ.get("PRODAVAN_API_BASE_URL") or "").rstrip("/")
     token = os.environ.get("PRODAVAN_AUTH_TOKEN") or os.environ.get("BRIDGE_AUTH_TOKEN") or ""

@@ -8,7 +8,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.application.pod_identity.bridge import SCOPE_INFRA_CACHE, PodBridgeClaims
 from prodavan.application.tenant_infra.adapters.memory_cache import (
-    InMemoryTenantCache,
     get_shared_memory_tenant_cache,
 )
 from prodavan.application.tenant_infra.adapters.redis_cache import RedisTenantCache

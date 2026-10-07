@@ -6,12 +6,12 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.application.modules.module_binding_service import ModuleBindingService
-from prodavan.application.modules.module_materialize_service import ModuleMaterializeService
-from prodavan.application.modules.module_meta_service import ModuleMetaDocumentService
 from prodavan.application.modules.module_instance_service import (
     OWNER_COMPANY,
     ModuleInstanceService,
 )
+from prodavan.application.modules.module_materialize_service import ModuleMaterializeService
+from prodavan.application.modules.module_meta_service import ModuleMetaDocumentService
 from prodavan.domain.errors import AppError
 from prodavan.domain.modules import ModuleBindKind, ModuleCompanyGrantScope, ModuleStatus
 from prodavan.domain.ownership import OwnerScope

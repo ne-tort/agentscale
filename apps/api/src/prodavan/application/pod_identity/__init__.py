@@ -2,8 +2,8 @@
 
 from prodavan.application.pod_identity.bridge import (
     PodBridgeClaims,
-    bump_pod_bridge_generation,
     build_launch_scopes,
+    bump_pod_bridge_generation,
     mint_pod_bridge_token,
     module_actions_scope,
     module_meta_scope,

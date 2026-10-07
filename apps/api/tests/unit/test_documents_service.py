@@ -14,8 +14,9 @@ from prodavan.domain.identity import Principal
 
 
 def _xlsx_bytes(rows: list[list[object]]) -> bytes:
-    from openpyxl import Workbook
     import io
+
+    from openpyxl import Workbook
 
     wb = Workbook()
     ws = wb.active

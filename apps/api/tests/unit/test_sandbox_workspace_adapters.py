@@ -197,10 +197,10 @@ class _SeqHTTP:
         self._responses = list(responses)
         self.calls: list[dict[str, Any]] = []
 
-    def __call__(self, *args: Any, **kwargs: Any) -> "_SeqHTTP":
+    def __call__(self, *args: Any, **kwargs: Any) -> _SeqHTTP:
         return self
 
-    async def __aenter__(self) -> "_SeqHTTP":
+    async def __aenter__(self) -> _SeqHTTP:
         return self
 
     async def __aexit__(self, *args: Any) -> bool:

@@ -106,7 +106,9 @@ class AiKeyModelGrantRow(Base):
     id: Mapped[str] = mapped_column(String(40), primary_key=True, default=lambda: _id("kmg"))
     key_id: Mapped[str] = mapped_column(ForeignKey("ai_provider_keys.id", ondelete="CASCADE"), nullable=False)
     model_id: Mapped[str] = mapped_column(ForeignKey("ai_models.id", ondelete="CASCADE"), nullable=False)
-    granted_by_scope: Mapped[str] = mapped_column(String(32), nullable=False, default="platform", server_default="platform")
+    granted_by_scope: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="platform", server_default="platform"
+    )
     granted_by_company_id: Mapped[str | None] = mapped_column(
         ForeignKey("companies.id", ondelete="CASCADE"),
         nullable=True,

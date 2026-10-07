@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -76,6 +78,63 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(ChatCodePanel), findsOneWidget);
     expect(find.textContaining('"a"'), findsOneWidget);
+  });
+
+  testWidgets('image attachment renders a thumbnail', (tester) async {
+    // 1x1 PNG
+    final png = Uint8List.fromList([
+      0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D,
+      0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+      0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC8, 0x89, 0x00, 0x00, 0x00,
+      0x0A, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
+    ]);
+    final requested = <String>[];
+    await tester.pumpWidget(
+      _themed(
+        UserMessageBlock(
+          text: 'что на скриншоте?',
+          attachmentRefs: const ['att_9'],
+          attachments: const [
+            {
+              'filename': 'скрин.png',
+              'storage_ref': 'object://p/inbox/скрин.png',
+              'kind': 'image',
+              'note': 'изображение передано модели; копия в контейнере',
+              'workspace_path': 'inbox/скрин.png',
+              'mime': 'image/png',
+              'image_inline': true,
+            },
+          ],
+          imageLoader: (id) async {
+            requested.add(id);
+            return png;
+          },
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(requested, ['att_9']);
+    expect(find.byType(Image), findsOneWidget);
+  });
+
+  testWidgets('image attachment falls back to a label on load error', (tester) async {
+    await tester.pumpWidget(
+      _themed(
+        UserMessageBlock(
+          text: '',
+          attachmentRefs: const ['att_gone'],
+          attachments: const [
+            {'filename': 'gone.png', 'kind': 'image'},
+          ],
+          imageLoader: (id) async => throw StateError('404'),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byType(Image), findsNothing);
+    expect(find.textContaining('gone.png'), findsOneWidget);
   });
 
   testWidgets('empty chat placeholder: top-anchored skeleton plates, no text', (tester) async {
