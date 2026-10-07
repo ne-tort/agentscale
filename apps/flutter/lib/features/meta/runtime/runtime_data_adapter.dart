@@ -36,6 +36,22 @@ class RuntimeDataAdapter extends ChangeNotifier {
 
   Future<void> loadAll() => _inner.loadAll();
 
+  bool isServerPaged(String tableSlug) => _inner.isServerPaged(tableSlug);
+
+  int serverPage(String tableSlug) => _inner.serverPage(tableSlug);
+
+  int serverPageSize(String tableSlug) => _inner.serverPageSize(tableSlug);
+
+  int serverTotal(String tableSlug) => _inner.serverTotal(tableSlug);
+
+  String serverSearch(String tableSlug) => _inner.serverSearch(tableSlug);
+
+  Future<void> setServerPage(String tableSlug, int page) =>
+      _inner.setServerPage(tableSlug, page);
+
+  Future<void> setServerSearch(String tableSlug, String query) =>
+      _inner.setServerSearch(tableSlug, query);
+
   Future<void> deleteRow(String rowId) => _inner.deleteRow(rowId);
 
   void refresh() => _inner.refresh();

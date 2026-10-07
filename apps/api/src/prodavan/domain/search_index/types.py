@@ -67,6 +67,8 @@ class SearchHit:
     doc_id: str
     score: float | None
     source: dict[str, Any]
+    # sort values of the hit (for search_after cursor paging)
+    sort: list[Any] | None = None
 
 
 @dataclass(slots=True)

@@ -551,10 +551,34 @@ async def list_project_runtime_module_data(
     employee: EmployeeDep,
     x_prodavan_session_id: str | None = Header(default=None, alias=SESSION_HEADER),
     chats: str | None = None,
+    page: int = 1,
+    page_size: int = 50,
+    search: str = "",
 ) -> dict:
     from prodavan.application.projects.project_runtime_module_service import (
         ProjectRuntimeModuleService,
     )
+
+    if table_slug == "master_price":
+        from prodavan.application.modules.equipment_master_price import (
+            try_list_virtual_page,
+        )
+        from prodavan.infrastructure.persistence.models.projects import ProjectRow
+
+        prow = await session.get(ProjectRow, project_id)
+        if prow is not None:
+            virtual = await try_list_virtual_page(
+                session,
+                cabinet_id=prow.cabinet_id,
+                table_slug=table_slug,
+                principal=principal,
+                employee=employee,
+                page=page,
+                page_size=page_size,
+                search=search,
+            )
+            if virtual is not None:
+                return virtual
 
     if (chats or "").strip().lower() == "all":
         # Проектно-широкое чтение chats=current таблицы (Закупка → товары

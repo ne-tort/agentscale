@@ -459,6 +459,8 @@ class SearchIndexService:
         filter: dict[str, Any] | None = None,
         session: AsyncSession | None = None,
         apply_tenant_filter: bool = True,
+        sort: list[dict[str, Any]] | None = None,
+        search_after: list[Any] | None = None,
     ) -> SearchResult:
         ns, idx = self._resolve_ns_idx(namespace, index)
         cid = self._require_tenancy(namespace=ns, company_id=company_id)
@@ -479,6 +481,8 @@ class SearchIndexService:
             from_=skip,
             size=lim,
             filter=filt,
+            sort=sort,
+            search_after=search_after,
         )
         await emit_op_metric(
             session=session,
