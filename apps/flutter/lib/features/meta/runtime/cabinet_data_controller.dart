@@ -125,6 +125,13 @@ class CabinetDataController extends ChangeNotifier with ModulePickContextMixin {
     await _loadServerPage(tableSlug);
   }
 
+  /// Кнопка обновления в шапке страницы: перечитать текущую страницу
+  /// виртуальной таблицы из OpenSearch (данные живут только там).
+  Future<void> reloadServerPage(String tableSlug) async {
+    if (!isServerPaged(tableSlug)) return;
+    await _loadServerPage(tableSlug);
+  }
+
   Future<void> setServerSearch(String tableSlug, String query) async {
     final state = _serverPages.putIfAbsent(tableSlug, _ServerPageState.new);
     if (query == state.search) return;

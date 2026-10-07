@@ -102,6 +102,7 @@ def build_master_price_query(suppliers: list[str], search: str) -> dict[str, Any
 def doc_to_master_row(doc: dict[str, Any]) -> dict[str, Any]:
     """OS-док → строка виртуальной таблицы (ключи = колонки мета-вьюхи)."""
     price = doc.get("price_num")
+    rrc = doc.get("rrc_num")
     return {
         "supplier": str(doc.get("supplier") or ""),
         "category": "",
@@ -111,6 +112,7 @@ def doc_to_master_row(doc: dict[str, Any]) -> dict[str, Any]:
         "in_stock": bool(doc.get("in_stock")),
         "lead_time": str(doc.get("lead_time") or ""),
         "price": float(price) if isinstance(price, (int, float)) else None,
+        "rrc": float(rrc) if isinstance(rrc, (int, float)) else None,
         "currency": str(doc.get("currency") or ""),
         "src_hash": str(doc.get("src_hash") or ""),
         "catalog_id": str(doc.get("catalog_id") or ""),
@@ -146,7 +148,7 @@ def master_price_row_values(row: dict[str, Any]) -> list[Any]:
         "В наличии" if row.get("in_stock") else "Под заказ",
         _price_cell(row.get("price")),
         _currency_cell(str(row.get("currency") or "")),
-        "",
+        _price_cell(row.get("rrc")),
     ]
 
 
@@ -172,6 +174,21 @@ async def try_list_virtual_page(
     ).list_page(
         cabinet_id=cabinet_id, search=search, page=page, page_size=page_size
     )
+
+
+def apply_margin(price: float | None, margin_pct: float) -> float | None:
+    """Цена/РРЦ мастер-прайса с наценкой поставщика (Commerce: round 2)."""
+    if price is None or not margin_pct:
+        return price
+    return round(float(price) * (1.0 + margin_pct / 100.0), 2)
+
+
+def _apply_margin_to_row(row: dict, margins: dict) -> None:
+    pct = margins.get(str(row.get("supplier") or "").strip().casefold(), 0.0)
+    if not pct:
+        return
+    row["price"] = apply_margin(row.get("price"), pct)
+    row["rrc"] = apply_margin(row.get("rrc"), pct)
 
 
 class MasterPriceService:
@@ -202,6 +219,25 @@ class MasterPriceService:
     async def _sellers(self, cabinet_id: str) -> list[str]:
         rows = await self._module_rows(cabinet_id, "trusted_sellers")
         return master_price_sellers([r for r in rows if isinstance(r, dict)])
+
+    async def _margins(self, cabinet_id: str) -> dict[str, float]:
+        """Наценка поставщика (margin_pct, %) для мастер-прайса.
+
+        Как в Commerce: наценка применяется ТОЛЬКО при формировании
+        мастер-прайса (страница/xlsx); в каталоге и офферах хранятся
+        настоящие цены поставщика до наценки.
+        """
+        rows = await self._module_rows(cabinet_id, "trusted_sellers")
+        out: dict[str, float] = {}
+        for row in rows:
+            body = row.get("body") if isinstance(row.get("body"), dict) else {}
+            name = str(body.get("name") or "").strip().casefold()
+            if not name:
+                continue
+            pct = body.get("margin_pct")
+            if isinstance(pct, (int, float)):
+                out[name] = float(pct)
+        return out
 
     async def _module_rows(self, cabinet_id: str, table_slug: str) -> list[dict]:
         from prodavan.application.cabinets.cabinet_module_service import (
@@ -241,6 +277,7 @@ class MasterPriceService:
             return {"items": [], "total": 0, "page": page, "page_size": size}
         svc = get_search_index_service()
         query = build_master_price_query(suppliers, search)
+        margins = await self._margins(cabinet_id)
         items: list[dict[str, Any]] = []
         total = 0
         for index in indexes:
@@ -258,7 +295,10 @@ class MasterPriceService:
                 sort=MASTER_PRICE_SORT,
             )
             total += result.total
-            items.extend(doc_to_master_row(h.source) for h in result.hits)
+            for hit in result.hits:
+                row = doc_to_master_row(hit.source)
+                _apply_margin_to_row(row, margins)
+                items.append(row)
         items.sort(key=lambda r: (r["supplier"], r["title"], r["src_hash"]))
         return {"items": items, "total": total, "page": page, "page_size": size}
 
@@ -272,6 +312,7 @@ class MasterPriceService:
         indexes = await self._ready_indexes(cabinet_id)
         svc = get_search_index_service()
         query = build_master_price_query(suppliers, "")
+        margins = await self._margins(cabinet_id)
         exported = 0
         for index in indexes:
             cursor: list[Any] | None = None
@@ -299,11 +340,15 @@ class MasterPriceService:
                 if not next_cursor or next_cursor == cursor:
                     for hit in hits:
                         if cursor is None or list(hit.sort or []) > cursor:
-                            yield doc_to_master_row(hit.source)
+                            row = doc_to_master_row(hit.source)
+                            _apply_margin_to_row(row, margins)
+                            yield row
                             exported += 1
                     break
                 for hit in hits:
-                    yield doc_to_master_row(hit.source)
+                    row = doc_to_master_row(hit.source)
+                    _apply_margin_to_row(row, margins)
+                    yield row
                     exported += 1
                     if exported >= _EXPORT_MAX_ROWS:
                         return

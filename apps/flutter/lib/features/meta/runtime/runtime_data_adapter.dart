@@ -52,6 +52,9 @@ class RuntimeDataAdapter extends ChangeNotifier {
   Future<void> setServerSearch(String tableSlug, String query) =>
       _inner.setServerSearch(tableSlug, query);
 
+  Future<void> reloadServerPage(String tableSlug) =>
+      _inner.reloadServerPage(tableSlug);
+
   Future<void> deleteRow(String rowId) => _inner.deleteRow(rowId);
 
   void refresh() => _inner.refresh();
