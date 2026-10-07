@@ -278,3 +278,13 @@ def test_column_map_projects_rrc() -> None:
     assert mapped["rrc"] == "13.5"
     mapped_no = apply_column_map({"pn": "X1"}, {"part_number": "pn"})
     assert mapped_no["rrc"] == ""
+
+
+def test_export_batch_within_os_size_cap() -> None:
+    """Регресс: батч обхода не больше MAX_SEARCH_SIZE сервиса — иначе
+    «неполный» батч обрывал экспорт первыми 200 доками индекса."""
+    from prodavan.application.modules import equipment_master_price as mp
+    from prodavan.domain.search_index.types import MAX_SEARCH_SIZE
+
+    assert mp._EXPORT_BATCH <= MAX_SEARCH_SIZE
+    assert mp._EXPORT_BATCH >= 1

@@ -23,6 +23,7 @@ from prodavan.application.modules.equipment_catalog_opensearch import (
     OS_NAMESPACE,
     catalog_os_index_name,
 )
+from prodavan.domain.search_index.types import MAX_SEARCH_SIZE
 
 MASTER_PRICE_SHEET = "Прайс"
 
@@ -54,7 +55,10 @@ MASTER_PRICE_SORT = [
 
 _PAGE_SIZE_MAX = 200
 _FROM_MAX = 10000 - _PAGE_SIZE_MAX
-_EXPORT_BATCH = 1000
+# SearchIndexService caps size at MAX_SEARCH_SIZE — батч должен равняться
+# фактическому размеру страницы, иначе «неполный» батч оборвёт обход
+# (инцидент: экспорт резался первыми 200 доками индекса).
+_EXPORT_BATCH = min(1000, MAX_SEARCH_SIZE)
 # страховка от бесконечного обхода (курсор должен двигаться):
 # абсолютный потолок строк одного экспорта
 _EXPORT_MAX_ROWS = 500_000
