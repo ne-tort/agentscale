@@ -278,10 +278,18 @@ def _normalize_address(addr: str) -> str:
 
 
 def _fill_sheet(ws: worksheet.Worksheet, spec: SheetSpec) -> None:
+    from prodavan.application.documents.editing.xlsx_xml_patch import (
+        sanitize_sheet_text,
+    )
+
+    def _clean(v: Any) -> Any:
+        v = _normalize_cell_value(v) if isinstance(v, dict | list) else v
+        return sanitize_sheet_text(v) if isinstance(v, str) else v
+
     if spec.header:
-        ws.append(list(spec.header))
+        ws.append([_clean(h) for h in spec.header])
     for row in spec.rows:
-        ws.append([_normalize_cell_value(v) if isinstance(v, dict | list) else v for v in row])
+        ws.append([_clean(v) for v in row])
 
 
 def _save_workbook(wb: workbook.Workbook) -> bytes:
