@@ -729,3 +729,21 @@ def test_budget_price_warning_and_offers_sort_seeds() -> None:
     ]
     warn_when = [r["when"] for r in ui["row_style"] if r["accent"] == "warning"]
     assert {"field": "in_stock", "eq": False} in warn_when
+    price_col = next(c for c in ui["columns"] if c["field"] == "price")
+    assert price_col["format"] == "offer_price"
+
+    # «Уточняйте»/без цены: face-цена группы тоже честная надпись
+    groups_view = next(v for v in meta["views"] if v["slug"] == "found_groups_list")
+    face_col = next(c for c in groups_view["ui_json"]["columns"] if c["field"] == "face_price")
+    assert face_col["format"] == "offer_price"
+
+    # бюджет: match_kind снапшот + warning на наименовании/P/N аналогов и сомнений
+    assert any(
+        c["name"] == "match_kind" and c.get("hidden") for c in cols
+    )
+    title_col = next(c for c in budget_view["ui_json"]["columns"] if c["field"] == "title")
+    pn_col = next(
+        c for c in budget_view["ui_json"]["columns"] if c["field"] == "part_number"
+    )
+    assert title_col["warning_when_match"] == ["analog", "doubt"]
+    assert pn_col["warning_when_match"] == ["analog", "doubt"]
