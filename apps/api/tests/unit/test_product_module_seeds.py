@@ -705,3 +705,27 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     pick = next(v for v in meta["views"] if v["slug"] == "request_lines_pick")
     also = pick["ui_json"]["selection"]["set_on_context"]["also_copy"]
     assert {"from": "title", "to": "source_title"} in also
+
+
+def test_budget_price_warning_and_offers_sort_seeds() -> None:
+    """«Вход с НДС»: format budget_price_in + снапшот on_order; список
+    офферов группы: наличие сверху, подзаказные — warning-ряд."""
+    from prodavan.application.platform.product_module_seeds import mod_equipment_meta
+
+    meta = mod_equipment_meta()
+    cols = [c for c in meta["columns"] if c["table_slug"] == "budget_lines"]
+    assert any(c["name"] == "on_order" and c.get("read_only") for c in cols)
+    budget_view = next(v for v in meta["views"] if v["slug"] == "budget_lines_list")
+    price_col = next(
+        c for c in budget_view["ui_json"]["columns"] if c["field"] == "price_in"
+    )
+    assert price_col["format"] == "budget_price_in"
+
+    offers_view = next(v for v in meta["views"] if v["slug"] == "offers_for_group")
+    ui = offers_view["ui_json"]
+    assert ui["sort"] == [
+        {"field": "in_stock", "dir": "desc"},
+        {"field": "price", "dir": "asc"},
+    ]
+    warn_when = [r["when"] for r in ui["row_style"] if r["accent"] == "warning"]
+    assert {"field": "in_stock", "eq": False} in warn_when

@@ -1119,8 +1119,13 @@ class EquipmentPipelineService:
                 registry is not None
                 and registry.is_disabled(str(body.get("seller") or ""))
             )
+            # Оффер БЕЗ цены никогда не выигрывает автовыбор, пока есть
+            # альтернатива с ценой (инцидент 2026-10-07: в бюджет попадали
+            # безценовые «под заказ»). Приоритетный поставщик бьёт цену
+            # только среди офферов с ценой.
             return (
                 1 if (body.get("is_stale") is True or disabled) else 0,
+                0 if price is not None else 1,
                 0 if body.get("priority") is True else 1,
                 price if price is not None else float("inf"),
                 0 if body.get("in_stock") is True else 1,
@@ -1238,7 +1243,10 @@ class EquipmentPipelineService:
                 ).strip()
                 or "Не определен",
                 "qty": line_body.get("qty") or 1,
-                "price_in": _num_or(obody.get("price"), 0.0),
+                # None = цены у оффера нет (UI рисует «Нет цены»/«Под заказ»
+                # warning-цветом); 0.0 раньше маскировала отсутствие цены.
+                "price_in": _num_or(obody.get("price"), None),
+                "on_order": obody.get("in_stock") is not True,
                 "seller": seller or "Не найден",
                 "brand": str(obody.get("brand") or "").strip(),
             }

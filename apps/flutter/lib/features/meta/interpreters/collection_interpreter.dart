@@ -11,6 +11,7 @@ import 'package:prodavan/core/widgets/app_icon_button.dart';
 import 'package:prodavan/core/widgets/app_inline_add_field.dart';
 import 'package:prodavan/core/widgets/app_snack_bar.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
+import 'package:prodavan/features/meta/module_cell_format.dart';
 import 'package:prodavan/features/meta/meta_icon.dart';
 import 'package:prodavan/features/meta/meta_label.dart';
 import 'package:prodavan/features/meta/module_action_file_download.dart';
@@ -102,7 +103,8 @@ class CollectionViewInterpreter extends StatelessWidget {
           orElse: () => AppEntityColumn(id: titleField, label: primaryLabel),
         );
         final rawRows = _filteredRows(seeds, tableSlug, uiJson);
-        final styled = _applyRowStyles(context, uiJson, rawRows);
+        var styled = _applyRowStyles(context, uiJson, rawRows);
+        styled = _withBudgetPriceWarnings(context, uiJson, styled);
         var rows = _withSelection(context, uiJson, styled);
         rows = _withEditableCells(context, uiJson, tableSlug, rows);
         rows = _withBenefitBadges(context, uiJson, l10n, rows);
@@ -636,6 +638,50 @@ class CollectionViewInterpreter extends StatelessWidget {
       }
     }
     return out;
+  }
+
+  /// «Вход с НДС» без цены / под заказ: warning-текст вместо числа
+  /// (body: price_in=null и/или on_order=true; подписи строит
+  /// budgetPriceInLabel).
+  List<AppEntityRow> _withBudgetPriceWarnings(
+    BuildContext context,
+    Map<String, dynamic> uiJson,
+    List<AppEntityRow> rows,
+  ) {
+    final columns = uiJson['columns'];
+    if (columns is! List) return rows;
+    final fields = <String>[];
+    for (final c in columns.whereType<Map>()) {
+      if (c['format']?.toString() != 'budget_price_in') continue;
+      final field = c['field']?.toString() ?? '';
+      if (field.isNotEmpty) fields.add(field);
+    }
+    if (fields.isEmpty) return rows;
+    final warning = context.appColors.warning;
+    return rows.map((row) {
+      final item = seeds.itemById(row.id);
+      final body = item is Map && item['body'] is Map
+          ? Map<String, dynamic>.from(item['body'] as Map)
+          : const <String, dynamic>{};
+      final label = budgetPriceInLabel(body);
+      if (label == null) return row;
+      final widgets = Map<String, Widget>.from(row.cellWidgets);
+      for (final field in fields) {
+        widgets[field] = Text(label, style: TextStyle(color: warning));
+      }
+      return AppEntityRow(
+        id: row.id,
+        title: row.title,
+        subtitle: row.subtitle,
+        cells: row.cells,
+        cellWidgets: widgets,
+        leading: row.leading,
+        trailing: row.trailing,
+        titleColor: row.titleColor,
+        rowColor: row.rowColor,
+        titleBold: row.titleBold,
+      );
+    }).toList();
   }
 
   /// benefit_static: бейдж из серверных полей benefit_label/benefit_tone
