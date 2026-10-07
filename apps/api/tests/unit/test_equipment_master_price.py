@@ -289,3 +289,26 @@ def test_export_batch_within_os_size_cap() -> None:
 
     assert mp._EXPORT_BATCH <= MAX_SEARCH_SIZE
     assert mp._EXPORT_BATCH >= 1
+
+
+@pytest.mark.asyncio
+async def test_build_workbook_streams_rows() -> None:
+    """Потоковая сборка: строки пишутся по мере чтения (без списка в памяти)."""
+    from prodavan.application.modules.equipment_master_price import (
+        build_master_price_workbook,
+    )
+
+    async def _rows():
+        for i in range(3):
+            yield doc_to_master_row(
+                {"supplier": f"S{i}", "title": f"T{i}", "in_stock": True, "price_num": 1.0, "currency": "RUB"}
+            )
+
+    data, count = await build_master_price_workbook(_template_bytes(), _rows())
+    assert count == 3
+    wb = openpyxl.load_workbook(io.BytesIO(data))
+    ws = wb["Прайс"]
+    assert ws["A1"].value == "Поставщик"
+    assert ws["A2"].value == "S0"
+    assert ws["A4"].value == "S2"
+    assert ws.freeze_panes == "A2"

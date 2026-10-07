@@ -37,13 +37,13 @@ List<Widget>? buildModuleScaffoldActions({
     if (actionId.isEmpty || readOnly) continue;
     final label = resolveMetaLabel(a['label'], l10n, locale: locale);
     out.add(
-      AppIconButton(
+      _ScaffoldActionButton(
         icon: metaIconFromName(
           a['icon']?.toString(),
           fallback: Icons.bolt_outlined,
         ),
         tooltip: label.isNotEmpty ? label : actionId,
-        onPressed: () => invokeModuleScaffoldAction(
+        onInvoke: () => invokeModuleScaffoldAction(
           context: context,
           seeds: seeds,
           actionId: actionId,
@@ -54,6 +54,60 @@ List<Widget>? buildModuleScaffoldActions({
     );
   }
   return out.isEmpty ? null : out;
+}
+
+/// Одна кнопка-экшен AppBar: во время выполнения блокируется и показывает
+/// спиннер (долгие экшены — экспорт мастер-прайса и т.п.), повторный тап
+/// невозможен; ошибки показывает [invokeModuleScaffoldAction].
+class _ScaffoldActionButton extends StatefulWidget {
+  const _ScaffoldActionButton({
+    required this.icon,
+    required this.tooltip,
+    required this.onInvoke,
+  });
+
+  final IconData icon;
+  final String tooltip;
+  final Future<void> Function() onInvoke;
+
+  @override
+  State<_ScaffoldActionButton> createState() => _ScaffoldActionButtonState();
+}
+
+class _ScaffoldActionButtonState extends State<_ScaffoldActionButton> {
+  bool _busy = false;
+
+  Future<void> _run() async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      await widget.onInvoke();
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_busy) {
+      return Tooltip(
+        message: widget.tooltip,
+        child: const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 12),
+          child: SizedBox(
+            width: 18,
+            height: 18,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+        ),
+      );
+    }
+    return AppIconButton(
+      icon: widget.icon,
+      tooltip: widget.tooltip,
+      onPressed: _run,
+    );
+  }
 }
 
 /// Localized action label from the module `actions` meta doc (by id).
