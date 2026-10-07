@@ -95,6 +95,7 @@ class ModuleActionExecutor:
         row_id: str | None = None,
         project_id: str | None = None,
         session_id: str | None = None,
+        extra_params: dict | None = None,
     ) -> dict[str, Any]:
         action = await self._load_action(module_id=module_id, action_id=action_id)
         if action.get("enabled") is False:
@@ -105,7 +106,10 @@ class ModuleActionExecutor:
                 detail="action is disabled",
             )
         kind = str(action.get("kind") or "")
-        params = action.get("params") if isinstance(action.get("params"), dict) else {}
+        params = dict(action.get("params")) if isinstance(action.get("params"), dict) else {}
+        if isinstance(extra_params, dict) and extra_params:
+            # UI-контекст вызова (src_hash и т.п.) — поверх seed-параметров.
+            params.update({k: v for k, v in extra_params.items() if v is not None})
         project_id = (project_id or "").strip() or None
         if project_id:
             await self._assert_project_in_cabinet(
@@ -265,6 +269,18 @@ class ModuleActionExecutor:
                 materialize=True,
             )
 
+        if kind == "equipment.match_to_line":
+            return await self._equipment_match_to_line(
+                cabinet_id=cabinet_id,
+                module_id=module_id,
+                params=params,
+                row_id=row_id,
+                principal=principal,
+                employee=employee,
+                project_id=project_id,
+                session_id=session_id,
+            )
+
         if kind == "equipment.master_price":
             return await self._master_price_export(
                 cabinet_id=cabinet_id,
@@ -413,6 +429,179 @@ class ModuleActionExecutor:
             session_id=session_id,
         )
         return await EquipmentPipelineService(self._session).run(io, materialize=materialize)
+
+    async def _equipment_match_to_line(
+        self,
+        *,
+        cabinet_id: str,
+        module_id: str,
+        params: dict[str, Any],
+        row_id: str | None,
+        principal: Principal,
+        employee: EmployeeRow | None,
+        project_id: str | None = None,
+        session_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Ручное сопоставление найденного товара (OS src_hash) с позицией заказчика.
+
+        Создаёт/переиспользует found_groups по ключам позиции каталога
+        (P/N + src_hash), прогоняет пайплайн (материализация оффера) и
+        помечает оффер выбранным (is_selected + selected_offer_id позиции) —
+        «звёздочка» в UI.
+        """
+        from prodavan.application.cabinets.cabinet_module_service import (
+            CabinetModuleService,
+        )
+        from prodavan.application.modules.equipment_search import EquipmentSearchService
+
+        line_id = (row_id or "").strip()
+        src_hash = str(params.get("src_hash") or "").strip()
+        if not line_id or not src_hash:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="row_id (позиция заказчика) и params.src_hash обязательны",
+            )
+        svc = CabinetModuleService(self._session)
+
+        async def _rows(table: str) -> list[dict]:
+            return await svc.list_data_rows(
+                cabinet_id=cabinet_id,
+                module_id=module_id,
+                table_slug=table,
+                principal=principal,
+                employee=employee,
+                session_id=session_id,
+            )
+
+        lines = await _rows("request_lines")
+        line = next(
+            (r for r in lines if str(r.get("row_id") or "") == line_id), None
+        )
+        if line is None:
+            raise AppError(
+                code="NOT_FOUND",
+                title="Not Found",
+                status=404,
+                detail=f"позиция заказчика не найдена: {line_id}",
+            )
+        line_body = line.get("body") or {}
+        line_pn = str(line_body.get("part_number") or "").strip()
+
+        search = EquipmentSearchService(
+            self._session, principal=principal, employee=employee
+        )
+        doc = await search.fetch_by_src_hash(cabinet_id=cabinet_id, src_hash=src_hash)
+        if doc is None:
+            raise AppError(
+                code="NOT_FOUND",
+                title="Not Found",
+                status=404,
+                detail="позиция каталога не найдена (каталоги переиндексированы?)",
+            )
+        doc_pn = str(doc.get("part_number") or "").strip()
+        if line_pn and doc_pn and line_pn.casefold() == doc_pn.casefold():
+            match_kind = "exact"
+        elif line_pn:
+            match_kind = "analog"
+        else:
+            match_kind = "doubt"
+
+        # переиспользуем группу той же позиции заказчика с тем же ключом
+        groups = await _rows("found_groups")
+        group = None
+        for g in groups:
+            body = g.get("body") or {}
+            if str(body.get("line_id") or "") != line_id:
+                continue
+            hashes = body.get("aliases_hash")
+            hash_list = hashes if isinstance(hashes, list) else [hashes]
+            same_hash = any(str(h or "") == src_hash for h in hash_list if h)
+            same_pn = (
+                doc_pn
+                and str(body.get("part_number") or "").strip().casefold()
+                == doc_pn.casefold()
+            )
+            if same_hash or same_pn:
+                group = g
+                break
+        if group is None:
+            created = await svc.create_data_row(
+                cabinet_id=cabinet_id,
+                module_id=module_id,
+                table_slug="found_groups",
+                body={
+                    "line_id": line_id,
+                    "part_number": doc_pn,
+                    "aliases_hash": [src_hash],
+                    "match_kind": match_kind,
+                    "note": "сопоставлено вручную из поиска товаров",
+                },
+                principal=principal,
+                employee=employee,
+                session_id=session_id,
+            )
+            group_id = str(created.get("row_id") or "")
+        else:
+            group_id = str(group.get("row_id") or "")
+
+        # материализация офферов группы (пайплайн)
+        await self._equipment_pipeline(
+            cabinet_id=cabinet_id,
+            module_id=module_id,
+            params={},
+            principal=principal,
+            employee=employee,
+            project_id=project_id,
+            session_id=session_id,
+            materialize=True,
+        )
+
+        offers = await _rows("found_offers")
+        offer = next(
+            (
+                o
+                for o in offers
+                if str((o.get("body") or {}).get("group_id") or "") == group_id
+                and str((o.get("body") or {}).get("src_hash") or "") == src_hash
+            ),
+            None,
+        )
+        if offer is None:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="оффер не материализовался (позиция отключена у поставщика?)",
+            )
+        # «звёздочка»: выбранный оффер позиции (та же механика, что data.select_row)
+        await self._select_row(
+            cabinet_id=cabinet_id,
+            module_id=module_id,
+            params={
+                "table_slug": "found_offers",
+                "select_field": "is_selected",
+                "group_by": "line_id",
+                "parent": {
+                    "table_slug": "request_lines",
+                    "id_from": "line_id",
+                    "set_field": "selected_offer_id",
+                },
+            },
+            row_id=str(offer.get("row_id") or ""),
+            principal=principal,
+            employee=employee,
+            project_id=project_id,
+            session_id=session_id,
+        )
+        return {
+            "kind": "equipment.match_to_line",
+            "ok": True,
+            "group_id": group_id,
+            "offer_id": str(offer.get("row_id") or ""),
+            "match_kind": match_kind,
+        }
 
     async def _master_price_export(
         self,

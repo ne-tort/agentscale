@@ -199,6 +199,7 @@ def test_equipment_meta_hub_on_data_placement() -> None:
         "document_company_fields",
         "document_fields",
         "master_price",
+        "equipment_search",
     }
     kinds = {a["kind"] for a in meta["actions"]}
     assert "content.index_opensearch" in kinds
@@ -750,6 +751,31 @@ def test_budget_price_warning_and_offers_sort_seeds() -> None:
     )
     assert title_col["warning_when_match"] == ["analog", "doubt"]
     assert pn_col["warning_when_match"] == ["analog", "doubt"]
+
+
+def test_equipment_search_page_seeds() -> None:
+    """«Поиск товаров»: виртуальная таблица, фильтр наличия, сопоставление."""
+    from prodavan.application.platform.product_module_seeds import mod_equipment_meta
+
+    meta = mod_equipment_meta()
+    tables = {t["slug"]: t for t in meta["tables"]}
+    assert tables["equipment_search"]["storage_kind"] == "opensearch_virtual"
+    view = next(v for v in meta["views"] if v["slug"] == "equipment_search_list")
+    ui = view["ui_json"]
+    assert ui["server_paged"] is True
+    assert ui["stock_filter"] is True
+    assert ui["row_tap"]["kind"] == "match_product"
+    assert ui["row_tap"]["action"] == "equipment_match_to_line"
+    stock_col = next(c for c in ui["columns"] if c["field"] == "in_stock")
+    assert stock_col["format"] == "stock_label"
+    action = next(a for a in meta["actions"] if a["id"] == "equipment_match_to_line")
+    assert action["kind"] == "equipment.match_to_line"
+    # мастер-прайс тоже сопоставляет по тапу
+    mp = next(v for v in meta["views"] if v["slug"] == "master_price_list")
+    assert mp["ui_json"]["row_tap"]["kind"] == "match_product"
+    hub = next(v for v in meta["views"] if v["slug"] == "equipment_hub")
+    titles = [i["title"] for i in hub["ui_json"]["items"]]
+    assert "Поиск товаров" in titles
 
 
 def test_master_price_seeds() -> None:

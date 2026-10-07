@@ -167,11 +167,26 @@ async def try_list_virtual_page(
     page: int,
     page_size: int,
     search: str,
+    in_stock_only: bool = False,
 ) -> dict[str, Any] | None:
     """Виртуальные таблицы модуля (master_price): строки из OpenSearch.
 
     None — таблица обычная (DB); вызывающий идёт в instance-строки.
     """
+    if table_slug == "equipment_search":
+        from prodavan.application.modules.equipment_search import (
+            EquipmentSearchService,
+        )
+
+        return await EquipmentSearchService(
+            session, principal=principal, employee=employee
+        ).list_page(
+            cabinet_id=cabinet_id,
+            search=search,
+            in_stock_only=bool(in_stock_only),
+            page=page,
+            page_size=page_size,
+        )
     if table_slug != "master_price":
         return None
     return await MasterPriceService(
