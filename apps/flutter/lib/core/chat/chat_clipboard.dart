@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/services.dart';
 import 'package:pasteboard/pasteboard.dart';
 
@@ -29,6 +30,10 @@ class PasteboardClipboardReader implements ChatClipboardReader {
 
   @override
   Future<List<DroppedChatFile>> readFilesOrImage() async {
+    // Web: pasteboard's image getter calls navigator.clipboard.read() —
+    // a browser permission prompt on EVERY paste (even text-only
+    // clipboards). The web build uses the DOM paste listener instead.
+    if (kIsWeb) return const [];
     try {
       final paths = await Pasteboard.files();
       if (paths.isNotEmpty) {
