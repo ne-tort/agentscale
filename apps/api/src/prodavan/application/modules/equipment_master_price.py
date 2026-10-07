@@ -95,6 +95,7 @@ def build_master_price_query(suppliers: list[str], search: str) -> dict[str, Any
                         {"term": {"part_number": term.upper()}},
                         {"term": {"part_number": term.lower()}},
                         {"term": {"brand": term}},
+                        {"wildcard": {"supplier": {"value": f"*{term}*"}}},
                     ],
                     "minimum_should_match": 1,
                 }
