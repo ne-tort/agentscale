@@ -2240,6 +2240,18 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "type": "number",
                 "required": False,
             },
+            # снапшот «оффер под заказ» (pipeline): UI рисует «Под заказ» /
+            # «{цена} (Под заказ)» warning-цветом в «Вход с НДС»
+            {
+                "table_slug": "budget_lines",
+                "name": "on_order",
+                "label": {"ru": "Под заказ", "en": "On order"},
+                "type": "bool",
+                "required": False,
+                "default": False,
+                "read_only": True,
+                "hidden": True,
+            },
             # бренд выбранного оффера (снапшот; для экспортов/аналитики)
             {
                 "table_slug": "budget_lines",
@@ -2905,6 +2917,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                         {
                             "field": "price_in",
                             "label": {"ru": "Вход с НДС", "en": "In w/ VAT"},
+                            "format": "budget_price_in",
                             "align": "end",
                             "max_width": 130,
                         },
@@ -3426,11 +3439,20 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "max_width": 90,
                         },
                     ],
-                    # позиция пропала из каталога → warning; приоритетный
-                    # поставщик → зелёный текст
+                    # наличие сверху; подзаказные и безценовые — ниже
+                    "sort": [
+                        {"field": "in_stock", "dir": "desc"},
+                        {"field": "price", "dir": "asc"},
+                    ],
+                    # позиция пропала из каталога или под заказ → warning;
+                    # приоритетный поставщик → зелёный текст
                     "row_style": [
                         {
                             "when": {"field": "is_stale", "eq": True},
+                            "accent": "warning",
+                        },
+                        {
+                            "when": {"field": "in_stock", "eq": False},
                             "accent": "warning",
                         },
                         {
