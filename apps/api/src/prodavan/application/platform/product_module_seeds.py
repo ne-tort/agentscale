@@ -2252,6 +2252,17 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "read_only": True,
                 "hidden": True,
             },
+            # снапшот точности выбранного оффера: analog/doubt → warning
+            # на наименовании и партномере строки бюджета
+            {
+                "table_slug": "budget_lines",
+                "name": "match_kind",
+                "label": {"ru": "Точность", "en": "Match"},
+                "type": "text",
+                "required": False,
+                "read_only": True,
+                "hidden": True,
+            },
             # бренд выбранного оффера (снапшот; для экспортов/аналитики)
             {
                 "table_slug": "budget_lines",
@@ -2892,12 +2903,15 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "label": {"ru": "Наименование", "en": "Title"},
                             "max_lines": 2,
                             "max_width": 240,
+                            # аналог/сомнение → warning-текст ячейки
+                            "warning_when_match": ["analog", "doubt"],
                         },
                         {
                             "field": "part_number",
                             "label": {"ru": "Партномер", "en": "P/N"},
                             "max_lines": 2,
                             "max_width": 80,
+                            "warning_when_match": ["analog", "doubt"],
                         },
                         # Markup takes the supplier column's slot (supplier
                         # dropped by request; markup editable in place).
@@ -3354,6 +3368,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                         {
                             "field": "face_price",
                             "label": {"ru": "Цена ₽", "en": "Price RUB"},
+                            "format": "offer_price",
                             "align": "end",
                             "max_width": 110,
                         },
@@ -3429,6 +3444,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                         {
                             "field": "price",
                             "label": {"ru": "Цена ₽", "en": "Price RUB"},
+                            "format": "offer_price",
                             "align": "end",
                             "max_width": 110,
                         },
@@ -3520,6 +3536,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                         {
                             "field": "face_price",
                             "label": {"ru": "Цена ₽", "en": "Price RUB"},
+                            "format": "offer_price",
                             "align": "end",
                             "max_width": 110,
                         },
@@ -3704,6 +3721,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                         {
                             "field": "price",
                             "label": {"ru": "Цена ₽", "en": "Price RUB"},
+                            "format": "offer_price",
                             "align": "end",
                             "max_width": 110,
                         },
