@@ -27,6 +27,7 @@ class _Api extends ProdavanApi {
     required String cabinetId,
     required String moduleId,
     required String actionId,
+    Map<String, dynamic>? params,
     String? rowId,
     String? projectId,
     String? sessionId,

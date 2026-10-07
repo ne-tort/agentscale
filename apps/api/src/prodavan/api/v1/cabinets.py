@@ -53,6 +53,9 @@ class ActionInvokeBody(BaseModel):
     row_id: str | None = None
     # When set, row SoT is the project leaf instance (hubs), not cabinet.
     project_id: str | None = Field(default=None, min_length=3, max_length=40)
+    # Extra context for actions that need more than row_id (напр. сопоставление
+    # найденного товара: src_hash позиции каталога).
+    params: dict | None = None
 
 
 class SecretUploadBody(BaseModel):
@@ -420,6 +423,7 @@ async def list_module_data_rows(
     page: int = 1,
     page_size: int = 50,
     search: str = "",
+    in_stock_only: bool = False,
 ) -> dict:
     from prodavan.application.modules.equipment_master_price import (
         try_list_virtual_page,
@@ -434,6 +438,7 @@ async def list_module_data_rows(
         page=page,
         page_size=page_size,
         search=search,
+        in_stock_only=in_stock_only,
     )
     if virtual is not None:
         return virtual
@@ -555,6 +560,7 @@ async def invoke_module_action(
         row_id=body.row_id,
         project_id=body.project_id,
         session_id=x_prodavan_session_id,
+        extra_params=body.params,
     )
 
 

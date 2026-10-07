@@ -111,6 +111,11 @@ String formatModuleCell({
     // добавляет collection_interpreter (cellWidgets).
     return budgetPriceInLabel(body) ?? raw?.toString() ?? '';
   }
+  if (format == 'stock_label') {
+    // Наличие: отсутствие → «Под заказ» (warning-окраску добавляет
+    // collection_interpreter тем же cellWidgets-пассом).
+    return raw == true ? 'В наличии' : 'Под заказ';
+  }
   if (format == 'offer_price') {
     // Цена оффера/лица группы: текстовые «цены» («Уточняйте») не парсятся
     // в число на индексации → null → честная надпись + warning-окраска.
