@@ -190,6 +190,79 @@ class ProdavanApi {
     }
   }
 
+  /// Server-paged virtual tables (master_price): rows live in OpenSearch,
+  /// the API returns one page + total.
+  Future<({List<Map<String, dynamic>> items, int total})> listModuleDataRowsPage({
+    required String cabinetId,
+    required String moduleId,
+    required String tableSlug,
+    String? sessionId,
+    int page = 1,
+    int pageSize = 50,
+    String search = '',
+  }) async {
+    final prev = this.cabinetId;
+    this.cabinetId = cabinetId;
+    try {
+      final res = await AuthHttp.get(
+        _uri(
+          '/cabinets/$cabinetId/modules/$moduleId/data/$tableSlug',
+          {
+            'page': '$page',
+            'page_size': '$pageSize',
+            if (search.isNotEmpty) 'search': search,
+          },
+        ),
+        extraHeaders: {
+          ..._workHeaders,
+          if (sessionId != null && sessionId.isNotEmpty)
+            'X-Prodavan-Session-Id': sessionId,
+        },
+      );
+      _throwIfError(res);
+      return _parsePagedBody(res.body);
+    } finally {
+      this.cabinetId = prev;
+    }
+  }
+
+  Future<({List<Map<String, dynamic>> items, int total})>
+  listProjectRuntimeModuleDataRowsPage({
+    required String projectId,
+    required String moduleId,
+    required String tableSlug,
+    String? sessionId,
+    int page = 1,
+    int pageSize = 50,
+    String search = '',
+  }) async {
+    final res = await AuthHttp.get(
+      _uri(
+        '/projects/$projectId/runtime-modules/$moduleId/data/$tableSlug',
+        {
+          'page': '$page',
+          'page_size': '$pageSize',
+          if (search.isNotEmpty) 'search': search,
+        },
+      ),
+      extraHeaders: {
+        ..._workHeaders,
+        if (sessionId != null && sessionId.isNotEmpty)
+          'X-Prodavan-Session-Id': sessionId,
+      },
+    );
+    _throwIfError(res);
+    return _parsePagedBody(res.body);
+  }
+
+  ({List<Map<String, dynamic>> items, int total}) _parsePagedBody(String body) {
+    final decoded = jsonDecode(body) as Map<String, dynamic>;
+    final raw = decoded['items'];
+    final items = raw is List ? raw.cast<Map<String, dynamic>>() : const <Map<String, dynamic>>[];
+    final total = decoded['total'];
+    return (items: items, total: total is int ? total : items.length);
+  }
+
   Future<Map<String, dynamic>> createModuleDataRow({
     required String cabinetId,
     required String moduleId,

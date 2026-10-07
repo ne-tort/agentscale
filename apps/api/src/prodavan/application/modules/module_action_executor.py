@@ -265,6 +265,16 @@ class ModuleActionExecutor:
                 materialize=True,
             )
 
+        if kind == "equipment.master_price":
+            return await self._master_price_export(
+                cabinet_id=cabinet_id,
+                module_id=module_id,
+                params=params,
+                principal=principal,
+                employee=employee,
+                project_id=project_id,
+            )
+
         if kind in ("equipment.pipeline", "equipment.offers_refresh"):
             return await self._equipment_pipeline(
                 cabinet_id=cabinet_id,
@@ -403,6 +413,69 @@ class ModuleActionExecutor:
             session_id=session_id,
         )
         return await EquipmentPipelineService(self._session).run(io, materialize=materialize)
+
+    async def _master_price_export(
+        self,
+        *,
+        cabinet_id: str,
+        module_id: str,
+        params: dict[str, Any],
+        principal: Principal,
+        employee: EmployeeRow | None,
+        project_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Мастер-прайс xlsx: строки батчами из OpenSearch (search_after),
+        заполнение шаблона «Прайс» (layout легаси-Commerce)."""
+        from prodavan.application.documents.service import DocumentsService
+        from prodavan.application.modules.equipment_budget import load_default_template
+        from prodavan.application.modules.equipment_master_price import (
+            MasterPriceService,
+            render_master_price_workbook,
+        )
+
+        template_type = str(params.get("templates_type") or "master_price")
+        service = MasterPriceService(
+            self._session, principal=principal, employee=employee
+        )
+        rows: list[dict[str, Any]] = []
+        async for row in service.iter_rows(cabinet_id=cabinet_id):
+            rows.append(row)
+        if not rows:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="no master price rows (check supplier master_price flags)",
+            )
+        template = await self._resolve_export_template(
+            cabinet_id=cabinet_id,
+            template_type=template_type,
+            principal=principal,
+            employee=employee,
+            fallback=load_default_template(template_type),
+        )
+        data = render_master_price_workbook(template, rows)
+        company_id = await self._resolve_documents_company_id(
+            cabinet_id=cabinet_id, project_id=project_id
+        )
+        if not company_id:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="no company tenancy for master price export",
+            )
+        ref = await DocumentsService(self._session).save_document(
+            data,
+            filename="master-price.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            company_id=company_id,
+            cabinet_id=cabinet_id or None,
+            project_id=project_id,
+            principal=principal,
+            employee=employee,
+        )
+        return {"kind": "equipment.master_price", "file_ref": ref, "rows": len(rows)}
 
     async def _procurement_apply(
         self,

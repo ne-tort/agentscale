@@ -64,6 +64,8 @@ TEMPLATE_TYPES: dict[str, str] = {
     "commercial_proposal": "commercial-proposal-template.xlsx",
     # Standalone retitled «Спецификация» sheet (values fill).
     "specification": "specification-template.xlsx",
+    # Мастер-прайс: лист «Прайс», layout легаси-Commerce (A–K, шапка строка 1).
+    "master_price": "master-price-template.xlsx",
 }
 
 # КП/spec item columns (rows 12..111): values written directly, formulas

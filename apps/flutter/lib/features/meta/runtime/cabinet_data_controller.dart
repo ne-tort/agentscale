@@ -96,11 +96,90 @@ class CabinetDataController extends ChangeNotifier with ModulePickContextMixin {
     notifyListeners();
   }
 
+  /// Server-paged virtual tables (ui_json.server_paged): rows come from
+  /// OpenSearch one page at a time; [_serverPages] holds pager state.
+  final Map<String, _ServerPageState> _serverPages = {};
+
+  bool isServerPaged(String tableSlug) {
+    for (final view in _manifest.views) {
+      if (view['table_slug'] != tableSlug) continue;
+      final ui = view['ui_json'];
+      if (ui is Map && ui['server_paged'] == true) return true;
+    }
+    return false;
+  }
+
+  int serverPage(String tableSlug) => _serverPages[tableSlug]?.page ?? 1;
+
+  int serverPageSize(String tableSlug) => _serverPages[tableSlug]?.pageSize ?? 50;
+
+  int serverTotal(String tableSlug) => _serverPages[tableSlug]?.total ?? 0;
+
+  String serverSearch(String tableSlug) => _serverPages[tableSlug]?.search ?? '';
+
+  Future<void> setServerPage(String tableSlug, int page) async {
+    final state = _serverPages.putIfAbsent(tableSlug, _ServerPageState.new);
+    final clamped = page < 1 ? 1 : page;
+    if (clamped == state.page) return;
+    state.page = clamped;
+    await _loadServerPage(tableSlug);
+  }
+
+  Future<void> setServerSearch(String tableSlug, String query) async {
+    final state = _serverPages.putIfAbsent(tableSlug, _ServerPageState.new);
+    if (query == state.search) return;
+    state.search = query;
+    state.page = 1;
+    await _loadServerPage(tableSlug);
+  }
+
+  Future<void> _loadServerPage(String tableSlug) async {
+    final state = _serverPages.putIfAbsent(tableSlug, _ServerPageState.new);
+    final res = _useProjectInstance
+        ? await api.listProjectRuntimeModuleDataRowsPage(
+            projectId: projectId!,
+            moduleId: moduleId,
+            tableSlug: tableSlug,
+            sessionId: sessionId,
+            page: state.page,
+            pageSize: state.pageSize,
+            search: state.search,
+          )
+        : await api.listModuleDataRowsPage(
+            cabinetId: cabinetId,
+            moduleId: moduleId,
+            tableSlug: tableSlug,
+            sessionId: sessionId,
+            page: state.page,
+            pageSize: state.pageSize,
+            search: state.search,
+          );
+    state.total = res.total;
+    final envelope = [
+      for (final row in res.items)
+        {
+          'table_slug': tableSlug,
+          // виртуальные строки не имеют row_id: ключ — src_hash позиции OS
+          'row_id': row['row_id']?.toString() ??
+              row['src_hash']?.toString() ??
+              '${tableSlug}_${row.hashCode}',
+          'body': Map<String, dynamic>.from(row),
+        },
+    ];
+    _items.removeWhere((i) => i['table_slug'] == tableSlug);
+    _items.addAll(envelope);
+    notifyListeners();
+  }
+
   Future<void> loadAll() async {
     final next = <Map<String, dynamic>>[];
     for (final table in _manifest.tables) {
       final slug = table['slug'] as String?;
       if (slug == null || slug.isEmpty) continue;
+      if (isServerPaged(slug)) {
+        // page 1 (or current pager state) loads below; skip full list
+        continue;
+      }
       final rows = _useProjectInstance
           ? await api.listProjectRuntimeModuleDataRows(
               projectId: projectId!,
@@ -125,14 +204,31 @@ class CabinetDataController extends ChangeNotifier with ModulePickContextMixin {
         });
       }
     }
-    if (_itemsFingerprint(next) == _itemsFingerprint(_items)) {
+    final serverSlugs = [
+      for (final table in _manifest.tables)
+        if (isServerPaged(table['slug']?.toString() ?? ''))
+          table['slug'].toString(),
+    ];
+    for (final slug in serverSlugs) {
+      try {
+        await _loadServerPage(slug);
+      } catch (_) {
+        // виртуальная таблица недоступна (OS down) — страница покажет empty
+      }
+    }
+    final keepServer = _items
+        .where((i) => serverSlugs.contains(i['table_slug']))
+        .toList();
+    if (_itemsFingerprint(next) ==
+        _itemsFingerprint(_items.where((i) => !serverSlugs.contains(i['table_slug'])).toList())) {
       // Сессионные данные не изменились — но кросс-чатовые таблицы могли.
       await _reloadCrossChat();
       return;
     }
     _items
       ..clear()
-      ..addAll(next);
+      ..addAll(next)
+      ..addAll(keepServer);
     notifyListeners();
     await _reloadCrossChat();
   }
@@ -453,3 +549,11 @@ class CabinetDataController extends ChangeNotifier with ModulePickContextMixin {
     );
   }
 }
+
+class _ServerPageState {
+  int page = 1;
+  int pageSize = 50;
+  int total = 0;
+  String search = '';
+}
+
