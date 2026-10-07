@@ -333,6 +333,12 @@ class CollectionViewInterpreter extends StatelessWidget {
                 : null,
             icon: const Icon(Icons.chevron_right),
           ),
+          IconButton(
+            visualDensity: VisualDensity.compact,
+            tooltip: 'Обновить данные',
+            onPressed: () => unawaited(adapter.reloadServerPage(tableSlug)),
+            icon: const Icon(Icons.refresh),
+          ),
         ],
       ),
     );
