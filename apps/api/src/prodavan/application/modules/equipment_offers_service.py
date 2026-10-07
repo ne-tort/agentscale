@@ -1119,16 +1119,17 @@ class EquipmentPipelineService:
                 registry is not None
                 and registry.is_disabled(str(body.get("seller") or ""))
             )
-            # Оффер БЕЗ цены никогда не выигрывает автовыбор, пока есть
-            # альтернатива с ценой (инцидент 2026-10-07: в бюджет попадали
-            # безценовые «под заказ»). Приоритетный поставщик бьёт цену
-            # только среди офферов с ценой.
+            # Порядок автовыбора (ТЗ 2026-10-07): наличие → цена → приоритет.
+            # Оффер БЕЗ цены (включая текстовые «Уточняйте»: price_num=None)
+            # выигрывает только внутри своей группы наличие, когда priced
+            # варианта там нет; под заказ уступает наличию; приоритетный
+            # поставщик бьёт цену среди priced внутри того же наличия.
             return (
                 1 if (body.get("is_stale") is True or disabled) else 0,
+                0 if body.get("in_stock") is True else 1,
                 0 if price is not None else 1,
                 0 if body.get("priority") is True else 1,
                 price if price is not None else float("inf"),
-                0 if body.get("in_stock") is True else 1,
                 str(o.get("row_id") or ""),
             )
 
@@ -1247,6 +1248,9 @@ class EquipmentPipelineService:
                 # warning-цветом); 0.0 раньше маскировала отсутствие цены.
                 "price_in": _num_or(obody.get("price"), None),
                 "on_order": obody.get("in_stock") is not True,
+                # точность выбранного оффера: UI красит наименование/P/N
+                # warning-цветом для аналогов и сомнений
+                "match_kind": _valid_match_kind(obody.get("match_kind")),
                 "seller": seller or "Не найден",
                 "brand": str(obody.get("brand") or "").strip(),
             }

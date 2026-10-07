@@ -773,8 +773,9 @@ async def test_match_label_and_stock_and_offer_annotations(io: FakeIO) -> None:
     assert by_hash["h4"]["body"]["benefit_label"] == "Единственный"
 
 
-async def test_best_offer_stock_is_last_tiebreak(io: FakeIO) -> None:
-    """Наличие — последний критерий внутри группы: приоритет → цена → наличие."""
+async def test_best_offer_stock_beats_price(io: FakeIO) -> None:
+    """ТЗ 2026-10-07: наличие — ПЕРВЫЙ критерий внутри группы (подзаказные
+    уступают наличию даже будучи дешевле): наличие → цена → приоритет."""
     # h1 убран (у него ручная цена), h3 убран (приоритет) — чистый тест на
     # Петрове (90, в наличии) и Смирнове (80, под заказ)
     docs2 = [d for d in DOCS if d["src_hash"] not in ("h1", "h3", "h4")]
@@ -786,12 +787,12 @@ async def test_best_offer_stock_is_last_tiebreak(io: FakeIO) -> None:
     svc = EquipmentPipelineService(session=object())
     await svc.run(io, materialize=True)
     by_hash = {o["body"]["src_hash"]: o for o in io.rows("found_offers") if o["body"].get("src_hash")}
-    # цена важнее наличия: дешевле+под заказ ВЫИГРЫВАЕТ, лицо помечено
-    assert by_hash["h8"]["body"]["is_best"] is True
+    # в наличии дороже ВЫИГРЫВАЕТ у дешевле+под заказ
+    assert by_hash["h2"]["body"]["is_best"] is True
     grp1 = io.body("found_groups", "grp_1")
-    assert grp1["face_price"] == 80.0
-    assert grp1["face_in_stock"] is False
-    assert grp1["match_label"] == "Точное (под заказ)"
+    assert grp1["face_price"] == 90.0
+    assert grp1["face_in_stock"] is True
+    assert grp1["match_label"] == "Точное"
 
     # при равной цене — в наличии выигрывает
     docs3 = [dict(d) for d in docs2]
@@ -1061,3 +1062,111 @@ async def test_budget_priceless_on_order_offer_gets_honest_snapshot(monkeypatch)
     assert budget[0]["body"]["on_order"] is True
     grp = io.body("found_groups", "grp_1")
     assert grp["match_label"] == "Точное (нет офферов)" or grp["offers_count"] == 1
+
+
+async def test_best_prefers_instock_priceless_over_onorder_priced(monkeypatch) -> None:
+    """ТЗ 2026-10-07: безценовой («Уточняйте») оффер В НАЛИЧИИ выигрывает у
+    priced «под заказ»; но priced в наличии выигрывает у безценового в наличии."""
+    _patch_os(monkeypatch, [])
+    monkeypatch.setattr(fx_mod, "convert_offer_price", _fake_convert)
+
+    def _offer(rid, *, price, in_stock):
+        return {
+            "row_id": rid,
+            "body": {
+                "group_id": "grp_1",
+                "line_id": "line_1",
+                "title": rid,
+                "seller": "П",
+                "part_number": "ABC-3",
+                "src_hash": rid,
+                "currency": "RUB",
+                "price": price,
+                "in_stock": in_stock,
+                "match_kind": "exact",
+            },
+        }
+
+    io = FakeIO(
+        {
+            "request_lines": [
+                {"row_id": "line_1", "body": {"title": "П", "part_number": "ABC-3", "qty": 1}},
+            ],
+            "found_groups": [
+                {"row_id": "grp_1", "body": {"line_id": "line_1", "part_number": "ABC-3", "match_kind": "exact"}},
+            ],
+            "found_offers": [
+                _offer("o_noprice_stock", price=None, in_stock=True),
+                _offer("o_priced_order", price=900.0, in_stock=False),
+            ],
+            "trusted_sellers": [],
+            "budget_lines": [],
+            "procurement": [],
+        }
+    )
+    svc = EquipmentPipelineService(session=object())
+    await svc.run(io, materialize=False)
+    grp = io.body("found_groups", "grp_1")
+    assert grp["best_offer_id"] == "o_noprice_stock"
+
+    # второй прогон: добавился priced в наличии — он забирает best
+    await io.create(
+        "found_offers",
+        {
+            "group_id": "grp_1",
+            "line_id": "line_1",
+            "title": "priced stock",
+            "seller": "П",
+            "part_number": "ABC-3",
+            "src_hash": "o_priced_stock",
+            "currency": "RUB",
+            "price": 1200.0,
+            "in_stock": True,
+            "match_kind": "exact",
+        },
+    )
+    await svc.run(io, materialize=False)
+    grp = io.body("found_groups", "grp_1")
+    assert grp["best_offer_id"] != "o_noprice_stock"
+    assert io.body("found_offers", grp["best_offer_id"])["price"] == 1200.0
+
+
+async def test_budget_snapshot_carries_match_kind(monkeypatch) -> None:
+    """Аналог/сомнение: бюджет хранит match_kind — UI красит наименование/P/N."""
+    _patch_os(monkeypatch, [])
+    monkeypatch.setattr(fx_mod, "convert_offer_price", _fake_convert)
+    io = FakeIO(
+        {
+            "request_lines": [
+                {"row_id": "line_1", "body": {"title": "П", "part_number": "ABC-4", "qty": 1}},
+            ],
+            "found_groups": [
+                {"row_id": "grp_1", "body": {"line_id": "line_1", "part_number": "ABC-4", "match_kind": "analog"}},
+            ],
+            "found_offers": [
+                {
+                    "row_id": "offer_a",
+                    "body": {
+                        "group_id": "grp_1",
+                        "line_id": "line_1",
+                        "title": "Аналог",
+                        "seller": "П",
+                        "part_number": "ABC-4-AN",
+                        "src_hash": "ha",
+                        "currency": "RUB",
+                        "price": 100.0,
+                        "in_stock": True,
+                        "match_kind": "analog",
+                    },
+                },
+            ],
+            "trusted_sellers": [],
+            "budget_lines": [],
+            "procurement": [],
+        }
+    )
+    svc = EquipmentPipelineService(session=object())
+    await svc.run(io, materialize=True)
+    budget = io.rows("budget_lines")
+    assert len(budget) == 1
+    assert budget[0]["body"]["match_kind"] == "analog"

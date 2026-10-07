@@ -77,6 +77,20 @@ void main() {
     });
   });
 
+  group('offer_price format', () {
+    test('null price renders «Нет цены», numeric renders as-is', () {
+      const col = {'field': 'price', 'format': 'offer_price'};
+      expect(
+        formatModuleCell(item: const {}, body: const {'price': null}, col: col, tableSlug: 'found_offers'),
+        'Нет цены',
+      );
+      expect(
+        formatModuleCell(item: const {}, body: const {'price': 99.5}, col: col, tableSlug: 'found_offers'),
+        '99.5',
+      );
+    });
+  });
+
   group('budgetPriceInLabel', () {
     test('no price / no price + on order / priced on order', () {
       expect(budgetPriceInLabel({'price_in': null, 'on_order': false}), 'Нет цены');
