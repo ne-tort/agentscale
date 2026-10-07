@@ -554,6 +554,7 @@ async def list_project_runtime_module_data(
     page: int = 1,
     page_size: int = 50,
     search: str = "",
+    in_stock_only: bool = False,
 ) -> dict:
     from prodavan.application.projects.project_runtime_module_service import (
         ProjectRuntimeModuleService,
@@ -576,6 +577,7 @@ async def list_project_runtime_module_data(
                 page=page,
                 page_size=page_size,
                 search=search,
+                in_stock_only=in_stock_only,
             )
             if virtual is not None:
                 return virtual

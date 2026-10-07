@@ -1109,6 +1109,15 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "enabled": True,
                 "scope": {"projects": "all", "chats": "current"},
             },
+            # «Поиск товаров»: виртуальная таблица ручного поиска по всем
+            # готовым каталогам OpenSearch (серверные поиск/пагинация/фильтр).
+            {
+                "slug": "equipment_search",
+                "label": {"ru": "Поиск товаров", "en": "Product search"},
+                "storage_kind": "opensearch_virtual",
+                "enabled": True,
+                "scope": {"projects": "all", "chats": "all"},
+            },
             # Мастер-прайс: виртуальная таблица — строки НЕ хранятся в БД,
             # читаются из OpenSearch готовых каталогов по поставщикам с
             # флагом master_price (пагинация/поиск на стороне сервера).
@@ -2460,6 +2469,63 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
             },
             _project_ids_column("equipment_prompts"),
             {
+                "table_slug": "equipment_search",
+                "name": "supplier",
+                "label": {"ru": "Поставщик", "en": "Supplier"},
+                "type": "text",
+                "required": False,
+            },
+            {
+                "table_slug": "equipment_search",
+                "name": "brand",
+                "label": {"ru": "Бренд", "en": "Brand"},
+                "type": "text",
+                "required": False,
+            },
+            {
+                "table_slug": "equipment_search",
+                "name": "part_number",
+                "label": {"ru": "PN", "en": "PN"},
+                "type": "text",
+                "required": False,
+            },
+            {
+                "table_slug": "equipment_search",
+                "name": "title",
+                "label": {"ru": "Наименование", "en": "Title"},
+                "type": "text",
+                "required": False,
+            },
+            {
+                "table_slug": "equipment_search",
+                "name": "in_stock",
+                "label": {"ru": "Наличие", "en": "Stock"},
+                "type": "bool",
+                "required": False,
+            },
+            {
+                "table_slug": "equipment_search",
+                "name": "price",
+                "label": {"ru": "Цена", "en": "Price"},
+                "type": "number",
+                "required": False,
+            },
+            {
+                "table_slug": "equipment_search",
+                "name": "currency",
+                "label": {"ru": "Валюта", "en": "Currency"},
+                "type": "text",
+                "required": False,
+            },
+            {
+                "table_slug": "equipment_search",
+                "name": "src_hash",
+                "label": {"ru": "Ключ позиции", "en": "Position key"},
+                "type": "text",
+                "required": False,
+                "hidden": True,
+            },
+            {
                 "table_slug": "master_price",
                 "name": "supplier",
                 "label": {"ru": "Поставщик", "en": "Supplier"},
@@ -2793,6 +2859,14 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "target": {
                                 "kind": "view",
                                 "view": "master_price_list",
+                            },
+                        },
+                        {
+                            "title": "Поиск товаров",
+                            "icon": "search",
+                            "target": {
+                                "kind": "view",
+                                "view": "equipment_search_list",
                             },
                         },
                     ],
@@ -4641,6 +4715,70 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 },
             },
             {
+                "slug": "equipment_search_list",
+                "table_slug": "equipment_search",
+                "kind": "collection",
+                "ui_json": {
+                    "version": 1,
+                    "kind": "collection",
+                    "scaffold": {
+                        "title": {"ru": "Поиск товаров", "en": "Product search"}
+                    },
+                    "server_paged": True,
+                    # тумблер «только в наличии» в шапке
+                    "stock_filter": True,
+                    "search": {
+                        "fields": ["title", "part_number", "brand", "supplier"]
+                    },
+                    "title_field": "title",
+                    "subtitle_fields": ["supplier", "part_number"],
+                    "columns": [
+                        {
+                            "field": "brand",
+                            "label": {"ru": "Бренд", "en": "Brand"},
+                            "max_width": 110,
+                        },
+                        {
+                            "field": "part_number",
+                            "label": {"ru": "PN", "en": "PN"},
+                            "max_lines": 2,
+                            "max_width": 110,
+                        },
+                        {
+                            "field": "title",
+                            "label": {"ru": "Наименование", "en": "Title"},
+                            "max_lines": 2,
+                            "max_width": 320,
+                        },
+                        {
+                            "field": "in_stock",
+                            "label": {"ru": "Наличие", "en": "Stock"},
+                            "format": "stock_label",
+                            "max_width": 110,
+                        },
+                        {
+                            "field": "price",
+                            "label": {"ru": "Цена", "en": "Price"},
+                            "format": "offer_price",
+                            "align": "end",
+                            "max_width": 110,
+                        },
+                        {
+                            "field": "currency",
+                            "label": {"ru": "Валюта", "en": "Currency"},
+                            "max_width": 80,
+                        },
+                    ],
+                    # тап по товару → список позиций заказчика для сопоставления
+                    "row_tap": {"kind": "match_product", "action": "equipment_match_to_line"},
+                    "empty": _empty(
+                        "Ничего не найдено",
+                        "Nothing found",
+                        icon="search",
+                    ),
+                },
+            },
+            {
                 "slug": "master_price_list",
                 "table_slug": "master_price",
                 "kind": "collection",
@@ -4717,6 +4855,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "max_width": 110,
                         },
                     ],
+                    "row_tap": {"kind": "match_product", "action": "equipment_match_to_line"},
                     "empty": _empty(
                         "Нет позиций мастер-прайса",
                         "No master price rows",
@@ -4989,6 +5128,18 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     },
                 },
                 "ui": {"placement": ["row_action"]},
+            },
+            {
+                "id": "equipment_match_to_line",
+                "label": {
+                    "ru": "Сопоставить с позицией",
+                    "en": "Match to line",
+                },
+                "kind": "equipment.match_to_line",
+                "enabled": True,
+                "params": {},
+                "trigger": {"on": []},
+                "ui": {"placement": []},
             },
             {
                 "id": "master_price_export",

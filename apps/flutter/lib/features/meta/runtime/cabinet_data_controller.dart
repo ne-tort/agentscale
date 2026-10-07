@@ -117,6 +117,17 @@ class CabinetDataController extends ChangeNotifier with ModulePickContextMixin {
 
   String serverSearch(String tableSlug) => _serverPages[tableSlug]?.search ?? '';
 
+  bool serverStockOnly(String tableSlug) =>
+      _serverPages[tableSlug]?.stockOnly ?? false;
+
+  Future<void> setServerStockOnly(String tableSlug, bool enabled) async {
+    final state = _serverPages.putIfAbsent(tableSlug, _ServerPageState.new);
+    if (state.stockOnly == enabled) return;
+    state.stockOnly = enabled;
+    state.page = 1;
+    await _loadServerPage(tableSlug);
+  }
+
   Future<void> setServerPage(String tableSlug, int page) async {
     final state = _serverPages.putIfAbsent(tableSlug, _ServerPageState.new);
     final clamped = page < 1 ? 1 : page;
@@ -151,6 +162,7 @@ class CabinetDataController extends ChangeNotifier with ModulePickContextMixin {
             page: state.page,
             pageSize: state.pageSize,
             search: state.search,
+            inStockOnly: state.stockOnly,
           )
         : await api.listModuleDataRowsPage(
             cabinetId: cabinetId,
@@ -160,6 +172,7 @@ class CabinetDataController extends ChangeNotifier with ModulePickContextMixin {
             page: state.page,
             pageSize: state.pageSize,
             search: state.search,
+            inStockOnly: state.stockOnly,
           );
     state.total = res.total;
     final envelope = [
@@ -438,12 +451,17 @@ class CabinetDataController extends ChangeNotifier with ModulePickContextMixin {
   /// Invokes a module action and returns the raw result body (may carry
   /// `file_ref` for exports). Reloads data afterwards so the UI reflects
   /// any server-side row updates.
-  Future<Map<String, dynamic>> invokeAction(String actionId, {String? rowId}) async {
+  Future<Map<String, dynamic>> invokeAction(
+    String actionId, {
+    String? rowId,
+    Map<String, dynamic>? params,
+  }) async {
     final result = await api.invokeModuleAction(
       cabinetId: cabinetId,
       moduleId: moduleId,
       actionId: actionId,
       rowId: rowId,
+      params: params,
       projectId: projectId,
       sessionId: sessionId,
     );
@@ -562,5 +580,6 @@ class _ServerPageState {
   int pageSize = 50;
   int total = 0;
   String search = '';
+  bool stockOnly = false;
 }
 

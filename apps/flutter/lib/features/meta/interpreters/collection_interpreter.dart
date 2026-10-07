@@ -24,6 +24,7 @@ import 'package:prodavan/features/meta/runtime/module_runtime_scope.dart';
 import 'package:prodavan/features/meta/runtime/owner_module_data_controller.dart';
 import 'package:prodavan/features/meta/runtime/runtime_data_adapter.dart';
 import 'package:prodavan/features/meta/module_scaffold_actions.dart';
+import 'package:prodavan/features/meta/widgets/equipment_match_sheet.dart';
 import 'package:prodavan/features/meta/widgets/benefit_badge.dart';
 import 'package:prodavan/features/meta/widgets/budget_summary_strip.dart';
 import 'package:prodavan/features/meta/widgets/document_fields_panel.dart';
@@ -152,6 +153,24 @@ class CollectionViewInterpreter extends StatelessWidget {
               return;
             }
             final rowTap = uiJson['row_tap'];
+            if (rowTap is Map && rowTap['kind'] == 'match_product') {
+              // виртуальные строки (поиск/мастер-прайс): сопоставить товар
+              // с позицией заказчика
+              final actionId = rowTap['action']?.toString() ?? '';
+              final adapter = seeds;
+              if (actionId.isNotEmpty && adapter is RuntimeDataAdapter) {
+                unawaited(
+                  EquipmentMatchSheet.show(
+                    context: context,
+                    adapter: adapter,
+                    actionId: actionId,
+                    srcHash: row.id,
+                    productTitle: row.title,
+                  ),
+                );
+              }
+              return;
+            }
             if (rowTap is Map && rowTap['kind'] == 'invoke_action') {
               // тап по строке вызывает экшен (напр. выбор оффера в «Закупке»)
               final actionId = rowTap['action']?.toString() ?? '';
@@ -188,7 +207,12 @@ class CollectionViewInterpreter extends StatelessWidget {
         final summary = _summary(uiJson);
         final docFields = _docFieldsConfig(uiJson);
         final serverBar = serverPaged
-            ? _serverPagedBar(context, seeds as RuntimeDataAdapter, tableSlug)
+            ? _serverPagedBar(
+                context,
+                seeds as RuntimeDataAdapter,
+                tableSlug,
+                stockFilter: uiJson['stock_filter'] == true,
+              )
             : null;
         if (!hasInline &&
             !_hasContextHeader(uiJson) &&
@@ -281,8 +305,9 @@ class CollectionViewInterpreter extends StatelessWidget {
   Widget _serverPagedBar(
     BuildContext context,
     RuntimeDataAdapter adapter,
-    String tableSlug,
-  ) {
+    String tableSlug, {
+    bool stockFilter = false,
+  }) {
     final scheme = Theme.of(context).colorScheme;
     final page = adapter.serverPage(tableSlug);
     final pageSize = adapter.serverPageSize(tableSlug);
@@ -290,26 +315,33 @@ class CollectionViewInterpreter extends StatelessWidget {
     final from = total == 0 ? 0 : (page - 1) * pageSize + 1;
     final to = math.min(page * pageSize, total);
     final lastPage = total == 0 ? 1 : ((total + pageSize - 1) ~/ pageSize);
-    return Padding(
+    final currentSearch = adapter.serverSearch(tableSlug);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // Inline-поле как у добавления итемов на других страницах, но поиск.
+        AppInlineAddField(
+          title: 'Поиск',
+          hintText: 'Найти товар...',
+          showBottomDivider: false,
+          validator: (raw) => raw.trim().isNotEmpty,
+          onSave: (raw) => adapter.setServerSearch(tableSlug, raw.trim()),
+        ),
+        if (currentSearch.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(bottom: AppSpacing.xs),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: InputChip(
+                label: Text(currentSearch, overflow: TextOverflow.ellipsis),
+                onDeleted: () => unawaited(adapter.setServerSearch(tableSlug, '')),
+              ),
+            ),
+          ),
+        Padding(
       padding: const EdgeInsets.fromLTRB(0, 0, 0, AppSpacing.xs),
       child: Row(
         children: [
-          SizedBox(
-            width: 260,
-            height: 36,
-            child: TextField(
-              decoration: InputDecoration(
-                isDense: true,
-                prefixIcon: const Icon(Icons.search, size: 18),
-                hintText: 'Поиск: название, P/N, бренд, поставщик',
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-              ),
-              onSubmitted: (value) =>
-                  unawaited(adapter.setServerSearch(tableSlug, value.trim())),
-            ),
-          ),
           const Spacer(),
           Text(
             '$from–$to из $total',
@@ -333,6 +365,27 @@ class CollectionViewInterpreter extends StatelessWidget {
                 : null,
             icon: const Icon(Icons.chevron_right),
           ),
+          if (stockFilter)
+            IconButton(
+              visualDensity: VisualDensity.compact,
+              tooltip: adapter.serverStockOnly(tableSlug)
+                  ? 'Показать всё (включая под заказ)'
+                  : 'Только в наличии',
+              onPressed: () => unawaited(
+                adapter.setServerStockOnly(
+                  tableSlug,
+                  !adapter.serverStockOnly(tableSlug),
+                ),
+              ),
+              icon: Icon(
+                adapter.serverStockOnly(tableSlug)
+                    ? Icons.inventory
+                    : Icons.inventory_2_outlined,
+                color: adapter.serverStockOnly(tableSlug)
+                    ? Theme.of(context).colorScheme.primary
+                    : null,
+              ),
+            ),
           IconButton(
             visualDensity: VisualDensity.compact,
             tooltip: 'Обновить данные',
@@ -341,6 +394,8 @@ class CollectionViewInterpreter extends StatelessWidget {
           ),
         ],
       ),
+        ),
+      ],
     );
   }
 
@@ -736,6 +791,7 @@ class CollectionViewInterpreter extends StatelessWidget {
     if (columns is! List) return rows;
     final priceInFields = <String>[];
     final offerPriceFields = <String>[];
+    final stockFields = <String>[];
     final matchWarn = <String, Set<String>>{};
     for (final c in columns.whereType<Map>()) {
       final field = c['field']?.toString() ?? '';
@@ -745,13 +801,18 @@ class CollectionViewInterpreter extends StatelessWidget {
           priceInFields.add(field);
         case 'offer_price':
           offerPriceFields.add(field);
+        case 'stock_label':
+          stockFields.add(field);
       }
       final when = c['warning_when_match'];
       if (when is List && when.isNotEmpty) {
         matchWarn[field] = when.map((e) => e.toString()).toSet();
       }
     }
-    if (priceInFields.isEmpty && offerPriceFields.isEmpty && matchWarn.isEmpty) {
+    if (priceInFields.isEmpty &&
+        offerPriceFields.isEmpty &&
+        stockFields.isEmpty &&
+        matchWarn.isEmpty) {
       return rows;
     }
     final warning = context.appColors.warning;
@@ -778,6 +839,13 @@ class CollectionViewInterpreter extends StatelessWidget {
             widgets[field] = Text('Нет цены', style: TextStyle(color: warning));
             changed = true;
           }
+        }
+      }
+      if (stockFields.isNotEmpty) {
+        for (final field in stockFields) {
+          if (body[field] == true) continue; // в наличии — обычный текст
+          widgets[field] = Text('Под заказ', style: TextStyle(color: warning));
+          changed = true;
         }
       }
       if (matchWarn.isNotEmpty) {
