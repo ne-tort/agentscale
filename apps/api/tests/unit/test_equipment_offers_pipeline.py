@@ -942,3 +942,122 @@ async def test_group_without_offers_shows_pn_face_and_honest_label(monkeypatch) 
     assert grp["face_title"] == "ZZZ-999"
     assert grp["match_label"] == "Точное (нет офферов)"
     assert grp.get("face_price") is None
+
+
+async def test_best_and_budget_skip_priceless_offer_when_priced_exists(monkeypatch) -> None:
+    """Автовыбор: оффер БЕЗ цены (даже приоритетного поставщика) не бьёт
+    priced-альтернативу; бюджет берёт цену и on_order-флаг честно."""
+    _patch_os(monkeypatch, [])
+    monkeypatch.setattr(fx_mod, "convert_offer_price", _fake_convert)
+    io = FakeIO(
+        {
+            "request_lines": [
+                {"row_id": "line_1", "body": {"title": "Позиция", "part_number": "ABC-1", "qty": 2}},
+            ],
+            "found_groups": [
+                {
+                    "row_id": "grp_1",
+                    "body": {"line_id": "line_1", "part_number": "ABC-1", "match_kind": "exact"},
+                },
+            ],
+            "found_offers": [
+                {
+                    "row_id": "offer_noprice",
+                    "body": {
+                        "group_id": "grp_1",
+                        "line_id": "line_1",
+                        "title": "Без цены приоритет",
+                        "seller": "Приоритет",
+                        "part_number": "ABC-1",
+                        "src_hash": "hp",
+                        "currency": "RUB",
+                        "price": None,
+                        "in_stock": False,
+                        "priority": True,
+                        "match_kind": "exact",
+                    },
+                },
+                {
+                    "row_id": "offer_priced",
+                    "body": {
+                        "group_id": "grp_1",
+                        "line_id": "line_1",
+                        "title": "С ценой",
+                        "seller": "Обычный",
+                        "part_number": "ABC-1",
+                        "src_hash": "hq",
+                        "currency": "RUB",
+                        "price": 500.0,
+                        "in_stock": True,
+                        "priority": False,
+                        "match_kind": "exact",
+                    },
+                },
+            ],
+            "trusted_sellers": [
+                {"row_id": "s1", "body": {"name": "Приоритет", "is_enabled": True, "priority_purchase": True}},
+                {"row_id": "s2", "body": {"name": "Обычный", "is_enabled": True}},
+            ],
+            "budget_lines": [],
+            "procurement": [],
+        }
+    )
+    svc = EquipmentPipelineService(session=object())
+    await svc.run(io, materialize=True)
+
+    grp = io.body("found_groups", "grp_1")
+    assert grp["best_offer_id"] == "offer_priced"
+    assert grp["face_price"] == 500.0
+    budget = io.rows("budget_lines")
+    assert len(budget) == 1
+    assert budget[0]["body"]["price_in"] == 500.0
+    assert budget[0]["body"]["on_order"] is False
+
+
+async def test_budget_priceless_on_order_offer_gets_honest_snapshot(monkeypatch) -> None:
+    """Единственный оффер — без цены и под заказ: бюджет честный
+    (price_in=null, on_order=true), а не маскировка нулём."""
+    _patch_os(monkeypatch, [])
+    monkeypatch.setattr(fx_mod, "convert_offer_price", _fake_convert)
+    io = FakeIO(
+        {
+            "request_lines": [
+                {"row_id": "line_1", "body": {"title": "Позиция", "part_number": "ABC-2", "qty": 1}},
+            ],
+            "found_groups": [
+                {
+                    "row_id": "grp_1",
+                    "body": {"line_id": "line_1", "part_number": "ABC-2", "match_kind": "exact"},
+                },
+            ],
+            "found_offers": [
+                {
+                    "row_id": "offer_x",
+                    "body": {
+                        "group_id": "grp_1",
+                        "line_id": "line_1",
+                        "title": "Под заказ без цены",
+                        "seller": "П",
+                        "part_number": "ABC-2",
+                        "src_hash": "hx",
+                        "currency": "RUB",
+                        "price": None,
+                        "in_stock": False,
+                        "match_kind": "exact",
+                    },
+                },
+            ],
+            "trusted_sellers": [],
+            "budget_lines": [],
+            "procurement": [],
+        }
+    )
+    svc = EquipmentPipelineService(session=object())
+    await svc.run(io, materialize=True)
+
+    budget = io.rows("budget_lines")
+    assert len(budget) == 1
+    assert budget[0]["body"]["price_in"] is None
+    assert budget[0]["body"]["on_order"] is True
+    grp = io.body("found_groups", "grp_1")
+    assert grp["match_label"] == "Точное (нет офферов)" or grp["offers_count"] == 1
