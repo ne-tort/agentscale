@@ -905,3 +905,40 @@ def test_mark_manual_overrides() -> None:
         body={"currency": "EUR"},
     )
     assert body["manual"] == {"currency": True}
+
+
+async def test_group_without_offers_shows_pn_face_and_honest_label(monkeypatch) -> None:
+    """Группа без офферов (каталог пуст/error): лицо = партномер, а не row_*,
+    лейбл «(нет офферов)» вместо вводившего в заблуждение «(под заказ)»."""
+    _patch_os(monkeypatch, [])
+    monkeypatch.setattr(fx_mod, "convert_offer_price", _fake_convert)
+    io = FakeIO(
+        {
+            "request_lines": [
+                {"row_id": "line_1", "body": {"title": "Позиция", "part_number": "ZZZ-999", "qty": 1}},
+            ],
+            "found_groups": [
+                {
+                    "row_id": "grp_z",
+                    "body": {
+                        "line_id": "line_1",
+                        "part_number": "ZZZ-999",
+                        "match_kind": "exact",
+                        "note": "каталог молчит",
+                    },
+                },
+            ],
+            "found_offers": [],
+            "trusted_sellers": [],
+            "budget_lines": [],
+            "procurement": [],
+        }
+    )
+    svc = EquipmentPipelineService(session=object())
+    await svc.run(io, materialize=True)
+
+    grp = io.body("found_groups", "grp_z")
+    assert grp["offers_count"] == 0
+    assert grp["face_title"] == "ZZZ-999"
+    assert grp["match_label"] == "Точное (нет офферов)"
+    assert grp.get("face_price") is None

@@ -877,7 +877,9 @@ class EquipmentPipelineService:
             face_priority = bool(face) and registry.is_priority(str(face.get("seller") or ""))
             face_in_stock = bool(face) and face.get("in_stock") is True
             want_match_label = _match_label(
-                _valid_match_kind(body.get("match_kind")), face_in_stock
+                _valid_match_kind(body.get("match_kind")),
+                face_in_stock,
+                has_offers=bool(face),
             )
 
             updates: dict[str, Any] = {}
@@ -892,8 +894,16 @@ class EquipmentPipelineService:
                 updates["match_label"] = want_match_label
             if body.get("best_offer_id") != best_id:
                 updates["best_offer_id"] = best_id
-            if body.get("face_title") != face.get("title"):
-                updates["face_title"] = face.get("title") or ""
+            # Без офферов лицо группы — сам ключ (P/N или первый алиас),
+            # иначе список показывает технический row_* вместо товара.
+            if face:
+                want_face_title = str(face.get("title") or "")
+            else:
+                aliases = body.get("aliases_pn")
+                first_alias = str(aliases[0]) if isinstance(aliases, list) and aliases else ""
+                want_face_title = str(body.get("part_number") or "") or first_alias
+            if body.get("face_title") != want_face_title:
+                updates["face_title"] = want_face_title
             if body.get("face_price") != _num_or(face.get("price"), None):
                 updates["face_price"] = _num_or(face.get("price"), None)
             if body.get("face_seller") != face.get("seller"):
@@ -1652,10 +1662,15 @@ _MATCH_LABELS = {
 }
 
 
-def _match_label(match_kind: str, in_stock: bool) -> str:
+def _match_label(match_kind: str, in_stock: bool, *, has_offers: bool = True) -> str:
     """«Совпадение» для UI: «Точное» / «Аналог» / «Есть сомнения» +
-    « (под заказ)», когда позиции нет в наличии."""
+    « (под заказ)», когда позиция не в наличии. Без офферов вовсе —
+    « (нет офферов)»: «под заказ» при пустой группе вводил в заблуждение
+    (инцидент 2026-10-07: каталог был в error, группы без офферов
+    показывались как «Точное (под заказ)»)."""
     base = _MATCH_LABELS.get(match_kind, "Аналог")
+    if not has_offers:
+        return f"{base} (нет офферов)"
     return base if in_stock else f"{base} (под заказ)"
 
 
