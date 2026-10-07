@@ -5,6 +5,9 @@ Delivery strategy per attachment (size permitting):
   and embedded as a "Вложенные данные" fenced block in the agent prompt.
 - Inlineable tabular (csv/tsv/xlsx/xml) → converted to JSON records and
   embedded as a "Вложенные данные" fenced block in the agent prompt.
+- Images (png/jpg/jpeg/webp/gif) → forwarded to the model as vision content
+  blocks (see ``images`` on the send body) AND saved to the Pod workspace
+  under /workspace/inbox/ so non-vision models / re-sends still have the file.
 - Anything else (binary, oversized, unparseable) → written to the Pod
   workspace under /workspace/inbox/ and referenced by path in the prompt.
 
@@ -14,6 +17,7 @@ Every attachment triggers the agent: the composed message ends with
 
 from __future__ import annotations
 
+import base64
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -49,9 +53,21 @@ from prodavan.infrastructure.persistence.models.projects import ProjectAttachmen
 
 logger = logging.getLogger(__name__)
 
-DeliveryKind = Literal["inline_text", "inline_json", "inline_table", "workspace_file"]
+DeliveryKind = Literal["inline_text", "inline_json", "inline_table", "image", "workspace_file"]
 
 _INSTRUCTION_SUFFIX = "Поступи с ним, согласно инструкциям."
+
+# Vision inline limits: images forwarded to the model as content blocks.
+# Larger/extra images still land in the workspace — only the inline copy
+# is skipped (the bridge schema caps 8 images / ~6MB base64 per entry).
+CHAT_IMAGE_INLINE_MAX_BYTES = 5 * 1024 * 1024
+CHAT_IMAGE_INLINE_MAX_COUNT = 8
+
+_IMAGE_EXTENSIONS = frozenset({".png", ".jpg", ".jpeg", ".webp", ".gif"})
+
+
+def is_image_filename(filename: str) -> bool:
+    return Path(filename).suffix.lower() in _IMAGE_EXTENSIONS
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,6 +81,10 @@ class DeliveredAttachment:
     text: str | None = None
     note: str = ""
     markdown: str | None = None
+    mime: str | None = None
+    # image forwarded to the model as vision content blocks (base64 kept
+    # only in AttachmentDeliveryResult.images, never in ui payloads)
+    image_inline: bool = False
 
     def ui_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {
@@ -83,6 +103,10 @@ class DeliveredAttachment:
             out["inline_text"] = self.text
         if self.kind == "inline_table" and self.markdown is not None:
             out["inline_markdown"] = self.markdown
+        if self.kind == "image":
+            if self.mime:
+                out["mime"] = self.mime
+            out["image_inline"] = self.image_inline
         return out
 
 
@@ -91,6 +115,8 @@ class AttachmentDeliveryResult:
     items: tuple[DeliveredAttachment, ...]
     agent_message: str
     display_text: str
+    # Vision images forwarded with the send body ({mime, data_base64}).
+    images: tuple[dict[str, str], ...] = ()
 
     def ui_attachments(self) -> list[dict[str, Any]]:
         return [item.ui_dict() for item in self.items]
@@ -125,6 +151,20 @@ def compose_agent_message(*, user_text: str, items: list[DeliveredAttachment]) -
             header = f"Вложенные данные: {item.filename} ({item.note})"
             # Fenced code block with a neutral info string; the label is in the header line.
             sections.append(f"{header}\n```\n{item.text}\n```")
+        elif item.kind == "image":
+            if item.image_inline:
+                sections.append(
+                    f"Изображение: {item.filename} — приложено к сообщению "
+                    "(видно модели; копия в контейнере)"
+                    + (f" /workspace/{item.workspace_path}" if item.workspace_path else "")
+                )
+            elif item.workspace_path:
+                sections.append(
+                    f"Изображение: {item.filename} → /workspace/{item.workspace_path} "
+                    f"({item.note})"
+                )
+            else:
+                sections.append(f"Изображение: {item.filename} ({item.note})".strip())
         elif item.workspace_path:
             sections.append(
                 f"Вложение добавлено: {item.filename} → /workspace/{item.workspace_path}"
@@ -263,6 +303,8 @@ class AttachmentDeliveryService:
         employee: EmployeeRow | None,
     ) -> AttachmentDeliveryResult:
         items: list[DeliveredAttachment] = []
+        images: list[dict[str, str]] = []
+        inline_image_slots = CHAT_IMAGE_INLINE_MAX_COUNT
         for ref in storage_refs:
             row, raw = await self._load_raw(
                 project_id=project_id,
@@ -271,19 +313,36 @@ class AttachmentDeliveryService:
                 employee=employee,
             )
             filename = row.filename or Path(ref).name or "attachment.bin"
+            is_image = is_image_filename(filename)
+            inline_image = bool(
+                is_image
+                and inline_image_slots > 0
+                and len(raw) <= CHAT_IMAGE_INLINE_MAX_BYTES
+            )
             delivered = await self._prepare_one(
                 filename=filename,
                 storage_ref=row.storage_ref,
                 raw=raw,
                 workspace_key=workspace_key,
                 runtime_ref=runtime_ref,
+                inline_image=inline_image,
             )
             items.append(delivered)
+            if inline_image:
+                inline_image_slots -= 1
+                assert delivered.mime is not None
+                images.append(
+                    {
+                        "mime": delivered.mime,
+                        "data_base64": base64.b64encode(raw).decode("ascii"),
+                    }
+                )
 
         return AttachmentDeliveryResult(
             items=tuple(items),
             agent_message=compose_agent_message(user_text=user_text, items=items),
             display_text=compose_display_text(user_text=user_text, items=items),
+            images=tuple(images),
         )
 
     async def _prepare_one(
@@ -294,7 +353,20 @@ class AttachmentDeliveryService:
         raw: bytes,
         workspace_key: str,
         runtime_ref: str | None,
+        inline_image: bool = False,
     ) -> DeliveredAttachment:
+        # 0) Images → vision content blocks + workspace copy (never inlined
+        # as text: dumping base64 into the prompt is useless and huge).
+        if is_image_filename(filename):
+            return await self._prepare_image(
+                filename=filename,
+                storage_ref=storage_ref,
+                raw=raw,
+                workspace_key=workspace_key,
+                runtime_ref=runtime_ref,
+                inline_image=inline_image,
+            )
+
         # 1) Tabular (csv/tsv/xlsx/xml) → JSON records inline or as workspace file.
         if is_tabular_filename(filename):
             return await self._prepare_tabular(
@@ -323,6 +395,46 @@ class AttachmentDeliveryService:
             workspace_key=workspace_key,
             runtime_ref=runtime_ref,
             note="файл помещён в контейнер",
+        )
+
+    async def _prepare_image(
+        self,
+        *,
+        filename: str,
+        storage_ref: str,
+        raw: bytes,
+        workspace_key: str,
+        runtime_ref: str | None,
+        inline_image: bool,
+    ) -> DeliveredAttachment:
+        safe_name = Path(filename).name
+        rel = f"inbox/{safe_name}"
+        mime = row_content_type_guess(filename)
+        await self._put_inbox_bytes(
+            workspace_key=workspace_key,
+            filename=safe_name,
+            data=raw,
+            content_type=mime,
+        )
+        try:
+            await self._write_pod_file(runtime_ref=runtime_ref, relative_path=rel, data=raw)
+        except Exception:
+            logger.exception("pod write failed for %s", rel)
+        if inline_image:
+            note = "изображение передано модели; копия в контейнере"
+        else:
+            note = "превышен лимит инлайна, копия в контейнере"
+        return DeliveredAttachment(
+            filename=filename,
+            storage_ref=storage_ref,
+            kind="image",
+            workspace_path=rel,
+            row_count=None,
+            records=None,
+            text=None,
+            note=note,
+            mime=mime,
+            image_inline=inline_image,
         )
 
     async def _prepare_tabular(

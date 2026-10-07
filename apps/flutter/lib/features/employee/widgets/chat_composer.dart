@@ -5,12 +5,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'package:prodavan/core/api/prodavan_api.dart';
+import 'package:prodavan/core/chat/chat_clipboard.dart';
 import 'package:prodavan/core/preferences/app_value_preference.dart';
 import 'package:prodavan/core/theme/app_color_tokens.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_snack_bar.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
+
+export 'package:prodavan/core/chat/chat_clipboard.dart' show DroppedChatFile;
 
 /// Wide limits aligned with API agent constraints (not unbounded).
 const int kChatMaxMessageChars = 500000;
@@ -19,14 +22,6 @@ const int kChatMaxAttachmentBytesClient = 500 * 1024 * 1024; // platform ceiling
 const int kComposerDraftMinChars = 5;
 
 typedef ChatComposerSend = void Function(String text, List<String> attachmentRefs);
-
-/// A file captured by an OS drag & drop onto the chat area.
-class DroppedChatFile {
-  const DroppedChatFile({required this.name, required this.bytes});
-
-  final String name;
-  final Uint8List bytes;
-}
 
 class _PendingAttachment {
   const _PendingAttachment({required this.id, required this.filename});
@@ -59,6 +54,7 @@ class ChatComposer extends StatefulWidget {
     this.updating = false,
     this.onUpdate,
     this.onDismissUpdate,
+    this.clipboardReader,
   });
 
   final ChatComposerSend onSend;
@@ -89,6 +85,9 @@ class ChatComposer extends StatefulWidget {
   final VoidCallback? onWake;
   /// Workspace outdated — block input; tap updates, X dismisses the mark.
   final bool updateMode;
+  /// Clipboard source for paste-to-attach (Ctrl+V of files/images); defaults
+  /// to the pasteboard-backed reader. Injectable for tests.
+  final ChatClipboardReader? clipboardReader;
   final bool updating;
   final VoidCallback? onUpdate;
   final VoidCallback? onDismissUpdate;
@@ -294,11 +293,31 @@ class ChatComposerState extends State<ChatComposer> {
 
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    // Ctrl+V / Cmd+V: plain text keeps the native TextField paste (the
+    // event is NOT consumed); files/images from the clipboard attach via
+    // the async reader — the native paste is a no-op for binary clipboard.
+    final isPaste = event.logicalKey == LogicalKeyboardKey.keyV &&
+        (HardwareKeyboard.instance.isControlPressed ||
+            HardwareKeyboard.instance.isMetaPressed);
+    if (isPaste) {
+      unawaited(_handlePaste());
+      return KeyEventResult.ignored;
+    }
     if (event.logicalKey != LogicalKeyboardKey.enter) return KeyEventResult.ignored;
     if (HardwareKeyboard.instance.isShiftPressed) return KeyEventResult.ignored;
     if (!widget.enabled || widget.streaming) return KeyEventResult.handled;
     _submit();
     return KeyEventResult.handled;
+  }
+
+  Future<void> _handlePaste() async {
+    final projectId = widget.projectId;
+    final api = widget.api;
+    if (!widget.enabled || projectId == null || api == null || _uploading) return;
+    final reader = widget.clipboardReader ?? const PasteboardClipboardReader();
+    final files = await reader.readFilesOrImage();
+    if (files.isEmpty || !mounted) return;
+    await attachDroppedFiles(files);
   }
 
   Future<void> _pickFile() async {

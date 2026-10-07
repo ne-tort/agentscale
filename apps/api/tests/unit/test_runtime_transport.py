@@ -9,7 +9,6 @@ import pytest
 
 from prodavan.application.agent import runtime_transport as rt
 from prodavan.application.agent.runtime_transport import (
-    RuntimeEndpoint,
     resolve_runtime_endpoint,
     resolve_runtime_endpoint_for_ref,
 )

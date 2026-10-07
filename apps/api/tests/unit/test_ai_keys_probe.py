@@ -5,7 +5,6 @@ from __future__ import annotations
 import pytest
 
 from prodavan.domain.ai_keys import (
-    ApiKind,
     ProbeKind,
     ProbeResult,
     ProbeStatus,

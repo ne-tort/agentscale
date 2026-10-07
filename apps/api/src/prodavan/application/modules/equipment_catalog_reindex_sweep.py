@@ -10,7 +10,7 @@ catalog would show «В процессе» forever. The sweep re-enqueues rows w
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import select
@@ -64,7 +64,7 @@ def _stale_indexing(row: dict[str, Any], *, now: datetime) -> bool:
         # it gets re-enqueued exactly once and gains the heartbeat fields.
         return True
     if started.tzinfo is None:
-        started = started.replace(tzinfo=timezone.utc)
+        started = started.replace(tzinfo=UTC)
     age_min = (now - started).total_seconds() / 60.0
     return age_min >= STALE_INDEXING_MINUTES
 
@@ -81,13 +81,13 @@ def _due(row: dict[str, Any], *, now: datetime) -> bool:
     if last is None:
         return True
     if last.tzinfo is None:
-        last = last.replace(tzinfo=timezone.utc)
+        last = last.replace(tzinfo=UTC)
     age_h = (now - last).total_seconds() / 3600.0
     return age_h >= _interval_hours(row)
 
 
 async def sweep_due_equipment_catalogs(session: AsyncSession) -> dict[str, Any]:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     enqueued = 0
     scanned = 0
     result = await session.execute(

@@ -12,7 +12,7 @@ from prodavan.domain.projects import CHAT_INLINE_TABULAR_ROW_LIMIT
 
 
 def test_csv_to_json_records() -> None:
-    raw = "name;qty\nАккумулятор;2\nКабель;10\n".encode("utf-8")
+    raw = "name;qty\nАккумулятор;2\nКабель;10\n".encode()
     result = tabular_bytes_to_json(raw, filename="spec.csv")
     assert result.row_count == 2
     assert result.records[0]["name"] == "Аккумулятор"

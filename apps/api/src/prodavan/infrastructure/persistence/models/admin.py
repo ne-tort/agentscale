@@ -11,7 +11,6 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from prodavan.domain.admin import (
     DEFAULT_CABINET_QUOTA,
-    DEFAULT_TENANT_INFRA_QUOTA,
     CompanyAgentRuntimePolicy,
     CompanyCabinetQuota,
     CompanyTenantInfraQuota,

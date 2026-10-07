@@ -35,9 +35,10 @@ async def schedule_cabinet_rematerialize(
     if not await module_has_materialize_rules(session, module_id=module_id):
         return {"scheduled": 0, "skipped": True, "reason": "no_materialize_rules"}
 
+    from sqlalchemy import select
+
     from prodavan.application.modules.module_binding_service import ModuleBindingService
     from prodavan.infrastructure.persistence.models.projects import ProjectRow
-    from sqlalchemy import select
 
     bindings = ModuleBindingService(session)
     bound = set(await bindings.list_project_ids(module_id))
