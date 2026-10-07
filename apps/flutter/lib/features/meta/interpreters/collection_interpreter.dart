@@ -104,7 +104,7 @@ class CollectionViewInterpreter extends StatelessWidget {
         );
         final rawRows = _filteredRows(seeds, tableSlug, uiJson);
         var styled = _applyRowStyles(context, uiJson, rawRows);
-        styled = _withBudgetPriceWarnings(context, uiJson, styled);
+        styled = _withWarningCells(context, uiJson, styled);
         var rows = _withSelection(context, uiJson, styled);
         rows = _withEditableCells(context, uiJson, tableSlug, rows);
         rows = _withBenefitBadges(context, uiJson, l10n, rows);
@@ -640,35 +640,76 @@ class CollectionViewInterpreter extends StatelessWidget {
     return out;
   }
 
-  /// «Вход с НДС» без цены / под заказ: warning-текст вместо числа
-  /// (body: price_in=null и/или on_order=true; подписи строит
-  /// budgetPriceInLabel).
-  List<AppEntityRow> _withBudgetPriceWarnings(
+  /// Warning-ячейки трёх видов (конфиг колонок ui_json):
+  /// - `format: budget_price_in` — «Нет цены» / «Под заказ» /
+  ///   «{цена} (Под заказ)» вместо числа (budgetPriceInLabel);
+  /// - `format: offer_price` — «Нет цены» warning, когда цены нет
+  ///   (включая текстовые «Уточняйте»: price_num не парсится);
+  /// - `warning_when_match: [...]` — текст ячейки красится warning,
+  ///   когда body['match_kind'] в списке (аналоги/сомнения в бюджете).
+  List<AppEntityRow> _withWarningCells(
     BuildContext context,
     Map<String, dynamic> uiJson,
     List<AppEntityRow> rows,
   ) {
     final columns = uiJson['columns'];
     if (columns is! List) return rows;
-    final fields = <String>[];
+    final priceInFields = <String>[];
+    final offerPriceFields = <String>[];
+    final matchWarn = <String, Set<String>>{};
     for (final c in columns.whereType<Map>()) {
-      if (c['format']?.toString() != 'budget_price_in') continue;
       final field = c['field']?.toString() ?? '';
-      if (field.isNotEmpty) fields.add(field);
+      if (field.isEmpty) continue;
+      switch (c['format']?.toString()) {
+        case 'budget_price_in':
+          priceInFields.add(field);
+        case 'offer_price':
+          offerPriceFields.add(field);
+      }
+      final when = c['warning_when_match'];
+      if (when is List && when.isNotEmpty) {
+        matchWarn[field] = when.map((e) => e.toString()).toSet();
+      }
     }
-    if (fields.isEmpty) return rows;
+    if (priceInFields.isEmpty && offerPriceFields.isEmpty && matchWarn.isEmpty) {
+      return rows;
+    }
     final warning = context.appColors.warning;
     return rows.map((row) {
       final item = seeds.itemById(row.id);
       final body = item is Map && item['body'] is Map
           ? Map<String, dynamic>.from(item['body'] as Map)
           : const <String, dynamic>{};
-      final label = budgetPriceInLabel(body);
-      if (label == null) return row;
       final widgets = Map<String, Widget>.from(row.cellWidgets);
-      for (final field in fields) {
-        widgets[field] = Text(label, style: TextStyle(color: warning));
+      var changed = false;
+      if (priceInFields.isNotEmpty) {
+        final label = budgetPriceInLabel(body);
+        if (label != null) {
+          for (final field in priceInFields) {
+            widgets[field] = Text(label, style: TextStyle(color: warning));
+          }
+          changed = true;
+        }
       }
+      if (offerPriceFields.isNotEmpty && body[offerPriceFields.first] == null) {
+        // все offer_price-колонки строки делят одно состояние «нет цены»
+        for (final field in offerPriceFields) {
+          if (body[field] == null) {
+            widgets[field] = Text('Нет цены', style: TextStyle(color: warning));
+            changed = true;
+          }
+        }
+      }
+      if (matchWarn.isNotEmpty) {
+        final kind = body['match_kind']?.toString() ?? '';
+        for (final entry in matchWarn.entries) {
+          if (!entry.value.contains(kind)) continue;
+          final text = row.cells[entry.key] ?? '';
+          widgets[entry.key] = Text(text, style: TextStyle(color: warning));
+          changed = true;
+        }
+      }
+      if (!changed) return row;
       return AppEntityRow(
         id: row.id,
         title: row.title,

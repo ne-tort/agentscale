@@ -111,6 +111,12 @@ String formatModuleCell({
     // добавляет collection_interpreter (cellWidgets).
     return budgetPriceInLabel(body) ?? raw?.toString() ?? '';
   }
+  if (format == 'offer_price') {
+    // Цена оффера/лица группы: текстовые «цены» («Уточняйте») не парсятся
+    // в число на индексации → null → честная надпись + warning-окраска.
+    if (raw == null) return 'Нет цены';
+    return raw.toString();
+  }
 
   final enumMeta = col['enum'];
   if (enumMeta is Map && enumMeta['labels'] is Map) {
