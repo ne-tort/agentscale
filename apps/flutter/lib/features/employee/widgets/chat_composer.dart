@@ -4,8 +4,11 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
+
 import 'package:prodavan/core/api/prodavan_api.dart';
 import 'package:prodavan/core/chat/chat_clipboard.dart';
+import 'package:prodavan/core/chat/chat_web_paste.dart';
 import 'package:prodavan/core/preferences/app_value_preference.dart';
 import 'package:prodavan/core/theme/app_color_tokens.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
@@ -108,6 +111,7 @@ class ChatComposerState extends State<ChatComposer> {
   final List<_PendingAttachment> _attachments = [];
   bool _uploading = false;
   bool _draftHydrated = false;
+  final WebChatPasteListener _webPaste = WebChatPasteListener();
   bool _multiline = false;
   /// After Send, ignore the empty-text persist that would clear the server draft
   /// before the user message is written (sidebar GC race → 404).
@@ -121,6 +125,17 @@ class ChatComposerState extends State<ChatComposer> {
     _controller.addListener(_onTextChanged);
     widget.draftRestore?.addListener(_onDraftRestore);
     unawaited(_hydrateDraft());
+    // Web: files/images arrive through the DOM paste event (no clipboard
+    // permission prompts); the keydown reader below is IO-only.
+    if (kIsWeb) {
+      _webPaste.start((files) {
+        if (!mounted) return;
+        if (!_focusNode.hasFocus) return;
+        if (!widget.enabled || widget.streaming || _uploading) return;
+        if (widget.projectId == null || widget.api == null) return;
+        unawaited(attachDroppedFiles(files));
+      });
+    }
   }
 
   @override
@@ -139,6 +154,7 @@ class ChatComposerState extends State<ChatComposer> {
 
   @override
   void dispose() {
+    _webPaste.stop();
     _draftTimer?.cancel();
     _controller.removeListener(_onTextChanged);
     widget.draftRestore?.removeListener(_onDraftRestore);
@@ -293,15 +309,19 @@ class ChatComposerState extends State<ChatComposer> {
 
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
-    // Ctrl+V / Cmd+V: plain text keeps the native TextField paste (the
-    // event is NOT consumed); files/images from the clipboard attach via
-    // the async reader — the native paste is a no-op for binary clipboard.
-    final isPaste = event.logicalKey == LogicalKeyboardKey.keyV &&
-        (HardwareKeyboard.instance.isControlPressed ||
-            HardwareKeyboard.instance.isMetaPressed);
-    if (isPaste) {
-      unawaited(_handlePaste());
-      return KeyEventResult.ignored;
+    // Ctrl+V / Cmd+V (IO builds): plain text keeps the native TextField
+    // paste (the event is NOT consumed); files/images from the native
+    // clipboard attach via the async reader. On web the DOM paste listener
+    // owns file/image pastes — reading the clipboard here would trigger a
+    // browser permission prompt on every paste.
+    if (!kIsWeb) {
+      final isPaste = event.logicalKey == LogicalKeyboardKey.keyV &&
+          (HardwareKeyboard.instance.isControlPressed ||
+              HardwareKeyboard.instance.isMetaPressed);
+      if (isPaste) {
+        unawaited(_handlePaste());
+        return KeyEventResult.ignored;
+      }
     }
     if (event.logicalKey != LogicalKeyboardKey.enter) return KeyEventResult.ignored;
     if (HardwareKeyboard.instance.isShiftPressed) return KeyEventResult.ignored;
