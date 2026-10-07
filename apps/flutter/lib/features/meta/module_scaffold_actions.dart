@@ -35,7 +35,7 @@ List<Widget>? buildModuleScaffoldActions({
   // СТРАНИЦЫ (не в шапке таблицы).
   final uiJson = ui['ui_json'] is Map ? Map<String, dynamic>.from(ui['ui_json'] as Map) : const <String, dynamic>{};
   if (uiJson['server_paged'] == true && seeds is RuntimeDataAdapter) {
-    final adapter = seeds as RuntimeDataAdapter;
+    final RuntimeDataAdapter adapter = seeds;
     final tableSlug = view['table_slug']?.toString() ?? '';
     if (uiJson['stock_filter'] == true && tableSlug.isNotEmpty) {
       out.add(_StockFilterButton(adapter: adapter, tableSlug: tableSlug));
