@@ -134,6 +134,8 @@ def _canonical_mappings() -> dict[str, Any]:
         "cabinet_id": {"type": "keyword"},
         "in_stock": {"type": "boolean"},
         "price_num": {"type": "double"},
+        "rrc": {"type": "keyword"},
+        "rrc_num": {"type": "double"},
         "title": {"type": "text", "fields": {"raw": {"type": "keyword"}}},
         "part_number": {"type": "keyword", "fields": {"text": {"type": "text"}}},
         "brand": {"type": "keyword"},
@@ -193,6 +195,7 @@ def _doc_from_mapped(
     cabinet_id: str | None,
 ) -> dict[str, Any]:
     price_num = parse_price(mapped.get("price"))
+    rrc_num = parse_price(mapped.get("rrc"))
     lead = mapped.get("lead_time") or ""
     return {
         "catalog_id": catalog_id,
@@ -204,6 +207,8 @@ def _doc_from_mapped(
         "title": mapped.get("title") or "",
         "brand": mapped.get("brand") or "",
         "price": mapped.get("price") or "",
+        "rrc": mapped.get("rrc") or "",
+        "rrc_num": rrc_num,
         "supplier": mapped.get("supplier") or "",
         "lead_time": lead,
         "currency": detect_currency_value(mapped.get("currency")) or "RUB",
