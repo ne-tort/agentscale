@@ -163,8 +163,15 @@ class InMemorySearchIndexStore:
         from_: int,
         size: int,
         filter: dict[str, Any] | None = None,
+        sort: list[dict[str, Any]] | None = None,
+        search_after: list[Any] | None = None,
     ) -> SearchResult:
         _ = query
+        _ = sort
+        if search_after:
+            # In-memory store has no sort values: a cursor page is empty
+            # (cursor iteration terminates immediately).
+            return SearchResult(hits=[], total=0, took_ms=0)
         matched = [
             (doc_id, doc)
             for doc_id, doc in self._bucket(namespace, index).items()

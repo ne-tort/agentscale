@@ -1103,6 +1103,16 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "enabled": True,
                 "scope": {"projects": "all", "chats": "current"},
             },
+            # Мастер-прайс: виртуальная таблица — строки НЕ хранятся в БД,
+            # читаются из OpenSearch готовых каталогов по поставщикам с
+            # флагом master_price (пагинация/поиск на стороне сервера).
+            {
+                "slug": "master_price",
+                "label": {"ru": "Мастер прайс", "en": "Master price"},
+                "storage_kind": "opensearch_virtual",
+                "enabled": True,
+                "scope": {"projects": "all", "chats": "all"},
+            },
             # Промпты подбора техники (управляемые инструкции; мердж в workspace
             # через prompt_paths/fragments — совместим с mod_prompts).
             {
@@ -2097,6 +2107,14 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "required": False,
                 "default": "",
             },
+            {
+                "table_slug": "trusted_sellers",
+                "name": "master_price",
+                "label": {"ru": "Мастер прайс", "en": "Master price"},
+                "type": "bool",
+                "required": False,
+                "default": False,
+            },
             _project_ids_column("trusted_sellers"),
             {
                 "table_slug": "web_shops",
@@ -2113,11 +2131,17 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "required": True,
                 "default": "budget",
                 "enum": {
-                    "values": ["budget", "commercial_proposal", "specification"],
+                    "values": [
+                        "budget",
+                        "commercial_proposal",
+                        "specification",
+                        "master_price",
+                    ],
                     "labels": {
                         "budget": "Бюджетирование (xlsx)",
                         "commercial_proposal": "КП (PDF)",
                         "specification": "Спецификация (PDF)",
+                        "master_price": "Мастер-прайс (xlsx)",
                     },
                 },
             },
@@ -2430,6 +2454,62 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
             },
             _project_ids_column("equipment_prompts"),
             {
+                "table_slug": "master_price",
+                "name": "supplier",
+                "label": {"ru": "Поставщик", "en": "Supplier"},
+                "type": "text",
+                "required": False,
+            },
+            {
+                "table_slug": "master_price",
+                "name": "category",
+                "label": {"ru": "Вид оборудования", "en": "Category"},
+                "type": "text",
+                "required": False,
+            },
+            {
+                "table_slug": "master_price",
+                "name": "brand",
+                "label": {"ru": "Бренд", "en": "Brand"},
+                "type": "text",
+                "required": False,
+            },
+            {
+                "table_slug": "master_price",
+                "name": "part_number",
+                "label": {"ru": "PN", "en": "PN"},
+                "type": "text",
+                "required": False,
+            },
+            {
+                "table_slug": "master_price",
+                "name": "title",
+                "label": {"ru": "Наименование", "en": "Title"},
+                "type": "text",
+                "required": False,
+            },
+            {
+                "table_slug": "master_price",
+                "name": "in_stock",
+                "label": {"ru": "Наличие", "en": "Stock"},
+                "type": "bool",
+                "required": False,
+            },
+            {
+                "table_slug": "master_price",
+                "name": "price",
+                "label": {"ru": "Цена", "en": "Price"},
+                "type": "number",
+                "required": False,
+            },
+            {
+                "table_slug": "master_price",
+                "name": "currency",
+                "label": {"ru": "Валюта", "en": "Currency"},
+                "type": "text",
+                "required": False,
+            },
+            {
                 "table_slug": "mcp_tool_overrides",
                 "name": "tool",
                 "label": {"ru": "Инструмент", "en": "Tool"},
@@ -2692,6 +2772,15 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                                 "view": "budget_lines_list",
                             },
                             "scope": {"active_chat": "required"},
+                        },
+                        {
+                            # виртуальная таблица из OpenSearch: чат не нужен
+                            "title": "Мастер прайс",
+                            "icon": "inventory_2",
+                            "target": {
+                                "kind": "view",
+                                "view": "master_price_list",
+                            },
                         },
                     ],
                 },
@@ -4346,6 +4435,11 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "icon": "toggle_on",
                         },
                         {
+                            "column": "master_price",
+                            "widget": "switch",
+                            "icon": "inventory_2",
+                        },
+                        {
                             "column": "is_verified",
                             "widget": "switch",
                             "icon": "verified",
@@ -4525,6 +4619,83 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                         {"column": "enabled", "widget": "switch", "icon": "toggle_on"},
                         {"column": "files_json", "widget": "prompt_files_editor"},
                     ],
+                },
+            },
+            {
+                "slug": "master_price_list",
+                "table_slug": "master_price",
+                "kind": "collection",
+                "ui_json": {
+                    "version": 1,
+                    "kind": "collection",
+                    "scaffold": {
+                        "title": {"ru": "Мастер прайс", "en": "Master price"},
+                        "actions": [
+                            {
+                                "kind": "invoke_action",
+                                "action": "master_price_export",
+                                "icon": "download",
+                                "label": {
+                                    "ru": "Скачать мастер-прайс",
+                                    "en": "Download master price",
+                                },
+                            }
+                        ],
+                    },
+                    "server_paged": True,
+                    "search": {
+                        "fields": ["title", "part_number", "brand", "supplier"]
+                    },
+                    "title_field": "title",
+                    "subtitle_fields": ["supplier", "part_number"],
+                    "columns": [
+                        {
+                            "field": "supplier",
+                            "label": {"ru": "Поставщик", "en": "Supplier"},
+                            "max_lines": 2,
+                            "max_width": 150,
+                        },
+                        {
+                            "field": "brand",
+                            "label": {"ru": "Бренд", "en": "Brand"},
+                            "max_width": 110,
+                        },
+                        {
+                            "field": "part_number",
+                            "label": {"ru": "PN", "en": "PN"},
+                            "max_lines": 2,
+                            "max_width": 110,
+                        },
+                        {
+                            "field": "title",
+                            "label": {"ru": "Наименование", "en": "Title"},
+                            "max_lines": 2,
+                            "max_width": 320,
+                        },
+                        {
+                            "field": "in_stock",
+                            "label": {"ru": "Наличие", "en": "Stock"},
+                            "format": "bool_yes_no",
+                            "max_width": 90,
+                        },
+                        {
+                            "field": "price",
+                            "label": {"ru": "Цена", "en": "Price"},
+                            "format": "offer_price",
+                            "align": "end",
+                            "max_width": 110,
+                        },
+                        {
+                            "field": "currency",
+                            "label": {"ru": "Валюта", "en": "Currency"},
+                            "max_width": 80,
+                        },
+                    ],
+                    "empty": _empty(
+                        "Нет позиций мастер-прайса",
+                        "No master price rows",
+                        icon="inventory_2",
+                    ),
                 },
             },
             {
@@ -4792,6 +4963,21 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     },
                 },
                 "ui": {"placement": ["row_action"]},
+            },
+            {
+                "id": "master_price_export",
+                "label": {
+                    "ru": "Скачать мастер-прайс",
+                    "en": "Download master price",
+                },
+                "kind": "equipment.master_price",
+                "enabled": True,
+                "params": {
+                    "sellers_table": "trusted_sellers",
+                    "templates_type": "master_price",
+                },
+                "trigger": {"on": []},
+                "ui": {"placement": ["scaffold"], "icon": "download"},
             },
             {
                 "id": "budget_sync_lines",
@@ -5185,6 +5371,19 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "active": True,
                 },
             },
+                {
+                    "table_slug": "templates",
+                    "row_id": "tpl_master_price_builtin",
+                    "body": {
+                        "template_type": "master_price",
+                        "title": "Мастер-прайс (встроенный)",
+                        "file": {
+                            "storage_key": "builtin/master-price-template.xlsx",
+                            "filename": "master-price.xlsx",
+                        },
+                        "active": True,
+                    },
+                },
                 *_equipment_type_seed_rows(),
                 *_equipment_prompt_seed_rows(),
                 {

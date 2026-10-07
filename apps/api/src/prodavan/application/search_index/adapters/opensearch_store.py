@@ -246,6 +246,8 @@ class OpenSearchStore:
         from_: int,
         size: int,
         filter: dict[str, Any] | None = None,
+        sort: list[dict[str, Any]] | None = None,
+        search_after: list[Any] | None = None,
     ) -> SearchResult:
         name = physical_index(namespace, index)
         must: list[dict[str, Any]] = []
@@ -266,6 +268,13 @@ class OpenSearchStore:
                 }
             },
         }
+        # Cursor paging for deep exports (from/size is capped by
+        # max_result_window): stable sort + search_after from the last hit.
+        if sort:
+            body["sort"] = sort
+            body["track_total_hits"] = True
+        if search_after:
+            body["search_after"] = search_after
         resp = await self._client.post(f"/{name}/_search", json=body)
         resp.raise_for_status()
         data = resp.json()
@@ -280,6 +289,7 @@ class OpenSearchStore:
                 doc_id=str(h.get("_id") or ""),
                 score=h.get("_score"),
                 source=dict(h.get("_source") or {}),
+                sort=h.get("sort") if isinstance(h.get("sort"), list) else None,
             )
             for h in hits_raw
         ]
