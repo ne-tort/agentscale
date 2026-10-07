@@ -31,6 +31,25 @@ List<Widget>? buildModuleScaffoldActions({
   final l10n = AppLocalizations.of(context);
   final locale = Localizations.localeOf(context);
   final out = <Widget>[];
+  // Server-paged виртуальные таблицы: обновление и фильтр наличия — в шапке
+  // СТРАНИЦЫ (не в шапке таблицы).
+  final uiJson = ui['ui_json'] is Map ? Map<String, dynamic>.from(ui['ui_json'] as Map) : const <String, dynamic>{};
+  if (uiJson['server_paged'] == true && seeds is RuntimeDataAdapter) {
+    final RuntimeDataAdapter adapter = seeds;
+    final tableSlug = view['table_slug']?.toString() ?? '';
+    if (uiJson['stock_filter'] == true && tableSlug.isNotEmpty) {
+      out.add(_StockFilterButton(adapter: adapter, tableSlug: tableSlug));
+    }
+    if (tableSlug.isNotEmpty) {
+      out.add(
+        _ScaffoldActionButton(
+          icon: Icons.refresh,
+          tooltip: 'Обновить данные',
+          onInvoke: () => adapter.reloadServerPage(tableSlug),
+        ),
+      );
+    }
+  }
   for (final a in actions.whereType<Map>()) {
     if (a['kind']?.toString() != 'invoke_action') continue;
     final actionId = a['action']?.toString() ?? '';
@@ -54,6 +73,30 @@ List<Widget>? buildModuleScaffoldActions({
     );
   }
   return out.isEmpty ? null : out;
+}
+
+/// Тумблер «только в наличии» в шапке страницы (server-paged вьюхи):
+/// слушает адаптер, чтобы подсветка была актуальной после переключения.
+class _StockFilterButton extends StatelessWidget {
+  const _StockFilterButton({required this.adapter, required this.tableSlug});
+
+  final RuntimeDataAdapter adapter;
+  final String tableSlug;
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: adapter,
+      builder: (context, _) {
+        final on = adapter.serverStockOnly(tableSlug);
+        return AppIconButton(
+          icon: on ? Icons.inventory : Icons.inventory_2_outlined,
+          tooltip: on ? 'Показать всё (включая под заказ)' : 'Только в наличии',
+          onPressed: () => adapter.setServerStockOnly(tableSlug, !on),
+        );
+      },
+    );
+  }
 }
 
 /// Одна кнопка-экшен AppBar: во время выполнения блокируется и показывает
