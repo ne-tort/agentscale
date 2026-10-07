@@ -56,6 +56,7 @@ def test_build_query_filters_suppliers_and_search() -> None:
     q = build_master_price_query(["Феррет"], "813661-B21")
     should = q["bool"]["filter"][1]["bool"]["should"]
     assert {"term": {"part_number": "813661-B21"}} in should
+    assert {"wildcard": {"supplier": {"value": "*813661-B21*"}}} in should
     assert q["bool"]["filter"][1]["bool"]["minimum_should_match"] == 1
 
 
