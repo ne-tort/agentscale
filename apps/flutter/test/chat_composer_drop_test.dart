@@ -6,6 +6,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:prodavan/core/api/prodavan_api.dart';
+import 'package:prodavan/core/chat/chat_clipboard.dart';
 import 'package:prodavan/features/employee/widgets/chat_composer.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
@@ -109,5 +110,77 @@ void main() {
     ]);
     await tester.pumpAndSettle();
     expect(api.uploads, isEmpty);
+  });
+
+  _pasteGroup();
+}
+
+class _FakeClipboardReader implements ChatClipboardReader {
+  _FakeClipboardReader(this.files);
+
+  final List<DroppedChatFile> files;
+
+  @override
+  Future<List<DroppedChatFile>> readFilesOrImage() async => files;
+}
+
+void _pasteGroup() {
+  group('paste-to-attach', () {
+    testWidgets('Ctrl+V attaches clipboard files through the shared pipeline', (tester) async {
+      final api = _Api();
+      final reader = _FakeClipboardReader([
+        DroppedChatFile(name: 'pasted-image-123.png', bytes: Uint8List.fromList([1, 2, 3])),
+      ]);
+      final sent = <List<String>>[];
+      await tester.pumpWidget(
+        _themed(
+          ChatComposer(
+            projectId: 'proj_1',
+            api: api,
+            clipboardReader: reader,
+            onSend: (text, refs) => sent.add(refs),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.enterText(find.byType(TextField), '');
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.control);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.control);
+      await tester.pumpAndSettle();
+
+      expect(api.uploads.length, 1);
+      expect(api.uploads.single['filename'], 'pasted-image-123.png');
+      expect(find.text('pasted-image-123.png'), findsOneWidget);
+
+      await tester.enterText(find.byType(TextField), 'что на скриншоте?');
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pump();
+      expect(sent.last, ['att_1']);
+    });
+
+    testWidgets('Ctrl+V with empty clipboard is a no-op', (tester) async {
+      final api = _Api();
+      final reader = _FakeClipboardReader(const []);
+      await tester.pumpWidget(
+        _themed(
+          ChatComposer(
+            projectId: 'proj_1',
+            api: api,
+            clipboardReader: reader,
+            onSend: (_, __) {},
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.control);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.control);
+      await tester.pumpAndSettle();
+
+      expect(api.uploads, isEmpty);
+    });
   });
 }

@@ -155,6 +155,40 @@ def _touch_session_activity(row: AgentSessionRow, *, text: str | None = None) ->
         row.title = _default_chat_title(text)
 
 
+_VISION_ERROR_MARKERS = ("image", "vision", "multimodal", "modalit", "content part")
+
+
+def _rewrite_vision_error_event(event: AgentEvent) -> AgentEvent:
+    """Provider rejected image content blocks (non-vision model) → friendly note.
+
+    The original provider text is kept truncated: the file copy lives in the
+    workspace, so the user can re-send without images or switch to a
+    vision-capable model.
+    """
+    data = event.data if isinstance(event.data, dict) else {}
+    message = str(data.get("message") or data.get("detail") or "")
+    lowered = message.lower()
+    if not any(marker in lowered for marker in _VISION_ERROR_MARKERS):
+        return event
+    detail = message.strip()
+    if len(detail) > 240:
+        detail = f"{detail[:240]}…"
+    hint = (
+        "Модель не поддерживает изображения. "
+        "Картинки сохранены в контейнере проекта (inbox); "
+        "отправьте сообщение без картинок или выберите vision-модель."
+    )
+    new_data = dict(data)
+    # Our own classification (never a reconnect-retryable code); the
+    # original provider code is preserved for diagnostics.
+    if data.get("code"):
+        new_data["provider_code"] = str(data["code"])
+    new_data["code"] = "MODEL_NOT_VISION"
+    new_data["message"] = f"{hint} Причина: {detail}" if detail else hint
+    new_data["images_not_supported"] = True
+    return AgentEvent.now(AgentEventType.ERROR, new_data)
+
+
 def _event_public(row: AgentEventRow) -> dict:
     return {
         "seq": row.seq,
@@ -379,8 +413,15 @@ class AgentSessionService:
     async def _project_hydrate_generation(self, project_id: str) -> int | None:
         from prodavan.infrastructure.persistence.models.projects import ProjectPodRow
 
+        # Projects legitimately carry several pod rows (terminated/failed
+        # history + the live one, e.g. after a failed launch relaunch).
+        # The generation the bridge compares against belongs to the LATEST
+        # pod — a bare scalar_one_or_none() 500s on any history.
         q = await self._session.execute(
-            select(ProjectPodRow.hydrate_generation).where(ProjectPodRow.project_id == project_id)
+            select(ProjectPodRow.hydrate_generation)
+            .where(ProjectPodRow.project_id == project_id)
+            .order_by(ProjectPodRow.created_at.desc(), ProjectPodRow.id.desc())
+            .limit(1)
         )
         value = None
         if hasattr(q, "scalar_one_or_none"):
@@ -781,6 +822,7 @@ class AgentSessionService:
         refs = tuple(normalized_refs)
 
         delivery = None
+        bridge_images: list[dict] = []
         if refs:
             delivery = await AttachmentDeliveryService(self._session).deliver_for_send(
                 project_id=project_id,
@@ -793,6 +835,10 @@ class AgentSessionService:
             )
             agent_text = delivery.agent_message
             display_text = delivery.display_text
+            # Vision images ride with the send body (bridge schema caps
+            # them); non-vision providers reject the request — the error
+            # mapping below turns that into a friendly chat message.
+            bridge_images = [dict(img) for img in delivery.images]
         else:
             agent_text = user_text
             display_text = user_text
@@ -893,6 +939,7 @@ class AgentSessionService:
                 project_id=project_id,
                 session_id=session_id,
                 message=bridge_message,
+                images=bridge_images or None,
                 model=send_model,
                 endpoint=runtime_endpoint,
                 retry=policy_to_send_fields(project.chat_error_policy),
@@ -906,6 +953,8 @@ class AgentSessionService:
                 ),
             ):
                 used_bridge = True
+                if event.type == AgentEventType.ERROR and bridge_images:
+                    event = _rewrite_vision_error_event(event)
                 appended = self._append_stream_event(
                     event=event,
                     session_id=session_id,

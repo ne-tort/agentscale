@@ -669,6 +669,7 @@ class UserMessageBlock extends StatefulWidget {
     this.attachmentRefs = const [],
     this.attachments = const [],
     this.timestamp,
+    this.imageLoader,
   });
 
   final String text;
@@ -677,6 +678,10 @@ class UserMessageBlock extends StatefulWidget {
 
   /// Send time — muted `HH:MM` label right-aligned under the bubble.
   final DateTime? timestamp;
+
+  /// Fetches image attachment bytes by attachment id — used to preview
+  /// `kind: image` attachments inside the bubble. Null → text-only chips.
+  final Future<Uint8List?> Function(String attachmentId)? imageLoader;
 
   @override
   State<UserMessageBlock> createState() => _UserMessageBlockState();
@@ -730,6 +735,16 @@ class _UserMessageBlockState extends State<UserMessageBlock> {
                     Builder(builder: (context) {
                       final att = attachments[i];
                       final kind = att['kind'] as String? ?? '';
+                      if (kind == 'image') {
+                        final ref = i < refs.length ? refs[i] : null;
+                        if (ref != null && ref.isNotEmpty && widget.imageLoader != null) {
+                          return _ImageAttachmentThumb(
+                            loader: widget.imageLoader!,
+                            attachmentId: ref,
+                            name: att['filename'] as String? ?? 'image',
+                          );
+                        }
+                      }
                       final inlineJson =
                           kind == 'inline_json' ? att['inline_json'] : null;
                       // Tabular attachments carry a GFM markdown table —
@@ -1449,6 +1464,78 @@ class _GroupedActivityBlockState extends State<GroupedActivityBlock> {
             ),
           ),
       ],
+    );
+  }
+}
+
+
+/// Compact preview of an image attachment inside a user bubble: bounded
+/// thumbnail fetched once by attachment id, falling back to a muted line
+/// when the bytes fail to load (deleted attachment / network error).
+class _ImageAttachmentThumb extends StatefulWidget {
+  const _ImageAttachmentThumb({
+    required this.loader,
+    required this.attachmentId,
+    required this.name,
+  });
+
+  final Future<Uint8List?> Function(String attachmentId) loader;
+  final String attachmentId;
+  final String name;
+
+  @override
+  State<_ImageAttachmentThumb> createState() => _ImageAttachmentThumbState();
+}
+
+class _ImageAttachmentThumbState extends State<_ImageAttachmentThumb> {
+  Future<Uint8List?>? _future;
+
+  @override
+  void initState() {
+    super.initState();
+    _future = widget.loader(widget.attachmentId);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(top: AppSpacing.xs),
+      child: FutureBuilder<Uint8List?>(
+        future: _future,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState != ConnectionState.done) {
+            return const SizedBox(
+              width: 160,
+              height: 90,
+              child: Center(
+                child: SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              ),
+            );
+          }
+          final bytes = snapshot.data;
+          if (snapshot.hasError || bytes == null || bytes.isEmpty) {
+            return ChatMutedLine(label: l10n.chatAttachmentLabel(widget.name));
+          }
+          return ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 220, maxWidth: 320),
+              child: Image.memory(
+                bytes,
+                fit: BoxFit.contain,
+                gaplessPlayback: true,
+                errorBuilder: (_, __, ___) =>
+                    ChatMutedLine(label: l10n.chatAttachmentLabel(widget.name)),
+              ),
+            ),
+          );
+        },
+      ),
     );
   }
 }

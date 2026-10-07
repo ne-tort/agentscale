@@ -71,6 +71,10 @@ class ChatBlockRenderer extends StatelessWidget {
           attachmentRefs: refs is List ? refs.cast<String>() : const [],
           attachments: attachments,
           timestamp: _parseTimestamp(block.raw['created_at']),
+          imageLoader: api != null && projectId != null
+              ? (attachmentId) =>
+                  api!.downloadProjectAttachmentBytes(projectId: projectId!, attachmentId: attachmentId)
+              : null,
         );
       case 'assistant_markdown':
         final usage = block.raw['usage'];
