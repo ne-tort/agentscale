@@ -509,14 +509,18 @@ class ModuleActionExecutor:
             match_kind = "doubt"
 
         # переиспользуем группу той же позиции заказчика с тем же ключом
+        from prodavan.application.modules.equipment_offers_service import (
+            alias_tokens,
+        )
+
         groups = await _rows("found_groups")
         group = None
         for g in groups:
             body = g.get("body") or {}
             if str(body.get("line_id") or "") != line_id:
                 continue
-            hashes = body.get("aliases_hash")
-            hash_list = hashes if isinstance(hashes, list) else [hashes]
+            # aliases_hash — текстовая колонка: токены через запятую/пробел
+            hash_list = alias_tokens(body.get("aliases_hash"))
             same_hash = any(str(h or "") == src_hash for h in hash_list if h)
             same_pn = (
                 doc_pn
@@ -534,7 +538,7 @@ class ModuleActionExecutor:
                 body={
                     "line_id": line_id,
                     "part_number": doc_pn,
-                    "aliases_hash": [src_hash],
+                    "aliases_hash": src_hash,
                     "match_kind": match_kind,
                     "note": "сопоставлено вручную из поиска товаров",
                 },
