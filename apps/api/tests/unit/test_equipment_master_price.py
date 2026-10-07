@@ -25,6 +25,22 @@ def _seller(name: str, *, master: bool = True, enabled: bool = True) -> dict:
     }
 
 
+def test_master_price_template_registered() -> None:
+    """Шаблон master_price зарегистрирован и читается из templates/."""
+    from prodavan.application.modules.equipment_budget import (
+        TEMPLATE_TYPES,
+        load_default_template,
+    )
+
+    assert TEMPLATE_TYPES["master_price"] == "master-price-template.xlsx"
+    data = load_default_template("master_price")
+    wb = openpyxl.load_workbook(io.BytesIO(data))
+    assert "Прайс" in wb.sheetnames
+    ws = wb["Прайс"]
+    assert ws["A1"].value == "Поставщик"
+    assert ws["K1"].value == "РРЦ"
+
+
 def test_master_price_sellers_selection() -> None:
     sellers = [
         _seller("Феррет"),
