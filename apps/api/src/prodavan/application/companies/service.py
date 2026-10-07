@@ -232,7 +232,7 @@ class CompaniesCommandService:
 
     async def purge(self, company_id: str, *, principal: Principal) -> dict:
         """Hard-purge company after soft-delete: require children already soft/purged, then wipe."""
-        from sqlalchemy import func, select
+        from sqlalchemy import select
 
         from prodavan.application.cabinets.instance_service import CabinetInstanceService
         from prodavan.application.project_service import ProjectCommand, ProjectQuery

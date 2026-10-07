@@ -470,7 +470,7 @@ async def test_wait_for_running_stub_still_promotes_instantly(monkeypatch) -> No
         return_value={"observed_state": ObservedState.PROVISIONING.value}
     )
 
-    out = await svc.wait_for_running(project_id="proj_test")
+    await svc.wait_for_running(project_id="proj_test")
 
     assert svc.observe.await_count == 1
     assert pod.status == PodStatus.RUNNING

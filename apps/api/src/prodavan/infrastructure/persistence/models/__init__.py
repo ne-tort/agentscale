@@ -12,7 +12,6 @@ from prodavan.infrastructure.persistence.models.agent import (
     EmployeeChatPinRow,
     EmployeeProjectSelectionRow,
 )
-from prodavan.infrastructure.persistence.models.composer_draft import EmployeeComposerDraftRow
 from prodavan.infrastructure.persistence.models.ai_keys import (
     AiKeyAuditEventRow,
     AiKeyCheckResultRow,
@@ -32,6 +31,7 @@ from prodavan.infrastructure.persistence.models.cabinets import (
     CabinetInstanceRow,
 )
 from prodavan.infrastructure.persistence.models.catalog import ReferenceCatalogEntryRow
+from prodavan.infrastructure.persistence.models.composer_draft import EmployeeComposerDraftRow
 from prodavan.infrastructure.persistence.models.content import (
     ContentAclEntryRow,
     ContentAliasBindingRow,

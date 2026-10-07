@@ -376,9 +376,10 @@ async def get_employee_metrics(
     employee: Annotated[EmployeeRow | None, Depends(get_current_employee)],
 ) -> dict:
     await EntitlementService(session).require_company_actor(principal, company_id, employee=employee)
+    from sqlalchemy import select
+
     from prodavan.application.metrics.query import MetricsQuery
     from prodavan.infrastructure.persistence.models.identity import MembershipRow
-    from sqlalchemy import select
 
     mem = await session.execute(
         select(MembershipRow.id).where(

@@ -8,8 +8,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from prodavan.application.projects import signed_ingress as mod
 from prodavan.application.project_service import ProjectAccessPolicy
+from prodavan.application.projects import signed_ingress as mod
 from prodavan.domain.errors import AppError
 from prodavan.domain.projects import ProjectStatus, webhook_signature
 

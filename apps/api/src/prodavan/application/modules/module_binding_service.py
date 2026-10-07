@@ -348,8 +348,8 @@ class ModuleBindingService:
         bind_kind: str = "local",
         child_may_edit: bool | None = None,
     ) -> dict:
-        from prodavan.domain.modules import ModuleBindKind, default_child_may_edit
         from prodavan.application.modules.module_instance_service import ModuleInstanceService
+        from prodavan.domain.modules import ModuleBindKind, default_child_may_edit
 
         if bind_kind not in (ModuleBindKind.LOCAL, ModuleBindKind.GLOBAL):
             raise AppError(
