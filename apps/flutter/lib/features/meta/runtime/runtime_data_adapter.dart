@@ -55,6 +55,11 @@ class RuntimeDataAdapter extends ChangeNotifier {
   Future<void> reloadServerPage(String tableSlug) =>
       _inner.reloadServerPage(tableSlug);
 
+  bool serverStockOnly(String tableSlug) => _inner.serverStockOnly(tableSlug);
+
+  Future<void> setServerStockOnly(String tableSlug, bool enabled) =>
+      _inner.setServerStockOnly(tableSlug, enabled);
+
   Future<void> deleteRow(String rowId) => _inner.deleteRow(rowId);
 
   void refresh() => _inner.refresh();

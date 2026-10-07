@@ -200,6 +200,7 @@ class ProdavanApi {
     int page = 1,
     int pageSize = 50,
     String search = '',
+    bool inStockOnly = false,
   }) async {
     final prev = this.cabinetId;
     this.cabinetId = cabinetId;
@@ -211,6 +212,7 @@ class ProdavanApi {
             'page': '$page',
             'page_size': '$pageSize',
             if (search.isNotEmpty) 'search': search,
+            if (inStockOnly) 'in_stock_only': 'true',
           },
         ),
         extraHeaders: {
@@ -235,6 +237,7 @@ class ProdavanApi {
     int page = 1,
     int pageSize = 50,
     String search = '',
+    bool inStockOnly = false,
   }) async {
     final res = await AuthHttp.get(
       _uri(
@@ -243,6 +246,7 @@ class ProdavanApi {
           'page': '$page',
           'page_size': '$pageSize',
           if (search.isNotEmpty) 'search': search,
+          if (inStockOnly) 'in_stock_only': 'true',
         },
       ),
       extraHeaders: {
@@ -465,6 +469,7 @@ class ProdavanApi {
     String? rowId,
     String? projectId,
     String? sessionId,
+    Map<String, dynamic>? params,
   }) async {
     final prev = this.cabinetId;
     this.cabinetId = cabinetId;
@@ -478,6 +483,7 @@ class ProdavanApi {
         },
         body: jsonEncode({
           if (rowId != null) 'row_id': rowId,
+          if (params != null && params.isNotEmpty) 'params': params,
           if (projectId != null && projectId.isNotEmpty) 'project_id': projectId,
         }),
       );
