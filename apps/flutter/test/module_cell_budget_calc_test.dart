@@ -76,4 +76,17 @@ void main() {
       expect(cell({'price_in': 1000, 'markup': 0.1}, priceOutCol), '1100.00');
     });
   });
+
+  group('budgetPriceInLabel', () {
+    test('no price / no price + on order / priced on order', () {
+      expect(budgetPriceInLabel({'price_in': null, 'on_order': false}), 'Нет цены');
+      expect(budgetPriceInLabel({'on_order': true}), 'Под заказ');
+      expect(
+        budgetPriceInLabel({'price_in': 34696.91, 'on_order': true}),
+        '34696.91 (Под заказ)',
+      );
+      expect(budgetPriceInLabel({'price_in': 100.0, 'on_order': false}), isNull);
+      expect(budgetPriceInLabel({'price_in': 100.0}), isNull);
+    });
+  });
 }

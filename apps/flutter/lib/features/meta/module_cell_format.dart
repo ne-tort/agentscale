@@ -106,6 +106,11 @@ String formatModuleCell({
     // Equipment budgeting: computed cell, value lives in col['variant'].
     return formatBudgetCalcCell(body: body, col: col);
   }
+  if (format == 'budget_price_in') {
+    // «Вход с НДС»: честные надписи вместо нуля/пустоты; warning-окраску
+    // добавляет collection_interpreter (cellWidgets).
+    return budgetPriceInLabel(body) ?? raw?.toString() ?? '';
+  }
 
   final enumMeta = col['enum'];
   if (enumMeta is Map && enumMeta['labels'] is Map) {
@@ -173,6 +178,19 @@ String formatBudgetCalcCell({
       value = priceOut;
   }
   return value.toStringAsFixed(2);
+}
+
+/// «Вход с НДС» (budget_lines): подпись вместо числа, когда цены нет или
+/// оффер под заказ. null — обычная числовая ячейка.
+/// - цены нет → «Нет цены»;
+/// - цены нет и под заказ → «Под заказ»;
+/// - цена есть и под заказ → «{цена} (Под заказ)».
+String? budgetPriceInLabel(Map<String, dynamic> body) {
+  final priceIn = _asDouble(body['price_in']);
+  final onOrder = body['on_order'] == true;
+  if (priceIn == null) return onOrder ? 'Под заказ' : 'Нет цены';
+  if (onOrder) return '${priceIn.toStringAsFixed(2)} (Под заказ)';
+  return null;
 }
 
 int? _asInt(dynamic raw) {
