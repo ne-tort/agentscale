@@ -290,26 +290,33 @@ class CollectionViewInterpreter extends StatelessWidget {
     final from = total == 0 ? 0 : (page - 1) * pageSize + 1;
     final to = math.min(page * pageSize, total);
     final lastPage = total == 0 ? 1 : ((total + pageSize - 1) ~/ pageSize);
-    return Padding(
+    final currentSearch = adapter.serverSearch(tableSlug);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // Inline-поле как у добавления итемов на других страницах, но поиск.
+        AppInlineAddField(
+          title: 'Поиск',
+          hintText: 'Найти товар...',
+          showBottomDivider: false,
+          validator: (raw) => raw.trim().isNotEmpty,
+          onSave: (raw) => adapter.setServerSearch(tableSlug, raw.trim()),
+        ),
+        if (currentSearch.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(bottom: AppSpacing.xs),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: InputChip(
+                label: Text(currentSearch, overflow: TextOverflow.ellipsis),
+                onDeleted: () => unawaited(adapter.setServerSearch(tableSlug, '')),
+              ),
+            ),
+          ),
+        Padding(
       padding: const EdgeInsets.fromLTRB(0, 0, 0, AppSpacing.xs),
       child: Row(
         children: [
-          SizedBox(
-            width: 260,
-            height: 36,
-            child: TextField(
-              decoration: InputDecoration(
-                isDense: true,
-                prefixIcon: const Icon(Icons.search, size: 18),
-                hintText: 'Поиск: название, P/N, бренд, поставщик',
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-              ),
-              onSubmitted: (value) =>
-                  unawaited(adapter.setServerSearch(tableSlug, value.trim())),
-            ),
-          ),
           const Spacer(),
           Text(
             '$from–$to из $total',
@@ -341,6 +348,8 @@ class CollectionViewInterpreter extends StatelessWidget {
           ),
         ],
       ),
+        ),
+      ],
     );
   }
 

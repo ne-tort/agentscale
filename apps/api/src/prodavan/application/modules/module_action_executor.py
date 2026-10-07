@@ -430,23 +430,13 @@ class ModuleActionExecutor:
         from prodavan.application.modules.equipment_budget import load_default_template
         from prodavan.application.modules.equipment_master_price import (
             MasterPriceService,
-            render_master_price_workbook,
+            build_master_price_workbook,
         )
 
         template_type = str(params.get("templates_type") or "master_price")
         service = MasterPriceService(
             self._session, principal=principal, employee=employee
         )
-        rows: list[dict[str, Any]] = []
-        async for row in service.iter_rows(cabinet_id=cabinet_id):
-            rows.append(row)
-        if not rows:
-            raise AppError(
-                code="VALIDATION_ERROR",
-                title="Validation Error",
-                status=422,
-                detail="no master price rows (check supplier master_price flags)",
-            )
         template = await self._resolve_export_template(
             cabinet_id=cabinet_id,
             template_type=template_type,
@@ -454,7 +444,39 @@ class ModuleActionExecutor:
             employee=employee,
             fallback=load_default_template(template_type),
         )
-        data = render_master_price_workbook(template, rows)
+        # Потоковая сборка: строки пишутся по мере чтения из OS — экспорт
+        # сотен тысяч позиций не держит их в памяти (лимит пода 1Gi).
+        import time as _time
+
+        started = _time.monotonic()
+        try:
+            data, rows_count = await build_master_price_workbook(
+                template, service.iter_rows(cabinet_id=cabinet_id)
+            )
+        except AppError:
+            raise
+        except Exception as exc:  # noqa: BLE001 — клиенту нужен понятный текст
+            logger.exception("master price export failed cabinet=%s", cabinet_id)
+            raise AppError(
+                code="MASTER_PRICE_EXPORT_FAILED",
+                title="Export failed",
+                status=502,
+                detail=f"мастер-прайс не собран: {type(exc).__name__}: {exc}",
+            ) from exc
+        logger.info(
+            "master price export: cabinet=%s rows=%s bytes=%s sec=%.1f",
+            cabinet_id,
+            rows_count,
+            len(data),
+            _time.monotonic() - started,
+        )
+        if rows_count == 0:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="no master price rows (check supplier master_price flags)",
+            )
         company_id = await self._resolve_documents_company_id(
             cabinet_id=cabinet_id, project_id=project_id
         )
@@ -475,7 +497,7 @@ class ModuleActionExecutor:
             principal=principal,
             employee=employee,
         )
-        return {"kind": "equipment.master_price", "file_ref": ref, "rows": len(rows)}
+        return {"kind": "equipment.master_price", "file_ref": ref, "rows": rows_count}
 
     async def _procurement_apply(
         self,

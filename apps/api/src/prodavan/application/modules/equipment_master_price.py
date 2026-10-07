@@ -362,6 +362,74 @@ class MasterPriceService:
                     break
 
 
+async def build_master_price_workbook(
+    template_bytes: bytes,
+    rows: AsyncIterator[dict[str, Any]],
+) -> tuple[bytes, int]:
+    """Потоковая сборка xlsx: строки пишутся в write_only-книгу по мере
+    чтения из OpenSearch.
+
+    Лимит памяти api-пода — 1Gi: держать 500k+ строк в списке (как раньше)
+    нельзя — OOM → HTTP 500. Заголовок/ширины/имя листа берём из шаблона
+    (встроенного или загруженного пользователем).
+    """
+    import openpyxl
+    from openpyxl import Workbook
+    from openpyxl.cell import WriteOnlyCell
+    from openpyxl.styles import Alignment, Font
+
+    tpl = openpyxl.load_workbook(io.BytesIO(template_bytes), read_only=True)
+    try:
+        sheet_name = (
+            MASTER_PRICE_SHEET
+            if MASTER_PRICE_SHEET in tpl.sheetnames
+            else (tpl.sheetnames[0] if tpl.sheetnames else MASTER_PRICE_SHEET)
+        )
+        src = tpl[sheet_name]
+        header_row = next(src.iter_rows(min_row=1, max_row=1), ())
+        header = [cell.value for cell in header_row]
+    finally:
+        tpl.close()
+    # Ширины колонок: read_only их не отдаёт; шаблоны — лёгкие (шапка без
+    # данных), но от патологически больших загрузок страхуемся размером.
+    widths: dict[str, float] = {}
+    if len(template_bytes) <= 1_000_000:
+        try:
+            tpl2 = openpyxl.load_workbook(io.BytesIO(template_bytes))
+            try:
+                src2 = tpl2[sheet_name] if sheet_name in tpl2.sheetnames else tpl2.active
+                widths = {
+                    key: dim.width
+                    for key, dim in src2.column_dimensions.items()
+                    if getattr(dim, "width", None)
+                }
+            finally:
+                tpl2.close()
+        except Exception:  # noqa: BLE001 — ширины не критичны
+            widths = {}
+
+    wb = Workbook(write_only=True)
+    ws = wb.create_sheet(title=sheet_name)
+    ws.freeze_panes = "A2"
+    for col, width in widths.items():
+        ws.column_dimensions[col].width = width
+    header_cells = []
+    for value in header:
+        cell = WriteOnlyCell(ws, value=value)
+        cell.font = Font(bold=True)
+        cell.alignment = Alignment(vertical="center")
+        header_cells.append(cell)
+    ws.append(header_cells)
+
+    count = 0
+    async for row in rows:
+        ws.append(master_price_row_values(row))
+        count += 1
+    out = io.BytesIO()
+    wb.save(out)
+    return out.getvalue(), count
+
+
 def render_master_price_workbook(template_bytes: bytes, rows: list[dict[str, Any]]) -> bytes:
     """Заполняет шаблон (лист «Прайс», шапка в строке 1) строками мастер-прайса."""
     import openpyxl
