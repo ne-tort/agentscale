@@ -24,7 +24,7 @@ import 'package:prodavan/features/meta/runtime/module_runtime_scope.dart';
 import 'package:prodavan/features/meta/runtime/owner_module_data_controller.dart';
 import 'package:prodavan/features/meta/runtime/runtime_data_adapter.dart';
 import 'package:prodavan/features/meta/module_scaffold_actions.dart';
-import 'package:prodavan/features/meta/widgets/equipment_match_sheet.dart';
+import 'package:prodavan/features/meta/widgets/equipment_match_page.dart';
 import 'package:prodavan/features/meta/widgets/benefit_badge.dart';
 import 'package:prodavan/features/meta/widgets/budget_summary_strip.dart';
 import 'package:prodavan/features/meta/widgets/document_fields_panel.dart';
@@ -107,6 +107,8 @@ class CollectionViewInterpreter extends StatelessWidget {
         final serverPaged = uiJson['server_paged'] == true && seeds is RuntimeDataAdapter;
         final rawRows = _filteredRows(seeds, tableSlug, uiJson);
         var styled = _applyRowStyles(context, uiJson, rawRows);
+        styled = _withNoOfferPlaceholder(context, uiJson, styled);
+        styled = _withDashEmptyCells(context, uiJson, styled);
         styled = _withWarningCells(context, uiJson, styled);
         var rows = _withSelection(context, uiJson, styled);
         rows = _withEditableCells(context, uiJson, tableSlug, rows);
@@ -154,18 +156,19 @@ class CollectionViewInterpreter extends StatelessWidget {
             }
             final rowTap = uiJson['row_tap'];
             if (rowTap is Map && rowTap['kind'] == 'match_product') {
-              // виртуальные строки (поиск/мастер-прайс): сопоставить товар
-              // с позицией заказчика
+              // виртуальные строки (поиск/мастер-прайс): отдельная страница
+              // сопоставления товара с позицией заказчика
               final actionId = rowTap['action']?.toString() ?? '';
               final adapter = seeds;
               if (actionId.isNotEmpty && adapter is RuntimeDataAdapter) {
-                unawaited(
-                  EquipmentMatchSheet.show(
-                    context: context,
-                    adapter: adapter,
-                    actionId: actionId,
-                    srcHash: row.id,
-                    productTitle: row.title,
+                Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => EquipmentMatchPage(
+                      adapter: adapter,
+                      actionId: actionId,
+                      srcHash: row.id,
+                      productTitle: row.title,
+                    ),
                   ),
                 );
               }
@@ -308,6 +311,7 @@ class CollectionViewInterpreter extends StatelessWidget {
     String tableSlug, {
     bool stockFilter = false,
   }) {
+    // stockFilter участвует только в шапке страницы (см. buildModuleScaffoldActions).
     final scheme = Theme.of(context).colorScheme;
     final page = adapter.serverPage(tableSlug);
     final pageSize = adapter.serverPageSize(tableSlug);
@@ -321,9 +325,11 @@ class CollectionViewInterpreter extends StatelessWidget {
       children: [
         // Inline-поле как у добавления итемов на других страницах, но поиск.
         AppInlineAddField(
-          title: 'Поиск',
+          title: 'Найти товар...',
           hintText: 'Найти товар...',
           showBottomDivider: false,
+          icon: Icons.search,
+          actionTooltip: 'Найти',
           validator: (raw) => raw.trim().isNotEmpty,
           onSave: (raw) => adapter.setServerSearch(tableSlug, raw.trim()),
         ),
@@ -364,33 +370,6 @@ class CollectionViewInterpreter extends StatelessWidget {
                 ? () => unawaited(adapter.setServerPage(tableSlug, page + 1))
                 : null,
             icon: const Icon(Icons.chevron_right),
-          ),
-          if (stockFilter)
-            IconButton(
-              visualDensity: VisualDensity.compact,
-              tooltip: adapter.serverStockOnly(tableSlug)
-                  ? 'Показать всё (включая под заказ)'
-                  : 'Только в наличии',
-              onPressed: () => unawaited(
-                adapter.setServerStockOnly(
-                  tableSlug,
-                  !adapter.serverStockOnly(tableSlug),
-                ),
-              ),
-              icon: Icon(
-                adapter.serverStockOnly(tableSlug)
-                    ? Icons.inventory
-                    : Icons.inventory_2_outlined,
-                color: adapter.serverStockOnly(tableSlug)
-                    ? Theme.of(context).colorScheme.primary
-                    : null,
-              ),
-            ),
-          IconButton(
-            visualDensity: VisualDensity.compact,
-            tooltip: 'Обновить данные',
-            onPressed: () => unawaited(adapter.reloadServerPage(tableSlug)),
-            icon: const Icon(Icons.refresh),
           ),
         ],
       ),
@@ -773,6 +752,78 @@ class CollectionViewInterpreter extends StatelessWidget {
       }
     }
     return out;
+  }
+
+  /// Группа без офферов: в колонке «Товар» (primary) — «Нет оффера»
+  /// warning-цветом вместо подстановки партномера.
+  /// ui_json: `no_offers_placeholder: {"text": "Нет оффера"}`.
+  List<AppEntityRow> _withNoOfferPlaceholder(
+    BuildContext context,
+    Map<String, dynamic> uiJson,
+    List<AppEntityRow> rows,
+  ) {
+    final cfg = uiJson['no_offers_placeholder'];
+    if (cfg is! Map) return rows;
+    final text = cfg['text']?.toString() ?? 'Нет оффера';
+    final warning = context.appColors.warning;
+    return rows.map((row) {
+      final item = seeds.itemById(row.id);
+      final body = item is Map && item['body'] is Map
+          ? Map<String, dynamic>.from(item['body'] as Map)
+          : const <String, dynamic>{};
+      final offers = body['offers_count'];
+      final noOffers = offers is num ? offers <= 0 : (offers == null);
+      if (!noOffers) return row;
+      return AppEntityRow(
+        id: row.id,
+        title: text,
+        subtitle: row.subtitle,
+        cells: row.cells,
+        cellWidgets: row.cellWidgets,
+        leading: row.leading,
+        trailing: row.trailing,
+        titleColor: warning,
+        rowColor: row.rowColor,
+        titleBold: row.titleBold,
+      );
+    }).toList();
+  }
+
+  /// Колонки из `dash_empty_fields`: пустое значение → «—» (muted).
+  List<AppEntityRow> _withDashEmptyCells(
+    BuildContext context,
+    Map<String, dynamic> uiJson,
+    List<AppEntityRow> rows,
+  ) {
+    final raw = uiJson['dash_empty_fields'];
+    if (raw is! List || raw.isEmpty) return rows;
+    final fields = raw.map((e) => e.toString()).toSet();
+    final muted = context.appColors.muted;
+    return rows.map((row) {
+      final widgets = Map<String, Widget>.from(row.cellWidgets);
+      var changed = false;
+      for (final field in fields) {
+        if (widgets.containsKey(field)) continue;
+        final value = row.cells[field]?.toString() ?? '';
+        if (value.trim().isEmpty) {
+          widgets[field] = Text('—', style: TextStyle(color: muted));
+          changed = true;
+        }
+      }
+      if (!changed) return row;
+      return AppEntityRow(
+        id: row.id,
+        title: row.title,
+        subtitle: row.subtitle,
+        cells: row.cells,
+        cellWidgets: widgets,
+        leading: row.leading,
+        trailing: row.trailing,
+        titleColor: row.titleColor,
+        rowColor: row.rowColor,
+        titleBold: row.titleBold,
+      );
+    }).toList();
   }
 
   /// Warning-ячейки трёх видов (конфиг колонок ui_json):

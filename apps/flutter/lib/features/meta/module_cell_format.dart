@@ -111,6 +111,23 @@ String formatModuleCell({
     // добавляет collection_interpreter (cellWidgets).
     return budgetPriceInLabel(body) ?? raw?.toString() ?? '';
   }
+  if (format == 'pn_fallback') {
+    // PN группы; без своего — партномер позиции заказчика; иначе прочерк.
+    final own = body['part_number']?.toString().trim() ?? '';
+    if (own.isNotEmpty) return own;
+    final line = body['line_part_number']?.toString().trim() ?? '';
+    if (line.isNotEmpty) return line;
+    return '—';
+  }
+  if (format == 'face_price') {
+    // Цена лица группы: без офферов — прочерк; с офферами и без цены —
+    // «Нет цены» (warning-окраску добавляет интерпретатор).
+    final offers = body['offers_count'];
+    final noOffers = offers is num ? offers <= 0 : offers == null;
+    if (noOffers) return '—';
+    if (raw == null) return 'Нет цены';
+    return raw.toString();
+  }
   if (format == 'stock_label') {
     // Наличие: отсутствие → «Под заказ» (warning-окраску добавляет
     // collection_interpreter тем же cellWidgets-пассом).
