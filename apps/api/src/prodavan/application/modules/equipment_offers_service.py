@@ -839,6 +839,12 @@ class EquipmentPipelineService:
                 offers_by_group.setdefault(gid, []).append(o)
 
         now = datetime.now(UTC).isoformat(timespec="seconds")
+        # Партномера позиций заказчика: display-фолбэк для групп без P/N.
+        lines_rows = [r for r in await io.list(LINES_TABLE) if isinstance(r, dict)]
+        line_pn_by_id = {
+            str(r.get("row_id") or ""): str((r.get("body") or {}).get("part_number") or "")
+            for r in lines_rows
+        }
         groups_by_line: dict[str, list[dict[str, Any]]] = {}
         best_group_by_line: dict[str, str] = {}
 
@@ -890,18 +896,18 @@ class EquipmentPipelineService:
                 updates["face_priority"] = face_priority
             if bool(body.get("face_in_stock")) is not face_in_stock:
                 updates["face_in_stock"] = face_in_stock
+            # Партномер позиции заказчика — фолбэк для колонки «PN» списка,
+            # когда у группы своего партномера нет (display-only снапшот).
+            want_line_pn = str(line_pn_by_id.get(line_id) or "")
+            if str(body.get("line_part_number") or "") != want_line_pn:
+                updates["line_part_number"] = want_line_pn
             if str(body.get("match_label") or "") != want_match_label:
                 updates["match_label"] = want_match_label
             if body.get("best_offer_id") != best_id:
                 updates["best_offer_id"] = best_id
-            # Без офферов лицо группы — сам ключ (P/N или первый алиас),
-            # иначе список показывает технический row_* вместо товара.
-            if face:
-                want_face_title = str(face.get("title") or "")
-            else:
-                aliases = body.get("aliases_pn")
-                first_alias = str(aliases[0]) if isinstance(aliases, list) and aliases else ""
-                want_face_title = str(body.get("part_number") or "") or first_alias
+            # Лицо = товар лучшего оффера; без офферов лицо пустое — UI
+            # показывает «Нет оффера» warning (партномер НЕ подставляем).
+            want_face_title = str(face.get("title") or "") if face else ""
             if body.get("face_title") != want_face_title:
                 updates["face_title"] = want_face_title
             if body.get("face_price") != _num_or(face.get("price"), None):
@@ -1682,7 +1688,9 @@ def _match_label(match_kind: str, in_stock: bool, *, has_offers: bool = True) ->
     показывались как «Точное (под заказ)»)."""
     base = _MATCH_LABELS.get(match_kind, "Аналог")
     if not has_offers:
-        return f"{base} (нет офферов)"
+        # Без офферов суффикс не нужен: «Нет оффера» показывается в колонке
+        # «Товар» warning-цветом (UI).
+        return base
     return base if in_stock else f"{base} (под заказ)"
 
 

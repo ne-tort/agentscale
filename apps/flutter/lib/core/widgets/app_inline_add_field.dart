@@ -19,6 +19,8 @@ class AppInlineAddField extends StatefulWidget {
     this.hintText,
     this.invalidMessage,
     this.showBottomDivider = true,
+    this.icon,
+    this.actionTooltip,
   });
 
   final String title;
@@ -29,6 +31,12 @@ class AppInlineAddField extends StatefulWidget {
 
   /// Full-bleed hairline under the field (separates from EntityCollection).
   final bool showBottomDivider;
+
+  /// Trailing action icon (default «+»); поиск передаёт лупу.
+  final IconData? icon;
+
+  /// Trailing action tooltip (default «Добавить»); поиск передаёт «Найти».
+  final String? actionTooltip;
 
   @override
   State<AppInlineAddField> createState() => _AppInlineAddFieldState();
@@ -159,8 +167,8 @@ class _AppInlineAddFieldState extends State<AppInlineAddField> {
       title: widget.title,
       enabled: !_saving,
       trailing: IconButton(
-        tooltip: l10n.commonAdd,
-        icon: Icon(Icons.add_rounded, size: 28, color: onSurface),
+        tooltip: widget.actionTooltip ?? l10n.commonAdd,
+        icon: Icon(widget.icon ?? Icons.add_rounded, size: 28, color: onSurface),
         padding: EdgeInsets.zero,
         visualDensity: VisualDensity.compact,
         constraints: const BoxConstraints(
