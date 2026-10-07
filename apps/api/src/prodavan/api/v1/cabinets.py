@@ -417,7 +417,26 @@ async def list_module_data_rows(
     session: SessionDep,
     employee: Annotated[EmployeeRow | None, Depends(get_current_employee)] = None,
     x_prodavan_session_id: str | None = Header(default=None, alias=SESSION_HEADER),
+    page: int = 1,
+    page_size: int = 50,
+    search: str = "",
 ) -> dict:
+    from prodavan.application.modules.equipment_master_price import (
+        try_list_virtual_page,
+    )
+
+    virtual = await try_list_virtual_page(
+        session,
+        cabinet_id=cabinet_id,
+        table_slug=table_slug,
+        principal=principal,
+        employee=employee,
+        page=page,
+        page_size=page_size,
+        search=search,
+    )
+    if virtual is not None:
+        return virtual
     items = await CabinetModuleService(session).list_data_rows(
         cabinet_id=cabinet_id,
         module_id=module_id,

@@ -37,6 +37,7 @@ def test_templates_meta_contract() -> None:
         "budget",
         "commercial_proposal",
         "specification",
+        "master_price",
     }
     assert cols["file"]["type"] == "file_ref"
     views = {v["slug"] for v in meta["views"]}
@@ -52,6 +53,7 @@ def test_templates_meta_contract() -> None:
         "budget",
         "commercial_proposal",
         "specification",
+        "master_price",
     }
     assert all(s["body"]["file"]["storage_key"].startswith("builtin/") for s in seeds)
 
@@ -196,6 +198,7 @@ def test_equipment_meta_hub_on_data_placement() -> None:
         "mcp_tool_overrides",
         "document_company_fields",
         "document_fields",
+        "master_price",
     }
     kinds = {a["kind"] for a in meta["actions"]}
     assert "content.index_opensearch" in kinds
@@ -485,8 +488,8 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     assert "section_title" not in slots_field
 
     seed_items = meta["seed_rows"]["items"]
-    # 14 base seeds + 3 built-in template rows + 2 prompt rows
-    assert len(seed_items) == 19
+    # 14 base seeds + 4 built-in template rows (incl. master price) + 2 prompt rows
+    assert len(seed_items) == 20
     by_row = {s["row_id"]: s for s in seed_items}
     assert "tpl_budget_builtin" in by_row
     assert by_row["etype_cpu"]["body"]["name"] if "etype_cpu" in by_row else True
@@ -747,3 +750,37 @@ def test_budget_price_warning_and_offers_sort_seeds() -> None:
     )
     assert title_col["warning_when_match"] == ["analog", "doubt"]
     assert pn_col["warning_when_match"] == ["analog", "doubt"]
+
+
+def test_master_price_seeds() -> None:
+    """Мастер-прайс: флаг поставщика, виртуальная таблица, вьюха с
+    серверной пагинацией, экшен скачивания, пункт в «Данных»."""
+    from prodavan.application.platform.product_module_seeds import mod_equipment_meta
+
+    meta = mod_equipment_meta()
+    sellers_cols = [c for c in meta["columns"] if c["table_slug"] == "trusted_sellers"]
+    assert any(c["name"] == "master_price" and c["type"] == "bool" for c in sellers_cols)
+    settings_view = next(
+        v for v in meta["views"] if v["slug"] == "trusted_sellers_settings"
+    )
+    assert any(
+        f["column"] == "master_price" and f["widget"] == "switch"
+        for f in settings_view["ui_json"]["fields"]
+    )
+    tables = {t["slug"]: t for t in meta["tables"]}
+    assert tables["master_price"]["storage_kind"] == "opensearch_virtual"
+    view = next(v for v in meta["views"] if v["slug"] == "master_price_list")
+    ui = view["ui_json"]
+    assert ui["server_paged"] is True
+    assert ui["scaffold"]["actions"][0]["action"] == "master_price_export"
+    action = next(a for a in meta["actions"] if a["id"] == "master_price_export")
+    assert action["kind"] == "equipment.master_price"
+    hub = next(v for v in meta["views"] if v["slug"] == "equipment_hub")
+    titles = [i["title"] for i in hub["ui_json"]["items"]]
+    assert "Мастер прайс" in titles
+    seed_tpl = next(
+        s
+        for s in meta["seed_rows"]["items"]
+        if s.get("row_id") == "tpl_master_price_builtin"
+    )
+    assert seed_tpl["body"]["template_type"] == "master_price"

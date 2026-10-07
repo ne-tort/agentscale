@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -102,6 +103,7 @@ class CollectionViewInterpreter extends StatelessWidget {
           (c) => c.id == titleField,
           orElse: () => AppEntityColumn(id: titleField, label: primaryLabel),
         );
+        final serverPaged = uiJson['server_paged'] == true && seeds is RuntimeDataAdapter;
         final rawRows = _filteredRows(seeds, tableSlug, uiJson);
         var styled = _applyRowStyles(context, uiJson, rawRows);
         styled = _withWarningCells(context, uiJson, styled);
@@ -185,6 +187,9 @@ class CollectionViewInterpreter extends StatelessWidget {
         // without inline add / headers / poll (the budget view).
         final summary = _summary(uiJson);
         final docFields = _docFieldsConfig(uiJson);
+        final serverBar = serverPaged
+            ? _serverPagedBar(context, seeds as RuntimeDataAdapter, tableSlug)
+            : null;
         if (!hasInline &&
             !_hasContextHeader(uiJson) &&
             !_hasListHeader(uiJson) &&
@@ -192,7 +197,14 @@ class CollectionViewInterpreter extends StatelessWidget {
             onLoadAction == null &&
             summary == null &&
             docFields == null) {
-          return SingleChildScrollView(child: collection);
+          if (serverBar == null) return SingleChildScrollView(child: collection);
+          return SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisSize: MainAxisSize.min,
+              children: [serverBar, collection],
+            ),
+          );
         }
 
         final docFieldsPanel = docFields == null
@@ -256,11 +268,73 @@ class CollectionViewInterpreter extends StatelessWidget {
                 seeds: seeds,
                 contextRowId: contextRowId,
               ),
+            if (serverBar != null) serverBar,
             collection,
           ],
           ),
         );
       },
+    );
+  }
+
+  /// Поиск + пагинатор серверной пагинации (виртуальные таблицы из OS).
+  Widget _serverPagedBar(
+    BuildContext context,
+    RuntimeDataAdapter adapter,
+    String tableSlug,
+  ) {
+    final scheme = Theme.of(context).colorScheme;
+    final page = adapter.serverPage(tableSlug);
+    final pageSize = adapter.serverPageSize(tableSlug);
+    final total = adapter.serverTotal(tableSlug);
+    final from = total == 0 ? 0 : (page - 1) * pageSize + 1;
+    final to = math.min(page * pageSize, total);
+    final lastPage = total == 0 ? 1 : ((total + pageSize - 1) ~/ pageSize);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(0, 0, 0, AppSpacing.xs),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 260,
+            height: 36,
+            child: TextField(
+              decoration: InputDecoration(
+                isDense: true,
+                prefixIcon: const Icon(Icons.search, size: 18),
+                hintText: 'Поиск: название, P/N, бренд, поставщик',
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+              onSubmitted: (value) =>
+                  unawaited(adapter.setServerSearch(tableSlug, value.trim())),
+            ),
+          ),
+          const Spacer(),
+          Text(
+            '$from–$to из $total',
+            style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12),
+          ),
+          IconButton(
+            visualDensity: VisualDensity.compact,
+            tooltip: 'Предыдущая страница',
+            onPressed: page > 1
+                ? () => unawaited(adapter.setServerPage(tableSlug, page - 1))
+                : null,
+            icon: const Icon(Icons.chevron_left),
+          ),
+          Text('$page / $lastPage',
+              style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12)),
+          IconButton(
+            visualDensity: VisualDensity.compact,
+            tooltip: 'Следующая страница',
+            onPressed: page < lastPage
+                ? () => unawaited(adapter.setServerPage(tableSlug, page + 1))
+                : null,
+            icon: const Icon(Icons.chevron_right),
+          ),
+        ],
+      ),
     );
   }
 
