@@ -265,3 +265,16 @@ def test_row_values_rrc_cell() -> None:
     # без РРЦ в источнике — «По запросу», как в Commerce
     norrc = doc_to_master_row({"supplier": "S", "in_stock": True, "price_num": 10.0, "rrc_num": None})
     assert master_price_row_values(norrc)[10] == "По запросу"
+
+
+def test_column_map_projects_rrc() -> None:
+    """rrc — каноническое поле: apply_column_map тянет его из источника."""
+    from prodavan.application.modules.equipment_catalog_search import apply_column_map
+
+    mapped = apply_column_map(
+        {"pn": "X1", "name": "Т", "price": "10", "rrc": "13.5"},
+        {"part_number": "pn", "title": "name", "price": "price", "rrc": "rrc"},
+    )
+    assert mapped["rrc"] == "13.5"
+    mapped_no = apply_column_map({"pn": "X1"}, {"part_number": "pn"})
+    assert mapped_no["rrc"] == ""
