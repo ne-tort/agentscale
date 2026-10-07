@@ -23,6 +23,9 @@ CANONICAL_FIELDS = (
     "supplier",
     "lead_time",
     "currency",
+    # РРЦ источника: сырая рекомендательная цена (Commerce: supplier_price_items.rrc);
+    # наценка применяется только при формировании мастер-прайса.
+    "rrc",
 )
 
 # Source headers that mean "currency of the price column" (case-insensitive).

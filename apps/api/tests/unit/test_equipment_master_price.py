@@ -181,8 +181,12 @@ async def test_list_page_paging_and_search(monkeypatch) -> None:
     async def _indexes(cabinet_id):
         return ["equipment__c_row_x"]
 
+    async def _margins(cabinet_id):
+        return {}
+
     monkeypatch.setattr(svc, "_sellers", _sellers)
     monkeypatch.setattr(svc, "_ready_indexes", _indexes)
+    monkeypatch.setattr(svc, "_margins", _margins)
 
     page1 = await svc.list_page(cabinet_id="cab", page=1, page_size=2)
     assert page1["total"] == 5
@@ -222,8 +226,12 @@ async def test_iter_rows_cursor_batches(monkeypatch) -> None:
     async def _indexes(cabinet_id):
         return ["equipment__c_row_x"]
 
+    async def _margins(cabinet_id):
+        return {}
+
     monkeypatch.setattr(svc, "_sellers", _sellers)
     monkeypatch.setattr(svc, "_ready_indexes", _indexes)
+    monkeypatch.setattr(svc, "_margins", _margins)
     monkeypatch.setattr(
         "prodavan.application.modules.equipment_master_price._EXPORT_BATCH", 2
     )
@@ -232,3 +240,41 @@ async def test_iter_rows_cursor_batches(monkeypatch) -> None:
     assert [r["title"] for r in out] == ["t0", "t1", "t2"]
     # второй вызов шёл с search_after от последнего хита батча
     assert fake.calls[1].get("search_after") == ["h1"]
+
+
+def test_apply_margin_rounds_like_commerce() -> None:
+    from prodavan.application.modules.equipment_master_price import apply_margin
+
+    assert apply_margin(100.0, 7) == 107.0
+    assert apply_margin(100.0, -2) == 98.0
+    assert apply_margin(None, 7) is None
+    assert apply_margin(10.005, 0) == 10.005
+    assert apply_margin(34696.91, 7) == 37125.69
+
+
+def test_row_values_rrc_cell() -> None:
+    row = doc_to_master_row(
+        {"supplier": "S", "in_stock": True, "price_num": 10.0, "rrc_num": 15.5, "currency": "RUB"}
+    )
+    from prodavan.application.modules.equipment_master_price import _apply_margin_to_row
+
+    _apply_margin_to_row(row, {"s": 10.0})
+    values = master_price_row_values(row)
+    assert values[8] == 11.0  # цена с наценкой
+    assert values[10] == 17.05  # РРЦ с наценкой
+    # без РРЦ в источнике — «По запросу», как в Commerce
+    norrc = doc_to_master_row({"supplier": "S", "in_stock": True, "price_num": 10.0, "rrc_num": None})
+    assert master_price_row_values(norrc)[10] == "По запросу"
+
+
+def test_column_map_projects_rrc() -> None:
+    """rrc — каноническое поле: apply_column_map тянет его из источника."""
+    from prodavan.application.modules.equipment_catalog_search import apply_column_map
+
+    mapped = apply_column_map(
+        {"pn": "X1", "name": "Т", "price": "10", "rrc": "13.5"},
+        {"part_number": "pn", "title": "name", "price": "price", "rrc": "rrc"},
+    )
+    assert mapped["rrc"] == "13.5"
+    mapped_no = apply_column_map({"pn": "X1"}, {"part_number": "pn"})
+    assert mapped_no["rrc"] == ""

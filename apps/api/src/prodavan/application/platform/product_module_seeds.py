@@ -395,6 +395,12 @@ _CATALOG_COLUMN_MAP_SCHEMA = [
         ],
     },
     {
+        "key": "rrc",
+        "label": {"ru": "РРЦ", "en": "RRP"},
+        "required": False,
+        "synonyms": ["rrc", "rrp", "msrp", "ррц", "рец. цена", "recommended price"],
+    },
+    {
         "key": "currency",
         "label": {"ru": "Валюта", "en": "Currency"},
         "required": False,
@@ -2510,6 +2516,13 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "required": False,
             },
             {
+                "table_slug": "master_price",
+                "name": "rrc",
+                "label": {"ru": "РРЦ", "en": "RRP"},
+                "type": "number",
+                "required": False,
+            },
+            {
                 "table_slug": "mcp_tool_overrides",
                 "name": "tool",
                 "label": {"ru": "Инструмент", "en": "Tool"},
@@ -4383,6 +4396,12 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "max_lines": 3,
                             "max_width": 260,
                         },
+                                            {
+                            "field": "master_price",
+                            "label": {"ru": "Мастер прайс", "en": "Master price"},
+                            "format": "bool_yes_no",
+                            "max_width": 110,
+                        },
                     ],
                     # Disabled suppliers stay visible but highlighted (warning).
                     "row_style": [
@@ -4689,6 +4708,13 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "field": "currency",
                             "label": {"ru": "Валюта", "en": "Currency"},
                             "max_width": 80,
+                        },
+                        {
+                            "field": "rrc",
+                            "label": {"ru": "РРЦ", "en": "RRP"},
+                            "format": "offer_price",
+                            "align": "end",
+                            "max_width": 110,
                         },
                     ],
                     "empty": _empty(
