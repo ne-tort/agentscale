@@ -2118,6 +2118,14 @@ class AppLocalizationsEn extends AppLocalizations {
   String get chatUsageCacheLabel => 'cache:';
 
   @override
+  String get chatChecklistTitle => 'Tasks';
+
+  @override
+  String chatChecklistProgress(int done, int total) {
+    return '$done/$total tasks done';
+  }
+
+  @override
   String chatModelPricePerMtok(String priceIn, String priceOut) {
     return '$priceIn / $priceOut \$ · 1M tokens';
   }

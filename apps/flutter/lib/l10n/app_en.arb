@@ -1282,6 +1282,18 @@
   "chatUsageInputLabel": "input:",
   "chatUsageOutputLabel": "output:",
   "chatUsageCacheLabel": "cache:",
+  "chatChecklistTitle": "Tasks",
+  "chatChecklistProgress": "{done}/{total} tasks done",
+  "@chatChecklistProgress": {
+    "placeholders": {
+      "done": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      }
+    }
+  },
   "chatModelPricePerMtok": "{priceIn} / {priceOut} $ · 1M tokens",
   "@chatModelPricePerMtok": {
     "placeholders": {
