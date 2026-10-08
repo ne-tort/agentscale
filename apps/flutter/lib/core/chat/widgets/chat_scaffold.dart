@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/api/prodavan_api.dart';
 import 'package:prodavan/core/chat/controller/chat_session_controller.dart';
+import 'package:prodavan/core/chat/models/chat_checklist.dart';
+import 'package:prodavan/core/chat/widgets/chat_checklist_panel.dart';
 import 'package:prodavan/core/chat/widgets/chat_empty_placeholder.dart';
 import 'package:prodavan/core/chat/models/chat_block.dart';
 import 'package:prodavan/core/chat/widgets/blocks/chat_block_renderer.dart';
@@ -538,94 +540,132 @@ class _ChatScaffoldState extends State<ChatScaffold> {
     return 900;
   }
 
+  /// Minimum chat-area width at which the checklist side panel is shown
+  /// (below this it would squeeze the transcript — the panel stays hidden).
+  static const double _kChecklistMinWidth = 840;
+
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
         final maxW = _columnMaxWidth(constraints.maxWidth);
-        return Center(
-          child: ConstrainedBox(
-            constraints: BoxConstraints(maxWidth: maxW),
-            child: Column(
-              children: [
-                Expanded(
-                  // OS drag & drop: the transcript region accepts files and
-                  // routes them into the composer's attach pipeline. The
-                  // composer field itself never changes.
-                  child: DropTarget(
-                    onDragDone: _handleDroppedFiles,
-                    onDragEntered: (_) => _setDrag(true),
-                    onDragExited: (_) => _setDrag(false),
-                    child: Stack(
-                      children: [
-                        Positioned.fill(
-                          child: (loading && !controller.hasCachedTranscript)
-                              ? const ChatTranscriptSkeleton()
-                              // Render the (possibly empty) list while streaming so
-                              // the working indicator shows right after the first
-                              // send — the list shows just the indicator.
-                              : (controller.visibleBlocks.isEmpty && !controller.streaming)
-                                  ? ChatEmptyPlaceholder(highlighted: _dragOver)
-                                  : ChatMessageList(
-                                      blocks: controller.visibleBlocks,
-                                      projectId: controller.projectId,
-                                      sessionId: controller.sessionId,
-                                      api: api,
-                                      hasMoreHistory: controller.hasMoreHistory,
-                                      loadingHistory: controller.loadingHistory,
-                                      onLoadOlder: controller.hasMoreHistory
-                                          ? controller.loadOlderTranscript
-                                          : null,
-                                      turnStreaming: controller.streaming,
-                                      showWorkingIndicator: controller.showWorkingIndicator,
-                                      showReconnectIndicator: controller.showReconnectIndicator,
-                                      reconnectAttempt: controller.reconnectAttempt,
-                                      reconnectMaxAttempts: controller.reconnectMaxAttempts,
-                                      reconnectNextModel: controller.reconnectNextModel,
-                                      mcpAliases: controller.mcpAliases,
-                                      costResolver: controller.usageCostUsd,
-                                      onResolveApproval: (id, decision) =>
-                                          controller.resolveApproval(id, decision),
-                                    ),
+        final checklistTasks = deriveChecklistTasks(controller.visibleBlocks);
+        final showChecklist =
+            checklistTasks.isNotEmpty && constraints.maxWidth >= _kChecklistMinWidth;
+
+        final column = ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: maxW),
+          child: Column(
+            children: [
+              Expanded(
+                // OS drag & drop: the transcript region accepts files and
+                // routes them into the composer's attach pipeline. The
+                // composer field itself never changes.
+                child: DropTarget(
+                  onDragDone: _handleDroppedFiles,
+                  onDragEntered: (_) => _setDrag(true),
+                  onDragExited: (_) => _setDrag(false),
+                  child: Stack(
+                    children: [
+                      Positioned.fill(
+                        child: (loading && !controller.hasCachedTranscript)
+                            ? const ChatTranscriptSkeleton()
+                            // Render the (possibly empty) list while streaming so
+                            // the working indicator shows right after the first
+                            // send — the list shows just the indicator.
+                            : (controller.visibleBlocks.isEmpty && !controller.streaming)
+                                ? ChatEmptyPlaceholder(highlighted: _dragOver)
+                                : ChatMessageList(
+                                    blocks: controller.visibleBlocks,
+                                    projectId: controller.projectId,
+                                    sessionId: controller.sessionId,
+                                    api: api,
+                                    hasMoreHistory: controller.hasMoreHistory,
+                                    loadingHistory: controller.loadingHistory,
+                                    onLoadOlder: controller.hasMoreHistory
+                                        ? controller.loadOlderTranscript
+                                        : null,
+                                    turnStreaming: controller.streaming,
+                                    showWorkingIndicator: controller.showWorkingIndicator,
+                                    showReconnectIndicator: controller.showReconnectIndicator,
+                                    reconnectAttempt: controller.reconnectAttempt,
+                                    reconnectMaxAttempts: controller.reconnectMaxAttempts,
+                                    reconnectNextModel: controller.reconnectNextModel,
+                                    mcpAliases: controller.mcpAliases,
+                                    costResolver: controller.usageCostUsd,
+                                    onResolveApproval: (id, decision) =>
+                                        controller.resolveApproval(id, decision),
+                                  ),
+                      ),
+                      if (_dragOver && _canAttachDrops)
+                        const Positioned.fill(
+                          child: IgnorePointer(child: ChatDropVeil()),
                         ),
-                        if (_dragOver && _canAttachDrops)
-                          const Positioned.fill(
-                            child: IgnorePointer(child: ChatDropVeil()),
-                          ),
-                      ],
-                    ),
+                    ],
                   ),
                 ),
-                ChatComposer(
-                  key: _composerKey,
-                  projectId: controller.projectId,
-                  sessionId: controller.sessionId.isEmpty ? null : controller.sessionId,
-                  api: api,
-                  draftRestore: controller.interruptedDraft,
-                  enabled: chatSendable && !updateMode,
-                  streaming: controller.streaming,
-                  disabledHint: disabledHint,
-                  wakeMode: wakeMode,
-                  waking: waking,
-                  onWake: onWake,
-                  updateMode: updateMode,
-                  updating: updating,
-                  onUpdate: onUpdate,
-                  onDismissUpdate: onDismissUpdate,
-                  onSend: (text, refs) => controller.send(text, attachmentRefs: refs),
-                  onCancel: controller.streaming ? () => controller.cancelStream() : null,
-                  onOpenSettings: onOpenChatSettings,
-                  modelLabel: modelLabel,
-                  onPickModel: onPickModel,
-                  onSessionMaterialized: (sid) {
-                    controller.sessionId = sid;
-                    onSessionMaterialized?.call(sid);
-                  },
-                  onDraftPresenceChanged: onDraftPresenceChanged,
-                ),
-              ],
-            ),
+              ),
+              ChatComposer(
+                key: _composerKey,
+                projectId: controller.projectId,
+                sessionId: controller.sessionId.isEmpty ? null : controller.sessionId,
+                api: api,
+                draftRestore: controller.interruptedDraft,
+                enabled: chatSendable && !updateMode,
+                streaming: controller.streaming,
+                disabledHint: disabledHint,
+                wakeMode: wakeMode,
+                waking: waking,
+                onWake: onWake,
+                updateMode: updateMode,
+                updating: updating,
+                onUpdate: onUpdate,
+                onDismissUpdate: onDismissUpdate,
+                onSend: (text, refs) => controller.send(text, attachmentRefs: refs),
+                onCancel: controller.streaming ? () => controller.cancelStream() : null,
+                onOpenSettings: onOpenChatSettings,
+                modelLabel: modelLabel,
+                onPickModel: onPickModel,
+                onSessionMaterialized: (sid) {
+                  controller.sessionId = sid;
+                  onSessionMaterialized?.call(sid);
+                },
+                onDraftPresenceChanged: onDraftPresenceChanged,
+              ),
+            ],
           ),
+        );
+
+        if (!showChecklist) {
+          // Asymmetric framing: a touch less air on the left than on the right
+          // (the column stays the visual anchor but is biased left of centre).
+          return Align(
+            alignment: const Alignment(-0.16, 0),
+            child: column,
+          );
+        }
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Expanded(
+              child: Align(
+                alignment: Alignment.topLeft,
+                child: Padding(
+                  padding: const EdgeInsets.only(left: AppSpacing.sm),
+                  child: column,
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.md,
+                AppSpacing.md,
+                AppSpacing.md,
+                0,
+              ),
+              child: ChatChecklistPanel(tasks: checklistTasks),
+            ),
+          ],
         );
       },
     );
