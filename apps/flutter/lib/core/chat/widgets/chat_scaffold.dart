@@ -649,8 +649,10 @@ class _ChatScaffoldState extends State<ChatScaffold> {
           // the checklist case), transcript width unchanged.
           return Center(child: column);
         }
-        // Chat + gutter + panel as ONE centred group: the outer margins and the
-        // chat↔checklist gap are all `_kChatGutter`, and the chat keeps its cap.
+        // Chat + gutter + panel as ONE centred group. The panel slot is a FIXED
+        // width so the chat column is always exactly `maxW` with a constant gap
+        // to the checklist — the compact pill sits inside the slot and never
+        // lets the transcript grow.
         final groupMaxW = maxW + _kChatGutter + kChatChecklistWidth;
         return Center(
           child: ConstrainedBox(
@@ -662,9 +664,12 @@ class _ChatScaffoldState extends State<ChatScaffold> {
                 const SizedBox(width: _kChatGutter),
                 Padding(
                   padding: const EdgeInsets.only(top: AppSpacing.md),
-                  child: Align(
-                    alignment: Alignment.topLeft,
-                    child: ChatChecklistPanel(tasks: checklistTasks),
+                  child: SizedBox(
+                    width: kChatChecklistWidth,
+                    child: Align(
+                      alignment: Alignment.topLeft,
+                      child: ChatChecklistPanel(tasks: checklistTasks),
+                    ),
                   ),
                 ),
               ],
