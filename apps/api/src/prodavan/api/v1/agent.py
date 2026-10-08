@@ -59,6 +59,9 @@ class ChatTurnBody(BaseModel):
     session_id: str | None = Field(default=None, max_length=64)
     attachment_refs: list[str] = Field(default_factory=list, max_length=CHAT_MAX_ATTACHMENTS_PER_MESSAGE)
     model: str | None = Field(default=None, max_length=128)
+    # Client-generated idempotency key: a retried send re-attaches to the same
+    # autonomous turn instead of starting a duplicate.
+    turn_id: str | None = Field(default=None, max_length=64)
 
     @model_validator(mode="after")
     def require_text_or_attachments(self) -> ChatTurnBody:
@@ -394,6 +397,7 @@ async def project_chat_stream(
             principal=principal,
             employee=employee,
             model=body.model,
+            turn_id=body.turn_id,
         ).__aiter__()
         pending: asyncio.Task | None = None
         try:

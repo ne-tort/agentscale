@@ -1350,12 +1350,17 @@ class ProdavanApi {
   }
 
   /// SSE chat turn — abort via [ProjectChatStreamHandle.abort] (L05).
+  ///
+  /// [turnId] is a client-generated idempotency key: the server starts an
+  /// autonomous turn keyed by it, so a retried request re-attaches to the same
+  /// run instead of starting a duplicate.
   ProjectChatStreamHandle projectChatStream({
     required String projectId,
     required String text,
     String? sessionId,
     String? model,
     List<String> attachmentRefs = const [],
+    String? turnId,
   }) {
     final prevProj = this.projectId;
     this.projectId = projectId;
@@ -1372,6 +1377,7 @@ class ProdavanApi {
             if (sessionId != null) 'session_id': sessionId,
             if (model != null && model.isNotEmpty) 'model': model,
             if (attachmentRefs.isNotEmpty) 'attachment_refs': attachmentRefs,
+            if (turnId != null && turnId.isNotEmpty) 'turn_id': turnId,
           });
         final response = await client.send(request);
         if (response.statusCode >= 400) {

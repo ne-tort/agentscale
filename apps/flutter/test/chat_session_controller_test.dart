@@ -23,6 +23,7 @@ class _FakeApi extends Fake implements ProdavanApi {
     String? sessionId,
     String? model,
     List<String> attachmentRefs = const [],
+    String? turnId,
   }) {
     final stream = this.stream;
     if (stream == null) {
