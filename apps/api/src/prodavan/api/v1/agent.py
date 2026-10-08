@@ -447,8 +447,14 @@ async def project_chat_transcript(
     session_id: str,
     limit: int = 500,
     before_seq: int | None = None,
+    after_seq: int | None = None,
 ) -> dict:
-    """Reload typed chat blocks for an explicit session (multi-chat)."""
+    """Reload typed chat blocks for an explicit session (multi-chat).
+
+    ``after_seq`` switches to incremental tail mode (events newer than the
+    cursor) for live polling; the payload also carries ``turn_in_progress``
+    so a reloaded client knows the agent is still working.
+    """
     # Clamp to a sane upper bound — the default page is large so a typical
     # session shows its full history without the user scrolling up to trigger
     # pagination, but remains bounded for very long sessions.
@@ -460,6 +466,7 @@ async def project_chat_transcript(
         session_id=session_id,
         limit=limit,
         before_seq=before_seq,
+        after_seq=after_seq,
     )
 
 

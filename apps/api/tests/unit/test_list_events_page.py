@@ -1,8 +1,8 @@
-"""Unit tests — agent event pagination (tail / before_seq)."""
+"""Unit tests — agent event pagination (tail / before_seq / after_seq)."""
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -141,3 +141,82 @@ async def test_list_events_page_skips_total_count_when_disabled() -> None:
     assert meta["newest_seq"] == 4
     assert "total_events" not in meta
     assert session.execute.await_count == 1
+
+
+def _session_row() -> AgentSessionRow:
+    return AgentSessionRow(
+        id="ags_1",
+        project_id="proj_1",
+        resolved_key_id=None,
+        provider="cursor",
+        api_kind="cursor_sdk",
+        vendor_agent_id="ags_1",
+        model=None,
+        cwd="/workspace",
+        status="active",
+    )
+
+
+@pytest.mark.asyncio
+async def test_list_events_page_after_seq_returns_newer_ascending() -> None:
+    """Incremental tail: only events strictly newer than the cursor, ascending."""
+    session = AsyncMock()
+    svc = AgentSessionService(session)
+    svc._projects.require_access = AsyncMock()  # type: ignore[method-assign]
+    svc.get_session = AsyncMock(return_value=_session_row())  # type: ignore[method-assign]
+    rows = [_event_row("ags_1", seq) for seq in (5, 6, 7)]
+    page_mock = MagicMock()
+    page_mock.scalars.return_value.all.return_value = rows
+    session.execute = AsyncMock(return_value=page_mock)
+
+    events, meta = await svc._list_events_page(
+        session_id="ags_1",
+        project_id="proj_1",
+        principal=MagicMock(),
+        employee=MagicMock(),
+        limit=10,
+        after_seq=4,
+        include_total_count=False,
+    )
+
+    assert [e["seq"] for e in events] == [5, 6, 7]
+    assert meta["newest_seq"] == 7
+    assert meta["has_more"] is False
+    assert "total_events" not in meta
+
+
+@pytest.mark.asyncio
+async def test_turn_in_progress_true_for_non_terminal_tail() -> None:
+    session = AsyncMock()
+    svc = AgentSessionService(session)
+    result_mock = MagicMock()
+    result_mock.first.return_value = ("text_delta", datetime.now(tz=UTC))
+    session.execute = AsyncMock(return_value=result_mock)
+
+    assert await svc.turn_in_progress("ags_1") is True
+
+
+@pytest.mark.asyncio
+async def test_turn_in_progress_false_for_terminal_tail() -> None:
+    session = AsyncMock()
+    svc = AgentSessionService(session)
+    for event_type in ("done", "error"):
+        result_mock = MagicMock()
+        result_mock.first.return_value = (event_type, datetime.now(tz=UTC))
+        session.execute = AsyncMock(return_value=result_mock)
+        assert await svc.turn_in_progress("ags_1") is False
+
+
+@pytest.mark.asyncio
+async def test_turn_in_progress_false_when_empty_or_stale() -> None:
+    session = AsyncMock()
+    svc = AgentSessionService(session)
+    empty = MagicMock()
+    empty.first.return_value = None
+    session.execute = AsyncMock(return_value=empty)
+    assert await svc.turn_in_progress("ags_1") is False
+
+    stale = MagicMock()
+    stale.first.return_value = ("text_delta", datetime.now(tz=UTC) - timedelta(minutes=30))
+    session.execute = AsyncMock(return_value=stale)
+    assert await svc.turn_in_progress("ags_1") is False

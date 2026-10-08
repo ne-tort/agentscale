@@ -585,7 +585,7 @@ class _ChatScaffoldState extends State<ChatScaffold> {
                                     onLoadOlder: controller.hasMoreHistory
                                         ? controller.loadOlderTranscript
                                         : null,
-                                    turnStreaming: controller.streaming,
+                                    turnStreaming: controller.agentWorking,
                                     showWorkingIndicator: controller.showWorkingIndicator,
                                     showReconnectIndicator: controller.showReconnectIndicator,
                                     reconnectAttempt: controller.reconnectAttempt,
