@@ -1,9 +1,12 @@
-# HTTPS-доступ к prod по адресу ВМ: https://172.31.156.203
+# Явный HTTPS-маршрут к prod по адресу ВМ: https://172.31.156.203
 #
-# Kubernetes Ingress не принимает IP в spec.rules[].host («must be a DNS
-# name, not an IP address»), поэтому маршрут живёт в Traefik IngressRoute:
-# матчер Host(`IP`) валиден для CRD, а явный priority поднимает его выше
-# wildcard-роутеров dev-контура на том же entrypoint websecure.
+# Роль после инверсии маршрутизации: prod-контур на websecure теперь ПО
+# УМОЛЧАНИЮ wildcard (agentscale-https в patch-prod, priority 50) — любой
+# публичный Host и так попадает в prod. Этот IngressRoute оставлен как
+# belt-and-suspenders для конкретного адреса ВМ (стабильный приватный IP,
+# НЕ меняющийся публичный адрес туннеля): высокий priority 1010/1020 гарантирует,
+# что https://172.31.156.203 точно идёт в prod независимо от wildcard-приоритета.
+# k8s Ingress не принимает IP в host, поэтому маршрут — Traefik IngressRoute CRD.
 #
 # TLS: без secretName → дефолтный TLSStore (kube-system/agentscale-tls);
 # его сертификат содержит SAN IP:172.31.156.203, а браузер не отправляет SNI

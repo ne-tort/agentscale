@@ -140,40 +140,17 @@ spec:
                 port:
                   number: 80
 ---
-# Prod HTTPS router: SNI host-pinned; cert from the default TLSStore
-# (kube-system/agentscale-tls, SAN includes DNS:agentscale.local).
-# Доступ по IP-адресу ВМ — web-https-ip-ingressroute.yaml (k8s Ingress
-# не принимает IP в host: "must be a DNS name, not an IP address").
+# Prod HTTPS router (websecure/:443) — the PUBLIC entrypoint. Kept as the base
+# WILDCARD (no host) so ANY Host lands on prod: a public IP via punnel/VPN (the
+# address may change — routing must NOT hardcode it), scanners, agentscale.local,
+# the VM IP. Cert = default TLSStore via wildcard SNI (tls: [{}] from base);
+# browsers show a name-mismatch warning for an arbitrary public IP (self-signed
+# cert) — expected, click-through. Priority 50 < dev's 100 (patch-dev pins
+# agentscale.dev/localhost), so the explicit dev names still win on :443.
+# Belt-and-suspenders: web-https-ip-ingressroute.yaml also routes the VM IP here.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: agentscale-https
-spec:
-  tls:
-    - hosts:
-        - agentscale.local
-  rules:
-    - host: agentscale.local
-      http:
-        paths:
-          - path: /api
-            pathType: Prefix
-            backend:
-              service:
-                name: agentscale-api
-                port:
-                  number: 8000
-          - path: /health
-            pathType: Prefix
-            backend:
-              service:
-                name: agentscale-api
-                port:
-                  number: 8000
-          - path: /
-            pathType: Prefix
-            backend:
-              service:
-                name: agentscale-web
-                port:
-                  number: 80
+  annotations:
+    traefik.ingress.kubernetes.io/router.priority: "50"
