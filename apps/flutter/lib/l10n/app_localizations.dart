@@ -3752,6 +3752,12 @@ abstract class AppLocalizations {
   /// **'output:'**
   String get chatUsageOutputLabel;
 
+  /// No description provided for @chatUsageCacheLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'cache:'**
+  String get chatUsageCacheLabel;
+
   /// No description provided for @chatModelPricePerMtok.
   ///
   /// In en, this message translates to:

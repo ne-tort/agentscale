@@ -1281,6 +1281,7 @@
   "chatCopiedMessage": "Copied",
   "chatUsageInputLabel": "input:",
   "chatUsageOutputLabel": "output:",
+  "chatUsageCacheLabel": "cache:",
   "chatModelPricePerMtok": "{priceIn} / {priceOut} $ · 1M tokens",
   "@chatModelPricePerMtok": {
     "placeholders": {

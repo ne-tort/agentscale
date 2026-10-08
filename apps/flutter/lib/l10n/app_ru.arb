@@ -1270,6 +1270,7 @@
   "chatCopiedMessage": "Скопировано",
   "chatUsageInputLabel": "вход:",
   "chatUsageOutputLabel": "выход:",
+  "chatUsageCacheLabel": "кэш:",
   "chatModelPricePerMtok": "{priceIn} / {priceOut} $ · 1M токенов",
   "@chatModelPricePerMtok": {
     "placeholders": {

@@ -2115,6 +2115,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get chatUsageOutputLabel => 'output:';
 
   @override
+  String get chatUsageCacheLabel => 'cache:';
+
+  @override
   String chatModelPricePerMtok(String priceIn, String priceOut) {
     return '$priceIn / $priceOut \$ · 1M tokens';
   }

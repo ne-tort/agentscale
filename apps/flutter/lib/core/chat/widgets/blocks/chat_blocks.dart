@@ -409,10 +409,32 @@ class _AssistantStreamBlockState extends State<AssistantStreamBlock> {
     final model = _stringOrNull(usage?['model']);
     final input = _intOrNull(usage?['input_tokens']);
     final output = _intOrNull(usage?['output_tokens']);
+    // Prompt-cache READ tokens — the "cache hit" metric, present in both
+    // dialects ([OI] `prompt_tokens_details.cached_tokens`; Anthropic
+    // `cache_read_input_tokens`). cache_creation is a cache WRITE, not a hit.
+    final cacheRead = _intOrNull(usage?['cache_read_tokens']);
+    final cacheCreation = _intOrNull(usage?['cache_creation_tokens']);
     var cost = _doubleOrNull(usage?['cost_usd']);
     cost ??= widget.costResolver?.call(model, input, output);
     final turnMs = _intOrNull(widget.turnMs);
-    final hasAny = model != null || input != null || output != null || cost != null || turnMs != null;
+    // Cache hit rate = cache reads / full prompt context. The denominator
+    // differs by dialect: [OI] input_tokens ALREADY includes the cached
+    // subset (so it is the full context); Anthropic input_tokens is
+    // cache-exclusive (so the context is input + read + creation).
+    final cacheExclusiveInput =
+        (_stringOrNull(usage?['provider']) ?? '').startsWith('anthropic');
+    final promptContext = cacheExclusiveInput
+        ? (input ?? 0) + (cacheRead ?? 0) + (cacheCreation ?? 0)
+        : (input ?? 0);
+    final cachePct = (cacheRead != null && cacheRead > 0 && promptContext > 0)
+        ? ((cacheRead * 100) / promptContext).round()
+        : null;
+    final hasAny = model != null ||
+        input != null ||
+        output != null ||
+        (cacheRead != null && cacheRead > 0) ||
+        cost != null ||
+        turnMs != null;
     final metaVisible = !widget.streaming && hasAny && (_hover || _copied);
     final timeText = _formatClockTime(widget.completedAt);
     final rowVisible = timeText != null || metaVisible;
@@ -447,6 +469,8 @@ class _AssistantStreamBlockState extends State<AssistantStreamBlock> {
                                 model: model,
                                 input: input,
                                 output: output,
+                                cacheRead: cacheRead,
+                                cachePct: cachePct,
                                 cost: cost,
                                 turnMs: turnMs,
                               ),
@@ -482,6 +506,8 @@ class _AssistantStreamBlockState extends State<AssistantStreamBlock> {
     String? model,
     int? input,
     int? output,
+    int? cacheRead,
+    int? cachePct,
     double? cost,
     int? turnMs,
   }) {
@@ -502,6 +528,14 @@ class _AssistantStreamBlockState extends State<AssistantStreamBlock> {
         Text('${l10n.chatUsageInputLabel} ${_formatTokens(input)}', style: style),
       if (output != null)
         Text('${l10n.chatUsageOutputLabel} ${_formatTokens(output)}', style: style),
+      // Prompt-cache hit: read tokens + share of the prompt context.
+      if (cacheRead != null && cacheRead > 0)
+        Text(
+          cachePct != null
+              ? '${l10n.chatUsageCacheLabel} ${_formatTokens(cacheRead)} ($cachePct%)'
+              : '${l10n.chatUsageCacheLabel} ${_formatTokens(cacheRead)}',
+          style: style,
+        ),
       if (cost != null) Text(_formatCost(cost), style: style),
       if (turnMs != null) Text(_formatDurationLabel(turnMs), style: style),
     ];
