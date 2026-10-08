@@ -1,8 +1,13 @@
 # Agentscale ingress — HTTP (web) and HTTPS (websecure) routers.
 #
-# No host filter: dev is reached via arbitrary reverse proxies (punnel/VPN,
-# WSL localhost forwarding) whose Host/SNI is unpredictable; wildcard match
-# keeps it working for any origin. Prod overlays may pin host + cert-manager.
+# Base = WILDCARD (no host filter). The two contours differentiate in overlays:
+#  - websecure (:443, the public entrypoint via punnel/VPN): PROD keeps the
+#    wildcard (catch-all, priority 50) so ANY Host — including a public IP that
+#    may change — lands on prod; DEV pins agentscale.dev/localhost at priority
+#    100 (patch-dev.yaml). Net rule: "any public address = prod", dev only via
+#    its explicit names. Routing never hardcodes the public IP.
+#  - web (:8088, local plain-HTTP): DEV keeps the wildcard (local dev access);
+#    PROD pins agentscale.local (patch-prod.yaml).
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -37,9 +42,11 @@ spec:
                 port:
                   number: 80
 ---
-# HTTPS router — websecure entrypoint. TLS enabled with the Traefik default
-# certificate (self-signed) when no explicit TLS store cert matches. Prod
-# overlays set host + cert-manager ClusterIssuer (Let's Encrypt, ai-qwerty.ru).
+# HTTPS router — websecure entrypoint. TLS uses the Traefik default certificate
+# from the default TLSStore (kube-system/agentscale-tls, self-signed; SANs cover
+# the VM IP + agentscale.dev/.local/localhost). Wildcard SNI (tls: [{}]) serves
+# it for any Host. PROD keeps this wildcard (public catch-all, priority 50);
+# DEV pins agentscale.dev/localhost at priority 100 — see the overlay patches.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:

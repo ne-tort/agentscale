@@ -167,3 +167,71 @@ data:
   POD_PROBE_BASE_URL: http://agentscale-probe-pod.agentscale-dev-sandboxes.svc:3921
   POD_PROBE_LEASE_TTL_SEC: "120"
   POD_PROBE_TIMEOUT_SEC: "15"
+---
+# Dev HTTPS router (websecure/:443): PINNED to the explicit dev hostnames at a
+# HIGH priority (100) so it beats the prod wildcard catch-all (priority 50).
+# Any OTHER Host on :443 — a public IP via punnel/VPN (may change), scanners —
+# falls through to prod: "any public address = prod". Dev stays reachable via
+# https://agentscale.dev and https://localhost (both are in the default cert
+# SAN). Plain-HTTP dev access is the web entrypoint (:8088), left as the base
+# wildcard (not patched here) — that port is local-only, never the public funnel.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: agentscale-https
+  annotations:
+    traefik.ingress.kubernetes.io/router.priority: "100"
+spec:
+  tls:
+    - hosts:
+        - agentscale.dev
+        - localhost
+  rules:
+    - host: agentscale.dev
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: agentscale-api
+                port:
+                  number: 8000
+          - path: /health
+            pathType: Prefix
+            backend:
+              service:
+                name: agentscale-api
+                port:
+                  number: 8000
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: agentscale-web
+                port:
+                  number: 80
+    - host: localhost
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: agentscale-api
+                port:
+                  number: 8000
+          - path: /health
+            pathType: Prefix
+            backend:
+              service:
+                name: agentscale-api
+                port:
+                  number: 8000
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: agentscale-web
+                port:
+                  number: 80
