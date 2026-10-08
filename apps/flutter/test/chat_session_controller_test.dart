@@ -270,4 +270,71 @@ void main() {
       controller.dispose();
     });
   });
+
+  group('reconnect indicator after reload', () {
+    test('rebuilds "Попытка реконнекта…" from the persisted status block', () async {
+      final api = _FakeApi()
+        ..transcript = {
+          null: {
+            'session_id': 'sess_rc',
+            'turn_in_progress': true,
+            'newest_seq': 9,
+            'blocks': <dynamic>[
+              {'kind': 'user', 'text': 'задание', 'id': 'u1'},
+              {
+                'kind': 'status',
+                'phase': 'reconnect',
+                'attempt': 2,
+                'max_attempts': 5,
+                'next_model': 'gpt-6-astra',
+                'id': 's1',
+              },
+            ],
+          },
+        };
+      final controller = ChatSessionController(
+        api: api,
+        projectId: 'prj_rc',
+        sessionId: 'sess_rc',
+      );
+
+      await controller.loadTranscript();
+
+      // Reloaded client (not streaming) still shows the reconnect indicator
+      // instead of a misleading "agentscale работает…".
+      expect(controller.streaming, isFalse);
+      expect(controller.reconnectAttempt, 2);
+      expect(controller.reconnectMaxAttempts, 5);
+      expect(controller.reconnectNextModel, 'gpt-6-astra');
+      expect(controller.showReconnectIndicator, isTrue);
+      expect(controller.showWorkingIndicator, isFalse);
+      controller.dispose();
+    });
+
+    test('a later assistant output clears the reconnect indicator', () async {
+      final api = _FakeApi()
+        ..transcript = {
+          null: {
+            'session_id': 'sess_rc2',
+            'turn_in_progress': true,
+            'blocks': <dynamic>[
+              {'kind': 'status', 'phase': 'reconnect', 'attempt': 1, 'id': 's1'},
+              {'kind': 'assistant_markdown', 'text': 'продолжаю', 'id': 'a1'},
+            ],
+          },
+        };
+      final controller = ChatSessionController(
+        api: api,
+        projectId: 'prj_rc2',
+        sessionId: 'sess_rc2',
+      );
+
+      await controller.loadTranscript();
+
+      expect(controller.reconnectAttempt, isNull);
+      expect(controller.showReconnectIndicator, isFalse);
+      expect(controller.showWorkingIndicator, isTrue);
+      controller.dispose();
+    });
+  });
 }

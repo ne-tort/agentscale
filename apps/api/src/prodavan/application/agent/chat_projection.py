@@ -315,6 +315,12 @@ def events_to_chat_blocks(events: list[dict]) -> list[dict]:
                     "kind": "status",
                     "phase": data.get("phase"),
                     "message": data.get("message") or data.get("detail"),
+                    # Reconnect fields — a reloaded client reconstructs the
+                    # "Попытка реконнекта…" indicator from these.
+                    "attempt": data.get("attempt"),
+                    "max_attempts": data.get("max_attempts"),
+                    "next_model": data.get("next_model"),
+                    "retry_in_ms": data.get("retry_in_ms"),
                 }
             )
         elif etype == AgentEventType.COMPACT_BOUNDARY:

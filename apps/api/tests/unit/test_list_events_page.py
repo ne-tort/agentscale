@@ -220,3 +220,34 @@ async def test_turn_in_progress_false_when_empty_or_stale() -> None:
     stale.first.return_value = ("text_delta", datetime.now(tz=UTC) - timedelta(minutes=30))
     session.execute = AsyncMock(return_value=stale)
     assert await svc.turn_in_progress("ags_1") is False
+
+
+@pytest.mark.asyncio
+async def test_get_transcript_turn_in_progress_false_when_session_cancelled() -> None:
+    """A stopped (CANCELLED) session must not report a turn in progress.
+
+    Otherwise a reloaded client re-arms the Cancel button and polls forever
+    even though the run was stopped.
+    """
+    session = AsyncMock()
+    svc = AgentSessionService(session)
+    svc._projects.require_access = AsyncMock()  # type: ignore[method-assign]
+    cancelled = _session_row()
+    cancelled.status = "cancelled"
+    svc.get_session = AsyncMock(return_value=cancelled)  # type: ignore[method-assign]
+    # Non-terminal tail would normally read as "working".
+    svc.turn_in_progress = AsyncMock(return_value=True)  # type: ignore[method-assign]
+    page_mock = MagicMock()
+    page_mock.scalars.return_value.all.return_value = []
+    count_mock = MagicMock()
+    count_mock.scalar_one.return_value = 0
+    session.execute = AsyncMock(side_effect=[page_mock, count_mock])
+
+    out = await svc.get_transcript(
+        project_id="proj_1",
+        principal=MagicMock(),
+        employee=MagicMock(),
+        session_id="ags_1",
+    )
+
+    assert out["turn_in_progress"] is False

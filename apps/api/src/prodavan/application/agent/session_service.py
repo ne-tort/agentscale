@@ -1287,7 +1287,12 @@ class AgentSessionService:
         employee: EmployeeRow,
         model: str | None,
     ) -> str:
-        """Reuse ACTIVE session; reactivate SUSPENDED session from UI after pause/resume."""
+        """Reuse ACTIVE session; reactivate SUSPENDED/CANCELLED from the UI.
+
+        A user "Stop" cancels the session (CANCELLED) but keeps the chat in the
+        sidebar; a follow-up message must continue THAT chat, not silently
+        switch to another session.
+        """
         if session_id:
             row = await self.get_session(session_id=session_id)
             if row.project_id != project_id:
@@ -1299,7 +1304,7 @@ class AgentSessionService:
                 )
             if row.status == AgentSessionStatus.ACTIVE:
                 return row.id
-            if row.status == AgentSessionStatus.SUSPENDED:
+            if row.status in (AgentSessionStatus.SUSPENDED, AgentSessionStatus.CANCELLED):
                 self._reactivate_session_row(row)
                 await self._session.flush()
                 return row.id
@@ -1585,7 +1590,14 @@ class AgentSessionService:
         if session_row.project_id != project_id:
             raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Agent session not found")
 
-        turn_in_progress = await self.turn_in_progress(sid)
+        # A turn can only be "in progress" while the session is ACTIVE. Once the
+        # user stops it (CANCELLED) or it is closed/suspended, the tail may
+        # still look non-terminal for a while — reporting "working" there would
+        # make a reloaded client re-arm the Cancel button and poll forever.
+        turn_in_progress = (
+            session_row.status == AgentSessionStatus.ACTIVE
+            and await self.turn_in_progress(sid)
+        )
 
         if after_seq is not None:
             # Incremental poll: new blocks only, no transcript-wide scans.
@@ -1769,11 +1781,15 @@ class AgentSessionService:
         row = await self.get_session(session_id=session_id)
         if row.project_id != project_id:
             raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Agent session not found")
+        if row.status == AgentSessionStatus.CANCELLED:
+            return _session_public(row)
         # Stop any detached run first: cancelling its task closes the runtime
         # stream (the runtime aborts the run) and marks it cancelled.
         detached_turns.request_cancel(session_id)
-        if row.status == AgentSessionStatus.CANCELLED:
-            return _session_public(row)
+        # Close the transcript honestly: without a terminal event the tail looks
+        # mid-turn (a reloaded client would keep showing "working" and re-arm
+        # the Cancel button). Mirrors run_stall's terminal marker.
+        await self._append_cancel_event(session_id)
         if settings.pod_agent_runtime_enabled and not settings.agent_inprocess_adapters_enabled:
             # Pod-runtime sessions have no in-process adapter to cancel - the
             # running turn streams into a cancelled session and stops on its
@@ -1787,6 +1803,37 @@ class AgentSessionService:
         await self._session.commit()
         await self._session.refresh(row)
         return _session_public(row)
+
+    async def _append_cancel_event(self, session_id: str) -> None:
+        """Append a terminal `done{cancelled}` event so the turn reads finished.
+
+        The detached run may be cancelled before it writes a terminal frame;
+        without this the newest event stays non-terminal and the transcript
+        looks mid-turn to a reloading client.
+        """
+        seq_q = await self._session.execute(
+            select(func.coalesce(func.max(AgentEventRow.seq), 0)).where(
+                AgentEventRow.session_id == session_id
+            )
+        )
+        seq = int(seq_q.scalar_one() or 0)
+        latest = await self._session.execute(
+            select(AgentEventRow.event_type)
+            .where(AgentEventRow.session_id == session_id)
+            .order_by(AgentEventRow.seq.desc())
+            .limit(1)
+        )
+        if latest.scalar_one_or_none() in TERMINAL_EVENT_TYPES:
+            return  # already finished — do not double-append
+        self._session.add(
+            AgentEventRow(
+                session_id=session_id,
+                seq=seq + 1,
+                event_type=str(AgentEventType.DONE),
+                payload={"reason": "cancelled", "cancelled": True},
+            )
+        )
+        await self._session.flush()
 
     async def cancel_active_for_project(self, *, project_id: str) -> int:
         """Best-effort cancel of ACTIVE sessions (reset prelude / hard stop). Caller owns commit."""
