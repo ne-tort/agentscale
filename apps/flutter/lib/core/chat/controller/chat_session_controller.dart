@@ -100,6 +100,11 @@ class ChatSessionController {
   static const _livePollInterval = Duration(milliseconds: 2500);
   static const _livePollMaxFailures = 5;
 
+  /// Monotonic local id generator for turn idempotency keys.
+  int _turnSeq = 0;
+  String _newTurnId() =>
+      't${DateTime.now().microsecondsSinceEpoch.toRadixString(36)}-${_turnSeq++}';
+
   /// Turn timing (live path): first assistant output moment and the moment
   /// the answer completed — stamped onto the assistant block as
   /// `created_at` / `turn_ms` when the turn finalizes.
@@ -248,7 +253,7 @@ class ChatSessionController {
     } catch (_) {}
   }
 
-  Future<void> loadTranscript({int? beforeSeq, bool background = false}) async {
+  Future<void> loadTranscript({int? beforeSeq, bool background = false, bool silent = false}) async {
     if (sessionId.isEmpty) {
       blocks.clear();
       _liveTurnBlocks = const [];
@@ -304,7 +309,8 @@ class ChatSessionController {
       // Best-effort transcript load: do not crash the chat. Keep the cached /
       // existing blocks visible; surface the error so the UI can show a
       // themed snackbar without leaving the composer in a dead state.
-      error = e;
+      // `silent` (post-cancel refresh) never overwrites the turn's own state.
+      if (!silent) error = e;
       notifyImmediate();
     } finally {
       if (background) {
@@ -390,6 +396,7 @@ class ChatSessionController {
       sessionId: sessionId,
       model: selectedModel,
       attachmentRefs: attachmentRefs,
+      turnId: _newTurnId(),
     );
     _handle = handle;
 
@@ -591,6 +598,8 @@ class ChatSessionController {
     blocks.addAll(_liveTurnBlocks);
     _liveTurnBlocks = const [];
     streaming = false;
+    turnInProgress = false;
+    _stopLivePolling();
     // Notify BEFORE the network call: the stop button must respond even when
     // the cancel request hangs on a bad network (Wave 6).
     notifyImmediate();
@@ -602,6 +611,13 @@ class ChatSessionController {
         // cancelled; surface the failure via [error] so the UI can snack it
         // instead of crashing on an unhandled async error.
         error = e;
+      }
+      // Pull the server's final state for the stopped turn (the run may have
+      // persisted events before the stop took effect).
+      try {
+        await loadTranscript(background: true, silent: true);
+      } catch (_) {
+        // Best-effort; the local cancel state already stands.
       }
     }
     _saveToCache();

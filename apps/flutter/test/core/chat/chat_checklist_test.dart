@@ -176,6 +176,31 @@ void main() {
       expect(find.text('Task 0'), findsOneWidget);
     });
 
+    testWidgets('compact pill is short, not stretched to full height', (tester) async {
+      await tester.pumpWidget(themed(ChatChecklistPanel(tasks: sample(3, done: 1), initialExpanded: false)));
+      await tester.pumpAndSettle();
+      final size = tester.getSize(find.byType(ChatChecklistPanel));
+      // A pill is one text line — well under 60px, never a full column.
+      expect(size.height, lessThan(60));
+      expect(find.textContaining('1/3'), findsOneWidget);
+    });
+
+    testWidgets('expanded card grows with content but stays within the cap', (tester) async {
+      // Few tasks → card is shorter than the cap (content-sized).
+      await tester.pumpWidget(themed(ChatChecklistPanel(tasks: sample(2))));
+      await tester.pumpAndSettle();
+      final small = tester.getSize(find.byType(ChatChecklistPanel));
+      expect(small.height, lessThan(kChatChecklistMaxHeight));
+      expect(small.width, kChatChecklistWidth);
+
+      // Many tasks → capped at the max (inner scroll handles the rest).
+      await tester.pumpWidget(themed(ChatChecklistPanel(tasks: sample(80))));
+      await tester.pumpAndSettle();
+      final big = tester.getSize(find.byType(ChatChecklistPanel));
+      expect(big.height, lessThanOrEqualTo(kChatChecklistMaxHeight));
+      expect(big.height, greaterThan(small.height));
+    });
+
     testWidgets('long list is bounded and scrolls internally', (tester) async {
       await tester.pumpWidget(themed(ChatChecklistPanel(tasks: sample(60, done: 5))));
       await tester.pumpAndSettle();

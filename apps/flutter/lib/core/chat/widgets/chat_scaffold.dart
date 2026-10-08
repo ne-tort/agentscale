@@ -612,7 +612,7 @@ class _ChatScaffoldState extends State<ChatScaffold> {
                 api: api,
                 draftRestore: controller.interruptedDraft,
                 enabled: chatSendable && !updateMode,
-                streaming: controller.streaming,
+                streaming: controller.agentWorking,
                 disabledHint: disabledHint,
                 wakeMode: wakeMode,
                 waking: waking,
@@ -622,7 +622,7 @@ class _ChatScaffoldState extends State<ChatScaffold> {
                 onUpdate: onUpdate,
                 onDismissUpdate: onDismissUpdate,
                 onSend: (text, refs) => controller.send(text, attachmentRefs: refs),
-                onCancel: controller.streaming ? () => controller.cancelStream() : null,
+                onCancel: controller.agentWorking ? () => controller.cancelStream() : null,
                 onOpenSettings: onOpenChatSettings,
                 modelLabel: modelLabel,
                 onPickModel: onPickModel,
@@ -663,7 +663,13 @@ class _ChatScaffoldState extends State<ChatScaffold> {
                 AppSpacing.md,
                 0,
               ),
-              child: ChatChecklistPanel(tasks: checklistTasks),
+              // Align gives the panel LOOSE height inside the stretch Row, so
+              // it stays content-sized (compact pill / capped card) and pins
+              // to the top instead of stretching to the full viewport height.
+              child: Align(
+                alignment: Alignment.topRight,
+                child: ChatChecklistPanel(tasks: checklistTasks),
+              ),
             ),
           ],
         );
