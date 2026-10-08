@@ -1101,19 +1101,35 @@ class SubagentBlock extends StatefulWidget {
   const SubagentBlock({
     super.key,
     required this.title,
+    this.model,
+    this.task,
     this.events = const [],
     this.resultSummary,
+    this.usageRaw,
+    this.turnMs,
+    this.completedAt,
     this.running = false,
     this.onFetchSidechain,
   });
 
   final String title;
 
+  /// Model the subagent ran on (shown in the header).
+  final String? model;
+
+  /// The subagent's task text (fallback header / context line).
+  final String? task;
+
   /// Child events captured live by the projection (`subagent_event`).
   final List<dynamic> events;
 
   /// One-line conclusion emitted by `subagent_stop`.
   final String? resultSummary;
+
+  /// Token usage / duration, rendered like the main assistant meta row.
+  final Map<String, dynamic>? usageRaw;
+  final int? turnMs;
+  final DateTime? completedAt;
 
   /// Parent turn is streaming and no result yet: header spinner + polling.
   final bool running;
@@ -1130,6 +1146,7 @@ class _SubagentBlockState extends State<SubagentBlock> {
 
   List<Map<String, dynamic>>? _sidechain;
   bool _loading = false;
+  bool _firstLoadDone = false;
   bool _open = false;
   bool _offline = false;
   Timer? _pollTimer;
@@ -1159,6 +1176,9 @@ class _SubagentBlockState extends State<SubagentBlock> {
     if (fetch == null || _loading) return;
     // Finished subagent with a cached transcript — no refetch on re-expand.
     if (_sidechain != null && !widget.running) return;
+    // The indeterminate bar is only for the FIRST load. A periodic refresh
+    // must not flash the bar (it looked like a stuck/blinking progress bar).
+    _firstLoadDone = _sidechain != null;
     setState(() {
       _loading = true;
       _offline = false;
@@ -1272,57 +1292,101 @@ class _SubagentBlockState extends State<SubagentBlock> {
     final l10n = AppLocalizations.of(context);
     final summary = widget.resultSummary;
     final eventLines = _open ? _eventLines(context) : const <Widget>[];
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        ChatMutedLine(
-          label: widget.title,
-          trailing: _headerTrailing(context),
-          expanded: _open,
-          onTap: () {
-            setState(() => _open = !_open);
-            if (_open) {
-              _load();
-            } else {
-              _pollTimer?.cancel();
-              _pollTimer = null;
-            }
-          },
-        ),
-        if (!_open && summary != null && summary.trim().isNotEmpty)
-          Padding(
-            padding: EdgeInsets.only(bottom: AppSpacing.xs / 2),
-            child: Text(
-              summary,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: _mutedBodyStyle(context).copyWith(fontSize: 12),
-            ),
+    // Indeterminate bar only for the very first load — never on refresh.
+    final showFirstLoadBar = _open && _loading && !_firstLoadDone;
+    return Padding(
+      // The subagent output sits in its own inset panel, indented from the
+      // parent transcript so it reads as a nested block.
+      padding: const EdgeInsets.only(left: AppSpacing.md),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          ChatMutedLine(
+            label: widget.title,
+            trailing: _headerTrailing(context),
+            expanded: _open,
+            onTap: () {
+              setState(() => _open = !_open);
+              if (_open) {
+                _load();
+              } else {
+                _pollTimer?.cancel();
+                _pollTimer = null;
+              }
+            },
           ),
-        if (_open) ...[
-          if (_loading) const LinearProgressIndicator(),
-          if (_offline) ...[
-            ChatInsetPanel(
-              child: Text(l10n.projectChatSidechainOffline, style: _mutedBodyStyle(context)),
+          if (!_open && summary != null && summary.trim().isNotEmpty)
+            Padding(
+              padding: EdgeInsets.only(bottom: AppSpacing.xs / 2),
+              child: Text(
+                summary,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: _mutedBodyStyle(context).copyWith(fontSize: 12),
+              ),
             ),
-            if (eventLines.isNotEmpty)
+          if (_open) ...[
+            if (showFirstLoadBar) const LinearProgressIndicator(),
+            if (_offline) ...[
+              ChatInsetPanel(
+                child: Text(l10n.projectChatSidechainOffline, style: _mutedBodyStyle(context)),
+              ),
+              if (eventLines.isNotEmpty)
+                ChatInsetPanel(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: eventLines,
+                  ),
+                ),
+            ] else if (_sidechain != null)
+              ChatInsetPanel(child: _transcriptBody(context))
+            else if (eventLines.isNotEmpty)
               ChatInsetPanel(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: eventLines,
                 ),
               ),
-          ] else if (_sidechain != null)
-            ChatInsetPanel(child: _transcriptBody(context))
-          else if (eventLines.isNotEmpty)
-            ChatInsetPanel(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: eventLines,
-              ),
-            ),
+            _metaRow(context),
+          ],
         ],
-      ],
+      ),
+    );
+  }
+
+  /// Meta line under the subagent output — same shape as the main assistant
+  /// message: model · input · output · cache · cost · duration, hover-reveal,
+  /// with an always-visible completion time.
+  Widget _metaRow(BuildContext context) {
+    final usage = widget.usageRaw;
+    final model = widget.model ?? _stringOrNull(usage?['model']);
+    final input = _intOrNull(usage?['input_tokens']);
+    final output = _intOrNull(usage?['output_tokens']);
+    final turnMs = _intOrNull(widget.turnMs);
+    final hasAny = model != null || input != null || output != null || turnMs != null;
+    final timeText = _formatClockTime(widget.completedAt);
+    if (!hasAny && timeText == null) return const SizedBox.shrink();
+    final style = _mutedBodyStyle(context).copyWith(fontSize: 11.5);
+    final cells = <Widget>[
+      if (model != null) Text(model, style: style),
+      if (input != null) Text('${AppLocalizations.of(context).chatUsageInputLabel} ${_formatTokens(input)}', style: style),
+      if (output != null) Text('${AppLocalizations.of(context).chatUsageOutputLabel} ${_formatTokens(output)}', style: style),
+      if (turnMs != null) Text(_formatDurationLabel(turnMs), style: style),
+    ];
+    final items = <Widget>[];
+    for (var i = 0; i < cells.length; i++) {
+      if (i > 0) items.add(const SizedBox(width: 8));
+      items.add(cells[i]);
+    }
+    return Padding(
+      padding: const EdgeInsets.only(top: AppSpacing.xs),
+      child: Row(
+        children: [
+          if (timeText != null) Text(timeText, style: style),
+          if (timeText != null && items.isNotEmpty) const SizedBox(width: 8),
+          Flexible(child: Row(mainAxisSize: MainAxisSize.min, children: items)),
+        ],
+      ),
     );
   }
 }

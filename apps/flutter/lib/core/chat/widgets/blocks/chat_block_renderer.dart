@@ -9,6 +9,20 @@ import 'package:prodavan/l10n/app_localizations.dart';
 String? _nonEmptyString(Object? value) =>
     value is String && value.trim().isNotEmpty ? value : null;
 
+/// Header title for a subagent block: prefer the model (the useful signal),
+/// then the task, then a generic label. The runtime's "default" profile name
+/// is meaningless to the user and is never shown.
+String _subagentTitle({String? agentType, String? model, String? task}) {
+  if (model != null) return model;
+  final type = agentType?.toLowerCase();
+  if (type != null && type != 'default') return agentType!;
+  if (task != null) {
+    final flat = task.replaceAll('\n', ' ').trim();
+    return flat.length <= 60 ? flat : '${flat.substring(0, 60)}…';
+  }
+  return 'Subagent';
+}
+
 /// ISO timestamp (server `created_at`) → DateTime, null-safe.
 DateTime? _parseTimestamp(Object? value) =>
     value is String && value.isNotEmpty ? DateTime.tryParse(value) : null;
@@ -95,6 +109,12 @@ class ChatBlockRenderer extends StatelessWidget {
           streaming: block.isStreaming,
         );
       case 'tool_call':
+        // `agent.spawn` is rendered as a dedicated subagent block (with model,
+        // task, transcript) — the raw tool-call line would duplicate it as a
+        // noisy "Субагент agent.spawn" row. Suppress it here.
+        if ((block.raw['name'] as String?)?.trim() == 'agent.spawn') {
+          return const SizedBox.shrink();
+        }
         if (pairedToolResult != null && pairedToolResult!.kind == 'tool_result') {
           final input = block.raw['input'] is Map
               ? Map<String, dynamic>.from(block.raw['input'] as Map)
@@ -137,13 +157,28 @@ class ChatBlockRenderer extends StatelessWidget {
         final toolUseId = _nonEmptyString(block.raw['parent_tool_use_id']) ?? block.id;
         final summary = _nonEmptyString(block.raw['result_summary']);
         final eventsRaw = block.raw['events'];
+        // The agent_type default ("default") is a runtime profile name, not a
+        // useful label — prefer the model, then the task, then a generic title.
+        final agentType = _nonEmptyString(block.raw['agent_type']);
+        final model = _nonEmptyString(block.raw['model']);
+        final task = _nonEmptyString(block.raw['task']);
+        final title = _subagentTitle(agentType: agentType, model: model, task: task);
+        // "Running" is decided by THIS subagent's own lifecycle, not the parent
+        // turn: a stop event (summary or status=completed) ends it even while
+        // the parent keeps streaming.
+        final stopped = summary != null || _nonEmptyString(block.raw['status']) == 'completed';
         return SubagentBlock(
-          title: _nonEmptyString(block.raw['agent_type']) ??
-              _nonEmptyString(block.raw['agent_id']) ??
-              'Subagent',
+          title: title,
+          model: model,
+          task: task,
           events: eventsRaw is List ? eventsRaw : const <dynamic>[],
           resultSummary: summary,
-          running: turnStreaming && summary == null,
+          usageRaw: block.raw['usage'] is Map
+              ? Map<String, dynamic>.from(block.raw['usage'] as Map)
+              : null,
+          turnMs: _intOrNull(block.raw['turn_ms']),
+          completedAt: _parseTimestamp(block.raw['completed_at'] ?? block.raw['created_at']),
+          running: turnStreaming && !stopped,
           onFetchSidechain:
               api != null && projectId != null && sessionId != null && toolUseId.isNotEmpty
                   ? () async {
@@ -152,7 +187,7 @@ class ChatBlockRenderer extends StatelessWidget {
                         sessionId: sessionId!,
                         toolUseId: toolUseId,
                       );
-                      final items = body['blocks'] ?? body['messages'] ?? body['events'];
+                      final items = body['blocks'] ?? body['entries'] ?? body['messages'];
                       if (items is List) {
                         return [
                           for (final item in items)

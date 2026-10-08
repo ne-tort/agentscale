@@ -260,6 +260,11 @@ def events_to_chat_blocks(events: list[dict]) -> list[dict]:
                 "id": sub_id,
                 "agent_id": data.get("agent_id"),
                 "agent_type": data.get("type") or data.get("agent_type"),
+                # Effective model (profile override or inherited parent model) —
+                # surfaced so the UI never shows a bare "default".
+                "model": data.get("model"),
+                "task": data.get("task"),
+                "description": data.get("description"),
                 "parent_tool_use_id": data.get("parent_tool_use_id") or parent_id,
                 "status": "running",
                 "events": [],
@@ -329,3 +334,78 @@ def events_to_chat_blocks(events: list[dict]) -> list[dict]:
     flush_assistant()
     flush_thinking()
     return blocks
+
+
+def transcript_entries_to_chat_blocks(entries: object) -> list[dict]:
+    """Convert runtime sidechain transcript entries → chat blocks.
+
+    The bridge returns sidechain transcripts as Anthropic-shaped transcript
+    entries (``{role, content}`` where content is a string or a block array of
+    ``text``/``tool_use``). The Flutter subagent renderer consumes chat blocks
+    (``kind``/``text``), so the API normalizes here — otherwise the UI falls
+    back to dumping the raw event stream.
+    """
+    if not isinstance(entries, list):
+        return []
+    blocks: list[dict] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        role = str(entry.get("role") or "")
+        content = entry.get("content")
+        if role == "user":
+            text = _content_text(content)
+            if text:
+                blocks.append({"kind": "user", "text": text})
+            continue
+        if role == "assistant":
+            if isinstance(content, list):
+                text = _content_text([b for b in content if isinstance(b, dict) and b.get("type") == "text"])
+                if text:
+                    blocks.append({"kind": "assistant_markdown", "text": text})
+                for b in content:
+                    if isinstance(b, dict) and b.get("type") == "tool_use":
+                        blocks.append(
+                            {
+                                "kind": "tool_call",
+                                "id": b.get("id"),
+                                "name": b.get("name"),
+                                "input": b.get("input") or {},
+                            }
+                        )
+            else:
+                text = _content_text(content)
+                if text:
+                    blocks.append({"kind": "assistant_markdown", "text": text})
+            continue
+        if role == "tool":
+            meta = entry.get("meta") if isinstance(entry.get("meta"), dict) else {}
+            blocks.append(
+                {
+                    "kind": "tool_result",
+                    "id": meta.get("tool_call_id"),
+                    "name": meta.get("name"),
+                    "output": _content_text(content),
+                    "is_error": bool(meta.get("is_error")),
+                }
+            )
+    return blocks
+
+
+def _content_text(content: object) -> str:
+    """Flatten a transcript content value (string or block array) to text."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for block in content:
+            if isinstance(block, dict):
+                text = block.get("text")
+                if isinstance(text, str):
+                    parts.append(text)
+            elif isinstance(block, str):
+                parts.append(block)
+        return "".join(parts)
+    if content is None:
+        return ""
+    return str(content)

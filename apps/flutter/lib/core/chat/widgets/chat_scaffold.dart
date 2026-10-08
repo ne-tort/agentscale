@@ -548,10 +548,16 @@ class _ChatScaffoldState extends State<ChatScaffold> {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final maxW = _columnMaxWidth(constraints.maxWidth);
         final checklistTasks = deriveChecklistTasks(controller.visibleBlocks);
         final showChecklist =
             checklistTasks.isNotEmpty && constraints.maxWidth >= _kChecklistMinWidth;
+        // With the checklist open the transcript FILLS the space up to the
+        // panel, so the left gutter and the transcript↔panel gap are both
+        // AppSpacing.md (equal margins, per the design ask). Without it the
+        // readable column width cap applies.
+        final maxW = showChecklist
+            ? double.infinity
+            : _columnMaxWidth(constraints.maxWidth);
 
         final column = ConstrainedBox(
           constraints: BoxConstraints(maxWidth: maxW),
@@ -637,11 +643,14 @@ class _ChatScaffoldState extends State<ChatScaffold> {
         );
 
         if (!showChecklist) {
-          // Asymmetric framing: a touch less air on the left than on the right
-          // (the column stays the visual anchor but is biased left of centre).
+          // Deterministic left inset equal to the checklist gap (AppSpacing.md)
+          // so the transcript's left air matches the gap to the checklist.
           return Align(
-            alignment: const Alignment(-0.16, 0),
-            child: column,
+            alignment: Alignment.topLeft,
+            child: Padding(
+              padding: const EdgeInsets.only(left: AppSpacing.md),
+              child: column,
+            ),
           );
         }
         return Row(
@@ -651,7 +660,9 @@ class _ChatScaffoldState extends State<ChatScaffold> {
               child: Align(
                 alignment: Alignment.topLeft,
                 child: Padding(
-                  padding: const EdgeInsets.only(left: AppSpacing.sm),
+                  // Left gutter == the panel's AppSpacing.md, so the space from
+                  // the sidebar and the space to the checklist are equal.
+                  padding: const EdgeInsets.only(left: AppSpacing.md),
                   child: column,
                 ),
               ),

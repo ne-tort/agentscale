@@ -2134,6 +2134,15 @@ class AgentSessionService:
                 status=503,
                 detail="sidechain transcript unavailable",
             )
+        # The bridge returns Anthropic-shaped transcript entries under `entries`;
+        # the UI renders chat blocks. Normalize here so the subagent panel shows
+        # a real transcript instead of falling back to a raw event dump.
+        from prodavan.application.agent.chat_projection import (
+            transcript_entries_to_chat_blocks,
+        )
+
+        if isinstance(body, dict) and "blocks" not in body:
+            body = {**body, "blocks": transcript_entries_to_chat_blocks(body.get("entries"))}
         return body
 
 
