@@ -37,6 +37,9 @@ class ChatChecklistPanel extends StatefulWidget {
 class _ChatChecklistPanelState extends State<ChatChecklistPanel> {
   late bool _expanded = widget.initialExpanded;
 
+  /// Ids of tasks whose comment is expanded (hidden by default).
+  final Set<String> _openComments = {};
+
   @override
   Widget build(BuildContext context) {
     if (widget.tasks.isEmpty) return const SizedBox.shrink();
@@ -173,39 +176,100 @@ class _ChatChecklistPanelState extends State<ChatChecklistPanel> {
   }
 
   Widget _taskRow(BuildContext context, ColorScheme scheme, ChatChecklistTask task) {
-    final (IconData icon, Color color) = task.isCompleted
-        ? (Icons.check_circle_rounded, scheme.primary)
-        : task.isInProgress
-            ? (Icons.pending_rounded, scheme.tertiary)
-            : (Icons.radio_button_unchecked, scheme.outline);
+    final (IconData icon, Color color) = _taskIcon(scheme, task);
+    final comment = task.comment;
+    final hasComment = comment != null && comment.trim().isNotEmpty;
+    final open = hasComment && _openComments.contains(task.id);
     return Padding(
       padding: const EdgeInsets.symmetric(
         horizontal: AppSpacing.md,
         vertical: AppSpacing.xs,
       ),
-      child: Row(
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Padding(
-            padding: const EdgeInsets.only(top: 1),
-            child: Icon(icon, size: 16, color: color),
-          ),
-          const SizedBox(width: AppSpacing.sm),
-          Expanded(
-            child: Text(
-              task.title,
-              style: TextStyle(
-                fontSize: 12.5,
-                height: 1.3,
-                color: task.isCompleted ? scheme.onSurfaceVariant : scheme.onSurface,
-                decoration: task.isCompleted ? TextDecoration.lineThrough : null,
-                decorationColor: scheme.onSurfaceVariant,
-              ),
+          InkWell(
+            onTap: hasComment
+                ? () => setState(() {
+                      if (open) {
+                        _openComments.remove(task.id);
+                      } else {
+                        _openComments.add(task.id);
+                      }
+                    })
+                : null,
+            borderRadius: BorderRadius.circular(6),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(top: 1),
+                  child: Icon(icon, size: 16, color: color),
+                ),
+                const SizedBox(width: AppSpacing.sm),
+                Expanded(
+                  child: Text(
+                    task.title,
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      height: 1.3,
+                      color: task.isCompleted ? scheme.onSurfaceVariant : scheme.onSurface,
+                      decoration: task.isCompleted ? TextDecoration.lineThrough : null,
+                      decorationColor: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+                if (hasComment)
+                  Padding(
+                    padding: const EdgeInsets.only(left: AppSpacing.xs),
+                    child: Icon(
+                      open ? Icons.expand_less : Icons.expand_more,
+                      size: 14,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+              ],
             ),
           ),
+          if (open)
+            Padding(
+              padding: const EdgeInsets.only(left: 24, top: AppSpacing.xs, right: AppSpacing.xs),
+              child: Text(
+                comment,
+                style: TextStyle(
+                  fontSize: 11.5,
+                  height: 1.3,
+                  color: scheme.onSurfaceVariant,
+                ),
+              ),
+            ),
         ],
       ),
     );
+  }
+
+  /// Leading icon + color for a task: an explicit color wins, otherwise the
+  /// state drives the icon; completed/blocked/deferred/partial have distinct
+  /// glyphs so the list is not merely open/closed.
+  (IconData, Color) _taskIcon(ColorScheme scheme, ChatChecklistTask task) {
+    if (task.isCompleted) return (Icons.check_circle_rounded, scheme.primary);
+    switch (task.color) {
+      case ChatTaskColor.success:
+        return (Icons.check_circle_outline_rounded, scheme.primary);
+      case ChatTaskColor.warning:
+        return (Icons.warning_amber_rounded, scheme.tertiary);
+      case ChatTaskColor.error:
+        return (Icons.error_outline_rounded, scheme.error);
+      case ChatTaskColor.info:
+        return (Icons.info_outline_rounded, scheme.secondary);
+      case null:
+        break;
+    }
+    if (task.isInProgress) return (Icons.pending_rounded, scheme.tertiary);
+    if (task.isBlocked) return (Icons.block_rounded, scheme.error);
+    if (task.isDeferred) return (Icons.schedule_rounded, scheme.onSurfaceVariant);
+    if (task.isPartial) return (Icons.incomplete_circle_rounded, scheme.tertiary);
+    return (Icons.radio_button_unchecked, scheme.outline);
   }
 }
 

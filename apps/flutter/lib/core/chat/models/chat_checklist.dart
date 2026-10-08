@@ -11,24 +11,46 @@ library;
 
 import 'chat_block.dart';
 
-/// One checklist task with normalized status.
+/// Semantic colors a task may carry (used sparingly, only when meaningful).
+enum ChatTaskColor { success, warning, error, info }
+
+/// One checklist task with normalized status, optional color and comment.
 class ChatChecklistTask {
   const ChatChecklistTask({
     required this.id,
     required this.title,
     required this.status,
+    this.color,
+    this.comment,
   });
 
   final String id;
   final String title;
 
-  /// One of `pending` / `in_progress` / `completed` (unknown → `pending`).
+  /// One of `pending` / `in_progress` / `completed` / `blocked` /
+  /// `deferred` / `partial` (unknown → `pending`).
   final String status;
 
-  bool get isCompleted => status == 'completed' || status == 'done';
-  bool get isInProgress => status == 'in_progress' || status == 'running';
+  /// Optional semantic color (drives the leading icon in the UI).
+  final ChatTaskColor? color;
 
-  Map<String, dynamic> toJson() => {'id': id, 'title': title, 'status': status};
+  /// Optional short note, shown collapsed until the user expands the task.
+  final String? comment;
+
+  bool get isCompleted => status == 'completed' || status == 'done';
+  bool get isInProgress => status == 'in_progress' || status == 'running' || status == 'active';
+  bool get isBlocked => status == 'blocked';
+  bool get isDeferred => status == 'deferred';
+  bool get isPartial => status == 'partial';
+  bool get hasComment => comment != null && comment!.trim().isNotEmpty;
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'title': title,
+        'status': status,
+        if (color != null) 'color': color!.name,
+        if (comment != null) 'comment': comment,
+      };
 }
 
 /// Strip the `mcp.openclaw.` prefix so a tool name compares canonically.
@@ -41,30 +63,127 @@ String canonicalToolName(String name) {
   return trimmed;
 }
 
+/// Normalize any status word the model used to a canonical state.
 String _normalizeStatus(Object? raw) {
   final s = raw?.toString().trim().toLowerCase();
   switch (s) {
     case 'completed':
+    case 'complete':
     case 'done':
+    case 'ok':
+    case 'closed':
       return 'completed';
     case 'in_progress':
     case 'in-progress':
+    case 'inprogress':
     case 'running':
     case 'active':
+    case 'doing':
+    case 'started':
       return 'in_progress';
+    case 'blocked':
+    case 'stuck':
+      return 'blocked';
+    case 'deferred':
+    case 'postponed':
+    case 'later':
+    case 'waiting':
+      return 'deferred';
+    case 'partial':
+    case 'partially':
+    case 'partially_done':
+    case 'partially-done':
+      return 'partial';
     default:
       return 'pending';
   }
 }
 
+ChatTaskColor? _normalizeColor(Object? raw) {
+  final s = raw?.toString().trim().toLowerCase().replaceAll(RegExp(r'^<+'), '').replaceAll(RegExp(r'>+$'), '');
+  switch (s) {
+    case 'success':
+    case 'ok':
+    case 'good':
+    case 'green':
+      return ChatTaskColor.success;
+    case 'warning':
+    case 'warn':
+    case 'attention':
+    case 'yellow':
+      return ChatTaskColor.warning;
+    case 'error':
+    case 'fail':
+    case 'failed':
+    case 'danger':
+    case 'problem':
+    case 'red':
+      return ChatTaskColor.error;
+    case 'info':
+    case 'note':
+    case 'blue':
+      return ChatTaskColor.info;
+    default:
+      return null;
+  }
+}
+
+// A leading tag may carry a color (`<success>`) or a status hint
+// (`<blocked>`, `<postponed>`); mirrors the runtime's parseTodoContent.
+final _leadingTag = RegExp(r'^\s*<\s*([a-zA-Z_]+)\s*>\s*');
+
+const _tagStatusHints = <String, String>{
+  'blocked': 'blocked',
+  'deferred': 'deferred',
+  'postponed': 'deferred',
+  'partial': 'partial',
+  'pending': 'pending',
+  'done': 'completed',
+  'completed': 'completed',
+};
+
+class _ParsedContent {
+  const _ParsedContent(this.title, this.color, this.statusHint);
+  final String title;
+  final ChatTaskColor? color;
+  final String? statusHint;
+}
+
+/// Split leading `<tag>`s off the title, mapping them to a color / status hint.
+_ParsedContent _parseContent(String raw) {
+  var content = raw;
+  ChatTaskColor? color;
+  String? statusHint;
+  for (var i = 0; i < 4; i++) {
+    final m = _leadingTag.firstMatch(content);
+    if (m == null) break;
+    final tag = m.group(1)!.toLowerCase();
+    content = content.substring(m.end);
+    final hinted = _tagStatusHints[tag];
+    if (hinted != null && statusHint == null) {
+      statusHint = hinted;
+    } else {
+      color ??= _normalizeColor(tag);
+    }
+  }
+  return _ParsedContent(content.trim(), color, statusHint);
+}
+
 ChatChecklistTask? _taskFromMap(Map map, {int fallbackIndex = 0}) {
-  final title = (map['content'] ?? map['title'] ?? map['id'])?.toString().trim();
-  if (title == null || title.isEmpty) return null;
+  final rawTitle = (map['content'] ?? map['title'] ?? map['id'])?.toString().trim();
+  if (rawTitle == null || rawTitle.isEmpty) return null;
+  final parsed = _parseContent(rawTitle);
+  final title = parsed.title.isEmpty ? rawTitle : parsed.title;
   final id = (map['id'] ?? map['task_id'])?.toString();
+  final hasStatus = map['status'] != null && map['status'].toString().trim().isNotEmpty;
+  final status = hasStatus ? _normalizeStatus(map['status']) : (parsed.statusHint ?? 'pending');
+  final comment = map['comment']?.toString().trim();
   return ChatChecklistTask(
     id: (id == null || id.isEmpty) ? 'task-$fallbackIndex' : id,
     title: title,
-    status: _normalizeStatus(map['status']),
+    status: status,
+    color: _normalizeColor(map['color']) ?? parsed.color,
+    comment: (comment == null || comment.isEmpty) ? null : comment,
   );
 }
 
@@ -123,15 +242,16 @@ List<ChatChecklistTask> deriveChecklistTasks(List<ChatBlock> blocks) {
         final id = (item['id'] ?? item['task_id'])?.toString();
         if (id == null || id.isEmpty) continue;
         final prev = state[id];
-        final title = (item['content'] ?? item['title'] ?? prev?.title)?.toString().trim();
-        if (title == null || title.isEmpty) continue;
-        state[id] = ChatChecklistTask(
-          id: id,
-          title: title,
-          status: item.containsKey('status')
-              ? _normalizeStatus(item['status'])
-              : (prev?.status ?? 'pending'),
-        );
+        // Merge onto the previous task so an omitted field is preserved.
+        final merged = <String, dynamic>{
+          'id': id,
+          'content': item['content'] ?? item['title'] ?? prev?.title,
+          'status': item.containsKey('status') ? item['status'] : prev?.status,
+          'color': item.containsKey('color') ? item['color'] : prev?.color?.name,
+          'comment': item.containsKey('comment') ? item['comment'] : prev?.comment,
+        };
+        final task = _taskFromMap(merged);
+        if (task != null) state[id] = task;
       }
     }
   }

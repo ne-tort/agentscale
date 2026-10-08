@@ -117,6 +117,67 @@ void main() {
       expect(tasks.map((t) => t.title), ['Step 1', 'Step 2']);
       expect(checklistCompletedCount(tasks), 2);
     });
+
+    test('color tag is stripped from the title and mapped to a color', () {
+      final tasks = deriveChecklistTasks([
+        _toolCall('todo.write', {
+          'items': [
+            {'id': '1', 'content': '<warning>Проверить совместимость'},
+            {'id': '2', 'content': 'Обычная задача'},
+          ],
+        }),
+      ]);
+      expect(tasks[0].title, 'Проверить совместимость');
+      expect(tasks[0].color, ChatTaskColor.warning);
+      expect(tasks[1].color, isNull);
+    });
+
+    test('state tag maps to a rich status (blocked/deferred/partial)', () {
+      final tasks = deriveChecklistTasks([
+        _toolCall('todo.write', {
+          'items': [
+            {'id': '1', 'content': '<blocked>Ждём клиента'},
+            {'id': '2', 'content': '<postponed>Позже'},
+            {'id': '3', 'content': '<partial>Сделано наполовину'},
+          ],
+        }),
+      ]);
+      expect(tasks[0].isBlocked, isTrue);
+      expect(tasks[1].isDeferred, isTrue);
+      expect(tasks[2].isPartial, isTrue);
+    });
+
+    test('explicit color field and comment are carried', () {
+      final tasks = deriveChecklistTasks([
+        _toolCall('todo.write', {
+          'items': [
+            {'id': '1', 'content': 'Позиция', 'color': 'error', 'comment': 'нет в каталоге'},
+          ],
+        }),
+      ]);
+      expect(tasks[0].color, ChatTaskColor.error);
+      expect(tasks[0].hasComment, isTrue);
+      expect(tasks[0].comment, 'нет в каталоге');
+    });
+
+    test('patch preserves color and comment when not overridden', () {
+      final blocks = [
+        _toolCall('todo.write', {
+          'items': [
+            {'id': '1', 'content': 'X', 'color': 'info', 'comment': 'c1', 'status': 'pending'},
+          ],
+        }),
+        _toolCall('todo.write', {
+          'patch': [
+            {'id': '1', 'status': 'in_progress'},
+          ],
+        }),
+      ];
+      final tasks = deriveChecklistTasks(blocks);
+      expect(tasks[0].isInProgress, isTrue);
+      expect(tasks[0].color, ChatTaskColor.info);
+      expect(tasks[0].comment, 'c1');
+    });
   });
 
   group('ChatChecklistPanel', () {
@@ -214,6 +275,26 @@ void main() {
       await tester.drag(find.byType(ListView), const Offset(0, -4000));
       await tester.pumpAndSettle();
       expect(find.text('Task 59'), findsOneWidget);
+    });
+
+    testWidgets('comment is hidden until the task is tapped, then revealed', (tester) async {
+      final tasks = [
+        const ChatChecklistTask(
+          id: '1',
+          title: 'Позиция X',
+          status: 'blocked',
+          comment: 'ждём ответ клиента',
+        ),
+      ];
+      await tester.pumpWidget(themed(ChatChecklistPanel(tasks: tasks)));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Позиция X'), findsOneWidget);
+      expect(find.text('ждём ответ клиента'), findsNothing);
+
+      await tester.tap(find.text('Позиция X'));
+      await tester.pumpAndSettle();
+      expect(find.text('ждём ответ клиента'), findsOneWidget);
     });
   });
 }
