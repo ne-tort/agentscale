@@ -4,7 +4,21 @@
 Императив только `poetry run prodavan-ops {validate|wait|rollout|smoke}`.  
 **Запрещены:** `.sh` под `infra/`, docker-compose как кластер, k3d в git, recover/deploy shell.
 
-Репозиторий: [ne-tort/prodavan](https://github.com/ne-tort/prodavan).  
+> ## Политика сред: работаем только с dev (2026-10-08)
+>
+> **Вся текущая работа — ТОЛЬКО dev-контур** (Argo `agentscale-dev` ← ветка `main`, ns `agentscale-dev`).
+> **Prod трогаем исключительно по явному требованию** пользователя: никаких промоций, sync/refresh prod-приложения, правок `infra/k3s/overlays/prod/**` или prod-ресурсов (ns `agentscale`) «заодно» с обычной задачей.
+>
+> | | Dev (по умолчанию) | Prod (только по явному требованию) |
+> |---|---|---|
+> | Argo app | `agentscale-dev` ← `main` | `agentscale-prod` ← `prod` |
+> | Namespace | `agentscale-dev` | `agentscale` |
+> | Поставка | PR → `main` → auto-merge → CI Images → Argo sync | PR `main`→`prod` + пин образов |
+> | UI | http://172.31.156.203:8088 | http://172.31.156.203:30090 |
+>
+> Обычный PR завершается на **Verify Dev** (green) — дальше не идём. Промоция в prod — отдельный заход по прямой просьбе.
+
+Репозиторий: [ne-tort/agentscale](https://github.com/ne-tort/agentscale) (подмодуль `prodavan/`).  
 **UI:** http://127.0.0.1:8088/ (Traefik слушает `0.0.0.0:8088`, Ingress без фильтра `host`).  
 После bootstrap — единая форма логин/пароль (Keycloak ROPC). Platform Admin: `admin` / `admin`. Issuer: `http://127.0.0.1:8089/realms/prodavan` (hostPort).
 
@@ -30,6 +44,8 @@
   → CI Images (GHCR)
   → Verify Dev (rollout + wait + smoke)
 ```
+
+Это **dev-поток** (Argo `agentscale-dev` ← `main`). На нём обычная задача и **завершается**. Промоция в prod (merge `main`→`prod`, PR в ветку `prod`, пин `newTag` в `overlays/prod/kustomization.yaml`) — **только по явному требованию** пользователя (см. «Политика сред» вверху).
 
 Не `git push origin main`.
 

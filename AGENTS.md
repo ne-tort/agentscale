@@ -22,6 +22,22 @@ Legacy AI-канон: [`docs/target/`](docs/target/) (кроме as-built) — �
 
 **Ранбук:** [`docs/07-infrastructure/runbook.md`](docs/07-infrastructure/runbook.md).
 
+### Политика сред: работаем только с dev
+
+> **Правило (2026-10-08): вся текущая работа ведётся ТОЛЬКО с dev-контуром.** **Prod трогаем исключительно по явному требованию** пользователя — никаких промоций, sync'ов, правок `overlays/prod` или prod-ресурсов «заодно» с задачей. Прод-деплой — отдельное, прямо запрошенное действие, а не часть обычной доработки.
+
+| | **Dev (по умолчанию)** | **Prod (только по явному требованию)** |
+|---|---|---|
+| Argo Application | `agentscale-dev` ← ветка `main` (auto-sync) | `agentscale-prod` ← ветка `prod` |
+| Namespace | `agentscale-dev` (+ `agentscale-dev-sandboxes`) | `agentscale` (+ `agentscale-sandboxes`) |
+| Поставка | PR → `main` → auto-merge → CI Images → Argo sync | PR `main`→`prod` + пин образов (промоция) |
+| UI | http://172.31.156.203:8088 | http://172.31.156.203:30090 |
+| Образы | `:latest` | pinned SHA (`overlays/prod/kustomization.yaml`) |
+
+- Обычный PR завершается на dev (**Verify Dev** green) — **дальше не идём**.
+- Прод-промоция (merge `main`→`prod`, PR в ветку `prod`, пин `newTag` в `overlays/prod/kustomization.yaml`) — **только по прямой просьбе** пользователя, отдельным заходом.
+- Не выполнять над prod: `argocd` sync/refresh, промо-PR, правки `overlays/prod/**`, ручные `kubectl` в ns `agentscale` — без явного требования.
+
 ### Поставка через PR (обязательно)
 
 **Задача не считается выполненной, пока нет PR.** Локальный diff, «готово в ветке» или summary без push — **не финал**.
@@ -45,15 +61,15 @@ Legacy AI-канон: [`docs/target/`](docs/target/) (кроме as-built) — �
 - Bootstrap кластера: **SSH + Terraform** (`infra/terraform/environments/vm`) → UI **http://172.31.156.203:8088/**.
 - Императив только **`infra/ops`**: `validate` / `wait` / `rollout` / `smoke`.
 - **Запрещены** `.sh` под `infra/`, docker-compose как кластер, k3d в git, recover/deploy shell.
-- Кластер: **k3s** + Argo (`infra/argocd` → `infra/k3s/overlays/dev`).
+- Кластер: **k3s** + Argo (`infra/argocd` → `infra/k3s/overlays/dev`). **Работаем с dev** (`agentscale-dev`); prod — только по явному требованию (см. «Политика сред»).
 
 ### Принципы инфраструктуры (канон)
 
 1. **Декларативно везде, где возможно.** GitOps (Argo CD) + Terraform — источник истины. Никаких императивных `.sh`/`.ps1` скриптов для инфраструктуры: состояние описывается манифестами/HelmChartConfig/Terraform, применяется контроллерами.
 2. **Где GitOps/Terraform не могут декларативно** — **init containers (Python)** внутри Pod/job, которые при старте приводят состояние к нужному. Не shell-скрипты на хосте, а контейнер с Python-логикой в k8s.
 3. **Windows-хост — только как клиент.** Раньше требовался WSL→Windows port forwarding и keepalive (исключение из декларативности). Теперь кластер на выделенной VM, доступной с Windows по IP напрямую: portproxy/keepalive не нужны.
-4. **Dev overlay: wildcard access.** Dev-доступ идёт через произвольные reverse-proxy/VPN (punnel) с непредсказуемым Host/SNI/IP — dev overlays **не пиняют** конкретные SNI/IP, а разрешают любой origin (wildcard). TLS — self-signed default cert Traefik (без cert-manager в dev).
-5. **Prod overlay: cert-manager + Let's Encrypt** на домене **`ai-qwerty.ru`** (ClusterIssuer, автоматический выпуск). Prod overlay пиняет host + TLS cert.
+4. **Маршрутизация dev/prod по Host (as-built 2026-10-08).** Правило: **любой публичный адрес = prod**. На `websecure` (:443, куда прокинут punnel/VPN) prod-контур = **wildcard catch-all** (`priority: 50`), dev = **pin** на `agentscale.dev`+`localhost` (`priority: 100`) → dev-имена выигрывают, всё прочее (публичный IP, сканеры) идёт в prod. Публичный IP туннеля **нигде не хардкодится** (он может меняться). На `web` (:8088, локальный, туннель не прокидывает) dev остаётся wildcard. TLS — self-signed default cert Traefik (без cert-manager); для произвольного публичного IP браузер даёт name-mismatch (ожидаемо). Детали: `infra/k3s/base/ingress.yaml`, `overlays/{dev,prod}/patch-*.yaml`.
+5. **Prod overlay — только по явному требованию.** `overlays/prod` пинит host/образы; любые его правки и prod-промоция — отдельный заход по прямой просьбе (см. «Политика сред»). Целевой дизайн прод-TLS (cert-manager + Let's Encrypt на домене) — не реализован как as-built, не путать с текущим self-signed.
 6. **Не ломать punnel/demux.** Punnel — L4 plaintext reverse relay по дизайну (FEATURE 029: no TLS terminate). HTTPS обеспечивается на ingress-уровне (Traefik websecure), не punnel'ом.
 
 ### Dev-кластер на VM (kubectl)
