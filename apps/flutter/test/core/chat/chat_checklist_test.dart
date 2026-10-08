@@ -10,7 +10,7 @@ import 'package:prodavan/l10n/app_localizations.dart';
 
 ChatBlock _toolCall(String name, Map<String, dynamic> input) => ChatBlock(
       kind: 'tool_call',
-      raw: {'id': 'call-${name}', 'name': name, 'input': input},
+      raw: {'id': 'call-$name', 'name': name, 'input': input},
     );
 
 ChatBlock _plan(List<Map<String, dynamic>> tasks) =>

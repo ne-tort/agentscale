@@ -1570,6 +1570,7 @@ class ProdavanApi {
     required String sessionId,
     int limit = 500,
     int? beforeSeq,
+    int? afterSeq,
   }) async {
     final prevProj = this.projectId;
     this.projectId = projectId;
@@ -1577,6 +1578,7 @@ class ProdavanApi {
       final params = <String, String>{'session_id': sessionId};
       if (limit != 500) params['limit'] = '$limit';
       if (beforeSeq != null) params['before_seq'] = '$beforeSeq';
+      if (afterSeq != null) params['after_seq'] = '$afterSeq';
       final query =
           '?${params.entries.map((e) => '${e.key}=${Uri.encodeComponent(e.value)}').join('&')}';
       final res = await AuthHttp.get(_uri('/projects/$projectId/chat/transcript$query'), extraHeaders: _workHeaders);

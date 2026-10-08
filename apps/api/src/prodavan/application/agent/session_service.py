@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -223,6 +223,19 @@ _STREAM_FLUSH_TYPES = frozenset(
         AgentEventType.SUBAGENT_STOP,
     }
 )
+
+# A turn is "done" once one of these lands in the transcript.
+TERMINAL_EVENT_TYPES = frozenset({str(AgentEventType.DONE), str(AgentEventType.ERROR)})
+
+# How long a non-terminal tail still counts as "the agent is working". The
+# stall watchdog (run_stall.STALL_AFTER = 7 min) writes a terminal marker, so
+# staying generous avoids flapping between "working" and "idle" while it
+# decides; beyond this window we treat a silent tail as a dead run.
+_TURN_IN_PROGRESS_MAX_AGE = timedelta(minutes=15)
+
+
+def _ensure_utc(value: datetime) -> datetime:
+    return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
 
 
 def _raise_if_agent_error_events(events: list[dict]) -> None:
@@ -1233,6 +1246,7 @@ class AgentSessionService:
         employee: EmployeeRow | None,
         limit: int = 500,
         before_seq: int | None = None,
+        after_seq: int | None = None,
         tail: bool = False,
         pod_agent: bool = False,
         session_row: AgentSessionRow | None = None,
@@ -1275,6 +1289,18 @@ class AgentSessionService:
             has_more = len(rows) > limit
             rows = rows[:limit]
             rows.reverse()
+        elif after_seq is not None:
+            # Incremental tail: only events strictly newer than the cursor,
+            # ascending, so a client can poll for live updates after a reload
+            # without re-fetching the whole transcript.
+            q = await self._session.execute(
+                base.where(AgentEventRow.seq > after_seq)
+                .order_by(AgentEventRow.seq.asc())
+                .limit(fetch_limit)
+            )
+            rows = list(q.scalars().all())
+            has_more = len(rows) > limit
+            rows = rows[:limit]
         else:
             q = await self._session.execute(base.order_by(AgentEventRow.seq.asc()).limit(fetch_limit))
             rows = list(q.scalars().all())
@@ -1400,8 +1426,15 @@ class AgentSessionService:
         session_id: str,
         limit: int = 500,
         before_seq: int | None = None,
+        after_seq: int | None = None,
     ) -> dict:
-        """Chat bubbles for an explicit session — UI must pass session_id (multi-chat)."""
+        """Chat bubbles for an explicit session — UI must pass session_id (multi-chat).
+
+        ``after_seq`` — incremental mode: return only events newer than the
+        cursor (for live tailing after a reload). ``turn_in_progress`` tells
+        the client the agent is still working so it can show the indicator and
+        keep polling instead of appearing idle.
+        """
         await self._projects.require_access(
             project_id=project_id, principal=principal, employee=employee, write=False
         )
@@ -1416,6 +1449,31 @@ class AgentSessionService:
         session_row = await self.get_session(session_id=sid)
         if session_row.project_id != project_id:
             raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Agent session not found")
+
+        turn_in_progress = await self.turn_in_progress(sid)
+
+        if after_seq is not None:
+            # Incremental poll: new blocks only, no transcript-wide scans.
+            events, meta = await self._list_events_page(
+                session_id=sid,
+                project_id=project_id,
+                principal=principal,
+                employee=employee,
+                limit=limit,
+                after_seq=after_seq,
+                tail=False,
+                session_row=session_row,
+                skip_access=True,
+                include_total_count=False,
+            )
+            return {
+                "session_id": sid,
+                "session_status": session_row.status,
+                "blocks": events_to_chat_blocks(events),
+                "pending_approvals": [],
+                "turn_in_progress": turn_in_progress,
+                **meta,
+            }
 
         events, meta = await self._list_events_page(
             session_id=sid,
@@ -1452,8 +1510,37 @@ class AgentSessionService:
             "session_status": session_row.status,
             "blocks": events_to_chat_blocks(events),
             "pending_approvals": pending_approvals,
+            "turn_in_progress": turn_in_progress,
             **meta,
         }
+
+    async def turn_in_progress(self, session_id: str) -> bool:
+        """Whether a turn is likely still running (derived from the event tail).
+
+        There is no server-side run registry — the transcript is the record.
+        A turn is in progress when the newest event is NOT terminal
+        (``done``/``error``); a trailing user_message or a mid-turn delta both
+        qualify. Bounded by recency so a crashed turn does not read as
+        "working" forever: after the stall watchdog (7 min) the boundary is
+        generous enough not to flap while the watchdog is still deciding.
+        """
+        q = await self._session.execute(
+            select(AgentEventRow.event_type, AgentEventRow.created_at)
+            .where(AgentEventRow.session_id == session_id)
+            .order_by(AgentEventRow.seq.desc())
+            .limit(1)
+        )
+        row = q.first()
+        if row is None:
+            return False
+        event_type, created_at = row
+        if event_type in TERMINAL_EVENT_TYPES:
+            return False
+        if created_at is not None:
+            age = datetime.now(UTC) - _ensure_utc(created_at)
+            if age > _TURN_IN_PROGRESS_MAX_AGE:
+                return False
+        return True
 
     async def delete_session(
         self,

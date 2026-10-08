@@ -73,6 +73,12 @@ class ChatSessionController {
   bool refreshingTranscript = false;
   bool hasCachedTranscript = false;
 
+  /// Server-reported: the agent is still working on this session (a turn is
+  /// in progress in the transcript). Set on transcript load so a client that
+  /// reloaded or navigated back mid-turn knows to show the working indicator
+  /// and poll for live updates instead of appearing idle.
+  bool turnInProgress = false;
+
   String get selectedModelLabel {
     final id = selectedModel ?? defaultModel;
     if (id == null || id.isEmpty) return id ?? '';
@@ -85,6 +91,14 @@ class ChatSessionController {
 
   ProjectChatStreamHandle? _handle;
   List<ChatBlock> _liveTurnBlocks = const [];
+
+  /// Live tail polling — used when the agent is working but this client is
+  /// not the SSE owner (reload / navigation mid-turn).
+  Timer? _livePollTimer;
+  bool _polling = false;
+  int _pollFailures = 0;
+  static const _livePollInterval = Duration(milliseconds: 2500);
+  static const _livePollMaxFailures = 5;
 
   /// Turn timing (live path): first assistant output moment and the moment
   /// the answer completed — stamped onto the assistant block as
@@ -113,8 +127,14 @@ class ChatSessionController {
   /// (right after send, between events): show the working indicator so the
   /// user sees the agent did not stop. Suppressed while a reconnect wait is
   /// shown instead («Попытка реконнекта…»).
+  ///
+  /// Also true when the agent is working on the session but this client is
+  /// NOT the one streaming it (reloaded/navigated back mid-turn): the server
+  /// reports [turnInProgress] and we poll — the user still sees it working.
+  bool get agentWorking => streaming || turnInProgress;
+
   bool get showWorkingIndicator =>
-      streaming && reconnectAttempt == null && !anyBlockStreaming && !hasPendingToolCall;
+      agentWorking && reconnectAttempt == null && !anyBlockStreaming && !hasPendingToolCall;
 
   /// «Попытка реконнекта…» — the runtime reported a provider-error reconnect.
   bool get showReconnectIndicator => streaming && reconnectAttempt != null;
@@ -257,6 +277,7 @@ class ChatSessionController {
         _liveTurnBlocks = const [];
         final pending = body['pending_approvals'];
         pendingApprovals = pending is List ? pending.cast<Map<String, dynamic>>() : const [];
+        turnInProgress = body['turn_in_progress'] == true;
       } else {
         // Pagination may legitimately return zero new blocks near the head —
         // only short-circuit when there is nothing more to load.
@@ -276,6 +297,7 @@ class ChatSessionController {
       }
       if (beforeSeq == null) {
         _saveToCache();
+        _syncLivePolling();
       }
       notifyImmediate();
     } catch (e) {
@@ -317,6 +339,9 @@ class ChatSessionController {
     if (trimmed.isEmpty && attachmentRefs.isEmpty) return;
     error = null;
     streaming = true;
+    // This client now owns the live stream — stop any reload-tail polling.
+    turnInProgress = false;
+    _stopLivePolling();
 
     if (sessionId.isEmpty) {
       try {
@@ -503,6 +528,9 @@ class ChatSessionController {
       reconnectAttempt = null;
       reconnectMaxAttempts = null;
       reconnectNextModel = null;
+      // If the turn was cut short (watchdog / connection drop) the server may
+      // still be working — resume tailing so the client keeps up.
+      if (turnInProgress) _syncLivePolling();
       notifyImmediate();
     }
   }
@@ -590,8 +618,76 @@ class ChatSessionController {
     await loadTranscript();
   }
 
+  /// Start/stop the live-tail poller so it runs only while the agent is
+  /// working and this client is not the SSE owner. Idempotent — safe to call
+  /// from any state transition (transcript load, send start/finish, poll).
+  void _syncLivePolling() {
+    final shouldPoll = turnInProgress && !streaming && sessionId.isNotEmpty;
+    if (shouldPoll) {
+      _livePollTimer ??= Timer.periodic(_livePollInterval, (_) => _pollLiveOnce());
+    } else {
+      _stopLivePolling();
+    }
+  }
+
+  void _stopLivePolling() {
+    _livePollTimer?.cancel();
+    _livePollTimer = null;
+  }
+
+  /// One incremental fetch of events newer than [newestSeq]; appends them so
+  /// a reloaded/navigated-back client catches up on the in-progress turn.
+  Future<void> _pollLiveOnce() async {
+    if (_polling || streaming || sessionId.isEmpty) return;
+    final cursor = newestSeq;
+    if (cursor == null) return;
+    _polling = true;
+    try {
+      final body = await api.projectChatTranscript(
+        projectId: projectId,
+        sessionId: sessionId,
+        afterSeq: cursor,
+      );
+      _pollFailures = 0;
+      final resolved = body['session_id'] as String?;
+      if (resolved != null && resolved.isNotEmpty) sessionId = resolved;
+      _mergeIncrementalBlocks(chatBlocksFromTranscript(body['blocks'] as List?));
+      newestSeq = body['newest_seq'] as int? ?? newestSeq;
+      turnInProgress = body['turn_in_progress'] == true;
+      _saveToCache();
+      _syncLivePolling();
+      notifyImmediate();
+    } catch (_) {
+      // Best-effort tail: stop after repeated failures instead of hammering.
+      _pollFailures++;
+      if (_pollFailures >= _livePollMaxFailures) {
+        turnInProgress = false;
+        _stopLivePolling();
+        notifyImmediate();
+      }
+    } finally {
+      _polling = false;
+    }
+  }
+
+  /// Append incrementally-fetched blocks, merging an assistant text run that
+  /// was split by the poll cursor so the message is not duplicated.
+  void _mergeIncrementalBlocks(List<ChatBlock> incoming) {
+    for (final b in incoming) {
+      if (b.kind == 'assistant_markdown' &&
+          blocks.isNotEmpty &&
+          blocks.last.kind == 'assistant_markdown') {
+        final prev = blocks.last;
+        blocks[blocks.length - 1] = prev.copyWithRaw({'text': '${prev.text}${b.text}'});
+      } else {
+        blocks.add(b);
+      }
+    }
+  }
+
   void dispose() {
     _handle?.abort();
+    _stopLivePolling();
     _notifyTimer?.cancel();
     _tick.close();
     interruptedDraft.dispose();
