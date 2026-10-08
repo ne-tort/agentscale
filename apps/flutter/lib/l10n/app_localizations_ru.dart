@@ -2134,6 +2134,9 @@ class AppLocalizationsRu extends AppLocalizations {
   String get chatUsageOutputLabel => 'выход:';
 
   @override
+  String get chatUsageCacheLabel => 'кэш:';
+
+  @override
   String chatModelPricePerMtok(String priceIn, String priceOut) {
     return '$priceIn / $priceOut \$ · 1M токенов';
   }
