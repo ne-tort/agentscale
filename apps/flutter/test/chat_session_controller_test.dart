@@ -6,7 +6,7 @@ import 'package:prodavan/core/api/prodavan_api.dart';
 import 'package:prodavan/core/chat/controller/chat_session_controller.dart';
 
 class _FakeApi extends Fake implements ProdavanApi {
-  _FakeApi({this.stream, this.transcript});
+  _FakeApi({this.stream});
 
   final StreamController<Map<String, dynamic>>? stream;
   Object? cancelError;
@@ -53,8 +53,7 @@ class _FakeApi extends Fake implements ProdavanApi {
     transcriptCalls.add(afterSeq);
     final t = transcript;
     if (t == null) throw StateError('no fake transcript configured');
-    final key = afterSeq == null ? null : afterSeq;
-    return t[key] ?? t[null] ?? const {'blocks': <dynamic>[]};
+    return t[afterSeq] ?? t[null] ?? const {'blocks': <dynamic>[]};
   }
 
   @override
