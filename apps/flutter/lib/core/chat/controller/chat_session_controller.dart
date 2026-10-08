@@ -141,8 +141,11 @@ class ChatSessionController {
   bool get showWorkingIndicator =>
       agentWorking && reconnectAttempt == null && !anyBlockStreaming && !hasPendingToolCall;
 
-  /// «Попытка реконнекта…» — the runtime reported a provider-error reconnect.
-  bool get showReconnectIndicator => streaming && reconnectAttempt != null;
+  /// «Попытка реконнекта…» — a provider-error reconnect is in flight. Works
+  /// both while this client streams (SSE frame) and after a reload (rebuilt
+  /// from the persisted `status{phase:reconnect}` block), so it no longer
+  /// requires [streaming].
+  bool get showReconnectIndicator => agentWorking && reconnectAttempt != null;
 
   /// UI-side cost estimate for usage metadata: runtime `cost_usd` wins, this
   /// only computes from the models catalog when the runtime did not report.
@@ -302,6 +305,7 @@ class ChatSessionController {
       }
       if (beforeSeq == null) {
         _saveToCache();
+        _syncReconnectFromBlocks();
         _syncLivePolling();
       }
       notifyImmediate();
@@ -670,6 +674,7 @@ class ChatSessionController {
       _mergeIncrementalBlocks(chatBlocksFromTranscript(body['blocks'] as List?));
       newestSeq = body['newest_seq'] as int? ?? newestSeq;
       turnInProgress = body['turn_in_progress'] == true;
+      _syncReconnectFromBlocks();
       _saveToCache();
       _syncLivePolling();
       notifyImmediate();
@@ -684,6 +689,57 @@ class ChatSessionController {
     } finally {
       _polling = false;
     }
+  }
+
+  /// Rebuild the reconnect indicator from persisted blocks (reload path).
+  ///
+  /// Scans the transcript tail for the newest decisive block: a
+  /// `status{phase:reconnect}` means a retry is in flight; any assistant/tool
+  /// output (or a non-reconnect status) means the retry resolved. This mirrors
+  /// the live SSE `status` frame so a reloaded client shows «Попытка
+  /// реконнекта…» instead of a misleading "agentscale работает…".
+  void _syncReconnectFromBlocks() {
+    for (var i = blocks.length - 1; i >= 0; i--) {
+      final b = blocks[i];
+      switch (b.kind) {
+        case 'status':
+          final phase = b.raw['phase']?.toString();
+          if (phase == 'reconnect') {
+            reconnectAttempt = _asInt(b.raw['attempt']);
+            reconnectMaxAttempts = _asInt(b.raw['max_attempts']);
+            reconnectNextModel = b.raw['next_model']?.toString();
+          } else {
+            reconnectAttempt = null;
+            reconnectMaxAttempts = null;
+            reconnectNextModel = null;
+          }
+          return;
+        case 'assistant_markdown':
+          if (b.text.trim().isNotEmpty) {
+            reconnectAttempt = null;
+            reconnectMaxAttempts = null;
+            reconnectNextModel = null;
+            return;
+          }
+          break;
+        case 'tool_call':
+        case 'tool_result':
+        case 'error':
+        case 'user':
+          reconnectAttempt = null;
+          reconnectMaxAttempts = null;
+          reconnectNextModel = null;
+          return;
+        default:
+          break;
+      }
+    }
+  }
+
+  static int? _asInt(Object? v) {
+    if (v is int) return v;
+    if (v is num) return v.toInt();
+    return null;
   }
 
   /// Append incrementally-fetched blocks, merging an assistant text run that

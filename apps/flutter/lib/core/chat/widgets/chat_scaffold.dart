@@ -544,6 +544,12 @@ class _ChatScaffoldState extends State<ChatScaffold> {
   /// (below this it would squeeze the transcript — the panel stays hidden).
   static const double _kChecklistMinWidth = 840;
 
+  /// Uniform horizontal gutter for the chat area: the average of the two
+  /// previously-asymmetric insets (sm on the left, md on the right), so the
+  /// left and right margins are equal — and identical whether or not the
+  /// checklist is shown. The transcript keeps its readable width cap.
+  static const double _kChatGutter = (AppSpacing.sm + AppSpacing.md) / 2;
+
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
@@ -551,13 +557,9 @@ class _ChatScaffoldState extends State<ChatScaffold> {
         final checklistTasks = deriveChecklistTasks(controller.visibleBlocks);
         final showChecklist =
             checklistTasks.isNotEmpty && constraints.maxWidth >= _kChecklistMinWidth;
-        // With the checklist open the transcript FILLS the space up to the
-        // panel, so the left gutter and the transcript↔panel gap are both
-        // AppSpacing.md (equal margins, per the design ask). Without it the
-        // readable column width cap applies.
-        final maxW = showChecklist
-            ? double.infinity
-            : _columnMaxWidth(constraints.maxWidth);
+        // The transcript keeps its readable width cap in BOTH cases — the
+        // checklist sits BESIDE it and never widens the chat.
+        final maxW = _columnMaxWidth(constraints.maxWidth);
 
         final column = ConstrainedBox(
           constraints: BoxConstraints(maxWidth: maxW),
@@ -643,46 +645,31 @@ class _ChatScaffoldState extends State<ChatScaffold> {
         );
 
         if (!showChecklist) {
-          // Deterministic left inset equal to the checklist gap (AppSpacing.md)
-          // so the transcript's left air matches the gap to the checklist.
-          return Align(
-            alignment: Alignment.topLeft,
-            child: Padding(
-              padding: const EdgeInsets.only(left: AppSpacing.md),
-              child: column,
-            ),
-          );
+          // Centred column: equal left and right margins (same gutter value as
+          // the checklist case), transcript width unchanged.
+          return Center(child: column);
         }
-        return Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Expanded(
-              child: Align(
-                alignment: Alignment.topLeft,
-                child: Padding(
-                  // Left gutter == the panel's AppSpacing.md, so the space from
-                  // the sidebar and the space to the checklist are equal.
-                  padding: const EdgeInsets.only(left: AppSpacing.md),
-                  child: column,
+        // Chat + gutter + panel as ONE centred group: the outer margins and the
+        // chat↔checklist gap are all `_kChatGutter`, and the chat keeps its cap.
+        final groupMaxW = maxW + _kChatGutter + kChatChecklistWidth;
+        return Center(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxWidth: groupMaxW),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(child: column),
+                const SizedBox(width: _kChatGutter),
+                Padding(
+                  padding: const EdgeInsets.only(top: AppSpacing.md),
+                  child: Align(
+                    alignment: Alignment.topLeft,
+                    child: ChatChecklistPanel(tasks: checklistTasks),
+                  ),
                 ),
-              ),
+              ],
             ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(
-                AppSpacing.md,
-                AppSpacing.md,
-                AppSpacing.md,
-                0,
-              ),
-              // Align gives the panel LOOSE height inside the stretch Row, so
-              // it stays content-sized (compact pill / capped card) and pins
-              // to the top instead of stretching to the full viewport height.
-              child: Align(
-                alignment: Alignment.topRight,
-                child: ChatChecklistPanel(tasks: checklistTasks),
-              ),
-            ),
-          ],
+          ),
         );
       },
     );
