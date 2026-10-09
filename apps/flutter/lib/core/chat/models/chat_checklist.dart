@@ -128,9 +128,8 @@ ChatTaskColor? _normalizeColor(Object? raw) {
   }
 }
 
-// A leading tag may carry a color (`<success>`) or a status hint
-// (`<blocked>`, `<postponed>`); mirrors the runtime's parseTodoContent.
-final _leadingTag = RegExp(r'^\s*<\s*([a-zA-Z_]+)\s*>\s*');
+// A `<tag>` may carry a color (`<success>`) or a status hint (`<blocked>`),
+// recognized anywhere in the title (see [_parseContent]).
 
 const _tagStatusHints = <String, String>{
   'blocked': 'blocked',
@@ -149,24 +148,36 @@ class _ParsedContent {
   final String? statusHint;
 }
 
-/// Split leading `<tag>`s off the title, mapping them to a color / status hint.
+// A `<tag>` may carry a color (`<success>`) or a status hint (`<blocked>`).
+// Recognized tags are stripped from the title ANYWHERE in the text (the model
+// does not always put them first), so they never leak into the UI. Unknown
+// tags are left untouched (they might be legitimate text).
+final _anyTag = RegExp(r'<\s*([a-zA-Z_]+)\s*>');
+
+/// Remove recognized `<tag>`s from the title, collecting their meaning.
 _ParsedContent _parseContent(String raw) {
-  var content = raw;
   ChatTaskColor? color;
   String? statusHint;
-  for (var i = 0; i < 4; i++) {
-    final m = _leadingTag.firstMatch(content);
-    if (m == null) break;
+  final cleaned = raw.replaceAllMapped(_anyTag, (m) {
     final tag = m.group(1)!.toLowerCase();
-    content = content.substring(m.end);
     final hinted = _tagStatusHints[tag];
-    if (hinted != null && statusHint == null) {
-      statusHint = hinted;
-    } else {
-      color ??= _normalizeColor(tag);
+    if (hinted != null) {
+      statusHint ??= hinted;
+      return '';
     }
-  }
-  return _ParsedContent(content.trim(), color, statusHint);
+    final c = _normalizeColor(tag);
+    if (c != null) {
+      color ??= c;
+      return '';
+    }
+    return m.group(0)!; // unknown tag → keep verbatim
+  });
+  // Tidy leftovers: doubled spaces and a dangling leading separator/punct.
+  final title = cleaned
+      .replaceAll(RegExp(r'\s{2,}'), ' ')
+      .replaceAll(RegExp(r'^\s*[:;,\-–—]+\s*'), '')
+      .trim();
+  return _ParsedContent(title, color, statusHint);
 }
 
 ChatChecklistTask? _taskFromMap(Map map, {int fallbackIndex = 0}) {

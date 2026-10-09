@@ -174,6 +174,35 @@ void main() {
       );
       expect(result.label, endsWith('…'));
     });
+
+    test('built-in utilities get human labels for bare / mcp / underscored names', () {
+      for (final name in [
+        'todo.write',
+        'mcp.openclaw.todo.write',
+        'todo_write',
+        'mcp_openclaw_todo_write',
+      ]) {
+        expect(
+          formatToolActivityLabel(l10n, name: name).label,
+          'Обновление плана задач',
+          reason: name,
+        );
+      }
+      for (final name in ['todo.list', 'mcp.openclaw.todo.list', 'todo_list']) {
+        expect(formatToolActivityLabel(l10n, name: name).label, 'План задач', reason: name);
+      }
+    });
+
+    test('unknown module tool shows a readable server · tool label, not "Инструмент"', () {
+      // A namespaced MCP tool with no alias reads as "server · tool"; the
+      // generic "Инструмент …" prefix is reserved for truly unknown bare names.
+      final namespaced = formatToolActivityLabel(l10n, name: 'mcp.vendor.mystery_tool');
+      expect(namespaced.label, 'vendor · mystery_tool');
+      expect(namespaced.label, isNot(startsWith('Инструмент')));
+
+      final bare = formatToolActivityLabel(l10n, name: 'mystery_tool');
+      expect(bare.label, startsWith('Инструмент'));
+    });
   });
 
   group('parseDiffStats', () {

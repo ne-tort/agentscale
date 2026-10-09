@@ -141,35 +141,44 @@ class _ChatChecklistPanelState extends State<ChatChecklistPanel> {
     int done,
     int total,
   ) {
-    return InkWell(
-      onTap: () => setState(() => _expanded = false),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(
-          AppSpacing.md,
-          AppSpacing.sm,
-          AppSpacing.xs,
-          AppSpacing.sm,
-        ),
-        child: Row(
-          children: [
-            Icon(Icons.checklist_rounded, size: 18, color: scheme.primary),
-            const SizedBox(width: AppSpacing.sm),
-            Text(
-              l10n.chatChecklistTitle,
-              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
-            ),
-            const Spacer(),
-            Text(
-              '$done/$total',
-              style: TextStyle(
-                fontSize: 12.5,
-                fontWeight: FontWeight.w600,
-                color: scheme.onSurfaceVariant,
-                fontFeatures: const [FontFeature.tabularFigures()],
+    // The ink (hover/press) highlight is painted by the nearest Material, which
+    // is NOT clipped by the card's rounded corners — so a tap on the header
+    // showed a sharp-cornered rectangle poking through them. Give the header
+    // its own transparent Material clipped to the card's top radius.
+    return Material(
+      type: MaterialType.transparency,
+      borderRadius: const BorderRadius.vertical(top: Radius.circular(14)),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: () => setState(() => _expanded = false),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.md,
+            AppSpacing.sm,
+            AppSpacing.xs,
+            AppSpacing.sm,
+          ),
+          child: Row(
+            children: [
+              Icon(Icons.checklist_rounded, size: 18, color: scheme.primary),
+              const SizedBox(width: AppSpacing.sm),
+              Text(
+                l10n.chatChecklistTitle,
+                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
               ),
-            ),
-            Icon(Icons.unfold_less, size: 16, color: scheme.onSurfaceVariant),
-          ],
+              const Spacer(),
+              Text(
+                '$done/$total',
+                style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                  color: scheme.onSurfaceVariant,
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                ),
+              ),
+              Icon(Icons.unfold_less, size: 16, color: scheme.onSurfaceVariant),
+            ],
+          ),
         ),
       ),
     );
