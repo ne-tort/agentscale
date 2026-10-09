@@ -1557,6 +1557,22 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "ref": {"table_slug": "equipment_types"},
             },
             {
+                # «line» — кандидат позиции; «build» — кандидат слота сборки.
+                # Пишет пайплайн; глобальный список фильтрует по нему.
+                "table_slug": "found_groups",
+                "name": "owner_kind",
+                "label": {"ru": "Владелец группы", "en": "Owner kind"},
+                "type": "enum",
+                "required": False,
+                "default": "line",
+                "read_only": True,
+                "hidden": True,
+                "enum": {
+                    "values": ["line", "build"],
+                    "labels": {"line": "Позиция", "build": "Сборка"},
+                },
+            },
+            {
                 "table_slug": "found_groups",
                 "name": "part_number",
                 "label": {"ru": "Партномер", "en": "Part number"},
@@ -3734,6 +3750,8 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "subtitle_fields": ["part_number", "match_label", "note"],
                     # сверка с OpenSearch при открытии (дрилл-даун позиции/бюджета)
                     "on_load": {"action": "equipment_pipeline_sync"},
+                    # только кандидаты позиции (не кандидаты слотов сборок)
+                    "row_filter": {"owner_kind": "line"},
                     "columns": [
                         {
                             "field": "face_title",
@@ -3902,6 +3920,9 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     },
                     # сверка с OpenSearch при открытии таблицы
                     "on_load": {"action": "equipment_pipeline_sync"},
+                    # только кандидаты позиций; кандидаты слотов сборок живут
+                    # внутри сборки (found_groups_pick)
+                    "row_filter": {"owner_kind": "line"},
                     # без офферов: «Товар» = «Нет оффера» warning; продавец/бренд — прочерк
                     "no_offers_placeholder": {"text": "Нет оффера"},
                     "dash_empty_fields": ["face_seller", "face_brand"],

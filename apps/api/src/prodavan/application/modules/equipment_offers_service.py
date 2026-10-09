@@ -908,6 +908,12 @@ class EquipmentPipelineService:
             )
 
             updates: dict[str, Any] = {}
+            # WAVE10: владелец группы — позиция («line») или слот сборки
+            # («build»). Глобальный список «Найденные товары» показывает только
+            # позиционные группы; кандидаты слота видны внутри сборки.
+            want_owner = "build" if str(body.get("build_id") or "") else "line"
+            if str(body.get("owner_kind") or "") != want_owner:
+                updates["owner_kind"] = want_owner
             want_rank = MATCH_ORDER.get(_valid_match_kind(body.get("match_kind")), 3)
             if body.get("rank") != want_rank:
                 updates["rank"] = want_rank

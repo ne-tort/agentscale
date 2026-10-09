@@ -1260,6 +1260,10 @@ async def test_build_from_slot_groups_best_and_budget(io: FakeIO) -> None:
         if r["body"].get("build_id") == build_id and r["body"].get("part_number") == "ABC-123"
     )
     assert best_slot.get("is_best") is True
+    # владелец группы помечен: build — кандидат слота (не виден в общем списке)
+    assert best_slot.get("owner_kind") == "build"
+    line_groups = [r["body"] for r in io.rows("found_groups") if r["body"].get("line_id") == "line_1"]
+    assert all(g.get("owner_kind") == "line" for g in line_groups)
 
 
 async def test_slot_group_orphan_cleanup_keeps_build_groups(io: FakeIO) -> None:
