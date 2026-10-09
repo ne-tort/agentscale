@@ -1483,6 +1483,7 @@ class EquipmentPipelineService:
             total = 0.0
             worst_rank = -1  # худшая точность среди компонентов (0=exact лучше)
             any_on_order = False
+            want_slots = dict(legacy_slots)
             for slot in slot_keys:
                 # 1) группа-кандидат слота → best по (точность, приоритет, цена)
                 slot_groups = groups_by_build_slot.get((bid, slot)) or []
@@ -1524,6 +1525,12 @@ class EquipmentPipelineService:
                         any_on_order = True
                 # is_best/альтернативы группы-кандидата: видно в pick-списке слота.
                 chosen_id = str((chosen_g or {}).get("row_id") or "")
+                if chosen_id:
+                    # Самовосстановление состава: если ручной выбор протух
+                    # (кандидат удалён или остался без офферов), в slots
+                    # пишется фактически учтённый в цене кандидат — иначе UI
+                    # показывает одно, а price_total считает другое.
+                    want_slots[slot] = chosen_id
                 slot_alts = max(0, len(priced) - 1)
                 for g in slot_groups:
                     gid = str(g.get("row_id") or "")
@@ -1578,6 +1585,8 @@ class EquipmentPipelineService:
             # парсит текст match_label (локализация/формулировка могут меняться).
             if bool(body.get("on_order")) is not any_on_order:
                 updates["on_order"] = any_on_order
+            if want_slots != (body.get("slots") if isinstance(body.get("slots"), dict) else {}):
+                updates["slots"] = want_slots
             if updates:
                 body.update(updates)
                 await io.update(BUILDS_TABLE, bid, body)

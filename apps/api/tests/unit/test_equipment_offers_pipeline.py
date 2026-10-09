@@ -1557,3 +1557,39 @@ async def test_procurement_attributes_build_components_to_sellers(io: FakeIO) ->
     # обычная позиция line_1 (не сборка) считается как раньше — 2 × 120 у «Сидоров»
     assert proc["Сидоров"]["sum_rub"] == 240.0
     assert proc["Сидоров"]["selected_count"] == 1
+
+
+async def test_stale_manual_slot_choice_self_heals(io: FakeIO) -> None:
+    """Протухший ручной выбор слота заменяется фактически учтённым кандидатом.
+
+    Иначе UI показывает один компонент, а price_total считается по другому.
+    """
+    svc = EquipmentPipelineService(session=object())
+    await io.create(
+        "equipment_builds",
+        {"name": "ПК", "build_kind": "pc", "line_id": "line_1", "slots": {}},
+    )
+    build_id = io.rows("equipment_builds")[0]["row_id"]
+    await io.create(
+        "found_groups",
+        {
+            "build_id": build_id,
+            "slot_type_id": "etype_cpu",
+            "part_number": "ABC-123",
+            "aliases_pn": "ABC123",
+            "match_kind": "exact",
+        },
+    )
+    live_id = io.rows("found_groups")[-1]["row_id"]
+
+    # ручной выбор указывает на несуществующую группу
+    body = io.body("equipment_builds", build_id)
+    body["slots"] = {"etype_cpu": "grp_deleted"}
+    await io.update("equipment_builds", build_id, body)
+
+    await svc.run(io, materialize=True)
+
+    b = io.body("equipment_builds", build_id)
+    assert b["slots"]["etype_cpu"] == live_id
+    assert b["price_total"] == 120.0
+    assert io.body("found_groups", live_id)["is_best"] is True
