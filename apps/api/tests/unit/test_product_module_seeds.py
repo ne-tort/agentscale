@@ -689,13 +689,42 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     )
     assert line_col["required"] is False
     assert line_col["label"]["ru"] == "Запрос"
-    # WAVE7: у группы line_id обязателен (позиция, для которой выбираем)
+    # WAVE10: группа принадлежит ЛИБО позиции (line_id), ЛИБО слоту сборки
+    # (build_id + slot_type_id) — поэтому line_id больше не обязателен.
     group_line_col = next(
         c
         for c in meta["columns"]
         if c["name"] == "line_id" and c["table_slug"] == "found_groups"
     )
-    assert group_line_col["required"] is True
+    assert group_line_col["required"] is False
+    build_col = next(
+        c
+        for c in meta["columns"]
+        if c["name"] == "build_id" and c["table_slug"] == "found_groups"
+    )
+    assert build_col["ref"]["table_slug"] == "equipment_builds"
+    slot_col = next(
+        c
+        for c in meta["columns"]
+        if c["name"] == "slot_type_id" and c["table_slug"] == "found_groups"
+    )
+    assert slot_col["ref"]["table_slug"] == "equipment_types"
+    # equipment_builds привязана к позиции и получает поля пайплайна (best/выгода).
+    build_line = next(
+        c
+        for c in meta["columns"]
+        if c["name"] == "line_id" and c["table_slug"] == "equipment_builds"
+    )
+    assert build_line["ref"]["table_slug"] == "request_lines"
+    build_names = {c["name"] for c in meta["columns"] if c["table_slug"] == "equipment_builds"}
+    assert {"is_best", "is_selected", "alternatives_count", "benefit_label"} <= build_names
+    # budget_lines может быть сборкой.
+    budget_build = next(
+        c
+        for c in meta["columns"]
+        if c["name"] == "build_id" and c["table_slug"] == "budget_lines"
+    )
+    assert budget_build["ref"]["table_slug"] == "equipment_builds"
     form = next(v for v in meta["views"] if v["slug"] == "found_offers_form")
     form_cols = [f["column"] for f in form["ui_json"]["fields"]]
     assert "catalog_id" not in form_cols
