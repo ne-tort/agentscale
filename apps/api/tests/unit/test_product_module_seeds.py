@@ -761,6 +761,14 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     assert build_line["ref"]["table_slug"] == "request_lines"
     build_names = {c["name"] for c in meta["columns"] if c["table_slug"] == "equipment_builds"}
     assert {"is_best", "is_selected", "alternatives_count", "benefit_label"} <= build_names
+    # WAVE11: количество на слот — параллельная карта к slots (не ломает их).
+    assert "slot_qty" in build_names
+    slot_qty_col = next(
+        c for c in meta["columns"]
+        if c["name"] == "slot_qty" and c["table_slug"] == "equipment_builds"
+    )
+    assert slot_qty_col["type"] == "json"
+    assert slot_qty_col["required"] is False
     # on_order — явный флаг «под заказ» сборки (бюджет читает его, а не текст
     # match_label); owner_kind — владелец группы (позиция или слот сборки).
     assert "on_order" in build_names

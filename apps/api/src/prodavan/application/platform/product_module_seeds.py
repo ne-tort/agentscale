@@ -2089,6 +2089,17 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "default": {},
             },
             {
+                # WAVE11: количество на слот — {type_id: qty}. Свойство СЛОТА, а
+                # не кандидата: у слота несколько альтернатив, но «2 плашки ОЗУ»
+                # верно для любой из них. Цена слота = цена кандидата × qty.
+                "table_slug": "equipment_builds",
+                "name": "slot_qty",
+                "label": {"ru": "Количество по слотам", "en": "Slot quantity"},
+                "type": "json",
+                "required": False,
+                "default": {},
+            },
+            {
                 "table_slug": "equipment_builds",
                 "name": "components_count",
                 "label": {"ru": "Комплектующих", "en": "Components"},

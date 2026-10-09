@@ -21,6 +21,8 @@ class BuildSlotsField extends StatelessWidget {
     required this.emptyLabel,
     required this.rowId,
     required this.onOpenPick,
+    this.slotQty = const {},
+    this.onQtyChanged,
   });
 
   final dynamic seeds;
@@ -35,6 +37,10 @@ class BuildSlotsField extends StatelessWidget {
   final String emptyLabel;
   final String? rowId;
   final void Function(String pickView, {String? rowId})? onOpenPick;
+
+  /// WAVE11: количество на слот ({type_id: qty}) — «2 плашки ОЗУ».
+  final Map<String, dynamic> slotQty;
+  final void Function(String typeId, int qty)? onQtyChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -58,6 +64,46 @@ class BuildSlotsField extends StatelessWidget {
       subtitle: subtitle,
       enabled: !readOnly && rowId != null && onOpenPick != null,
       onTap: () => _openSlotPick(type.id),
+      trailing: _qtyStepper(context, type.id, selected != null),
+    );
+  }
+
+  int _qtyOf(String typeId) {
+    final raw = slotQty[typeId];
+    final v = raw is num ? raw.toInt() : int.tryParse(raw?.toString() ?? '');
+    return (v == null || v < 1) ? 1 : v;
+  }
+
+  /// Компактный «− N +» справа от слота; без выбранного компонента неактивен.
+  Widget? _qtyStepper(BuildContext context, String typeId, bool hasSelection) {
+    final onChange = onQtyChanged;
+    if (onChange == null || readOnly || !hasSelection) return null;
+    final qty = _qtyOf(typeId);
+    final colors = Theme.of(context).colorScheme;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _QtyButton(
+          icon: Icons.remove,
+          enabled: qty > 1,
+          color: colors,
+          onTap: () => onChange(typeId, qty - 1),
+        ),
+        ConstrainedBox(
+          constraints: const BoxConstraints(minWidth: 26),
+          child: Text(
+            '$qty',
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.titleSmall,
+          ),
+        ),
+        _QtyButton(
+          icon: Icons.add,
+          enabled: true,
+          color: colors,
+          onTap: () => onChange(typeId, qty + 1),
+        ),
+      ],
     );
   }
 
@@ -210,4 +256,36 @@ String buildSlotsEmptyLabel(
   final resolved = resolveMetaLabel(raw, l10n, locale: locale);
   if (resolved.isNotEmpty) return resolved;
   return locale.languageCode == 'en' ? 'Not selected' : 'Не выбран';
+}
+
+Map<String, dynamic> parseSlotQtyMap(dynamic raw) {
+  if (raw is Map) return Map<String, dynamic>.from(raw);
+  return <String, dynamic>{};
+}
+
+/// Компактная круглая кнопка «−»/«+» степпера количества слота.
+class _QtyButton extends StatelessWidget {
+  const _QtyButton({
+    required this.icon,
+    required this.enabled,
+    required this.color,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final bool enabled;
+  final ColorScheme color;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return IconButton(
+      icon: Icon(icon, size: 18),
+      visualDensity: VisualDensity.compact,
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
+      color: enabled ? color.onSurfaceVariant : color.onSurface.withValues(alpha: 0.3),
+      onPressed: enabled ? onTap : null,
+    );
+  }
 }

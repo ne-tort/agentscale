@@ -1529,6 +1529,26 @@ class CollectionViewInterpreter extends StatelessWidget {
     final slots = slotsRaw is Map
         ? Map<String, dynamic>.from(slotsRaw)
         : <String, dynamic>{};
+    // WAVE11: количество на слот ({type_id: qty}) — свойство слота, а не
+    // кандидата; явный slot_qty важнее qty легаси-комплектующего.
+    final slotQtyRaw = body['slot_qty'];
+    final slotQty = slotQtyRaw is Map
+        ? Map<String, dynamic>.from(slotQtyRaw)
+        : <String, dynamic>{};
+
+    double qtyFor(String typeId, Map<String, dynamic> itemBody) {
+      final raw = slotQty[typeId];
+      final explicit = raw is num
+          ? raw.toDouble()
+          : double.tryParse(raw?.toString() ?? '');
+      if (explicit != null && explicit > 0) return explicit;
+      final legacy = itemBody['qty'];
+      final legacyQty = legacy is num
+          ? legacy.toDouble()
+          : double.tryParse(legacy?.toString() ?? '') ?? 1.0;
+      return legacyQty <= 0 ? 1.0 : legacyQty;
+    }
+
     var count = 0;
     var total = 0.0;
     for (final entry in slots.entries) {
@@ -1547,14 +1567,11 @@ class CollectionViewInterpreter extends StatelessWidget {
         final price = priceRaw is num
             ? priceRaw.toDouble()
             : double.tryParse(priceRaw?.toString() ?? '') ?? 0.0;
-        total += price;
+        total += price * qtyFor(entry.key.toString(), const {});
         continue;
       }
       final itemBody = candidateBody;
-      final qtyRaw = itemBody['qty'];
-      final qty = qtyRaw is num
-          ? qtyRaw.toDouble()
-          : double.tryParse(qtyRaw?.toString() ?? '') ?? 1.0;
+      final qty = qtyFor(entry.key.toString(), itemBody);
       final offerId = itemBody['offer_id']?.toString();
       if (offerId == null || offerId.isEmpty) continue;
       final offer = seeds.itemById(offerId);
@@ -1565,7 +1582,7 @@ class CollectionViewInterpreter extends StatelessWidget {
       final price = priceRaw is num
           ? priceRaw.toDouble()
           : double.tryParse(priceRaw?.toString() ?? '') ?? 0.0;
-      total += price * (qty <= 0 ? 1.0 : qty);
+      total += price * qty;
     }
     body['components_count'] = count;
     body['price_total'] = total;
