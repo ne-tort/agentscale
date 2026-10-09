@@ -1666,6 +1666,7 @@ class EquipmentPipelineService:
                 (b for b in line_builds if str(b.get("row_id") or "") == winner), None
             )
             wbody = (winner_build or {}).get("body") or {}
+            best_price = _num_or(wbody.get("price_total"), None)
             if await self._write_line_build_snapshot(
                 io,
                 lines_rows=lines_rows,
@@ -1673,11 +1674,13 @@ class EquipmentPipelineService:
                 snap={
                     "builds_count": len(line_builds),
                     "build_best_id": winner,
-                    "build_best_price": _num_or(wbody.get("price_total"), None),
+                    "build_best_price": best_price,
                     "build_match_label": str(wbody.get("match_label") or ""),
                     "build_benefit_label": str(wbody.get("benefit_label") or ""),
                     "build_benefit_tone": str(wbody.get("benefit_tone") or ""),
                 },
+                # сборка с ценой закрывает позицию — статус не должен оставаться «Открыта»
+                priced_build=winner != "" and best_price not in (None, 0),
             ):
                 lines_updated += 1
 
@@ -1715,15 +1718,26 @@ class EquipmentPipelineService:
         lines_rows: list[dict[str, Any]],
         line_id: str,
         snap: dict[str, Any],
+        priced_build: bool = False,
     ) -> bool:
-        """Пишет снапшот сборок на позицию только если он изменился."""
+        """Пишет снапшот сборок на позицию только если он изменился.
+
+        `priced_build` — у позиции есть сборка с ценой. Тогда «открытая» позиция
+        становится «Есть кандидаты»: её закрыла сборка, а не одиночная группа,
+        поэтому found_count (счётчик групп позиции) остаётся 0, но статус
+        «Открыта» вводил бы в заблуждение. Ручной выбор оффера (`selected`)
+        не понижаем.
+        """
         line_row = next(
             (r for r in lines_rows if str(r.get("row_id") or "") == line_id), None
         )
         if line_row is None:
             return False
         lbody = dict(line_row.get("body") or {})
-        changed = {k: v for k, v in snap.items() if lbody.get(k) != v}
+        want = dict(snap)
+        if priced_build and str(lbody.get("status") or "") == "open":
+            want["status"] = "matched"
+        changed = {k: v for k, v in want.items() if lbody.get(k) != v}
         if not changed:
             return False
         lbody.update(changed)
