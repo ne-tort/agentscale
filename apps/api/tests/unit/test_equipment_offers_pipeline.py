@@ -1635,3 +1635,74 @@ async def test_group_without_slot_type_id_not_counted_in_build_price(io: FakeIO)
     # учтён только CPU (120), хэш-группа без слота (450) в цену не вошла
     assert b["components_count"] == 1
     assert b["price_total"] == 120.0
+
+
+async def test_line_status_matched_when_closed_by_build(io: FakeIO) -> None:
+    """Позиция, закрытая сборкой, не остаётся в статусе «Открыта».
+
+    found_count считает группы ПОЗИЦИИ; у позиции-сборки их нет, поэтому без
+    отдельной логики статус оставался open, хотя лучшая сборка с ценой есть.
+    """
+    svc = EquipmentPipelineService(session=object())
+    # новая позиция без своих групп — только сборка
+    await io.create("request_lines", {"title": "Сборка ПК", "qty": 1, "status": "open"})
+    line_id = io.rows("request_lines")[-1]["row_id"]
+    await io.create(
+        "equipment_builds",
+        {"name": "ПК", "build_kind": "pc", "line_id": line_id, "slots": {}},
+    )
+    build_id = io.rows("equipment_builds")[-1]["row_id"]
+    await io.create(
+        "found_groups",
+        {
+            "build_id": build_id,
+            "slot_type_id": "etype_cpu",
+            "part_number": "ABC-123",
+            "aliases_pn": "ABC123",
+            "match_kind": "exact",
+        },
+    )
+
+    await svc.run(io, materialize=True)
+
+    line = io.body("request_lines", line_id)
+    assert line["builds_count"] == 1
+    assert line["build_best_price"] == 120.0
+    assert line["status"] == "matched"
+    # found_count остаётся счётчиком групп позиции (их у сборки нет)
+    assert line["found_count"] == 0
+
+
+async def test_build_does_not_downgrade_selected_line(io: FakeIO) -> None:
+    """Позиция с валидным ручным выбором оффера остаётся selected при сборке."""
+    svc = EquipmentPipelineService(session=object())
+    await svc.run(io, materialize=True)
+
+    offer = next(
+        o for o in io.rows("found_offers")
+        if (o["body"].get("line_id") == "line_1") and o["body"].get("src_hash") == "h2"
+    )
+    body = io.body("request_lines", "line_1")
+    body["selected_offer_id"] = offer["row_id"]
+    await io.update("request_lines", "line_1", body)
+
+    await io.create(
+        "equipment_builds",
+        {"name": "ПК", "build_kind": "pc", "line_id": "line_1", "slots": {}},
+    )
+    build_id = io.rows("equipment_builds")[-1]["row_id"]
+    await io.create(
+        "found_groups",
+        {
+            "build_id": build_id,
+            "slot_type_id": "etype_cpu",
+            "part_number": "ABC-123",
+            "match_kind": "exact",
+        },
+    )
+
+    await svc.run(io, materialize=False)
+
+    line = io.body("request_lines", "line_1")
+    assert line["builds_count"] == 1
+    assert line["status"] == "selected"
