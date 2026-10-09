@@ -5585,6 +5585,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                         "groups_table": "found_groups",
                         "lines_table": "request_lines",
                         "offers_table": "found_offers",
+                        "builds_table": "equipment_builds",
                         "budget_table": "budget_lines",
                         "procurement_table": "procurement",
                         "materialize": True,

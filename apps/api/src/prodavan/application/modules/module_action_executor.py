@@ -1036,8 +1036,9 @@ class ModuleActionExecutor:
         """Best-effort WAVE7: авто-пайплайн «Подбора товаров» после записей строк.
 
         - ``found_groups`` → полный пайплайн (материализация офферов из OS);
-        - ``request_lines`` / ``found_offers`` → пайплайн без материализации
-          (пересчёт best/бюджета/закупки — например после ручной правки оффера);
+        - ``request_lines`` / ``found_offers`` / ``equipment_builds`` → пайплайн
+          без материализации (пересчёт best/бюджета/закупки — например после
+          ручной правки оффера или выбора сборки);
         - ``procurement`` → ``equipment.procurement_apply`` (маржа/доставка).
 
         Пайплайн пишет строки с ``run_actions=False`` — рекурсии нет.
@@ -1065,6 +1066,10 @@ class ModuleActionExecutor:
                         str(params.get("groups_table") or "found_groups"),
                         str(params.get("lines_table") or "request_lines"),
                         str(params.get("offers_table") or "found_offers"),
+                        # WAVE10: правка сборки (ручной выбор is_selected, смена
+                        # позиции или состава) тоже должна пересчитать
+                        # best-сборку, бюджет и статус позиции.
+                        str(params.get("builds_table") or "equipment_builds"),
                     }
                 if table_slug not in watched:
                     continue
