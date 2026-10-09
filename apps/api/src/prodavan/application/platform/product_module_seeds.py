@@ -2141,6 +2141,18 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "read_only": True,
             },
             {
+                # «под заказ»: хотя бы один компонент сборки не в наличии.
+                # Бюджет читает флаг напрямую (не парсит текст match_label).
+                "table_slug": "equipment_builds",
+                "name": "on_order",
+                "label": {"ru": "Под заказ", "en": "On order"},
+                "type": "bool",
+                "required": False,
+                "default": False,
+                "read_only": True,
+                "hidden": True,
+            },
+            {
                 "table_slug": "equipment_builds",
                 "name": "is_selected",
                 "label": {"ru": "Выбрана", "en": "Selected"},

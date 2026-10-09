@@ -1282,3 +1282,278 @@ async def test_slot_group_orphan_cleanup_keeps_build_groups(io: FakeIO) -> None:
 
     await svc.run(io, materialize=False)
     assert ("found_groups", slot_grp_id) not in io.deleted
+
+
+async def test_manual_slot_choice_drives_build_price_and_match(io: FakeIO) -> None:
+    """Ручной выбор кандидата слота определяет цену/точность сборки.
+
+    Регресс: раньше slot_price брался из автобest, а ручной выбор влиял только
+    на is_best — UI показывал выбранный вариант, а итог считался по другому.
+    """
+    svc = EquipmentPipelineService(session=object())
+    await io.create(
+        "equipment_builds",
+        {"name": "ПК", "build_kind": "pc", "line_id": "line_1", "slots": {}},
+    )
+    build_id = io.rows("equipment_builds")[0]["row_id"]
+    await io.create(
+        "found_groups",
+        {
+            "build_id": build_id,
+            "slot_type_id": "etype_cpu",
+            "part_number": "ABC-123",
+            "aliases_pn": "ABC123",
+            "match_kind": "exact",
+        },
+    )
+    cheap_id = io.rows("found_groups")[-1]["row_id"]
+    await io.create(
+        "found_groups",
+        {
+            "build_id": build_id,
+            "slot_type_id": "etype_cpu",
+            "part_number": "",
+            "aliases_hash": "h4",
+            "match_kind": "doubt",
+        },
+    )
+    dear_id = io.rows("found_groups")[-1]["row_id"]
+
+    # авто: exact дешевле (120) → он и в цене, и в match_kind
+    await svc.run(io, materialize=True)
+    b = io.body("equipment_builds", build_id)
+    assert b["price_total"] == 120.0
+    assert b["match_kind"] == "exact"
+    assert io.body("found_groups", cheap_id)["is_best"] is True
+
+    # ручной выбор дорогого doubt-кандидата → цена и точность следуют за ним
+    body = io.body("equipment_builds", build_id)
+    body["slots"] = {"etype_cpu": dear_id}
+    await io.update("equipment_builds", build_id, body)
+    await svc.run(io, materialize=False)
+
+    b = io.body("equipment_builds", build_id)
+    assert b["price_total"] == 450.0
+    assert b["match_kind"] == "doubt"
+    assert io.body("found_groups", dear_id)["is_best"] is True
+    assert io.body("found_groups", cheap_id).get("is_best") is not True
+    # бюджет позиции тоже следует за ручным выбором
+    budget = [r["body"] for r in io.rows("budget_lines") if r["body"].get("line_id") == "line_1"]
+    assert budget and budget[0]["price_in"] == 450.0
+
+
+async def test_build_on_order_flag_and_budget(io: FakeIO) -> None:
+    """on_order сборки — явный флаг, бюджет читает его (не текст match_label)."""
+    svc = EquipmentPipelineService(session=object())
+    await io.create(
+        "equipment_builds",
+        {"name": "ПК", "build_kind": "pc", "line_id": "line_1", "slots": {}},
+    )
+    build_id = io.rows("equipment_builds")[0]["row_id"]
+    await io.create(
+        "found_groups",
+        {
+            "build_id": build_id,
+            "slot_type_id": "etype_gpu",
+            "part_number": "GPU-1",
+            "match_kind": "exact",
+        },
+    )
+    # оффер «под заказ» — пишем напрямую (материализация не нужна для проверки флага)
+    await io.create(
+        "found_offers",
+        {
+            "group_id": io.rows("found_groups")[-1]["row_id"],
+            "title": "GPU",
+            "seller": "Иванов",
+            "part_number": "GPU-1",
+            "src_hash": "h7",
+            "currency": "RUB",
+            "price_orig": 1000.0,
+            "price": 1000.0,
+            "in_stock": False,
+            "is_stale": False,
+        },
+    )
+
+    await svc.run(io, materialize=False)
+
+    b = io.body("equipment_builds", build_id)
+    assert b["on_order"] is True
+    assert "под заказ" in b["match_label"].lower()
+    budget = [r["body"] for r in io.rows("budget_lines") if r["body"].get("line_id") == "line_1"]
+    assert budget and budget[0]["on_order"] is True
+
+
+async def test_line_snapshot_cleared_when_builds_gone(io: FakeIO) -> None:
+    """Снапшот build_* на позиции гаснет, когда сборки удалены."""
+    svc = EquipmentPipelineService(session=object())
+    await io.create(
+        "equipment_builds",
+        {"name": "ПК", "build_kind": "pc", "line_id": "line_1", "slots": {}},
+    )
+    build_id = io.rows("equipment_builds")[0]["row_id"]
+    await io.create(
+        "found_groups",
+        {
+            "build_id": build_id,
+            "slot_type_id": "etype_cpu",
+            "part_number": "ABC-123",
+            "aliases_pn": "ABC123",
+            "match_kind": "exact",
+        },
+    )
+    await svc.run(io, materialize=True)
+    assert io.body("request_lines", "line_1")["builds_count"] == 1
+    assert io.body("request_lines", "line_1")["build_best_price"] == 120.0
+
+    await io.delete("equipment_builds", build_id)
+    await svc.run(io, materialize=False)
+
+    line = io.body("request_lines", "line_1")
+    assert line["builds_count"] == 0
+    assert line["build_best_id"] == ""
+    assert line["build_best_price"] is None
+    # бюджет вернулся к обычному офферу позиции
+    budget = [r["body"] for r in io.rows("budget_lines") if r["body"].get("line_id") == "line_1"]
+    assert budget and budget[0].get("build_id") in ("", None)
+
+
+async def test_orphan_build_cleaned_when_line_deleted_bypassing_cascade(io: FakeIO) -> None:
+    """Сборка с мёртвым line_id удаляется пайплайном, её слот-группы — тоже."""
+    svc = EquipmentPipelineService(session=object())
+    await io.create(
+        "equipment_builds",
+        {"name": "ПК", "build_kind": "pc", "line_id": "line_dead", "slots": {}},
+    )
+    build_id = io.rows("equipment_builds")[0]["row_id"]
+    await io.create(
+        "found_groups",
+        {
+            "build_id": build_id,
+            "slot_type_id": "etype_cpu",
+            "part_number": "ABC-123",
+            "match_kind": "exact",
+        },
+    )
+    grp_id = io.rows("found_groups")[-1]["row_id"]
+
+    await svc.run(io, materialize=True)
+
+    assert ("equipment_builds", build_id) in io.deleted
+    assert ("found_groups", grp_id) in io.deleted
+    assert io.rows("equipment_builds") == []
+
+
+@pytest.mark.parametrize("table_slug", ["request_lines", "equipment_builds"])
+async def test_cascade_delete_covers_builds_and_slot_groups(
+    io: FakeIO, table_slug: str
+) -> None:
+    """Каскад: удаление позиции тянет сборки + слот-группы; удаление сборки — её группы."""
+    from prodavan.application.modules.equipment_offers_service import cascade_equipment_delete
+
+    await io.create(
+        "equipment_builds",
+        {"name": "ПК", "build_kind": "pc", "line_id": "line_1", "slots": {}},
+    )
+    build_id = io.rows("equipment_builds")[0]["row_id"]
+    await io.create(
+        "found_groups",
+        {
+            "build_id": build_id,
+            "slot_type_id": "etype_cpu",
+            "part_number": "ABC-123",
+            "match_kind": "exact",
+        },
+    )
+    grp_id = io.rows("found_groups")[-1]["row_id"]
+    await io.create(
+        "found_offers",
+        {"group_id": grp_id, "title": "Товар", "seller": "Иванов", "src_hash": "h1"},
+    )
+    offer_id = io.rows("found_offers")[-1]["row_id"]
+
+    if table_slug == "request_lines":
+        row_id, row_body = "line_1", {}
+    else:
+        row_id, row_body = build_id, {}
+
+    await cascade_equipment_delete(
+        object(),
+        cabinet_id="cab",
+        project_id="proj",
+        table_slug=table_slug,
+        row_id=row_id,
+        row_body=row_body,
+        principal=None,
+        employee=None,
+        session_id=None,
+        io=io,
+    )
+
+    # слот-группа и её оффер удалены в обоих сценариях
+    assert ("found_groups", grp_id) in io.deleted
+    assert ("found_offers", offer_id) in io.deleted
+    if table_slug == "request_lines":
+        # сборка — зависимая строка позиции, её тянет каскад
+        assert ("equipment_builds", build_id) in io.deleted
+    else:
+        # саму сборку удаляет вызывающий сервис (контракт каскада: только зависимости)
+        assert ("equipment_builds", build_id) not in io.deleted
+
+
+async def test_procurement_attributes_build_components_to_sellers(io: FakeIO) -> None:
+    """Закупка для позиции-сборки раскладывается по поставщикам компонентов.
+
+    Регресс: строка бюджета сборки имеет seller="" — без раскладки позиция
+    вообще не попадала в «Закупку», хотя деньги по ней есть.
+    """
+    svc = EquipmentPipelineService(session=object())
+    await io.create(
+        "equipment_builds",
+        {"name": "ПК", "build_kind": "pc", "line_id": "line_2", "slots": {}},
+    )
+    build_id = io.rows("equipment_builds")[0]["row_id"]
+    # CPU у «Иванов» (100) и GPU-хэш у «Петров» (h4 → 5 USD → 450 RUB)
+    await io.create(
+        "found_groups",
+        {
+            "build_id": build_id,
+            "slot_type_id": "etype_cpu",
+            "part_number": "",
+            "aliases_hash": "h1",
+            "match_kind": "exact",
+        },
+    )
+    await io.create(
+        "found_groups",
+        {
+            "build_id": build_id,
+            "slot_type_id": "etype_gpu",
+            "part_number": "",
+            "aliases_hash": "h4",
+            "match_kind": "exact",
+        },
+    )
+
+    await svc.run(io, materialize=True)
+
+    build = io.body("equipment_builds", build_id)
+    assert build["components_count"] == 2
+    total = build["price_total"]
+    assert total > 0
+
+    # строка бюджета — сборка (без единого продавца)
+    budget = [r["body"] for r in io.rows("budget_lines") if r["body"].get("line_id") == "line_2"]
+    assert budget and budget[0]["build_id"] == build_id
+    assert budget[0]["seller"] == ""
+
+    # закупка: компоненты сборки расложены по своим поставщикам.
+    # Оба компонента у «Иванов» (h1 = 100, h4 = 5 USD → 450) → 550 = цене сборки.
+    proc = {r["body"]["seller"]: r["body"] for r in io.rows("procurement")}
+    assert proc, "закупка пустая — компоненты сборки не учтены"
+    assert proc["Иванов"]["sum_rub"] == round(total, 2)
+    assert proc["Иванов"]["selected_count"] == 2
+    # обычная позиция line_1 (не сборка) считается как раньше — 2 × 120 у «Сидоров»
+    assert proc["Сидоров"]["sum_rub"] == 240.0
+    assert proc["Сидоров"]["selected_count"] == 1

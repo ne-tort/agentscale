@@ -555,7 +555,8 @@ class PodModuleDataService:
         if not deleted:
             raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="row not found")
         if module_id == "mod_equipment" and existing is not None:
-            # Каскад как в UI: позиция → группы/офферы/бюджет.
+            # Каскад как в UI: позиция → группы/офферы/бюджет/сборки;
+            # сборка → её группы-кандидаты слотов и их офферы.
             from prodavan.application.modules.equipment_offers_service import (
                 cascade_equipment_delete,
             )

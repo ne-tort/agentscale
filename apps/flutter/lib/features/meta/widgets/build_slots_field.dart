@@ -79,15 +79,18 @@ class BuildSlotsField extends StatelessWidget {
       final pn = (body['part_number']?.toString() ?? '').trim();
       final price = body['face_price'];
       final alts = body['alternatives_count'];
+      final offersCount = body['offers_count'];
       final parts = <String>[
         if (title.isNotEmpty) title else (pn.isNotEmpty ? pn : id),
         if (pn.isNotEmpty && title.isNotEmpty) pn,
         if (price != null) _fmtMoney(price),
         if (alts is num && alts > 0) '+$alts',
       ];
-      final hasOffer = int.tryParse(body['offers_count']?.toString() ?? '') != 0 ||
-          body['offers_count'] == null;
-      final color = hasOffer ? null : context.appColors.warning;
+      // Без офферов у кандидата — warning (как «Нет оффера» в общем списке).
+      final offers = offersCount is num
+          ? offersCount.toInt()
+          : int.tryParse(offersCount?.toString() ?? '') ?? 0;
+      final color = offers > 0 ? null : context.appColors.warning;
       return Text(
         parts.join(' · '),
         maxLines: 2,

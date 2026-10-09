@@ -761,6 +761,33 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     assert build_line["ref"]["table_slug"] == "request_lines"
     build_names = {c["name"] for c in meta["columns"] if c["table_slug"] == "equipment_builds"}
     assert {"is_best", "is_selected", "alternatives_count", "benefit_label"} <= build_names
+    # on_order — явный флаг «под заказ» сборки (бюджет читает его, а не текст
+    # match_label); owner_kind — владелец группы (позиция или слот сборки).
+    assert "on_order" in build_names
+    group_names = {c["name"] for c in meta["columns"] if c["table_slug"] == "found_groups"}
+    assert "owner_kind" in group_names
+    # снапшот сборок на позиции (колонки списка «Позиции заказчика»)
+    line_names = {c["name"] for c in meta["columns"] if c["table_slug"] == "request_lines"}
+    assert {
+        "builds_count",
+        "build_best_id",
+        "build_best_price",
+        "build_match_label",
+        "build_benefit_label",
+        "build_benefit_tone",
+    } <= line_names
+    # кандидаты слотов не должны попадать в общие списки найденных товаров
+    for slug in ("found_groups_list", "groups_for_line"):
+        view = next(v for v in meta["views"] if v["slug"] == slug)
+        assert view["ui_json"]["row_filter"] == {"owner_kind": "line"}
+    # позиция показывает сборку и даёт переход к её вариантам
+    lines_list = next(v for v in meta["views"] if v["slug"] == "request_lines_list")
+    line_fields = {c["field"] for c in lines_list["ui_json"]["columns"]}
+    assert {"build_best_price", "build_benefit_label"} <= line_fields
+    builds_btn = next(
+        t for t in lines_list["ui_json"]["toolbar"] if t.get("view") == "equipment_builds_list"
+    )
+    assert builds_btn["context"] == "row"
     # budget_lines может быть сборкой.
     budget_build = next(
         c
