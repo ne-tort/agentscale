@@ -173,4 +173,71 @@ void main() {
     expect(find.textContaining('вход:'), findsNothing);
     expect(find.byIcon(Icons.copy_outlined), findsNothing);
   });
+
+  testWidgets('cache cell shows read tokens and hit rate for [OI] usage (input includes cache)', (tester) async {
+    await tester.pumpWidget(
+      _themed(
+        const AssistantStreamBlock(
+          text: 'answer',
+          // [OI]-compat: input_tokens ALREADY includes the cached subset.
+          usageRaw: {
+            'model': 'grok-4.7',
+            'provider': 'openai',
+            'input_tokens': 1000,
+            'output_tokens': 100,
+            'cache_read_tokens': 400,
+          },
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await _hoverOver(tester, find.byType(AssistantStreamBlock));
+    // 400 / 1000 = 40% (input already IS the full prompt context).
+    expect(find.textContaining('кэш: 400 (40%)'), findsOneWidget);
+  });
+
+  testWidgets('cache cell adds read+creation into the context for Anthropic usage', (tester) async {
+    await tester.pumpWidget(
+      _themed(
+        const AssistantStreamBlock(
+          text: 'answer',
+          // Anthropic: input_tokens is cache-exclusive; context = input+read+creation.
+          usageRaw: {
+            'model': 'claude',
+            'provider': 'anthropic',
+            'input_tokens': 200,
+            'output_tokens': 50,
+            'cache_creation_tokens': 500,
+            'cache_read_tokens': 300,
+          },
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await _hoverOver(tester, find.byType(AssistantStreamBlock));
+    // read = 300; context = 200 + 300 + 500 = 1000 → 30%.
+    expect(find.textContaining('кэш: 300 (30%)'), findsOneWidget);
+  });
+
+  testWidgets('no cache cell when there were no cache reads', (tester) async {
+    await tester.pumpWidget(
+      _themed(
+        const AssistantStreamBlock(
+          text: 'answer',
+          usageRaw: {
+            'model': 'model-a',
+            'input_tokens': 500,
+            'output_tokens': 20,
+            'cache_read_tokens': 0,
+          },
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await _hoverOver(tester, find.byType(AssistantStreamBlock));
+    expect(find.textContaining('кэш:'), findsNothing);
+  });
 }

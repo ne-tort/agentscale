@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -42,6 +43,15 @@ async def test_cancel_with_pod_runtime_does_not_501(monkeypatch) -> None:
     monkeypatch.setattr(svc, "_projects", projects)
     monkeypatch.setattr(svc._session, "commit", AsyncMock())
     monkeypatch.setattr(svc._session, "refresh", AsyncMock())
+    # _append_cancel_event reads the max seq + latest type, then adds a row.
+    monkeypatch.setattr(svc._session, "add", MagicMock())
+    monkeypatch.setattr(svc._session, "flush", AsyncMock())
+    svc._session.execute = AsyncMock(
+        side_effect=[
+            SimpleNamespace(scalar_one=lambda: 0),
+            SimpleNamespace(scalar_one_or_none=lambda: None),
+        ]
+    )
 
     # The bug: get_agent_adapter raised agent_adapter_disabled (501) here.
     out = await svc.cancel_session(

@@ -73,6 +73,12 @@ class ChatSessionController {
   bool refreshingTranscript = false;
   bool hasCachedTranscript = false;
 
+  /// Server-reported: the agent is still working on this session (a turn is
+  /// in progress in the transcript). Set on transcript load so a client that
+  /// reloaded or navigated back mid-turn knows to show the working indicator
+  /// and poll for live updates instead of appearing idle.
+  bool turnInProgress = false;
+
   String get selectedModelLabel {
     final id = selectedModel ?? defaultModel;
     if (id == null || id.isEmpty) return id ?? '';
@@ -85,6 +91,19 @@ class ChatSessionController {
 
   ProjectChatStreamHandle? _handle;
   List<ChatBlock> _liveTurnBlocks = const [];
+
+  /// Live tail polling — used when the agent is working but this client is
+  /// not the SSE owner (reload / navigation mid-turn).
+  Timer? _livePollTimer;
+  bool _polling = false;
+  int _pollFailures = 0;
+  static const _livePollInterval = Duration(milliseconds: 2500);
+  static const _livePollMaxFailures = 5;
+
+  /// Monotonic local id generator for turn idempotency keys.
+  int _turnSeq = 0;
+  String _newTurnId() =>
+      't${DateTime.now().microsecondsSinceEpoch.toRadixString(36)}-${_turnSeq++}';
 
   /// Turn timing (live path): first assistant output moment and the moment
   /// the answer completed — stamped onto the assistant block as
@@ -113,11 +132,20 @@ class ChatSessionController {
   /// (right after send, between events): show the working indicator so the
   /// user sees the agent did not stop. Suppressed while a reconnect wait is
   /// shown instead («Попытка реконнекта…»).
-  bool get showWorkingIndicator =>
-      streaming && reconnectAttempt == null && !anyBlockStreaming && !hasPendingToolCall;
+  ///
+  /// Also true when the agent is working on the session but this client is
+  /// NOT the one streaming it (reloaded/navigated back mid-turn): the server
+  /// reports [turnInProgress] and we poll — the user still sees it working.
+  bool get agentWorking => streaming || turnInProgress;
 
-  /// «Попытка реконнекта…» — the runtime reported a provider-error reconnect.
-  bool get showReconnectIndicator => streaming && reconnectAttempt != null;
+  bool get showWorkingIndicator =>
+      agentWorking && reconnectAttempt == null && !anyBlockStreaming && !hasPendingToolCall;
+
+  /// «Попытка реконнекта…» — a provider-error reconnect is in flight. Works
+  /// both while this client streams (SSE frame) and after a reload (rebuilt
+  /// from the persisted `status{phase:reconnect}` block), so it no longer
+  /// requires [streaming].
+  bool get showReconnectIndicator => agentWorking && reconnectAttempt != null;
 
   /// UI-side cost estimate for usage metadata: runtime `cost_usd` wins, this
   /// only computes from the models catalog when the runtime did not report.
@@ -228,7 +256,7 @@ class ChatSessionController {
     } catch (_) {}
   }
 
-  Future<void> loadTranscript({int? beforeSeq, bool background = false}) async {
+  Future<void> loadTranscript({int? beforeSeq, bool background = false, bool silent = false}) async {
     if (sessionId.isEmpty) {
       blocks.clear();
       _liveTurnBlocks = const [];
@@ -257,6 +285,7 @@ class ChatSessionController {
         _liveTurnBlocks = const [];
         final pending = body['pending_approvals'];
         pendingApprovals = pending is List ? pending.cast<Map<String, dynamic>>() : const [];
+        turnInProgress = body['turn_in_progress'] == true;
       } else {
         // Pagination may legitimately return zero new blocks near the head —
         // only short-circuit when there is nothing more to load.
@@ -276,13 +305,16 @@ class ChatSessionController {
       }
       if (beforeSeq == null) {
         _saveToCache();
+        _syncReconnectFromBlocks();
+        _syncLivePolling();
       }
       notifyImmediate();
     } catch (e) {
       // Best-effort transcript load: do not crash the chat. Keep the cached /
       // existing blocks visible; surface the error so the UI can show a
       // themed snackbar without leaving the composer in a dead state.
-      error = e;
+      // `silent` (post-cancel refresh) never overwrites the turn's own state.
+      if (!silent) error = e;
       notifyImmediate();
     } finally {
       if (background) {
@@ -317,6 +349,9 @@ class ChatSessionController {
     if (trimmed.isEmpty && attachmentRefs.isEmpty) return;
     error = null;
     streaming = true;
+    // This client now owns the live stream — stop any reload-tail polling.
+    turnInProgress = false;
+    _stopLivePolling();
 
     if (sessionId.isEmpty) {
       try {
@@ -365,6 +400,7 @@ class ChatSessionController {
       sessionId: sessionId,
       model: selectedModel,
       attachmentRefs: attachmentRefs,
+      turnId: _newTurnId(),
     );
     _handle = handle;
 
@@ -503,6 +539,9 @@ class ChatSessionController {
       reconnectAttempt = null;
       reconnectMaxAttempts = null;
       reconnectNextModel = null;
+      // If the turn was cut short (watchdog / connection drop) the server may
+      // still be working — resume tailing so the client keeps up.
+      if (turnInProgress) _syncLivePolling();
       notifyImmediate();
     }
   }
@@ -563,6 +602,8 @@ class ChatSessionController {
     blocks.addAll(_liveTurnBlocks);
     _liveTurnBlocks = const [];
     streaming = false;
+    turnInProgress = false;
+    _stopLivePolling();
     // Notify BEFORE the network call: the stop button must respond even when
     // the cancel request hangs on a bad network (Wave 6).
     notifyImmediate();
@@ -574,6 +615,13 @@ class ChatSessionController {
         // cancelled; surface the failure via [error] so the UI can snack it
         // instead of crashing on an unhandled async error.
         error = e;
+      }
+      // Pull the server's final state for the stopped turn (the run may have
+      // persisted events before the stop took effect).
+      try {
+        await loadTranscript(background: true, silent: true);
+      } catch (_) {
+        // Best-effort; the local cancel state already stands.
       }
     }
     _saveToCache();
@@ -590,8 +638,128 @@ class ChatSessionController {
     await loadTranscript();
   }
 
+  /// Start/stop the live-tail poller so it runs only while the agent is
+  /// working and this client is not the SSE owner. Idempotent — safe to call
+  /// from any state transition (transcript load, send start/finish, poll).
+  void _syncLivePolling() {
+    final shouldPoll = turnInProgress && !streaming && sessionId.isNotEmpty;
+    if (shouldPoll) {
+      _livePollTimer ??= Timer.periodic(_livePollInterval, (_) => _pollLiveOnce());
+    } else {
+      _stopLivePolling();
+    }
+  }
+
+  void _stopLivePolling() {
+    _livePollTimer?.cancel();
+    _livePollTimer = null;
+  }
+
+  /// One incremental fetch of events newer than [newestSeq]; appends them so
+  /// a reloaded/navigated-back client catches up on the in-progress turn.
+  Future<void> _pollLiveOnce() async {
+    if (_polling || streaming || sessionId.isEmpty) return;
+    final cursor = newestSeq;
+    if (cursor == null) return;
+    _polling = true;
+    try {
+      final body = await api.projectChatTranscript(
+        projectId: projectId,
+        sessionId: sessionId,
+        afterSeq: cursor,
+      );
+      _pollFailures = 0;
+      final resolved = body['session_id'] as String?;
+      if (resolved != null && resolved.isNotEmpty) sessionId = resolved;
+      _mergeIncrementalBlocks(chatBlocksFromTranscript(body['blocks'] as List?));
+      newestSeq = body['newest_seq'] as int? ?? newestSeq;
+      turnInProgress = body['turn_in_progress'] == true;
+      _syncReconnectFromBlocks();
+      _saveToCache();
+      _syncLivePolling();
+      notifyImmediate();
+    } catch (_) {
+      // Best-effort tail: stop after repeated failures instead of hammering.
+      _pollFailures++;
+      if (_pollFailures >= _livePollMaxFailures) {
+        turnInProgress = false;
+        _stopLivePolling();
+        notifyImmediate();
+      }
+    } finally {
+      _polling = false;
+    }
+  }
+
+  /// Rebuild the reconnect indicator from persisted blocks (reload path).
+  ///
+  /// Scans the transcript tail for the newest decisive block: a
+  /// `status{phase:reconnect}` means a retry is in flight; any assistant/tool
+  /// output (or a non-reconnect status) means the retry resolved. This mirrors
+  /// the live SSE `status` frame so a reloaded client shows «Попытка
+  /// реконнекта…» instead of a misleading "agentscale работает…".
+  void _syncReconnectFromBlocks() {
+    for (var i = blocks.length - 1; i >= 0; i--) {
+      final b = blocks[i];
+      switch (b.kind) {
+        case 'status':
+          final phase = b.raw['phase']?.toString();
+          if (phase == 'reconnect') {
+            reconnectAttempt = _asInt(b.raw['attempt']);
+            reconnectMaxAttempts = _asInt(b.raw['max_attempts']);
+            reconnectNextModel = b.raw['next_model']?.toString();
+          } else {
+            reconnectAttempt = null;
+            reconnectMaxAttempts = null;
+            reconnectNextModel = null;
+          }
+          return;
+        case 'assistant_markdown':
+          if (b.text.trim().isNotEmpty) {
+            reconnectAttempt = null;
+            reconnectMaxAttempts = null;
+            reconnectNextModel = null;
+            return;
+          }
+          break;
+        case 'tool_call':
+        case 'tool_result':
+        case 'error':
+        case 'user':
+          reconnectAttempt = null;
+          reconnectMaxAttempts = null;
+          reconnectNextModel = null;
+          return;
+        default:
+          break;
+      }
+    }
+  }
+
+  static int? _asInt(Object? v) {
+    if (v is int) return v;
+    if (v is num) return v.toInt();
+    return null;
+  }
+
+  /// Append incrementally-fetched blocks, merging an assistant text run that
+  /// was split by the poll cursor so the message is not duplicated.
+  void _mergeIncrementalBlocks(List<ChatBlock> incoming) {
+    for (final b in incoming) {
+      if (b.kind == 'assistant_markdown' &&
+          blocks.isNotEmpty &&
+          blocks.last.kind == 'assistant_markdown') {
+        final prev = blocks.last;
+        blocks[blocks.length - 1] = prev.copyWithRaw({'text': '${prev.text}${b.text}'});
+      } else {
+        blocks.add(b);
+      }
+    }
+  }
+
   void dispose() {
     _handle?.abort();
+    _stopLivePolling();
     _notifyTimer?.cancel();
     _tick.close();
     interruptedDraft.dispose();

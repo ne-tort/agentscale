@@ -305,7 +305,7 @@ class ChatSidebarService:
             sess_q = await self._session.execute(
                 select(AgentSessionRow)
                 .where(AgentSessionRow.project_id.in_(query_ids))
-                .where(AgentSessionRow.status.in_(["active", "suspended", "closed"]))
+                .where(AgentSessionRow.status.in_(["active", "suspended", "closed", "cancelled"]))
             )
             for row in sess_q.scalars().all():
                 sessions_by_project.setdefault(row.project_id, []).append(row)

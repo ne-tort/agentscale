@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
+from uuid import uuid4
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,6 +27,7 @@ from prodavan.application.agent.conversation_rehydrate import (
     stamp_hydrate_generation,
 )
 from prodavan.application.agent.credential_broker import AgentCredentialBroker
+from prodavan.application.agent.detached_turn import DetachedTurn, detached_turns
 from prodavan.application.agent.openclaw_bridge import (
     BridgeSessionBootstrap,
     OpenClawBridgeBootstrap,
@@ -223,6 +226,22 @@ _STREAM_FLUSH_TYPES = frozenset(
         AgentEventType.SUBAGENT_STOP,
     }
 )
+
+# A turn is "done" once one of these lands in the transcript.
+TERMINAL_EVENT_TYPES = frozenset({str(AgentEventType.DONE), str(AgentEventType.ERROR)})
+
+# Detached-turn tailer poll interval (the run writes via its own session).
+_TAIL_POLL_INTERVAL_SEC = 0.25
+
+# How long a non-terminal tail still counts as "the agent is working". The
+# stall watchdog (run_stall.STALL_AFTER = 7 min) writes a terminal marker, so
+# staying generous avoids flapping between "working" and "idle" while it
+# decides; beyond this window we treat a silent tail as a dead run.
+_TURN_IN_PROGRESS_MAX_AGE = timedelta(minutes=15)
+
+
+def _ensure_utc(value: datetime) -> datetime:
+    return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
 
 
 def _raise_if_agent_error_events(events: list[dict]) -> None:
@@ -1091,8 +1110,15 @@ class AgentSessionService:
         principal: Principal,
         employee: EmployeeRow | None,
         model: str | None = None,
+        turn_id: str | None = None,
     ) -> AsyncIterator[dict]:
-        """SSE event stream for L05 workspace — persists like send_message."""
+        """SSE for a chat turn: START a detached run, then TAIL its events.
+
+        The turn runs autonomously (see `detached_turn`); this generator only
+        forwards persisted events. If the client disconnects, the run keeps
+        going — a reloaded page re-attaches via `after_seq` polling and sees
+        the same events.
+        """
         if employee is None:
             raise AppError(code="FORBIDDEN", title="Forbidden", status=403, detail="employee required")
         sid = await self._resolve_sendable_session_id(
@@ -1102,31 +1128,153 @@ class AgentSessionService:
             employee=employee,
             model=model,
         )
-        yield {"type": "_session", "data": {"session_id": sid}}
-        events: list[dict] = []
-        try:
-            async for event in self._iter_send_events(
-                project_id=project_id,
-                session_id=sid,
+        # Commit the resolved/created session NOW: the detached run opens its
+        # own session and must see this row (and any reactivation).
+        await self._session.commit()
+        turn = await self.start_detached_turn(
+            project_id=project_id,
+            session_id=sid,
+            text=text,
+            attachment_refs=attachment_refs,
+            principal=principal,
+            employee=employee,
+            model=model,
+            turn_id=turn_id,
+        )
+        yield {"type": "_session", "data": {"session_id": sid, "turn_id": turn.turn_id}}
+        async for event in self.iter_turn_tail(turn):
+            yield event
+
+    async def start_detached_turn(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        text: str,
+        attachment_refs: list[str] | None,
+        principal: Principal,
+        employee: EmployeeRow | None,
+        model: str | None,
+        turn_id: str | None = None,
+    ) -> DetachedTurn:
+        """Start (or reuse) an autonomous turn for `session_id`."""
+        seq_q = await self._session.execute(
+            select(func.coalesce(func.max(AgentEventRow.seq), 0)).where(
+                AgentEventRow.session_id == session_id
+            )
+        )
+        start_seq = int(seq_q.scalar_one() or 0)
+        return await detached_turns.start(
+            turn_id=turn_id or uuid4().hex,
+            session_id=session_id,
+            project_id=project_id,
+            start_seq=start_seq,
+            employee_id=employee.id if employee else None,
+            principal=principal,
+            runner=lambda turn: self._detached_events(
+                turn,
                 text=text,
                 attachment_refs=attachment_refs,
-                principal=principal,
-                employee=employee,
                 model=model,
-            ):
-                events.append(event)
+            ),
+        )
+
+    async def _detached_events(
+        self,
+        turn: DetachedTurn,
+        *,
+        text: str,
+        attachment_refs: list[str] | None,
+        model: str | None,
+    ) -> None:
+        """Run one turn to completion on its OWN DB session, then persist.
+
+        Owns a fresh `AsyncSession` so the run is independent of any request
+        (the request that started it, and its connection, may be gone). Every
+        event is persisted (+ flushed) by `_iter_send_events`, so a client that
+        re-attaches mid-turn reads the transcript and catches up.
+        """
+        from prodavan.infrastructure.persistence.database import get_session_factory
+
+        factory = get_session_factory()
+        collected: list[dict] = []
+        async with factory() as run_session:
+            run_service = AgentSessionService(run_session)
+            employee = (
+                await run_session.get(EmployeeRow, turn.employee_id)
+                if turn.employee_id
+                else None
+            )
+            try:
+                async for event in run_service._iter_send_events(
+                    project_id=turn.project_id,
+                    session_id=turn.session_id,
+                    text=text,
+                    attachment_refs=attachment_refs,
+                    principal=turn.principal,  # type: ignore[arg-type]
+                    employee=employee,
+                    model=model,
+                ):
+                    collected.append(event)
+                await run_session.commit()
+            except asyncio.CancelledError:
+                await run_session.rollback()
+                turn.error_code = "CANCELLED"
+                turn.error_detail = "turn cancelled"
+                raise
+            except AppError as err:
+                await run_session.rollback()
+                turn.error_code = err.code
+                turn.error_detail = err.detail
+            except Exception:  # noqa: BLE001 — surface to the tailer, never crash
+                await run_session.rollback()
+                turn.error_code = turn.error_code or "INTERNAL"
+                turn.error_detail = turn.error_detail or "agent turn failed"
+        turn.drained_events = collected
+        turn.assistant_text = assistant_text_from_events(collected)
+
+    async def iter_turn_tail(self, turn: DetachedTurn) -> AsyncIterator[dict]:
+        """Yield a detached turn's persisted events until it finishes.
+
+        Polls `agent_events` past a moving cursor, so it works identically for
+        the original SSE sender and a page that re-attached after a reload.
+        """
+        cursor = turn.start_seq
+        while True:
+            events, _meta = await self._list_events_page(
+                session_id=turn.session_id,
+                project_id=turn.project_id,
+                principal=None,
+                employee=None,
+                limit=200,
+                after_seq=cursor,
+                skip_access=True,
+                include_total_count=False,
+            )
+            for event in events:
+                seq = event.get("seq")
+                if isinstance(seq, int):
+                    cursor = seq
                 yield event
-            await self._session.commit()
-        except AppError:
-            await self._session.rollback()
-            raise
-        assistant_text = assistant_text_from_events(events)
+            if turn.finished and not events:
+                break
+            if not events:
+                await asyncio.sleep(_TAIL_POLL_INTERVAL_SEC)
+        # The run died before writing anything (authz/budget/hard failure):
+        # surface a structured error so the client is not left guessing.
+        if turn.error_code and not turn.drained_events:
+            yield {
+                "type": "error",
+                "data": {"code": turn.error_code, "message": turn.error_detail or ""},
+            }
         yield {
             "type": "_turn_complete",
             "data": {
-                "session_id": sid,
-                "assistant_text": assistant_text,
-                "pending_approvals": _pending_approvals_from_events(events),
+                "session_id": turn.session_id,
+                "turn_id": turn.turn_id,
+                "assistant_text": turn.assistant_text,
+                "pending_approvals": _pending_approvals_from_events(turn.drained_events),
+                "cancelled": turn.cancel_requested,
             },
         }
 
@@ -1139,7 +1287,12 @@ class AgentSessionService:
         employee: EmployeeRow,
         model: str | None,
     ) -> str:
-        """Reuse ACTIVE session; reactivate SUSPENDED session from UI after pause/resume."""
+        """Reuse ACTIVE session; reactivate SUSPENDED/CANCELLED from the UI.
+
+        A user "Stop" cancels the session (CANCELLED) but keeps the chat in the
+        sidebar; a follow-up message must continue THAT chat, not silently
+        switch to another session.
+        """
         if session_id:
             row = await self.get_session(session_id=session_id)
             if row.project_id != project_id:
@@ -1151,7 +1304,7 @@ class AgentSessionService:
                 )
             if row.status == AgentSessionStatus.ACTIVE:
                 return row.id
-            if row.status == AgentSessionStatus.SUSPENDED:
+            if row.status in (AgentSessionStatus.SUSPENDED, AgentSessionStatus.CANCELLED):
                 self._reactivate_session_row(row)
                 await self._session.flush()
                 return row.id
@@ -1233,6 +1386,7 @@ class AgentSessionService:
         employee: EmployeeRow | None,
         limit: int = 500,
         before_seq: int | None = None,
+        after_seq: int | None = None,
         tail: bool = False,
         pod_agent: bool = False,
         session_row: AgentSessionRow | None = None,
@@ -1275,6 +1429,18 @@ class AgentSessionService:
             has_more = len(rows) > limit
             rows = rows[:limit]
             rows.reverse()
+        elif after_seq is not None:
+            # Incremental tail: only events strictly newer than the cursor,
+            # ascending, so a client can poll for live updates after a reload
+            # without re-fetching the whole transcript.
+            q = await self._session.execute(
+                base.where(AgentEventRow.seq > after_seq)
+                .order_by(AgentEventRow.seq.asc())
+                .limit(fetch_limit)
+            )
+            rows = list(q.scalars().all())
+            has_more = len(rows) > limit
+            rows = rows[:limit]
         else:
             q = await self._session.execute(base.order_by(AgentEventRow.seq.asc()).limit(fetch_limit))
             rows = list(q.scalars().all())
@@ -1400,8 +1566,15 @@ class AgentSessionService:
         session_id: str,
         limit: int = 500,
         before_seq: int | None = None,
+        after_seq: int | None = None,
     ) -> dict:
-        """Chat bubbles for an explicit session — UI must pass session_id (multi-chat)."""
+        """Chat bubbles for an explicit session — UI must pass session_id (multi-chat).
+
+        ``after_seq`` — incremental mode: return only events newer than the
+        cursor (for live tailing after a reload). ``turn_in_progress`` tells
+        the client the agent is still working so it can show the indicator and
+        keep polling instead of appearing idle.
+        """
         await self._projects.require_access(
             project_id=project_id, principal=principal, employee=employee, write=False
         )
@@ -1416,6 +1589,38 @@ class AgentSessionService:
         session_row = await self.get_session(session_id=sid)
         if session_row.project_id != project_id:
             raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Agent session not found")
+
+        # A turn can only be "in progress" while the session is ACTIVE. Once the
+        # user stops it (CANCELLED) or it is closed/suspended, the tail may
+        # still look non-terminal for a while — reporting "working" there would
+        # make a reloaded client re-arm the Cancel button and poll forever.
+        turn_in_progress = (
+            session_row.status == AgentSessionStatus.ACTIVE
+            and await self.turn_in_progress(sid)
+        )
+
+        if after_seq is not None:
+            # Incremental poll: new blocks only, no transcript-wide scans.
+            events, meta = await self._list_events_page(
+                session_id=sid,
+                project_id=project_id,
+                principal=principal,
+                employee=employee,
+                limit=limit,
+                after_seq=after_seq,
+                tail=False,
+                session_row=session_row,
+                skip_access=True,
+                include_total_count=False,
+            )
+            return {
+                "session_id": sid,
+                "session_status": session_row.status,
+                "blocks": events_to_chat_blocks(events),
+                "pending_approvals": [],
+                "turn_in_progress": turn_in_progress,
+                **meta,
+            }
 
         events, meta = await self._list_events_page(
             session_id=sid,
@@ -1452,8 +1657,37 @@ class AgentSessionService:
             "session_status": session_row.status,
             "blocks": events_to_chat_blocks(events),
             "pending_approvals": pending_approvals,
+            "turn_in_progress": turn_in_progress,
             **meta,
         }
+
+    async def turn_in_progress(self, session_id: str) -> bool:
+        """Whether a turn is still running for this session.
+
+        Authoritative source is the in-process detached-turn registry (there is
+        exactly one API replica). After an API restart the registry is empty,
+        so we fall back to the event tail: newest event is not terminal
+        (``done``/``error``) and not older than the recency window.
+        """
+        if detached_turns.is_working(session_id):
+            return True
+        q = await self._session.execute(
+            select(AgentEventRow.event_type, AgentEventRow.created_at)
+            .where(AgentEventRow.session_id == session_id)
+            .order_by(AgentEventRow.seq.desc())
+            .limit(1)
+        )
+        row = q.first()
+        if row is None:
+            return False
+        event_type, created_at = row
+        if event_type in TERMINAL_EVENT_TYPES:
+            return False
+        if created_at is not None:
+            age = datetime.now(UTC) - _ensure_utc(created_at)
+            if age > _TURN_IN_PROGRESS_MAX_AGE:
+                return False
+        return True
 
     async def delete_session(
         self,
@@ -1549,6 +1783,13 @@ class AgentSessionService:
             raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Agent session not found")
         if row.status == AgentSessionStatus.CANCELLED:
             return _session_public(row)
+        # Stop any detached run first: cancelling its task closes the runtime
+        # stream (the runtime aborts the run) and marks it cancelled.
+        detached_turns.request_cancel(session_id)
+        # Close the transcript honestly: without a terminal event the tail looks
+        # mid-turn (a reloaded client would keep showing "working" and re-arm
+        # the Cancel button). Mirrors run_stall's terminal marker.
+        await self._append_cancel_event(session_id)
         if settings.pod_agent_runtime_enabled and not settings.agent_inprocess_adapters_enabled:
             # Pod-runtime sessions have no in-process adapter to cancel - the
             # running turn streams into a cancelled session and stops on its
@@ -1562,6 +1803,37 @@ class AgentSessionService:
         await self._session.commit()
         await self._session.refresh(row)
         return _session_public(row)
+
+    async def _append_cancel_event(self, session_id: str) -> None:
+        """Append a terminal `done{cancelled}` event so the turn reads finished.
+
+        The detached run may be cancelled before it writes a terminal frame;
+        without this the newest event stays non-terminal and the transcript
+        looks mid-turn to a reloading client.
+        """
+        seq_q = await self._session.execute(
+            select(func.coalesce(func.max(AgentEventRow.seq), 0)).where(
+                AgentEventRow.session_id == session_id
+            )
+        )
+        seq = int(seq_q.scalar_one() or 0)
+        latest = await self._session.execute(
+            select(AgentEventRow.event_type)
+            .where(AgentEventRow.session_id == session_id)
+            .order_by(AgentEventRow.seq.desc())
+            .limit(1)
+        )
+        if latest.scalar_one_or_none() in TERMINAL_EVENT_TYPES:
+            return  # already finished — do not double-append
+        self._session.add(
+            AgentEventRow(
+                session_id=session_id,
+                seq=seq + 1,
+                event_type=str(AgentEventType.DONE),
+                payload={"reason": "cancelled", "cancelled": True},
+            )
+        )
+        await self._session.flush()
 
     async def cancel_active_for_project(self, *, project_id: str) -> int:
         """Best-effort cancel of ACTIVE sessions (reset prelude / hard stop). Caller owns commit."""
@@ -1909,6 +2181,15 @@ class AgentSessionService:
                 status=503,
                 detail="sidechain transcript unavailable",
             )
+        # The bridge returns Anthropic-shaped transcript entries under `entries`;
+        # the UI renders chat blocks. Normalize here so the subagent panel shows
+        # a real transcript instead of falling back to a raw event dump.
+        from prodavan.application.agent.chat_projection import (
+            transcript_entries_to_chat_blocks,
+        )
+
+        if isinstance(body, dict) and "blocks" not in body:
+            body = {**body, "blocks": transcript_entries_to_chat_blocks(body.get("entries"))}
         return body
 
 
