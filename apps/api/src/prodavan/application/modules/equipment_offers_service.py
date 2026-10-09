@@ -359,6 +359,9 @@ class EquipmentPipelineService:
             "budget_created": 0,
             "budget_updated": 0,
             "builds_updated": 0,
+            "builds_deleted": 0,
+            "build_slot_groups_updated": 0,
+            "build_lines_updated": 0,
             "procurement_rows": 0,
             "checked": 0,
         }
@@ -374,6 +377,18 @@ class EquipmentPipelineService:
         # (build_id + slot_type_id) — «живая», если её владелец существует.
         line_ids = {str(r.get("row_id") or "") for r in lines}
         build_rows = [r for r in await io.list(BUILDS_TABLE) if isinstance(r, dict)]
+        # Сборки-сироты (позиция удалена в обход каскада, например через MCP) —
+        # удаляем ДО групп: иначе их слот-группы считаются «живыми» вечно.
+        live_build_rows: list[dict[str, Any]] = []
+        for b in build_rows:
+            bid = str(b.get("row_id") or "")
+            blid = str((b.get("body") or {}).get("line_id") or "")
+            if not blid or blid in line_ids:
+                live_build_rows.append(b)
+                continue
+            if await io.delete(BUILDS_TABLE, bid):
+                stats["builds_deleted"] += 1
+        build_rows = live_build_rows
         build_ids = {str(r.get("row_id") or "") for r in build_rows}
         live_groups: list[dict[str, Any]] = []
         for g in groups:
@@ -436,9 +451,10 @@ class EquipmentPipelineService:
         # «Сборка» ДО бюджета: бюджет позиции-сборки читает уже посчитанную
         # price_total сборки. Состав/цена из слотов (группы-кандидаты + легаси
         # item-слоты), best-сборка позиции, альтернативы и выгода.
-        stats["builds_updated"] = await self._sync_builds(
+        build_stats = await self._sync_builds(
             io, groups=groups, offers=offers
         )
+        stats.update(build_stats)
 
         budget_stats = await self._sync_budget(
             io, lines=lines, groups=groups, offers=offers, registry=registry
@@ -1278,8 +1294,9 @@ class EquipmentPipelineService:
                     or "Сборка",
                     "qty": line_body.get("qty") or 1,
                     "price_in": _num_or(bbody.get("price_total"), None),
-                    # сборка «под заказ», если её match_label это отражает
-                    "on_order": "под заказ" in str(bbody.get("match_label") or "").lower(),
+                    # «под заказ» — флаг сборки (пишет _sync_builds), а не разбор
+                    # текста match_label.
+                    "on_order": bbody.get("on_order") is True,
                     "match_kind": _valid_match_kind(bbody.get("match_kind")),
                     "seller": "",
                     "brand": "",
@@ -1333,6 +1350,9 @@ class EquipmentPipelineService:
             seller = str(obody.get("seller") or "").strip()
             snapshot = {
                 "line_id": line_id,
+                # строка больше не из сборки (сборку удалили / осталась без цены)
+                # — гасим ссылку, иначе UI/документы читают мёртвую сборку.
+                "build_id": "",
                 "title": str(obody.get("title") or line_body.get("title") or "").strip()
                 or "Не найден",
                 "part_number": str(
@@ -1394,7 +1414,7 @@ class EquipmentPipelineService:
         *,
         groups: list[dict[str, Any]],
         offers: list[dict[str, Any]],
-    ) -> int:
+    ) -> dict[str, int]:
         """equipment_builds: состав/цена из слотов + best-сборка позиции.
 
         WAVE10. Слот сборки = тип комплектующего; его кандидаты — группы
@@ -1406,8 +1426,30 @@ class EquipmentPipelineService:
         """
         items = [r for r in await io.list(ITEMS_TABLE) if isinstance(r, dict)]
         builds = [r for r in await io.list(BUILDS_TABLE) if isinstance(r, dict)]
+        lines_rows = [r for r in await io.list(LINES_TABLE) if isinstance(r, dict)]
         if not builds:
-            return 0
+            # Сборок нет вовсе — всё равно гасим протухшие снапшоты на позициях.
+            lines_updated = 0
+            for line_row in lines_rows:
+                if await self._write_line_build_snapshot(
+                    io,
+                    lines_rows=lines_rows,
+                    line_id=str(line_row.get("row_id") or ""),
+                    snap={
+                        "builds_count": 0,
+                        "build_best_id": "",
+                        "build_best_price": None,
+                        "build_match_label": "",
+                        "build_benefit_label": "",
+                        "build_benefit_tone": "",
+                    },
+                ):
+                    lines_updated += 1
+            return {
+                "builds_updated": 0,
+                "build_slot_groups_updated": 0,
+                "build_lines_updated": lines_updated,
+            }
         items_by_id = {str(r.get("row_id") or ""): r for r in items}
         offers_by_id = {str(r.get("row_id") or ""): r for r in offers}
 
@@ -1422,6 +1464,8 @@ class EquipmentPipelineService:
             groups_by_build_slot.setdefault((bid, slot), []).append(g)
 
         updated = 0
+        slot_groups_updated = 0
+        lines_updated = 0
         builds_by_line: dict[str, list[dict[str, Any]]] = {}
         for build in builds:
             bid = str(build.get("row_id") or "")
@@ -1462,12 +1506,6 @@ class EquipmentPipelineService:
                             str(g.get("row_id") or ""),
                         ),
                     )[0]
-                    gb = best_g.get("body") or {}
-                    slot_price = _num_or(gb.get("face_price"), None)
-                    rank = MATCH_ORDER.get(_valid_match_kind(gb.get("match_kind")), 3)
-                    worst_rank = max(worst_rank, rank)
-                    if gb.get("face_in_stock") is not True:
-                        any_on_order = True
                     # Ручной выбор слота (slots[slot] = group_id) перекрывает
                     # автобest, если указывает на живого кандидата слота.
                     manual_id = str(legacy_slots.get(slot) or "")
@@ -1475,6 +1513,15 @@ class EquipmentPipelineService:
                         (g for g in priced if str(g.get("row_id") or "") == manual_id),
                         best_g,
                     )
+                    # Цена/точность/наличие сборки считаются ПО ВЫБРАННОМУ
+                    # кандидату, а не по автобest: иначе ручной выбор в UI
+                    # расходится с итоговой ценой сборки.
+                    gb = chosen_g.get("body") or {}
+                    slot_price = _num_or(gb.get("face_price"), None)
+                    rank = MATCH_ORDER.get(_valid_match_kind(gb.get("match_kind")), 3)
+                    worst_rank = max(worst_rank, rank)
+                    if gb.get("face_in_stock") is not True:
+                        any_on_order = True
                 # is_best/альтернативы группы-кандидата: видно в pick-списке слота.
                 chosen_id = str((chosen_g or {}).get("row_id") or "")
                 slot_alts = max(0, len(priced) - 1)
@@ -1492,7 +1539,7 @@ class EquipmentPipelineService:
                         gbody.update(gupdates)
                         await io.update(GROUPS_TABLE, gid, gbody)
                         g["body"] = gbody
-                        updated += 1
+                        slot_groups_updated += 1
                 # 2) легаси item-слот (если группы слота цены не дали)
                 slot_qty = 1.0
                 if slot_price is None:
@@ -1527,6 +1574,10 @@ class EquipmentPipelineService:
                 updates["match_kind"] = want_kind
             if str(body.get("match_label") or "") != want_label:
                 updates["match_label"] = want_label
+            # «под заказ» — отдельный флаг: бюджет читает его напрямую, а не
+            # парсит текст match_label (локализация/формулировка могут меняться).
+            if bool(body.get("on_order")) is not any_on_order:
+                updates["on_order"] = any_on_order
             if updates:
                 body.update(updates)
                 await io.update(BUILDS_TABLE, bid, body)
@@ -1534,7 +1585,6 @@ class EquipmentPipelineService:
                 updated += 1
 
         # best-сборка позиции: точность → цена; остальные — альтернативы.
-        lines_rows = [r for r in await io.list(LINES_TABLE) if isinstance(r, dict)]
         for line_id, line_builds in builds_by_line.items():
             priced = [
                 b
@@ -1596,26 +1646,70 @@ class EquipmentPipelineService:
                 (b for b in line_builds if str(b.get("row_id") or "") == winner), None
             )
             wbody = (winner_build or {}).get("body") or {}
-            line_row = next(
-                (r for r in lines_rows if str(r.get("row_id") or "") == line_id), None
-            )
-            if line_row is not None:
-                lbody = dict(line_row.get("body") or {})
-                snap: dict[str, Any] = {
+            if await self._write_line_build_snapshot(
+                io,
+                lines_rows=lines_rows,
+                line_id=line_id,
+                snap={
                     "builds_count": len(line_builds),
                     "build_best_id": winner,
                     "build_best_price": _num_or(wbody.get("price_total"), None),
                     "build_match_label": str(wbody.get("match_label") or ""),
                     "build_benefit_label": str(wbody.get("benefit_label") or ""),
                     "build_benefit_tone": str(wbody.get("benefit_tone") or ""),
-                }
-                changed = {k: v for k, v in snap.items() if lbody.get(k) != v}
-                if changed:
-                    lbody.update(changed)
-                    await io.update(LINES_TABLE, line_id, lbody)
-                    line_row["body"] = lbody
-                    updated += 1
-        return updated
+                },
+            ):
+                lines_updated += 1
+
+        # Позиции без сборок: гасим протухший снапшот (сборки удалили) — иначе
+        # «Сборка ₽» и бейдж выгоды продолжают показывать несуществующее.
+        for line_row in lines_rows:
+            lid = str(line_row.get("row_id") or "")
+            if lid in builds_by_line:
+                continue
+            if await self._write_line_build_snapshot(
+                io,
+                lines_rows=lines_rows,
+                line_id=lid,
+                snap={
+                    "builds_count": 0,
+                    "build_best_id": "",
+                    "build_best_price": None,
+                    "build_match_label": "",
+                    "build_benefit_label": "",
+                    "build_benefit_tone": "",
+                },
+            ):
+                lines_updated += 1
+
+        return {
+            "builds_updated": updated,
+            "build_slot_groups_updated": slot_groups_updated,
+            "build_lines_updated": lines_updated,
+        }
+
+    async def _write_line_build_snapshot(
+        self,
+        io: ModuleRowIO,
+        *,
+        lines_rows: list[dict[str, Any]],
+        line_id: str,
+        snap: dict[str, Any],
+    ) -> bool:
+        """Пишет снапшот сборок на позицию только если он изменился."""
+        line_row = next(
+            (r for r in lines_rows if str(r.get("row_id") or "") == line_id), None
+        )
+        if line_row is None:
+            return False
+        lbody = dict(line_row.get("body") or {})
+        changed = {k: v for k, v in snap.items() if lbody.get(k) != v}
+        if not changed:
+            return False
+        lbody.update(changed)
+        await io.update(LINES_TABLE, line_id, lbody)
+        line_row["body"] = lbody
+        return True
 
     # ---------------------------------------------------------------- закупка
 
@@ -1641,6 +1735,9 @@ class EquipmentPipelineService:
         offers = [
             r for r in await io.list_project_wide(OFFERS_TABLE) if isinstance(r, dict)
         ]
+        groups = [
+            r for r in await io.list_project_wide(GROUPS_TABLE) if isinstance(r, dict)
+        ]
 
         offers_count_by_seller: dict[str, int] = {}
         for o in offers:
@@ -1649,6 +1746,16 @@ class EquipmentPipelineService:
                 offers_count_by_seller[seller.casefold()] = (
                     offers_count_by_seller.get(seller.casefold(), 0) + 1
                 )
+
+        # WAVE10: выбранные комплектующие сборок (группы слота с is_best) —
+        # строка бюджета сборки не имеет одного продавца, поэтому закупка
+        # раскладывается по поставщикам компонентов.
+        chosen_groups_by_build: dict[str, list[dict[str, Any]]] = {}
+        for g in groups:
+            gbody = g.get("body") or {}
+            bid = str(gbody.get("build_id") or "")
+            if bid and gbody.get("is_best") is True:
+                chosen_groups_by_build.setdefault(bid, []).append(gbody)
 
         # Позиции проекта из бюджетных снапшотов (line_id уникален в рамках
         # чата; при дубле из другого чата побеждает последний апдейт).
@@ -1661,6 +1768,27 @@ class EquipmentPipelineService:
             seller = str(body.get("seller") or "").strip()
             if seller:
                 lines_by_seller.setdefault(seller.casefold(), []).append(body)
+                continue
+            # строка сборки: раскладываем по поставщикам её компонентов
+            build_id = str(body.get("build_id") or "")
+            if not build_id:
+                continue
+            qty = _num_or(body.get("qty"), 1.0) or 1.0
+            for gb in chosen_groups_by_build.get(build_id) or []:
+                comp_seller = str(gb.get("face_seller") or "").strip()
+                comp_price = _num_or(gb.get("face_price"), None)
+                if not comp_seller or comp_price is None:
+                    continue
+                lines_by_seller.setdefault(comp_seller.casefold(), []).append(
+                    {
+                        "line_id": line_id,
+                        "qty": qty,
+                        "price_in": comp_price,
+                        "seller": comp_seller,
+                        # маржа — из реестра поставщика (не ручная)
+                        "markup_source": "",
+                    }
+                )
 
         proc_rows = [r for r in await io.list(PROCUREMENT_TABLE) if isinstance(r, dict)]
         proc_by_seller: dict[str, dict[str, Any]] = {}
@@ -1855,14 +1983,17 @@ async def cascade_equipment_delete(
     """Каскадное удаление связанных строк mod_equipment.
 
     Связь по позиции заказчика (request_lines.row_id):
-    - удаление позиции → её found_groups + found_offers + budget_lines;
+    - удаление позиции → её found_groups + found_offers + budget_lines
+      + сборки позиции (equipment_builds) вместе с их группами-кандидатами
+      слотов и офферами;
     - удаление строки бюджета → корневая позиция со всем каскадом;
-    - удаление found_groups → её офферы.
+    - удаление found_groups → её офферы;
+    - удаление сборки → её группы-кандидаты слотов (build_id) и их офферы.
 
     Записи идут через ModuleRowIO(run_actions=False) в бакете чата самой
     строки (session_id), пайплайн дочищает остатки на следующем прогоне.
     """
-    if table_slug not in (LINES_TABLE, BUDGET_TABLE, GROUPS_TABLE):
+    if table_slug not in (LINES_TABLE, BUDGET_TABLE, GROUPS_TABLE, BUILDS_TABLE):
         return {}
     if _IN_CASCADE_DELETE.get():
         return {}  # каскад уже идёт — не рекурсируем через сервисные хуки
@@ -1888,11 +2019,37 @@ async def cascade_equipment_delete(
                 if await io.delete(table, rid):
                     deleted[table] = deleted.get(table, 0) + 1
 
+        async def _cascade_build(build_id: str) -> None:
+            """Сборка → её группы-кандидаты слотов и их офферы."""
+            slot_groups = [
+                row
+                for row in await io.list(GROUPS_TABLE)
+                if str((row.get("body") or {}).get("build_id") or "") == build_id
+            ]
+            for row in slot_groups:
+                gid = str(row.get("row_id") or "")
+                await _delete_where(OFFERS_TABLE, "group_id", gid)
+                if await io.delete(GROUPS_TABLE, gid):
+                    deleted[GROUPS_TABLE] = deleted.get(GROUPS_TABLE, 0) + 1
+
         async def _cascade_line(line_id: str) -> None:
             # офферы — по line_id и по группам позиции (страховка на разрыв дубля)
             await _delete_where(OFFERS_TABLE, "line_id", line_id)
             await _delete_where(GROUPS_TABLE, "line_id", line_id)
             await _delete_where(BUDGET_TABLE, "line_id", line_id)
+            # WAVE10: сборки позиции и их комплектующие. Группы слотов несут
+            # build_id (не line_id), поэтому без этого каскада они остаются
+            # «живыми» для пайплайна и продолжают материализоваться.
+            builds = [
+                row
+                for row in await io.list(BUILDS_TABLE)
+                if str((row.get("body") or {}).get("line_id") or "") == line_id
+            ]
+            for row in builds:
+                bid = str(row.get("row_id") or "")
+                await _cascade_build(bid)
+                if await io.delete(BUILDS_TABLE, bid):
+                    deleted[BUILDS_TABLE] = deleted.get(BUILDS_TABLE, 0) + 1
 
         if table_slug == LINES_TABLE:
             await _cascade_line(row_id)
@@ -1909,6 +2066,8 @@ async def cascade_equipment_delete(
                 await _cascade_line(line_id)
         elif table_slug == GROUPS_TABLE:
             await _delete_where(OFFERS_TABLE, "group_id", row_id)
+        elif table_slug == BUILDS_TABLE:
+            await _cascade_build(row_id)
         return deleted
     finally:
         _IN_CASCADE_DELETE.set(False)

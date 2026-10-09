@@ -389,8 +389,9 @@ class CabinetModuleService:
         if not ok:
             raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="row not found")
         if module_id == "mod_equipment" and existing is not None:
-            # Связанные данные позиции заказчика удаляются вместе с ней:
-            # позиция → группы/офферы/бюджет; строка бюджета → вся цепочка.
+            # Связанные данные удаляются вместе со строкой:
+            # позиция → группы/офферы/бюджет/сборки; строка бюджета → вся
+            # цепочка; сборка → её группы-кандидаты слотов и их офферы.
             from prodavan.application.modules.equipment_offers_service import (
                 cascade_equipment_delete,
             )
