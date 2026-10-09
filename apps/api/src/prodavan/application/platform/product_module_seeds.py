@@ -1462,8 +1462,26 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "name": "line_id",
                 "label": {"ru": "Позиция заказчика", "en": "Request line"},
                 "type": "ref",
-                "required": True,
+                # WAVE10: группа принадлежит ЛИБО позиции (line_id), ЛИБО слоту
+                # сборки (build_id + slot_type_id) — поэтому не required.
+                "required": False,
                 "ref": {"table_slug": "request_lines"},
+            },
+            {
+                "table_slug": "found_groups",
+                "name": "build_id",
+                "label": {"ru": "Сборка", "en": "Build"},
+                "type": "ref",
+                "required": False,
+                "ref": {"table_slug": "equipment_builds"},
+            },
+            {
+                "table_slug": "found_groups",
+                "name": "slot_type_id",
+                "label": {"ru": "Тип комплектующего", "en": "Component type"},
+                "type": "ref",
+                "required": False,
+                "ref": {"table_slug": "equipment_types"},
             },
             {
                 "table_slug": "found_groups",
@@ -1950,6 +1968,17 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "type": "text",
                 "required": True,
             },
+            # WAVE10: сборка привязана к позиции заказчика. На одну позицию —
+            # несколько сборок (разные сокеты/платформы), одна из них is_best;
+            # остальные — альтернативы (alternatives_count).
+            {
+                "table_slug": "equipment_builds",
+                "name": "line_id",
+                "label": {"ru": "Позиция заказчика", "en": "Request line"},
+                "type": "ref",
+                "required": False,
+                "ref": {"table_slug": "request_lines"},
+            },
             {
                 "table_slug": "equipment_builds",
                 "name": "build_kind",
@@ -1985,6 +2014,86 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "type": "number",
                 "required": False,
                 "default": 0,
+            },
+            # WAVE10 — поля пайплайна (read-only, как «лица» у found_groups).
+            {
+                "table_slug": "equipment_builds",
+                "name": "match_kind",
+                "label": {"ru": "Совпадение", "en": "Match"},
+                "type": "enum",
+                "required": False,
+                "default": "analog",
+                "read_only": True,
+                "enum": {
+                    "values": ["exact", "analog", "doubt"],
+                    "labels": {
+                        "exact": "Точное",
+                        "analog": "Аналог",
+                        "doubt": "Есть сомнения",
+                    },
+                },
+            },
+            {
+                "table_slug": "equipment_builds",
+                "name": "match_label",
+                "label": {"ru": "Совпадение", "en": "Match label"},
+                "type": "text",
+                "required": False,
+                "default": "",
+                "read_only": True,
+            },
+            {
+                "table_slug": "equipment_builds",
+                "name": "is_best",
+                "label": {"ru": "Лучшая", "en": "Best"},
+                "type": "bool",
+                "required": False,
+                "default": False,
+                "read_only": True,
+            },
+            {
+                "table_slug": "equipment_builds",
+                "name": "is_selected",
+                "label": {"ru": "Выбрана", "en": "Selected"},
+                "type": "bool",
+                "required": False,
+                "default": False,
+            },
+            {
+                "table_slug": "equipment_builds",
+                "name": "alternatives_count",
+                "label": {"ru": "Альтернатив", "en": "Alternatives"},
+                "type": "number",
+                "required": False,
+                "default": 0,
+                "read_only": True,
+            },
+            {
+                "table_slug": "equipment_builds",
+                "name": "benefit_label",
+                "label": {"ru": "Выгода", "en": "Benefit"},
+                "type": "text",
+                "required": False,
+                "default": "",
+                "read_only": True,
+            },
+            {
+                "table_slug": "equipment_builds",
+                "name": "benefit_tone",
+                "label": {"ru": "Тон выгоды", "en": "Benefit tone"},
+                "type": "text",
+                "required": False,
+                "default": "",
+                "read_only": True,
+                "hidden": True,
+            },
+            {
+                "table_slug": "equipment_builds",
+                "name": "note",
+                "label": {"ru": "Комментарий ИИ", "en": "AI note"},
+                "type": "text",
+                "required": False,
+                "default": "",
             },
             _project_ids_column("equipment_builds"),
             {
@@ -2239,6 +2348,16 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "type": "ref",
                 "required": False,
                 "ref": {"table_slug": "request_lines"},
+            },
+            # WAVE10: строка бюджета может быть сборкой (сумма best-офферов по
+            # слотам) — тогда указывает на equipment_builds вместо прямой позиции.
+            {
+                "table_slug": "budget_lines",
+                "name": "build_id",
+                "label": {"ru": "Сборка", "en": "Build"},
+                "type": "ref",
+                "required": False,
+                "ref": {"table_slug": "equipment_builds"},
             },
             {
                 "table_slug": "budget_lines",

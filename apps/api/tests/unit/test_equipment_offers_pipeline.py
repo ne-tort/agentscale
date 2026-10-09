@@ -1172,3 +1172,94 @@ async def test_budget_snapshot_carries_match_kind(monkeypatch) -> None:
     budget = io.rows("budget_lines")
     assert len(budget) == 1
     assert budget[0]["body"]["match_kind"] == "analog"
+
+
+async def test_build_from_slot_groups_best_and_budget(io: FakeIO) -> None:
+    """WAVE10: сборка собирается из групп-кандидатов слота.
+
+    Слот = тип комплектующего; его кандидаты — found_groups с build_id+slot_type_id
+    (материализуются как обычные группы). Цена сборки = Σ(best-группа слота).
+    Среди сборок позиции — best (точность→цена); бюджет берётся из сборки.
+    """
+    svc = EquipmentPipelineService(session=object())
+    # Сборка ПК на позиции line_1, слот CPU: две группы-кандидата с офферами.
+    await io.create(
+        "equipment_builds",
+        {"name": "ПК Intel", "build_kind": "pc", "line_id": "line_1", "slots": {}},
+    )
+    build_id = io.rows("equipment_builds")[0]["row_id"]
+    await io.create(
+        "found_groups",
+        {
+            "build_id": build_id,
+            "slot_type_id": "etype_cpu",
+            "part_number": "ABC-123",
+            "aliases_pn": "ABC123",
+            "match_kind": "exact",
+        },
+    )
+    await io.create(
+        "found_groups",
+        {
+            "build_id": build_id,
+            "slot_type_id": "etype_cpu",
+            "part_number": "",
+            "aliases_hash": "h4",
+            "match_kind": "doubt",
+        },
+    )
+    # second build (alternative) на той же позиции — другой CPU, дороже
+    await io.create(
+        "equipment_builds",
+        {"name": "ПК AMD", "build_kind": "pc", "line_id": "line_1", "slots": {}},
+    )
+    build2_id = io.rows("equipment_builds")[1]["row_id"]
+    await io.create(
+        "found_groups",
+        {
+            "build_id": build2_id,
+            "slot_type_id": "etype_cpu",
+            "part_number": "",
+            "aliases_hash": "h4",
+            "match_kind": "doubt",
+        },
+    )
+
+    await svc.run(io, materialize=True)
+
+    b1 = next(r["body"] for r in io.rows("equipment_builds") if r["row_id"] == build_id)
+    # слот CPU: best-группа = exact (grp на ABC-123), цена лица = 120 (Сидоров, priority)
+    assert b1["components_count"] == 1
+    assert b1["price_total"] == 120.0
+    assert b1["match_kind"] == "exact"
+    # две сборки позиции → одна best, у неё 1 альтернатива
+    assert b1["is_best"] is True
+    assert b1["alternatives_count"] == 1
+    b2 = next(r["body"] for r in io.rows("equipment_builds") if r["row_id"] == build2_id)
+    # is_best=False — дефолт, ключ может отсутствовать (без write-amplification)
+    assert b2.get("is_best") is not True
+    assert b2["price_total"] == 450.0
+
+    # бюджет позиции line_1 взят ИЗ СБОРКИ
+    budget = [r["body"] for r in io.rows("budget_lines") if r["body"].get("line_id") == "line_1"]
+    assert budget
+    assert budget[0]["build_id"] == build_id
+    assert budget[0]["price_in"] == 120.0
+
+
+async def test_slot_group_orphan_cleanup_keeps_build_groups(io: FakeIO) -> None:
+    """Группа-кандидат слота (build_id) не считается сиротой и не удаляется."""
+    svc = EquipmentPipelineService(session=object())
+    await io.create(
+        "equipment_builds",
+        {"name": "ПК", "build_kind": "pc", "line_id": "line_1", "slots": {}},
+    )
+    build_id = io.rows("equipment_builds")[0]["row_id"]
+    await io.create(
+        "found_groups",
+        {"build_id": build_id, "slot_type_id": "etype_cpu", "part_number": "ABC-123", "match_kind": "exact"},
+    )
+    slot_grp_id = io.rows("found_groups")[-1]["row_id"]
+
+    await svc.run(io, materialize=False)
+    assert ("found_groups", slot_grp_id) not in io.deleted
