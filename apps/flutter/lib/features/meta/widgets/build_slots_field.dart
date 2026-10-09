@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/preferences/app_nav_preference.dart';
+import 'package:prodavan/core/theme/app_color_tokens.dart';
 import 'package:prodavan/features/meta/meta_label.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
@@ -41,16 +42,79 @@ class BuildSlotsField extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        for (final type in types)
-          AppNavPreference(
-            title: type.name,
-            icon: Icons.memory_outlined,
-            subtitle: Text(_slotSubtitle(type.id)),
-            enabled: !readOnly && rowId != null && onOpenPick != null,
-            onTap: () => _openSlotPick(type.id),
-          ),
+        for (final type in types) _slotRow(context, type),
       ],
     );
+  }
+
+  Widget _slotRow(BuildContext context, _TypeSlot type) {
+    final selected = _slotValue(type.id);
+    final subtitle = selected == null
+        ? Text(emptyLabel)
+        : _selectedSubtitle(context, selected);
+    return AppNavPreference(
+      title: type.name,
+      icon: Icons.memory_outlined,
+      subtitle: subtitle,
+      enabled: !readOnly && rowId != null && onOpenPick != null,
+      onTap: () => _openSlotPick(type.id),
+    );
+  }
+
+  /// Слот хранит найденную группу-кандидата (found_groups) или легаси item.
+  String? _slotValue(String typeId) {
+    final raw = slots[typeId]?.toString();
+    if (raw == null || raw.isEmpty) return null;
+    return raw;
+  }
+
+  Widget _selectedSubtitle(BuildContext context, String id) {
+    final item = seeds.itemById(id);
+    final body = item is Map && item['body'] is Map
+        ? Map<String, dynamic>.from(item['body'] as Map)
+        : <String, dynamic>{};
+    final isGroup = body.containsKey('face_price') || body.containsKey('match_kind');
+    if (isGroup) {
+      final title = (body['face_title']?.toString() ?? '').trim();
+      final pn = (body['part_number']?.toString() ?? '').trim();
+      final price = body['face_price'];
+      final alts = body['alternatives_count'];
+      final parts = <String>[
+        if (title.isNotEmpty) title else (pn.isNotEmpty ? pn : id),
+        if (pn.isNotEmpty && title.isNotEmpty) pn,
+        if (price != null) _fmtMoney(price),
+        if (alts is num && alts > 0) '+$alts',
+      ];
+      final hasOffer = int.tryParse(body['offers_count']?.toString() ?? '') != 0 ||
+          body['offers_count'] == null;
+      final color = hasOffer ? null : context.appColors.warning;
+      return Text(
+        parts.join(' · '),
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+        style: color == null
+            ? null
+            : Theme.of(context).textTheme.bodyMedium?.copyWith(color: color),
+      );
+    }
+    final name = body['name']?.toString();
+    return Text(
+      (name != null && name.isNotEmpty) ? name : id,
+      maxLines: 2,
+      overflow: TextOverflow.ellipsis,
+    );
+  }
+
+  String _fmtMoney(dynamic raw) {
+    final v = raw is num ? raw.toDouble() : double.tryParse(raw.toString());
+    if (v == null) return raw.toString();
+    final s = v.toStringAsFixed(0);
+    final buf = StringBuffer();
+    for (var i = 0; i < s.length; i++) {
+      if (i > 0 && (s.length - i) % 3 == 0) buf.write(' ');
+      buf.write(s[i]);
+    }
+    return '${buf.toString()} ₽';
   }
 
   List<_TypeSlot> _eligibleTypes() {
@@ -93,18 +157,6 @@ class BuildSlotsField extends StatelessWidget {
     if (scope == 'all') return true;
     if (buildKind.isEmpty) return true;
     return scope == buildKind;
-  }
-
-  String _slotSubtitle(String typeId) {
-    final itemId = slots[typeId]?.toString();
-    if (itemId == null || itemId.isEmpty) return emptyLabel;
-    final item = seeds.itemById(itemId);
-    final body = item is Map && item['body'] is Map
-        ? Map<String, dynamic>.from(item['body'] as Map)
-        : <String, dynamic>{};
-    final name = body['name']?.toString();
-    if (name != null && name.isNotEmpty) return name;
-    return itemId;
   }
 
   void _openSlotPick(String typeId) {

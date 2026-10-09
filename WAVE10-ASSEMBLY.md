@@ -1,6 +1,7 @@
 # WAVE10 — Сборки ПК/серверов в «Подборе техники»
 
-Статус: **дизайн + фаза 1 (схема)**. Прод не трогаем — только dev.
+Статус: **фазы 1–5 реализованы** (схема+пайплайн — #172; MCP+аудит+UI+промпты —
+#173). Прод не трогаем — только dev.
 
 Документ сводит замысел (в терминах заказчика) к as-built коду и задаёт целевую
 модель связей, чтобы не сломать существующий поток «Позиция → Найденный товар».
@@ -80,33 +81,44 @@ request_lines (Позиция заказчика)
 
 ## 4. План по фазам
 
-**Фаза 1 — схема (этот PR).**
+**Фаза 1 — схема (#172, merged).**
 - `found_groups`: + `build_id` (ref equipment_builds), + `slot_type_id` (ref equipment_types).
 - `equipment_builds`: + `line_id` (ref request_lines), + `is_best`, + `alternatives_count`, + `match_kind`, + face-поля.
 - `budget_lines`: + `build_id` (ref equipment_builds).
 - Миграция + правка сидов + тесты схемы.
 
-**Фаза 2 — пайплайн.** Материализация офферов для групп-компонентов (по build_id),
-ранжирование внутри слота, best-группа слота, `price_total` из best-групп,
-best-сборка позиции, бюджет из сборки.
+**Фаза 2 — пайплайн (#172, merged).** Материализация офферов для групп-компонентов
+(по build_id), ранжирование внутри слота, best-группа слота, `price_total` из
+best-групп, best-сборка позиции, бюджет из сборки.
 
-**Фаза 3 — UI.** Экран сборки: слоты по типам, список альтернатив по слоту с
-выбором best (переиспользовать `benefit`/`selection`/`match_label`), плашка сборки
-в позиции, суммарная стоимость.
+**Фаза 3 — UI (#173).** Вид `found_groups_pick` — кандидаты слота (фильтр по
+`build_id`+`slot_type_id`), выбор best (switch → `slots[slot]`), колонки как в
+«Найденных товарах» (переиспользованы `benefit`/`selection`/`match_label`).
+`build_slots_field` показывает выбранного кандидата и альтернативы;
+`equipment_builds_list` — фильтр по позиции и бейдж выгоды; `request_lines_list` —
+колонка «Сборка ₽» + бейдж выгоды сборки.
 
-**Фаза 4 — MCP-инструменты.** CRUD сборок/слотов/кандидатов, оптимизированный
-под сборку (совместимость + цена), аудит свойств типов комплектующих.
+**Фаза 4 — MCP-инструменты (#173).** `equipment_types_list`,
+`equipment_builds_list/get/upsert/delete`; `found_groups_upsert` принимает
+`build_id`+`slot_type_id`. Аудит свойств типов — см. §5.
 
-**Фаза 5 — промпты + регресс.** Инструкции агенту по сборкам, проверка, что
-обычный поток «Позиция → Найденный товар» не регрессировал.
+**Фаза 5 — промпты + регресс (#173).** `60-builds.md`, обновления `AGENTS.md` и
+`40-groups.md`; обычный поток «Позиция → Найденный товар» не регрессировал
+(группы с `build_id` исключены из выбора best-группы позиции).
 
 ---
 
-## 5. Аудит типов комплектующих (черновик, уточняется в фазе 4)
+## 5. Аудит типов комплектующих (выполнен в фазе 4)
 
-Все `fields_json` — **опциональны** (флаг required отсутствует как класс; UI
-пишет attrs свободно). 13 типов: cpu, motherboard, ram, storage, gpu, psu,
-cooling, case, case_fans, nic (scope=all) + raid_hba, backplane, bmc (scope=server).
-Замечания к уточнению: несогласованные label'ы (`ram.ram_type` = «Тип» vs
-`motherboard.ram_type` = «Тип ОЗУ»); нет полей под совместимость (cpu: family/gen,
-ecc; motherboard: pcie-слоты; gpu: чипсет; nic: контроллер; raid: внешние порты).
+Все `fields_json` — **опциональны** (флага required нет как класса; UI пишет
+attrs свободно). 13 типов: cpu, motherboard, ram, storage, gpu, psu, cooling,
+case, case_fans, nic (scope=all) + raid_hba, backplane, bmc (scope=server).
+
+Внесено:
+- label согласован: `ram.ram_type` = «Тип ОЗУ» (был «Тип»).
+- добавлены поля совместимости/полноты: cpu — `generation`, `memory_types`,
+  `ecc`; motherboard — `pcie_slots`; gpu — `chipset`, `vram_type`; storage —
+  `endurance`; nic — `controller`; raid_hba — `external_ports`, `battery_backup`;
+  backplane — `hot_swap`.
+- ключи совместимости намеренно совпадают между типами (`socket`, `ram_type`,
+  `ecc`, `interface`, `form_factor`) — по ним ИИ сверяет детали сборки.

@@ -2,7 +2,7 @@
   "format": "mcp.package",
   "format_version": 1,
   "name": "prodavan-equipment",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "entry": {
     "command": "python",
     "args": [
@@ -19,6 +19,11 @@
     "found_groups_list",
     "found_groups_get",
     "found_groups_upsert",
-    "found_groups_delete"
+    "found_groups_delete",
+    "equipment_types_list",
+    "equipment_builds_list",
+    "equipment_builds_get",
+    "equipment_builds_upsert",
+    "equipment_builds_delete"
   ]
 }

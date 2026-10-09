@@ -1246,6 +1246,25 @@ async def test_build_from_slot_groups_best_and_budget(io: FakeIO) -> None:
     assert budget[0]["build_id"] == build_id
     assert budget[0]["price_in"] == 120.0
 
+    # снапшот сборок на позиции (виден в списке позиций)
+    line_body = io.rows("request_lines")[0]["body"]
+    assert line_body["builds_count"] == 2
+    assert line_body["build_best_id"] == build_id
+    assert line_body["build_best_price"] == 120.0
+
+    # лучший кандидат слота помечен is_best; альтернатива — нет
+    cpu_groups = [r for r in io.rows("found_groups") if r["body"].get("slot_type_id") == "etype_cpu"]
+    best_slot = next(
+        r["body"]
+        for r in cpu_groups
+        if r["body"].get("build_id") == build_id and r["body"].get("part_number") == "ABC-123"
+    )
+    assert best_slot.get("is_best") is True
+    # владелец группы помечен: build — кандидат слота (не виден в общем списке)
+    assert best_slot.get("owner_kind") == "build"
+    line_groups = [r["body"] for r in io.rows("found_groups") if r["body"].get("line_id") == "line_1"]
+    assert all(g.get("owner_kind") == "line" for g in line_groups)
+
 
 async def test_slot_group_orphan_cleanup_keeps_build_groups(io: FakeIO) -> None:
     """Группа-кандидат слота (build_id) не считается сиротой и не удаляется."""

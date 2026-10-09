@@ -478,15 +478,33 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     build_cols = [f["column"] for f in build_settings["ui_json"]["fields"]]
     assert build_cols == [
         "name",
+        "line_id",
         "build_kind",
+        "match_label",
         "components_count",
         "price_total",
         "slots",
+        "note",
     ]
+    line_field = next(f for f in build_settings["ui_json"]["fields"] if f["column"] == "line_id")
+    assert line_field["widget"] == "ref"
     slots_field = next(f for f in build_settings["ui_json"]["fields"] if f["column"] == "slots")
     assert slots_field["widget"] == "build_slots"
-    assert slots_field["pick_view"] == "equipment_items_pick"
+    assert slots_field["pick_view"] == "found_groups_pick"
+    assert slots_field["groups_table"] == "found_groups"
     assert "section_title" not in slots_field
+
+    # WAVE10: pick-вид кандидатов слота — фильтр по сборке и слоту, выбор best.
+    groups_pick = next(v for v in meta["views"] if v["slug"] == "found_groups_pick")
+    assert groups_pick["table_slug"] == "found_groups"
+    assert groups_pick["ui_json"]["row_filter_from_context"] == {
+        "build_id": "contextRowId",
+        "slot_type_id": "_pick_type_id",
+    }
+    gsel = groups_pick["ui_json"]["selection"]["set_on_context"]
+    assert gsel["map_field"] == "slots"
+    assert gsel["map_key_from_context"] == "_slot_key"
+    assert gsel["recompute_build_totals"] is True
 
     seed_items = meta["seed_rows"]["items"]
     # 14 base seeds + 4 built-in template rows (incl. master price) + 2 prompt rows
@@ -501,6 +519,22 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     assert any(f["key"] == "memory_channels" for f in etypes[0]["body"]["fields_json"])
     assert any(s["row_id"] == "etype_case_fans" for s in seed_items)
     assert any(s["row_id"] == "etype_bmc" for s in seed_items)
+    # WAVE10-аудит: ключи совместимости присутствуют и совпадают между типами,
+    # все свойства опциональны (нет required-флага в fields_json).
+    by_type = {s["row_id"]: s["body"] for s in etypes}
+    for body in by_type.values():
+        for f in body["fields_json"]:
+            assert "required" not in f
+    cpu_keys = {f["key"] for f in by_type["etype_cpu"]["fields_json"]}
+    mb_keys = {f["key"] for f in by_type["etype_motherboard"]["fields_json"]}
+    assert "socket" in cpu_keys and "socket" in mb_keys
+    assert "ram_type" in mb_keys and "ram_type" in {f["key"] for f in by_type["etype_ram"]["fields_json"]}
+    assert "ecc" in cpu_keys
+    assert "generation" in cpu_keys
+    assert "pcie_slots" in mb_keys
+    assert "chipset" in {f["key"] for f in by_type["etype_gpu"]["fields_json"]}
+    assert "controller" in {f["key"] for f in by_type["etype_nic"]["fields_json"]}
+    assert "external_ports" in {f["key"] for f in by_type["etype_raid_hba"]["fields_json"]}
     mcp_seed = next(s for s in seed_items if s["row_id"] == "equipment_mcp_default")
     assert mcp_seed["table_slug"] == "equipment_mcp"
     assert mcp_seed["body"]["enabled"] is True
@@ -531,7 +565,16 @@ def test_equipment_meta_hub_on_data_placement() -> None:
         "30-identify.md",
         "40-groups.md",
         "50-rank.md",
+        "60-builds.md",
     ]
+    # WAVE10: правило сборок доехало до системного промпта и правил модуля.
+    assert "equipment_builds" in agents_file["body"]
+    assert "slot_type_id" in agents_file["body"]
+    builds_rule = next(
+        f for f in rules_seed["body"]["files_json"] if f["name"] == "60-builds.md"
+    )
+    assert "equipment_builds_upsert" in builds_rule["body"]
+    assert "slot_type_id" in builds_rule["body"]
     assert all(f["body"].strip() for f in rules_seed["body"]["files_json"])
     priorities = [f["priority"] for f in rules_seed["body"]["files_json"]]
     assert priorities == sorted(priorities)
