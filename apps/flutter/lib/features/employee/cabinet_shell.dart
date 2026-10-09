@@ -199,7 +199,21 @@ class _CabinetShellState extends State<CabinetShell> {
   Future<void> _maybeRestorePersistedChat() async {
     if (_chatRestoreAttempted || _chatOpen) return;
     _chatRestoreAttempted = true;
-    final sid = workContext.selectedSessionId;
+    // The sidebar fetch above is best-effort and can transiently fail (or the
+    // selection may arrive late). Retry once shortly after if we still have no
+    // persisted session — avoids the intermittent "sidebar/chat missing until
+    // the next reload" symptom.
+    var sid = workContext.selectedSessionId;
+    if (sid == null || sid.isEmpty) {
+      await Future<void>.delayed(const Duration(milliseconds: 600));
+      if (!mounted || _chatOpen) return;
+      try {
+        await _reloadSidebar();
+      } catch (_) {
+        // keep going — one more read of the selection below
+      }
+      sid = workContext.selectedSessionId;
+    }
     if (sid == null || sid.isEmpty) return;
     Map<String, dynamic>? chat;
     for (final g in _projectGroups) {
@@ -541,10 +555,24 @@ class _CabinetShellState extends State<CabinetShell> {
       _chatOpen = true;
       _subpageOpen = true;
     });
-    await WidgetsBinding.instance.endOfFrame;
-    if (!mounted) return;
+    // Wait for the body Stack (and its chat Navigator) to be mounted. While
+    // `_navLoading` is true the body is a spinner — no `_chatNavKey` state —
+    // and a root push there would paint the chat OVER the whole shell
+    // (sidebar hidden). Poll a few frames until the navigator exists.
+    for (var attempt = 0; attempt < 60; attempt++) {
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted) return;
+      if (_chatNavKey.currentState != null) break;
+    }
     final nav = _chatNavKey.currentState;
     if (nav == null) {
+      // Nav never became ready (persistent load failure). Rather than hijack
+      // the whole shell, fall back to the root push — but undo the overlay
+      // flags so the sidebar is not left hidden underneath.
+      setState(() {
+        _chatOpen = false;
+        _subpageOpen = false;
+      });
       await Navigator.of(context).push(route);
       return;
     }

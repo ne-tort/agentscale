@@ -36,7 +36,7 @@ spec:
       - name: agent-runtime
         # Versioned tag — bumped by PR when prodavan-claw image is rebuilt.
         # TODO: keep in sync with ghcr.io/ne-tort/prodavan-agent-runtime releases.
-        image: ghcr.io/ne-tort/prodavan-agent-runtime:85bea749d72c # prodavan-claw@85bea749 (vision images: content blocks до провайдеров)
+        image: ghcr.io/ne-tort/prodavan-agent-runtime:929b6768cba2 # prodavan-claw@929b676 (теги чеклиста скрыты в любой позиции)
         imagePullPolicy: IfNotPresent
         # Static platform env — claims cannot carry env
         # (envVarsInjectionPolicy: Disallowed), so all boot-time config lives

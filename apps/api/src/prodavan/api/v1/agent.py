@@ -59,6 +59,9 @@ class ChatTurnBody(BaseModel):
     session_id: str | None = Field(default=None, max_length=64)
     attachment_refs: list[str] = Field(default_factory=list, max_length=CHAT_MAX_ATTACHMENTS_PER_MESSAGE)
     model: str | None = Field(default=None, max_length=128)
+    # Client-generated idempotency key: a retried send re-attaches to the same
+    # autonomous turn instead of starting a duplicate.
+    turn_id: str | None = Field(default=None, max_length=64)
 
     @model_validator(mode="after")
     def require_text_or_attachments(self) -> ChatTurnBody:
@@ -394,6 +397,7 @@ async def project_chat_stream(
             principal=principal,
             employee=employee,
             model=body.model,
+            turn_id=body.turn_id,
         ).__aiter__()
         pending: asyncio.Task | None = None
         try:
@@ -447,8 +451,14 @@ async def project_chat_transcript(
     session_id: str,
     limit: int = 500,
     before_seq: int | None = None,
+    after_seq: int | None = None,
 ) -> dict:
-    """Reload typed chat blocks for an explicit session (multi-chat)."""
+    """Reload typed chat blocks for an explicit session (multi-chat).
+
+    ``after_seq`` switches to incremental tail mode (events newer than the
+    cursor) for live polling; the payload also carries ``turn_in_progress``
+    so a reloaded client knows the agent is still working.
+    """
     # Clamp to a sane upper bound — the default page is large so a typical
     # session shows its full history without the user scrolling up to trigger
     # pagination, but remains bounded for very long sessions.
@@ -460,6 +470,7 @@ async def project_chat_transcript(
         session_id=session_id,
         limit=limit,
         before_seq=before_seq,
+        after_seq=after_seq,
     )
 
 

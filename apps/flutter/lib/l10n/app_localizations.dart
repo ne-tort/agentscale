@@ -3752,6 +3752,24 @@ abstract class AppLocalizations {
   /// **'output:'**
   String get chatUsageOutputLabel;
 
+  /// No description provided for @chatUsageCacheLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'cache:'**
+  String get chatUsageCacheLabel;
+
+  /// No description provided for @chatChecklistTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Tasks'**
+  String get chatChecklistTitle;
+
+  /// No description provided for @chatChecklistProgress.
+  ///
+  /// In en, this message translates to:
+  /// **'{done}/{total} tasks done'**
+  String chatChecklistProgress(int done, int total);
+
   /// No description provided for @chatModelPricePerMtok.
   ///
   /// In en, this message translates to:

@@ -1350,12 +1350,17 @@ class ProdavanApi {
   }
 
   /// SSE chat turn — abort via [ProjectChatStreamHandle.abort] (L05).
+  ///
+  /// [turnId] is a client-generated idempotency key: the server starts an
+  /// autonomous turn keyed by it, so a retried request re-attaches to the same
+  /// run instead of starting a duplicate.
   ProjectChatStreamHandle projectChatStream({
     required String projectId,
     required String text,
     String? sessionId,
     String? model,
     List<String> attachmentRefs = const [],
+    String? turnId,
   }) {
     final prevProj = this.projectId;
     this.projectId = projectId;
@@ -1372,6 +1377,7 @@ class ProdavanApi {
             if (sessionId != null) 'session_id': sessionId,
             if (model != null && model.isNotEmpty) 'model': model,
             if (attachmentRefs.isNotEmpty) 'attachment_refs': attachmentRefs,
+            if (turnId != null && turnId.isNotEmpty) 'turn_id': turnId,
           });
         final response = await client.send(request);
         if (response.statusCode >= 400) {
@@ -1570,6 +1576,7 @@ class ProdavanApi {
     required String sessionId,
     int limit = 500,
     int? beforeSeq,
+    int? afterSeq,
   }) async {
     final prevProj = this.projectId;
     this.projectId = projectId;
@@ -1577,6 +1584,7 @@ class ProdavanApi {
       final params = <String, String>{'session_id': sessionId};
       if (limit != 500) params['limit'] = '$limit';
       if (beforeSeq != null) params['before_seq'] = '$beforeSeq';
+      if (afterSeq != null) params['after_seq'] = '$afterSeq';
       final query =
           '?${params.entries.map((e) => '${e.key}=${Uri.encodeComponent(e.value)}').join('&')}';
       final res = await AuthHttp.get(_uri('/projects/$projectId/chat/transcript$query'), extraHeaders: _workHeaders);

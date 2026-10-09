@@ -214,3 +214,39 @@ def test_event_public_includes_created_at() -> None:
 
     public = _event_public(_Row())  # type: ignore[arg-type]
     assert public["created_at"] == "2026-09-29T10:00:00+00:00"
+
+
+def test_transcript_entries_to_chat_blocks_maps_roles() -> None:
+    """Sidechain transcript entries (Anthropic-shaped) → chat blocks for the UI."""
+    from prodavan.application.agent.chat_projection import (
+        transcript_entries_to_chat_blocks,
+    )
+
+    entries = [
+        {"role": "user", "content": "найди аналоги"},
+        {
+            "role": "assistant",
+            "content": [
+                {"type": "text", "text": "Ищу"},
+                {"type": "tool_use", "id": "t1", "name": "Read", "input": {"path": "a"}},
+            ],
+        },
+        {"role": "tool", "content": "ok", "meta": {"tool_call_id": "t1", "name": "Read"}},
+    ]
+    blocks = transcript_entries_to_chat_blocks(entries)
+    assert blocks[0] == {"kind": "user", "text": "найди аналоги"}
+    assert blocks[1] == {"kind": "assistant_markdown", "text": "Ищу"}
+    assert blocks[2]["kind"] == "tool_call"
+    assert blocks[2]["name"] == "Read"
+    assert blocks[3]["kind"] == "tool_result"
+    assert blocks[3]["id"] == "t1"
+
+
+def test_transcript_entries_to_chat_blocks_tolerates_junk() -> None:
+    from prodavan.application.agent.chat_projection import (
+        transcript_entries_to_chat_blocks,
+    )
+
+    assert transcript_entries_to_chat_blocks(None) == []
+    assert transcript_entries_to_chat_blocks("nope") == []
+    assert transcript_entries_to_chat_blocks([1, "x", {}]) == []

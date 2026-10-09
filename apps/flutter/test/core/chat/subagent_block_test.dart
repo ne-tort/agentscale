@@ -249,4 +249,123 @@ void main() {
     await tester.pump(const Duration(milliseconds: 6000));
     expect(calls, 2);
   });
+
+  testWidgets('renderer shows the model as title and never the bare "default"', (tester) async {
+    await tester.pumpWidget(
+      _themed(
+        ChatBlockRenderer(
+          block: ChatBlock(
+            kind: 'subagent',
+            raw: {
+              'id': 'a1',
+              'agent_type': 'default',
+              'model': 'gpt-6-astra',
+              'task': 'Найти аналоги',
+              'parent_tool_use_id': 'tu1',
+              'events': const <dynamic>[],
+            },
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('gpt-6-astra'), findsOneWidget);
+    expect(find.text('default'), findsNothing);
+    expect(find.textContaining('agent.spawn'), findsNothing);
+  });
+
+  testWidgets('renderer falls back to the task (not "default") when no model', (tester) async {
+    await tester.pumpWidget(
+      _themed(
+        ChatBlockRenderer(
+          block: ChatBlock(
+            kind: 'subagent',
+            raw: {
+              'id': 'a1',
+              'agent_type': 'default',
+              'task': 'Собрать спецификацию',
+              'parent_tool_use_id': 'tu1',
+              'events': const <dynamic>[],
+            },
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Собрать спецификацию'), findsOneWidget);
+    expect(find.text('default'), findsNothing);
+  });
+
+  testWidgets('subagent stops spinning once its own stop event arrives, even while the parent streams', (tester) async {
+    await tester.pumpWidget(
+      _themed(
+        ChatBlockRenderer(
+          block: ChatBlock(
+            kind: 'subagent',
+            raw: {
+              'id': 'a1',
+              'parent_tool_use_id': 'tu1',
+              'status': 'completed',
+              'result_summary': 'готово',
+              'events': const <dynamic>[],
+            },
+          ),
+          turnStreaming: true,
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(find.byType(CircularProgressIndicator), findsNothing);
+    expect(find.byIcon(Icons.check_circle_outline), findsOneWidget);
+  });
+
+  testWidgets('no progress bar on periodic refresh — only on first load', (tester) async {
+    var calls = 0;
+    Future<List<Map<String, dynamic>>> fetch() async {
+      calls++;
+      return [
+        {'kind': 'assistant_markdown', 'text': 'tick $calls'},
+      ];
+    }
+
+    await tester.pumpWidget(
+      _themed(SubagentBlock(title: 'sub', running: true, onFetchSidechain: fetch)),
+    );
+    await tester.pump();
+    await tester.tap(find.text('sub'));
+    // First load: indeterminate bar is allowed while it resolves.
+    await tester.pump();
+    await tester.pump();
+    expect(calls, 1);
+
+    // Second poll: the bar must NOT reappear (was the "blinking" bar bug).
+    await tester.pump(const Duration(milliseconds: 2600));
+    await tester.pump();
+    expect(calls, 2);
+    expect(find.byType(LinearProgressIndicator), findsNothing);
+  });
+
+  testWidgets('expanded subagent shows a meta row with the model', (tester) async {
+    await tester.pumpWidget(
+      _themed(
+        SubagentBlock(
+          title: 'gpt-6-astra',
+          model: 'gpt-6-astra',
+          usageRaw: const {'input_tokens': 1234, 'output_tokens': 56},
+          turnMs: 4200,
+          resultSummary: 'готово',
+          onFetchSidechain: () async => const [
+            {'kind': 'assistant_markdown', 'text': 'answer'},
+          ],
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('gpt-6-astra'));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('вход: 1\u00A0234'), findsOneWidget);
+    expect(find.textContaining('выход: 56'), findsOneWidget);
+    expect(find.text('0:04'), findsOneWidget);
+  });
 }

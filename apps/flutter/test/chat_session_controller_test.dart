@@ -12,6 +12,10 @@ class _FakeApi extends Fake implements ProdavanApi {
   Object? cancelError;
   int cancelCalls = 0;
 
+  /// Responses for projectChatTranscript, keyed by afterSeq (null = full load).
+  Map<int?, Map<String, dynamic>>? transcript;
+  final List<int?> transcriptCalls = [];
+
   @override
   ProjectChatStreamHandle projectChatStream({
     required String projectId,
@@ -19,6 +23,7 @@ class _FakeApi extends Fake implements ProdavanApi {
     String? sessionId,
     String? model,
     List<String> attachmentRefs = const [],
+    String? turnId,
   }) {
     final stream = this.stream;
     if (stream == null) {
@@ -36,6 +41,20 @@ class _FakeApi extends Fake implements ProdavanApi {
     required String sessionId,
   }) async {
     return const [];
+  }
+
+  @override
+  Future<Map<String, dynamic>> projectChatTranscript({
+    required String projectId,
+    required String sessionId,
+    int limit = 500,
+    int? beforeSeq,
+    int? afterSeq,
+  }) async {
+    transcriptCalls.add(afterSeq);
+    final t = transcript;
+    if (t == null) throw StateError('no fake transcript configured');
+    return t[afterSeq] ?? t[null] ?? const {'blocks': <dynamic>[]};
   }
 
   @override
@@ -194,6 +213,127 @@ void main() {
       expect(controller.usageCostUsd('nope', 1000, 1000), isNull);
       // No tokens to price → null.
       expect(controller.usageCostUsd('model-a', null, null), isNull);
+      controller.dispose();
+    });
+  });
+
+  group('reload mid-turn (turn_in_progress)', () {
+    test('agentWorking reflects the server turn-in-progress flag after reload', () async {
+      final api = _FakeApi()
+        ..transcript = {
+          null: {
+            'session_id': 'sess_reload',
+            'blocks': <dynamic>[],
+            'turn_in_progress': true,
+            'newest_seq': 7,
+          },
+        };
+      final controller = ChatSessionController(
+        api: api,
+        projectId: 'prj_reload',
+        sessionId: 'sess_reload',
+      );
+
+      expect(controller.agentWorking, isFalse);
+      await controller.loadTranscript();
+
+      // Reloaded client: not streaming locally, but the server says the agent
+      // is working → the working indicator must show (not appear idle).
+      expect(controller.streaming, isFalse);
+      expect(controller.turnInProgress, isTrue);
+      expect(controller.agentWorking, isTrue);
+      expect(controller.showWorkingIndicator, isTrue);
+
+      controller.dispose();
+    });
+
+    test('idle transcript reports agent not working', () async {
+      final api = _FakeApi()
+        ..transcript = {
+          null: {
+            'session_id': 'sess_idle',
+            'blocks': <dynamic>[],
+            'turn_in_progress': false,
+          },
+        };
+      final controller = ChatSessionController(
+        api: api,
+        projectId: 'prj_idle',
+        sessionId: 'sess_idle',
+      );
+
+      await controller.loadTranscript();
+
+      expect(controller.turnInProgress, isFalse);
+      expect(controller.agentWorking, isFalse);
+      expect(controller.showWorkingIndicator, isFalse);
+      controller.dispose();
+    });
+  });
+
+  group('reconnect indicator after reload', () {
+    test('rebuilds "Попытка реконнекта…" from the persisted status block', () async {
+      final api = _FakeApi()
+        ..transcript = {
+          null: {
+            'session_id': 'sess_rc',
+            'turn_in_progress': true,
+            'newest_seq': 9,
+            'blocks': <dynamic>[
+              {'kind': 'user', 'text': 'задание', 'id': 'u1'},
+              {
+                'kind': 'status',
+                'phase': 'reconnect',
+                'attempt': 2,
+                'max_attempts': 5,
+                'next_model': 'gpt-6-astra',
+                'id': 's1',
+              },
+            ],
+          },
+        };
+      final controller = ChatSessionController(
+        api: api,
+        projectId: 'prj_rc',
+        sessionId: 'sess_rc',
+      );
+
+      await controller.loadTranscript();
+
+      // Reloaded client (not streaming) still shows the reconnect indicator
+      // instead of a misleading "agentscale работает…".
+      expect(controller.streaming, isFalse);
+      expect(controller.reconnectAttempt, 2);
+      expect(controller.reconnectMaxAttempts, 5);
+      expect(controller.reconnectNextModel, 'gpt-6-astra');
+      expect(controller.showReconnectIndicator, isTrue);
+      expect(controller.showWorkingIndicator, isFalse);
+      controller.dispose();
+    });
+
+    test('a later assistant output clears the reconnect indicator', () async {
+      final api = _FakeApi()
+        ..transcript = {
+          null: {
+            'session_id': 'sess_rc2',
+            'turn_in_progress': true,
+            'blocks': <dynamic>[
+              {'kind': 'status', 'phase': 'reconnect', 'attempt': 1, 'id': 's1'},
+              {'kind': 'assistant_markdown', 'text': 'продолжаю', 'id': 'a1'},
+            ],
+          },
+        };
+      final controller = ChatSessionController(
+        api: api,
+        projectId: 'prj_rc2',
+        sessionId: 'sess_rc2',
+      );
+
+      await controller.loadTranscript();
+
+      expect(controller.reconnectAttempt, isNull);
+      expect(controller.showReconnectIndicator, isFalse);
+      expect(controller.showWorkingIndicator, isTrue);
       controller.dispose();
     });
   });
