@@ -508,6 +508,14 @@ class CollectionViewInterpreter extends StatelessWidget {
       for (final e in filterFromCtx.entries) {
         final ctxKey = e.value?.toString();
         if (ctxKey == null || ctxKey.isEmpty) continue;
+        // `contextRowId` — сам открытый ряд (родитель pick-вида): слот сборки
+        // фильтрует кандидатов по build_id = row_id сборки.
+        if (ctxKey == 'contextRowId') {
+          if (contextRowId != null && contextRowId!.isNotEmpty) {
+            ctxFilterEntries.add(MapEntry(e.key.toString(), contextRowId!));
+          }
+          continue;
+        }
         final v = _resolvePickOrBody(ctxKey, pick: pick, body: ctxBody);
         if (v == null || v.isEmpty) continue;
         ctxFilterEntries.add(MapEntry(e.key.toString(), v));
@@ -946,12 +954,14 @@ class CollectionViewInterpreter extends StatelessWidget {
       for (final cfg in configs) {
         final columnId = cfg['field']?.toString() ?? '';
         if (columnId.isEmpty) continue;
-        final label = body['benefit_label']?.toString() ?? '';
+        final labelField = cfg['label_field']?.toString() ?? 'benefit_label';
+        final toneField = cfg['tone_field']?.toString() ?? 'benefit_tone';
+        final label = body[labelField]?.toString() ?? '';
         if (label.isEmpty) continue;
         widgets[columnId] = BenefitBadge(
           data: BenefitBadgeData(
             label: label,
-            tone: toneOf(body['benefit_tone']?.toString() ?? ''),
+            tone: toneOf(body[toneField]?.toString() ?? ''),
           ),
         );
         changed = true;
@@ -1194,11 +1204,15 @@ class CollectionViewInterpreter extends StatelessWidget {
           if (targetView.isEmpty) continue;
           final label = resolveMetaLabel(t['label'], l10n, locale: Localizations.localeOf(context));
           final iconName = t['icon'] as String?;
+          final passContext = t['context'] == 'row' || t['context_row'] == true;
           items.add(
             AppIconButton(
               icon: metaIconFromName(iconName),
               tooltip: label.isNotEmpty ? label : targetView,
-              onPressed: () => onOpenForm!(targetView),
+              onPressed: () => onOpenForm!(
+                targetView,
+                rowId: passContext ? contextRowId : null,
+              ),
             ),
           );
         }
@@ -1518,13 +1532,25 @@ class CollectionViewInterpreter extends StatelessWidget {
     var count = 0;
     var total = 0.0;
     for (final entry in slots.entries) {
-      final itemId = entry.value?.toString();
-      if (itemId == null || itemId.isEmpty) continue;
+      final slotValue = entry.value?.toString();
+      if (slotValue == null || slotValue.isEmpty) continue;
       count += 1;
-      final item = seeds.itemById(itemId);
-      final itemBody = item is Map && item['body'] is Map
-          ? Map<String, dynamic>.from(item['body'] as Map)
+      // WAVE10: слот хранит найденную группу (found_groups) — цена её «лица».
+      // Легаси-слот (equipment_items → offer) поддержан ниже.
+      final candidate = seeds.itemById(slotValue);
+      final candidateBody = candidate is Map && candidate['body'] is Map
+          ? Map<String, dynamic>.from(candidate['body'] as Map)
           : <String, dynamic>{};
+      if (candidateBody.containsKey('face_price') ||
+          candidateBody.containsKey('match_kind')) {
+        final priceRaw = candidateBody['face_price'];
+        final price = priceRaw is num
+            ? priceRaw.toDouble()
+            : double.tryParse(priceRaw?.toString() ?? '') ?? 0.0;
+        total += price;
+        continue;
+      }
+      final itemBody = candidateBody;
       final qtyRaw = itemBody['qty'];
       final qty = qtyRaw is num
           ? qtyRaw.toDouble()

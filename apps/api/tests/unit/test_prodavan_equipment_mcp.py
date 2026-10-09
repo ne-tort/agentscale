@@ -28,8 +28,26 @@ def test_tools_list_contains_catalog_and_sot_tools() -> None:
         mcp_server._handle({"jsonrpc": "2.0", "id": 9, "method": "initialize"})["result"][
             "serverInfo"
         ]["version"]
-        == "2.2.0"
+        == "2.3.0"
     )
+
+
+def test_tools_list_contains_build_tools() -> None:
+    """WAVE10: инструменты сборок и типов комплектующих."""
+    listed = mcp_server._handle({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+    names = {t["name"] for t in listed["result"]["tools"]}
+    for name in (
+        "equipment_types_list",
+        "equipment_builds_list",
+        "equipment_builds_get",
+        "equipment_builds_upsert",
+        "equipment_builds_delete",
+    ):
+        assert name in names
+    # found_groups_upsert теперь умеет слоты сборки
+    group = next(t for t in listed["result"]["tools"] if t["name"] == "found_groups_upsert")
+    props = group["inputSchema"]["properties"]
+    assert "build_id" in props and "slot_type_id" in props
 
 
 def test_delete_tools_call_pod_delete(monkeypatch) -> None:
@@ -167,7 +185,7 @@ def test_found_groups_upsert_posts_row(monkeypatch) -> None:
     assert posted["body"]["match_kind"] == "exact"
 
 
-def test_found_groups_create_requires_line_id_and_keys(monkeypatch) -> None:
+def test_found_groups_create_requires_owner_and_keys(monkeypatch) -> None:
     monkeypatch.setenv("PRODAVAN_API_BASE_URL", "http://api.example/api/v1")
     monkeypatch.setenv("PRODAVAN_AUTH_TOKEN", "tok")
     monkeypatch.setenv("PRODAVAN_PROJECT_ID", "proj-1")
@@ -187,7 +205,7 @@ def test_found_groups_create_requires_line_id_and_keys(monkeypatch) -> None:
     assert resp["result"].get("isError") is True
     assert "line_id" in resp["result"]["content"][0]["text"]
 
-    # line_id без ключей группы — тоже ошибка
+    # владелец есть, но без ключей группы — тоже ошибка
     resp2 = mcp_server._handle(
         {
             "jsonrpc": "2.0",
@@ -202,6 +220,154 @@ def test_found_groups_create_requires_line_id_and_keys(monkeypatch) -> None:
     assert resp2 is not None
     assert resp2["result"].get("isError") is True
     assert "part_number" in resp2["result"]["content"][0]["text"]
+
+
+def test_found_groups_build_slot_requires_slot_type(monkeypatch) -> None:
+    """Слот сборки: build_id без slot_type_id — ошибка; с ним — POST."""
+    monkeypatch.setenv("PRODAVAN_API_BASE_URL", "http://api.example/api/v1")
+    monkeypatch.setenv("PRODAVAN_AUTH_TOKEN", "tok")
+    monkeypatch.setenv("PRODAVAN_PROJECT_ID", "proj-1")
+
+    resp = mcp_server._handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 11,
+            "method": "tools/call",
+            "params": {
+                "name": "found_groups_upsert",
+                "arguments": {"build_id": "b1", "part_number": "X"},
+            },
+        }
+    )
+    assert resp["result"].get("isError") is True
+    assert "slot_type_id" in resp["result"]["content"][0]["text"]
+
+    posted: dict = {}
+
+    def fake_http(method, path, payload=None, *, session_id=None):
+        posted.update(payload or {})
+        return {"row_id": "g9"}
+
+    with patch.object(mcp_server, "_http", side_effect=fake_http):
+        ok = mcp_server._handle(
+            {
+                "jsonrpc": "2.0",
+                "id": 12,
+                "method": "tools/call",
+                "params": {
+                    "name": "found_groups_upsert",
+                    "arguments": {
+                        "build_id": "b1",
+                        "slot_type_id": "etype_cpu",
+                        "part_number": "X",
+                        "match_kind": "exact",
+                    },
+                },
+            }
+        )
+    assert ok["result"].get("isError") is not True
+    assert posted["body"]["build_id"] == "b1"
+    assert posted["body"]["slot_type_id"] == "etype_cpu"
+
+
+def test_equipment_builds_upsert_and_delete(monkeypatch) -> None:
+    monkeypatch.setenv("PRODAVAN_API_BASE_URL", "http://api.example/api/v1")
+    monkeypatch.setenv("PRODAVAN_AUTH_TOKEN", "tok")
+    monkeypatch.setenv("PRODAVAN_PROJECT_ID", "proj-1")
+
+    # создание без line_id — ошибка
+    bad = mcp_server._handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 13,
+            "method": "tools/call",
+            "params": {
+                "name": "equipment_builds_upsert",
+                "arguments": {"name": "Intel сборка"},
+            },
+        }
+    )
+    assert bad["result"].get("isError") is True
+    assert "line_id" in bad["result"]["content"][0]["text"]
+
+    calls: list[tuple] = []
+
+    def fake_http(method, path, payload=None, *, session_id=None):
+        calls.append((method, path, payload))
+        return {"row_id": "b1"}
+
+    with patch.object(mcp_server, "_http", side_effect=fake_http):
+        ok = mcp_server._handle(
+            {
+                "jsonrpc": "2.0",
+                "id": 14,
+                "method": "tools/call",
+                "params": {
+                    "name": "equipment_builds_upsert",
+                    "arguments": {
+                        "name": "Intel сборка",
+                        "line_id": "line-1",
+                        "build_kind": "pc",
+                    },
+                },
+            }
+        )
+        assert ok["result"].get("isError") is not True
+        mcp_server._handle(
+            {
+                "jsonrpc": "2.0",
+                "id": 15,
+                "method": "tools/call",
+                "params": {"name": "equipment_builds_delete", "arguments": {"row_id": "b1"}},
+            }
+        )
+    assert calls[0][0] == "POST"
+    assert calls[0][2]["body"]["line_id"] == "line-1"
+    assert calls[1][0] == "DELETE"
+    assert calls[1][1].endswith("/equipment_builds/b1")
+
+
+def test_equipment_builds_upsert_rejects_bad_kind(monkeypatch) -> None:
+    monkeypatch.setenv("PRODAVAN_API_BASE_URL", "http://api.example/api/v1")
+    monkeypatch.setenv("PRODAVAN_AUTH_TOKEN", "tok")
+    monkeypatch.setenv("PRODAVAN_PROJECT_ID", "proj-1")
+    resp = mcp_server._handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 16,
+            "method": "tools/call",
+            "params": {
+                "name": "equipment_builds_upsert",
+                "arguments": {"name": "X", "line_id": "l1", "build_kind": "workstation"},
+            },
+        }
+    )
+    assert resp["result"].get("isError") is True
+    assert "build_kind" in resp["result"]["content"][0]["text"]
+
+
+def test_equipment_types_list_filters_by_build_kind(monkeypatch) -> None:
+    monkeypatch.setenv("PRODAVAN_API_BASE_URL", "http://api.example/api/v1")
+    monkeypatch.setenv("PRODAVAN_AUTH_TOKEN", "tok")
+    monkeypatch.setenv("PRODAVAN_PROJECT_ID", "proj-1")
+
+    rows = [
+        {"row_id": "etype_cpu", "body": {"name": "CPU", "build_scope": "all"}},
+        {"row_id": "etype_bmc", "body": {"name": "BMC", "build_scope": "server"}},
+    ]
+    with patch.object(mcp_server, "_list_rows", return_value=rows):
+        resp = mcp_server._handle(
+            {
+                "jsonrpc": "2.0",
+                "id": 17,
+                "method": "tools/call",
+                "params": {"name": "equipment_types_list", "arguments": {"build_kind": "pc"}},
+            }
+        )
+    items = json.loads(resp["result"]["content"][0]["text"])["items"]
+    ids = {r["row_id"] for r in items}
+    assert "etype_cpu" in ids
+    assert "etype_bmc" not in ids
 
 
 def test_found_groups_upsert_rejects_bad_match_kind(monkeypatch) -> None:

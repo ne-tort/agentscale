@@ -869,7 +869,9 @@ class EquipmentPipelineService:
             gid = str(g.get("row_id") or "")
             body = dict(g.get("body") or {})
             line_id = str(body.get("line_id") or "")
-            if line_id:
+            # WAVE10: группы-кандидаты слота сборки (build_id) не участвуют в
+            # выборе best-группы позиции — у них своя логика в _sync_builds.
+            if line_id and not str(body.get("build_id") or ""):
                 groups_by_line.setdefault(line_id, []).append(g)
 
             group_offers = offers_by_group.get(gid) or []
@@ -1248,7 +1250,8 @@ class EquipmentPipelineService:
         for g in groups:
             body = g.get("body") or {}
             lid = str(body.get("line_id") or "")
-            if lid:
+            # группы-кандидаты слота сборки (build_id) не «лицо» позиции
+            if lid and not str(body.get("build_id") or ""):
                 groups_by_line.setdefault(lid, []).append(g)
 
         for line in lines:
@@ -1440,6 +1443,7 @@ class EquipmentPipelineService:
                     and int(_num_or((g.get("body") or {}).get("offers_count"), 0) or 0) > 0
                 ]
                 slot_price: float | None = None
+                chosen_g: dict[str, Any] | None = None
                 if priced:
                     best_g = sorted(
                         priced,
@@ -1458,6 +1462,31 @@ class EquipmentPipelineService:
                     worst_rank = max(worst_rank, rank)
                     if gb.get("face_in_stock") is not True:
                         any_on_order = True
+                    # Ручной выбор слота (slots[slot] = group_id) перекрывает
+                    # автобest, если указывает на живого кандидата слота.
+                    manual_id = str(legacy_slots.get(slot) or "")
+                    chosen_g = next(
+                        (g for g in priced if str(g.get("row_id") or "") == manual_id),
+                        best_g,
+                    )
+                # is_best/альтернативы группы-кандидата: видно в pick-списке слота.
+                chosen_id = str((chosen_g or {}).get("row_id") or "")
+                slot_alts = max(0, len(priced) - 1)
+                for g in slot_groups:
+                    gid = str(g.get("row_id") or "")
+                    gbody = dict(g.get("body") or {})
+                    gupdates: dict[str, Any] = {}
+                    want_best = chosen_id != "" and gid == chosen_id
+                    if bool(gbody.get("is_best")) is not want_best:
+                        gupdates["is_best"] = want_best
+                    want_alts = slot_alts if gbody.get("offers_count") else 0
+                    if _num_or(gbody.get("alternatives_count"), 0) != want_alts:
+                        gupdates["alternatives_count"] = want_alts
+                    if gupdates:
+                        gbody.update(gupdates)
+                        await io.update(GROUPS_TABLE, gid, gbody)
+                        g["body"] = gbody
+                        updated += 1
                 # 2) легаси item-слот (если группы слота цены не дали)
                 slot_qty = 1.0
                 if slot_price is None:
@@ -1499,6 +1528,7 @@ class EquipmentPipelineService:
                 updated += 1
 
         # best-сборка позиции: точность → цена; остальные — альтернативы.
+        lines_rows = [r for r in await io.list(LINES_TABLE) if isinstance(r, dict)]
         for line_id, line_builds in builds_by_line.items():
             priced = [
                 b
@@ -1552,6 +1582,32 @@ class EquipmentPipelineService:
                     body.update(updates)
                     await io.update(BUILDS_TABLE, bid, body)
                     b["body"] = body
+                    updated += 1
+
+            # снапшот сборок на позиции: список показывает «Сборка» (счётчик,
+            # цена лучшей, совпадение, выгода) без дрилл-дауна в сборки.
+            winner_build = next(
+                (b for b in line_builds if str(b.get("row_id") or "") == winner), None
+            )
+            wbody = (winner_build or {}).get("body") or {}
+            line_row = next(
+                (r for r in lines_rows if str(r.get("row_id") or "") == line_id), None
+            )
+            if line_row is not None:
+                lbody = dict(line_row.get("body") or {})
+                snap: dict[str, Any] = {
+                    "builds_count": len(line_builds),
+                    "build_best_id": winner,
+                    "build_best_price": _num_or(wbody.get("price_total"), None),
+                    "build_match_label": str(wbody.get("match_label") or ""),
+                    "build_benefit_label": str(wbody.get("benefit_label") or ""),
+                    "build_benefit_tone": str(wbody.get("benefit_tone") or ""),
+                }
+                changed = {k: v for k, v in snap.items() if lbody.get(k) != v}
+                if changed:
+                    lbody.update(changed)
+                    await io.update(LINES_TABLE, line_id, lbody)
+                    line_row["body"] = lbody
                     updated += 1
         return updated
 

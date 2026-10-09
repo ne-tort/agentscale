@@ -17,8 +17,23 @@ WAVE7 responsibility split (v2.1.1):
            request_lines status / found_count / selected_offer_id are owned by
            the pipeline too — the agent never sets them.
 
+WAVE10 builds (v2.3.0):
+  A «Сборка» (equipment_builds) belongs to ONE request line and represents one
+  compatible PC/server variant (e.g. Intel vs AMD platform). A build has SLOTS
+  keyed by equipment type (equipment_types.row_id). Slot candidates are the
+  SAME found_groups rows — a group belongs EITHER to a position (line_id) OR to
+  a build slot (build_id + slot_type_id). So recording a build component is
+  exactly found_groups_upsert with build_id + slot_type_id instead of line_id.
+  The pipeline then materializes offers, prices each slot's best group, sums the
+  build total, and picks the best build per line (alternatives + benefit).
+  Build fields components_count / price_total / match_kind / is_best /
+  alternatives_count / benefit_* are pipeline-owned — do NOT set them.
+
 Linking IDs (visible to the agent — no hidden ids):
   - request_lines.row_id  → pass as found_groups.line_id (позиция заказчика)
+                            or equipment_builds.line_id (build → position)
+  - equipment_builds.row_id → pass as found_groups.build_id (build slot group)
+  - equipment_types.row_id  → pass as found_groups.slot_type_id (which slot)
   - found_groups.row_id   → group identity (offers link back via group_id)
   - catalog hit.src_hash  → stable catalog position id (supplier+title);
                            use it in aliases_hash when a position has no P/N
@@ -36,6 +51,7 @@ from typing import Any
 
 DEFAULT_MODULE_ID = "mod_equipment"
 MATCH_KINDS = frozenset({"exact", "analog", "doubt"})
+BUILD_KINDS = frozenset({"pc", "server"})
 
 
 def _env() -> tuple[str, str, str]:
@@ -212,17 +228,21 @@ TOOLS: list[dict[str, Any]] = [
         "name": "found_groups_upsert",
         "description": (
             "Create or update a found_groups row — THE tool to record which products "
-            "match a customer position. One row = one part-number group for one "
-            "request line; record EVERY distinct candidate part number as its own group. "
-            "On create: line_id MUST be request_lines.row_id "
-            "(from request_lines_list) AND at least one of part_number / "
-            "aliases_pn / aliases_hash is required. "
+            "match a customer position, OR which products fill a build slot. "
+            "One row = one part-number group for one request line (line_id) "
+            "OR for one build slot (build_id + slot_type_id). "
+            "Record EVERY distinct candidate part number as its own group; a slot may "
+            "have SEVERAL candidate groups — the platform prices them and picks the "
+            "cheapest as the slot's best, so record alternatives, not just one. "
+            "On create: EITHER line_id (request_lines.row_id, normal search) OR "
+            "build_id + slot_type_id (build component) is required, AND at least one of "
+            "part_number / aliases_pn / aliases_hash. "
             "part_number — canonical P/N of the group. aliases_pn — ALL other "
             "spellings of the SAME part number you saw across suppliers in the "
             "catalog hits (comma-separated). aliases_hash — src_hash ids of catalog "
             "hits that belong to this group but carry NO part number (copy the "
             "src_hash from equipment_catalog_search hits). "
-            "match_kind — how well THIS group matches the customer position: "
+            "match_kind — how well THIS group matches the requirement: "
             "'exact' (точное совпадение по P/N), 'analog' (функциональный аналог), "
             "'doubt' (есть сомнения в точности; analog and doubt are DIFFERENT "
             "categories). "
@@ -231,6 +251,9 @@ TOOLS: list[dict[str, Any]] = [
             "prices from OpenSearch and auto-selects the best: cheapest offer wins, "
             "but a PRIORITY supplier beats price within the same match tier; "
             "analog/doubt groups never outrank exact ones regardless of supplier. "
+            "For builds the same rule applies per slot: the cheapest accurate "
+            "candidate becomes the slot's best; the build total is the sum of the "
+            "slot bests, and the cheapest accurate build of the line becomes is_best. "
             "The user can override the choice manually in the UI. "
             "Do NOT write found_offers (no such tool): offers/prices are owned by "
             "the platform. "
@@ -243,7 +266,15 @@ TOOLS: list[dict[str, Any]] = [
                 "row_id": {"type": "string"},
                 "line_id": {
                     "type": ["string", "null"],
-                    "description": "request_lines.row_id (required on create)",
+                    "description": "request_lines.row_id (normal search; required if no build_id)",
+                },
+                "build_id": {
+                    "type": ["string", "null"],
+                    "description": "equipment_builds.row_id (build slot component)",
+                },
+                "slot_type_id": {
+                    "type": ["string", "null"],
+                    "description": "equipment_types.row_id — which slot of the build",
                 },
                 "part_number": {
                     "type": ["string", "null"],
@@ -260,7 +291,7 @@ TOOLS: list[dict[str, Any]] = [
                 "match_kind": {
                     "type": ["string", "null"],
                     "enum": ["exact", "analog", "doubt", None],
-                    "description": "Match category vs the customer position",
+                    "description": "Match category vs the customer position / requirement",
                 },
                 "note": {
                     "type": ["string", "null"],
@@ -276,6 +307,122 @@ TOOLS: list[dict[str, Any]] = [
         "description": (
             "Delete a found_groups row by row_id. Materialized offers of the group are "
             "removed by the platform pipeline. Use it to drop a mistaken candidate group."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "module_id": {"type": "string", "default": DEFAULT_MODULE_ID},
+                "row_id": {"type": "string"},
+            },
+            "required": ["row_id"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "equipment_types_list",
+        "description": (
+            "List component types (equipment_types) — the SLOT vocabulary of a build: "
+            "row_id (use as slot_type_id / build.slots key), name, sort_order, "
+            "build_scope (all|pc|server — which builds show this slot) and fields_json "
+            "(the characteristic keys to fill in equipment_items.attrs). "
+            "COMPATIBILITY keys are shared across types on purpose: cpu.socket ↔ "
+            "motherboard.socket, ram.ram_type ↔ motherboard.ram_type, "
+            "cooling.socket_compat, case.form_factor_support, psu.wattage vs "
+            "gpu.recommended_psu_w, storage.interface ↔ motherboard.sata_ports/m2_slots. "
+            "Use these keys to verify parts are compatible before adding them to a build."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "module_id": {"type": "string", "default": DEFAULT_MODULE_ID},
+                "build_kind": {
+                    "type": "string",
+                    "enum": ["pc", "server"],
+                    "description": "Optional: only types whose build_scope fits",
+                },
+            },
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "equipment_builds_list",
+        "description": (
+            "List builds (equipment_builds) — PC/server variants for customer positions. "
+            "Each build: name, line_id (request_lines.row_id), build_kind (pc|server), "
+            "components_count, price_total (sum of slot best offers), match_kind, "
+            "is_best, alternatives_count, benefit_label, slots. "
+            "One line may have SEVERAL builds (e.g. Intel and AMD platforms): the "
+            "pipeline marks the cheapest accurate one is_best, the rest are "
+            "alternatives. Filter by line_id to see the variants of one position."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "module_id": {"type": "string", "default": DEFAULT_MODULE_ID},
+                "line_id": {
+                    "type": "string",
+                    "description": "Optional filter: request_lines.row_id",
+                },
+            },
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "equipment_builds_get",
+        "description": "Get one equipment_builds row by row_id.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "module_id": {"type": "string", "default": DEFAULT_MODULE_ID},
+                "row_id": {"type": "string"},
+            },
+            "required": ["row_id"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "equipment_builds_upsert",
+        "description": (
+            "Create or update a build (equipment_builds) — one compatible PC/server "
+            "variant for a customer position. "
+            "On create: name AND line_id (request_lines.row_id) are required; "
+            "build_kind defaults to 'pc'. "
+            "Create SEVERAL builds per position when the platform is not fixed "
+            "(e.g. one Intel, one AMD) — each with its own components; the pipeline "
+            "then picks the best by accuracy→price and lists the rest as alternatives. "
+            "Components are NOT written here: add each part with found_groups_upsert "
+            "passing build_id (this build's row_id) + slot_type_id (equipment_types.row_id). "
+            "PATCH merges: omit = leave; null = clear. Optional: build_kind, note, "
+            "project_ids. components_count / price_total / match_kind / is_best / "
+            "alternatives_count / benefit_* are pipeline-owned — do not set them."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "module_id": {"type": "string", "default": DEFAULT_MODULE_ID},
+                "row_id": {"type": "string"},
+                "name": {"type": "string"},
+                "line_id": {
+                    "type": ["string", "null"],
+                    "description": "request_lines.row_id (required on create)",
+                },
+                "build_kind": {
+                    "type": ["string", "null"],
+                    "enum": ["pc", "server", None],
+                },
+                "note": {"type": ["string", "null"]},
+                "project_ids": {"type": ["array", "null"], "items": {"type": "string"}},
+            },
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "equipment_builds_delete",
+        "description": (
+            "Delete a build (equipment_builds) by row_id. Its slot candidate groups "
+            "(found_groups with this build_id) and their materialized offers are "
+            "cleaned up by the platform pipeline automatically. Use it to drop a "
+            "mistaken or non-compatible variant."
         ),
         "inputSchema": {
             "type": "object",
@@ -383,10 +530,20 @@ def _validate_line_body(body: dict[str, Any], *, creating: bool) -> None:
 def _validate_group_body(body: dict[str, Any], *, creating: bool) -> None:
     if creating:
         line_id = body.get("line_id")
-        if not isinstance(line_id, str) or not line_id.strip():
+        build_id = body.get("build_id")
+        has_line = isinstance(line_id, str) and bool(line_id.strip())
+        has_build = isinstance(build_id, str) and bool(build_id.strip())
+        if not has_line and not has_build:
             raise RuntimeError(
-                "line_id is required when creating found_groups "
-                "(use request_lines.row_id from request_lines_list)"
+                "found_groups must belong to EITHER a request line (line_id = "
+                "request_lines.row_id from request_lines_list) OR a build slot "
+                "(build_id = equipment_builds.row_id + slot_type_id = "
+                "equipment_types.row_id)"
+            )
+        if has_build and not str(body.get("slot_type_id") or "").strip():
+            raise RuntimeError(
+                "slot_type_id is required with build_id (use equipment_types.row_id "
+                "from equipment_types_list)"
             )
         has_keys = any(
             str(body.get(k) or "").strip()
@@ -400,6 +557,28 @@ def _validate_group_body(body: dict[str, Any], *, creating: bool) -> None:
     if "match_kind" in body and body["match_kind"] is not None:
         if str(body["match_kind"]) not in MATCH_KINDS:
             raise RuntimeError(f"match_kind must be one of {sorted(MATCH_KINDS)}")
+
+
+def _validate_build_body(body: dict[str, Any], *, creating: bool) -> None:
+    if creating:
+        if not str(body.get("name") or "").strip():
+            raise RuntimeError("name is required when creating equipment_builds")
+        if not str(body.get("line_id") or "").strip():
+            raise RuntimeError(
+                "line_id is required when creating equipment_builds "
+                "(use request_lines.row_id from request_lines_list)"
+            )
+    if "build_kind" in body and body["build_kind"] is not None:
+        if str(body["build_kind"]) not in BUILD_KINDS:
+            raise RuntimeError(f"build_kind must be one of {sorted(BUILD_KINDS)}")
+
+
+def _scope_fits(build_scope: str, build_kind: str) -> bool:
+    """build_scope all|pc|server matches a requested build_kind (empty = any)."""
+    scope = (build_scope or "").strip() or "all"
+    if scope == "all" or not build_kind:
+        return True
+    return scope == build_kind
 
 
 def _catalog_sources() -> dict[str, Any]:
@@ -488,12 +667,16 @@ def _call_tool(name: str, arguments: dict[str, Any]) -> Any:
     if name == "found_groups_list":
         items = _list_rows(mid, "found_groups", session_id=sid)
         line_id = str(arguments.get("line_id") or "").strip()
-        if line_id:
+        build_id = str(arguments.get("build_id") or "").strip()
+        if line_id or build_id:
             filtered = []
             for r in items:
                 body = r.get("body") if isinstance(r.get("body"), dict) else r
-                if str(body.get("line_id") or "") == line_id:
-                    filtered.append(r)
+                if line_id and str(body.get("line_id") or "") != line_id:
+                    continue
+                if build_id and str(body.get("build_id") or "") != build_id:
+                    continue
+                filtered.append(r)
             items = filtered
         return {"items": items}
     if name == "found_groups_get":
@@ -501,6 +684,8 @@ def _call_tool(name: str, arguments: dict[str, Any]) -> Any:
     if name == "found_groups_upsert":
         keys = (
             "line_id",
+            "build_id",
+            "slot_type_id",
             "part_number",
             "aliases_pn",
             "aliases_hash",
@@ -531,6 +716,66 @@ def _call_tool(name: str, arguments: dict[str, Any]) -> Any:
         return _http(
             "DELETE",
             _data_path(mid, "found_groups", row_id),
+            session_id=sid,
+        )
+
+    if name == "equipment_types_list":
+        items = _list_rows(mid, "equipment_types", session_id=sid)
+        build_kind = str(arguments.get("build_kind") or "").strip()
+        if build_kind:
+            items = [
+                r
+                for r in items
+                if _scope_fits(
+                    str((r.get("body") or {}).get("build_scope") or ""), build_kind
+                )
+            ]
+        return {"items": items}
+
+    if name == "equipment_builds_list":
+        items = _list_rows(mid, "equipment_builds", session_id=sid)
+        line_id = str(arguments.get("line_id") or "").strip()
+        if line_id:
+            filtered = []
+            for r in items:
+                body = r.get("body") if isinstance(r.get("body"), dict) else r
+                if str(body.get("line_id") or "") == line_id:
+                    filtered.append(r)
+            items = filtered
+        return {"items": items}
+    if name == "equipment_builds_get":
+        return _get_row(mid, "equipment_builds", str(arguments.get("row_id") or ""), session_id=sid)
+    if name == "equipment_builds_upsert":
+        keys = (
+            "name",
+            "line_id",
+            "build_kind",
+            "note",
+            "project_ids",
+        )
+        body = _pick_present(arguments, keys)
+        row_id = str(arguments.get("row_id") or "").strip() or None
+        _validate_build_body(body, creating=not row_id)
+        if row_id:
+            return _http(
+                "PATCH",
+                _data_path(mid, "equipment_builds", row_id),
+                {"body": body},
+                session_id=sid,
+            )
+        return _http(
+            "POST",
+            _data_path(mid, "equipment_builds"),
+            {"body": body},
+            session_id=sid,
+        )
+    if name == "equipment_builds_delete":
+        row_id = str(arguments.get("row_id") or "").strip()
+        if not row_id:
+            raise RuntimeError("row_id is required for equipment_builds_delete")
+        return _http(
+            "DELETE",
+            _data_path(mid, "equipment_builds", row_id),
             session_id=sid,
         )
 
@@ -598,7 +843,7 @@ def _handle(msg: dict[str, Any]) -> dict[str, Any] | None:
             "result": {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "prodavan-equipment", "version": "2.2.0"},
+                "serverInfo": {"name": "prodavan-equipment", "version": "2.3.0"},
             },
         }
     if method == "notifications/initialized":
