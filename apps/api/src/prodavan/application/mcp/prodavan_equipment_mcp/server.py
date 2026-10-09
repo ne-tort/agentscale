@@ -540,11 +540,6 @@ def _validate_group_body(body: dict[str, Any], *, creating: bool) -> None:
                 "(build_id = equipment_builds.row_id + slot_type_id = "
                 "equipment_types.row_id)"
             )
-        if has_build and not str(body.get("slot_type_id") or "").strip():
-            raise RuntimeError(
-                "slot_type_id is required with build_id (use equipment_types.row_id "
-                "from equipment_types_list)"
-            )
         has_keys = any(
             str(body.get(k) or "").strip()
             for k in ("part_number", "aliases_pn", "aliases_hash")
@@ -554,6 +549,17 @@ def _validate_group_body(body: dict[str, Any], *, creating: bool) -> None:
                 "at least one of part_number / aliases_pn / aliases_hash is required "
                 "when creating found_groups (group keys to search the catalog)"
             )
+    # build_id без slot_type_id недопустим и на PATCH: группа без слота попала бы
+    # в фантомный слот "" и молча вошла в цену сборки.
+    if "build_id" in body:
+        build_id = body.get("build_id")
+        if isinstance(build_id, str) and build_id.strip():
+            slot = body.get("slot_type_id")
+            if not (isinstance(slot, str) and slot.strip()):
+                raise RuntimeError(
+                    "slot_type_id is required with build_id (use equipment_types.row_id "
+                    "from equipment_types_list)"
+                )
     if "match_kind" in body and body["match_kind"] is not None:
         if str(body["match_kind"]) not in MATCH_KINDS:
             raise RuntimeError(f"match_kind must be one of {sorted(MATCH_KINDS)}")

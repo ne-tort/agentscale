@@ -1593,3 +1593,45 @@ async def test_stale_manual_slot_choice_self_heals(io: FakeIO) -> None:
     assert b["slots"]["etype_cpu"] == live_id
     assert b["price_total"] == 120.0
     assert io.body("found_groups", live_id)["is_best"] is True
+
+
+async def test_group_without_slot_type_id_not_counted_in_build_price(io: FakeIO) -> None:
+    """Группа с build_id, но без slot_type_id не входит в цену сборки.
+
+    Иначе она попадает в фантомный слот "" и молча увеличивает price_total.
+    """
+    svc = EquipmentPipelineService(session=object())
+    await io.create(
+        "equipment_builds",
+        {"name": "ПК", "build_kind": "pc", "line_id": "line_1", "slots": {}},
+    )
+    build_id = io.rows("equipment_builds")[0]["row_id"]
+    # нормальный кандидат слота
+    await io.create(
+        "found_groups",
+        {
+            "build_id": build_id,
+            "slot_type_id": "etype_cpu",
+            "part_number": "ABC-123",
+            "aliases_pn": "ABC123",
+            "match_kind": "exact",
+        },
+    )
+    # «повисшая» группа без слота
+    await io.create(
+        "found_groups",
+        {
+            "build_id": build_id,
+            "slot_type_id": "",
+            "part_number": "",
+            "aliases_hash": "h4",
+            "match_kind": "exact",
+        },
+    )
+
+    await svc.run(io, materialize=True)
+
+    b = io.body("equipment_builds", build_id)
+    # учтён только CPU (120), хэш-группа без слота (450) в цену не вошла
+    assert b["components_count"] == 1
+    assert b["price_total"] == 120.0

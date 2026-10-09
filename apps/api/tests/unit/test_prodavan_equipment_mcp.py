@@ -453,3 +453,40 @@ def test_tools_list_survives_override_fetch_failure(monkeypatch) -> None:
         resp = mcp_server._handle({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
     names = {t["name"] for t in resp["result"]["tools"]}
     assert "equipment_catalog_search" in names
+
+
+def test_found_groups_patch_build_id_requires_slot_type(monkeypatch) -> None:
+    """PATCH с build_id без slot_type_id отклоняется (фантомный слот)."""
+    monkeypatch.setenv("PRODAVAN_API_BASE_URL", "http://api.example/api/v1")
+    monkeypatch.setenv("PRODAVAN_AUTH_TOKEN", "tok")
+    monkeypatch.setenv("PRODAVAN_PROJECT_ID", "proj-1")
+
+    resp = mcp_server._handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 21,
+            "method": "tools/call",
+            "params": {
+                "name": "found_groups_upsert",
+                "arguments": {"row_id": "g1", "build_id": "b1"},
+            },
+        }
+    )
+    assert resp["result"].get("isError") is True
+    assert "slot_type_id" in resp["result"]["content"][0]["text"]
+
+    # с slot_type_id — проходит
+    with patch.object(mcp_server, "_http", return_value={"row_id": "g1"}) as http:
+        ok = mcp_server._handle(
+            {
+                "jsonrpc": "2.0",
+                "id": 22,
+                "method": "tools/call",
+                "params": {
+                    "name": "found_groups_upsert",
+                    "arguments": {"row_id": "g1", "build_id": "b1", "slot_type_id": "etype_cpu"},
+                },
+            }
+        )
+    assert ok["result"].get("isError") is not True
+    assert http.call_args.args[0] == "PATCH"
