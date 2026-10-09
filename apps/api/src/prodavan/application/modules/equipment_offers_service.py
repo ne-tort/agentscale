@@ -1487,6 +1487,10 @@ class EquipmentPipelineService:
 
             # Слоты: объединяем ключи из легаси `slots` и из групп сборки.
             legacy_slots = body.get("slots") if isinstance(body.get("slots"), dict) else {}
+            # WAVE11: количество на слот ({type_id: qty}) — свойство слота, а не
+            # кандидата: «2 плашки ОЗУ» верно для любой альтернативы слота.
+            raw_slot_qty = body.get("slot_qty")
+            build_slot_qty = raw_slot_qty if isinstance(raw_slot_qty, dict) else {}
             slot_keys = set(str(k) for k in legacy_slots.keys())
             slot_keys |= {slot for (b, slot) in groups_by_build_slot.keys() if b == bid}
 
@@ -1558,13 +1562,16 @@ class EquipmentPipelineService:
                         await io.update(GROUPS_TABLE, gid, gbody)
                         g["body"] = gbody
                         slot_groups_updated += 1
-                # 2) легаси item-слот (если группы слота цены не дали)
-                slot_qty = 1.0
+                # 2) количество слота: явный slot_qty сборки важнее qty
+                # легаси-item; по умолчанию 1.
+                explicit_qty = _num_or(build_slot_qty.get(slot), None)
+                slot_qty = explicit_qty if (explicit_qty or 0) > 0 else 1.0
                 if slot_price is None:
                     item = items_by_id.get(str(legacy_slots.get(slot) or ""))
                     if item is not None:
                         ibody = item.get("body") or {}
-                        slot_qty = _num_or(ibody.get("qty"), 1.0) or 1.0
+                        if explicit_qty is None:
+                            slot_qty = _num_or(ibody.get("qty"), 1.0) or 1.0
                         offer = offers_by_id.get(str(ibody.get("offer_id") or ""))
                         if offer is not None:
                             slot_price = _num_or((offer.get("body") or {}).get("price"), None)

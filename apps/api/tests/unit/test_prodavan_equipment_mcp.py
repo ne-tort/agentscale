@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from unittest.mock import patch
 
+import pytest
+
 from prodavan.application.mcp.prodavan_equipment_mcp import server as mcp_server
 
 
@@ -490,3 +492,59 @@ def test_found_groups_patch_build_id_requires_slot_type(monkeypatch) -> None:
         )
     assert ok["result"].get("isError") is not True
     assert http.call_args.args[0] == "PATCH"
+
+
+def test_equipment_builds_upsert_accepts_slot_qty(monkeypatch) -> None:
+    """WAVE11: количество на слот передаётся в equipment_builds.slot_qty."""
+    monkeypatch.setenv("PRODAVAN_API_BASE_URL", "http://api.example/api/v1")
+    monkeypatch.setenv("PRODAVAN_AUTH_TOKEN", "tok")
+    monkeypatch.setenv("PRODAVAN_PROJECT_ID", "proj-1")
+
+    posted: dict = {}
+
+    def fake_http(method, path, payload=None, *, session_id=None):
+        posted.update(payload or {})
+        return {"row_id": "b1"}
+
+    with patch.object(mcp_server, "_http", side_effect=fake_http):
+        resp = mcp_server._handle(
+            {
+                "jsonrpc": "2.0",
+                "id": 31,
+                "method": "tools/call",
+                "params": {
+                    "name": "equipment_builds_upsert",
+                    "arguments": {
+                        "row_id": "b1",
+                        "slot_qty": {"etype_ram": 2, "etype_case_fans": 3},
+                    },
+                },
+            }
+        )
+    assert resp["result"].get("isError") is not True
+    assert posted["body"]["slot_qty"] == {"etype_ram": 2, "etype_case_fans": 3}
+
+
+@pytest.mark.parametrize(
+    "bad_qty",
+    [{"etype_ram": 0}, {"etype_ram": -1}, {"etype_ram": 1.5}, {"etype_ram": "много"}, "not-a-map"],
+)
+def test_equipment_builds_upsert_rejects_bad_slot_qty(monkeypatch, bad_qty) -> None:
+    """slot_qty — целые ≥ 1 и обязательно словарь."""
+    monkeypatch.setenv("PRODAVAN_API_BASE_URL", "http://api.example/api/v1")
+    monkeypatch.setenv("PRODAVAN_AUTH_TOKEN", "tok")
+    monkeypatch.setenv("PRODAVAN_PROJECT_ID", "proj-1")
+
+    resp = mcp_server._handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 32,
+            "method": "tools/call",
+            "params": {
+                "name": "equipment_builds_upsert",
+                "arguments": {"row_id": "b1", "slot_qty": bad_qty},
+            },
+        }
+    )
+    assert resp["result"].get("isError") is True
+    assert "slot_qty" in resp["result"]["content"][0]["text"]

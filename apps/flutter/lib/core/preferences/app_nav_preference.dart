@@ -16,6 +16,7 @@ class AppNavPreference extends StatelessWidget {
     this.loading = false,
     this.loadingLabel,
     this.leading,
+    this.trailing,
   });
 
   final String title;
@@ -27,6 +28,9 @@ class AppNavPreference extends StatelessWidget {
   final bool loading;
   final String? loadingLabel;
   final Widget? leading;
+
+  /// Overrides the default chevron (e.g. an inline quantity stepper).
+  final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
@@ -59,7 +63,7 @@ class AppNavPreference extends StatelessWidget {
           ? Text(progressSubtitle)
           : subtitle,
       accentColor: accentColor,
-      trailing: loading ? null : const AppTrailingChevron(),
+      trailing: loading ? null : (trailing ?? const AppTrailingChevron()),
       onTap: enabled && !loading ? onTap : null,
     );
   }

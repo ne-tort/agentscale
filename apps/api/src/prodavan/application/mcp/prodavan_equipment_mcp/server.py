@@ -392,8 +392,13 @@ TOOLS: list[dict[str, Any]] = [
             "then picks the best by accuracy→price and lists the rest as alternatives. "
             "Components are NOT written here: add each part with found_groups_upsert "
             "passing build_id (this build's row_id) + slot_type_id (equipment_types.row_id). "
-            "PATCH merges: omit = leave; null = clear. Optional: build_kind, note, "
-            "project_ids. components_count / price_total / match_kind / is_best / "
+            "slot_qty sets how many of a component the build needs "
+            "({equipment_types.row_id: qty}, e.g. {\"etype_ram\": 2} for two sticks — "
+            "use it when 2 cheaper sticks beat 1 larger one). Quantity belongs to the "
+            "SLOT, not to a candidate: it holds for any alternative of that slot. "
+            "The slot price is multiplied by qty in price_total. "
+            "PATCH merges: omit = leave; null = clear. Optional: build_kind, slot_qty, "
+            "note, project_ids. components_count / price_total / match_kind / is_best / "
             "alternatives_count / benefit_* are pipeline-owned — do not set them."
         ),
         "inputSchema": {
@@ -409,6 +414,14 @@ TOOLS: list[dict[str, Any]] = [
                 "build_kind": {
                     "type": ["string", "null"],
                     "enum": ["pc", "server", None],
+                },
+                "slot_qty": {
+                    "type": ["object", "null"],
+                    "description": (
+                        "Quantity per slot: {equipment_types.row_id: int >= 1}. "
+                        "Omitted slots default to 1."
+                    ),
+                    "additionalProperties": {"type": ["number", "integer"]},
                 },
                 "note": {"type": ["string", "null"]},
                 "project_ids": {"type": ["array", "null"], "items": {"type": "string"}},
@@ -577,6 +590,23 @@ def _validate_build_body(body: dict[str, Any], *, creating: bool) -> None:
     if "build_kind" in body and body["build_kind"] is not None:
         if str(body["build_kind"]) not in BUILD_KINDS:
             raise RuntimeError(f"build_kind must be one of {sorted(BUILD_KINDS)}")
+    if "slot_qty" in body and body["slot_qty"] is not None:
+        qty = body["slot_qty"]
+        if not isinstance(qty, dict):
+            raise RuntimeError(
+                "slot_qty must be an object {equipment_types.row_id: quantity}"
+            )
+        for slot, value in qty.items():
+            try:
+                num = float(value)
+            except (TypeError, ValueError):
+                raise RuntimeError(
+                    f"slot_qty[{slot!r}] must be a number >= 1"
+                ) from None
+            if num < 1 or num != int(num):
+                raise RuntimeError(
+                    f"slot_qty[{slot!r}] must be a whole number >= 1 (got {value!r})"
+                )
 
 
 def _scope_fits(build_scope: str, build_kind: str) -> bool:
@@ -756,6 +786,7 @@ def _call_tool(name: str, arguments: dict[str, Any]) -> Any:
             "name",
             "line_id",
             "build_kind",
+            "slot_qty",
             "note",
             "project_ids",
         )

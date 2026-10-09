@@ -627,6 +627,20 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
         emptyLabel: buildSlotsEmptyLabel(fieldCfg, l10n, locale),
         rowId: _rowId,
         onOpenPick: widget.onOpenView,
+        // WAVE11: количество на слот. Пересчёт цены делает серверный пайплайн
+        // (запись equipment_builds триггерит equipment_pipeline_sync).
+        slotQty: parseSlotQtyMap(_values['slot_qty']),
+        onQtyChanged: fieldReadOnly
+            ? null
+            : (typeId, qty) {
+                final next = parseSlotQtyMap(_values['slot_qty']);
+                if (qty <= 1) {
+                  next.remove(typeId);
+                } else {
+                  next[typeId] = qty;
+                }
+                _persist('slot_qty', next);
+              },
       );
     }
     if (widgetKind == 'fields_schema_editor') {

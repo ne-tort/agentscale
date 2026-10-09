@@ -1706,3 +1706,87 @@ async def test_build_does_not_downgrade_selected_line(io: FakeIO) -> None:
     line = io.body("request_lines", "line_1")
     assert line["builds_count"] == 1
     assert line["status"] == "selected"
+
+
+async def test_slot_qty_multiplies_build_price(io: FakeIO) -> None:
+    """WAVE11: количество на слот учитывается в цене сборки.
+
+    «2 плашки ОЗУ» — свойство слота, а не кандидата: qty применяется к
+    выбранной группе слота и попадает в price_total и в бюджет позиции.
+    """
+    svc = EquipmentPipelineService(session=object())
+    await io.create(
+        "equipment_builds",
+        {"name": "ПК", "build_kind": "pc", "line_id": "line_1", "slots": {}},
+    )
+    build_id = io.rows("equipment_builds")[0]["row_id"]
+    # CPU ×1 (120 у приоритетного Сидорова) + RAM ×2 (450 за штуку)
+    await io.create(
+        "found_groups",
+        {
+            "build_id": build_id,
+            "slot_type_id": "etype_cpu",
+            "part_number": "ABC-123",
+            "aliases_pn": "ABC123",
+            "match_kind": "exact",
+        },
+    )
+    await io.create(
+        "found_groups",
+        {
+            "build_id": build_id,
+            "slot_type_id": "etype_ram",
+            "part_number": "",
+            "aliases_hash": "h4",
+            "match_kind": "exact",
+        },
+    )
+
+    await svc.run(io, materialize=True)
+    b = io.body("equipment_builds", build_id)
+    assert b["components_count"] == 2
+    assert b["price_total"] == 120.0 + 450.0  # qty по умолчанию 1
+
+    # ставим количество 2 на слот ОЗУ
+    body = io.body("equipment_builds", build_id)
+    body["slot_qty"] = {"etype_ram": 2}
+    await io.update("equipment_builds", build_id, body)
+    await svc.run(io, materialize=False)
+
+    b = io.body("equipment_builds", build_id)
+    assert b["price_total"] == 120.0 + 450.0 * 2
+    # количество не увеличивает счётчик типов комплектующих
+    assert b["components_count"] == 2
+    # бюджет позиции следует за ценой сборки
+    budget = [r["body"] for r in io.rows("budget_lines") if r["body"].get("line_id") == "line_1"]
+    assert budget and budget[0]["price_in"] == 120.0 + 450.0 * 2
+
+
+async def test_slot_qty_overrides_legacy_item_qty(io: FakeIO) -> None:
+    """Явный slot_qty сборки важнее qty легаси-комплектующего."""
+    svc = EquipmentPipelineService(session=object())
+    await io.create(
+        "equipment_items",
+        {"name": "Планка", "type_id": "etype_ram", "qty": 3, "offer_id": "offer_manual"},
+    )
+    item_id = io.rows("equipment_items")[0]["row_id"]
+    await io.create(
+        "equipment_builds",
+        {
+            "name": "Легаси",
+            "build_kind": "pc",
+            "line_id": "line_2",
+            "slots": {"etype_ram": item_id},
+        },
+    )
+    build_id = io.rows("equipment_builds")[0]["row_id"]
+
+    await svc.run(io, materialize=False)
+    # offer_manual: цена 100, qty из item = 3 → 300
+    assert io.body("equipment_builds", build_id)["price_total"] == 300.0
+
+    body = io.body("equipment_builds", build_id)
+    body["slot_qty"] = {"etype_ram": 1}
+    await io.update("equipment_builds", build_id, body)
+    await svc.run(io, materialize=False)
+    assert io.body("equipment_builds", build_id)["price_total"] == 100.0
