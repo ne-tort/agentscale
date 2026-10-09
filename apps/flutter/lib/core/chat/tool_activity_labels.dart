@@ -419,11 +419,32 @@ String formatToolPanelBody({
   }
 }
 
+/// Canonicalize a wire tool name for label lookup.
+///
+/// The agent's built-ins arrive either bare (`todo.write`), via the built-in
+/// MCP server (`mcp.openclaw.todo.write`) or, on the OpenAI schema, with dots
+/// mapped to underscores (`todo_write`, `mcp_openclaw_todo_write`). Collapse
+/// all three to the bare dotted name so the label switch matches — otherwise
+/// the user sees the raw "Инструмент mcp.openclaw.todo.write".
+String canonicalToolLabelName(String name) {
+  var n = name.trim();
+  final lower = n.toLowerCase();
+  if (lower.startsWith('mcp.openclaw.')) {
+    n = n.substring('mcp.openclaw.'.length);
+  } else if (lower.startsWith('mcp_openclaw_')) {
+    n = n.substring('mcp_openclaw_'.length);
+  }
+  // Underscored OpenAI-schema name → dotted canonical (only when it has no
+  // dots of its own, so real dotted names are untouched).
+  if (!n.contains('.') && n.contains('_')) n = n.replaceAll('_', '.');
+  return n;
+}
+
 /// Labels for the agent's standard (non-module) MCP utilities — displayed
 /// regardless of server/module config; the wire names come from the OpenClaw
 /// tool registry (openclaw-sdk packages/tools + functional tools).
 String? standardUtilityLabel(AppLocalizations l10n, String bareTool) {
-  switch (bareTool.toLowerCase().trim()) {
+  switch (canonicalToolLabelName(bareTool).toLowerCase()) {
     case 'web.search':
       return l10n.projectChatToolWebSearch;
     case 'web.fetch':
@@ -445,7 +466,7 @@ String? standardUtilityLabel(AppLocalizations l10n, String bareTool) {
     case 'context.compact':
       return l10n.projectChatToolCompact;
     case 'agent.spawn':
-      return l10n.projectChatToolSubagent(bareTool);
+      return l10n.projectChatToolSubagent(canonicalToolLabelName(bareTool));
     case 'mcp.list_servers':
       return l10n.projectChatToolMcpServers;
     case 'mcp.list_tools':

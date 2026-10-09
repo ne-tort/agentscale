@@ -132,6 +132,34 @@ void main() {
       expect(tasks[1].color, isNull);
     });
 
+    test('tags are stripped wherever they appear (not only at the start)', () {
+      final tasks = deriveChecklistTasks([
+        _toolCall('todo.write', {
+          'items': [
+            {'id': '1', 'content': 'Позиция A <error> нет в каталоге'},
+            {'id': '2', 'content': 'Позиция B — <success> найдена'},
+          ],
+        }),
+      ]);
+      // Tag never leaks into the rendered title.
+      expect(tasks[0].title, 'Позиция A нет в каталоге');
+      expect(tasks[0].color, ChatTaskColor.error);
+      expect(tasks[1].title, 'Позиция B — найдена');
+      expect(tasks[1].color, ChatTaskColor.success);
+    });
+
+    test('unknown tags are preserved verbatim', () {
+      final tasks = deriveChecklistTasks([
+        _toolCall('todo.write', {
+          'items': [
+            {'id': '1', 'content': 'Значение <2 порога'},
+          ],
+        }),
+      ]);
+      expect(tasks[0].title, 'Значение <2 порога');
+      expect(tasks[0].color, isNull);
+    });
+
     test('state tag maps to a rich status (blocked/deferred/partial)', () {
       final tasks = deriveChecklistTasks([
         _toolCall('todo.write', {
