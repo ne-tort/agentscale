@@ -146,7 +146,7 @@ data:
   POD_AGENT_RUNTIME_AUTH_SECRET: pod-agent-bridge-auth
   # Cross-ns (sandbox -> app ns) URL: dev contour app ns is agentscale-dev.
   POD_AGENT_RUNTIME_API_BASE_URL: http://agentscale-api.agentscale-dev.svc:8001/api/v1
-  POD_AGENT_RUNTIME_IMAGE: ghcr.io/ne-tort/prodavan-agent-runtime:bfa4c90ae679
+  POD_AGENT_RUNTIME_IMAGE: ghcr.io/ne-tort/prodavan-agent-runtime:929b6768cba2
   POD_AGENT_RUNTIME_BOOTSTRAP_ENABLED: "true"
   # CLAW-WEB — web.search provider config. The sandbox agent-runtime never
   # reaches SearxNG directly: `provider=prodavan_api` (id провайдера в
