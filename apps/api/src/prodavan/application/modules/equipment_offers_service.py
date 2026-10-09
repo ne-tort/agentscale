@@ -1453,15 +1453,26 @@ class EquipmentPipelineService:
         items_by_id = {str(r.get("row_id") or ""): r for r in items}
         offers_by_id = {str(r.get("row_id") or ""): r for r in offers}
 
-        # Кандидаты слотов: группы с build_id (+slot_type_id).
+        # Кандидаты слотов: группы с build_id И slot_type_id. Группа без слота
+        # (build_id есть, slot_type_id пуст) в цену сборки не входит: иначе она
+        # попала бы в фантомный слот "" и молча увеличила price_total.
         groups_by_build_slot: dict[tuple[str, str], list[dict[str, Any]]] = {}
+        unassigned_slot_groups = 0
         for g in groups:
             gbody = g.get("body") or {}
             bid = str(gbody.get("build_id") or "")
             if not bid:
                 continue
             slot = str(gbody.get("slot_type_id") or "")
+            if not slot:
+                unassigned_slot_groups += 1
+                continue
             groups_by_build_slot.setdefault((bid, slot), []).append(g)
+        if unassigned_slot_groups:
+            logger.warning(
+                "pipeline: %d групп(а) сборки без slot_type_id — не учтены в цене",
+                unassigned_slot_groups,
+            )
 
         updated = 0
         slot_groups_updated = 0
