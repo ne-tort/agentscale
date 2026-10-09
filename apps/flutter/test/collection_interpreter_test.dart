@@ -193,6 +193,7 @@ Map<String, dynamic> _rowTapManifestJson() => {
 
 void main() {
   _wave7Group('WAVE7 collection features');
+  _wave10Group('WAVE10 build slot pick');
   testWidgets('uses AppInlineAddField with meta title', (tester) async {
     final manifest = ModuleMetaManifest.fromJson(_collectionManifestJson());
     final seeds = SeedDataController(manifest);
@@ -603,6 +604,214 @@ void _wave7Group(String description) {
       final body = seeds.itemById('p1')!['body'] as Map<String, dynamic>;
       expect(body['include_delivery'], isTrue);
       expect(find.byIcon(Icons.check_box), findsOneWidget);
+    });
+  });
+}
+
+/// WAVE10: pick-вид кандидатов слота сборки — фильтр по contextRowId +
+/// запись выбора в slots с пересчётом итога сборки из face_price группы.
+Map<String, dynamic> _wave10ManifestJson() => {
+      'syntax_version': 1,
+      'tables': [
+        {
+          'slug': 'builds',
+          'label': 'Builds',
+          'storage_kind': 'json_document',
+          'enabled': true,
+        },
+        {
+          'slug': 'groups',
+          'label': 'Groups',
+          'storage_kind': 'json_document',
+          'enabled': true,
+        },
+      ],
+      'columns': [
+        {'table_slug': 'builds', 'name': 'name', 'label': 'Название', 'type': 'text'},
+        {'table_slug': 'builds', 'name': 'slots', 'label': 'Слоты', 'type': 'json'},
+        {
+          'table_slug': 'builds',
+          'name': 'price_total',
+          'label': 'Цена',
+          'type': 'number',
+        },
+        {
+          'table_slug': 'builds',
+          'name': 'components_count',
+          'label': 'Комплектующих',
+          'type': 'number',
+        },
+        {'table_slug': 'groups', 'name': 'face_title', 'label': 'Товар', 'type': 'text'},
+        {'table_slug': 'groups', 'name': 'build_id', 'label': 'Сборка', 'type': 'text'},
+        {
+          'table_slug': 'groups',
+          'name': 'slot_type_id',
+          'label': 'Слот',
+          'type': 'text',
+        },
+        {
+          'table_slug': 'groups',
+          'name': 'face_price',
+          'label': 'Цена',
+          'type': 'number',
+        },
+        {'table_slug': 'groups', 'name': 'is_best', 'label': 'Лучший', 'type': 'bool'},
+      ],
+      'views': [
+        {
+          'slug': 'build_groups_pick',
+          'table_slug': 'groups',
+          'kind': 'collection',
+          'ui_json': {
+            'version': 1,
+            'kind': 'collection',
+            'title_field': 'face_title',
+            'columns': [
+              {'field': 'face_title', 'label': 'Товар'},
+              {'field': 'face_price', 'label': 'Цена'},
+            ],
+            'row_filter_from_context': {
+              'build_id': 'contextRowId',
+              'slot_type_id': '_pick_type_id',
+            },
+            'selection': {
+              'kind': 'single',
+              'control': 'switch',
+              'placement': 'trailing',
+              'disable_row_tap': true,
+              'match_map_field': 'slots',
+              'match_map_key_from_context': '_slot_key',
+              'set_on_context': {
+                'map_field': 'slots',
+                'map_key_from_context': '_slot_key',
+                'value_from': 'row_id',
+                'recompute_build_totals': true,
+              },
+            },
+          },
+        },
+      ],
+      'tabs': [],
+      'seed_rows': {
+        'items': [
+          {
+            'table_slug': 'builds',
+            'row_id': 'b1',
+            'body': {'name': 'ПК Intel', 'slots': <String, dynamic>{}},
+          },
+          {
+            'table_slug': 'groups',
+            'row_id': 'g_cheap',
+            'body': {
+              'face_title': 'CPU дешёвый',
+              'build_id': 'b1',
+              'slot_type_id': 'etype_cpu',
+              'face_price': 100,
+              'is_best': true,
+            },
+          },
+          {
+            'table_slug': 'groups',
+            'row_id': 'g_dear',
+            'body': {
+              'face_title': 'CPU дорогой',
+              'build_id': 'b1',
+              'slot_type_id': 'etype_cpu',
+              'face_price': 250,
+            },
+          },
+          {
+            'table_slug': 'groups',
+            'row_id': 'g_other_slot',
+            'body': {
+              'face_title': 'RAM (другой слот)',
+              'build_id': 'b1',
+              'slot_type_id': 'etype_ram',
+              'face_price': 50,
+            },
+          },
+          {
+            'table_slug': 'groups',
+            'row_id': 'g_other_build',
+            'body': {
+              'face_title': 'CPU другой сборки',
+              'build_id': 'b2',
+              'slot_type_id': 'etype_cpu',
+              'face_price': 999,
+            },
+          },
+        ],
+      },
+    };
+
+void _wave10Group(String description) {
+  group(description, () {
+    testWidgets('row_filter_from_context: contextRowId + pick-контекст слота',
+        (tester) async {
+      tester.view.physicalSize = const Size(500, 900);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      final manifest = ModuleMetaManifest.fromJson(_wave10ManifestJson());
+      final seeds = SeedDataController(manifest);
+      seeds.setPickContext(typeId: 'etype_cpu', slotKey: 'etype_cpu');
+      final view = manifest.viewBySlug('build_groups_pick')!;
+
+      await tester.pumpWidget(
+        _ruApp(
+          CollectionViewInterpreter(
+            manifest: manifest,
+            view: view,
+            seeds: seeds,
+            contextRowId: 'b1',
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // видны только кандидаты ЭТОЙ сборки и ЭТОГО слота
+      expect(find.text('CPU дешёвый'), findsOneWidget);
+      expect(find.text('CPU дорогой'), findsOneWidget);
+      expect(find.text('RAM (другой слот)'), findsNothing);
+      expect(find.text('CPU другой сборки'), findsNothing);
+    });
+
+    testWidgets('выбор кандидата пишет slots и пересчитывает итог из face_price',
+        (tester) async {
+      tester.view.physicalSize = const Size(500, 900);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      final manifest = ModuleMetaManifest.fromJson(_wave10ManifestJson());
+      final seeds = SeedDataController(manifest);
+      seeds.setPickContext(typeId: 'etype_cpu', slotKey: 'etype_cpu');
+      final view = manifest.viewBySlug('build_groups_pick')!;
+
+      await tester.pumpWidget(
+        _ruApp(
+          CollectionViewInterpreter(
+            manifest: manifest,
+            view: view,
+            seeds: seeds,
+            contextRowId: 'b1',
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // текущий выбор (is_best → slots пуст, поэтому switch выключены)
+      final switches = tester.widgetList<Switch>(find.byType(Switch)).toList();
+      expect(switches.length, 2);
+
+      // выбираем дорогой вариант (второй ряд)
+      await tester.tap(find.byType(Switch).at(1));
+      await tester.pumpAndSettle();
+
+      final build = seeds.bodyFor('b1');
+      expect(build['slots'], {'etype_cpu': 'g_dear'});
+      // итог считается из face_price группы, а не из легаси item→offer
+      expect(build['price_total'], 250);
+      expect(build['components_count'], 1);
     });
   });
 }
