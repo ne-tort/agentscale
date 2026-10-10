@@ -9,7 +9,11 @@ import tarfile
 from typing import Any, BinaryIO
 
 from prodavan.application.pod_service.ports.dehydrate import DehydrateResult
-from prodavan.application.pod_service.workspace_dehydrate_rules import is_excluded_rel, max_file_bytes
+from prodavan.application.pod_service.workspace_dehydrate_rules import (
+    is_excluded_rel,
+    is_platform_owned_rel,
+    max_file_bytes,
+)
 from prodavan.core.infra.object_keys import workspace_object_key
 from prodavan.infrastructure.files.manager import ensure_file_store
 from prodavan.infrastructure.projects.tar_paths import tar_member_relpath
@@ -50,6 +54,17 @@ def upload_workspace_tar(
             if not rel or is_excluded_rel(rel):
                 skipped += 1
                 continue
+            if is_platform_owned_rel(rel):
+                # Копия пода не авторитетна: mcp.json и packages/* пишет
+                # материализация из Postgres (file_ref / seed-zip). Не
+                # выкачиваем их (иначе старая версия пакета затрёт свежую),
+                # но помечаем существующий ключ как «оставить», чтобы финальная
+                # зачистка не удалила их из хранилища.
+                kept_keys.add(
+                    workspace_object_key(workspace_key=workspace_key, relative_path=rel)
+                )
+                skipped += 1
+                continue
             if member.size > cap:
                 logger.warning(
                     "dehydrate skip oversized file workspace_key=%s rel=%s size=%s",
@@ -76,9 +91,16 @@ def upload_workspace_tar(
     for key in existing:
         if key.endswith("/"):
             continue
-        if key not in kept_keys:
-            if mgr.delete_sync(key):
-                deleted += 1
+        if key in kept_keys:
+            continue
+        # Платформенные артефакты (mcp.json, packages/*) живут в хранилище и
+        # без архива пода: их пишет материализация. Удалять их здесь нельзя —
+        # иначе гидрация останется без mcp.json и агент потеряет MCP-инструменты.
+        rel = key[len(prefix):] if key.startswith(prefix) else key
+        if is_platform_owned_rel(rel):
+            continue
+        if mgr.delete_sync(key):
+            deleted += 1
 
     logger.info(
         "dehydrate uploaded=%s deleted=%s skipped=%s workspace_key=%s",

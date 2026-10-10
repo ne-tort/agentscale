@@ -25,13 +25,24 @@ class MinioFileStore(FileStorePort):
         from botocore.client import Config
 
         self._bucket = bucket
+        # botocore >= 1.36 по умолчанию считает контрольную сумму «когда
+        # поддерживается» и шлёт x-amz-checksum-crc32. MinIO для DeleteObjects
+        # требует именно Content-MD5 и отвечает MissingContentMD5, поэтому
+        # просим считать её только там, где она обязательна (when_required).
+        config_kwargs: dict[str, Any] = {"signature_version": "s3v4"}
+        try:
+            Config(**{**config_kwargs, "request_checksum_calculation": "when_required"})
+            config_kwargs["request_checksum_calculation"] = "when_required"
+        except TypeError:
+            # старый botocore: параметра нет, Content-MD5 и так считается сам
+            pass
         self._client: Any = boto3.client(
             "s3",
             endpoint_url=endpoint_url,
             aws_access_key_id=access_key,
             aws_secret_access_key=secret_key,
             region_name=region,
-            config=Config(signature_version="s3v4"),
+            config=Config(**config_kwargs),
         )
 
     def _safe_prefix(self, prefix: str) -> str:
@@ -109,11 +120,34 @@ class MinioFileStore(FileStorePort):
                     continue
                 for i in range(0, len(objs), 1000):
                     chunk = objs[i : i + 1000]
-                    self._client.delete_objects(
-                        Bucket=self._bucket,
-                        Delete={"Objects": chunk, "Quiet": True},
-                    )
-                    deleted += len(chunk)
+                    try:
+                        self._client.delete_objects(
+                            Bucket=self._bucket,
+                            Delete={"Objects": chunk, "Quiet": True},
+                        )
+                        deleted += len(chunk)
+                    except Exception:
+                        # Батч может отклоняться S3-совместимым хранилищем
+                        # (например MissingContentMD5 на MinIO). Тогда чистим
+                        # по одному: иначе в workspace остаются протухшие файлы
+                        # (старый MCP-пакет переживает рематериализацию).
+                        logger.warning(
+                            "s3 batch delete failed for %d keys under %s — "
+                            "falling back to per-object delete",
+                            len(chunk),
+                            safe,
+                            exc_info=True,
+                        )
+                        for obj in chunk:
+                            try:
+                                self._client.delete_object(
+                                    Bucket=self._bucket, Key=obj["Key"]
+                                )
+                                deleted += 1
+                            except Exception:
+                                logger.exception(
+                                    "s3 delete_object failed: %s", obj["Key"]
+                                )
         except Exception:
             logger.exception("s3 delete_prefix failed: %s", safe)
         return deleted
