@@ -697,8 +697,14 @@ def _http(
 ) -> Any:
     api_base, token, project_id = _env()
     if not api_base or not token or not project_id:
+        # Маркер PRODAVAN_MCP_ENV_MISSING — контракт с API: по нему платформа
+        # понимает, что под потерял проектный bind (env применяется только
+        # через POST /v1/project/bind и живёт в памяти bridge), и сбрасывает
+        # метку bind, чтобы следующий send перепривязал под. Менять текст
+        # маркера можно только вместе с `_MCP_ENV_MISSING_MARKERS` в API.
         raise RuntimeError(
-            "PRODAVAN_API_BASE_URL, PRODAVAN_AUTH_TOKEN, and PRODAVAN_PROJECT_ID are required"
+            "PRODAVAN_MCP_ENV_MISSING: PRODAVAN_API_BASE_URL, PRODAVAN_AUTH_TOKEN, "
+            "and PRODAVAN_PROJECT_ID are required"
         )
     url = f"{api_base}{path}"
     data = None
@@ -1570,7 +1576,7 @@ def _handle(msg: dict[str, Any]) -> dict[str, Any] | None:
             "result": {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "prodavan-equipment", "version": "2.4.1"},
+                "serverInfo": {"name": "prodavan-equipment", "version": "2.4.2"},
             },
         }
     if method == "notifications/initialized":

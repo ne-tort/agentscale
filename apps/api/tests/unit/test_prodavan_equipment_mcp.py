@@ -30,7 +30,7 @@ def test_tools_list_contains_catalog_and_sot_tools() -> None:
         mcp_server._handle({"jsonrpc": "2.0", "id": 9, "method": "initialize"})["result"][
             "serverInfo"
         ]["version"]
-        == "2.4.1"
+        == "2.4.2"
     )
 
 
@@ -694,7 +694,7 @@ def test_tools_list_contains_ready_builds_catalog_tools() -> None:
         mcp_server._handle({"jsonrpc": "2.0", "id": 2, "method": "initialize"})["result"][
             "serverInfo"
         ]["version"]
-        == "2.4.1"
+        == "2.4.2"
     )
 
 
