@@ -627,6 +627,7 @@ class PodModuleDataService:
         action_id: str,
         row_id: str | None = None,
         session_id: str | None = None,
+        extra_params: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         project = await self._require_project_row(project_id, bridge)
         self._require_module_actions(bridge, module_id)
@@ -652,6 +653,7 @@ class PodModuleDataService:
             row_id=row_id,
             project_id=project_id,
             session_id=session_id,
+            extra_params=extra_params,
         )
         return {"module_id": module_id, **result}
 
