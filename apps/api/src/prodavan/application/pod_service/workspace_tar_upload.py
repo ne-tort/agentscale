@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import json
 import logging
 import mimetypes
 import tarfile
@@ -12,13 +13,41 @@ from prodavan.application.pod_service.ports.dehydrate import DehydrateResult
 from prodavan.application.pod_service.workspace_dehydrate_rules import (
     is_excluded_rel,
     is_platform_owned_rel,
+    materialized_paths_from_manifest,
     max_file_bytes,
 )
-from prodavan.core.infra.object_keys import workspace_object_key
+from prodavan.core.infra.object_keys import (
+    workspace_meta_object_key,
+    workspace_object_key,
+)
 from prodavan.infrastructure.files.manager import ensure_file_store
 from prodavan.infrastructure.projects.tar_paths import tar_member_relpath
 
 logger = logging.getLogger(__name__)
+
+
+def _load_materialized_paths(mgr: Any, workspace_key: str) -> frozenset[str]:
+    """Манифест материализованных путей из хранилища (best-effort).
+
+    Пишется `checkpoint_project_workspace` из `projects.materialize_manifest`.
+    Отсутствие/повреждение манифеста не ошибка: остаются статические правила
+    (`mcp.json`, `packages/`, `.prodavan/`, `AGENTS.md`).
+    """
+    try:
+        raw = mgr.get_bytes_sync(
+            workspace_meta_object_key(workspace_key=workspace_key, name="materialized.json")
+        )
+        data = json.loads(raw or b"null")
+    except Exception:  # noqa: BLE001 - манифест не критичен, деградируем тихо
+        return frozenset()
+    if isinstance(data, dict):
+        paths = data.get("paths")
+        if isinstance(paths, (list, tuple)):
+            return materialized_paths_from_manifest({"_": list(paths)})
+        return materialized_paths_from_manifest(data)
+    if isinstance(data, list):
+        return materialized_paths_from_manifest({"_": data})
+    return frozenset()
 
 
 def upload_workspace_tar(
@@ -39,6 +68,7 @@ def upload_workspace_tar(
     skipped = 0
     kept_keys: set[str] = set()
     cap = max_file_bytes()
+    materialized = _load_materialized_paths(mgr, workspace_key)
 
     if tar_file is not None:
         tar_file.seek(0)
@@ -54,11 +84,11 @@ def upload_workspace_tar(
             if not rel or is_excluded_rel(rel):
                 skipped += 1
                 continue
-            if is_platform_owned_rel(rel):
-                # Копия пода не авторитетна: mcp.json и packages/* пишет
-                # материализация из Postgres (file_ref / seed-zip). Не
-                # выкачиваем их (иначе старая версия пакета затрёт свежую),
-                # но помечаем существующий ключ как «оставить», чтобы финальная
+            if is_platform_owned_rel(rel, materialized=materialized):
+                # Копия пода не авторитетна: материализованные файлы пишет
+                # платформа из Postgres (file_ref / seed-zip / правила модулей).
+                # Не выкачиваем их (иначе старая версия затрёт свежую), но
+                # помечаем существующий ключ как «оставить», чтобы финальная
                 # зачистка не удалила их из хранилища.
                 kept_keys.add(
                     workspace_object_key(workspace_key=workspace_key, relative_path=rel)
@@ -93,11 +123,12 @@ def upload_workspace_tar(
             continue
         if key in kept_keys:
             continue
-        # Платформенные артефакты (mcp.json, packages/*) живут в хранилище и
-        # без архива пода: их пишет материализация. Удалять их здесь нельзя —
-        # иначе гидрация останется без mcp.json и агент потеряет MCP-инструменты.
+        # Платформенные артефакты (mcp.json, packages/*, .prodavan/*,
+        # материализованные пути модулей) живут в хранилище и без архива пода:
+        # их пишет материализация. Удалять их здесь нельзя — иначе гидрация
+        # останется без mcp.json и агент потеряет MCP-инструменты.
         rel = key[len(prefix):] if key.startswith(prefix) else key
-        if is_platform_owned_rel(rel):
+        if is_platform_owned_rel(rel, materialized=materialized):
             continue
         if mgr.delete_sync(key):
             deleted += 1
