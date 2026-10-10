@@ -591,6 +591,7 @@ class ModuleActionExecutor:
 
         slot_qty: dict[str, Any] = {}
         groups_created = 0
+        groups: list[dict[str, Any]] = []
         skipped: list[str] = []
         for slot in slots:
             sbody = slot.get("body") or {}
@@ -615,7 +616,7 @@ class ModuleActionExecutor:
             if not (part_number or aliases_pn or aliases_hash):
                 skipped.append(type_id)
                 continue
-            await io.create(
+            group = await io.create(
                 "found_groups",
                 {
                     "build_id": build_id,
@@ -634,6 +635,17 @@ class ModuleActionExecutor:
                 },
             )
             groups_created += 1
+            # id групп возвращаем агенту: без них копию сборки не прочитать
+            # прицельно (found_groups_list фильтруется по build_id, а
+            # угадывать row_id слота агент не должен)
+            groups.append(
+                {
+                    "slot_type_id": type_id,
+                    "group_id": str((group or {}).get("row_id") or ""),
+                    "part_number": part_number,
+                    "qty": qty,
+                }
+            )
 
         if slot_qty:
             await io.update(
@@ -655,6 +667,7 @@ class ModuleActionExecutor:
             "build_id": build_id,
             "line_id": line_id,
             "groups_created": groups_created,
+            "groups": groups,
             "slot_qty": slot_qty,
             "slots_skipped_no_keys": skipped,
             "pipeline": {

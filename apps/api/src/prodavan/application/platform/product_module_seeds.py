@@ -7237,7 +7237,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "row_id": "equipment_mcp_default",
                     "body": {
                         "name": "prodavan-equipment",
-                        "version": "2.4.0",
+                        "version": "2.4.1",
                         "enabled": True,
                     },
                 },
