@@ -2102,6 +2102,18 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "ref": {"table_slug": "request_lines"},
             },
             {
+                # WAVE11: провенанс — из какой «Готовой сборки» каталога
+                # скопирована эта рабочая сборка чата (пусто = собрана с нуля).
+                "table_slug": "equipment_builds",
+                "name": "source_ready_build_id",
+                "label": {"ru": "Источник (каталог)", "en": "Source (catalog)"},
+                "type": "text",
+                "required": False,
+                "default": "",
+                "read_only": True,
+                "hidden": True,
+            },
+            {
                 "table_slug": "equipment_builds",
                 "name": "build_kind",
                 "label": {"ru": "Тип", "en": "Kind"},
@@ -6774,6 +6786,20 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "trigger": {"on": ["row.created", "row.updated"], "async": True},
                     "ui": {"placement": ["scaffold"], "icon": "refresh"},
                 },
+                # WAVE11: копирование «Готовой сборки» из каталога в чат на
+                # позицию заказчика. Копируются КЛЮЧИ (партномер/алиасы/хэш),
+                # а не цены — копия сразу тянет актуальные офферы штатным
+                # пайплайном WAVE10. Вызывается из MCP (ready_build_attach)
+                # и кнопкой «В чат» на карточке сборки.
+                {
+                    "id": "ready_build_attach",
+                    "label": {"ru": "В чат", "en": "Attach to position"},
+                    "kind": "equipment.attach_ready_build",
+                    "enabled": True,
+                    "params": {},
+                    "trigger": {"on": [], "async": False},
+                    "ui": {"placement": ["row"], "icon": "add_shopping_cart"},
+                },
                 # WAVE7: ручная правка строки «Закупка» (маржа % → реестр
                 # поставщиков и бюджетные строки, доставка → суммы).
                 {
@@ -6967,6 +6993,36 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "tool": "equipment_builds_delete",
                 "label": "Удаление сборки",
                 "description": "Удаление сборки (с её комплектующими)",
+            },
+            {
+                "server": "prodavan-equipment",
+                "tool": "ready_builds_catalog",
+                "label": "Каталог готовых сборок",
+                "description": "Группы, пул компонентов и готовые сборки",
+            },
+            {
+                "server": "prodavan-equipment",
+                "tool": "build_group_upsert",
+                "label": "Запись группы сборок",
+                "description": "Создание или обновление группы сборок",
+            },
+            {
+                "server": "prodavan-equipment",
+                "tool": "build_group_item_upsert",
+                "label": "Запись компонента пула",
+                "description": "Компонент группы: ключи и класс",
+            },
+            {
+                "server": "prodavan-equipment",
+                "tool": "ready_build_upsert",
+                "label": "Запись готовой сборки",
+                "description": "Сборка вместе со слотами одним вызовом",
+            },
+            {
+                "server": "prodavan-equipment",
+                "tool": "ready_build_attach",
+                "label": "Сборка в чат",
+                "description": "Копирование готовой сборки на позицию заказчика",
             },
         ],
         "mcp_tools": [
@@ -7181,7 +7237,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "row_id": "equipment_mcp_default",
                     "body": {
                         "name": "prodavan-equipment",
-                        "version": "2.3.0",
+                        "version": "2.4.0",
                         "enabled": True,
                     },
                 },

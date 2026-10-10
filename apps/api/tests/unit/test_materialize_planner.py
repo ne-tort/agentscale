@@ -381,6 +381,7 @@ def test_equipment_prompt_seed_rows_materialize_layout() -> None:
         "prompts/equipment/40-groups.md",
         "prompts/equipment/50-rank.md",
         "prompts/equipment/60-builds.md",
+        "prompts/equipment/70-ready-builds.md",
     }
     agents_md = by_path["AGENTS.md"]
     assert agents_md.row_body["body_md"].lstrip().startswith("# Prodavan")

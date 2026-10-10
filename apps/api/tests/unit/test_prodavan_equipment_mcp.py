@@ -30,7 +30,7 @@ def test_tools_list_contains_catalog_and_sot_tools() -> None:
         mcp_server._handle({"jsonrpc": "2.0", "id": 9, "method": "initialize"})["result"][
             "serverInfo"
         ]["version"]
-        == "2.3.0"
+        == "2.4.0"
     )
 
 
@@ -548,3 +548,264 @@ def test_equipment_builds_upsert_rejects_bad_slot_qty(monkeypatch, bad_qty) -> N
     )
     assert resp["result"].get("isError") is True
     assert "slot_qty" in resp["result"]["content"][0]["text"]
+
+
+# ------------------------------------------------- WAVE11: каталог сборок
+
+def test_tools_list_contains_ready_builds_catalog_tools() -> None:
+    listed = mcp_server._handle({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+    names = {t["name"] for t in listed["result"]["tools"]}
+    for name in (
+        "ready_builds_catalog",
+        "build_group_upsert",
+        "build_group_item_upsert",
+        "ready_build_upsert",
+        "ready_build_attach",
+    ):
+        assert name in names
+    # прежние инструменты не потеряны при добавлении новых
+    assert "equipment_builds_delete" in names
+    assert "found_groups_upsert" in names
+    assert len(names) == 20
+    assert (
+        mcp_server._handle({"jsonrpc": "2.0", "id": 2, "method": "initialize"})["result"][
+            "serverInfo"
+        ]["version"]
+        == "2.4.0"
+    )
+
+
+@pytest.fixture()
+def _env(monkeypatch):
+    monkeypatch.setenv("PRODAVAN_API_BASE_URL", "http://api.example/api/v1")
+    monkeypatch.setenv("PRODAVAN_AUTH_TOKEN", "tok")
+    monkeypatch.setenv("PRODAVAN_PROJECT_ID", "proj-1")
+
+
+def _call(tool: str, arguments: dict):
+    return mcp_server._handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 99,
+            "method": "tools/call",
+            "params": {"name": tool, "arguments": arguments},
+        }
+    )
+
+
+def test_ready_builds_catalog_compact_strips_bodies(_env) -> None:
+    """compact-режим отдаёт только нужные поля: каталог на сотни сборок
+    не должен съедать контекст агента."""
+    rows = [
+        {
+            "row_id": "rb1",
+            "body": {
+                "name": "Бюджетный 6 ядер",
+                "group_id": "g1",
+                "budget_tier": "budget",
+                "cpu_cores": 6,
+                "ram_gb": 16,
+                "price_total": 30000,
+                "is_enabled": True,
+                "note": "длинный комментарий, которого в compact быть не должно",
+                "synced_at": "2026-10-09T00:00:00+00:00",
+            },
+        }
+    ]
+    with patch.object(mcp_server, "_list_rows", return_value=rows):
+        resp = _call("ready_builds_catalog", {"scope": "builds", "detail": "compact"})
+    payload = json.loads(resp["result"]["content"][0]["text"])
+    item = payload["items"][0]
+    assert item["row_id"] == "rb1"
+    assert item["name"] == "Бюджетный 6 ядер"
+    assert item["price_total"] == 30000
+    assert "note" not in item
+    assert "synced_at" not in item
+    assert "body" not in item
+    assert payload["total"] == 1
+
+
+def test_ready_builds_catalog_full_keeps_body_and_filters(_env) -> None:
+    rows = [
+        {"row_id": "rb1", "body": {"name": "A", "group_id": "g1", "budget_tier": "budget",
+                                   "note": "полный", "is_enabled": True}},
+        {"row_id": "rb2", "body": {"name": "B", "group_id": "g2", "budget_tier": "high",
+                                   "is_enabled": True}},
+        {"row_id": "rb3", "body": {"name": "C", "group_id": "g1", "budget_tier": "budget",
+                                   "is_enabled": False}},
+    ]
+    with patch.object(mcp_server, "_list_rows", return_value=rows):
+        resp = _call(
+            "ready_builds_catalog",
+            {"scope": "builds", "detail": "full", "group_id": "g1"},
+        )
+    payload = json.loads(resp["result"]["content"][0]["text"])
+    # only_enabled=True по умолчанию отсекает выключенную
+    assert [i["row_id"] for i in payload["items"]] == ["rb1"]
+    assert payload["items"][0]["body"]["note"] == "полный"
+
+    with patch.object(mcp_server, "_list_rows", return_value=rows):
+        resp2 = _call(
+            "ready_builds_catalog",
+            {"scope": "builds", "group_id": "g1", "only_enabled": False},
+        )
+    payload2 = json.loads(resp2["result"]["content"][0]["text"])
+    assert sorted(i["row_id"] for i in payload2["items"]) == ["rb1", "rb3"]
+
+
+def test_ready_builds_catalog_build_scope_returns_slots(_env) -> None:
+    builds = [{"row_id": "rb1", "body": {"name": "A", "is_enabled": True}}]
+    slots = [
+        {"row_id": "s1", "body": {"build_id": "rb1", "type_id": "etype_cpu", "qty": 1,
+                                  "mode": "dynamic", "class_key": "cpu_6c",
+                                  "resolved_price": 11000}},
+        {"row_id": "s2", "body": {"build_id": "other", "type_id": "etype_ram", "qty": 2}},
+    ]
+
+    def fake_list(mid, table, *, session_id=None):
+        return builds if table == "ready_builds" else slots
+
+    with patch.object(mcp_server, "_list_rows", side_effect=fake_list):
+        resp = _call("ready_builds_catalog", {"scope": "build", "row_id": "rb1"})
+    payload = json.loads(resp["result"]["content"][0]["text"])
+    assert payload["build"]["row_id"] == "rb1"
+    assert [s["row_id"] for s in payload["slots"]] == ["s1"]
+
+    with patch.object(mcp_server, "_list_rows", side_effect=fake_list):
+        bad = _call("ready_builds_catalog", {"scope": "build"})
+    assert bad["result"].get("isError") is True
+    assert "row_id" in bad["result"]["content"][0]["text"]
+
+
+def test_build_group_item_requires_keys_and_class(_env) -> None:
+    """Пул хранит КЛЮЧИ: без них и без класса компонент бессмыслен."""
+    resp = _call(
+        "build_group_item_upsert",
+        {"group_id": "g1", "type_id": "etype_ram", "class_key": "ram_16"},
+    )
+    assert resp["result"].get("isError") is True
+    assert "part_number" in resp["result"]["content"][0]["text"]
+
+    resp2 = _call(
+        "build_group_item_upsert",
+        {"group_id": "g1", "type_id": "etype_ram", "part_number": "RAM-16"},
+    )
+    assert resp2["result"].get("isError") is True
+    assert "class_key" in resp2["result"]["content"][0]["text"]
+
+    posted: dict = {}
+
+    def fake_http(method, path, payload=None, *, session_id=None):
+        posted.update(payload or {})
+        return {"row_id": "it1"}
+
+    with patch.object(mcp_server, "_http", side_effect=fake_http):
+        ok = _call(
+            "build_group_item_upsert",
+            {
+                "group_id": "g1",
+                "type_id": "etype_ram",
+                "class_key": "ram_16",
+                "class_label": "16 ГБ DDR4",
+                "part_number": "RAM-16",
+                "aliases_pn": "RAM16, RAM 16",
+                "qty_default": 2,
+            },
+        )
+    assert ok["result"].get("isError") is not True
+    assert posted["body"]["class_key"] == "ram_16"
+    assert posted["body"]["qty_default"] == 2
+
+
+def test_ready_build_upsert_writes_slots_in_one_call(_env) -> None:
+    """Сборка + слоты одним вызовом: прежние слоты заменяются новыми."""
+    calls: list[tuple] = []
+    existing_slots = [{"row_id": "old_slot", "body": {"build_id": "rb1"}}]
+
+    def fake_http(method, path, payload=None, *, session_id=None):
+        calls.append((method, path, payload))
+        if method == "POST" and path.endswith("/ready_builds"):
+            return {"row_id": "rb1", "body": (payload or {}).get("body")}
+        return {"row_id": "new_slot"}
+
+    with (
+        patch.object(mcp_server, "_http", side_effect=fake_http),
+        patch.object(mcp_server, "_list_rows", return_value=existing_slots),
+    ):
+        resp = _call(
+            "ready_build_upsert",
+            {
+                "group_id": "g1",
+                "name": "Бюджетный ПК",
+                "budget_tier": "budget",
+                "cpu_cores": 6,
+                "ram_gb": 16,
+                "slots": [
+                    {"type_id": "etype_cpu", "mode": "dynamic", "class_key": "cpu_6c", "qty": 1},
+                    {"type_id": "etype_ram", "mode": "fixed", "item_id": "it_ram", "qty": 2},
+                ],
+            },
+        )
+    assert resp["result"].get("isError") is not True
+    payload = json.loads(resp["result"]["content"][0]["text"])
+    assert payload["slots_replaced"] is True
+    assert len(payload["slots"]) == 2
+    # старый слот удалён, два новых созданы
+    assert (
+        "DELETE",
+        "/projects/proj-1/modules/mod_equipment/data/ready_build_slots/old_slot",
+        None,
+    ) in calls
+    created = [c for c in calls if c[0] == "POST" and c[1].endswith("/ready_build_slots")]
+    assert len(created) == 2
+    assert created[1][2]["body"]["build_id"] == "rb1"
+    assert created[1][2]["body"]["qty"] == 2
+
+
+def test_ready_build_upsert_validates_slots(_env) -> None:
+    resp = _call(
+        "ready_build_upsert",
+        {"group_id": "g1", "name": "X", "slots": [{"type_id": "etype_cpu", "mode": "fixed"}]},
+    )
+    assert resp["result"].get("isError") is True
+    assert "fixed" in resp["result"]["content"][0]["text"]
+
+    # class_key задан, чтобы дошли до проверки количества (иначе раньше
+    # сработает валидация dynamic-слота)
+    resp2 = _call(
+        "ready_build_upsert",
+        {
+            "group_id": "g1",
+            "name": "X",
+            "slots": [{"type_id": "etype_cpu", "class_key": "cpu_6c", "qty": 0}],
+        },
+    )
+    assert resp2["result"].get("isError") is True
+    assert "qty" in resp2["result"]["content"][0]["text"]
+
+    resp3 = _call("ready_build_upsert", {"name": "X"})
+    assert resp3["result"].get("isError") is True
+    assert "group_id" in resp3["result"]["content"][0]["text"]
+
+
+def test_ready_build_attach_invokes_action(_env) -> None:
+    calls: list[tuple] = []
+
+    def fake_http(method, path, payload=None, *, session_id=None):
+        calls.append((method, path, payload))
+        return {"ok": True, "build_id": "b1"}
+
+    with patch.object(mcp_server, "_http", side_effect=fake_http):
+        resp = _call(
+            "ready_build_attach",
+            {"ready_build_id": "rb1", "line_id": "line1", "note": "копия"},
+        )
+    assert resp["result"].get("isError") is not True
+    method, path, payload = calls[0]
+    assert method == "POST"
+    assert path.endswith("/actions/ready_build_attach/invoke")
+    assert payload == {"row_id": "rb1", "params": {"line_id": "line1", "note": "копия"}}
+
+    bad = _call("ready_build_attach", {"ready_build_id": "rb1"})
+    assert bad["result"].get("isError") is True
+    assert "line_id" in bad["result"]["content"][0]["text"]
