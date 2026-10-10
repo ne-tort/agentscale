@@ -16,7 +16,7 @@ import time
 from collections import OrderedDict
 from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -111,12 +111,59 @@ def _is_hydrating_conflict(response: httpx.Response | None) -> bool:
         return False
 
 
+#: Маркеры «под потерял проектный bind». Первый — контракт с MCP-пакетами
+#: (`prodavan_*_mcp/server.py` бросают его, когда PRODAVAN_* не заданы).
+#: Второй — легас-текст тех же пакетов до появления маркера: поды обновляют
+#: workspace только перевыпуском claim, поэтому старая формулировка ещё долго
+#: будет приходить с живых подов.
+_MCP_ENV_MISSING_MARKERS = (
+    "PRODAVAN_MCP_ENV_MISSING",
+    "PRODAVAN_API_BASE_URL, PRODAVAN_AUTH_TOKEN, and PRODAVAN_PROJECT_ID are required",
+)
+
+
+def _tool_result_text(output: Any) -> str:
+    """Текст tool_result: MCP-ответ ({content:[{text}]}) или голая строка."""
+    if isinstance(output, str):
+        return output
+    if isinstance(output, dict):
+        content = output.get("content")
+        if isinstance(content, list):
+            parts = [
+                str(item.get("text") or "")
+                for item in content
+                if isinstance(item, dict)
+            ]
+            return "\n".join(p for p in parts if p)
+        return str(output.get("text") or "")
+    return ""
+
+
+def tool_result_lost_pod_bind(event: AgentEvent) -> bool:
+    """True, если tool_result принёс ошибку про отсутствующий проектный env.
+
+    Проекционный env (PRODAVAN_AUTH_TOKEN / PRODAVAN_PROJECT_ID) применяется
+    ТОЛЬКО через `POST /v1/project/bind` и живёт в памяти bridge: после
+    рестарта контейнера он исчезает, а MCP-серверы пода продолжают отвечать
+    на каждый вызов ошибкой. Это единственный достоверный признак, доступный
+    API без похода в k8s, — по нему сбрасываем метку bind.
+    """
+    if event.type != AgentEventType.TOOL_RESULT:
+        return False
+    data = event.data if isinstance(event.data, dict) else {}
+    if not data.get("is_error"):
+        return False
+    text = _tool_result_text(data.get("output"))
+    return bool(text) and any(marker in text for marker in _MCP_ENV_MISSING_MARKERS)
+
+
 async def ensure_recent_bind(
     session: AsyncSession,
     project_id: str,
     *,
     endpoint: RuntimeEndpoint | None = None,
     http_client: type[httpx.AsyncClient] = httpx.AsyncClient,
+    force: bool = False,
 ) -> None:
     """Re-bind the agent-runtime when the pod bridge JWT may be stale.
 
@@ -128,6 +175,12 @@ async def ensure_recent_bind(
     mints a fresh token and the runtime swaps it in). Redis-unavailable
     degradation: an in-memory throttle keeps binds at most once per
     ``_BIND_FALLBACK_INTERVAL_SEC`` per process instead of every send.
+
+    ``force=True`` пропускает и метку, и троттлинг: bind — единственный
+    способ вернуть поду проектное состояние (``applyProjectBind`` пишет
+    PRODAVAN_* в env процесса, пересоздаёт builtin MCP, перечитывает
+    config.yaml и переподнимает MCP-серверы), поэтому когда под заведомо
+    потерял состояние, ждать истечения метки нельзя.
     """
     from prodavan.core.infra.cache import cache_get, cache_key, cache_set
 
@@ -138,13 +191,14 @@ async def ensure_recent_bind(
     if endpoint is not None:
         sandbox_name = str((endpoint.headers or {}).get("X-Sandbox-Id") or "").strip()
     key = cache_key("bind", project_id, sandbox_name)
-    try:
-        if await cache_get(key) is not None:
+    if not force:
+        try:
+            if await cache_get(key) is not None:
+                return
+        except Exception:  # noqa: BLE001 - cache helpers degrade, never raise
+            pass
+        if _bind_attempt_throttled(key, time.monotonic()):
             return
-    except Exception:  # noqa: BLE001 - cache helpers degrade, never raise
-        pass
-    if _bind_attempt_throttled(key, time.monotonic()):
-        return
     try:
         ok = await bind_project_runtime(
             session,
@@ -158,6 +212,31 @@ async def ensure_recent_bind(
             await cache_set(key, "1", ttl_sec=_BIND_MARK_TTL_SEC)
     except Exception as exc:  # noqa: BLE001 - best-effort by contract
         logger.debug("ensure_recent_bind failed project_id=%s: %s", project_id, exc)
+
+
+async def invalidate_bind_mark(
+    project_id: str, endpoint: RuntimeEndpoint | None = None
+) -> None:
+    """Сбросить метку bind, чтобы СЛЕДУЮЩИЙ send заново привязал под.
+
+    Нужно, когда под потерял проектное состояние, а ``sandbox_name`` не
+    изменился: метка ключуется по (project_id, sandbox_name), поэтому
+    рестарт контейнера внутри того же пода её не инвалидирует, и без
+    явного сброса модульные MCP-инструменты оставались бы сломаны до
+    истечения TTL (12 ч).
+    """
+    from prodavan.core.infra.cache import cache_delete, cache_key
+
+    sandbox_name = ""
+    if endpoint is not None:
+        sandbox_name = str((endpoint.headers or {}).get("X-Sandbox-Id") or "").strip()
+    key = cache_key("bind", project_id, sandbox_name)
+    # in-memory троттлинг (деградация без Redis) сбрасываем тоже
+    _last_bind_attempt.pop(key, None)
+    try:
+        await cache_delete(key)
+    except Exception:  # noqa: BLE001 - best-effort by contract
+        logger.debug("invalidate_bind_mark failed project_id=%s", project_id)
 
 
 def _explicit_bridge_model(model: str | None) -> str | None:
@@ -239,6 +318,7 @@ class OpenClawBridgeBootstrap:
         *,
         project_id: str,
         payload: BridgeSessionBootstrap,
+        force_bind: bool = False,
     ) -> bool:
         if not settings.pod_agent_runtime_enabled or not settings.pod_agent_runtime_bootstrap_enabled:
             return False
@@ -255,11 +335,14 @@ class OpenClawBridgeBootstrap:
         # project. Idempotent + 404-tolerant; never blocks registration.
         # ensure_recent_bind re-pushes identity (with a fresh bridge JWT)
         # when the last bind is older than half the JWT TTL.
+        # force_bind — когда отсутствие сессии в поде уже доказало, что bridge
+        # перезапустился и потерял проектное состояние: ждать метку нельзя.
         await ensure_recent_bind(
             self._session,
             project_id,
             endpoint=endpoint,
             http_client=self._http_client,
+            force=force_bind,
         )
 
         url = f"{endpoint.base_url}/v1/sessions"
@@ -465,6 +548,18 @@ class OpenClawBridgeBootstrap:
                 retry=retry,
                 max_turns=max_turns,
             ):
+                if tool_result_lost_pod_bind(event):
+                    # Под потерял проектный bind (рестарт контейнера внутри
+                    # того же пода: sandbox_name не меняется, поэтому метка
+                    # сама не сбрасывается). Чиним на СЛЕДУЮЩИЙ send — текущий
+                    # ход уже испорчен, но без сброса модульные инструменты
+                    # оставались бы сломаны до 12 ч.
+                    logger.warning(
+                        "openclaw send: pod lost project bind, invalidating "
+                        "bind mark project_id=%s",
+                        project_id,
+                    )
+                    await invalidate_bind_mark(project_id, endpoint)
                 if (
                     not retried
                     and event.type == AgentEventType.ERROR
@@ -483,7 +578,12 @@ class OpenClawBridgeBootstrap:
                     # Re-register against a FRESH endpoint (register_session
                     # re-resolves internally): in sandbox mode the claim may
                     # have been re-adopted under a new sandbox name.
-                    if await self.register_session(project_id=project_id, payload=bootstrap):
+                    # force_bind: recoverable-ошибка означает, что под потерял
+                    # состояние (сессии в нём нет), а значит и проектный env
+                    # bridge тоже потерян — bind обязателен, метку не ждём.
+                    if await self.register_session(
+                        project_id=project_id, payload=bootstrap, force_bind=True
+                    ):
                         continue
                     yield AgentEvent.now(
                         AgentEventType.ERROR,
