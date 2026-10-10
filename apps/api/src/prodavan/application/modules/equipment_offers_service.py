@@ -1887,6 +1887,9 @@ class EquipmentPipelineService:
         groups = [
             r for r in await io.list_project_wide(GROUPS_TABLE) if isinstance(r, dict)
         ]
+        builds = [
+            r for r in await io.list_project_wide(BUILDS_TABLE) if isinstance(r, dict)
+        ]
 
         offers_count_by_seller: dict[str, int] = {}
         for o in offers:
@@ -1906,6 +1909,16 @@ class EquipmentPipelineService:
             if bid and gbody.get("is_best") is True:
                 chosen_groups_by_build.setdefault(bid, []).append(gbody)
 
+        # WAVE11: количество на слот ({type_id: qty}) — без него закупка
+        # расходится с бюджетом: «2 плашки ОЗУ» попали бы в закупку как одна.
+        slot_qty_by_build: dict[str, dict[str, Any]] = {}
+        for b in builds:
+            bbody = b.get("body") or {}
+            bid = str(b.get("row_id") or "")
+            raw = bbody.get("slot_qty")
+            if bid and isinstance(raw, dict):
+                slot_qty_by_build[bid] = raw
+
         # Позиции проекта из бюджетных снапшотов (line_id уникален в рамках
         # чата; при дубле из другого чата побеждает последний апдейт).
         lines_by_seller: dict[str, list[dict[str, Any]]] = {}
@@ -1922,16 +1935,21 @@ class EquipmentPipelineService:
             build_id = str(body.get("build_id") or "")
             if not build_id:
                 continue
-            qty = _num_or(body.get("qty"), 1.0) or 1.0
+            line_qty = _num_or(body.get("qty"), 1.0) or 1.0
+            slot_qty = slot_qty_by_build.get(build_id) or {}
             for gb in chosen_groups_by_build.get(build_id) or []:
                 comp_seller = str(gb.get("face_seller") or "").strip()
                 comp_price = _num_or(gb.get("face_price"), None)
                 if not comp_seller or comp_price is None:
                     continue
+                per_slot = _num_or(
+                    slot_qty.get(str(gb.get("slot_type_id") or "")), 1.0
+                ) or 1.0
                 lines_by_seller.setdefault(comp_seller.casefold(), []).append(
                     {
                         "line_id": line_id,
-                        "qty": qty,
+                        # количество позиции × количество в слоте
+                        "qty": line_qty * per_slot,
                         "price_in": comp_price,
                         "seller": comp_seller,
                         # маржа — из реестра поставщика (не ручная)

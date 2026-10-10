@@ -1790,3 +1790,61 @@ async def test_slot_qty_overrides_legacy_item_qty(io: FakeIO) -> None:
     await io.update("equipment_builds", build_id, body)
     await svc.run(io, materialize=False)
     assert io.body("equipment_builds", build_id)["price_total"] == 100.0
+
+
+async def test_procurement_counts_slot_qty_of_build_components(io: FakeIO) -> None:
+    """Закупка учитывает количество слота сборки, а не только количество позиции.
+
+    Регресс (найден на dev в E2E WAVE11): бюджет сборки считал «2 плашки ОЗУ»
+    правильно (price_in = сумма с qty), а закупка раскладывала компонент как
+    одну штуку — итог закупки расходился с бюджетом.
+    """
+    svc = EquipmentPipelineService(session=object())
+    await io.create(
+        "request_lines", {"title": "Сборка с количеством", "qty": 2, "status": "open"}
+    )
+    line_id = io.rows("request_lines")[-1]["row_id"]
+    await io.create(
+        "equipment_builds",
+        {
+            "name": "ПК",
+            "build_kind": "pc",
+            "line_id": line_id,
+            "slots": {},
+            # 2 плашки ОЗУ на слот
+            "slot_qty": {"etype_ram": 2},
+        },
+    )
+    build_id = io.rows("equipment_builds")[-1]["row_id"]
+    await io.create(
+        "found_groups",
+        {
+            "build_id": build_id,
+            "slot_type_id": "etype_ram",
+            "part_number": "",
+            "aliases_hash": "h4",
+            "match_kind": "exact",
+        },
+    )
+
+    await svc.run(io, materialize=True)
+
+    build = io.body("equipment_builds", build_id)
+    # 450 × 2 плашки
+    assert build["price_total"] == 900.0
+
+    budget = [
+        r["body"] for r in io.rows("budget_lines") if r["body"].get("line_id") == line_id
+    ]
+    assert budget and budget[0]["price_in"] == 900.0
+
+    # закупка: компонент сборки даёт qty позиции (2) × qty слота (2) = 4 штуки
+    # по 450 = 1800. Плюс вклад обычной позиции line_2 из фикстуры
+    # (1 × 450 = 450) — тот же поставщик «Иванов».
+    proc = {r["body"]["seller"]: r["body"] for r in io.rows("procurement")}
+    assert proc, "компоненты сборки не попали в закупку"
+    ram_row = proc["Иванов"]
+    assert ram_row["qty_total"] == 1.0 + 4.0
+    assert ram_row["sum_rub"] == 450.0 + 1800.0
+    # сумма закупки по компоненту сборки совпадает с бюджетом позиции (× qty)
+    assert ram_row["sum_rub"] - 450.0 == 900.0 * 2
