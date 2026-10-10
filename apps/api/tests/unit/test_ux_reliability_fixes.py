@@ -327,3 +327,154 @@ async def test_json_charset_middleware_keeps_existing_charset() -> None:
         await _run_through_middleware(b"application/json; charset=utf-8")
         == b"application/json; charset=utf-8"
     )
+
+
+@pytest.mark.asyncio
+async def test_cabinet_delete_recomputes_equipment(monkeypatch) -> None:
+    """Удаление строки mod_equipment обязано пересчитать вычисляемые итоги.
+
+    Регресс: delete_data_row вызывал каскад, но не _maybe_run_row_actions,
+    поэтому после удаления группы/слота/сборки цена сборки, бюджет, «Закупка»
+    и агрегаты каталога оставались посчитанными по удалённой строке — до
+    следующего случайного триггера или открытия страницы.
+    """
+    session = AsyncMock()
+    svc = CabinetModuleService(session)
+
+    async def _tables_body(**kwargs):  # noqa: ANN003
+        return [{"slug": "found_groups", "scope": {"chats": "current"}}]
+
+    async def _require_access(**kwargs):  # noqa: ANN003
+        return None
+
+    async def _require_module_binding(**kwargs):  # noqa: ANN003
+        return None
+
+    inst = SimpleNamespace(id="minst_1")
+
+    async def _cabinet_sot(**kwargs):  # noqa: ANN003
+        return inst
+
+    async def _delete(**kwargs):  # noqa: ANN003
+        return True
+
+    async def _schedule(_session, **kwargs):  # noqa: ANN003
+        return {"scheduled": 0, "skipped": True}
+
+    monkeypatch.setattr(svc._access, "require_access", _require_access)
+    monkeypatch.setattr(svc, "_require_module_binding", _require_module_binding)
+    monkeypatch.setattr(svc, "_cabinet_sot", _cabinet_sot)
+    monkeypatch.setattr(svc._instances, "delete_data_row", _delete)
+    monkeypatch.setattr(svc._instances, "resolve_tables_body", _tables_body)
+
+    async def _get_row(**kwargs):  # noqa: ANN003
+        return {
+            "row_id": "grp_1",
+            "body": {"line_id": "line_1", "part_number": "ABC"},
+            "session_id": "chat_1",
+        }
+
+    monkeypatch.setattr(svc._instances, "get_data_row", _get_row)
+
+    import prodavan.application.projects.rematerialize_scheduler as remat
+
+    monkeypatch.setattr(remat, "schedule_cabinet_rematerialize", _schedule)
+
+    # каскад и пересчёт — под наблюдением
+    cascades: list[str] = []
+    recomputes: list[dict] = []
+
+    async def _fake_cascade(_session, **kwargs):  # noqa: ANN003
+        cascades.append(str(kwargs.get("table_slug")))
+        return {}
+
+    async def _fake_actions(**kwargs):  # noqa: ANN003
+        recomputes.append(
+            {
+                "table_slug": kwargs.get("table_slug"),
+                "row_id": kwargs.get("row_id"),
+                "session_id": kwargs.get("session_id"),
+            }
+        )
+
+    import prodavan.application.modules.equipment_offers_service as eos
+
+    monkeypatch.setattr(eos, "cascade_equipment_delete", _fake_cascade)
+    monkeypatch.setattr(svc, "_maybe_run_row_actions", _fake_actions)
+
+    await svc.delete_data_row(
+        cabinet_id="cab_1",
+        module_id="mod_equipment",
+        table_slug="found_groups",
+        row_id="grp_1",
+        principal=MagicMock(),
+        employee=None,
+        session_id="chat_1",
+    )
+
+    assert cascades == ["found_groups"]
+    # пересчёт запущен в бакете удалённой строки
+    assert recomputes == [
+        {"table_slug": "found_groups", "row_id": "grp_1", "session_id": "chat_1"}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_cabinet_delete_recompute_failure_does_not_break_delete(
+    monkeypatch,
+) -> None:
+    """Сбой пересчёта не отменяет удаление: строка удалена, ошибка в логе."""
+    session = AsyncMock()
+    svc = CabinetModuleService(session)
+
+    async def _tables_body(**kwargs):  # noqa: ANN003
+        return [{"slug": "found_groups", "scope": {"chats": "current"}}]
+
+    async def _noop(**kwargs):  # noqa: ANN003
+        return None
+
+    inst = SimpleNamespace(id="minst_1")
+
+    async def _cabinet_sot(**kwargs):  # noqa: ANN003
+        return inst
+
+    async def _delete(**kwargs):  # noqa: ANN003
+        return True
+
+    async def _schedule(_session, **kwargs):  # noqa: ANN003
+        return {"scheduled": 0, "skipped": True}
+
+    async def _get_row(**kwargs):  # noqa: ANN003
+        return {"row_id": "grp_1", "body": {}, "session_id": "chat_1"}
+
+    async def _boom(**kwargs):  # noqa: ANN003
+        raise RuntimeError("pipeline down")
+
+    monkeypatch.setattr(svc._access, "require_access", _noop)
+    monkeypatch.setattr(svc, "_require_module_binding", _noop)
+    monkeypatch.setattr(svc, "_cabinet_sot", _cabinet_sot)
+    monkeypatch.setattr(svc._instances, "delete_data_row", _delete)
+    monkeypatch.setattr(svc._instances, "resolve_tables_body", _tables_body)
+    monkeypatch.setattr(svc._instances, "get_data_row", _get_row)
+    monkeypatch.setattr(svc, "_maybe_run_row_actions", _boom)
+
+    import prodavan.application.modules.equipment_offers_service as eos
+    import prodavan.application.projects.rematerialize_scheduler as remat
+
+    async def _fake_cascade(_session, **kwargs):  # noqa: ANN003
+        return {}
+
+    monkeypatch.setattr(eos, "cascade_equipment_delete", _fake_cascade)
+    monkeypatch.setattr(remat, "schedule_cabinet_rematerialize", _schedule)
+
+    out = await svc.delete_data_row(
+        cabinet_id="cab_1",
+        module_id="mod_equipment",
+        table_slug="found_groups",
+        row_id="grp_1",
+        principal=MagicMock(),
+        employee=None,
+        session_id="chat_1",
+    )
+    # удаление состоялось, несмотря на сбой пересчёта
+    assert isinstance(out, dict)

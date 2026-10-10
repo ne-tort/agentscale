@@ -638,6 +638,35 @@ class ProjectRuntimeModuleService:
                 employee=employee,
                 session_id=str(existing.get("session_id") or "") or None,
             )
+            # Пересчёт после удаления. Без него вычисляемые итоги (цена сборки,
+            # бюджет, «Закупка», агрегаты каталога готовых сборок) остаются
+            # посчитанными по удалённой строке — до следующего случайного
+            # триггера или открытия страницы.
+            try:
+                await self._maybe_run_row_actions(
+                    project_id=project_id,
+                    cabinet_id=str(project.cabinet_id or ""),
+                    module_id=module_id,
+                    table_slug=table_slug,
+                    row_id=row_id,
+                    principal=principal,
+                    employee=employee,
+                    previous_body=(
+                        existing.get("body")
+                        if isinstance(existing.get("body"), dict)
+                        else None
+                    ),
+                    session_id=str(existing.get("session_id") or "") or None,
+                )
+            except AppError:
+                raise
+            except Exception:
+                logger.exception(
+                    "equipment recompute after delete failed project=%s table=%s row=%s",
+                    project_id,
+                    table_slug,
+                    row_id,
+                )
         if module_id == "mod_equipment" and table_slug == "catalogs":
             try:
                 from prodavan.application.modules.equipment_catalog_opensearch import (
