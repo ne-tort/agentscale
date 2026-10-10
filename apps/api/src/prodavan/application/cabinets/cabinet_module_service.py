@@ -438,6 +438,35 @@ class CabinetModuleService:
         # on the next list/poll (row survived with 200 OK).
         await self._session.commit()
 
+        # Пересчёт после удаления (как на записи): иначе вычисляемые итоги —
+        # цена сборки, бюджет, «Закупка», агрегаты каталога готовых сборок —
+        # остаются посчитанными по удалённой строке.
+        if module_id == "mod_equipment":
+            try:
+                await self._maybe_run_row_actions(
+                    cabinet_id=cabinet_id,
+                    module_id=module_id,
+                    table_slug=table_slug,
+                    row_id=row_id,
+                    principal=principal,
+                    employee=employee,
+                    previous_body=(
+                        existing.get("body")
+                        if existing is not None and isinstance(existing.get("body"), dict)
+                        else None
+                    ),
+                    session_id=delete_session,
+                )
+            except AppError:
+                raise
+            except Exception:
+                logger.exception(
+                    "equipment recompute after delete failed cabinet=%s table=%s row=%s",
+                    cabinet_id,
+                    table_slug,
+                    row_id,
+                )
+
         return await self._schedule_rematerialize(
             cabinet_id=cabinet_id, module_id=module_id, table_slug=table_slug
         )
