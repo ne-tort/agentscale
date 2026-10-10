@@ -608,6 +608,9 @@ async def test_attach_ready_build_copies_keys_into_chat(io: FakeIO, monkeypatch)
     assert by_slot["etype_cpu"]["part_number"] == "CPU-A"
     assert by_slot["etype_ram"]["part_number"] == "RAM-16B"
     assert by_slot["etype_cpu"]["match_kind"] == "exact"
+    # владелец проставлен сразу: иначе до прогона пайплайна группы слотов
+    # мелькали бы в общем списке «Найденные товары» (фильтр owner_kind = line)
+    assert all(g["owner_kind"] == "build" for g in copied)
     # цены в копию не переносятся — их материализует пайплайн чата
     assert "best_price" not in by_slot["etype_cpu"]
 
