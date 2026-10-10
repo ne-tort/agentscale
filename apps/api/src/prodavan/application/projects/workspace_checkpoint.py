@@ -34,7 +34,7 @@ def _persist_materialized_manifest(*, workspace_key: str, project: ProjectRow) -
     Манифест обязателен именно потому, что пути модулей шаблонные
     (`{{target_path}}`) — статическим списком их не покрыть.
     """
-    manifest = project.materialize_manifest
+    manifest = getattr(project, "materialize_manifest", None)
     paths = sorted(
         materialized_paths_from_manifest(manifest if isinstance(manifest, dict) else {})
     )
