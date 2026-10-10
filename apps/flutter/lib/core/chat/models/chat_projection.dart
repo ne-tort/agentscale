@@ -381,6 +381,16 @@ List<ChatBlock> applyStreamEvent(List<ChatBlock> blocks, Map<String, dynamic> ev
           next[i] = next[i].copyWithRaw({'_streaming': false});
         }
       }
+      // Ход оборван по лимиту шагов: рантайм в этом случае не выдаёт никакого
+      // текста, и без подписи пользователь видит просто оборванный ответ.
+      // Серверная проекция транскрипта добавляет такой же блок, поэтому
+      // сообщение видно сразу, а не только после перезагрузки.
+      if (payload['reason'] == 'max_turns') {
+        next.add(ChatBlock(kind: 'system_notice', raw: {
+          'reason': 'max_turns',
+          '_key': _KeyGen.next('system_notice'),
+        }));
+      }
       break;
   }
   return next;

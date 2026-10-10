@@ -33,6 +33,9 @@ class AgentSessionRow(Base):
     cwd: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="active")
     title: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    # Лимит шагов модели на один ход. NULL = без ограничений (дефолт).
+    # Уходит в теле каждого send → рантайм обрывает ход с reason="max_turns".
+    max_turns: Mapped[int | None] = mapped_column(Integer, nullable=True)
     last_message_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     adapter_state: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

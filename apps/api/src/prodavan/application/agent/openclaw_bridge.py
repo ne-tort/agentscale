@@ -400,6 +400,7 @@ class OpenClawBridgeBootstrap:
         bootstrap: BridgeSessionBootstrap | None = None,
         endpoint: RuntimeEndpoint | None = None,
         retry: dict | None = None,
+        max_turns: int | None = None,
     ) -> AsyncIterator[AgentEvent]:
         """Proxy send to Pod agent-runtime; yields normalized AgentEvent stream.
 
@@ -411,6 +412,9 @@ class OpenClawBridgeBootstrap:
         — forwarded on every attempt.
         ``images``: vision images on the new user turn ({mime, data_base64})
         — forwarded as send-body ``images`` (SendRequestSchema validates).
+        ``max_turns``: лимит шагов модели на этот ход (настройка чата).
+        None — не отправляем вовсе, тогда действует значение из
+        `.prodavan/config.yaml` (по умолчанию «без ограничений»).
         """
         if not settings.pod_agent_runtime_enabled:
             return
@@ -459,6 +463,7 @@ class OpenClawBridgeBootstrap:
                 images=images,
                 model=model,
                 retry=retry,
+                max_turns=max_turns,
             ):
                 if (
                     not retried
@@ -505,6 +510,7 @@ class OpenClawBridgeBootstrap:
         images: list[dict] | None = None,
         model: str | None,
         retry: dict | None = None,
+        max_turns: int | None = None,
     ) -> AsyncIterator[AgentEvent]:
         # Fresh bridge JWT before every send: the token TTL (24h) is shorter
         # than a sandbox lifetime; a stale token makes runtime→API
@@ -517,6 +523,10 @@ class OpenClawBridgeBootstrap:
         bridge_model = sanitize_runtime_model(model)
         if bridge_model:
             body["model"] = bridge_model
+        if max_turns is not None and max_turns > 0:
+            # SendRequestSchema требует положительное целое; при «без
+            # ограничений» поле не отправляем — работает конфиг проекта
+            body["max_turns"] = int(max_turns)
         if retry:
             # SendRetryPolicy (chat reconnect policy) — provider-error
             # reconnects with interval/attempt budget + fallback models.

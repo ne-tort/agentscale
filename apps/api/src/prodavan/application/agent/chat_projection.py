@@ -6,6 +6,7 @@ from datetime import datetime
 
 from prodavan.application.agent.text_delta import normalize_text_delta
 from prodavan.domain.agent import PLATFORM_EVENT_USER_MESSAGE, AgentEventType
+from prodavan.domain.agent.turn_limits import DONE_REASON_MAX_TURNS
 
 
 def _event_ts(event: dict) -> datetime | None:
@@ -201,6 +202,12 @@ def events_to_chat_blocks(events: list[dict]) -> list[dict]:
                         "retryable": bool(data.get("retryable")),
                     }
                 )
+            elif str(data.get("reason") or "") == DONE_REASON_MAX_TURNS:
+                # Ход оборвался по лимиту шагов: рантайм в этом случае не
+                # выдаёт никакого текста, и без явной подписи пользователь
+                # видит просто оборванный ответ. Текст рендерит клиент (он
+                # локализован), отсюда — только причина.
+                blocks.append({"kind": "system_notice", "reason": DONE_REASON_MAX_TURNS})
             continue
 
         flush_assistant()
