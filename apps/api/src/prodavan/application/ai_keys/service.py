@@ -1056,14 +1056,21 @@ class AiKeysService:
         row = await self._get_row(key_id)
         return agent_provider_from_key_row(row)
 
-    async def resolve_credentials_for_project(
+    async def select_runtime_key_for_project(
         self,
         *,
         project: ProjectRow,
         preferred_provider: str | None = None,
-        platform_fallback: bool = False,
-    ) -> ResolvedCredential:
-        _ = platform_fallback  # project resolve never uses unbound platform pool
+    ) -> AiProviderKeyRow:
+        """Выбор runtime-ключа проекта БЕЗ резолва секрета.
+
+        Отдельный метод (а не дубль логики в `resolve_credentials_for_project`)
+        потому, что перепривязка сессий при смене провайдера обязана выбирать
+        ключ ровно тем же путём, каким его выбрала бы новая сессия, — иначе
+        живые сессии уедут на другой ключ. Секрет здесь не нужен: его резолв
+        для xai_oauth ходит в сеть и обновляет токен, что для чтения одних
+        метаданных избыточно.
+        """
         available = await self.list_available_keys_for_project(project=project)
         rows: list[AiProviderKeyRow] = []
         for item in available:
@@ -1091,7 +1098,19 @@ class AiKeysService:
                 else "no active runtime AI key for project"
             )
             raise AppError(code="NO_AI_KEY", title="No AI key", status=404, detail=detail)
+        return chosen
 
+    async def resolve_credentials_for_project(
+        self,
+        *,
+        project: ProjectRow,
+        preferred_provider: str | None = None,
+        platform_fallback: bool = False,
+    ) -> ResolvedCredential:
+        _ = platform_fallback  # project resolve never uses unbound platform pool
+        chosen = await self.select_runtime_key_for_project(
+            project=project, preferred_provider=preferred_provider
+        )
         secret = await self.effective_secret_for_row(chosen)
         return ResolvedCredential(
             key_id=chosen.id,

@@ -1943,6 +1943,51 @@ class AgentSessionService:
         )
         return await self._cancel_session_rows(list(result.scalars().all()))
 
+    async def rebind_active_to_project_key(self, *, project: ProjectRow) -> int:
+        """Перепривязать ACTIVE-сессии проекта к его текущему AI-ключу.
+
+        Снапшот `resolved_key_id` / `provider` / `api_kind` / `model` пишется
+        только при создании и форке сессии. После смены провайдера проекта
+        живые сессии продолжали слать в под lease СТАРОГО ключа, а список
+        моделей в чате при этом брался из свежего `/models/live` — в итоге
+        валидный токен нового провайдера уезжал на старый endpoint (или старый
+        токен на новый) и апстрим отвечал 401 «Invalid token».
+
+        Модель сбрасываем: она принадлежала старому провайдеру и для нового
+        бессмысленна. Следующий send поднимет дефолт нового ключа через
+        `_resolve_send_model` → `_resolve_live_default_model`.
+
+        Bridge отдельно дёргать не нужно: пред-send PATCH каждый раз повторно
+        шлёт `bootstrap.provider_key_id` из строки сессии, а lease пушится для
+        `row.resolved_key_id`, так что правка строк сама доезжает до пода.
+        """
+        try:
+            chosen = await self._keys.select_runtime_key_for_project(project=project)
+        except AppError:
+            # Runtime-ключа нет (все отозваны/only cli_subscription). Patch
+            # проекта из-за этого падать не должен: сессии остаются как есть,
+            # а send сам вернёт NO_AI_KEY — как и до смены провайдера.
+            return 0
+        result = await self._session.execute(
+            select(AgentSessionRow)
+            .where(AgentSessionRow.project_id == project.id)
+            .where(AgentSessionRow.status == AgentSessionStatus.ACTIVE)
+        )
+        changed = 0
+        for row in result.scalars().all():
+            if (
+                row.resolved_key_id == chosen.id
+                and row.provider == chosen.provider
+                and row.api_kind == chosen.api_kind
+            ):
+                continue
+            row.resolved_key_id = chosen.id
+            row.provider = chosen.provider
+            row.api_kind = chosen.api_kind
+            row.model = None
+            changed += 1
+        return changed
+
     async def _cancel_session_rows(self, rows: list[AgentSessionRow]) -> int:
         for row in rows:
             try:
