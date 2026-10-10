@@ -125,6 +125,177 @@ def group_hash_keys(body: dict[str, Any]) -> list[str]:
     return [t for t in alias_tokens(body.get("aliases_hash")) if t]
 
 
+async def search_catalog_docs(
+    session: Any,
+    *,
+    ready_ids: list[str],
+    bodies: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Один батч-запрос в OpenSearch по всем ключам (партномер + хэши).
+
+    Общий для пайплайна позиций (``found_groups``) и пайплайна каталога
+    «Готовые сборки» (``build_group_items`` / ``ready_build_slots``): обеим
+    нужно «найти все доки каталога по набору ключей», чанкование и пагинация
+    одинаковые — дублировать их нельзя, иначе разойдутся лимиты.
+
+    ``bodies`` — любые тела со стандартными полями ключей
+    (``part_number`` / ``aliases_pn`` / ``aliases_hash``).
+    """
+    from prodavan.application.modules.equipment_catalog_opensearch import (
+        OS_NAMESPACE,
+        catalog_os_index_name,
+    )
+    from prodavan.core.infra.opensearch_manager import get_search_index_service
+
+    pn_terms: list[str] = []
+    hash_terms: list[str] = []
+    for body in bodies:
+        for key in group_pn_keys(body):
+            if key not in pn_terms:
+                pn_terms.append(key)
+        for key in group_hash_keys(body):
+            if key not in hash_terms:
+                hash_terms.append(key)
+    if not pn_terms and not hash_terms:
+        return []
+
+    pn_set = set(pn_terms)
+    svc = get_search_index_service()
+    docs: dict[str, dict[str, Any]] = {}
+    all_terms = pn_terms + hash_terms
+    # чанки терминов; MAX_SEARCH_SIZE=200 на запрос → пагинируем до 5 страниц
+    for start in range(0, len(all_terms), 20):
+        chunk = all_terms[start : start + 20]
+        chunk_pn = [t for t in chunk if t in pn_set]
+        chunk_hash = [t for t in chunk if t not in pn_set]
+        chunk_should: list[dict[str, Any]] = []
+        if chunk_pn:
+            chunk_should.append({"terms": {"part_number": chunk_pn}})
+        if chunk_hash:
+            chunk_should.append({"terms": {"src_hash": chunk_hash}})
+        chunk_query = {
+            "bool": {
+                "filter": [
+                    {"bool": {"should": chunk_should, "minimum_should_match": 1}}
+                ]
+            }
+        }
+        for catalog_row_id in ready_ids:
+            page = 0
+            while page < 5:
+                try:
+                    result = await svc.search(
+                        namespace=OS_NAMESPACE,
+                        index=catalog_os_index_name(catalog_row_id),
+                        query=chunk_query,
+                        from_=page * 200,
+                        size=200,
+                        company_id="platform",
+                        cabinet_id=None,
+                        project_id=None,
+                        apply_tenant_filter=False,
+                        session=session,
+                    )
+                except Exception:
+                    logger.exception(
+                        "equipment catalog search failed catalog=%s", catalog_row_id
+                    )
+                    break
+                page_hits = result.hits or []
+                for hit in page_hits:
+                    doc = hit.source if isinstance(hit.source, dict) else {}
+                    h = str(doc.get("src_hash") or "")
+                    if h and h not in docs:
+                        docs[h] = doc
+                if len(page_hits) < 200:
+                    break
+                page += 1
+    return list(docs.values())
+
+
+def assign_docs_to_keys(
+    docs: list[dict[str, Any]],
+    bodies: dict[str, dict[str, Any]],
+    *,
+    registry: _SellerRegistry | None = None,
+) -> dict[str, list[dict[str, Any]]]:
+    """Раскладка доков каталога по владельцам ключей.
+
+    ``bodies`` — {owner_id: body}. Возвращает {owner_id: [docs]}. Совпадение по
+    партномеру (в любом из написаний) или по ``src_hash``. Доки отключённых
+    поставщиков исключаются — как в поиске агента и в пайплайне позиций.
+    """
+    pn_sets = {oid: {p.casefold() for p in group_pn_keys(b)} for oid, b in bodies.items()}
+    hash_sets = {oid: set(group_hash_keys(b)) for oid, b in bodies.items()}
+    out: dict[str, list[dict[str, Any]]] = {oid: [] for oid in bodies}
+    for doc in docs:
+        if registry is not None and registry.is_disabled(str(doc.get("supplier") or "")):
+            continue
+        h = str(doc.get("src_hash") or "")
+        pn_cf = str(doc.get("part_number") or "").casefold()
+        for oid in bodies:
+            if pn_cf and pn_cf in pn_sets[oid]:
+                out[oid].append(doc)
+            elif h and h in hash_sets[oid]:
+                out[oid].append(doc)
+    return out
+
+
+async def best_price_from_docs(
+    docs: list[dict[str, Any]],
+    *,
+    registry: _SellerRegistry | None = None,
+) -> dict[str, Any] | None:
+    """Лучшее предложение из доков каталога: наличие → цена → приоритет.
+
+    Тот же порядок критериев, что ``_best_offer`` для офферов позиции, поэтому
+    цена в каталоге сборок и цена в чате не расходятся. Валюта приводится к ₽.
+    Возвращает None, если ценовых доков нет.
+    """
+    from prodavan.application.modules.equipment_fx import convert_offer_price
+
+    best: dict[str, Any] | None = None
+    best_key: tuple | None = None
+    offers_count = 0
+    for doc in docs:
+        currency = str(doc.get("currency") or "RUB").upper() or "RUB"
+        if currency not in SUPPORTED_CURRENCIES:
+            continue
+        price_num = _float_or_none(doc.get("price_num"))
+        if price_num is None:
+            price_num = parse_price(str(doc.get("price") or ""))
+        if price_num is None:
+            continue
+        rub = price_num
+        if currency != "RUB":
+            rub, _ = await convert_offer_price(price=price_num, currency=currency)
+        offers_count += 1
+        seller = str(doc.get("supplier") or "")
+        in_stock = bool(doc.get("in_stock"))
+        disabled = registry is not None and registry.is_disabled(seller)
+        priority = registry is not None and registry.is_priority(seller)
+        key = (
+            1 if disabled else 0,
+            0 if in_stock else 1,
+            0 if priority else 1,
+            rub,
+            str(doc.get("src_hash") or ""),
+        )
+        if best_key is None or key < best_key:
+            best_key = key
+            best = {
+                "title": str(doc.get("title") or ""),
+                "part_number": str(doc.get("part_number") or ""),
+                "seller": seller,
+                "price": rub,
+                "in_stock": in_stock,
+            }
+    if best is None:
+        return None
+    best["offers_count"] = offers_count
+    return best
+
+
 class ModuleRowIO:
     """Row IO для пайплайна: маршрутизация cabinet / project contour.
 
@@ -613,77 +784,9 @@ class EquipmentPipelineService:
     async def _search_docs(
         self, *, ready_ids: list[str], groups: list[dict[str, Any]]
     ) -> list[dict[str, Any]]:
-        from prodavan.application.modules.equipment_catalog_opensearch import (
-            OS_NAMESPACE,
-            catalog_os_index_name,
+        return await search_catalog_docs(
+            self._session, ready_ids=ready_ids, bodies=[g.get("body") or {} for g in groups]
         )
-        from prodavan.core.infra.opensearch_manager import get_search_index_service
-
-        pn_terms: list[str] = []
-        hash_terms: list[str] = []
-        for g in groups:
-            body = g.get("body") or {}
-            for key in group_pn_keys(body):
-                if key not in pn_terms:
-                    pn_terms.append(key)
-            for key in group_hash_keys(body):
-                if key not in hash_terms:
-                    hash_terms.append(key)
-        if not pn_terms and not hash_terms:
-            return []
-
-        pn_set = set(pn_terms)
-        svc = get_search_index_service()
-        docs: dict[str, dict[str, Any]] = {}
-        all_terms = pn_terms + hash_terms
-        # чанки терминов; MAX_SEARCH_SIZE=200 на запрос → пагинируем до 5 страниц
-        for start in range(0, len(all_terms), 20):
-            chunk = all_terms[start : start + 20]
-            chunk_pn = [t for t in chunk if t in pn_set]
-            chunk_hash = [t for t in chunk if t not in pn_set]
-            chunk_should: list[dict[str, Any]] = []
-            if chunk_pn:
-                chunk_should.append({"terms": {"part_number": chunk_pn}})
-            if chunk_hash:
-                chunk_should.append({"terms": {"src_hash": chunk_hash}})
-            chunk_query = {
-                "bool": {
-                    "filter": [
-                        {"bool": {"should": chunk_should, "minimum_should_match": 1}}
-                    ]
-                }
-            }
-            for catalog_row_id in ready_ids:
-                page = 0
-                while page < 5:
-                    try:
-                        result = await svc.search(
-                            namespace=OS_NAMESPACE,
-                            index=catalog_os_index_name(catalog_row_id),
-                            query=chunk_query,
-                            from_=page * 200,
-                            size=200,
-                            company_id="platform",
-                            cabinet_id=None,
-                            project_id=None,
-                            apply_tenant_filter=False,
-                            session=self._session,
-                        )
-                    except Exception:
-                        logger.exception(
-                            "equipment pipeline: os search failed catalog=%s", catalog_row_id
-                        )
-                        break
-                    page_hits = result.hits or []
-                    for hit in page_hits:
-                        doc = hit.source if isinstance(hit.source, dict) else {}
-                        h = str(doc.get("src_hash") or "")
-                        if h and h not in docs:
-                            docs[h] = doc
-                    if len(page_hits) < 200:
-                        break
-                    page += 1
-        return list(docs.values())
 
     async def _offer_body_from_doc(
         self,

@@ -303,6 +303,18 @@ class ModuleActionExecutor:
                 materialize=params.get("materialize") is not False,
             )
 
+        if kind == "equipment.ready_builds":
+            return await self._ready_builds_pipeline(
+                cabinet_id=cabinet_id,
+                module_id=module_id,
+                params=params,
+                principal=principal,
+                employee=employee,
+                project_id=project_id,
+                session_id=session_id,
+                resolve=params.get("resolve") is not False,
+            )
+
         if kind == "equipment.procurement_apply":
             return await self._procurement_apply(
                 cabinet_id=cabinet_id,
@@ -429,6 +441,40 @@ class ModuleActionExecutor:
             session_id=session_id,
         )
         return await EquipmentPipelineService(self._session).run(io, materialize=materialize)
+
+    async def _ready_builds_pipeline(
+        self,
+        *,
+        cabinet_id: str,
+        module_id: str,
+        params: dict[str, Any],
+        principal: Principal,
+        employee: EmployeeRow | None,
+        project_id: str | None = None,
+        session_id: str | None = None,
+        resolve: bool = True,
+    ) -> dict[str, Any]:
+        """WAVE11: пайплайн каталога «Готовые сборки».
+
+        Резолвит ключи пула (партномер/алиасы/хэш) в лучшие цены одним
+        батч-запросом в OpenSearch, разрешает dynamic/fixed слоты и
+        пересчитывает итоги сборок и агрегаты групп — см.
+        equipment_ready_builds_service.
+        """
+        from prodavan.application.modules.equipment_offers_service import ModuleRowIO
+        from prodavan.application.modules.equipment_ready_builds_service import (
+            ReadyBuildsPipelineService,
+        )
+
+        io = ModuleRowIO(
+            self._session,
+            cabinet_id=cabinet_id,
+            project_id=project_id,
+            principal=principal,
+            employee=employee,
+            session_id=session_id,
+        )
+        return await ReadyBuildsPipelineService(session=self._session).run(io, resolve=resolve)
 
     async def _equipment_match_to_line(
         self,
@@ -1039,7 +1085,9 @@ class ModuleActionExecutor:
         - ``request_lines`` / ``found_offers`` / ``equipment_builds`` → пайплайн
           без материализации (пересчёт best/бюджета/закупки — например после
           ручной правки оффера или выбора сборки);
-        - ``procurement`` → ``equipment.procurement_apply`` (маржа/доставка).
+        - ``procurement`` → ``equipment.procurement_apply`` (маржа/доставка);
+        - WAVE11: ``build_groups`` / ``build_group_items`` / ``ready_builds`` /
+          ``ready_build_slots`` → пайплайн каталога «Готовые сборки».
 
         Пайплайн пишет строки с ``run_actions=False`` — рекурсии нет.
         ``session_id`` задаёт скоп чата (None → общий бакет main).
@@ -1055,12 +1103,21 @@ class ModuleActionExecutor:
                     "equipment.budget_sync",
                     "equipment.offers_refresh",
                     "equipment.procurement_apply",
+                    "equipment.ready_builds",
                 ):
                     continue
                 params = action.get("params") if isinstance(action.get("params"), dict) else {}
                 if kind == "equipment.procurement_apply":
                     # закупка: только её таблица, отдельный экшен (маржа/доставка)
                     watched = {str(params.get("procurement_table") or "procurement")}
+                elif kind == "equipment.ready_builds":
+                    # каталог «Готовые сборки»: свои 4 таблицы, свой пайплайн
+                    watched = {
+                        str(params.get("groups_table") or "build_groups"),
+                        str(params.get("items_table") or "build_group_items"),
+                        str(params.get("builds_table") or "ready_builds"),
+                        str(params.get("slots_table") or "ready_build_slots"),
+                    }
                 else:
                     watched = {
                         str(params.get("groups_table") or "found_groups"),
@@ -1088,6 +1145,17 @@ class ModuleActionExecutor:
                     cabinet_id=cabinet_id,
                     module_id=module_id,
                     row_id=row_id,
+                    principal=principal,
+                    employee=employee,
+                    project_id=project_id,
+                    session_id=session_id,
+                )
+                return
+            if matched_kind == "equipment.ready_builds":
+                await self._ready_builds_pipeline(
+                    cabinet_id=cabinet_id,
+                    module_id=module_id,
+                    params={},
                     principal=principal,
                     employee=employee,
                     project_id=project_id,

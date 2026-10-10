@@ -217,6 +217,13 @@ class WorkerManager(LifespanResource):
             "task": job_names.AGENT_RUN_STALL_SWEEP,
             "schedule": schedule(run_every=60.0),
         }
+        # WAVE11: каталог «Готовые сборки» должен обновляться сам — цены
+        # меняются в каталоге поставщика, а не в наших строках, поэтому
+        # триггеров на запись недостаточно. Час — как у catalog-reindex.
+        beat["prodavan-ready-builds-sweep"] = {
+            "task": job_names.SWEEP_READY_BUILDS,
+            "schedule": schedule(run_every=3600.0),
+        }
         app.conf.beat_schedule = beat
         job_tasks.register_tasks(app)
         return app

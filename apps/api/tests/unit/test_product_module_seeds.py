@@ -200,6 +200,25 @@ def test_equipment_meta_hub_on_data_placement() -> None:
         "document_fields",
         "master_price",
         "equipment_search",
+        # WAVE11: каталог «Готовые сборки» (группы + пул + сборки + слоты)
+        "build_groups",
+        "build_group_items",
+        "ready_builds",
+        "ready_build_slots",
+    }
+    # Каталог сборок — глобальная библиотека: chats=all (строки общие на проект,
+    # session_id NULL). Чат-скоп сломал бы переиспользование между заявками.
+    catalog_scopes = {
+        t["slug"]: (t.get("scope") or {}).get("chats")
+        for t in meta["tables"]
+        if t["slug"]
+        in ("build_groups", "build_group_items", "ready_builds", "ready_build_slots")
+    }
+    assert catalog_scopes == {
+        "build_groups": "all",
+        "build_group_items": "all",
+        "ready_builds": "all",
+        "ready_build_slots": "all",
     }
     kinds = {a["kind"] for a in meta["actions"]}
     assert "content.index_opensearch" in kinds
@@ -363,12 +382,19 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     assert mgmt_titles == {
         "Базы данных",
         "Типы комплектующих",
+        # WAVE11: глобальная библиотека шаблонов сборок
+        "Готовые сборки",
         "Поставщики",
         "Интернет магазины",
         "Шаблоны",
         "Промпты",
         "Инструкции MCP",
     }
+    # «Готовые сборки» ведут в группы (домены совместимости), не в плоский список
+    ready_item = next(
+        i for i in mgmt_hub["ui_json"]["items"] if i["title"] == "Готовые сборки"
+    )
+    assert ready_item["target"]["view"] == "build_groups_list"
     tabs = {t["id"]: t for t in meta["tabs"]}
     assert tabs["tab_equipment"]["nav"]["placement"] == "data"
     assert tabs["tab_equipment_management"]["nav"]["placement"] == "management"
