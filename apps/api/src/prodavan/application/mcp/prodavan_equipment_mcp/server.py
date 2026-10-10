@@ -200,7 +200,11 @@ TOOLS: list[dict[str, Any]] = [
         "description": (
             "List candidate groups (found_groups) — your selection of part numbers per "
             "request line: line_id, part_number, aliases_pn, aliases_hash, match_kind "
-            "(exact|analog|doubt), note, offers_count, face fields (best offer per group)."
+            "(exact|analog|doubt), note, offers_count, face fields (best offer per group). "
+            "A group belongs EITHER to a request line (line_id) OR to a build slot "
+            "(build_id + slot_type_id) — slot groups have NO line_id, so filtering by "
+            "line_id returns nothing for a build. To inspect the components of a build "
+            "(e.g. the copy made by ready_build_attach) filter by build_id."
         ),
         "inputSchema": {
             "type": "object",
@@ -209,6 +213,15 @@ TOOLS: list[dict[str, Any]] = [
                 "line_id": {
                     "type": "string",
                     "description": "Optional filter: request_lines.row_id",
+                },
+                "build_id": {
+                    "type": "string",
+                    "description": (
+                        "Optional filter: equipment_builds.row_id — returns the build's "
+                        "slot groups (owner_kind=build). This is how you read the "
+                        "components of a build copy before pinning a part number or "
+                        "adding an alias to a slot."
+                    ),
                 },
             },
             "additionalProperties": False,
@@ -649,7 +662,9 @@ TOOLS: list[dict[str, Any]] = [
             "you may pin a part number for a slot, add an alias or src_hash of a product "
             "you found, or change a quantity. The catalog itself is not modified — it is "
             "the shop window, the copy belongs to the request. "
-            "Returns build_id, groups_created, slot_qty and slots_skipped_no_keys "
+            "Returns build_id, groups_created, groups (per slot: slot_type_id, group_id, "
+            "part_number, qty — use these group_id values to inspect or pin the copy's "
+            "components), slot_qty and slots_skipped_no_keys "
             "(slots whose component had no keys — tell the manager about those)."
         ),
         "inputSchema": {
@@ -1555,7 +1570,7 @@ def _handle(msg: dict[str, Any]) -> dict[str, Any] | None:
             "result": {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "prodavan-equipment", "version": "2.4.0"},
+                "serverInfo": {"name": "prodavan-equipment", "version": "2.4.1"},
             },
         }
     if method == "notifications/initialized":

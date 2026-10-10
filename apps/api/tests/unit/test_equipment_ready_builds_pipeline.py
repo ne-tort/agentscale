@@ -614,6 +614,24 @@ async def test_attach_ready_build_copies_keys_into_chat(io: FakeIO, monkeypatch)
     # цены в копию не переносятся — их материализует пайплайн чата
     assert "best_price" not in by_slot["etype_cpu"]
 
+    # id созданных групп возвращаются агенту: без них он не может работать с
+    # копией прицельно (закрепить партномер слота, добавить алиас) —
+    # found_groups_list фильтруется по build_id, а угадывать row_id слота
+    # агент не должен
+    assert {g["slot_type_id"] for g in result["groups"]} == {"etype_cpu", "etype_ram"}
+    assert {g["group_id"] for g in result["groups"]} == {
+        g["row_id"] for g in io._tables["found_groups"]
+        if g["body"].get("build_id") == build_id
+    }
+    assert {g["slot_type_id"]: g["qty"] for g in result["groups"]} == {
+        "etype_cpu": 1,
+        "etype_ram": 2,
+    }
+    assert {g["slot_type_id"]: g["part_number"] for g in result["groups"]} == {
+        "etype_cpu": "CPU-A",
+        "etype_ram": "RAM-16B",
+    }
+
 
 async def test_attach_ready_build_requires_existing_line(io: FakeIO, monkeypatch) -> None:
     """Нельзя скопировать сборку на несуществующую позицию."""

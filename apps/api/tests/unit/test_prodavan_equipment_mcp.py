@@ -30,8 +30,65 @@ def test_tools_list_contains_catalog_and_sot_tools() -> None:
         mcp_server._handle({"jsonrpc": "2.0", "id": 9, "method": "initialize"})["result"][
             "serverInfo"
         ]["version"]
-        == "2.4.0"
+        == "2.4.1"
     )
+
+
+def test_found_groups_list_schema_declares_build_id() -> None:
+    """Группы слотов сборки не имеют line_id — без build_id в схеме агент
+    не может прочитать компоненты копии, сделанной ready_build_attach.
+
+    Обработчик build_id поддерживал и раньше, но в inputSchema его не было,
+    а `additionalProperties: False` не давал агенту его передать: на
+    `found_groups_list(line_id=…)` приходил пустой список, и копия сборки
+    оказывалась невидимой.
+    """
+    listed = mcp_server._handle({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+    tool = next(t for t in listed["result"]["tools"] if t["name"] == "found_groups_list")
+    props = tool["inputSchema"]["properties"]
+    assert "build_id" in props
+    assert "line_id" in props
+    assert tool["inputSchema"].get("additionalProperties") is False
+    # описание должно объяснять, что у групп слота нет line_id
+    assert "build_id" in tool["description"]
+
+
+def test_found_groups_list_filters_by_build_id(monkeypatch) -> None:
+    """Группы слотов сборки видны по build_id: у них нет line_id."""
+    monkeypatch.setenv("PRODAVAN_API_BASE_URL", "http://api.example/api/v1")
+    monkeypatch.setenv("PRODAVAN_AUTH_TOKEN", "tok")
+    monkeypatch.setenv("PRODAVAN_PROJECT_ID", "proj-1")
+
+    rows = [
+        {"row_id": "g_line", "body": {"line_id": "line_1", "owner_kind": "line"}},
+        {
+            "row_id": "g_cpu",
+            "body": {"build_id": "b1", "slot_type_id": "etype_cpu", "owner_kind": "build"},
+        },
+        {
+            "row_id": "g_ram",
+            "body": {"build_id": "b1", "slot_type_id": "etype_ram", "owner_kind": "build"},
+        },
+        {"row_id": "g_other", "body": {"build_id": "b2", "owner_kind": "build"}},
+    ]
+
+    def call(arguments):
+        with patch.object(mcp_server, "_http", return_value={"items": rows}):
+            resp = mcp_server._handle(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 21,
+                    "method": "tools/call",
+                    "params": {"name": "found_groups_list", "arguments": arguments},
+                }
+            )
+        assert resp["result"].get("isError") is not True
+        return [r["row_id"] for r in json.loads(resp["result"]["content"][0]["text"])["items"]]
+
+    assert call({"build_id": "b1"}) == ["g_cpu", "g_ram"]
+    assert call({"line_id": "line_1"}) == ["g_line"]
+    # без фильтра — всё, включая группы сборок
+    assert call({}) == ["g_line", "g_cpu", "g_ram", "g_other"]
 
 
 def test_tools_list_contains_build_tools() -> None:
@@ -637,7 +694,7 @@ def test_tools_list_contains_ready_builds_catalog_tools() -> None:
         mcp_server._handle({"jsonrpc": "2.0", "id": 2, "method": "initialize"})["result"][
             "serverInfo"
         ]["version"]
-        == "2.4.0"
+        == "2.4.1"
     )
 
 
