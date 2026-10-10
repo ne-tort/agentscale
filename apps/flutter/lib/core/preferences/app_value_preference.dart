@@ -147,7 +147,7 @@ class _AppValuePreferenceState<T> extends State<AppValuePreference<T>> {
     }
     final parsed = widget.inputToValue != null
         ? widget.inputToValue!(raw)
-        : raw as T?;
+        : _parse(raw);
     if (parsed == null) return;
     setState(() => _saving = true);
     try {
@@ -183,6 +183,19 @@ class _AppValuePreferenceState<T> extends State<AppValuePreference<T>> {
   }
 
   void _guardBlur() => _ignoreNextBlur = true;
+
+  /// Приведение введённого текста к [T], когда [AppValuePreference.inputToValue]
+  /// не задан.
+  ///
+  /// Раньше здесь было `raw as T?`, и для `AppValuePreference<int>` это
+  /// бросало TypeError на каждом сохранении: числовые настройки (интервал и
+  /// число попыток в «Обработке ошибок», лимит шагов) не сохранялись вовсе,
+  /// а строковые продолжали работать — поэтому баг и не всплыл.
+  T? _parse(String raw) {
+    if (T == int) return int.tryParse(raw) as T?;
+    if (T == double) return double.tryParse(raw) as T?;
+    return raw as T?;
+  }
 
   Widget _busyTrailing(ThemeData theme) {
     return SizedBox(
