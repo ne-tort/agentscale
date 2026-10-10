@@ -375,3 +375,32 @@ def register_tasks(app) -> None:
 
         logger.info("celery task %s", job_names.SWEEP_EQUIPMENT_CATALOG_REINDEX)
         return run_async(_run())
+
+    @app.task(name=job_names.SWEEP_READY_BUILDS, bind=False)
+    def sweep_ready_builds() -> dict[str, Any]:
+        """WAVE11: автообновление каталога «Готовые сборки».
+
+        Цены меняются в каталоге поставщика, а не в наших строках, поэтому
+        одних триггеров на запись мало — sweep периодически резолвит ключи
+        пула (партномер/алиасы/хэш) в свежие лучшие цены и пересчитывает
+        составы dynamic-слотов и итоги сборок.
+        """
+        from prodavan.application.modules.equipment_ready_builds_sweep import (
+            sweep_ready_builds as _sweep_catalog,
+        )
+        from prodavan.infrastructure.persistence.database import get_session_factory
+
+        async def _run() -> dict[str, Any]:
+            async def _work() -> dict[str, Any]:
+                factory = get_session_factory()
+                async with factory() as session:
+                    return await _sweep_catalog(session)
+
+            return await run_with_job_lock(
+                "sweep_ready_builds",
+                ttl_sec=900,
+                fn=_work,
+            )
+
+        logger.info("celery task %s", job_names.SWEEP_READY_BUILDS)
+        return run_async(_run())
