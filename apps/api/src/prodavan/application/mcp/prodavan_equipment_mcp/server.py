@@ -1352,6 +1352,12 @@ def _call_tool(name: str, arguments: dict[str, Any]) -> Any:
         body = _pick_present(arguments, keys)
         row_id = str(arguments.get("row_id") or "").strip() or None
         _validate_group_body(body, creating=not row_id)
+        # Владелец группы проставляется сразу: дефолт колонки "line", поэтому
+        # группа слота сборки до прогона пайплайна мелькала бы в общем списке
+        # «Найденные товары» (он фильтрует по owner_kind = line).
+        if "build_id" in body:
+            bid = body.get("build_id")
+            body["owner_kind"] = "build" if isinstance(bid, str) and bid.strip() else "line"
         if row_id:
             return _http(
                 "PATCH",

@@ -457,6 +457,72 @@ def test_tools_list_survives_override_fetch_failure(monkeypatch) -> None:
     assert "equipment_catalog_search" in names
 
 
+def test_found_groups_upsert_sets_owner_kind(monkeypatch) -> None:
+    """Владелец группы проставляется при записи, а не только пайплайном.
+
+    Дефолт колонки owner_kind = "line", а общий список «Найденные товары»
+    фильтрует по owner_kind = line — без явной простановки группа слота сборки
+    мелькала бы в нём до первого прогона пайплайна.
+    """
+    monkeypatch.setenv("PRODAVAN_API_BASE_URL", "http://api.example/api/v1")
+    monkeypatch.setenv("PRODAVAN_AUTH_TOKEN", "tok")
+    monkeypatch.setenv("PRODAVAN_PROJECT_ID", "proj-1")
+
+    posted: dict = {}
+
+    def fake_http(method, path, payload=None, *, session_id=None):
+        posted.clear()
+        posted.update(payload or {})
+        return {"row_id": "g1"}
+
+    with patch.object(mcp_server, "_http", side_effect=fake_http):
+        # слот сборки → owner_kind = build
+        mcp_server._handle(
+            {
+                "jsonrpc": "2.0",
+                "id": 41,
+                "method": "tools/call",
+                "params": {
+                    "name": "found_groups_upsert",
+                    "arguments": {
+                        "build_id": "b1",
+                        "slot_type_id": "etype_cpu",
+                        "part_number": "X",
+                    },
+                },
+            }
+        )
+        assert posted["body"]["owner_kind"] == "build"
+
+        # обычная позиция → owner_kind = line
+        mcp_server._handle(
+            {
+                "jsonrpc": "2.0",
+                "id": 42,
+                "method": "tools/call",
+                "params": {
+                    "name": "found_groups_upsert",
+                    "arguments": {"line_id": "line1", "part_number": "Y"},
+                },
+            }
+        )
+        assert "owner_kind" not in posted["body"]
+
+        # снятие привязки к сборке (build_id = null) возвращает группу позиции
+        mcp_server._handle(
+            {
+                "jsonrpc": "2.0",
+                "id": 43,
+                "method": "tools/call",
+                "params": {
+                    "name": "found_groups_upsert",
+                    "arguments": {"row_id": "g1", "build_id": None},
+                },
+            }
+        )
+        assert posted["body"]["owner_kind"] == "line"
+
+
 def test_found_groups_patch_build_id_requires_slot_type(monkeypatch) -> None:
     """PATCH с build_id без slot_type_id отклоняется (фантомный слот)."""
     monkeypatch.setenv("PRODAVAN_API_BASE_URL", "http://api.example/api/v1")
