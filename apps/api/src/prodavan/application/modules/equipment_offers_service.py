@@ -46,6 +46,11 @@ PROCUREMENT_TABLE = "procurement"
 CATALOGS_TABLE = "catalogs"
 BUILDS_TABLE = "equipment_builds"
 ITEMS_TABLE = "equipment_items"
+# WAVE11: каталог «Готовые сборки» (chats=all, глобальная библиотека)
+CATALOG_GROUPS_TABLE = "build_groups"
+CATALOG_POOL_TABLE = "build_group_items"
+CATALOG_BUILDS_TABLE = "ready_builds"
+CATALOG_SLOTS_TABLE = "ready_build_slots"
 
 MATCH_EXACT = "exact"
 MATCH_ANALOG = "analog"
@@ -2134,10 +2139,22 @@ async def cascade_equipment_delete(
     - удаление found_groups → её офферы;
     - удаление сборки → её группы-кандидаты слотов (build_id) и их офферы.
 
+    WAVE11, каталог «Готовые сборки»:
+    - удаление группы → её пул (build_group_items), сборки (ready_builds)
+      и их слоты (ready_build_slots);
+    - удаление готовой сборки → её слоты.
+
     Записи идут через ModuleRowIO(run_actions=False) в бакете чата самой
     строки (session_id), пайплайн дочищает остатки на следующем прогоне.
     """
-    if table_slug not in (LINES_TABLE, BUDGET_TABLE, GROUPS_TABLE, BUILDS_TABLE):
+    if table_slug not in (
+        LINES_TABLE,
+        BUDGET_TABLE,
+        GROUPS_TABLE,
+        BUILDS_TABLE,
+        CATALOG_GROUPS_TABLE,
+        CATALOG_BUILDS_TABLE,
+    ):
         return {}
     if _IN_CASCADE_DELETE.get():
         return {}  # каскад уже идёт — не рекурсируем через сервисные хуки
@@ -2212,6 +2229,24 @@ async def cascade_equipment_delete(
             await _delete_where(OFFERS_TABLE, "group_id", row_id)
         elif table_slug == BUILDS_TABLE:
             await _cascade_build(row_id)
+        elif table_slug == CATALOG_BUILDS_TABLE:
+            # готовая сборка → её слоты
+            await _delete_where(CATALOG_SLOTS_TABLE, "build_id", row_id)
+        elif table_slug == CATALOG_GROUPS_TABLE:
+            # группа → пул, её готовые сборки и их слоты
+            await _delete_where(CATALOG_POOL_TABLE, "group_id", row_id)
+            group_builds = [
+                r
+                for r in await io.list(CATALOG_BUILDS_TABLE)
+                if str((r.get("body") or {}).get("group_id") or "") == row_id
+            ]
+            for b in group_builds:
+                bid = str(b.get("row_id") or "")
+                await _delete_where(CATALOG_SLOTS_TABLE, "build_id", bid)
+                if await io.delete(CATALOG_BUILDS_TABLE, bid):
+                    deleted[CATALOG_BUILDS_TABLE] = (
+                        deleted.get(CATALOG_BUILDS_TABLE, 0) + 1
+                    )
         return deleted
     finally:
         _IN_CASCADE_DELETE.set(False)

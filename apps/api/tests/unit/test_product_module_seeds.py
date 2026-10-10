@@ -592,6 +592,7 @@ def test_equipment_meta_hub_on_data_placement() -> None:
         "40-groups.md",
         "50-rank.md",
         "60-builds.md",
+        "70-ready-builds.md",
     ]
     # WAVE10: правило сборок доехало до системного промпта и правил модуля.
     assert "equipment_builds" in agents_file["body"]
@@ -599,6 +600,22 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     builds_rule = next(
         f for f in rules_seed["body"]["files_json"] if f["name"] == "60-builds.md"
     )
+    catalog_rule = next(
+        f for f in rules_seed["body"]["files_json"] if f["name"] == "70-ready-builds.md"
+    )
+    # WAVE11: правило каталога учит приоритету «сначала готовая сборка»,
+    # инструментам и семантике классов (разные классы не конкурируют ценой).
+    for probe in (
+        "ready_builds_catalog",
+        "ready_build_attach",
+        "build_group_item_upsert",
+        "ready_build_upsert",
+        "class_key",
+        "dynamic",
+        "fixed",
+    ):
+        assert probe in catalog_rule["body"], probe
+    assert "сначала ищи готовую" in catalog_rule["body"].lower()
     assert "equipment_builds_upsert" in builds_rule["body"]
     assert "slot_type_id" in builds_rule["body"]
     assert all(f["body"].strip() for f in rules_seed["body"]["files_json"])

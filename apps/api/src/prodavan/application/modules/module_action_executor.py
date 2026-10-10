@@ -315,6 +315,18 @@ class ModuleActionExecutor:
                 resolve=params.get("resolve") is not False,
             )
 
+        if kind == "equipment.attach_ready_build":
+            return await self._attach_ready_build(
+                cabinet_id=cabinet_id,
+                module_id=module_id,
+                params=params,
+                row_id=row_id,
+                principal=principal,
+                employee=employee,
+                project_id=project_id,
+                session_id=session_id,
+            )
+
         if kind == "equipment.procurement_apply":
             return await self._procurement_apply(
                 cabinet_id=cabinet_id,
@@ -475,6 +487,177 @@ class ModuleActionExecutor:
             session_id=session_id,
         )
         return await ReadyBuildsPipelineService(session=self._session).run(io, resolve=resolve)
+
+    async def _attach_ready_build(
+        self,
+        *,
+        cabinet_id: str,
+        module_id: str,
+        params: dict[str, Any],
+        row_id: str | None,
+        principal: Principal,
+        employee: EmployeeRow | None,
+        project_id: str | None = None,
+        session_id: str | None = None,
+    ) -> dict[str, Any]:
+        """WAVE11: копирование «Готовой сборки» из каталога в чат на позицию.
+
+        Каталог — библиотека шаблонов (``chats: all``), чат — рабочая копия
+        (``chats: current``). Копируются **ключи** (партномер / алиасы / хэш),
+        а не цены: копия сразу начинает жить своей жизнью и тянет актуальные
+        офферы штатной механикой WAVE10 (материализация → best → бюджет →
+        закупка). Дальше ИИ может править копию прицельно: заменить слот,
+        добавить алиас/хэш, поменять количество.
+
+        Обратная синхронизация (чат → каталог) намеренно не делается: копия
+        принадлежит заявке, каталог — витрина. Перенос решения в каталог —
+        отдельное осознанное действие, не автоматика.
+        """
+        from prodavan.application.modules.equipment_offers_service import (
+            ModuleRowIO,
+        )
+        from prodavan.application.modules.equipment_ready_builds_service import (
+            BUILDS_TABLE as CATALOG_BUILDS,
+        )
+        from prodavan.application.modules.equipment_ready_builds_service import (
+            POOL_TABLE,
+            SLOTS_TABLE,
+        )
+
+        ready_build_id = (row_id or str(params.get("ready_build_id") or "")).strip()
+        line_id = str(params.get("line_id") or "").strip()
+        if not ready_build_id or not line_id:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="row_id (готовая сборка) и params.line_id (позиция) обязательны",
+            )
+
+        io = ModuleRowIO(
+            self._session,
+            cabinet_id=cabinet_id,
+            project_id=project_id,
+            principal=principal,
+            employee=employee,
+            session_id=session_id,
+        )
+
+        # Каталог chats:all → io.list отдаёт строки независимо от чата.
+        catalog_builds = await io.list(CATALOG_BUILDS)
+        ready = next(
+            (b for b in catalog_builds if str(b.get("row_id") or "") == ready_build_id),
+            None,
+        )
+        if ready is None:
+            raise AppError(
+                code="NOT_FOUND",
+                title="Not Found",
+                status=404,
+                detail=f"готовая сборка не найдена: {ready_build_id}",
+            )
+        lines = await io.list("request_lines")
+        if not any(str(r.get("row_id") or "") == line_id for r in lines):
+            raise AppError(
+                code="NOT_FOUND",
+                title="Not Found",
+                status=404,
+                detail=f"позиция заказчика не найдена: {line_id}",
+            )
+
+        slots = [
+            s
+            for s in await io.list(SLOTS_TABLE)
+            if str((s.get("body") or {}).get("build_id") or "") == ready_build_id
+        ]
+        pool = {
+            str(r.get("row_id") or ""): (r.get("body") or {})
+            for r in await io.list(POOL_TABLE)
+        }
+        rbody = ready.get("body") or {}
+
+        created = await io.create(
+            "equipment_builds",
+            {
+                "name": str(rbody.get("name") or "Сборка").strip() or "Сборка",
+                "line_id": line_id,
+                "build_kind": str(rbody.get("build_kind") or "pc"),
+                "note": str(params.get("note") or "").strip(),
+                # провенанс: копия готова пересоздаться/сравниться с каталогом
+                "source_ready_build_id": ready_build_id,
+            },
+        )
+        build_id = str(created.get("row_id") or "")
+
+        slot_qty: dict[str, Any] = {}
+        groups_created = 0
+        skipped: list[str] = []
+        for slot in slots:
+            sbody = slot.get("body") or {}
+            type_id = str(sbody.get("type_id") or "")
+            if not type_id:
+                continue
+            qty_raw = sbody.get("qty")
+            try:
+                qty = int(float(qty_raw)) if qty_raw not in (None, "") else 1
+            except (TypeError, ValueError):
+                qty = 1
+            if qty > 1:
+                slot_qty[type_id] = qty
+
+            # Ключи берём у РАЗРЕШЁННОГО компонента пула (то, что пайплайн
+            # каталога выбрал по цене), иначе — у собственных ключей слота.
+            resolved_id = str(sbody.get("resolved_item_id") or "")
+            source = pool.get(resolved_id) or pool.get(str(sbody.get("item_id") or "")) or {}
+            part_number = str(source.get("part_number") or sbody.get("part_number") or "").strip()
+            aliases_pn = str(source.get("aliases_pn") or sbody.get("aliases_pn") or "").strip()
+            aliases_hash = str(source.get("aliases_hash") or sbody.get("aliases_hash") or "").strip()
+            if not (part_number or aliases_pn or aliases_hash):
+                skipped.append(type_id)
+                continue
+            await io.create(
+                "found_groups",
+                {
+                    "build_id": build_id,
+                    "slot_type_id": type_id,
+                    "part_number": part_number,
+                    "aliases_pn": aliases_pn,
+                    "aliases_hash": aliases_hash,
+                    # компонент каталога уже был проверен на совместимость —
+                    # для копии это точное соответствие её же спецификации
+                    "match_kind": "exact",
+                    "note": str(sbody.get("note") or "").strip(),
+                },
+            )
+            groups_created += 1
+
+        if slot_qty:
+            await io.update(
+                "equipment_builds",
+                build_id,
+                {**(created.get("body") or {}), "slot_qty": slot_qty},
+            )
+
+        # Материализация офферов копии — штатный пайплайн позиций.
+        from prodavan.application.modules.equipment_offers_service import (
+            EquipmentPipelineService,
+        )
+
+        pipeline = await EquipmentPipelineService(self._session).run(io, materialize=True)
+
+        return {
+            "ok": True,
+            "ready_build_id": ready_build_id,
+            "build_id": build_id,
+            "line_id": line_id,
+            "groups_created": groups_created,
+            "slot_qty": slot_qty,
+            "slots_skipped_no_keys": skipped,
+            "pipeline": {
+                k: pipeline.get(k)
+                for k in ("offers_created", "builds_updated", "budget_created", "budget_updated")
+            },
+        }
 
     async def _equipment_match_to_line(
         self,

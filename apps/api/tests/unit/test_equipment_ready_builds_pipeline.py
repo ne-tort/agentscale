@@ -459,3 +459,194 @@ def test_class_signature_is_stable_and_separating() -> None:
     assert class_signature(base) != class_signature({**base, "cpu_cores": 8})
     # «SSD 256» и «HDD 256» — разные витрины, а не одна
     assert class_signature({**base, "storage_kind": "HDD"}) != class_signature(base)
+
+
+async def test_cascade_delete_catalog_group_and_build(io: FakeIO) -> None:
+    """Каскад каталога: группа тянет пул и сборки со слотами; сборка — слоты."""
+    from prodavan.application.modules.equipment_offers_service import (
+        cascade_equipment_delete,
+    )
+
+    await _add_build(
+        io,
+        row_id="b_cas",
+        name="Каскадная",
+        ram_gb=16,
+        slots=[{"type_id": "etype_cpu", "class_key": "cpu_6c", "mode": "dynamic", "qty": 1}],
+    )
+    slot_ids = [s["row_id"] for s in io._tables["ready_build_slots"]]
+    assert slot_ids
+
+    # удаление готовой сборки → её слоты
+    await cascade_equipment_delete(
+        object(),
+        cabinet_id="cab",
+        project_id=None,
+        table_slug="ready_builds",
+        row_id="b_cas",
+        row_body={},
+        principal=None,
+        employee=None,
+        session_id=None,
+        io=io,
+    )
+    assert io._tables["ready_build_slots"] == []
+
+    # удаление группы → пул и все её сборки
+    await _add_build(
+        io,
+        row_id="b_group_cas",
+        name="В группе",
+        ram_gb=16,
+        slots=[{"type_id": "etype_cpu", "class_key": "cpu_6c", "mode": "dynamic", "qty": 1}],
+    )
+    await cascade_equipment_delete(
+        object(),
+        cabinet_id="cab",
+        project_id=None,
+        table_slug="build_groups",
+        row_id="grp_am4",
+        row_body={},
+        principal=None,
+        employee=None,
+        session_id=None,
+        io=io,
+    )
+    assert io._tables["build_group_items"] == []
+    assert io._tables["ready_builds"] == []
+    assert io._tables["ready_build_slots"] == []
+
+
+# Чат-таблицы нужны только тесту attach: каталог копируется в бакет чата.
+def _chat_tables() -> dict[str, list[dict[str, Any]]]:
+    return {
+        "request_lines": [
+            {"row_id": "line_1", "body": {"title": "Сборка ПК", "qty": 1, "status": "open"}}
+        ],
+        "equipment_builds": [],
+        "found_groups": [],
+        "found_offers": [],
+        "budget_lines": [],
+        "procurement": [],
+        "equipment_items": [],
+    }
+
+
+async def test_attach_ready_build_copies_keys_into_chat(io: FakeIO, monkeypatch) -> None:
+    """ready_build_attach копирует КЛЮЧИ (не цены) в чат: сборка + группы слотов.
+
+    Копия живёт своей жизнью: материализация офферов, best, бюджет — штатная
+    механика WAVE10, поэтому в копию должны попасть партномер/алиасы/хэш и qty.
+    """
+    import prodavan.application.modules.equipment_offers_service as eos
+    from prodavan.application.modules.module_action_executor import ModuleActionExecutor
+    from prodavan.domain.identity import Principal
+
+    for table, rows in _chat_tables().items():
+        io._tables.setdefault(table, rows)
+
+    svc = ReadyBuildsPipelineService(session=object())
+    await _add_build(
+        io,
+        row_id="b_src",
+        name="Бюджетный ПК",
+        ram_gb=16,
+        slots=[
+            {"type_id": "etype_cpu", "class_key": "cpu_6c", "mode": "dynamic", "qty": 1},
+            {"type_id": "etype_ram", "class_key": "ram_16", "mode": "dynamic", "qty": 2},
+        ],
+    )
+    await svc.run(io)
+
+    # пайплайн чата проверен отдельными тестами — здесь фиксируем сам факт вызова
+    pipeline_calls: list[bool] = []
+
+    class _StubPipeline:
+        def __init__(self, session):  # noqa: ANN001, D107
+            pass
+
+        async def run(self, io, *, materialize=True):  # noqa: ANN001, D103
+            pipeline_calls.append(materialize)
+            return {"offers_created": 0}
+
+    monkeypatch.setattr(eos, "EquipmentPipelineService", _StubPipeline)
+    monkeypatch.setattr(eos, "ModuleRowIO", lambda *a, **k: io)
+
+    executor = ModuleActionExecutor(object())
+    result = await executor._attach_ready_build(
+        cabinet_id="cab",
+        module_id="mod_equipment",
+        params={"line_id": "line_1"},
+        row_id="b_src",
+        principal=Principal(sub="u1", roles=frozenset()),
+        employee=None,
+        project_id=None,
+        session_id="chat_1",
+    )
+
+    assert result["ok"] is True
+    assert result["line_id"] == "line_1"
+    assert result["groups_created"] == 2
+    assert result["slot_qty"] == {"etype_ram": 2}
+    assert pipeline_calls == [True]  # копия сразу материализует офферы
+
+    build_id = result["build_id"]
+    chat_build = next(
+        b["body"] for b in io._tables["equipment_builds"] if b["row_id"] == build_id
+    )
+    assert chat_build["source_ready_build_id"] == "b_src"
+    assert chat_build["name"] == "Бюджетный ПК"
+    assert chat_build["slot_qty"] == {"etype_ram": 2}
+
+    copied = [
+        g["body"] for g in io._tables["found_groups"]
+        if g["body"].get("build_id") == build_id
+    ]
+    assert len(copied) == 2
+    by_slot = {g["slot_type_id"]: g for g in copied}
+    # ключи скопированы из РАЗРЕШЁННОГО компонента пула (дешевейшего в классе)
+    assert by_slot["etype_cpu"]["part_number"] == "CPU-A"
+    assert by_slot["etype_ram"]["part_number"] == "RAM-16B"
+    assert by_slot["etype_cpu"]["match_kind"] == "exact"
+    # цены в копию не переносятся — их материализует пайплайн чата
+    assert "best_price" not in by_slot["etype_cpu"]
+
+
+async def test_attach_ready_build_requires_existing_line(io: FakeIO, monkeypatch) -> None:
+    """Нельзя скопировать сборку на несуществующую позицию."""
+    import prodavan.application.modules.equipment_offers_service as eos
+    from prodavan.application.modules.module_action_executor import ModuleActionExecutor
+    from prodavan.domain.errors import AppError
+    from prodavan.domain.identity import Principal
+
+    for table, rows in _chat_tables().items():
+        io._tables.setdefault(table, rows)
+    monkeypatch.setattr(eos, "ModuleRowIO", lambda *a, **k: io)
+
+    executor = ModuleActionExecutor(object())
+    with pytest.raises(AppError) as err:
+        await executor._attach_ready_build(
+            cabinet_id="cab",
+            module_id="mod_equipment",
+            params={"line_id": "line_missing"},
+            row_id="b_src",
+            principal=Principal(sub="u1", roles=frozenset()),
+            employee=None,
+            project_id=None,
+            session_id="chat_1",
+        )
+    assert err.value.status == 404
+
+    # без line_id — валидация 422
+    with pytest.raises(AppError) as err2:
+        await executor._attach_ready_build(
+            cabinet_id="cab",
+            module_id="mod_equipment",
+            params={},
+            row_id="b_src",
+            principal=Principal(sub="u1", roles=frozenset()),
+            employee=None,
+            project_id=None,
+            session_id="chat_1",
+        )
+    assert err2.value.status == 422

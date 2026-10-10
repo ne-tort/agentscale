@@ -52,6 +52,9 @@ from typing import Any
 DEFAULT_MODULE_ID = "mod_equipment"
 MATCH_KINDS = frozenset({"exact", "analog", "doubt"})
 BUILD_KINDS = frozenset({"pc", "server"})
+# WAVE11: каталог «Готовые сборки»
+BUDGET_TIERS = frozenset({"budget", "mid", "high"})
+SLOT_MODES = frozenset({"dynamic", "fixed"})
 
 
 def _env() -> tuple[str, str, str]:
@@ -447,6 +450,226 @@ TOOLS: list[dict[str, Any]] = [
             "additionalProperties": False,
         },
     },
+    {
+        "name": "ready_builds_catalog",
+        "description": (
+            "THE read tool for the «Готовые сборки» catalog (WAVE11) — a reusable, "
+            "price-auto-updating library of PC/server build templates. "
+            "ALWAYS prefer picking a ready build from here over assembling a PC from "
+            "scratch: the catalog already encodes verified compatibility. "
+            "scope: 'groups' (compatibility domains: socket / ram_type / budget tier), "
+            "'items' (group component pool: part numbers + class_key + resolved best "
+            "price), 'builds' (ready builds with totals), 'build' (ONE build with all "
+            "its slots — pass row_id). "
+            "detail: 'compact' (default — ids, names, class, price; use for browsing "
+            "dozens of builds) or 'full' (all fields incl. keys and notes). "
+            "Filters: group_id, build_id, type_id, class_key, build_kind, budget_tier, "
+            "only_enabled. The catalog stores KEYS (part number / aliases / hash), not "
+            "supplier offers: prices are re-resolved from OpenSearch automatically, and "
+            "dynamic slots may drift to a cheaper compatible component of the same class."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "module_id": {"type": "string", "default": DEFAULT_MODULE_ID},
+                "scope": {
+                    "type": "string",
+                    "enum": ["groups", "items", "builds", "build"],
+                    "default": "builds",
+                },
+                "detail": {"type": "string", "enum": ["compact", "full"], "default": "compact"},
+                "row_id": {
+                    "type": "string",
+                    "description": "Required for scope=build",
+                },
+                "group_id": {"type": "string"},
+                "build_id": {"type": "string"},
+                "type_id": {"type": "string"},
+                "class_key": {"type": "string"},
+                "build_kind": {"type": "string", "enum": ["pc", "server"]},
+                "budget_tier": {"type": "string", "enum": ["budget", "mid", "high"]},
+                "only_enabled": {"type": "boolean", "default": True},
+                "limit": {"type": "integer", "default": 100, "minimum": 1, "maximum": 500},
+            },
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "build_group_upsert",
+        "description": (
+            "Create or update a build group (build_groups) — a COMPATIBILITY DOMAIN, "
+            "not a convenience folder: inside one group components are interchangeable. "
+            "socket / ram_type / form_factor are the compatibility anchors; budget_tier "
+            "(budget|mid|high) is a layer ON TOP of them, never a substitute — never put "
+            "AM4 and LGA1700 into one group. On create: name is required. "
+            "PATCH merges: omit = leave; null = clear."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "module_id": {"type": "string", "default": DEFAULT_MODULE_ID},
+                "row_id": {"type": "string"},
+                "name": {"type": "string"},
+                "build_kind": {"type": ["string", "null"], "enum": ["pc", "server", None]},
+                "socket": {"type": ["string", "null"]},
+                "ram_type": {"type": ["string", "null"]},
+                "form_factor": {"type": ["string", "null"]},
+                "budget_tier": {
+                    "type": ["string", "null"],
+                    "enum": ["budget", "mid", "high", None],
+                },
+                "note": {"type": ["string", "null"]},
+                "is_enabled": {"type": ["boolean", "null"]},
+                "project_ids": {"type": ["array", "null"], "items": {"type": "string"}},
+            },
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "build_group_item_upsert",
+        "description": (
+            "Create or update one component alternative in a group's pool "
+            "(build_group_items). The pool holds KEYS, not supplier offers: "
+            "part_number + aliases_pn (other spellings, comma-separated) + aliases_hash "
+            "(src_hash ids from equipment_catalog_search for positions WITHOUT a P/N). "
+            "At least one key is required on create. "
+            "class_key is MANDATORY in practice — it is what stops incompatible "
+            "substitution: 'ram_16' and 'ram_32', 'ssd_256' and 'ssd_512', 'hdd_1000' "
+            "are DIFFERENT classes and never compete by price. Use stable snake_case "
+            "(type + the distinguishing spec). class_label is its human-readable form. "
+            "The platform resolves best_price / best_seller / in_stock / "
+            "is_cheapest_in_class from OpenSearch — do NOT set them. "
+            "qty_default = how many of this component a build typically needs "
+            "(e.g. 2 for RAM sticks)."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "module_id": {"type": "string", "default": DEFAULT_MODULE_ID},
+                "row_id": {"type": "string"},
+                "group_id": {
+                    "type": ["string", "null"],
+                    "description": "build_groups.row_id (required on create)",
+                },
+                "type_id": {
+                    "type": ["string", "null"],
+                    "description": "equipment_types.row_id (required on create)",
+                },
+                "class_key": {"type": ["string", "null"]},
+                "class_label": {"type": ["string", "null"]},
+                "part_number": {"type": ["string", "null"]},
+                "aliases_pn": {"type": ["string", "null"]},
+                "aliases_hash": {"type": ["string", "null"]},
+                "qty_default": {"type": ["number", "integer", "null"]},
+                "note": {"type": ["string", "null"]},
+                "project_ids": {"type": ["array", "null"], "items": {"type": "string"}},
+            },
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "ready_build_upsert",
+        "description": (
+            "Create or update a ready build (ready_builds) TOGETHER WITH its slots in "
+            "ONE call — pass `slots` as an array; existing slots of the build are "
+            "replaced by it (omit `slots` to leave them untouched). "
+            "On create: group_id and name are required. "
+            "Class attributes (cpu_cores, ram_gb, storage_kind, storage_gb, gpu_class) "
+            "are what a customer request is matched against ('budget PC, 6 cores, "
+            "256 GB SSD, 16 GB RAM') and what forms class_signature — two builds with "
+            "different RAM are DIFFERENT showcases and never compete by price, so fill "
+            "them accurately. "
+            "Each slot: type_id (equipment_types.row_id, required), qty (default 1), "
+            "mode ('dynamic' = take the cheapest available component of class_key, may "
+            "drift as prices change; 'fixed' = pinned to item_id, price changes but the "
+            "component does not), class_key (which pool class to draw from), item_id "
+            "(build_group_items.row_id — the pinned/default component), or own "
+            "part_number/aliases_pn/aliases_hash when the component is not in the pool, "
+            "plus note. "
+            "price_total / slots_count / is_cheapest_in_class / unresolved_count are "
+            "computed by the platform — do NOT set them."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "module_id": {"type": "string", "default": DEFAULT_MODULE_ID},
+                "row_id": {"type": "string"},
+                "group_id": {
+                    "type": ["string", "null"],
+                    "description": "build_groups.row_id (required on create)",
+                },
+                "name": {"type": "string"},
+                "build_kind": {"type": ["string", "null"], "enum": ["pc", "server", None]},
+                "budget_tier": {
+                    "type": ["string", "null"],
+                    "enum": ["budget", "mid", "high", None],
+                },
+                "cpu_cores": {"type": ["number", "integer", "null"]},
+                "ram_gb": {"type": ["number", "integer", "null"]},
+                "storage_kind": {"type": ["string", "null"]},
+                "storage_gb": {"type": ["number", "integer", "null"]},
+                "gpu_class": {"type": ["string", "null"]},
+                "note": {"type": ["string", "null"]},
+                "is_enabled": {"type": ["boolean", "null"]},
+                "project_ids": {"type": ["array", "null"], "items": {"type": "string"}},
+                "slots": {
+                    "type": ["array", "null"],
+                    "description": "Replaces the build's slot list when provided",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "type_id": {"type": "string"},
+                            "qty": {"type": ["number", "integer"]},
+                            "mode": {"type": "string", "enum": ["dynamic", "fixed"]},
+                            "class_key": {"type": "string"},
+                            "item_id": {"type": "string"},
+                            "part_number": {"type": "string"},
+                            "aliases_pn": {"type": "string"},
+                            "aliases_hash": {"type": "string"},
+                            "note": {"type": "string"},
+                        },
+                        "required": ["type_id"],
+                        "additionalProperties": False,
+                    },
+                },
+            },
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "ready_build_attach",
+        "description": (
+            "Copy a ready build from the catalog into THIS chat as a working build for a "
+            "customer position: creates equipment_builds (line_id = the position) plus "
+            "one found_groups candidate per slot, then materializes offers. "
+            "KEYS are copied, not prices — the copy immediately lives its own life and "
+            "pulls current offers through the normal pipeline, so budget and procurement "
+            "work exactly as for a build made from scratch. "
+            "After this call, work with the COPY (equipment_builds / found_groups): "
+            "you may pin a part number for a slot, add an alias or src_hash of a product "
+            "you found, or change a quantity. The catalog itself is not modified — it is "
+            "the shop window, the copy belongs to the request. "
+            "Returns build_id, groups_created, slot_qty and slots_skipped_no_keys "
+            "(slots whose component had no keys — tell the manager about those)."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "module_id": {"type": "string", "default": DEFAULT_MODULE_ID},
+                "ready_build_id": {
+                    "type": "string",
+                    "description": "ready_builds.row_id from ready_builds_catalog",
+                },
+                "line_id": {
+                    "type": "string",
+                    "description": "request_lines.row_id (customer position)",
+                },
+                "note": {"type": "string"},
+            },
+            "required": ["ready_build_id", "line_id"],
+            "additionalProperties": False,
+        },
+    },
 ]
 
 
@@ -652,6 +875,403 @@ def _catalog_search(arguments: dict[str, Any]) -> dict[str, Any]:
     )
 
 
+# ------------------------------------------------------- WAVE11: каталог сборок
+
+# Поля, отдаваемые агенту в compact-режиме. Полный список тел съел бы контекст
+# на десятках сборок, поэтому компактность — часть контракта инструмента.
+_CATALOG_COMPACT_FIELDS: dict[str, tuple[str, ...]] = {
+    "build_groups": (
+        "name",
+        "build_kind",
+        "socket",
+        "ram_type",
+        "budget_tier",
+        "items_count",
+        "builds_count",
+        "price_min",
+        "price_max",
+        "is_enabled",
+    ),
+    "build_group_items": (
+        "group_id",
+        "type_id",
+        "type_name",
+        "class_key",
+        "class_label",
+        "part_number",
+        "best_price",
+        "best_seller",
+        "in_stock",
+        "offers_count",
+        "is_cheapest_in_class",
+        "qty_default",
+    ),
+    "ready_builds": (
+        "group_id",
+        "name",
+        "build_kind",
+        "budget_tier",
+        "cpu_cores",
+        "ram_gb",
+        "storage_kind",
+        "storage_gb",
+        "gpu_class",
+        "slots_count",
+        "qty_total",
+        "price_total",
+        "price_min",
+        "price_max",
+        "on_order",
+        "unresolved_count",
+        "is_cheapest_in_class",
+        "alternatives_count",
+        "is_enabled",
+    ),
+    "ready_build_slots": (
+        "build_id",
+        "type_id",
+        "type_name",
+        "qty",
+        "mode",
+        "class_key",
+        "item_id",
+        "resolved_title",
+        "resolved_part_number",
+        "resolved_price",
+        "line_total",
+        "alternatives_count",
+    ),
+}
+
+
+def _rows_body(row: dict[str, Any]) -> dict[str, Any]:
+    body = row.get("body")
+    return dict(body) if isinstance(body, dict) else {}
+
+
+def _project_rows(
+    rows: list[dict[str, Any]], table: str, *, full: bool
+) -> list[dict[str, Any]]:
+    """Сжимает строки до row_id + нужных полей (compact) или отдаёт тело целиком."""
+    out: list[dict[str, Any]] = []
+    keep = _CATALOG_COMPACT_FIELDS.get(table)
+    for row in rows:
+        body = _rows_body(row)
+        item: dict[str, Any] = {"row_id": str(row.get("row_id") or "")}
+        if full or keep is None:
+            item["body"] = body
+        else:
+            for key in keep:
+                if key in body:
+                    item[key] = body[key]
+        out.append(item)
+    return out
+
+
+def _ready_builds_catalog(
+    mid: str, arguments: dict[str, Any], sid: str | None
+) -> dict[str, Any]:
+    """Чтение каталога с уровнями компактности и фильтрами.
+
+    Отдельный инструмент (а не generic module_data_list) потому, что каталог
+    рассчитан на десятки-сотни сборок: без compact-режима и фильтров агент
+    утонет в контексте раньше, чем выберет сборку.
+    """
+    scope = str(arguments.get("scope") or "builds").strip() or "builds"
+    full = str(arguments.get("detail") or "compact").strip().lower() == "full"
+    only_enabled = arguments.get("only_enabled") is not False
+    try:
+        limit = max(1, min(int(arguments.get("limit") or 100), 500))
+    except (TypeError, ValueError):
+        limit = 100
+
+    group_id = str(arguments.get("group_id") or "").strip()
+    build_id = str(arguments.get("build_id") or "").strip()
+    type_id = str(arguments.get("type_id") or "").strip()
+    class_key = str(arguments.get("class_key") or "").strip()
+    build_kind = str(arguments.get("build_kind") or "").strip()
+    budget_tier = str(arguments.get("budget_tier") or "").strip()
+
+    def _matches(body: dict[str, Any]) -> bool:
+        if only_enabled and body.get("is_enabled") is False:
+            return False
+        for field, want in (
+            ("group_id", group_id),
+            ("build_id", build_id),
+            ("type_id", type_id),
+            ("class_key", class_key),
+            ("build_kind", build_kind),
+            ("budget_tier", budget_tier),
+        ):
+            if want and str(body.get(field) or "") != want:
+                return False
+        return True
+
+    table = {
+        "groups": "build_groups",
+        "items": "build_group_items",
+        "builds": "ready_builds",
+        "build": "ready_builds",
+    }.get(scope)
+    if table is None:
+        raise RuntimeError(
+            "scope must be one of groups | items | builds | build"
+        )
+
+    rows = _list_rows(mid, table, session_id=sid)
+    if scope == "build":
+        row_id = str(arguments.get("row_id") or "").strip()
+        if not row_id:
+            raise RuntimeError("row_id is required for scope=build")
+        build = next(
+            (r for r in rows if str(r.get("row_id") or "") == row_id), None
+        )
+        if build is None:
+            raise RuntimeError(f"ready_builds row not found: {row_id}")
+        slots = [
+            r
+            for r in _list_rows(mid, "ready_build_slots", session_id=sid)
+            if str(_rows_body(r).get("build_id") or "") == row_id
+        ]
+        return {
+            "build": _project_rows([build], "ready_builds", full=True)[0],
+            "slots": _project_rows(slots, "ready_build_slots", full=full),
+        }
+
+    filtered = [r for r in rows if _matches(_rows_body(r))]
+    items = _project_rows(filtered[:limit], table, full=full)
+    return {
+        "scope": scope,
+        "detail": "full" if full else "compact",
+        "total": len(filtered),
+        "returned": len(items),
+        "items": items,
+    }
+
+
+def _validate_group_meta(body: dict[str, Any], *, creating: bool) -> None:
+    if creating and not str(body.get("name") or "").strip():
+        raise RuntimeError("name is required when creating build_groups")
+    if "build_kind" in body and body["build_kind"] is not None:
+        if str(body["build_kind"]) not in BUILD_KINDS:
+            raise RuntimeError(f"build_kind must be one of {sorted(BUILD_KINDS)}")
+    if "budget_tier" in body and body["budget_tier"] is not None:
+        if str(body["budget_tier"]) not in BUDGET_TIERS:
+            raise RuntimeError(f"budget_tier must be one of {sorted(BUDGET_TIERS)}")
+
+
+def _validate_pool_item(body: dict[str, Any], *, creating: bool) -> None:
+    if creating:
+        for field in ("group_id", "type_id"):
+            if not str(body.get(field) or "").strip():
+                raise RuntimeError(
+                    f"{field} is required when creating build_group_items"
+                )
+        has_keys = any(
+            str(body.get(k) or "").strip()
+            for k in ("part_number", "aliases_pn", "aliases_hash")
+        )
+        if not has_keys:
+            raise RuntimeError(
+                "at least one of part_number / aliases_pn / aliases_hash is required: "
+                "the pool stores KEYS, the platform resolves prices from them"
+            )
+        if not str(body.get("class_key") or "").strip():
+            raise RuntimeError(
+                "class_key is required (e.g. ram_16, ssd_256): it is what stops "
+                "incompatible substitution — different classes never compete by price"
+            )
+    if "qty_default" in body and body["qty_default"] is not None:
+        try:
+            qty = float(body["qty_default"])
+        except (TypeError, ValueError):
+            raise RuntimeError("qty_default must be a number >= 1") from None
+        if qty < 1:
+            raise RuntimeError("qty_default must be >= 1")
+
+
+def _upsert_row(
+    mid: str,
+    table: str,
+    arguments: dict[str, Any],
+    sid: str | None,
+    *,
+    keys: Sequence[str],
+    required_on_create: Sequence[str] = (),
+    validate: Any = None,
+) -> Any:
+    """Общий create/update строки каталога (PATCH-мерж: omit = leave, null = clear)."""
+    body = _pick_present(arguments, keys)
+    row_id = str(arguments.get("row_id") or "").strip() or None
+    if validate is not None:
+        validate(body, creating=not row_id)
+    for field in required_on_create:
+        if not row_id and not str(body.get(field) or "").strip():
+            raise RuntimeError(f"{field} is required when creating {table}")
+    if row_id:
+        return _http(
+            "PATCH", _data_path(mid, table, row_id), {"body": body}, session_id=sid
+        )
+    return _http("POST", _data_path(mid, table), {"body": body}, session_id=sid)
+
+
+_SLOT_KEYS = (
+    "type_id",
+    "qty",
+    "mode",
+    "class_key",
+    "item_id",
+    "part_number",
+    "aliases_pn",
+    "aliases_hash",
+    "note",
+)
+
+
+def _validate_slot(slot: Any) -> dict[str, Any]:
+    if not isinstance(slot, dict):
+        raise RuntimeError("each slots entry must be an object")
+    type_id = str(slot.get("type_id") or "").strip()
+    if not type_id:
+        raise RuntimeError("slots[].type_id is required (equipment_types.row_id)")
+    mode = str(slot.get("mode") or "dynamic").strip() or "dynamic"
+    if mode not in SLOT_MODES:
+        raise RuntimeError(f"slots[].mode must be one of {sorted(SLOT_MODES)}")
+    if mode == "fixed" and not (
+        str(slot.get("item_id") or "").strip()
+        or any(str(slot.get(k) or "").strip() for k in ("part_number", "aliases_pn", "aliases_hash"))
+    ):
+        raise RuntimeError(
+            "slots[].mode='fixed' needs item_id (pool component) or own "
+            "part_number / aliases_pn / aliases_hash to pin"
+        )
+    if mode == "dynamic" and not (
+        str(slot.get("class_key") or "").strip()
+        or str(slot.get("item_id") or "").strip()
+        or any(str(slot.get(k) or "").strip() for k in ("part_number", "aliases_pn", "aliases_hash"))
+    ):
+        raise RuntimeError(
+            "slots[].mode='dynamic' needs class_key (to draw the cheapest of the "
+            "class), item_id, or own part_number / aliases_pn / aliases_hash"
+        )
+    qty = slot.get("qty")
+    if qty is not None:
+        try:
+            qty_num = float(qty)
+        except (TypeError, ValueError):
+            raise RuntimeError("slots[].qty must be a whole number >= 1") from None
+        if qty_num < 1 or qty_num != int(qty_num):
+            raise RuntimeError("slots[].qty must be a whole number >= 1")
+    return {k: slot[k] for k in _SLOT_KEYS if k in slot}
+
+
+def _ready_build_upsert(mid: str, arguments: dict[str, Any], sid: str | None) -> Any:
+    """Сборка + её слоты одним вызовом: ИИ создаёт сборку за один ход, а не за N."""
+    keys = (
+        "group_id",
+        "name",
+        "build_kind",
+        "budget_tier",
+        "cpu_cores",
+        "ram_gb",
+        "storage_kind",
+        "storage_gb",
+        "gpu_class",
+        "note",
+        "is_enabled",
+        "project_ids",
+    )
+    body = _pick_present(arguments, keys)
+    row_id = str(arguments.get("row_id") or "").strip() or None
+    _validate_build_meta(body, creating=not row_id)
+
+    raw_slots = arguments.get("slots")
+    slots: list[dict[str, Any]] | None = None
+    if raw_slots is not None:
+        if not isinstance(raw_slots, list):
+            raise RuntimeError("slots must be an array")
+        slots = [_validate_slot(s) for s in raw_slots]
+
+    if row_id:
+        result = _http(
+            "PATCH", _data_path(mid, "ready_builds", row_id), {"body": body}, session_id=sid
+        )
+    else:
+        result = _http(
+            "POST", _data_path(mid, "ready_builds"), {"body": body}, session_id=sid
+        )
+    build_id = str(
+        (result or {}).get("row_id") or row_id or ""
+    ).strip()
+
+    if slots is None:
+        return {"build": result, "slots_replaced": False}
+    if not build_id:
+        raise RuntimeError("cannot replace slots: build row_id is unknown")
+
+    # слоты заменяются набором из вызова: удаляем прежние, пишем новые
+    existing = [
+        r
+        for r in _list_rows(mid, "ready_build_slots", session_id=sid)
+        if str(_rows_body(r).get("build_id") or "") == build_id
+    ]
+    for row in existing:
+        old_id = str(row.get("row_id") or "")
+        if old_id:
+            _http("DELETE", _data_path(mid, "ready_build_slots", old_id), session_id=sid)
+    created: list[Any] = []
+    for slot in slots:
+        created.append(
+            _http(
+                "POST",
+                _data_path(mid, "ready_build_slots"),
+                {"body": {"build_id": build_id, **slot}},
+                session_id=sid,
+            )
+        )
+    return {"build": result, "slots_replaced": True, "slots": created}
+
+
+def _validate_build_meta(body: dict[str, Any], *, creating: bool) -> None:
+    if creating:
+        if not str(body.get("group_id") or "").strip():
+            raise RuntimeError(
+                "group_id is required when creating ready_builds "
+                "(use build_groups.row_id from ready_builds_catalog scope=groups)"
+            )
+        if not str(body.get("name") or "").strip():
+            raise RuntimeError("name is required when creating ready_builds")
+    if "build_kind" in body and body["build_kind"] is not None:
+        if str(body["build_kind"]) not in BUILD_KINDS:
+            raise RuntimeError(f"build_kind must be one of {sorted(BUILD_KINDS)}")
+    if "budget_tier" in body and body["budget_tier"] is not None:
+        if str(body["budget_tier"]) not in BUDGET_TIERS:
+            raise RuntimeError(f"budget_tier must be one of {sorted(BUDGET_TIERS)}")
+
+
+def _ready_build_attach(mid: str, arguments: dict[str, Any], sid: str | None) -> Any:
+    """Копирование готовой сборки в чат на позицию (серверное действие)."""
+    ready_build_id = str(arguments.get("ready_build_id") or "").strip()
+    line_id = str(arguments.get("line_id") or "").strip()
+    if not ready_build_id:
+        raise RuntimeError("ready_build_id is required for ready_build_attach")
+    if not line_id:
+        raise RuntimeError(
+            "line_id is required for ready_build_attach (request_lines.row_id)"
+        )
+    _, _, project_id = _env()
+    payload: dict[str, Any] = {"line_id": line_id}
+    note = str(arguments.get("note") or "").strip()
+    if note:
+        payload["note"] = note
+    return _http(
+        "POST",
+        f"/projects/{project_id}/modules/{mid}/actions/ready_build_attach/invoke",
+        {"row_id": ready_build_id, "params": payload},
+        session_id=sid,
+    )
+
+
 def _call_tool(name: str, arguments: dict[str, Any]) -> Any:
     if name == "equipment_catalog_sources":
         return _catalog_sources()
@@ -816,6 +1436,55 @@ def _call_tool(name: str, arguments: dict[str, Any]) -> Any:
             session_id=sid,
         )
 
+    # ------------------------------------------------- WAVE11: каталог сборок
+    if name == "ready_builds_catalog":
+        return _ready_builds_catalog(mid, arguments, sid)
+    if name == "build_group_upsert":
+        return _upsert_row(
+            mid,
+            "build_groups",
+            arguments,
+            sid,
+            keys=(
+                "name",
+                "build_kind",
+                "socket",
+                "ram_type",
+                "form_factor",
+                "budget_tier",
+                "note",
+                "is_enabled",
+                "project_ids",
+            ),
+            required_on_create=("name",),
+            validate=_validate_group_meta,
+        )
+    if name == "build_group_item_upsert":
+        return _upsert_row(
+            mid,
+            "build_group_items",
+            arguments,
+            sid,
+            keys=(
+                "group_id",
+                "type_id",
+                "class_key",
+                "class_label",
+                "part_number",
+                "aliases_pn",
+                "aliases_hash",
+                "qty_default",
+                "note",
+                "project_ids",
+            ),
+            required_on_create=("group_id", "type_id"),
+            validate=_validate_pool_item,
+        )
+    if name == "ready_build_upsert":
+        return _ready_build_upsert(mid, arguments, sid)
+    if name == "ready_build_attach":
+        return _ready_build_attach(mid, arguments, sid)
+
     raise RuntimeError(f"unknown tool: {name}")
 
 
@@ -880,7 +1549,7 @@ def _handle(msg: dict[str, Any]) -> dict[str, Any] | None:
             "result": {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "prodavan-equipment", "version": "2.3.0"},
+                "serverInfo": {"name": "prodavan-equipment", "version": "2.4.0"},
             },
         }
     if method == "notifications/initialized":
