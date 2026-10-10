@@ -519,3 +519,132 @@ async def test_provision_reuses_failed_row() -> None:
     assert failed.status == PodStatus.PENDING
     assert failed.last_error is None
     events.emit.assert_not_awaited()
+
+
+def _running_pod(project) -> ProjectPodRow:
+    return ProjectPodRow(
+        id="pod_abc123",
+        project_id=project.id,
+        workspace_key=project.workspace_key,
+        status=PodStatus.RUNNING,
+        desired_state=PodDesiredState.RUNNING.value,
+        runtime_ref="object-ws:wk_demo",
+        hydrate_generation=0,
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+    )
+
+
+def _session_with(project, pod) -> AsyncMock:
+    session = AsyncMock()
+    session.get = AsyncMock(return_value=project)
+    execute_result = MagicMock()
+    execute_result.scalar_one_or_none.return_value = pod
+    session.execute = AsyncMock(return_value=execute_result)
+    return session
+
+
+@pytest.mark.asyncio
+async def test_sync_desired_rematerialize_recreates_sandbox_pod(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Sandbox: rematerialize обязан перевыпустить claim.
+
+    Гидрация живого sandbox-пода заблокирована маркером `.hydrated` (bridge
+    `hydrateOnBind` выходит сразу и ничего не перечитывает), а API-сторона в
+    этом режиме гидрацию не делает вовсе (`build_hydrate` → StubHydrateAdapter).
+    Без terminate+нового claim под продолжал ходить на ПРЕЖНИЙ provider
+    endpoint и со старыми MCP-пакетами, хотя в БД всё уже новое — так после
+    смены провайдера проекта валидный токен нового провайдера уезжал на чужой
+    base_url и апстрим отвечал 401 «Invalid token».
+    """
+    monkeypatch.setattr("prodavan.config.settings.settings.pod_runtime_mode", "sandbox")
+    project = _project()
+    pod = _running_pod(project)
+    session = _session_with(project, pod)
+
+    runtime = AsyncMock()
+    hydrate = AsyncMock()
+    events = AsyncMock(spec=PodLifecycleEmitter)
+    store = AsyncMock()
+    store.clear_project_latest = AsyncMock()
+    env_loader = AsyncMock()
+    env_loader.load_for_project = AsyncMock(return_value=())
+
+    cmd = PodCommand(session, runtime=runtime, events=events, hydrate=hydrate)
+    cmd._project_events = AsyncMock()
+
+    with (
+        patch(
+            "prodavan.application.pod_service.command.ContainerEnvLoader",
+            return_value=env_loader,
+        ),
+        patch(
+            "prodavan.application.projects.workspace_checkpoint.checkpoint_project_workspace",
+            new=AsyncMock(return_value=None),
+        ) as checkpoint,
+        patch(
+            "prodavan.application.metrics.adapters.redis_metrics_store.build_metrics_store",
+            return_value=store,
+        ),
+    ):
+        await cmd.sync_desired(
+            project.id,
+            PodDesiredState.RUNNING,
+            principal=_principal(),
+            reason="rematerialize",
+        )
+
+    # чекапоинт ДО terminate — файлы агента не теряются
+    checkpoint.assert_awaited_once()
+    # в sandbox-режиме runtime_ref нормализуется в claim-ссылку
+    runtime.terminate.assert_awaited_once_with(runtime_ref="sandbox-claim-wk-demo")
+    runtime.ensure_running.assert_awaited_once()
+    hydrate.hydrate.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_sync_desired_rematerialize_keeps_k8s_pod_in_place(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """k8s-адаптер пересоздаёт под сам по hydrate_generation — форс не нужен."""
+    monkeypatch.setattr("prodavan.config.settings.settings.pod_runtime_mode", "k8s")
+    project = _project()
+    pod = _running_pod(project)
+    session = _session_with(project, pod)
+
+    runtime = AsyncMock()
+    hydrate = AsyncMock()
+    events = AsyncMock(spec=PodLifecycleEmitter)
+    env_loader = AsyncMock()
+    env_loader.load_for_project = AsyncMock(return_value=())
+
+    cmd = PodCommand(session, runtime=runtime, events=events, hydrate=hydrate)
+    cmd._project_events = AsyncMock()
+
+    with (
+        patch(
+            "prodavan.application.pod_service.command.ContainerEnvLoader",
+            return_value=env_loader,
+        ),
+        patch(
+            "prodavan.application.projects.workspace_checkpoint.checkpoint_project_workspace",
+            new=AsyncMock(return_value=None),
+        ) as checkpoint,
+        patch(
+            "prodavan.application.metrics.adapters.redis_metrics_store.build_metrics_store",
+            return_value=AsyncMock(),
+        ),
+    ):
+        await cmd.sync_desired(
+            project.id,
+            PodDesiredState.RUNNING,
+            principal=_principal(),
+            reason="rematerialize",
+        )
+
+    runtime.terminate.assert_not_awaited()
+    checkpoint.assert_not_awaited()
+    runtime.ensure_running.assert_awaited_once()
+    hydrate.hydrate.assert_awaited()
+
