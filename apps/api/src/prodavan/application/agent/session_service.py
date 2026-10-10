@@ -62,6 +62,7 @@ from prodavan.domain.agent import (
     ChatMessage,
 )
 from prodavan.domain.agent.errors import agent_runtime_unavailable, app_error_from_bridge_event
+from prodavan.domain.agent.turn_limits import normalize_max_turns, resolve_send_max_turns
 from prodavan.domain.errors import AppError
 from prodavan.domain.identity import Principal
 from prodavan.domain.projects import CHAT_MAX_ATTACHMENTS_PER_MESSAGE, CHAT_MAX_MESSAGE_CHARS
@@ -85,6 +86,8 @@ def _session_public(row: AgentSessionRow) -> dict:
         "cwd": row.cwd,
         "status": row.status,
         "title": row.title,
+        # None = без ограничений (дефолт); N > 0 = лимит шагов на один ход
+        "max_turns": row.max_turns,
         "last_message_at": row.last_message_at.isoformat() if row.last_message_at else None,
         "created_at": row.created_at.isoformat() if row.created_at else None,
         "agent_tokens_used": 0,
@@ -717,6 +720,8 @@ class AgentSessionService:
         employee: EmployeeRow | None,
         title: str | None = None,
         pin: bool | None = None,
+        max_turns: int | None = None,
+        update_max_turns: bool = False,
     ) -> dict:
         from prodavan.application.agent.chat_sidebar_service import ChatSidebarService
 
@@ -729,6 +734,12 @@ class AgentSessionService:
         if title is not None:
             cleaned = title.strip()
             row.title = cleaned[:200] if cleaned else None
+            await self._session.commit()
+            await self._session.refresh(row)
+        if update_max_turns:
+            # None (или 0) = «без ограничений» — настройка снимается, а не
+            # обнуляется: рантайм принимает только положительное целое
+            row.max_turns = normalize_max_turns(max_turns)
             await self._session.commit()
             await self._session.refresh(row)
         pinned = None
@@ -962,6 +973,7 @@ class AgentSessionService:
                 model=send_model,
                 endpoint=runtime_endpoint,
                 retry=policy_to_send_fields(project.chat_error_policy),
+                max_turns=resolve_send_max_turns(row.max_turns),
                 bootstrap=BridgeSessionBootstrap(
                     session_id=row.id,
                     prodavan_session_id=row.id,

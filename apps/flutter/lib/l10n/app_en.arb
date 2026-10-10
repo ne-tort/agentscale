@@ -1271,6 +1271,11 @@
   "projectChatErrorPolicyTryOtherModels": "Try other models",
   "projectChatErrorPolicyFallbackModels": "Fallback models",
   "projectChatErrorPolicyFallbackModelsNone": "None selected",
+  "projectChatMaxTurnsLimit": "Limit steps per run",
+  "projectChatMaxTurnsValue": "Steps per run",
+  "projectChatMaxTurnsUnlimited": "Unlimited",
+  "projectChatMaxTurnsInvalid": "Enter a whole number from 1 to 1000",
+  "projectChatMaxTurnsReached": "Step limit reached — ask the agent to continue",
   "@projectChatReconnectingAttempt": {
     "placeholders": {
       "n": {},
