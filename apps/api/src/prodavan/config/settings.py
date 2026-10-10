@@ -60,6 +60,13 @@ class Settings(BaseSettings):
     opensearch_username: str | None = None
     opensearch_password: str | None = None
 
+    # Ретраи стартовых пингов (Redis / Mongo / OpenSearch). `*_required=True`
+    # делает упавший пинг фатальным для startup, поэтому один мимолётный сбой
+    # зависимости ронял API в crash-loop. Несколько попыток переживают короткий
+    # сбой, сохраняя «громко падаем, если зависимости реально нет».
+    infra_startup_ping_attempts: int = 5
+    infra_startup_ping_delay_sec: float = 2.0
+
     # Pod Identity Bridge (scoped JWT for Project Pods). In prod an explicit
     # secret is required (pod_identity_bridge_strict=True → fail closed).
     # Fallbacks to POD_AGENT_BRIDGE_AUTH_TOKEN / AUTH_TEST_SECRET only exist for
