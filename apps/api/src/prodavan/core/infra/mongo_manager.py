@@ -9,6 +9,7 @@ from prodavan.application.document_store.adapters.memory_store import InMemoryDo
 from prodavan.application.document_store.adapters.mongo_store import MongoDocumentStore
 from prodavan.application.document_store.ports.document_store import DocumentStorePort
 from prodavan.application.document_store.service import DocumentStoreService
+from prodavan.core.infra.startup_ping import ping_with_retry, resolve_ping_retry
 from prodavan.core.lifespan.resource import LifespanResource
 
 logger = logging.getLogger(__name__)
@@ -42,11 +43,16 @@ class MongoManager(LifespanResource):
         database: str = "prodavan",
         enabled: bool = False,
         required: bool = False,
+        ping_attempts: int | None = None,
+        ping_delay_sec: float | None = None,
     ) -> None:
         self._url = (url or "").strip() or None
         self._database = (database or "prodavan").strip() or "prodavan"
         self._enabled_flag = bool(enabled) and self._url is not None
         self._required = required
+        self._ping_attempts, self._ping_delay_sec = resolve_ping_retry(
+            ping_attempts, ping_delay_sec
+        )
         self._client: Any = None
         self._db: Any = None
         self._store: DocumentStorePort = InMemoryDocumentStore()
@@ -80,7 +86,14 @@ class MongoManager(LifespanResource):
 
             self._client = AsyncIOMotorClient(self._url, serverSelectionTimeoutMS=5000)
             self._db = self._client[self._database]
-            await self._db.command("ping")
+            ok = await ping_with_retry(
+                "mongodb",
+                lambda: self._db.command("ping"),
+                attempts=self._ping_attempts,
+                delay_sec=self._ping_delay_sec,
+            )
+            if not ok:
+                raise RuntimeError("mongodb ping failed")
             self._store = MongoDocumentStore(db=self._db)
             self._service = DocumentStoreService(self._store)
             logger.info("mongodb: connected db=%s", self._database)
