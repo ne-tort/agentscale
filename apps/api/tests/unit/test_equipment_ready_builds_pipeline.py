@@ -587,7 +587,14 @@ async def test_attach_ready_build_copies_keys_into_chat(io: FakeIO, monkeypatch)
     assert result["ok"] is True
     assert result["line_id"] == "line_1"
     assert result["groups_created"] == 2
-    assert result["slot_qty"] == {"etype_ram": 2}
+    # slot_qty ключуется по ИДЕНТИЧНОСТИ слота (row_id каталожного слота),
+    # а не по типу — иначе два компонента одного типа делили бы один счётчик
+    ram_slot = next(
+        r for r in io._tables["ready_build_slots"]
+        if (r.get("body") or {}).get("type_id") == "etype_ram"
+    )
+    ram_slot_id = ram_slot["row_id"]
+    assert result["slot_qty"] == {ram_slot_id: 2}
     assert pipeline_calls == [True]  # копия сразу материализует офферы
 
     build_id = result["build_id"]
@@ -596,7 +603,16 @@ async def test_attach_ready_build_copies_keys_into_chat(io: FakeIO, monkeypatch)
     )
     assert chat_build["source_ready_build_id"] == "b_src"
     assert chat_build["name"] == "Бюджетный ПК"
-    assert chat_build["slot_qty"] == {"etype_ram": 2}
+    assert chat_build["slot_qty"] == {ram_slot_id: 2}
+    # карта слот→тип — редактор слотов рендерит их по ней (несколько компонентов
+    # одного типа остаются разными строками)
+    assert chat_build["slot_types"] == {
+        ram_slot_id: "etype_ram",
+        next(
+            r["row_id"] for r in io._tables["ready_build_slots"]
+            if (r.get("body") or {}).get("type_id") == "etype_cpu"
+        ): "etype_cpu",
+    }
 
     copied = [
         g["body"] for g in io._tables["found_groups"]

@@ -1590,6 +1590,19 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "ref": {"table_slug": "equipment_types"},
             },
             {
+                # Идентичность КОНКРЕТНОГО слота (две строки одного типа — два
+                # слота): без неё две группы одного типа схлопывались бы в один
+                # слот. По умолчанию = slot_type_id (совместимость со сборками,
+                # у которых по одному компоненту на тип).
+                "table_slug": "found_groups",
+                "name": "slot_id",
+                "label": {"ru": "Слот сборки", "en": "Build slot"},
+                "type": "text",
+                "required": False,
+                "default": "",
+                "hidden": True,
+            },
+            {
                 # «line» — кандидат позиции; «build» — кандидат слота сборки.
                 # Пишет пайплайн; глобальный список фильтрует по нему.
                 "table_slug": "found_groups",
