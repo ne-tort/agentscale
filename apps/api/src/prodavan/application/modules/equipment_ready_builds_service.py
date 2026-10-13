@@ -229,6 +229,12 @@ class ReadyBuildsPipelineService:
         # ------------------------------------------------ слоты: dynamic/fixed
         slots_by_build: dict[str, list[dict[str, Any]]] = {}
         resolved_by_slot: dict[str, dict[str, Any]] = {}
+        # group_id сборки — на слоте: денормализация, чтобы список пула
+        # фильтровался по группе без джойна сборка → группа
+        group_by_build = {
+            str(b.get("row_id") or ""): str((b.get("body") or {}).get("group_id") or "")
+            for b in builds
+        }
         for slot in slots:
             sid = str(slot.get("row_id") or "")
             body = dict(slot.get("body") or {})
@@ -319,6 +325,18 @@ class ReadyBuildsPipelineService:
             want_type_name = type_names.get(str(body.get("type_id") or ""), "")
             if want_type_name and str(body.get("type_name") or "") != want_type_name:
                 updates["type_name"] = want_type_name
+            # денормализация group_id на слот: пул-список фильтруется по группе
+            # без джойна сборка → группа
+            want_group = group_by_build.get(bid, "")
+            if want_group and str(body.get("group_id") or "") != want_group:
+                updates["group_id"] = want_group
+            # class_key из разрешённого компонента — у fixed-слотов он пустой,
+            # а пикер замены фильтрует пул по (группа, тип, класс)
+            chosen_class = ""
+            if chosen_id:
+                chosen_class = str((item_best.get(chosen_id) or {}).get("class_key") or "")
+            if chosen_class and str(body.get("class_key") or "") != chosen_class:
+                updates["class_key"] = chosen_class
             if updates:
                 updates["synced_at"] = now
                 body.update(updates)

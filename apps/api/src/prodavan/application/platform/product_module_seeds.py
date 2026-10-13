@@ -6067,7 +6067,14 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                         {"column": "qty", "widget": "value", "icon": "numbers"},
                         {"column": "mode", "widget": "choice", "icon": "swap_horiz"},
                         {"column": "class_key", "widget": "value", "icon": "sell"},
-                        {"column": "item_id", "widget": "ref", "icon": "inventory_2"},
+                        {
+                            "column": "item_id",
+                            "widget": "pick",
+                            "icon": "inventory_2",
+                            # выбор компонента из пула группы (по типу и классу слота)
+                            "pick_view": "build_group_items_pick",
+                            "title_field": "resolved_title",
+                        },
                         {"column": "part_number", "widget": "value", "icon": "qr_code_2"},
                         {"column": "aliases_pn", "widget": "value", "icon": "alt_route"},
                         {"column": "aliases_hash", "widget": "value", "icon": "fingerprint"},
@@ -6077,6 +6084,91 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                         {"column": "resolved_seller", "widget": "value", "read_only": True},
                         {"column": "note", "widget": "value", "icon": "edit_note"},
                     ],
+                },
+            },
+            # Выбор компонента из пула группы при замене в слоте готовой сборки.
+            # Контекст — открытый слот: пул фильтруется по group_id сборки и
+            # class_key слота (оба пишутся на слот пайплайном).
+            {
+                "slug": "build_group_items_pick",
+                "table_slug": "build_group_items",
+                "kind": "collection",
+                "ui_json": {
+                    "version": 1,
+                    "kind": "collection",
+                    "scaffold": {
+                        "title": {"ru": "Заменить компонент", "en": "Replace component"},
+                    },
+                    "title_field": "best_title",
+                    "subtitle_fields": ["class_label", "part_number"],
+                    "row_filter_from_context": {
+                        "group_id": "group_id",
+                        "class_key": "class_key",
+                    },
+                    "columns": [
+                        {
+                            "field": "best_title",
+                            "label": {"ru": "Товар", "en": "Product"},
+                            "max_lines": 2,
+                            "max_width": 240,
+                        },
+                        {
+                            "field": "part_number",
+                            "label": {"ru": "Партномер", "en": "P/N"},
+                            "max_lines": 2,
+                            "max_width": 150,
+                            "format": "pn_fallback",
+                        },
+                        {
+                            "field": "class_label",
+                            "label": {"ru": "Класс", "en": "Class"},
+                            "max_width": 150,
+                        },
+                        {
+                            "field": "best_price",
+                            "label": {"ru": "Цена ₽", "en": "Price"},
+                            "format": "offer_price",
+                            "align": "end",
+                            "max_width": 110,
+                        },
+                        {
+                            "field": "best_seller",
+                            "label": {"ru": "Поставщик", "en": "Supplier"},
+                            "max_lines": 2,
+                            "max_width": 140,
+                        },
+                        {
+                            "field": "in_stock",
+                            "label": {"ru": "Наличие", "en": "Stock"},
+                            "format": "bool_yes_no",
+                            "max_width": 90,
+                        },
+                        {
+                            "field": "offers_count",
+                            "label": {"ru": "Офферов", "en": "Offers"},
+                            "align": "end",
+                            "max_width": 90,
+                        },
+                    ],
+                    "sort": [{"field": "best_price", "dir": "asc"}],
+                    "selection": {
+                        "kind": "single",
+                        "control": "switch",
+                        "placement": "trailing",
+                        # текущий выбор — item_id открытого слота
+                        "match_context_field": "item_id",
+                        "set_on_context": {
+                            # пишем выбранный компонент пула в item_id слота
+                            "field": "item_id",
+                            "value_from": "row_id",
+                            "pop_after": True,
+                        },
+                    },
+                    "empty": _empty(
+                        "Нет совместимых компонентов в группе и классе",
+                        "No compatible components",
+                        icon="inventory_2",
+                    ),
                 },
             },
             {
