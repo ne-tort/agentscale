@@ -53,6 +53,7 @@ GROUPS_TABLE = "build_groups"
 POOL_TABLE = "build_group_items"
 BUILDS_TABLE = "ready_builds"
 SLOTS_TABLE = "ready_build_slots"
+TYPES_TABLE = "equipment_types"
 
 MODE_DYNAMIC = "dynamic"
 MODE_FIXED = "fixed"
@@ -127,6 +128,11 @@ class ReadyBuildsPipelineService:
 
         sellers = [r for r in await io.list(SELLERS_TABLE) if isinstance(r, dict)]
         registry = _SellerRegistry(sellers)
+        # `type_name` — денормализованное зеркало ref'а `type_id`: его отдают и
+        # компактная проекция каталога для агента, и колонка «Тип» в UI. Сам его
+        # никто не заполняет (агент передаёт не всегда), поэтому выводим из
+        # справочника типов — иначе в каталоге пустые названия.
+        type_names = await self._type_names(io)
 
         # ------------------------------------------------ резолв цен из OS
         best_by_item: dict[str, dict[str, Any]] = {}
@@ -162,6 +168,9 @@ class ReadyBuildsPipelineService:
             want_stock = bool((best or {}).get("in_stock"))
             if bool(body.get("in_stock")) is not want_stock:
                 updates["in_stock"] = want_stock
+            want_type_name = type_names.get(str(body.get("type_id") or ""), "")
+            if want_type_name and str(body.get("type_name") or "") != want_type_name:
+                updates["type_name"] = want_type_name
             if updates:
                 updates["synced_at"] = now
                 body.update(updates)
@@ -299,6 +308,9 @@ class ReadyBuildsPipelineService:
                 updates["in_stock"] = in_stock
             if _num_or(body.get("alternatives_count"), 0) != alternatives:
                 updates["alternatives_count"] = alternatives
+            want_type_name = type_names.get(str(body.get("type_id") or ""), "")
+            if want_type_name and str(body.get("type_name") or "") != want_type_name:
+                updates["type_name"] = want_type_name
             if updates:
                 updates["synced_at"] = now
                 body.update(updates)
@@ -425,6 +437,22 @@ class ReadyBuildsPipelineService:
                 stats["groups_updated"] += 1
 
         return stats
+
+    # ------------------------------------------------------- справочник типов
+
+    @staticmethod
+    async def _type_names(io: ModuleRowIO) -> dict[str, str]:
+        """`equipment_types.row_id` → название типа (для зеркала `type_name`)."""
+        out: dict[str, str] = {}
+        for row in await io.list(TYPES_TABLE):
+            if not isinstance(row, dict):
+                continue
+            rid = str(row.get("row_id") or "")
+            body = row.get("body") if isinstance(row.get("body"), dict) else {}
+            name = str((body or {}).get("name") or "").strip()
+            if rid and name:
+                out[rid] = name
+        return out
 
     # ------------------------------------------------------------ резолв цен
 
