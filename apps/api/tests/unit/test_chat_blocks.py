@@ -250,3 +250,47 @@ def test_transcript_entries_to_chat_blocks_tolerates_junk() -> None:
     assert transcript_entries_to_chat_blocks(None) == []
     assert transcript_entries_to_chat_blocks("nope") == []
     assert transcript_entries_to_chat_blocks([1, "x", {}]) == []
+
+
+def test_tool_result_is_error_read_from_output_envelope() -> None:
+    """Боевой openclaw-адаптер кладёт флаг ошибки в `output.isError`.
+
+    Проекция читала только `data.is_error` (его ставят codex/cursor/claude
+    нормалайзеры), поэтому на dev/prod упавшие вызовы инструментов уходили в
+    UI как успешные — в частности, потерянный проекционный bind выглядел
+    обычным ответом.
+    """
+    events = [
+        {
+            "type": AgentEventType.TOOL_RESULT,
+            "data": {
+                "id": "c1",
+                "name": "mcp.prodavan-equipment.ready_builds_catalog",
+                "output": {
+                    "content": [{"text": "PRODAVAN_MCP_ENV_MISSING: ...", "type": "text"}],
+                    "isError": True,
+                },
+            },
+        },
+        {
+            "type": AgentEventType.TOOL_RESULT,
+            "data": {
+                "id": "c2",
+                "name": "mcp.prodavan-modules.module_data_list",
+                "output": {"content": [{"text": "{}", "type": "text"}]},
+                "is_error": True,
+            },
+        },
+        {
+            "type": AgentEventType.TOOL_RESULT,
+            "data": {
+                "id": "c3",
+                "name": "fs.read",
+                "output": {"content": [{"text": "ok", "type": "text"}], "isError": False},
+            },
+        },
+    ]
+
+    blocks = events_to_chat_blocks(events)
+
+    assert [b["is_error"] for b in blocks] == [True, True, False]

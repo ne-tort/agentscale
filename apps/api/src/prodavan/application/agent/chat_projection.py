@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from prodavan.application.agent.text_delta import normalize_text_delta
+from prodavan.application.agent.tool_result import tool_result_is_error
 from prodavan.domain.agent import PLATFORM_EVENT_USER_MESSAGE, AgentEventType
 from prodavan.domain.agent.turn_limits import DONE_REASON_MAX_TURNS
 
@@ -239,7 +240,9 @@ def events_to_chat_blocks(events: list[dict]) -> list[dict]:
                     "id": data.get("id"),
                     "name": data.get("name"),
                     "output": data.get("output"),
-                    "is_error": bool(data.get("is_error")),
+                    # флаг ошибки у openclaw-адаптера лежит в output.isError,
+                    # а не в data.is_error — иначе UI не помечал упавшие вызовы
+                    "is_error": tool_result_is_error(data),
                 }
             )
         elif etype == AgentEventType.TOOL_PROGRESS:

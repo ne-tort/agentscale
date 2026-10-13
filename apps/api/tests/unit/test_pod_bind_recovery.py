@@ -36,13 +36,33 @@ _LEGACY = (
 
 
 def _tool_result(text: str, *, is_error: bool = True) -> AgentEvent:
+    """Форма БОЕВОГО openclaw-адаптера: флаг ошибки внутри `output.isError`.
+
+    Именно так приходит на dev/prod (`adapter: platform_openclaw`);
+    `data.is_error` кладут только codex/cursor/claude нормалайзеры.
+    """
     return AgentEvent.now(
         AgentEventType.TOOL_RESULT,
         {
             "id": "call-1",
             "name": "mcp.prodavan-equipment.ready_builds_catalog",
+            "output": {
+                "content": [{"text": text, "type": "text"}],
+                "isError": is_error,
+            },
+        },
+    )
+
+
+def _tool_result_legacy_flag(text: str) -> AgentEvent:
+    """Форма codex/cursor: флаг в корне данных."""
+    return AgentEvent.now(
+        AgentEventType.TOOL_RESULT,
+        {
+            "id": "call-2",
+            "name": "mcp.prodavan-modules.module_data_list",
             "output": {"content": [{"text": text, "type": "text"}]},
-            "is_error": is_error,
+            "is_error": True,
         },
     )
 
@@ -54,6 +74,18 @@ def test_detects_new_marker_and_legacy_text() -> None:
     assert bridge_mod.tool_result_lost_pod_bind(_tool_result(f"{_MARKER}: {_LEGACY}"))
     # легас-текст: поды со старым MCP-пакетом ещё долго будут отвечать им
     assert bridge_mod.tool_result_lost_pod_bind(_tool_result(_LEGACY))
+
+
+def test_detects_marker_with_data_level_error_flag() -> None:
+    """codex/cursor кладут is_error в корень — детектор обязан видеть и их."""
+    assert bridge_mod.tool_result_lost_pod_bind(_tool_result_legacy_flag(_LEGACY))
+
+
+def test_ignores_marker_in_successful_result() -> None:
+    """Агент мог прочитать текст ошибки файлом — это не авария bind'а."""
+    assert not bridge_mod.tool_result_lost_pod_bind(
+        _tool_result(f"в файле было: {_MARKER}", is_error=False)
+    )
 
 
 def test_ignores_successful_and_unrelated_results() -> None:
@@ -71,7 +103,7 @@ def test_ignores_successful_and_unrelated_results() -> None:
 def test_detects_plain_string_output() -> None:
     """tool_result может прийти и строкой, не только MCP-конвертом."""
     event = AgentEvent.now(
-        AgentEventType.TOOL_RESULT, {"output": _LEGACY, "is_error": True}
+        AgentEventType.TOOL_RESULT, {"output": _LEGACY, "isError": True}
     )
     assert bridge_mod.tool_result_lost_pod_bind(event)
 
