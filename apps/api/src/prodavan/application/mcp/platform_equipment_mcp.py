@@ -9,7 +9,7 @@ from prodavan.application.mcp.bridge_env import platform_mcp_bridge_env_refs
 from prodavan.infrastructure.projects.workspace import WorkspaceLayoutWriter
 
 PACKAGE_NAME = "prodavan-equipment"
-PACKAGE_VERSION = "2.4.3"
+PACKAGE_VERSION = "2.4.4"
 
 _TOOL_NAMES = (
     "equipment_catalog_sources",
@@ -32,6 +32,7 @@ _TOOL_NAMES = (
     "build_group_upsert",
     "build_group_item_upsert",
     "ready_build_upsert",
+    "ready_build_slot_upsert",
     "ready_build_attach",
 )
 

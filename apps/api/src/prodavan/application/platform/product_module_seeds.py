@@ -7205,6 +7205,12 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "label": "Сборка в чат",
                 "description": "Копирование готовой сборки на позицию заказчика",
             },
+            {
+                "server": "prodavan-equipment",
+                "tool": "ready_build_slot_upsert",
+                "label": "Слот готовой сборки",
+                "description": "Создание или правка одного слота сборки (не всех)",
+            },
         ],
         "mcp_tools": [
                     {
@@ -7418,7 +7424,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "row_id": "equipment_mcp_default",
                     "body": {
                         "name": "prodavan-equipment",
-                        "version": "2.4.3",
+                        "version": "2.4.4",
                         "enabled": True,
                     },
                 },
