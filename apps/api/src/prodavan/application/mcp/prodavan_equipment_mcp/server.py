@@ -413,9 +413,18 @@ TOOLS: list[dict[str, Any]] = [
             "use it when 2 cheaper sticks beat 1 larger one). Quantity belongs to the "
             "SLOT, not to a candidate: it holds for any alternative of that slot. "
             "The slot price is multiplied by qty in price_total. "
-            "PATCH merges: omit = leave; null = clear. Optional: build_kind, slot_qty, "
-            "note, project_ids. components_count / price_total / match_kind / is_best / "
-            "alternatives_count / benefit_* are pipeline-owned — do not set them."
+            "slots PINS which candidate is the slot's component "
+            "({equipment_types.row_id: found_groups.row_id}). The pipeline picks the "
+            "cheapest accurate candidate automatically, BUT an existing slots entry "
+            "wins over that auto-pick — so after a build was priced once, adding a "
+            "cheaper candidate does NOT change the price until you re-pin the slot "
+            "here. This is how you fix a part number for a component type. The map is "
+            "stored whole: read the build first and send ALL slots with the one you "
+            "changed. Point a slot at a candidate of the SAME build+slot_type_id "
+            "(found_groups_list with build_id), otherwise it is ignored as stale. "
+            "PATCH merges: omit = leave; null = clear. Optional: build_kind, slots, "
+            "slot_qty, note, project_ids. components_count / price_total / match_kind / "
+            "is_best / alternatives_count / benefit_* are pipeline-owned — do not set them."
         ),
         "inputSchema": {
             "type": "object",
@@ -430,6 +439,16 @@ TOOLS: list[dict[str, Any]] = [
                 "build_kind": {
                     "type": ["string", "null"],
                     "enum": ["pc", "server", None],
+                },
+                "slots": {
+                    "type": ["object", "null"],
+                    "description": (
+                        "Chosen component per slot: {equipment_types.row_id: "
+                        "found_groups.row_id}. Overrides the pipeline's automatic "
+                        "cheapest pick. Send the WHOLE map (read the build first) — "
+                        "the field is replaced, not merged key by key."
+                    ),
+                    "additionalProperties": {"type": "string"},
                 },
                 "slot_qty": {
                     "type": ["object", "null"],
@@ -850,6 +869,20 @@ def _validate_build_body(body: dict[str, Any], *, creating: bool) -> None:
             if num < 1 or num != int(num):
                 raise RuntimeError(
                     f"slot_qty[{slot!r}] must be a whole number >= 1 (got {value!r})"
+                )
+    if "slots" in body and body["slots"] is not None:
+        slots = body["slots"]
+        if not isinstance(slots, dict):
+            raise RuntimeError(
+                "slots must be an object {equipment_types.row_id: found_groups.row_id}"
+            )
+        for slot, group_id in slots.items():
+            if not str(slot or "").strip():
+                raise RuntimeError("slots keys must be non-empty equipment_types.row_id")
+            if not str(group_id or "").strip():
+                raise RuntimeError(
+                    f"slots[{slot!r}] must be a found_groups.row_id of THIS build's slot "
+                    "(use found_groups_list with build_id to get them)"
                 )
 
 
@@ -1433,6 +1466,7 @@ def _call_tool(name: str, arguments: dict[str, Any]) -> Any:
             "name",
             "line_id",
             "build_kind",
+            "slots",
             "slot_qty",
             "note",
             "project_ids",
@@ -1576,7 +1610,7 @@ def _handle(msg: dict[str, Any]) -> dict[str, Any] | None:
             "result": {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "prodavan-equipment", "version": "2.4.2"},
+                "serverInfo": {"name": "prodavan-equipment", "version": "2.4.3"},
             },
         }
     if method == "notifications/initialized":

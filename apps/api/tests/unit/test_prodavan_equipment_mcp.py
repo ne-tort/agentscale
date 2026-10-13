@@ -30,7 +30,7 @@ def test_tools_list_contains_catalog_and_sot_tools() -> None:
         mcp_server._handle({"jsonrpc": "2.0", "id": 9, "method": "initialize"})["result"][
             "serverInfo"
         ]["version"]
-        == "2.4.2"
+        == "2.4.3"
     )
 
 
@@ -386,6 +386,95 @@ def test_equipment_builds_upsert_and_delete(monkeypatch) -> None:
     assert calls[1][1].endswith("/equipment_builds/b1")
 
 
+def test_equipment_builds_upsert_pins_slot_component(monkeypatch) -> None:
+    """`slots` — закрепление кандидата за слотом (аналог found_groups_pick в UI).
+
+    Пайплайн сам выбирает дешёвейшего кандидата, НО существующая запись в
+    `slots` перекрывает автовыбор. Поэтому без этого параметра агент не мог
+    ни зафиксировать партномер за слотом, ни перевыбрать компонент после
+    добавления более дешёвой альтернативы — цена копии сборки не менялась.
+    """
+    monkeypatch.setenv("PRODAVAN_API_BASE_URL", "http://api.example/api/v1")
+    monkeypatch.setenv("PRODAVAN_AUTH_TOKEN", "tok")
+    monkeypatch.setenv("PRODAVAN_PROJECT_ID", "proj-1")
+
+    listed = mcp_server._handle({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+    tool = next(
+        t for t in listed["result"]["tools"] if t["name"] == "equipment_builds_upsert"
+    )
+    assert "slots" in tool["inputSchema"]["properties"]
+    assert "slots" in tool["description"]
+
+    posted: dict = {}
+
+    def fake_http(method, path, payload=None, *, session_id=None):
+        posted.update(payload or {})
+        return {"row_id": "b1"}
+
+    with patch.object(mcp_server, "_http", side_effect=fake_http):
+        resp = mcp_server._handle(
+            {
+                "jsonrpc": "2.0",
+                "id": 17,
+                "method": "tools/call",
+                "params": {
+                    "name": "equipment_builds_upsert",
+                    "arguments": {
+                        "row_id": "b1",
+                        "slots": {"etype_ram": "g_ram_8gb", "etype_cpu": "g_cpu"},
+                    },
+                },
+            }
+        )
+
+    assert resp["result"].get("isError") is not True
+    assert posted["body"]["slots"] == {"etype_ram": "g_ram_8gb", "etype_cpu": "g_cpu"}
+
+
+def test_equipment_builds_upsert_rejects_bad_slots(monkeypatch) -> None:
+    monkeypatch.setenv("PRODAVAN_API_BASE_URL", "http://api.example/api/v1")
+    monkeypatch.setenv("PRODAVAN_AUTH_TOKEN", "tok")
+    monkeypatch.setenv("PRODAVAN_PROJECT_ID", "proj-1")
+
+    for args, needle in (
+        ({"row_id": "b1", "slots": "g1"}, "slots must be an object"),
+        ({"row_id": "b1", "slots": {"etype_ram": ""}}, "must be a found_groups.row_id"),
+        ({"row_id": "b1", "slots": {"": "g1"}}, "non-empty equipment_types.row_id"),
+    ):
+        resp = mcp_server._handle(
+            {
+                "jsonrpc": "2.0",
+                "id": 18,
+                "method": "tools/call",
+                "params": {"name": "equipment_builds_upsert", "arguments": args},
+            }
+        )
+        assert resp["result"].get("isError") is True, args
+        assert needle in resp["result"]["content"][0]["text"], args
+
+    # null — легально: снять закрепление
+    posted: dict = {}
+
+    def fake_http(method, path, payload=None, *, session_id=None):
+        posted.update(payload or {})
+        return {"row_id": "b1"}
+
+    with patch.object(mcp_server, "_http", side_effect=fake_http):
+        resp = mcp_server._handle(
+            {
+                "jsonrpc": "2.0",
+                "id": 19,
+                "method": "tools/call",
+                "params": {
+                    "name": "equipment_builds_upsert",
+                    "arguments": {"row_id": "b1", "slots": None},
+                },
+            }
+        )
+    assert resp["result"].get("isError") is not True
+    assert posted["body"]["slots"] is None
+
+
 def test_equipment_builds_upsert_rejects_bad_kind(monkeypatch) -> None:
     monkeypatch.setenv("PRODAVAN_API_BASE_URL", "http://api.example/api/v1")
     monkeypatch.setenv("PRODAVAN_AUTH_TOKEN", "tok")
@@ -694,7 +783,7 @@ def test_tools_list_contains_ready_builds_catalog_tools() -> None:
         mcp_server._handle({"jsonrpc": "2.0", "id": 2, "method": "initialize"})["result"][
             "serverInfo"
         ]["version"]
-        == "2.4.2"
+        == "2.4.3"
     )
 
 
