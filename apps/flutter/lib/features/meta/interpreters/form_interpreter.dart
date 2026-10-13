@@ -406,12 +406,42 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
       return EmptyPlaceholder(title: l10n.adminModuleSeedEmpty);
     }
 
+    final linksRaw = uiJson['links'];
+    final linkEntries = linksRaw is List
+        ? linksRaw.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList()
+        : <Map<String, dynamic>>[];
+
     return ListView(
       padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
       children: [
         for (final name in fieldNames)
           if (colByName[name] != null) _field(context, colByName[name]!, name, uiJson),
+        // Навигация к связанным спискам (пул компонентов, сборки группы,
+        // слоты сборки) — иначе detail-страница замыкалась сама на себя.
+        if (linkEntries.isNotEmpty) ...[
+          const SizedBox(height: AppSpacing.md),
+          for (final link in linkEntries) _navLink(context, link),
+        ],
       ],
+    );
+  }
+
+  Widget _navLink(BuildContext context, Map<String, dynamic> link) {
+    final l10n = AppLocalizations.of(context);
+    final locale = Localizations.localeOf(context);
+    final title = resolveMetaLabel(link['label'], l10n, locale: locale);
+    final iconName = link['icon'] as String?;
+    final openView = link['open_view'] as String?;
+    final enabled = openView != null && openView.isNotEmpty && widget.onOpenView != null;
+    return AppNavPreference(
+      title: title,
+      icon: iconName != null && iconName.isNotEmpty
+          ? metaIconFromName(iconName)
+          : Icons.link_outlined,
+      enabled: enabled,
+      // Открываем связанный список с контекстом текущей строки: целевой вид
+      // фильтрует по row_filter_from_context (group_id / build_id = contextRowId).
+      onTap: enabled ? () => widget.onOpenView!(openView, rowId: _rowId) : () {},
     );
   }
 

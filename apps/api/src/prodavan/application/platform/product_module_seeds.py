@@ -5643,7 +5643,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "max_width": 110,
                         },
                     ],
-                    "row_tap": {"kind": "open_view", "view": "ready_builds_list"},
+                    "row_tap": {"kind": "open_view", "view": "build_group_settings"},
                     "context_bind": {"group_id": "contextRowId"},
                     "inline_add": {"field": "name", "title": "Добавить группу"},
                     "empty": _empty(
@@ -5680,6 +5680,19 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                         {"column": "is_enabled", "widget": "switch", "icon": "toggle_on"},
                         {"column": "note", "widget": "value", "icon": "edit_note"},
                     ],
+                    # переходы к связанным спискам этой группы
+                    "links": [
+                        {
+                            "label": {"ru": "Пул компонентов", "en": "Component pool"},
+                            "icon": "inventory_2",
+                            "open_view": "build_group_items_list",
+                        },
+                        {
+                            "label": {"ru": "Сборки группы", "en": "Group builds"},
+                            "icon": "precision_manufacturing",
+                            "open_view": "ready_builds_list",
+                        },
+                    ],
                 },
             },
             {
@@ -5695,6 +5708,8 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "title_field": "class_label",
                     "subtitle_fields": ["type_name", "part_number"],
                     "context_bind": {"group_id": "contextRowId"},
+                    # список пула открывается из группы — показываем только её строки
+                    "row_filter_from_context": {"group_id": "contextRowId"},
                     "columns": [
                         {
                             "field": "type_name",
@@ -5958,6 +5973,14 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                         },
                         {"column": "note", "widget": "value", "icon": "edit_note"},
                     ],
+                    # переход к слотам сборки (типы + выбранный компонент + цена)
+                    "links": [
+                        {
+                            "label": {"ru": "Слоты сборки", "en": "Build slots"},
+                            "icon": "view_quilt",
+                            "open_view": "ready_build_slots_list",
+                        },
+                    ],
                 },
             },
             {
@@ -5973,6 +5996,8 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "title_field": "type_name",
                     "subtitle_fields": ["class_key", "resolved_part_number"],
                     "context_bind": {"build_id": "contextRowId"},
+                    # список слотов открывается из сборки — только её строки
+                    "row_filter_from_context": {"build_id": "contextRowId"},
                     "columns": [
                         {
                             "field": "type_name",
