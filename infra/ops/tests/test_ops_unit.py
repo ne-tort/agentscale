@@ -24,6 +24,18 @@ def test_first_party_deployments_cover_api_web_celery() -> None:
     assert "agentscale-celery-beat" in names
 
 
+def test_first_party_deployments_cover_indexer() -> None:
+    """Регресс: индексатор не участвовал в rollout и неделями жил на старом коде.
+
+    Он крутится на том же образе :latest, но отдельным deployment'ом, поэтому
+    без явного включения в цели его правки (например doc_id офферов каталога)
+    не доезжали до dev: под оставался старым, пока его не пересоздавали по
+    другой причине.
+    """
+    assert "agentscale-celery-indexer" in set(FIRST_PARTY_DEPLOYMENTS)
+    assert ("agentscale-celery-indexer", "agentscale-dev") in set(DEPLOYMENT_TARGETS)
+
+
 def test_deployment_targets_include_probe_pod_in_sandboxes_namespace() -> None:
     """Probe pod (agent-runtime) lives in agentscale-dev-sandboxes, not agentscale."""
     names_by_ns: dict[str, set[str]] = {}
