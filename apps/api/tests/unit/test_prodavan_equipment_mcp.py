@@ -30,7 +30,7 @@ def test_tools_list_contains_catalog_and_sot_tools() -> None:
         mcp_server._handle({"jsonrpc": "2.0", "id": 9, "method": "initialize"})["result"][
             "serverInfo"
         ]["version"]
-        == "2.4.3"
+        == "2.4.4"
     )
 
 
@@ -772,18 +772,19 @@ def test_tools_list_contains_ready_builds_catalog_tools() -> None:
         "build_group_upsert",
         "build_group_item_upsert",
         "ready_build_upsert",
+        "ready_build_slot_upsert",
         "ready_build_attach",
     ):
         assert name in names
     # прежние инструменты не потеряны при добавлении новых
     assert "equipment_builds_delete" in names
     assert "found_groups_upsert" in names
-    assert len(names) == 20
+    assert len(names) == 21
     assert (
         mcp_server._handle({"jsonrpc": "2.0", "id": 2, "method": "initialize"})["result"][
             "serverInfo"
         ]["version"]
-        == "2.4.3"
+        == "2.4.4"
     )
 
 
@@ -1021,3 +1022,89 @@ def test_ready_build_attach_invokes_action(_env) -> None:
     bad = _call("ready_build_attach", {"ready_build_id": "rb1"})
     assert bad["result"].get("isError") is True
     assert "line_id" in bad["result"]["content"][0]["text"]
+
+
+def _env_ccc(monkeypatch):
+    monkeypatch.setenv("PRODAVAN_API_BASE_URL", "http://api.example/api/v1")
+    monkeypatch.setenv("PRODAVAN_AUTH_TOKEN", "tok")
+    monkeypatch.setenv("PRODAVAN_PROJECT_ID", "proj-1")
+
+
+def test_ready_build_slot_upsert_creates_and_patches_single_slot(monkeypatch) -> None:
+    """Патч ОДНОГО слота сборки — без перезаписи всего массива.
+
+    `ready_build_upsert` при наличии slots удаляет все слоты сборки и пишет
+    новые; чтобы перевыбрать/докрутить один компонент, нужен патч одной строки.
+    """
+    _env_ccc(monkeypatch)
+
+    posted: list[tuple] = []
+
+    def fake_http(method, path, payload=None, *, session_id=None):
+        posted.append((method, path, payload))
+        return {"row_id": "slot_new"}
+
+    with patch.object(mcp_server, "_http", side_effect=fake_http):
+        # создание слота
+        resp = mcp_server._handle(
+            {
+                "jsonrpc": "2.0",
+                "id": 20,
+                "method": "tools/call",
+                "params": {
+                    "name": "ready_build_slot_upsert",
+                    "arguments": {
+                        "build_id": "b1",
+                        "type_id": "etype_ram",
+                        "qty": 2,
+                        "mode": "dynamic",
+                        "class_key": "ram_16",
+                    },
+                },
+            }
+        )
+        assert resp["result"].get("isError") is not True
+        assert posted[-1][0] == "POST"
+        assert posted[-1][1].endswith("/ready_build_slots")
+        assert posted[-1][2]["body"]["qty"] == 2
+        assert posted[-1][2]["body"]["build_id"] == "b1"
+
+        # патч существующего: только qty, ничего лишнего
+        resp = mcp_server._handle(
+            {
+                "jsonrpc": "2.0",
+                "id": 21,
+                "method": "tools/call",
+                "params": {
+                    "name": "ready_build_slot_upsert",
+                    "arguments": {"row_id": "slot_ram", "qty": 4},
+                },
+            }
+        )
+        assert resp["result"].get("isError") is not True
+        assert posted[-1][0] == "PATCH"
+        assert posted[-1][1].endswith("/ready_build_slots/slot_ram")
+        assert posted[-1][2]["body"] == {"qty": 4}
+
+
+def test_ready_build_slot_upsert_validates_qty_and_mode(monkeypatch) -> None:
+    _env_ccc(monkeypatch)
+
+    for args, needle in (
+        ({"build_id": "b1", "type_id": "etype_ram", "qty": 1.5, "class_key": "ram_16"},
+         "qty must be a whole number"),
+        ({"build_id": "b1", "type_id": "etype_ram", "mode": "nope", "class_key": "ram_16"},
+         "mode must be one of"),
+        ({"build_id": "b1"}, "type_id is required"),
+        ({"row_id": "slot_x", "qty": 0}, "qty must be a whole number"),
+    ):
+        resp = mcp_server._handle(
+            {
+                "jsonrpc": "2.0",
+                "id": 22,
+                "method": "tools/call",
+                "params": {"name": "ready_build_slot_upsert", "arguments": args},
+            }
+        )
+        assert resp["result"].get("isError") is True, args
+        assert needle in resp["result"]["content"][0]["text"], args

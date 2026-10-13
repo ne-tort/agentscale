@@ -707,6 +707,50 @@ TOOLS: list[dict[str, Any]] = [
             "additionalProperties": False,
         },
     },
+    {
+        "name": "ready_build_slot_upsert",
+        "description": (
+            "Create or patch ONE slot of a ready build (ready_build_slots) — use this "
+            "to change a single component WITHOUT resending the whole slots array "
+            "(ready_build_upsert replaces ALL slots). "
+            "On create: build_id AND type_id (equipment_types.row_id) are required; "
+            "for mode='fixed' also item_id (pool component) or own part_number / "
+            "aliases_pn / aliases_hash to pin; for mode='dynamic' a class_key to draw "
+            "from. To CHANGE the component of an existing slot, patch it with the new "
+            "item_id (a build_group_items.row_id from the SAME group + class). "
+            "qty is a whole number >= 1 (e.g. 2 RAM sticks)."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "module_id": {"type": "string", "default": DEFAULT_MODULE_ID},
+                "build_id": {
+                    "type": "string",
+                    "description": "ready_builds.row_id (required on create)",
+                },
+                "row_id": {
+                    "type": "string",
+                    "description": "ready_build_slots.row_id — patch an existing slot",
+                },
+                "type_id": {
+                    "type": ["string", "null"],
+                    "description": "equipment_types.row_id (required on create)",
+                },
+                "qty": {"type": ["number", "integer", "null"]},
+                "mode": {"type": ["string", "null"], "enum": ["dynamic", "fixed", None]},
+                "class_key": {"type": ["string", "null"]},
+                "item_id": {
+                    "type": ["string", "null"],
+                    "description": "build_group_items.row_id (pinned pool component)",
+                },
+                "part_number": {"type": ["string", "null"]},
+                "aliases_pn": {"type": ["string", "null"]},
+                "aliases_hash": {"type": ["string", "null"]},
+                "note": {"type": ["string", "null"]},
+            },
+            "additionalProperties": False,
+        },
+    },
 ]
 
 
@@ -1293,6 +1337,43 @@ def _ready_build_upsert(mid: str, arguments: dict[str, Any], sid: str | None) ->
     return {"build": result, "slots_replaced": True, "slots": created}
 
 
+def _ready_build_slot_upsert(mid: str, arguments: dict[str, Any], sid: str | None) -> Any:
+    """Один слот сборки: создать или патчить, не перезаписывая остальные."""
+    row_id = str(arguments.get("row_id") or "").strip() or None
+    build_id = str(arguments.get("build_id") or "").strip()
+    if not row_id and not build_id:
+        raise RuntimeError("build_id is required when creating a ready_build_slots row")
+    body = _pick_present(arguments, _SLOT_KEYS)
+    if row_id is None:
+        body = _validate_slot({**body, "build_id": build_id})
+        body["build_id"] = build_id
+        return _http(
+            "POST",
+            _data_path(mid, "ready_build_slots"),
+            {"body": body},
+            session_id=sid,
+        )
+    # патч: только переданные поля; qty приводим к целому ≥1
+    if "qty" in body and body["qty"] is not None:
+        try:
+            qty_num = float(body["qty"])
+        except (TypeError, ValueError):
+            raise RuntimeError("qty must be a whole number >= 1") from None
+        if qty_num < 1 or qty_num != int(qty_num):
+            raise RuntimeError("qty must be a whole number >= 1")
+    if "mode" in body and body["mode"] is not None:
+        mode = str(body["mode"]).strip() or "dynamic"
+        if mode not in SLOT_MODES:
+            raise RuntimeError(f"mode must be one of {sorted(SLOT_MODES)}")
+        body["mode"] = mode
+    return _http(
+        "PATCH",
+        _data_path(mid, "ready_build_slots", row_id),
+        {"body": body},
+        session_id=sid,
+    )
+
+
 def _validate_build_meta(body: dict[str, Any], *, creating: bool) -> None:
     if creating:
         if not str(body.get("group_id") or "").strip():
@@ -1550,6 +1631,8 @@ def _call_tool(name: str, arguments: dict[str, Any]) -> Any:
         )
     if name == "ready_build_upsert":
         return _ready_build_upsert(mid, arguments, sid)
+    if name == "ready_build_slot_upsert":
+        return _ready_build_slot_upsert(mid, arguments, sid)
     if name == "ready_build_attach":
         return _ready_build_attach(mid, arguments, sid)
 
@@ -1617,7 +1700,7 @@ def _handle(msg: dict[str, Any]) -> dict[str, Any] | None:
             "result": {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "prodavan-equipment", "version": "2.4.3"},
+                "serverInfo": {"name": "prodavan-equipment", "version": "2.4.4"},
             },
         }
     if method == "notifications/initialized":
