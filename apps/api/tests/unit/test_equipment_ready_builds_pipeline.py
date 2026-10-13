@@ -771,3 +771,29 @@ async def test_pipeline_counts_ram_sticks_and_drives_from_slots(io: FakeIO) -> N
     # qty_total по-прежнему считает все слоты (psu не плашка и не диск)
     assert build["qty_total"] == 7.0
     assert build["slots_count"] == 4
+
+
+@pytest.mark.asyncio
+async def test_pipeline_writes_group_id_onto_slots(io: FakeIO) -> None:
+    """Слот получает group_id своей сборки (денормализация).
+
+    Без него список пула при замене компонента не может отфильтровать
+    альтернативы по группе без джойна сборка → группа.
+    """
+    await _add_build(
+        io,
+        row_id="b_gid",
+        name="Сборка с group_id на слотах",
+        ram_gb=16,
+        slots=[{"type_id": "etype_cpu", "class_key": "cpu_6c", "mode": "dynamic", "qty": 1}],
+    )
+
+    svc = ReadyBuildsPipelineService(session=object())
+    await svc.run(io)
+
+    slot = next(
+        r
+        for r in io._tables["ready_build_slots"]
+        if (r.get("body") or {}).get("build_id") == "b_gid"
+    )
+    assert (slot.get("body") or {}).get("group_id") == "grp_am4"

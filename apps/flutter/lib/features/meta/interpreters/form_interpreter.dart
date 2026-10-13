@@ -555,6 +555,26 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
         },
       );
     }
+    if (widgetKind == 'pick') {
+      // Поле-выбор из связанного списка (пул компонентов и т.п.): открывает
+      // pick_view с контекстом текущей строки; запись выбора — через
+      // set_on_context целевого вида (поэтому само поле ничего не хранит).
+      final pickView = fieldCfg?['pick_view']?.toString() ?? '';
+      final displayField = fieldCfg?['title_field']?.toString() ?? '';
+      final displayRaw = displayField.isNotEmpty ? _values[displayField] : value;
+      final displayText = (displayRaw?.toString() ?? '').trim();
+      final enabled = !fieldReadOnly &&
+          pickView.isNotEmpty &&
+          widget.onOpenView != null &&
+          _rowId != null;
+      return AppNavPreference(
+        title: label,
+        icon: fieldIcon ?? Icons.search,
+        subtitle: displayText.isNotEmpty ? Text(displayText) : null,
+        enabled: enabled,
+        onTap: enabled ? () => widget.onOpenView!(pickView, rowId: _rowId) : () {},
+      );
+    }
     if (widgetKind == 'remote_database_picker') {
       if (_rowId == null) {
         return AppNavPreference(
