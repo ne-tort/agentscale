@@ -23,6 +23,7 @@ class BuildSlotsField extends StatelessWidget {
     required this.onOpenPick,
     this.slotQty = const {},
     this.onQtyChanged,
+    this.slotTypes = const {},
   });
 
   final dynamic seeds;
@@ -42,15 +43,45 @@ class BuildSlotsField extends StatelessWidget {
   final Map<String, dynamic> slotQty;
   final void Function(String typeId, int qty)? onQtyChanged;
 
+  /// Карта слот→тип (slot_key → type_id). Нужна, чтобы рендерить несколько
+  /// слотов одного типа (например SSD + HDD в одной сборке): у них разные
+  /// slot_key, а тип общий.
+  final Map<String, dynamic> slotTypes;
+
   @override
   Widget build(BuildContext context) {
     final types = _eligibleTypes();
+    final typeIds = types.map((t) => t.id).toSet();
+    // дополнительные слоты тех же типов — их ключ в slots/slotQty это
+    // идентичность слота (slot_id), а не id типа
+    final extra = <_TypeSlot>[];
+    final slotKeys = <String>{...slots.keys, ...slotQty.keys};
+    for (final key in slotKeys) {
+      if (typeIds.contains(key) || key.isEmpty) continue;
+      final typeId = slotTypes[key]?.toString() ?? '';
+      final name = _typeName(types, typeId) ?? key;
+      extra.add(_TypeSlot(id: key, name: name, sortOrder: 900, typeId: typeId));
+    }
+    extra.sort((a, b) {
+      final c = a.sortOrder.compareTo(b.sortOrder);
+      if (c != 0) return c;
+      return a.id.compareTo(b.id);
+    });
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         for (final type in types) _slotRow(context, type),
+        for (final type in extra) _slotRow(context, type),
       ],
     );
+  }
+
+  String? _typeName(List<_TypeSlot> types, String typeId) {
+    if (typeId.isEmpty) return null;
+    for (final t in types) {
+      if (t.id == typeId) return t.name;
+    }
+    return null;
   }
 
   Widget _slotRow(BuildContext context, _TypeSlot type) {
@@ -63,7 +94,7 @@ class BuildSlotsField extends StatelessWidget {
       icon: Icons.memory_outlined,
       subtitle: subtitle,
       enabled: !readOnly && rowId != null && onOpenPick != null,
-      onTap: () => _openSlotPick(type.id),
+      onTap: () => _openSlotPick(type),
       trailing: _qtyStepper(context, type.id, selected != null),
     );
   }
@@ -208,10 +239,12 @@ class BuildSlotsField extends StatelessWidget {
     return scope == buildKind;
   }
 
-  void _openSlotPick(String typeId) {
+  void _openSlotPick(_TypeSlot slot) {
     if (rowId == null || onOpenPick == null) return;
     try {
-      seeds.setPickContext(typeId: typeId, slotKey: typeId);
+      // slotKey = идентичность слота (куда пишется выбор), pickTypeId — тип
+      // для фильтра кандидатов; у обычного слота они совпадают
+      seeds.setPickContext(typeId: slot.pickTypeId, slotKey: slot.id);
     } catch (_) {
       return;
     }
@@ -224,11 +257,20 @@ class _TypeSlot {
     required this.id,
     required this.name,
     required this.sortOrder,
+    this.typeId,
   });
 
+  /// Ключ слота: для обычного типа — id типа; для дополнительного слота того
+  /// же типа — идентичность слота (slot_id).
   final String id;
   final String name;
   final int sortOrder;
+
+  /// Тип комплектующего этого слота (для фильтра пикера). По умолчанию = id.
+  final String? typeId;
+
+  /// Реальный тип для пикера/контекста.
+  String get pickTypeId => (typeId == null || typeId!.isEmpty) ? id : typeId!;
 }
 
 Map<String, dynamic> parseSlotsMap(dynamic raw) {

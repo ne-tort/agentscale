@@ -1484,6 +1484,8 @@ def _call_tool(name: str, arguments: dict[str, Any]) -> Any:
             "line_id",
             "build_id",
             "slot_type_id",
+            # идентичность конкретного слота — несколько компонентов одного типа
+            "slot_id",
             "part_number",
             "aliases_pn",
             "aliases_hash",

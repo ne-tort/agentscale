@@ -1266,6 +1266,74 @@ async def test_build_from_slot_groups_best_and_budget(io: FakeIO) -> None:
     assert all(g.get("owner_kind") == "line" for g in line_groups)
 
 
+async def test_build_two_slots_of_same_type_stay_separate(monkeypatch) -> None:
+    """Два компонента одного типа (SSD + HDD) — разные слоты, не схлопываются.
+
+    `found_groups` группируются по (build_id, slot_id), а не по slot_type_id:
+    без идентичности слота два компонента одного типа становились одним слотом
+    и в цену входил только лучший из них.
+    """
+    from prodavan.application.modules.equipment_offers_service import EquipmentPipelineService
+
+    docs = [
+        _doc("h_ssd", part_number="SSD-500", title="SSD", supplier="П", price_num=100.0),
+        _doc("h_hdd", part_number="HDD-2T", title="HDD", supplier="П", price_num=50.0),
+    ]
+    _patch_os(monkeypatch, docs)
+    monkeypatch.setattr(fx_mod, "convert_offer_price", _fake_convert)
+    io = FakeIO(
+        {
+            "catalogs": [{"row_id": "cat_1", "body": {"name": "T", "status": "ready", "paused": False}}],
+            "trusted_sellers": [{"row_id": "s1", "body": {"name": "П", "is_enabled": True}}],
+            "request_lines": [{"row_id": "line_1", "body": {"title": "ПК", "qty": 1, "status": "open"}}],
+            "equipment_builds": [
+                {"row_id": "b1", "body": {"name": "Двухдисковая", "build_kind": "pc", "line_id": "line_1", "slots": {}}},
+            ],
+            "found_groups": [
+                # два слота типа etype_storage с РАЗНОЙ идентичностью
+                {"row_id": "g_ssd", "body": {"build_id": "b1", "slot_type_id": "etype_storage", "slot_id": "s_ssd", "part_number": "SSD-500", "match_kind": "exact"}},
+                {"row_id": "g_hdd", "body": {"build_id": "b1", "slot_type_id": "etype_storage", "slot_id": "s_hdd", "part_number": "HDD-2T", "match_kind": "exact"}},
+            ],
+            "found_offers": [],
+            "budget_lines": [],
+            "procurement": [],
+            "equipment_items": [],
+        }
+    )
+
+    svc = EquipmentPipelineService(session=object())
+    await svc.run(io, materialize=True)
+
+    b = io.body("equipment_builds", "b1")
+    # оба слота учтены: 100 + 50 = 150, а не «лучший из них»
+    assert b["price_total"] == 150.0
+    assert b["components_count"] == 2
+    # slots ведётся по идентичности слота, не по типу
+    assert set((b.get("slots") or {}).keys()) == {"s_ssd", "s_hdd"}
+
+
+async def test_slot_id_falls_back_to_slot_type_id(io: FakeIO) -> None:
+    """Старые сборки без slot_id ведут себя ровно как раньше (ключ = типу)."""
+    svc = EquipmentPipelineService(session=object())
+    await io.create(
+        "equipment_builds",
+        {"name": "Однослотная", "build_kind": "pc", "line_id": "line_1", "slots": {}},
+    )
+    build_id = io.rows("equipment_builds")[-1]["row_id"]
+    await io.create(
+        "found_groups",
+        {"build_id": build_id, "slot_type_id": "etype_cpu", "part_number": "ABC-123", "match_kind": "exact"},
+    )
+
+    await svc.run(io, materialize=True)
+
+    b = io.body("equipment_builds", build_id)
+    # ключ слота = slot_type_id (как раньше)
+    assert (b.get("slots") or {}).get("etype_cpu")
+    # ABC-123 в фикстуре: лучший оффер — приоритетный поставщик (120)
+    assert b["price_total"] == 120.0
+
+
 async def test_slot_group_orphan_cleanup_keeps_build_groups(io: FakeIO) -> None:
     """Группа-кандидат слота (build_id) не считается сиротой и не удаляется."""
     svc = EquipmentPipelineService(session=object())

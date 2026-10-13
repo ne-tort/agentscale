@@ -1561,9 +1561,15 @@ class EquipmentPipelineService:
         items_by_id = {str(r.get("row_id") or ""): r for r in items}
         offers_by_id = {str(r.get("row_id") or ""): r for r in offers}
 
-        # Кандидаты слотов: группы с build_id И slot_type_id. Группа без слота
-        # (build_id есть, slot_type_id пуст) в цену сборки не входит: иначе она
-        # попала бы в фантомный слот "" и молча увеличила price_total.
+        # Кандидаты слотов: группы с build_id И идентичностью слота. Группа без
+        # слота (build_id есть, но ни slot_id, ни slot_type_id) в цену сборки
+        # не входит: иначе она попала бы в фантомный слот "" и молча увеличила
+        # price_total.
+        #
+        # Ключ слота — slot_id, а при его отсутствии slot_type_id. Так две
+        # группы одного ТИПА (например SSD + HDD в одной сборке) остаются
+        # разными слотами, а не схлопываются в один; для сборок с одним
+        # компонентом на тип ключ равен slot_type_id, как раньше.
         groups_by_build_slot: dict[tuple[str, str], list[dict[str, Any]]] = {}
         unassigned_slot_groups = 0
         for g in groups:
@@ -1571,14 +1577,14 @@ class EquipmentPipelineService:
             bid = str(gbody.get("build_id") or "")
             if not bid:
                 continue
-            slot = str(gbody.get("slot_type_id") or "")
+            slot = str(gbody.get("slot_id") or gbody.get("slot_type_id") or "").strip()
             if not slot:
                 unassigned_slot_groups += 1
                 continue
             groups_by_build_slot.setdefault((bid, slot), []).append(g)
         if unassigned_slot_groups:
             logger.warning(
-                "pipeline: %d групп(а) сборки без slot_type_id — не учтены в цене",
+                "pipeline: %d групп(а) сборки без слота — не учтены в цене",
                 unassigned_slot_groups,
             )
 
@@ -1943,7 +1949,8 @@ class EquipmentPipelineService:
                 if not comp_seller or comp_price is None:
                     continue
                 per_slot = _num_or(
-                    slot_qty.get(str(gb.get("slot_type_id") or "")), 1.0
+                    # по идентичности слота (slot_id или slot_type_id)
+                    slot_qty.get(str(gb.get("slot_id") or gb.get("slot_type_id") or "")), 1.0
                 ) or 1.0
                 lines_by_seller.setdefault(comp_seller.casefold(), []).append(
                     {

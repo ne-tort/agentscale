@@ -680,6 +680,8 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
         // WAVE11: количество на слот. Пересчёт цены делает серверный пайплайн
         // (запись equipment_builds триггерит equipment_pipeline_sync).
         slotQty: parseSlotQtyMap(_values['slot_qty']),
+        // карта слот→тип — рендерит несколько слотов одного типа (SSD+HDD)
+        slotTypes: parseSlotsMap(_values['slot_types']),
         onQtyChanged: fieldReadOnly
             ? null
             : (typeId, qty) {

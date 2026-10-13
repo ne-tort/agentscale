@@ -593,18 +593,24 @@ class ModuleActionExecutor:
         groups_created = 0
         groups: list[dict[str, Any]] = []
         skipped: list[str] = []
+        slot_types: dict[str, str] = {}
         for slot in slots:
             sbody = slot.get("body") or {}
             type_id = str(sbody.get("type_id") or "")
             if not type_id:
                 continue
+            # идентичность слота — row_id каталожного слота: две строки одного
+            # типа (например SSD + HDD) остаются разными слотами и в копии
+            slot_row_id = str(slot.get("row_id") or "").strip()
+            slot_id = slot_row_id or type_id
+            slot_types[slot_id] = type_id
             qty_raw = sbody.get("qty")
             try:
                 qty = int(float(qty_raw)) if qty_raw not in (None, "") else 1
             except (TypeError, ValueError):
                 qty = 1
             if qty > 1:
-                slot_qty[type_id] = qty
+                slot_qty[slot_id] = qty
 
             # Ключи берём у РАЗРЕШЁННОГО компонента пула (то, что пайплайн
             # каталога выбрал по цене), иначе — у собственных ключей слота.
@@ -621,6 +627,10 @@ class ModuleActionExecutor:
                 {
                     "build_id": build_id,
                     "slot_type_id": type_id,
+                    # идентичность конкретного слота — по нему пайплайн
+                    # группирует кандидатов; без неё две строки одного типа
+                    # схлопывались бы в один слот
+                    "slot_id": slot_id,
                     "part_number": part_number,
                     "aliases_pn": aliases_pn,
                     "aliases_hash": aliases_hash,
@@ -641,17 +651,24 @@ class ModuleActionExecutor:
             groups.append(
                 {
                     "slot_type_id": type_id,
+                    "slot_id": slot_id,
                     "group_id": str((group or {}).get("row_id") or ""),
                     "part_number": part_number,
                     "qty": qty,
                 }
             )
 
-        if slot_qty:
+        if slot_qty or slot_types:
             await io.update(
                 "equipment_builds",
                 build_id,
-                {**(created.get("body") or {}), "slot_qty": slot_qty},
+                {
+                    **(created.get("body") or {}),
+                    "slot_qty": slot_qty,
+                    # карта слот→тип — UI редактора слотов рендерит слоты по ней
+                    # (несколько компонентов одного типа остаются разными строками)
+                    "slot_types": slot_types,
+                },
             )
 
         # Материализация офферов копии — штатный пайплайн позиций.
