@@ -671,3 +671,52 @@ async def test_attach_ready_build_requires_existing_line(io: FakeIO, monkeypatch
             session_id="chat_1",
         )
     assert err2.value.status == 422
+
+
+@pytest.mark.asyncio
+async def test_pipeline_fills_type_name_from_equipment_types(io: FakeIO) -> None:
+    """`type_name` — зеркало ref'а `type_id`; его отдают компактная проекция
+    каталога для агента и колонка «Тип» в UI, но сам никто не заполняет.
+
+    На dev у созданного агентом каталога названия типов были пустые
+    (`type_name: ""` у всех 4 слотов и 4 компонентов пула).
+    """
+    io._tables["equipment_types"] = [
+        {"row_id": "etype_cpu", "body": {"name": "Процессор"}},
+        {"row_id": "etype_ram", "body": {"name": "Оперативная память"}},
+        # типа без имени быть не должно, но зеркало не должно и затирать имеющееся
+        {"row_id": "etype_ghost", "body": {"name": "   "}},
+    ]
+    await _add_build(
+        io,
+        row_id="b_tn",
+        name="Сборка с именами типов",
+        ram_gb=16,
+        slots=[{"type_id": "etype_cpu", "class_key": "cpu_6c", "mode": "dynamic", "qty": 1}],
+    )
+
+    svc = ReadyBuildsPipelineService(session=object())
+    await svc.run(io)
+
+    # пул
+    cpu_item = io.body("build_group_items", "it_cpu_a")
+    assert cpu_item["type_name"] == "Процессор"
+    # слоты
+    slot = next(
+        io.body("ready_build_slots", r["row_id"])
+        for r in io._tables["ready_build_slots"]
+        if (r.get("body") or {}).get("build_id") == "b_tn"
+    )
+    assert slot["type_name"] == "Процессор"
+
+
+@pytest.mark.asyncio
+async def test_pipeline_does_not_invent_type_name_for_unknown_type(io: FakeIO) -> None:
+    """Нет справочника типов → поле не трогаем (и не пишем пустую строку)."""
+    io._tables.pop("equipment_types", None)
+    io._tables["build_group_items"][0]["body"]["type_name"] = "Ручное название"
+
+    svc = ReadyBuildsPipelineService(session=object())
+    await svc.run(io)
+
+    assert io.body("build_group_items", "it_cpu_a")["type_name"] == "Ручное название"
