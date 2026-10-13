@@ -3076,6 +3076,34 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "default": "",
             },
             {
+                "table_slug": "ready_builds",
+                "name": "gpu_gb",
+                "label": {"ru": "GPU, ГБ", "en": "GPU, GB"},
+                "type": "number",
+                "required": False,
+            },
+            {
+                # Плашки ОЗУ и диски — производные от слотов своего типа, а не
+                # отдельно вводимые поля: «сколько плашек/дисков» должно
+                # отвечать на вопрос, сколько таких компонентов добавлено.
+                "table_slug": "ready_builds",
+                "name": "ram_sticks",
+                "label": {"ru": "ОЗУ, плашек", "en": "RAM sticks"},
+                "type": "number",
+                "required": False,
+                "default": 0,
+                "read_only": True,
+            },
+            {
+                "table_slug": "ready_builds",
+                "name": "storage_drives",
+                "label": {"ru": "Накопителей, шт", "en": "Drives"},
+                "type": "number",
+                "required": False,
+                "default": 0,
+                "read_only": True,
+            },
+            {
                 # Ключ ранжирования: «дешевлейшая сборка» считается СТРОГО внутри
                 # (group_id, class_signature). Разные сигнатуры = разные витрины,
                 # они не конкурируют (16 ГБ не «побеждает» 32 ГБ ценой).
@@ -3107,7 +3135,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
             {
                 "table_slug": "ready_builds",
                 "name": "slots_count",
-                "label": {"ru": "Слотов", "en": "Slots"},
+                "label": {"ru": "Типов комплектующих", "en": "Component kinds"},
                 "type": "number",
                 "required": False,
                 "default": 0,
@@ -3116,7 +3144,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
             {
                 "table_slug": "ready_builds",
                 "name": "qty_total",
-                "label": {"ru": "Всего штук", "en": "Total units"},
+                "label": {"ru": "Компонентов всего", "en": "Total components"},
                 "type": "number",
                 "required": False,
                 "default": 0,
@@ -5602,7 +5630,14 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                         },
                         {
                             "field": "price_min",
-                            "label": {"ru": "Цена от ₽", "en": "From"},
+                            "label": {"ru": "Сборки от ₽", "en": "Builds from"},
+                            "format": "offer_price",
+                            "align": "end",
+                            "max_width": 110,
+                        },
+                        {
+                            "field": "price_max",
+                            "label": {"ru": "Сборки до ₽", "en": "Builds up to"},
                             "format": "offer_price",
                             "align": "end",
                             "max_width": 110,
@@ -5805,25 +5840,54 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "field": "cpu_cores",
                             "label": {"ru": "Ядер", "en": "Cores"},
                             "align": "end",
-                            "max_width": 80,
+                            "max_width": 70,
                         },
                         {
                             "field": "ram_gb",
                             "label": {"ru": "ОЗУ ГБ", "en": "RAM GB"},
                             "align": "end",
-                            "max_width": 90,
+                            "max_width": 70,
+                        },
+                        {
+                            "field": "ram_sticks",
+                            "label": {"ru": "Плашек", "en": "Sticks"},
+                            "align": "end",
+                            "max_width": 70,
+                        },
+                        {
+                            "field": "storage_kind",
+                            "label": {"ru": "Диск", "en": "Drive"},
+                            "max_width": 70,
                         },
                         {
                             "field": "storage_gb",
-                            "label": {"ru": "Диск ГБ", "en": "Storage GB"},
+                            "label": {"ru": "Диск ГБ", "en": "GB"},
                             "align": "end",
-                            "max_width": 95,
+                            "max_width": 80,
+                        },
+                        {
+                            "field": "storage_drives",
+                            "label": {"ru": "Дисков", "en": "Drives"},
+                            "align": "end",
+                            "max_width": 70,
+                        },
+                        {
+                            "field": "gpu_gb",
+                            "label": {"ru": "GPU ГБ", "en": "GPU GB"},
+                            "align": "end",
+                            "max_width": 70,
                         },
                         {
                             "field": "slots_count",
-                            "label": {"ru": "Слотов", "en": "Slots"},
+                            "label": {"ru": "Типов компл.", "en": "Kinds"},
                             "align": "end",
-                            "max_width": 85,
+                            "max_width": 80,
+                        },
+                        {
+                            "field": "qty_total",
+                            "label": {"ru": "Компл. всего", "en": "Units"},
+                            "align": "end",
+                            "max_width": 80,
                         },
                         {
                             "field": "price_total",

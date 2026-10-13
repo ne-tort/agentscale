@@ -58,6 +58,11 @@ TYPES_TABLE = "equipment_types"
 MODE_DYNAMIC = "dynamic"
 MODE_FIXED = "fixed"
 
+# Идентификаторы типов, чья численность показываем отдельно (плашки, диски).
+# Сидятся со стабильными id в product_module_seeds.
+RAM_TYPE_ID = "etype_ram"
+STORAGE_TYPE_ID = "etype_storage"
+
 
 def class_signature(body: dict[str, Any]) -> str:
     """Нормализованная сигнатура класса сборки — ключ ранжирования.
@@ -81,6 +86,9 @@ def class_signature(body: dict[str, Any]) -> str:
         _text("storage_kind"),
         f"sto{_num('storage_gb')}",
         _text("gpu_class"),
+        # gpu_gb — такая же классовая характеристика, как ram_gb: две сборки с
+        # разным объёмом видеопамяти не должны конкурировать по цене
+        f"gpu{_num('gpu_gb')}gb",
         _text("budget_tier"),
     ]
     return "|".join(parts)
@@ -326,6 +334,8 @@ class ReadyBuildsPipelineService:
             build_slots = slots_by_build.get(bid) or []
             slots_count = len(build_slots)
             qty_total = 0.0
+            ram_sticks = 0.0
+            storage_drives = 0.0
             total = 0.0
             unresolved = 0
             any_on_order = False
@@ -335,6 +345,13 @@ class ReadyBuildsPipelineService:
                 res = resolved_by_slot.get(sid) or {}
                 qty = float(res.get("qty") or 1.0)
                 qty_total += qty
+                # плашки ОЗУ и диски считаются по слотам своего типа — из
+                # добавленных компонентов, а не из отдельного поля
+                slot_type = str((slot.get("body") or {}).get("type_id") or "")
+                if slot_type == RAM_TYPE_ID:
+                    ram_sticks += qty
+                elif slot_type == STORAGE_TYPE_ID:
+                    storage_drives += qty
                 price = res.get("price")
                 if price is None:
                     unresolved += 1
@@ -352,6 +369,10 @@ class ReadyBuildsPipelineService:
                 updates["slots_count"] = slots_count
             if _num_or(body.get("qty_total"), 0) != qty_total:
                 updates["qty_total"] = qty_total
+            if _num_or(body.get("ram_sticks"), 0) != ram_sticks:
+                updates["ram_sticks"] = ram_sticks
+            if _num_or(body.get("storage_drives"), 0) != storage_drives:
+                updates["storage_drives"] = storage_drives
             if _num_or(body.get("price_total"), None) != total:
                 updates["price_total"] = total
             if _num_or(body.get("unresolved_count"), 0) != unresolved:
