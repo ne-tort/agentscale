@@ -175,9 +175,27 @@ def source_hash(supplier: str, title: str) -> str:
 
 
 def _source_row_key(mapped: dict[str, str], raw: dict[str, Any], seq: int) -> str:
+    """Ключ строки источника (= одного ПРЕДЛОЖЕНИЯ) для doc_id.
+
+    Документ индекса плоский: на строку один `supplier` / `price` / `in_stock` /
+    `src_hash`. Значит один партномер у нескольких поставщиков — это несколько
+    документов, и ключ обязан включать поставщика.
+
+    Прежний `pn:{pn}` схлопывал всех поставщиков одного партномера в один
+    документ (last-write-wins): файл из 75 строк с 25 партномерами давал в
+    индексе 25 документов, и «лучшая цена по поставщику внутри партномера»
+    вырождалась в единственную (случайную) цену. На этом же держится WAVE11 —
+    выбор дешевле альтернативы внутри партномера и внутри группы.
+
+    Взята пара (pn, src_hash): `src_hash` и есть принятая в платформе
+    идентичность предложения (по ней `found_offers` матчится с живым
+    каталогом), поэтому doc_id становится 1:1 с предложением. Идемпотентность
+    между прогонами здесь не нужна — индексация делает полный wipe+reindex.
+    """
     pn = (mapped.get("part_number") or "").strip()
     if pn:
-        return f"pn:{pn}"
+        offer = source_hash(mapped.get("supplier") or "", mapped.get("title") or "")
+        return f"pn:{pn}:{offer}"
     title = (mapped.get("title") or "").strip()
     if title:
         return f"t:{hashlib.sha1(title.encode('utf-8')).hexdigest()[:16]}:{seq}"
