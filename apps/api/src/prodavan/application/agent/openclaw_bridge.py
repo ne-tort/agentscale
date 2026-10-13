@@ -16,7 +16,7 @@ import time
 from collections import OrderedDict
 from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -34,6 +34,7 @@ from prodavan.application.agent.runtime_transport import (
     resolve_runtime_endpoint,
     runtime_mode,
 )
+from prodavan.application.agent.tool_result import tool_result_is_error, tool_result_text
 from prodavan.config.settings import settings
 from prodavan.domain.agent import FROZEN_EVENT_TYPES, PLATFORM_STREAM_EVENT_TYPES, AgentEvent, AgentEventType
 from prodavan.domain.agent.errors import POD_NOT_RUNNING
@@ -122,23 +123,6 @@ _MCP_ENV_MISSING_MARKERS = (
 )
 
 
-def _tool_result_text(output: Any) -> str:
-    """Текст tool_result: MCP-ответ ({content:[{text}]}) или голая строка."""
-    if isinstance(output, str):
-        return output
-    if isinstance(output, dict):
-        content = output.get("content")
-        if isinstance(content, list):
-            parts = [
-                str(item.get("text") or "")
-                for item in content
-                if isinstance(item, dict)
-            ]
-            return "\n".join(p for p in parts if p)
-        return str(output.get("text") or "")
-    return ""
-
-
 def tool_result_lost_pod_bind(event: AgentEvent) -> bool:
     """True, если tool_result принёс ошибку про отсутствующий проектный env.
 
@@ -147,13 +131,18 @@ def tool_result_lost_pod_bind(event: AgentEvent) -> bool:
     рестарта контейнера он исчезает, а MCP-серверы пода продолжают отвечать
     на каждый вызов ошибкой. Это единственный достоверный признак, доступный
     API без похода в k8s, — по нему сбрасываем метку bind.
+
+    Флаг ошибки читаем через `tool_result_is_error`: боевой openclaw-адаптер
+    кладёт его в `output.isError`, а не в `data.is_error` (так делают только
+    codex/cursor/claude нормалайзеры), поэтому проверка лишь `data.is_error`
+    на dev/prod не срабатывала никогда.
     """
     if event.type != AgentEventType.TOOL_RESULT:
         return False
     data = event.data if isinstance(event.data, dict) else {}
-    if not data.get("is_error"):
+    if not tool_result_is_error(data):
         return False
-    text = _tool_result_text(data.get("output"))
+    text = tool_result_text(data.get("output"))
     return bool(text) and any(marker in text for marker in _MCP_ENV_MISSING_MARKERS)
 
 
