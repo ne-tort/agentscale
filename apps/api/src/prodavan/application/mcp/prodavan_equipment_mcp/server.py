@@ -606,10 +606,12 @@ TOOLS: list[dict[str, Any]] = [
             "ONE call — pass `slots` as an array; existing slots of the build are "
             "replaced by it (omit `slots` to leave them untouched). "
             "On create: group_id and name are required. "
-            "Class attributes (cpu_cores, ram_gb, storage_kind, storage_gb, gpu_class) "
+            "Class attributes (cpu_cores, ram_gb, storage_kind, storage_gb, gpu_class, "
+            "gpu_gb) "
             "are what a customer request is matched against ('budget PC, 6 cores, "
             "256 GB SSD, 16 GB RAM') and what forms class_signature — two builds with "
-            "different RAM are DIFFERENT showcases and never compete by price, so fill "
+            "different RAM (or different VRAM) are DIFFERENT showcases and never compete "
+            "by price, so fill "
             "them accurately. "
             "Each slot: type_id (equipment_types.row_id, required), qty (default 1), "
             "mode ('dynamic' = take the cheapest available component of class_key, may "
@@ -641,6 +643,7 @@ TOOLS: list[dict[str, Any]] = [
                 "storage_kind": {"type": ["string", "null"]},
                 "storage_gb": {"type": ["number", "integer", "null"]},
                 "gpu_class": {"type": ["string", "null"]},
+                "gpu_gb": {"type": ["number", "integer", "null"]},
                 "note": {"type": ["string", "null"]},
                 "is_enabled": {"type": ["boolean", "null"]},
                 "project_ids": {"type": ["array", "null"], "items": {"type": "string"}},
@@ -970,8 +973,11 @@ _CATALOG_COMPACT_FIELDS: dict[str, tuple[str, ...]] = {
         "storage_kind",
         "storage_gb",
         "gpu_class",
+        "gpu_gb",
         "slots_count",
         "qty_total",
+        "ram_sticks",
+        "storage_drives",
         "price_total",
         "price_min",
         "price_max",
@@ -1231,6 +1237,7 @@ def _ready_build_upsert(mid: str, arguments: dict[str, Any], sid: str | None) ->
         "storage_kind",
         "storage_gb",
         "gpu_class",
+        "gpu_gb",
         "note",
         "is_enabled",
         "project_ids",

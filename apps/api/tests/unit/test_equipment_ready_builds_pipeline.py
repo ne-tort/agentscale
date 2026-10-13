@@ -720,3 +720,54 @@ async def test_pipeline_does_not_invent_type_name_for_unknown_type(io: FakeIO) -
     await svc.run(io)
 
     assert io.body("build_group_items", "it_cpu_a")["type_name"] == "Ручное название"
+
+
+@pytest.mark.asyncio
+async def test_signature_distinguishes_gpu_gb(io: FakeIO) -> None:
+    """gpu_gb — классовая характеристика, как ram_gb: две сборки с разным
+    объёмом видеопамяти не должны конкурировать по цене."""
+    base = {
+        "cpu_cores": 6,
+        "ram_gb": 16,
+        "storage_kind": "ssd",
+        "storage_gb": 500,
+        "gpu_class": "",
+        "budget_tier": "budget",
+    }
+    assert class_signature(base) == "cpu6|ram16|ssd|sto500|-|gpu-gb|budget"
+    with_gpu8 = {**base, "gpu_class": "rtx", "gpu_gb": 8}
+    with_gpu16 = {**base, "gpu_class": "rtx", "gpu_gb": 16}
+    assert class_signature(with_gpu8) != class_signature(with_gpu16)
+    assert "gpu8gb" in class_signature(with_gpu8)
+
+
+@pytest.mark.asyncio
+async def test_pipeline_counts_ram_sticks_and_drives_from_slots(io: FakeIO) -> None:
+    """«Плашек ОЗУ» и «накопителей» выводятся из слотов своего типа.
+
+    Не отдельное поле, которое надо заполнять руками, — а сумма qty по слотам
+    типа ОЗУ/накопитель. Ровно то, что просили: численность исходит из
+    добавленных компонентов.
+    """
+    await _add_build(
+        io,
+        row_id="b_counts",
+        name="Сборка со счётчиками",
+        ram_gb=32,
+        slots=[
+            {"type_id": "etype_cpu", "class_key": "cpu_6c", "mode": "dynamic", "qty": 1},
+            {"type_id": "etype_ram", "class_key": "ram_16", "mode": "dynamic", "qty": 2},
+            {"type_id": "etype_storage", "class_key": "ssd_500", "mode": "dynamic", "qty": 3},
+            {"type_id": "etype_psu", "class_key": "psu_500", "mode": "dynamic", "qty": 1},
+        ],
+    )
+
+    svc = ReadyBuildsPipelineService(session=object())
+    await svc.run(io)
+
+    build = io.body("ready_builds", "b_counts")
+    assert build["ram_sticks"] == 2.0
+    assert build["storage_drives"] == 3.0
+    # qty_total по-прежнему считает все слоты (psu не плашка и не диск)
+    assert build["qty_total"] == 7.0
+    assert build["slots_count"] == 4
