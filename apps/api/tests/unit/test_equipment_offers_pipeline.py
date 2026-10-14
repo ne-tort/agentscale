@@ -1947,3 +1947,49 @@ async def test_procurement_counts_slot_qty_of_build_components(io: FakeIO) -> No
     assert ram_row["sum_rub"] == 450.0 + 1800.0
     # сумма закупки по компоненту сборки совпадает с бюджетом позиции (× qty)
     assert ram_row["sum_rub"] - 450.0 == 900.0 * 2
+
+
+async def test_build_link_qty_scales_components(io: FakeIO) -> None:
+    """WAVE13: количество сборок на позиции (equipment_builds.qty) масштабирует
+    компоненты в бюджете и закупке: 2 сборки × 2 плашки = 4 планки ОЗУ."""
+    svc = EquipmentPipelineService(session=object())
+    await io.create(
+        "request_lines", {"title": "Две сборки", "qty": 1, "status": "open"}
+    )
+    line_id = io.rows("request_lines")[-1]["row_id"]
+    await io.create(
+        "equipment_builds",
+        {
+            "name": "ПК ×2",
+            "build_kind": "pc",
+            "line_id": line_id,
+            "qty": 2,                      # ← заказ на две сборки
+            "slot_qty": {"etype_ram": 2},  # по 2 плашки в каждой
+        },
+    )
+    build_id = io.rows("equipment_builds")[-1]["row_id"]
+    await io.create(
+        "found_groups",
+        {
+            "build_id": build_id,
+            "slot_type_id": "etype_ram",
+            "part_number": "",
+            "aliases_hash": "h4",
+            "match_kind": "exact",
+        },
+    )
+
+    await svc.run(io, materialize=True)
+
+    # бюджет: qty позиции (1) × сборок (2) = 2 строки бюджета по цене сборки
+    budget = [
+        r["body"] for r in io.rows("budget_lines") if r["body"].get("line_id") == line_id
+    ]
+    assert budget and budget[0]["qty"] == 2
+    assert budget[0]["price_in"] == 900.0  # за одну сборку (2 × 450)
+
+    # закупка: 2 (qty бюджета) × 2 (слот) = 4 планки ОЗУ + вклад фикстуры line_2
+    proc = {r["body"]["seller"]: r["body"] for r in io.rows("procurement")}
+    ram_row = proc["Иванов"]
+    assert ram_row["qty_total"] == 4.0 + 1.0
+    assert ram_row["sum_rub"] == 1800.0 + 450.0

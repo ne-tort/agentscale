@@ -55,7 +55,7 @@ from typing import Any
 
 DEFAULT_MODULE_ID = "mod_equipment"
 MATCH_KINDS = frozenset({"exact", "analog", "doubt"})
-BUILD_KINDS = frozenset({"pc", "server"})
+BUILD_KINDS = frozenset({"pc", "server", "laptop", "nettop", "monoblock", "phone"})
 
 
 def _env() -> tuple[str, str, str]:
@@ -325,12 +325,15 @@ TOOLS: list[dict[str, Any]] = [
         "description": (
             "List component types (equipment_types) — the TEMPLATES of the equipment "
             "model: row_id (use as type_id in part_cards / ready_build slots), name, "
-            "sort_order, build_scope (all|pc|server) and fields_json — the "
-            "characteristics of the type. Each field: key, label, kind "
-            "(text | enum | groups), required (must be filled on part cards), "
-            "compat_domain (socket | ram_type | form_factor — the compatibility "
-            "matrix: fields of different types sharing a domain must MATCH in a "
-            "build), values (enum) or groups (grouped values like \"512\" = 512 ГБ). "
+            "sort_order, build_scope (all|pc|server|laptop|nettop|monoblock|phone) "
+            "and fields_json — the characteristics of the type. Each field: key, "
+            "label, kind (text | enum | groups), required (must be filled on part "
+            "cards), compat_domain (socket | ram_type | form_factor — the "
+            "compatibility matrix: fields of different types sharing a domain must "
+            "MATCH in a build), values (enum) or groups (grouped values like "
+            "\"512\" = 512 ГБ). DEVICE-KIT types (laptop/nettop/monoblock/phone) are "
+            "single-slot devices: their fields select the model (a phone's storage "
+            "is storage_gb, its camera is camera_mp, battery is battery_mah). "
             "ALWAYS pick attr/constraint values from these predefined values — "
             "never invent strings."
         ),
@@ -340,7 +343,7 @@ TOOLS: list[dict[str, Any]] = [
                 "module_id": {"type": "string", "default": DEFAULT_MODULE_ID},
                 "build_kind": {
                     "type": "string",
-                    "enum": ["pc", "server"],
+                    "enum": ["pc", "server", "laptop", "nettop", "monoblock", "phone"],
                     "description": "Optional: only types whose build_scope fits",
                 },
             },
@@ -415,6 +418,14 @@ TOOLS: list[dict[str, Any]] = [
                     "description": "request_lines.row_id (customer position)",
                 },
                 "is_selected": {"type": ["boolean", "null"]},
+                "qty": {
+                    "type": ["number", "integer", "null"],
+                    "description": (
+                        "How many of this build the order needs (default 1). Scales "
+                        "ALL components incl. multi-slot ones: 2 RAM sticks in the "
+                        "build × 2 builds = 4 sticks in procurement."
+                    ),
+                },
                 "note": {"type": ["string", "null"]},
                 "project_ids": {"type": ["array", "null"], "items": {"type": "string"}},
             },
@@ -552,7 +563,7 @@ TOOLS: list[dict[str, Any]] = [
             "type": "object",
             "properties": {
                 "module_id": {"type": "string", "default": DEFAULT_MODULE_ID},
-                "build_kind": {"type": "string", "enum": ["pc", "server"]},
+                "build_kind": {"type": "string", "enum": ["pc", "server", "laptop", "nettop", "monoblock", "phone"]},
                 "only_enabled": {"type": "boolean", "default": True},
                 "limit": {"type": "integer", "default": 100, "minimum": 1, "maximum": 500},
             },
@@ -605,7 +616,7 @@ TOOLS: list[dict[str, Any]] = [
                 "module_id": {"type": "string", "default": DEFAULT_MODULE_ID},
                 "row_id": {"type": "string"},
                 "name": {"type": "string"},
-                "build_kind": {"type": ["string", "null"], "enum": ["pc", "server", None]},
+                "build_kind": {"type": ["string", "null"], "enum": ["pc", "server", "laptop", "nettop", "monoblock", "phone", None]},
                 "target_price_min": {"type": ["number", "integer", "null"]},
                 "target_price_max": {"type": ["number", "integer", "null"]},
                 "note": {"type": ["string", "null"]},
@@ -663,6 +674,13 @@ TOOLS: list[dict[str, Any]] = [
                 "line_id": {
                     "type": "string",
                     "description": "request_lines.row_id (customer position)",
+                },
+                "qty": {
+                    "type": ["number", "integer"],
+                    "description": (
+                        "How many of this build the order needs (default 1). Scales "
+                        "ALL components incl. multi-slot ones."
+                    ),
                 },
                 "note": {"type": "string"},
             },
@@ -1379,7 +1397,7 @@ def _validate_build_meta(body: dict[str, Any], *, creating: bool) -> None:
 
 
 def _ready_build_attach(mid: str, arguments: dict[str, Any], sid: str | None) -> Any:
-    """Копирование готовой сборки в чат на позицию (серверное действие)."""
+    """Привязка готовой сборки к позиции (серверное действие)."""
     ready_build_id = str(arguments.get("ready_build_id") or "").strip()
     line_id = str(arguments.get("line_id") or "").strip()
     if not ready_build_id:
@@ -1393,6 +1411,15 @@ def _ready_build_attach(mid: str, arguments: dict[str, Any], sid: str | None) ->
     note = str(arguments.get("note") or "").strip()
     if note:
         payload["note"] = note
+    qty = arguments.get("qty")
+    if qty is not None:
+        try:
+            qty_num = float(qty)
+        except (TypeError, ValueError):
+            raise RuntimeError("qty must be a whole number >= 1") from None
+        if qty_num < 1 or qty_num != int(qty_num):
+            raise RuntimeError("qty must be a whole number >= 1")
+        payload["qty"] = int(qty_num)
     return _http(
         "POST",
         f"/projects/{project_id}/modules/{mid}/actions/ready_build_attach/invoke",
@@ -1534,6 +1561,7 @@ def _call_tool(name: str, arguments: dict[str, Any]) -> Any:
             "ready_build_id",
             "line_id",
             "is_selected",
+            "qty",
             "note",
             "project_ids",
         )

@@ -550,8 +550,8 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     assert slot_card["pick_view"] == "part_cards_pick"
 
     seed_items = meta["seed_rows"]["items"]
-    # 13 типов + 4 встроенных шаблона + 2 промпта + 1 MCP
-    assert len(seed_items) == 20
+    # 17 типов (13 базовые + 4 устройства-комплекта) + 4 шаблона + 2 промпта + 1 MCP
+    assert len(seed_items) == 24
     by_row = {s["row_id"]: s for s in seed_items}
     assert "tpl_budget_builtin" in by_row
     etypes = [s for s in seed_items if s["table_slug"] == "equipment_types"]
@@ -581,6 +581,18 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     assert "LGA1700" in cpu["socket"]["values"]
     assert "512" in {g["value"] for g in storage["capacity"]["groups"]}
     assert "650" in {g["value"] for g in psu["wattage"]["groups"]}
+    # WAVE13: устройства-комплекты (ноутбук/неттоп/моноблок/телефон) —
+    # свои типы со scope под свой вид сборки, поля-группы (память/ОЗУ/экран/
+    # камера/аккумулятор) с заранее заданными значениями
+    for scope, row_id in (("laptop", "etype_laptop"), ("nettop", "etype_nettop"),
+                          ("monoblock", "etype_monoblock"), ("phone", "etype_phone")):
+        assert row_id in by_type, row_id
+        assert by_type[row_id]["build_scope"] == scope
+        assert any(f.get("required") for f in by_type[row_id]["fields_json"])
+    phone = {f["key"]: f for f in by_type["etype_phone"]["fields_json"]}
+    assert phone["storage_gb"]["kind"] == "groups"  # «SSD телефона»
+    assert phone["camera_mp"]["kind"] == "groups"
+    assert phone["battery_mah"]["kind"] == "groups"
     mcp_seed = next(s for s in seed_items if s["row_id"] == "equipment_mcp_default")
     assert mcp_seed["table_slug"] == "equipment_mcp"
     assert mcp_seed["body"]["enabled"] is True

@@ -15,6 +15,9 @@ import 'package:prodavan/features/meta/runtime/module_runtime_scope.dart';
 import 'package:prodavan/features/meta/meta_icon.dart';
 import 'package:prodavan/features/meta/widgets/column_map_field.dart';
 import 'package:prodavan/features/meta/widgets/constraint_attrs_field.dart';
+import 'package:prodavan/features/meta/widgets/build_spec_editor.dart';
+import 'package:prodavan/features/meta/widgets/ready_build_slots_table.dart';
+import 'package:prodavan/features/meta/widgets/target_price_field.dart';
 import 'package:prodavan/features/meta/widgets/fields_schema_editor_field.dart';
 import 'package:prodavan/features/meta/widgets/prompt_files_editor_field.dart';
 import 'package:prodavan/features/meta/widgets/file_upload_field.dart';
@@ -410,17 +413,32 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
     final linkEntries = linksRaw is List
         ? linksRaw.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList()
         : <Map<String, dynamic>>[];
+    // after_field: ссылка встаёт сразу после своего поля (например «Состав»
+    // после названия), а не в хвосте формы; text_from_field — заголовок берётся
+    // из значения поля (например актуальный spec_summary).
+    final trailingLinks = <Map<String, dynamic>>[];
+    final afterFieldLinks = <String, List<Map<String, dynamic>>>{};
+    for (final link in linkEntries) {
+      final after = link['after_field']?.toString() ?? '';
+      if (after.isNotEmpty) {
+        afterFieldLinks.putIfAbsent(after, () => []).add(link);
+      } else {
+        trailingLinks.add(link);
+      }
+    }
 
     return ListView(
       padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
       children: [
         for (final name in fieldNames)
-          if (colByName[name] != null) _field(context, colByName[name]!, name, uiJson),
-        // Навигация к связанным спискам (пул компонентов, сборки группы,
-        // слоты сборки) — иначе detail-страница замыкалась сама на себя.
-        if (linkEntries.isNotEmpty) ...[
+          if (colByName[name] != null) ...[
+            _field(context, colByName[name]!, name, uiJson),
+            for (final link in afterFieldLinks[name] ?? const <Map<String, dynamic>>[])
+              _navLink(context, link),
+          ],
+        if (trailingLinks.isNotEmpty) ...[
           const SizedBox(height: AppSpacing.md),
-          for (final link in linkEntries) _navLink(context, link),
+          for (final link in trailingLinks) _navLink(context, link),
         ],
       ],
     );
@@ -429,7 +447,12 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
   Widget _navLink(BuildContext context, Map<String, dynamic> link) {
     final l10n = AppLocalizations.of(context);
     final locale = Localizations.localeOf(context);
-    final title = resolveMetaLabel(link['label'], l10n, locale: locale);
+    var title = resolveMetaLabel(link['label'], l10n, locale: locale);
+    final textFromField = link['text_from_field']?.toString() ?? '';
+    if (textFromField.isNotEmpty) {
+      final v = _values[textFromField]?.toString().trim() ?? '';
+      if (v.isNotEmpty) title = '$title: $v';
+    }
     final iconName = link['icon'] as String?;
     final openView = link['open_view'] as String?;
     // row_id_from_field: цель навигации — строка из поля текущей записи
@@ -696,6 +719,39 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
         value: value,
         readOnly: fieldReadOnly,
         onChanged: (fields) => _persist(name, fields),
+      );
+    }
+    if (widgetKind == 'target_price_range') {
+      return TargetPriceRangeField(
+        label: label,
+        icon: fieldIcon,
+        valueMin: _values['target_price_min'] as num?,
+        valueMax: _values['target_price_max'] as num?,
+        priceMin: _values['price_min'] as num?,
+        priceMax: _values['price_max'] as num?,
+        readOnly: fieldReadOnly,
+        onChanged: (min, max) =>
+            _persistFields({'target_price_min': min, 'target_price_max': max}),
+      );
+    }
+    if (widgetKind == 'ready_build_slots_table') {
+      return ReadyBuildSlotsTable(
+        seeds: widget.seeds,
+        buildId: _rowId,
+        slotsTable: fieldCfg?['slots_table']?.toString() ?? 'ready_build_slots',
+        readOnly: fieldReadOnly,
+        pickView: fieldCfg?['pick_view']?.toString() ?? 'part_cards_pick',
+        onOpenPick: widget.onOpenView,
+      );
+    }
+    if (widgetKind == 'build_spec_editor') {
+      return BuildSpecEditor(
+        seeds: widget.seeds,
+        buildId: _rowId,
+        slotsTable: fieldCfg?['slots_table']?.toString() ?? 'ready_build_slots',
+        typesTable: fieldCfg?['types_table']?.toString() ?? 'equipment_types',
+        readOnly: fieldReadOnly,
+        buildKind: _values['build_kind']?.toString() ?? 'pc',
       );
     }
     if (widgetKind == 'prompt_files_editor') {

@@ -82,6 +82,15 @@ SYNCED_OFFER_FIELDS = (
 SUPPORTED_CURRENCIES = frozenset({"RUB", "USD", "EUR"})
 
 
+def _qty_mul(line_qty: Any, build_qty: Any) -> float:
+    """Количество в бюджете/закупке: позиция × сборок на позицию (оба ≥1)."""
+    lq = _num_or(line_qty, None)
+    bq = _num_or(build_qty, None)
+    lq = lq if lq and lq >= 1 else 1.0
+    bq = bq if bq and bq >= 1 else 1.0
+    return lq * bq
+
+
 def alias_tokens(raw: Any) -> list[str]:
     if isinstance(raw, list):
         return [str(x).strip() for x in raw if str(x).strip()]
@@ -1412,7 +1421,9 @@ class EquipmentPipelineService:
                     or "Сборка",
                     "part_number": str(line_body.get("part_number") or "").strip()
                     or "Сборка",
-                    "qty": line_body.get("qty") or 1,
+                    # WAVE13: количество позиции × количество сборок на позицию
+                    # (заказ на 2 сборки из 2 плашек = 4 планки ОЗУ).
+                    "qty": _qty_mul(line_body.get("qty"), bbody.get("qty")),
                     "price_in": _num_or(bbody.get("price_total"), None),
                     # «под заказ» — флаг сборки (пишет _sync_builds), а не разбор
                     # текста match_label.
@@ -2101,6 +2112,7 @@ class EquipmentPipelineService:
                 continue
             line_qty = _num_or(body.get("qty"), 1.0) or 1.0
             slot_qty = slot_qty_by_build.get(build_id) or {}
+            # бюджет уже несёт line.qty × link.qty — второй раз не множим
             for gb in chosen_groups_by_build.get(build_id) or []:
                 comp_seller = str(gb.get("face_seller") or "").strip()
                 comp_price = _num_or(gb.get("face_price"), None)
@@ -2113,7 +2125,7 @@ class EquipmentPipelineService:
                 lines_by_seller.setdefault(comp_seller.casefold(), []).append(
                     {
                         "line_id": line_id,
-                        # количество позиции × количество в слоте
+                        # (позиция × сборок, из бюджета) × в слоте
                         "qty": line_qty * per_slot,
                         "price_in": comp_price,
                         "seller": comp_seller,
