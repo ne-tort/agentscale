@@ -88,8 +88,8 @@ def upgrade() -> None:
                 sa.text(
                     "DELETE FROM module_instance_data_rows "
                     "WHERE table_slug = 'found_offers' "
-                    "AND body->>'group_id' = ANY(:ids)"
-                ),
+                    "AND body->>'group_id' IN :ids"
+                ).bindparams(sa.bindparam("ids", expanding=True)),
                 {"ids": build_groups_ids},
             ).rowcount
             or 0
