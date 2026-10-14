@@ -29,11 +29,52 @@
 | Pub | `/cache/pub` (`PUB_CACHE`) | пакеты не перекачиваются |
 | pip / Poetry | `/cache/pip`, `/cache/poetry*` | python-зависимости |
 | kubectl / kustomize / setup-python / setup-node | `/cache/kubectl`, `/cache/kustomize`, `/cache/toolcache` (`RUNNER_TOOL_CACHE`) | инструменты и toolcache |
-| **Docker слои + RUN cache mounts** | persistent buildx builder `agentscale-ci` (docker-container, volume `buildx_buildkit_agentscale-ci0_state`) | слои образов и `--mount=type=cache` (pip/pub внутри Dockerfile) живут между сборками; GC — 50 GiB / 30 дней (`/etc/buildkit/buildkitd.toml`, копия — `buildkitd.toml` здесь) |
+| **Docker слои + RUN cache mounts** | persistent buildx builder `agentscale-ci` (docker-container, volume `buildx_buildkit_agentscale-ci0_state`) | слои образов и `--mount=type=cache` (pip/pub внутри Dockerfile) живут между сборками; GC — 20 GiB / 7 дней (`/etc/buildkit/buildkitd.toml`, копия — `buildkitd.toml` здесь) |
 
 Workflows `CI Images` больше не создают per-job buildkitd и не гоняют `type=local`
 кэш через `/tmp` (кэш жил в контейнере раннера и терялся при любом пересоздании).
 Единственный buildkitd `agentscale-ci` общий для всех job'ов.
+
+## Гигиена диска (важно: ВМ общая с dev-кластером)
+
+2026-10-14 диск ВМ заполнился до 84% и утянул dev-контур. Две причины и обе
+закрыты:
+
+1. **Утечка анонимных томов.** Образ `postgres` объявляет `VOLUME`, поэтому
+   `docker rm -f` контейнера smoke-теста оставлял анонимный том ~140 МБ. За
+   ~300 прогонов это дало ~42 ГБ. Теперь все teardown'ы используют `docker rm -fv`
+   + `docker volume prune -f` (`ci-api.yml`, `ci-e2e.yml`, `ci-nightly.yml`,
+   `ci-images.yml`).
+2. **Кэш buildx без ограничения по размеру.** Политика была 50 GiB / 30 дней —
+   расчёт на выделенный build-хост. Кэш дорос до 31 ГБ. Политика ужесточена до
+   20 GiB / 7 дней.
+
+Плюс защита, не зависящая от workflow (отменённый или упавший прогон сам за
+собой не уберёт):
+
+- **`ci-disk-guard.py`** — systemd-таймер `ci-disk-guard.timer` (каждые 30 мин,
+  `OnBootSec=5min`). Убирает осиротевшие smoke/pg-контейнеры, анонимные
+  dangling-тома, оставляет 2 новейших sha-тега на репозиторий (k3s работает из
+  containerd — docker-образы по sha это чистый мусор CI), и подрезает кэши
+  buildx по бюджету. Именованные тома и образы запущенных контейнеров не
+  трогает.
+- **Алерт по порогу**: при 80% (`--warn-pct`) и 90% (`--crit-pct`) пишет в
+  journal и вызывает `/usr/local/sbin/ci-disk-alert.sh LEVEL MSG`, если тот
+  существует (например, curl в ntfy). Положить свой скрипт — и алерты пойдут
+  без правок в репо.
+- **Concurrency в CI**: у `ci-api` / `ci-images` / `ci-flutter` / `ci-schemas`
+  группы `ci-<name>-${{ github.ref }}` с `cancel-in-progress: true` — новый
+  push отменяет предыдущий прогон вместо того, чтобы складывать вторую полную
+  сборку/тест на ту же ВМ.
+
+Проверить руками:
+
+```bash
+sudo python3 /usr/local/sbin/ci-disk-guard.py --dry-run   # что будет удалено
+systemctl list-timers ci-disk-guard.timer
+journalctl -u ci-disk-guard.service -n 20
+df -h /
+```
 
 ## Dev-кластер (k3s) — на этой же VM
 

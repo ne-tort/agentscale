@@ -182,7 +182,11 @@ jobs:
 
       - name: Stop Postgres
         if: always()
-        run: docker rm -f "${PG_CONTAINER:-agentscale-e2e-pg}" 2>/dev/null || true
+        run: |
+          # -v: drop the anonymous postgres volume too (see ci-api.yml), and
+          # prune whatever else a cancelled run left dangling.
+          docker rm -fv "${PG_CONTAINER:-agentscale-e2e-pg}" 2>/dev/null || true
+          docker volume prune -f >/dev/null 2>&1 || true
 
   dev-preflight:
     needs: gate
