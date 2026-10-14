@@ -432,3 +432,24 @@ def register_tasks(app) -> None:
 
         logger.info("celery task %s", job_names.SWEEP_READY_BUILDS)
         return run_async(_run())
+
+    @app.task(name=job_names.WEBHOOK_DELIVER, bind=False)
+    def webhook_deliver() -> dict[str, Any]:
+        """Исходящие вебхуки: доставка outbox (подписанные POST + ретраи)."""
+        from prodavan.application.external.webhooks import WebhookService
+        from prodavan.infrastructure.persistence.database import get_session_factory
+
+        async def _run() -> dict[str, Any]:
+            async def _work() -> dict[str, Any]:
+                factory = get_session_factory()
+                async with factory() as session:
+                    return await WebhookService(session).deliver_pending()
+
+            return await run_with_job_lock(
+                "webhook_deliver",
+                ttl_sec=120,
+                fn=_work,
+            )
+
+        logger.info("celery task %s", job_names.WEBHOOK_DELIVER)
+        return run_async(_run())
