@@ -518,11 +518,13 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     assert builds_list["ui_json"]["inline_add"]["field"] == "name"
     build_settings = next(v for v in meta["views"] if v["slug"] == "equipment_build_settings")
     build_cols = [f["column"] for f in build_settings["ui_json"]["fields"]]
-    # WAVE12: сборка чата — ссылка на готовую сборку; редактора слотов нет
+    # WAVE12/13: сборка чата — ссылка на готовую сборку + количество;
+    # редактора слотов нет
     assert build_cols == [
         "name",
         "ready_build_id",
         "line_id",
+        "qty",
         "build_kind",
         "match_label",
         "components_count",

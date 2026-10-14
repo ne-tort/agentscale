@@ -715,6 +715,9 @@ class ReadyBuildsPipelineService:
                 domain_seen.setdefault(domain, {}).setdefault(_norm(value), []).append(
                     state["type_name"]
                 )
+        # compat_ok — СТРОГО про домены совместимости. Неразрешённые слоты и
+        # замечания о комплектности (нет корпуса/кулера) — это compat_issues,
+        # а не несовместимость: флаг не трогаем.
         compat_ok = True
         for domain, values in domain_seen.items():
             if len(values) > 1:
@@ -723,8 +726,6 @@ class ReadyBuildsPipelineService:
                     f"{v} ({', '.join(sorted(set(owners)))})" for v, owners in values.items()
                 )
                 issues.append(f"домен «{domain}» не сходится: {detail}")
-        if issues:
-            compat_ok = False
 
         # ---- spec_summary: «Процессор: LGA1700 · 6 ядер; ОЗУ: DDR4 · 16 ГБ ×2»
         spec_parts: list[str] = []

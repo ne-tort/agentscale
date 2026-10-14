@@ -466,7 +466,8 @@ async def test_compat_domain_filters_candidates(monkeypatch: pytest.MonkeyPatch)
     assert mb["resolved_card_id"] == "c_mb_lga"  # не c_mb_am5
     build = io.body("ready_builds", "b1")
     assert build.get("compat_ok", True) is True
-    assert not build.get("compat_issues")
+    # доменных конфликтов нет (заметки о комплектности — отдельная тема)
+    assert "socket" not in (build.get("compat_issues") or "")
 
 
 @pytest.mark.asyncio
