@@ -9,6 +9,8 @@
 /// Pure functions only: no widgets, no I/O — unit-testable in isolation.
 library;
 
+import 'dart:convert';
+
 import 'chat_block.dart';
 
 /// Semantic colors a task may carry (used sparingly, only when meaningful).
@@ -181,10 +183,12 @@ _ParsedContent _parseContent(String raw) {
 }
 
 ChatChecklistTask? _taskFromMap(Map map, {int fallbackIndex = 0}) {
-  final rawTitle = (map['content'] ?? map['title'] ?? map['id'])?.toString().trim();
-  if (rawTitle == null || rawTitle.isEmpty) return null;
-  final parsed = _parseContent(rawTitle);
-  final title = parsed.title.isEmpty ? rawTitle : parsed.title;
+  final rawTitle = (map['content'] ?? map['title'])?.toString().trim();
+  final parsed = _parseContent(rawTitle ?? '');
+  // Никогда не показываем id как заголовок: без текста задачи строка
+  // бессмысленна (id «todo-1» — это артефакт рантайма, не название).
+  final title = parsed.title;
+  if (title.isEmpty) return null;
   final id = (map['id'] ?? map['task_id'])?.toString();
   final hasStatus = map['status'] != null && map['status'].toString().trim().isNotEmpty;
   final status = hasStatus ? _normalizeStatus(map['status']) : (parsed.statusHint ?? 'pending');
@@ -200,15 +204,35 @@ ChatChecklistTask? _taskFromMap(Map map, {int fallbackIndex = 0}) {
 
 /// Fold the transcript into the current checklist task list.
 ///
-/// Replays, in order: `plan` blocks (vendor task events, full replacement)
-/// and `todo.write` tool calls (`items` = full replacement, `patch` = update
-/// by id). The latest state wins; an explicit empty `items` clears the list.
-/// Returns an empty list when the agent never produced a checklist.
+/// Replays, in order: `todo.write` tool RESULTS (the authoritative snapshot
+/// with runtime-assigned ids — the agent's later `items`/`patch` calls carry
+/// `id: null` / `content: null`, which without the result snapshot lost task
+/// titles and showed the id «todo-1» as the title), then `plan` blocks and
+/// `todo.write` CALLS as fallback for transcripts that lack the result blocks.
+/// The latest state wins; an explicit empty list clears it.
 List<ChatChecklistTask> deriveChecklistTasks(List<ChatBlock> blocks) {
   // id → task, insertion-ordered so the list keeps the model's ordering.
   final Map<String, ChatChecklistTask> state = {};
 
   for (final block in blocks) {
+    // todo.write RESULT: полный снимок с назначенными рантаймом id — главный
+    // источник истины (входные items/patch их не всегда несут).
+    if (block.kind == 'tool_result') {
+      final name = canonicalToolName(block.raw['name']?.toString() ?? '');
+      if (name != 'todo.write') continue;
+      final todos = _todosFromResult(block.raw);
+      if (todos == null) continue;
+      final next = <String, ChatChecklistTask>{};
+      for (var i = 0; i < todos.length; i++) {
+        final task = _taskFromMap(todos[i], fallbackIndex: i);
+        if (task != null) next[task.id] = task;
+      }
+      state
+        ..clear()
+        ..addAll(next);
+      continue;
+    }
+
     if (block.kind == 'plan') {
       final raw = block.raw['tasks'];
       if (raw is! List) continue;
@@ -273,3 +297,33 @@ List<ChatChecklistTask> deriveChecklistTasks(List<ChatBlock> blocks) {
 /// How many of the tasks are done (for the compact "x/y" header).
 int checklistCompletedCount(List<ChatChecklistTask> tasks) =>
     tasks.where((t) => t.isCompleted).length;
+
+/// Extract the authoritative `todos` list from a `todo.write` tool RESULT.
+///
+/// The runtime returns `{"todos": [...]}` as a JSON string in
+/// `output.content[0].text`; those entries carry the runtime-assigned ids AND
+/// content, which the agent's `patch` calls omit. Returns null when the block
+/// holds no todo list.
+List<Map>? _todosFromResult(Map<String, dynamic> raw) {
+  final output = raw['output'];
+  String? text;
+  if (output is Map) {
+    final content = output['content'];
+    if (content is List && content.isNotEmpty) {
+      final first = content.first;
+      if (first is Map) text = first['text']?.toString();
+    }
+  } else if (output is String) {
+    text = output;
+  }
+  if (text == null || text.isEmpty) return null;
+  try {
+    final decoded = jsonDecode(text);
+    if (decoded is Map && decoded['todos'] is List) {
+      return [for (final t in decoded['todos'] as List) if (t is Map) t];
+    }
+  } on FormatException {
+    return null;
+  }
+  return null;
+}
