@@ -118,6 +118,61 @@ void main() {
       expect(checklistCompletedCount(tasks), 2);
     });
 
+    test('regression: patch with runtime id + no content keeps title from result',
+        () {
+      // Реальный транскрипт: первый todo.write — items с id=null + content,
+      // рантайм назначает todo-1…; следующий patch несёт id + content:null.
+      // Без снимка из tool_result заголовок падал на id («todo-1»).
+      final blocks = [
+        _toolCall('todo.write', {
+          'items': [
+            {'id': null, 'content': 'Перенести заявку', 'status': 'in_progress'},
+            {'id': null, 'content': 'Intel i5-12400F, 1 шт', 'status': 'pending'},
+          ],
+        }),
+        // авторитетный снимок рантайма: id + content + status
+        ChatBlock(
+          kind: 'tool_result',
+          raw: {
+            'name': 'mcp.openclaw.todo.write',
+            'output': {
+              'content': [
+                {
+                  'text':
+                      '{"todos":[{"id":"todo-1","content":"Перенести заявку","status":"in_progress"},{"id":"todo-2","content":"Intel i5-12400F, 1 шт","status":"pending"}]}',
+                },
+              ],
+            },
+          },
+        ),
+        _toolCall('todo.write', {
+          'patch': [
+            {'id': 'todo-1', 'status': 'completed'},
+            {'id': 'todo-2', 'status': 'in_progress'},
+          ],
+        }),
+      ];
+      final tasks = deriveChecklistTasks(blocks);
+      expect(tasks.map((t) => t.title), ['Перенести заявку', 'Intel i5-12400F, 1 шт']);
+      expect(tasks[0].isCompleted, isTrue);
+      expect(tasks[1].isInProgress, isTrue);
+      // ни один заголовок не равен runtime-id
+      expect(tasks.any((t) => t.title.startsWith('todo-')), isFalse);
+    });
+
+    test('task without any title text is dropped, never shows its id', () {
+      final blocks = [
+        _toolCall('todo.write', {
+          'items': [
+            {'id': 'todo-9', 'status': 'pending'},
+            {'id': 'todo-2', 'content': 'Real task', 'status': 'pending'},
+          ],
+        }),
+      ];
+      final tasks = deriveChecklistTasks(blocks);
+      expect(tasks.map((t) => t.title), ['Real task']);
+    });
+
     test('color tag is stripped from the title and mapped to a color', () {
       final tasks = deriveChecklistTasks([
         _toolCall('todo.write', {
