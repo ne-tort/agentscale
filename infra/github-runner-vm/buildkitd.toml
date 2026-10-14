@@ -1,7 +1,19 @@
-# Persistent CI buildx builder ("prodavan-ci"): cap build cache at 50GiB,
-# drop entries older than 30 days. Read client-side by `docker buildx create`.
-# Kept in sync with /etc/buildkit/buildkitd.toml on the CI VM (01-base.sh).
+# Persistent CI buildx builders ("agentscale-ci" / "prodavan-ci"): cap the build
+# cache and drop entries older than 7 days. Read client-side by
+# `docker buildx create`.
+#
+# History: the original 50 GiB / 30-day policy was sized for a dedicated build
+# host. These runners share ONE VM with the k3s dev cluster; the cache grew to
+# ~31 GB before anything pruned it, and combined with leaked anonymous volumes
+# (postgres smoke containers) it filled the 196 GB disk to 84% and took the dev
+# contour down with it (2026-10-14). The CI disk guard (ci-disk-guard.py, 30-min
+# timer) caps these volumes too, but the GC policy must agree or the cache
+# regrows between runs.
+#
+# Kept in sync with /etc/buildkit/buildkitd.toml on the CI VM (01-base.py).
 [worker.oci]
   [[worker.oci.gcpolicy]]
-    keepDuration = 2592000
-    keepBytes = 53687091200
+    keepDuration = 604800
+    keepBytes = 21474836480
+  [[worker.oci.gcpolicy]]
+    keepBytes = 10737418240

@@ -9,6 +9,13 @@ on:
       - ".github/workflows/ci-api.yml"
   workflow_dispatch:
 
+# The CI runners all live on ONE VM: a second push must not stack a second full
+# pytest run on top of the first (it swamped CPU/RAM and left orphans behind).
+# Newest push supersedes the older run.
+concurrency:
+  group: ci-api-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     # github-hosted ubuntu-latest fails instantly (empty steps) in this org
@@ -156,6 +163,11 @@ jobs:
 
       - name: Stop Postgres
         if: always()
-        run: docker rm -f "${PG_CONTAINER:-}" 2>/dev/null || true
+        run: |
+          # -v is REQUIRED: postgres images declare VOLUME, so a plain `rm -f`
+          # leaves an anonymous volume (~140 MB) behind on EVERY run. ~300 of
+          # those silently filled the CI VM disk to 84%.
+          docker rm -fv "${PG_CONTAINER:-}" 2>/dev/null || true
+          docker volume prune -f >/dev/null 2>&1 || true
 
       # actions/setup-python@v5 removed — Kali not in python-versions manifest.
