@@ -1690,7 +1690,8 @@ class EquipmentPipelineService:
                 await io.delete(GROUPS_TABLE, gid)
                 stats["mirror_groups_deleted"] += 1
 
-            # денормализация на сборку чата: количество/типы слотов и платформа
+            # денормализация на сборку чата: количество/типы слотов, платформа
+            # и имя готовой сборки (список «Сборка» показывает, что привязано)
             updates: dict[str, Any] = {}
             if (bbody.get("slot_qty") or {}) != slot_qty:
                 updates["slot_qty"] = slot_qty
@@ -1699,6 +1700,9 @@ class EquipmentPipelineService:
             want_kind = str(rbody.get("build_kind") or "pc")
             if str(bbody.get("build_kind") or "") != want_kind:
                 updates["build_kind"] = want_kind
+            want_name = str(rbody.get("name") or "")
+            if str(bbody.get("ready_build_name") or "") != want_name:
+                updates["ready_build_name"] = want_name
             if updates:
                 bbody.update(updates)
                 await io.update(BUILDS_TABLE, bid, bbody)

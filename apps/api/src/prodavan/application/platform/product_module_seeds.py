@@ -2124,6 +2124,18 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
             },
             {
                 # Денормализация из готовой сборки (пишет зеркало пайплайна):
+                # имя каталога, чтобы список «Сборка» показывал, что привязано,
+                # без джойна в каталог.
+                "table_slug": "equipment_builds",
+                "name": "ready_build_name",
+                "label": {"ru": "Готовая сборка", "en": "Ready build"},
+                "type": "text",
+                "required": False,
+                "default": "",
+                "read_only": True,
+            },
+            {
+                # Денормализация из готовой сборки (пишет зеркало пайплайна):
                 # {slot_id: qty} — количество на слот (2 плашки ОЗУ) и
                 # {slot_id: type_id} — тип каждого слота. Руками не правится.
                 "table_slug": "equipment_builds",
@@ -4958,16 +4970,25 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                         "title": {"ru": "Сборка", "en": "Builds"},
                     },
                     "title_field": "name",
-                    "subtitle_fields": ["build_kind", "components_count", "price_total"],
+                    "subtitle_fields": ["ready_build_name", "components_count", "price_total"],
                     # Открыто из позиции (toolbar «Сборки») → только сборки этой
                     # позиции; иначе виден весь список.
                     "row_filter_from_context": {"line_id": "contextRowId"},
+                    # создание из позиции сразу привязывает сборку к ней
+                    # (готовую сборку выбирают в карточке через ready_builds_pick)
+                    "context_bind": {"line_id": "contextRowId"},
                     "columns": [
                         {
                             "field": "name",
                             "label": {"ru": "Название", "en": "Name"},
                             "max_lines": 2,
                             "max_width": 240,
+                        },
+                        {
+                            "field": "ready_build_name",
+                            "label": {"ru": "Готовая сборка", "en": "Ready build"},
+                            "max_lines": 2,
+                            "max_width": 200,
                         },
                         {
                             "field": "build_kind",
@@ -5051,7 +5072,9 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "widget": "pick",
                             "icon": "precision_manufacturing",
                             "pick_view": "ready_builds_pick",
-                            "title_field": "name",
+                            # показываем имя готовой сборки (денормализация
+                            # зеркала), а не только row_id привязки
+                            "title_field": "ready_build_name",
                             "empty_style": "warning",
                             "empty_label": {
                                 "ru": "Не выбрана",
@@ -5415,6 +5438,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "value_from": "row_id",
                             "also_copy": [
                                 {"from": "name", "to": "name"},
+                                {"from": "name", "to": "ready_build_name"},
                                 {"from": "build_kind", "to": "build_kind"},
                             ],
                             "pop_after": True,
