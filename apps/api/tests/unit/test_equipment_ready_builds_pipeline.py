@@ -466,7 +466,8 @@ async def test_compat_domain_filters_candidates(monkeypatch: pytest.MonkeyPatch)
     assert mb["resolved_card_id"] == "c_mb_lga"  # не c_mb_am5
     build = io.body("ready_builds", "b1")
     assert build.get("compat_ok", True) is True
-    assert not build.get("compat_issues")
+    # доменных конфликтов нет (заметки о комплектности — отдельная тема)
+    assert "socket" not in (build.get("compat_issues") or "")
 
 
 @pytest.mark.asyncio
@@ -679,6 +680,77 @@ async def test_second_run_is_silent(monkeypatch: pytest.MonkeyPatch) -> None:
     assert stats["slots_updated"] == 0
     assert stats["builds_updated"] == 0
     assert io.updated == []
+
+
+# ------------------------------------------------------------------ сплит qty
+
+
+@pytest.mark.asyncio
+async def test_ram_split_pair_cheaper_than_single(monkeypatch: pytest.MonkeyPatch) -> None:
+    """WAVE13: «32 ГБ» собирается как 2×16, если пара дешевле одного модуля 32."""
+    docs = DOCS + [_doc("RAM-16C", price=2600.0, supplier="Иванов")]
+    cards = _cards_default() + [
+        _card("c_ram16c", "etype_ram", "RAM-16C", {"ram_type": "DDR4", "module_capacity": "16"}),
+    ]
+    io = FakeIO(
+        _tables(
+            cards=cards,
+            builds=[_build("b1")],
+            slots=[_slot("sl_ram", "b1", "etype_ram", {"ram_type": "DDR4", "ram_total": "32"})],
+        )
+    )
+    _patch_docs(monkeypatch, docs)
+    await _run(io)
+    slot = io.body("ready_build_slots", "sl_ram")
+    # 2×16 по 2600 (5200) дешевле 1×32 (5500) — сплит выиграл
+    assert slot["qty"] == 2
+    assert slot["resolved_card_id"] == "c_ram16c"
+    assert slot["line_total"] == 5200.0
+    build = io.body("ready_builds", "b1")
+    assert build["ram_sticks"] == 2
+    assert build["price_total"] == 5200.0
+    assert "×2" in build["spec_summary"]
+
+
+@pytest.mark.asyncio
+async def test_ram_no_split_when_single_cheaper(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Единый модуль дешевле пары — сплита нет (qty остаётся 1)."""
+    _patch_docs(monkeypatch, DOCS)
+    io = FakeIO(
+        _tables(
+            cards=_cards_default(),
+            builds=[_build("b1")],
+            slots=[_slot("sl_ram", "b1", "etype_ram", {"ram_type": "DDR4", "ram_total": "32"})],
+        )
+    )
+    await _run(io)
+    slot = io.body("ready_build_slots", "sl_ram")
+    # 1×32 (5500) дешевле 2×16 (5600) и 4×8
+    assert slot["qty"] == 1
+    assert slot["resolved_card_id"] == "c_ram32"
+    assert slot["line_total"] == 5500.0
+
+
+@pytest.mark.asyncio
+async def test_storage_split_combinatorics(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Тот же сплит для дисков: storage_total распадается на кратные ёмкости."""
+    docs = DOCS + [_doc("SSD-128", price=1500.0, supplier="Иванов")]
+    cards = _cards_default() + [
+        _card("c_ssd128", "etype_storage", "SSD-128", {"drive_type": "SSD", "capacity": "128"}),
+    ]
+    io = FakeIO(
+        _tables(
+            cards=cards,
+            builds=[_build("b1")],
+            slots=[_slot("sl_sto", "b1", "etype_storage", {"drive_type": "SSD", "storage_total": "512"})],
+        )
+    )
+    _patch_docs(monkeypatch, docs)
+    await _run(io)
+    slot = io.body("ready_build_slots", "sl_sto")
+    # 4×128 (6000) дороже 1×512 (4600) — без сплита; 2×256 (7000) тоже дороже
+    assert slot["qty"] == 1
+    assert slot["resolved_card_id"] == "c_ssd512p"
 
 
 # ------------------------------------------------------------------ шаблоны типов

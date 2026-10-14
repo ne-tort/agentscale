@@ -63,6 +63,20 @@ TYPES_TABLE = "equipment_types"
 RAM_TYPE_ID = "etype_ram"
 STORAGE_TYPE_ID = "etype_storage"
 
+# WAVE13: сплит-комбинаторика для ОЗУ и накопителей. В слоте требование задаёт
+# СУММУ (ram_total / storage_total), а резолвер решает, как её набрать:
+# «32 ГБ ОЗУ» = 1×32 или 2×16 или 4×8 — выбирается дешевейший вариант.
+# Ключ карточки остаётся по-модульный (module_capacity / capacity), потому что
+# карточка описывает ОДИН модуль; тотал — только в слоте.
+RAM_TOTAL_KEY = "ram_total"
+STORAGE_TOTAL_KEY = "storage_total"
+# поле модуля/диска в attrs карточки для каждого «тотал»-типа
+_TOTAL_CAPACITY_FIELD = {
+    RAM_TYPE_ID: ("ram_total", "module_capacity"),
+    STORAGE_TYPE_ID: ("storage_total", "capacity"),
+}
+_SPLIT_MULTIPLIERS = (1, 2, 4)
+
 # Сколько кандидатов слота участвует в комбинаторике коридора цен: дешевейший,
 # квартили, дорожайший. Полного перебора нет по дизайну.
 COMBO_SPREAD = 5
@@ -355,6 +369,11 @@ class ReadyBuildsPipelineService:
                 )
                 if str(body.get("constraints_label") or "") != want_constraints_label:
                     updates["constraints_label"] = want_constraints_label
+                # сплит (2×16 вместо 1×32): фактическое количество пишется на
+                # слот — зеркало отдаст его в чат как slot_qty
+                want_qty = _qty_of(res.get("qty"))
+                if _qty_of(body.get("qty")) != want_qty:
+                    updates["qty"] = want_qty
                 if updates:
                     updates["synced_at"] = now
                     body.update(updates)
@@ -371,9 +390,11 @@ class ReadyBuildsPipelineService:
             storage_drives = 0.0
             for slot in build_slots:
                 sbody = slot.get("body") or {}
-                qty = _qty_of(sbody.get("qty"))
-                qty_total += qty
                 slot_type = str(sbody.get("type_id") or "")
+                # количество — из резолюции (сплит мог переписать qty слота)
+                res = resolution["slots"].get(str(slot.get("row_id") or "")) or {}
+                qty = _qty_of(res.get("qty") or sbody.get("qty"))
+                qty_total += qty
                 if slot_type == RAM_TYPE_ID:
                     ram_sticks += qty
                 elif slot_type == STORAGE_TYPE_ID:
@@ -511,6 +532,12 @@ class ReadyBuildsPipelineService:
             )
             qty = _qty_of(sbody.get("qty"))
             pinned_id = str(sbody.get("card_id") or "").strip()
+            # тотал-поля (ram_total/storage_total) не существуют в карточках —
+            # в прямое сравнение они не идут, их обрабатывает сплит-логика
+            total_key = _TOTAL_CAPACITY_FIELD.get(type_id, (None, None))[0]
+            match_constraints = {
+                k: v for k, v in constraints.items() if k != total_key
+            }
 
             candidates: list[dict[str, Any]] = []
             if pinned_id:
@@ -522,7 +549,7 @@ class ReadyBuildsPipelineService:
                 else:
                     candidates = [pinned]
                     if not card_matches_constraints(
-                        (pinned.get("body") or {}).get("attrs"), constraints, fields
+                        (pinned.get("body") or {}).get("attrs"), match_constraints, fields
                     ):
                         issues.append(
                             f"{schema.get('name') or type_id}: закреплённая карточка "
@@ -533,7 +560,7 @@ class ReadyBuildsPipelineService:
                     cbody = card.get("body") or {}
                     if str(cbody.get("type_id") or "") != type_id:
                         continue
-                    if not card_matches_constraints(cbody.get("attrs"), constraints, fields):
+                    if not card_matches_constraints(cbody.get("attrs"), match_constraints, fields):
                         continue
                     candidates.append(card)
                 # доменный фильтр: если домен зафиксирован, поле типа входит в
@@ -561,15 +588,39 @@ class ReadyBuildsPipelineService:
                             f"{key}={fixed} — совместимость по «{domain}» ослаблена"
                         )
 
-            # ценовые кандидаты: только с лидером цены
-            priced: list[tuple[str, float, bool]] = []
-            for card in candidates:
-                cid = str(card.get("row_id") or "")
-                cbody = card.get("body") or {}
-                price = _num_or(cbody.get("best_price"), None)
-                if price is None or int(_num_or(cbody.get("offers_count"), 0) or 0) <= 0:
-                    continue
-                priced.append((cid, float(price), bool(cbody.get("in_stock"))))
+            # ценовые кандидаты: (card_id, сумма_слота, наличие, qty_факт).
+            # Сумма слота уже включает количество — по ней и сравниваем.
+            priced: list[tuple[str, float, bool, float]] = []
+            total_key, per_field = _TOTAL_CAPACITY_FIELD.get(type_id, (None, None))
+            total_raw = constraints.get(total_key) if total_key else None
+            total_gb = _num_or(total_raw, None) if total_raw is not None else None
+            if total_key and total_gb and total_gb > 0 and not pinned_id:
+                # сплит-комбинаторика: «32 = 1×32 | 2×16 | 4×8» — дешевле побеждает.
+                for k in _SPLIT_MULTIPLIERS:
+                    if total_gb % k != 0:
+                        continue
+                    per = total_gb // k
+                    per_str = str(int(per))
+                    best = self._cheapest_card(
+                        candidates=(),  # по тоталу не фильтруем — берём с нуля
+                        cards_by_id=cards_by_id,
+                        type_id=type_id,
+                        match_constraints=match_constraints,
+                        per_field=per_field,
+                        per_value=per_str,
+                    )
+                    if best is not None:
+                        priced.append(
+                            (best[0], best[1] * k, best[2], float(k))
+                        )
+            if not priced:
+                for card in candidates:
+                    cid = str(card.get("row_id") or "")
+                    cbody = card.get("body") or {}
+                    price = _num_or(cbody.get("best_price"), None)
+                    if price is None or int(_num_or(cbody.get("offers_count"), 0) or 0) <= 0:
+                        continue
+                    priced.append((cid, float(price) * qty, bool(cbody.get("in_stock")), qty))
             priced.sort(key=lambda t: (t[1], t[0]))
 
             slot_states.append(
@@ -585,6 +636,15 @@ class ReadyBuildsPipelineService:
                     "pinned_id": pinned_id,
                 }
             )
+
+        # ПК всегда включает корпус и охлаждение процессора: их отсутствие —
+        # не ошибка резолва, но заметное замечание (видно в карточке сборки).
+        if str(build_body.get("build_kind") or "pc") == "pc":
+            present = {s["type_id"] for s in slot_states}
+            if "etype_case" not in present:
+                issues.append("нет слота корпуса (etype_case)")
+            if "etype_cooling" not in present:
+                issues.append("нет слота охлаждения (etype_cooling)")
 
         # ---- выбор комбинации (коридор цен с тела сборки)
         target_min = _num_or(build_body.get("target_price_min"), None)
@@ -606,10 +666,15 @@ class ReadyBuildsPipelineService:
         for state in slot_states:
             sid = state["slot_id"]
             chosen_id = chosen.get(sid, "")
+            # выбранная запись несёт сумму слота и фактическое количество
+            # (для сплита 2×16 вместо 1×32: qty переписываем на слоте)
+            chosen_entry = next(
+                (e for e in state["priced"] if e[0] == chosen_id), None
+            )
             card = cards_by_id.get(chosen_id) if chosen_id else None
             cbody = (card or {}).get("body") or {}
-            price = _num_or(cbody.get("best_price"), None) if card else None
-            if card is None or price is None:
+            unit_price = _num_or(cbody.get("best_price"), None) if card else None
+            if card is None or unit_price is None or chosen_entry is None:
                 unresolved += 1
                 if not state["priced"] and not state["pinned_id"]:
                     issues.append(
@@ -618,15 +683,18 @@ class ReadyBuildsPipelineService:
             in_stock = bool(cbody.get("in_stock")) if card else False
             if card is not None and not in_stock:
                 on_order = True
+            line_total = chosen_entry[1] if chosen_entry else None
             out_slots[sid] = {
                 "card_id": chosen_id,
                 "title": str(cbody.get("best_title") or ""),
                 "part_number": str(cbody.get("part_number") or ""),
                 "seller": str(cbody.get("best_seller") or ""),
-                "price": price,
+                "price": unit_price,
                 "in_stock": in_stock,
-                "line_total": round(price * state["qty"], 2) if price is not None else None,
+                "line_total": line_total,
                 "alternatives": max(0, len(state["priced"]) - 1),
+                # фактическое количество (для сплита) — зеркало отдаст в чат
+                "qty": chosen_entry[3] if chosen_entry else state["qty"],
             }
 
         # ---- совместимость выбранной комбинации по доменам
@@ -647,6 +715,9 @@ class ReadyBuildsPipelineService:
                 domain_seen.setdefault(domain, {}).setdefault(_norm(value), []).append(
                     state["type_name"]
                 )
+        # compat_ok — СТРОГО про домены совместимости. Неразрешённые слоты и
+        # замечания о комплектности (нет корпуса/кулера) — это compat_issues,
+        # а не несовместимость: флаг не трогаем.
         compat_ok = True
         for domain, values in domain_seen.items():
             if len(values) > 1:
@@ -655,16 +726,16 @@ class ReadyBuildsPipelineService:
                     f"{v} ({', '.join(sorted(set(owners)))})" for v, owners in values.items()
                 )
                 issues.append(f"домен «{domain}» не сходится: {detail}")
-        if issues:
-            compat_ok = False
 
         # ---- spec_summary: «Процессор: LGA1700 · 6 ядер; ОЗУ: DDR4 · 16 ГБ ×2»
         spec_parts: list[str] = []
         for state in slot_states:
             label = attrs_label(state["fields"] or {}, state["constraints"])
             part = f"{state['type_name']}: {label}" if label else state["type_name"]
-            if state["qty"] > 1:
-                part = f"{part} ×{int(state['qty'])}"
+            # фактическое количество (после сплита) — из результата, не из слота
+            actual_qty = (out_slots.get(state["slot_id"]) or {}).get("qty") or state["qty"]
+            if actual_qty > 1:
+                part = f"{part} ×{int(actual_qty)}"
             spec_parts.append(part)
 
         return {
@@ -684,7 +755,38 @@ class ReadyBuildsPipelineService:
     # ------------------------------------------------------------ комбинаторика
 
     @staticmethod
-    def _spread(priced: list[tuple[str, float, bool]]) -> list[int]:
+    def _cheapest_card(
+        *,
+        candidates: Any,
+        cards_by_id: dict[str, dict[str, Any]],
+        type_id: str,
+        match_constraints: dict[str, Any],
+        per_field: str,
+        per_value: str,
+    ) -> tuple[str, float, bool] | None:
+        """Дешевейшая карточка типа с attrs[per_field] == per_value и покрытием
+        остальных требований (без тотал-ключа — он и заменён на per_value)."""
+        best: tuple[str, float, bool] | None = None
+        for card in cards_by_id.values():
+            cbody = card.get("body") or {}
+            if str(cbody.get("type_id") or "") != type_id:
+                continue
+            attrs = cbody.get("attrs") if isinstance(cbody.get("attrs"), dict) else {}
+            if _norm(attrs.get(per_field)) != _norm(per_value):
+                continue
+            if not card_matches_constraints(attrs, match_constraints, {}):
+                continue
+            price = _num_or(cbody.get("best_price"), None)
+            if price is None or int(_num_or(cbody.get("offers_count"), 0) or 0) <= 0:
+                continue
+            cid = str(card.get("row_id") or "")
+            cand = (cid, float(price), bool(cbody.get("in_stock")))
+            if best is None or (cand[1], cand[0]) < (best[1], best[0]):
+                best = cand
+        return best
+
+    @staticmethod
+    def _spread(priced: list[tuple[str, float, bool, float]]) -> list[int]:
         """Индексы кандидатов для комбинаторики: дешевейший, квартили, дорожайший."""
         n = len(priced)
         if n <= COMBO_SPREAD:
@@ -713,9 +815,10 @@ class ReadyBuildsPipelineService:
             return chosen, "", 0, totals
 
         def total_of(combo: tuple[int, ...]) -> float:
+            # сумма слота уже включает количество (сплит: 2×16 вместо 32)
             total = 0.0
             for state, idx in zip(active, combo):
-                total += state["priced"][idx][1] * state["qty"]
+                total += state["priced"][idx][1]
             return round(total, 2)
 
         spreads = [self._spread(s["priced"]) for s in active]
@@ -742,7 +845,8 @@ class ReadyBuildsPipelineService:
                     if not higher:
                         continue
                     nxt = higher[0]
-                    delta = (active[i]["priced"][nxt][1] - active[i]["priced"][combo[i]][1]) * active[i]["qty"]
+                    # дельта по цене слота (количество уже входит в цену записи)
+                    delta = active[i]["priced"][nxt][1] - active[i]["priced"][combo[i]][1]
                     if delta <= 0:
                         continue
                     if current + delta > target_max:
@@ -766,7 +870,7 @@ class ReadyBuildsPipelineService:
                     if not higher:
                         continue
                     nxt = higher[0]
-                    delta = (active[i]["priced"][nxt][1] - active[i]["priced"][combo[i]][1]) * active[i]["qty"]
+                    delta = active[i]["priced"][nxt][1] - active[i]["priced"][combo[i]][1]
                     if delta <= 0:
                         continue
                     if best_move is None or delta < best_move[2]:
@@ -818,10 +922,10 @@ class ReadyBuildsPipelineService:
 
         # коридор возможных конфигураций (по полным спискам кандидатов, не spread)
         totals["price_min"] = round(
-            sum(s["priced"][0][1] * s["qty"] for s in active), 2
+            sum(s["priced"][0][1] for s in active), 2
         )
         totals["price_max"] = round(
-            sum(s["priced"][-1][1] * s["qty"] for s in active), 2
+            sum(s["priced"][-1][1] for s in active), 2
         )
         totals["price_total"] = total_of(picked)
         return chosen, note, combos_tried, totals

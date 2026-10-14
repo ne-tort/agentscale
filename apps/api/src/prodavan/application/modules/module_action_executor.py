@@ -558,6 +558,14 @@ class ModuleActionExecutor:
             )
 
         rbody = ready.get("body") or {}
+        # WAVE13: количество сборок на позиции — масштабирует все компоненты
+        qty_raw = params.get("qty")
+        try:
+            qty = int(float(qty_raw)) if qty_raw not in (None, "") else 1
+        except (TypeError, ValueError):
+            qty = 1
+        if qty < 1:
+            qty = 1
         created = await io.create(
             "equipment_builds",
             {
@@ -565,6 +573,7 @@ class ModuleActionExecutor:
                 "line_id": line_id,
                 "ready_build_id": ready_build_id,
                 "build_kind": str(rbody.get("build_kind") or "pc"),
+                "qty": qty,
                 "note": str(params.get("note") or "").strip(),
             },
         )
