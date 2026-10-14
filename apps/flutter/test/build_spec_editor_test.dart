@@ -142,10 +142,11 @@ void main() {
     );
     // коридор возможных комбинаций — зелёным справа
     expect(find.text('37414–49299 ₽'), findsOneWidget);
-    // ввод «до» сохраняется
+    // ввод «до» сохраняется; «от» тоже проходит через onChanged
     await tester.enterText(find.byType(TextField).at(1), '48000');
     await tester.testTextInput.receiveAction(TextInputAction.done);
     expect(savedMax, 48000);
+    expect(savedMin, 30000);
   });
 
   testWidgets('BuildSpecEditor: девять полей, выбор пишет constraints слота',
