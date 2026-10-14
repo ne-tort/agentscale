@@ -1,12 +1,16 @@
-"""WAVE11 — пайплайн каталога «Готовые сборки» (fake IO + fake OpenSearch).
+"""WAVE12 — пайплайн каталога «Готовые сборки» v2 (fake IO + fake OpenSearch).
 
-Проверяет ключевые инварианты каталога:
-- резолв ключей пула в лучшую цену (наличие → приоритет → цена, как у офферов);
-- «дешевлейший в классе» строго внутри (group_id, type_id, class_key);
-- dynamic-слот дрейфует на дешевейший компонент класса, fixed — нет;
-- qty умножает сумму слота и итог сборки;
-- class_signature разделяет сборки: 16 ГБ не «побеждает» 32 ГБ ценой;
-- агрегаты группы и guard от write-amplification (повторный прогон молчит).
+Проверяет ключевые инварианты новой модели:
+- карточки резолвят ключи в лидер-цену (наличие → приоритет → цена);
+- слот подбирает карточки по constraints (разные группы характеристик не
+  конкурируют: «SSD 256» никогда не выиграет у «SSD 512» ценой);
+- автоподбор берёт дешевейшую подходящую карточку и дрейфует при смене цен;
+- закреплённая card_id перекрывает автоподбор;
+- матрица совместимости: домены (socket/ram_type/form_factor) сходятся —
+  конфликт фиксируется в compat_issues;
+- qty умножает сумму слота и итог сборки; плашки/диски — из слотов;
+- целевой коридор цены: умный перебор комбинаций внутри [min, max];
+- guard от write-amplification (повторный прогон молчит).
 """
 
 from __future__ import annotations
@@ -19,7 +23,10 @@ import prodavan.application.modules.equipment_ready_builds_service as rb_mod
 from prodavan.application.modules.equipment_offers_service import ModuleRowIO
 from prodavan.application.modules.equipment_ready_builds_service import (
     ReadyBuildsPipelineService,
-    class_signature,
+    attrs_label,
+    card_matches_constraints,
+    parse_type_schemas,
+    validate_card_attrs,
 )
 
 
@@ -78,21 +85,207 @@ def _doc(pn: str, *, price: float, supplier: str, in_stock: bool = True, h: str 
     }
 
 
-# Каталог: CPU-A дешевле у Петрова; RAM-16B дешевле RAM-16 (тот же класс);
-# CPU-ORDER есть только «под заказ».
+# Каталог: CPU-A дешевле у Петрова; RAM-16B дешевле RAM-16 (обе 16 ГБ DDR4);
+# CPU-AM5 дороже и другого сокета; SSD-512 есть, SSD-256 тоже; охлаждения нет.
 DOCS = [
     _doc("CPU-A", price=12000.0, supplier="Иванов"),
     _doc("CPU-A", price=11000.0, supplier="Петров"),
     _doc("CPU-B", price=15000.0, supplier="Иванов"),
-    _doc("CPU-ORDER", price=9000.0, supplier="Иванов", in_stock=False),
+    _doc("CPU-AM5", price=20000.0, supplier="Иванов"),
+    _doc("MB-LGA", price=8000.0, supplier="Иванов"),
+    _doc("MB-AM5", price=9000.0, supplier="Иванов"),
     _doc("RAM-16", price=3000.0, supplier="Иванов"),
     _doc("RAM-16B", price=2800.0, supplier="Петров"),
     _doc("RAM-32", price=5500.0, supplier="Иванов"),
-    _doc("SSD-256", price=4000.0, supplier="Петров", h="h_ssd256"),
+    _doc("SSD-256", price=3500.0, supplier="Иванов"),
+    _doc("SSD-512", price=5000.0, supplier="Петров", h="h_ssd512"),
+    _doc("SSD-512P", price=4600.0, supplier="Иванов", h="h_ssd512p"),
+    _doc("PSU-650", price=6000.0, supplier="Иванов"),
+]
+
+TYPES = [
+    {
+        "row_id": "etype_cpu",
+        "body": {
+            "name": "Процессор",
+            "sort_order": 10,
+            "fields_json": [
+                {
+                    "key": "socket",
+                    "label": {"ru": "Сокет"},
+                    "kind": "enum",
+                    "required": True,
+                    "compat_domain": "socket",
+                    "values": ["AM4", "AM5", "LGA1700"],
+                },
+                {
+                    "key": "cores",
+                    "label": {"ru": "Ядра"},
+                    "kind": "groups",
+                    "required": True,
+                    "groups": [
+                        {"value": "4", "label": "4 ядра"},
+                        {"value": "6", "label": "6 ядер"},
+                        {"value": "8", "label": "8 ядер"},
+                    ],
+                },
+            ],
+        },
+    },
+    {
+        "row_id": "etype_motherboard",
+        "body": {
+            "name": "Материнская плата",
+            "sort_order": 20,
+            "fields_json": [
+                {
+                    "key": "socket",
+                    "label": {"ru": "Сокет"},
+                    "kind": "enum",
+                    "required": True,
+                    "compat_domain": "socket",
+                    "values": ["AM4", "AM5", "LGA1700"],
+                },
+                {
+                    "key": "ram_type",
+                    "label": {"ru": "Тип ОЗУ"},
+                    "kind": "enum",
+                    "required": True,
+                    "compat_domain": "ram_type",
+                    "values": ["DDR4", "DDR5"],
+                },
+            ],
+        },
+    },
+    {
+        "row_id": "etype_ram",
+        "body": {
+            "name": "Оперативная память",
+            "sort_order": 30,
+            "fields_json": [
+                {
+                    "key": "ram_type",
+                    "label": {"ru": "Тип ОЗУ"},
+                    "kind": "enum",
+                    "required": True,
+                    "compat_domain": "ram_type",
+                    "values": ["DDR4", "DDR5"],
+                },
+                {
+                    "key": "module_capacity",
+                    "label": {"ru": "Объём модуля"},
+                    "kind": "groups",
+                    "required": True,
+                    "groups": [
+                        {"value": "16", "label": "16 ГБ"},
+                        {"value": "32", "label": "32 ГБ"},
+                    ],
+                },
+            ],
+        },
+    },
+    {
+        "row_id": "etype_storage",
+        "body": {
+            "name": "Накопитель",
+            "sort_order": 40,
+            "fields_json": [
+                {
+                    "key": "drive_type",
+                    "label": {"ru": "Тип"},
+                    "kind": "enum",
+                    "required": True,
+                    "values": ["SSD", "HDD"],
+                },
+                {
+                    "key": "capacity",
+                    "label": {"ru": "Объём"},
+                    "kind": "groups",
+                    "required": True,
+                    "groups": [
+                        {"value": "256", "label": "256 ГБ"},
+                        {"value": "512", "label": "512 ГБ"},
+                    ],
+                },
+            ],
+        },
+    },
+    {
+        "row_id": "etype_psu",
+        "body": {
+            "name": "Блок питания",
+            "sort_order": 60,
+            "fields_json": [
+                {
+                    "key": "wattage",
+                    "label": {"ru": "Мощность"},
+                    "kind": "groups",
+                    "required": True,
+                    "groups": [{"value": "650", "label": "650 Вт"}],
+                },
+            ],
+        },
+    },
+    {
+        "row_id": "etype_cooling",
+        "body": {
+            "name": "Охлаждение",
+            "sort_order": 70,
+            "fields_json": [
+                {
+                    "key": "socket",
+                    "label": {"ru": "Сокет"},
+                    "kind": "enum",
+                    "required": True,
+                    "compat_domain": "socket",
+                    "values": ["AM4", "AM5", "LGA1700"],
+                },
+            ],
+        },
+    },
 ]
 
 
-def _tables() -> dict[str, list[dict[str, Any]]]:
+def _card(
+    row_id: str,
+    type_id: str,
+    pn: str,
+    attrs: dict[str, str],
+    *,
+    aliases_hash: str = "",
+) -> dict[str, Any]:
+    body: dict[str, Any] = {"type_id": type_id, "part_number": pn, "attrs": attrs}
+    if aliases_hash:
+        body["aliases_hash"] = aliases_hash
+    return {"row_id": row_id, "body": body}
+
+
+def _slot(
+    row_id: str,
+    build_id: str,
+    type_id: str,
+    constraints: dict[str, str] | None = None,
+    *,
+    qty: int = 1,
+    card_id: str = "",
+) -> dict[str, Any]:
+    body: dict[str, Any] = {
+        "build_id": build_id,
+        "type_id": type_id,
+        "constraints": constraints or {},
+        "qty": qty,
+    }
+    if card_id:
+        body["card_id"] = card_id
+    return {"row_id": row_id, "body": body}
+
+
+def _tables(
+    *,
+    cards: list[dict[str, Any]] | None = None,
+    builds: list[dict[str, Any]] | None = None,
+    slots: list[dict[str, Any]] | None = None,
+) -> dict[str, list[dict[str, Any]]]:
     return {
         "catalogs": [
             {"row_id": "cat_1", "body": {"name": "Test", "status": "ready", "paused": False}}
@@ -101,715 +294,433 @@ def _tables() -> dict[str, list[dict[str, Any]]]:
             {"row_id": "s1", "body": {"name": "Иванов", "is_enabled": True}},
             {"row_id": "s2", "body": {"name": "Петров", "is_enabled": True}},
         ],
-        "build_groups": [
-            {
-                "row_id": "grp_am4",
-                "body": {
-                    "name": "AM4 · DDR4 · бюджетный",
-                    "build_kind": "pc",
-                    "socket": "AM4",
-                    "ram_type": "DDR4",
-                    "budget_tier": "budget",
-                    "is_enabled": True,
-                },
-            }
-        ],
-        "build_group_items": [
-            {
-                "row_id": "it_cpu_a",
-                "body": {
-                    "group_id": "grp_am4",
-                    "type_id": "etype_cpu",
-                    "class_key": "cpu_6c",
-                    "class_label": "6 ядер",
-                    "part_number": "CPU-A",
-                },
-            },
-            {
-                "row_id": "it_cpu_b",
-                "body": {
-                    "group_id": "grp_am4",
-                    "type_id": "etype_cpu",
-                    "class_key": "cpu_6c",
-                    "class_label": "6 ядер",
-                    "part_number": "CPU-B",
-                },
-            },
-            {
-                "row_id": "it_ram16",
-                "body": {
-                    "group_id": "grp_am4",
-                    "type_id": "etype_ram",
-                    "class_key": "ram_16",
-                    "class_label": "16 ГБ DDR4",
-                    "part_number": "RAM-16",
-                },
-            },
-            {
-                "row_id": "it_ram16b",
-                "body": {
-                    "group_id": "grp_am4",
-                    "type_id": "etype_ram",
-                    "class_key": "ram_16",
-                    "class_label": "16 ГБ DDR4",
-                    "part_number": "RAM-16B",
-                },
-            },
-            {
-                "row_id": "it_ram32",
-                "body": {
-                    "group_id": "grp_am4",
-                    "type_id": "etype_ram",
-                    "class_key": "ram_32",
-                    "class_label": "32 ГБ DDR4",
-                    "part_number": "RAM-32",
-                },
-            },
-            # без офферов в каталоге — слот с ним останется неразрешённым
-            {
-                "row_id": "it_ghost",
-                "body": {
-                    "group_id": "grp_am4",
-                    "type_id": "etype_cooling",
-                    "class_key": "cool_1",
-                    "class_label": "Кулер",
-                    "part_number": "NO-SUCH-PN",
-                },
-            },
-        ],
-        "ready_builds": [],
-        "ready_build_slots": [],
+        "equipment_types": TYPES,
+        "part_cards": cards or [],
+        "ready_builds": builds or [],
+        "ready_build_slots": slots or [],
     }
 
 
-@pytest.fixture()
-def io(monkeypatch) -> FakeIO:
-    async def _fake_search(session, *, ready_ids, bodies):  # noqa: ANN001
-        return list(DOCS)
-
-    monkeypatch.setattr(rb_mod, "search_catalog_docs", _fake_search)
-    return FakeIO(_tables())
+def _build(row_id: str, name: str = "Офисный ПК", **extra: Any) -> dict[str, Any]:
+    body: dict[str, Any] = {"name": name, "build_kind": "pc", "is_enabled": True}
+    body.update(extra)
+    return {"row_id": row_id, "body": body}
 
 
-async def _add_build(
-    io: FakeIO,
-    *,
-    row_id: str,
-    name: str,
-    ram_gb: int,
-    slots: list[dict[str, Any]],
-) -> str:
-    await io.create(
-        "ready_builds",
-        {
-            "group_id": "grp_am4",
-            "name": name,
-            "build_kind": "pc",
-            "budget_tier": "budget",
-            "cpu_cores": 6,
-            "ram_gb": ram_gb,
-            "storage_kind": "SSD",
-            "storage_gb": 256,
-            "is_enabled": True,
-        },
+def _cards_default() -> list[dict[str, Any]]:
+    return [
+        _card("c_cpu_a", "etype_cpu", "CPU-A", {"socket": "LGA1700", "cores": "6"}),
+        _card("c_cpu_b", "etype_cpu", "CPU-B", {"socket": "LGA1700", "cores": "8"}),
+        _card("c_cpu_am5", "etype_cpu", "CPU-AM5", {"socket": "AM5", "cores": "8"}),
+        _card("c_mb_lga", "etype_motherboard", "MB-LGA", {"socket": "LGA1700", "ram_type": "DDR4"}),
+        _card("c_mb_am5", "etype_motherboard", "MB-AM5", {"socket": "AM5", "ram_type": "DDR5"}),
+        _card("c_ram16", "etype_ram", "RAM-16", {"ram_type": "DDR4", "module_capacity": "16"}),
+        _card("c_ram16b", "etype_ram", "RAM-16B", {"ram_type": "DDR4", "module_capacity": "16"}),
+        _card("c_ram32", "etype_ram", "RAM-32", {"ram_type": "DDR4", "module_capacity": "32"}),
+        _card("c_ssd256", "etype_storage", "SSD-256", {"drive_type": "SSD", "capacity": "256"}),
+        _card("c_ssd512", "etype_storage", "SSD-512", {"drive_type": "SSD", "capacity": "512"}, aliases_hash="h_ssd512"),
+        _card("c_ssd512p", "etype_storage", "SSD-512P", {"drive_type": "SSD", "capacity": "512"}, aliases_hash="h_ssd512p"),
+        _card("c_psu", "etype_psu", "PSU-650", {"wattage": "650"}),
+    ]
+
+
+def _patch_docs(monkeypatch: pytest.MonkeyPatch, docs: list[dict[str, Any]]) -> None:
+    async def fake_search(session: Any, *, ready_ids: list[str], bodies: list[dict[str, Any]]):
+        return docs
+
+    monkeypatch.setattr(rb_mod, "search_catalog_docs", fake_search)
+
+
+async def _run(io: FakeIO) -> dict[str, Any]:
+    return await ReadyBuildsPipelineService(session=object()).run(io)
+
+
+# ------------------------------------------------------------------ карточки
+
+
+@pytest.mark.asyncio
+async def test_cards_resolve_price_leader(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Карточка получает лидер-цену: наличие → цена (CPU-A дешевле у Петрова)."""
+    _patch_docs(monkeypatch, DOCS)
+    io = FakeIO(_tables(cards=_cards_default()))
+    stats = await _run(io)
+    assert stats["cards"] == 12
+    assert stats["cards_updated"] > 0
+    body = io.body("part_cards", "c_cpu_a")
+    assert body["best_price"] == 11000.0
+    assert body["best_seller"] == "Петров"
+    assert body["in_stock"] is True
+    assert body["offers_count"] == 2
+    assert body["type_name"] == "Процессор"
+    assert body["attrs_label"] == "LGA1700 · 6 ядер"
+
+
+@pytest.mark.asyncio
+async def test_card_without_offers_stays_unpriced(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Карточка без офферов в каталоге — без цены, слот с ней не разрешается."""
+    _patch_docs(monkeypatch, DOCS)
+    cards = [_card("c_ghost", "etype_cooling", "COOL-X", {"socket": "LGA1700"})]
+    io = FakeIO(_tables(cards=cards))
+    await _run(io)
+    body = io.body("part_cards", "c_ghost")
+    assert body.get("best_price") is None
+    assert body.get("offers_count", 0) == 0
+
+
+# ------------------------------------------------------------------ слоты
+
+
+@pytest.mark.asyncio
+async def test_slot_picks_cheapest_matching_constraints(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Слот «SSD 512» видит только 512-карточки и берёт дешевейшую (SSD-512P)."""
+    _patch_docs(monkeypatch, DOCS)
+    io = FakeIO(
+        _tables(
+            cards=_cards_default(),
+            builds=[_build("b1")],
+            slots=[
+                _slot("sl_sto", "b1", "etype_storage", {"drive_type": "SSD", "capacity": "512"}),
+            ],
+        )
     )
-    # create() сам назначает row_id — пересохраняем под нужным
-    created = io._tables["ready_builds"][-1]
-    created["row_id"] = row_id
-    for slot in slots:
-        await io.create("ready_build_slots", {"build_id": row_id, **slot})
-    return row_id
+    await _run(io)
+    body = io.body("ready_build_slots", "sl_sto")
+    assert body["resolved_card_id"] == "c_ssd512p"  # 4600 < 5000
+    assert body["resolved_price"] == 4600.0
+    assert body["alternatives_count"] == 1  # SSD-512 остаётся альтернативой
+    assert body["constraints_label"] == "SSD · 512 ГБ"
+    build = io.body("ready_builds", "b1")
+    assert build["price_total"] == 4600.0
+    assert build["price_min"] == 4600.0
+    assert build["price_max"] == 5000.0
+    assert build["spec_summary"] == "Накопитель: SSD · 512 ГБ"
 
 
-async def test_pool_items_resolve_best_price_and_cheapest_in_class(io: FakeIO) -> None:
-    svc = ReadyBuildsPipelineService(session=object())
-    await svc.run(io)
-
-    cpu_a = io.body("build_group_items", "it_cpu_a")
-    # лучший оффер CPU-A: Петров 11000 (дешевле Иванова)
-    assert cpu_a["best_price"] == 11000.0
-    assert cpu_a["best_seller"] == "Петров"
-    assert cpu_a["offers_count"] == 2
-    assert cpu_a["in_stock"] is True
-
-    ram16 = io.body("build_group_items", "it_ram16")
-    ram16b = io.body("build_group_items", "it_ram16b")
-    # один класс ram_16 → дешевейший помечен, у обоих видны альтернативы
-    assert ram16b["is_cheapest_in_class"] is True
-    assert ram16.get("is_cheapest_in_class") is not True
-    assert ram16b["alternatives_count"] == 1
-    assert ram16["alternatives_count"] == 1
-
-    # другой класс (ram_32) не конкурирует с ram_16
-    ram32 = io.body("build_group_items", "it_ram32")
-    assert ram32["is_cheapest_in_class"] is True
-    assert ram32.get("alternatives_count", 0) == 0
-
-    # нет офферов → цена не выдумана
-    ghost = io.body("build_group_items", "it_ghost")
-    assert ghost.get("offers_count", 0) == 0
-    # цена не выдумана: ключа нет вовсе либо он пустой
-    assert ghost.get("best_price") in (None, 0)
-
-
-async def test_dynamic_slot_drifts_to_cheapest_fixed_does_not(io: FakeIO) -> None:
-    """dynamic берёт дешевейший компонент класса; fixed держит закреплённый."""
-    svc = ReadyBuildsPipelineService(session=object())
-    await _add_build(
-        io,
-        row_id="b_dyn",
-        name="Динамическая",
-        ram_gb=16,
-        slots=[
-            {"type_id": "etype_ram", "class_key": "ram_16", "mode": "dynamic", "qty": 1},
-            {"type_id": "etype_cpu", "class_key": "cpu_6c", "mode": "fixed",
-             "item_id": "it_cpu_b", "qty": 1},
-        ],
+@pytest.mark.asyncio
+async def test_price_drift_moves_auto_pick(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Смена лидера цены в каталоге переводит автоподбор на нового лидера."""
+    io = FakeIO(
+        _tables(
+            cards=_cards_default(),
+            builds=[_build("b1")],
+            slots=[_slot("sl_sto", "b1", "etype_storage", {"capacity": "512"})],
+        )
     )
-    await svc.run(io)
+    _patch_docs(monkeypatch, DOCS)
+    await _run(io)
+    assert io.body("ready_build_slots", "sl_sto")["resolved_card_id"] == "c_ssd512p"
 
-    slots = {
-        s["body"]["type_id"]: s["body"]
-        for s in io._tables["ready_build_slots"]
-        if s["body"]["build_id"] == "b_dyn"
-    }
-    ram = slots["etype_ram"]
-    cpu = slots["etype_cpu"]
-    # dynamic → RAM-16B (2800), а не RAM-16 (3000)
-    assert ram["resolved_item_id"] == "it_ram16b"
-    assert ram["resolved_price"] == 2800.0
-    assert ram["alternatives_count"] == 1
-    # fixed → закреплённый CPU-B (15000), хотя CPU-A дешевле (11000)
-    assert cpu["resolved_item_id"] == "it_cpu_b"
-    assert cpu["resolved_price"] == 15000.0
-
-    build = io.body("ready_builds", "b_dyn")
-    assert build["price_total"] == 2800.0 + 15000.0
-    assert build["slots_count"] == 2
-    assert build.get("unresolved_count", 0) == 0
+    # SSD-512 подешевел ниже SSD-512P → автоподбор переехал
+    docs2 = [d if d["part_number"] != "SSD-512" else {**d, "price_num": 4000.0, "price": "4000.0"} for d in DOCS]
+    _patch_docs(monkeypatch, docs2)
+    await _run(io)
+    assert io.body("ready_build_slots", "sl_sto")["resolved_card_id"] == "c_ssd512"
 
 
-async def test_slot_qty_multiplies_line_and_build_total(io: FakeIO) -> None:
-    svc = ReadyBuildsPipelineService(session=object())
-    await _add_build(
-        io,
-        row_id="b_qty",
-        name="С количеством",
-        ram_gb=32,
-        slots=[
-            {"type_id": "etype_ram", "class_key": "ram_16", "mode": "dynamic", "qty": 2},
-            {"type_id": "etype_cpu", "class_key": "cpu_6c", "mode": "dynamic", "qty": 1},
-        ],
+@pytest.mark.asyncio
+async def test_pinned_card_wins_over_cheaper(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Закреплённая card_id — ручная замена: дешевле ≠ выбрано."""
+    _patch_docs(monkeypatch, DOCS)
+    io = FakeIO(
+        _tables(
+            cards=_cards_default(),
+            builds=[_build("b1")],
+            slots=[
+                _slot(
+                    "sl_sto",
+                    "b1",
+                    "etype_storage",
+                    {"capacity": "512"},
+                    card_id="c_ssd512",  # 5000, хотя SSD-512P за 4600 дешевле
+                ),
+            ],
+        )
     )
-    await svc.run(io)
-
-    slots = {
-        s["body"]["type_id"]: s["body"] for s in io._tables["ready_build_slots"]
-        if s["body"]["build_id"] == "b_qty"
-    }
-    # 2 × 2800 (дешевейший в классе ram_16)
-    assert slots["etype_ram"]["line_total"] == 5600.0
-    assert slots["etype_cpu"]["line_total"] == 11000.0
-
-    build = io.body("ready_builds", "b_qty")
-    assert build["price_total"] == 16600.0
-    # qty_total — штуки, slots_count — типы
-    assert build["qty_total"] == 3
-    assert build["slots_count"] == 2
+    await _run(io)
+    body = io.body("ready_build_slots", "sl_sto")
+    assert body["resolved_card_id"] == "c_ssd512"
+    assert body["resolved_price"] == 5000.0
 
 
-async def test_class_signature_keeps_16gb_and_32gb_apart(io: FakeIO) -> None:
-    """16 ГБ не «побеждает» 32 ГБ ценой: разные сигнатуры = разные витрины."""
-    svc = ReadyBuildsPipelineService(session=object())
-    # одинаковые слоты, но классовые атрибуты разные → разные сигнатуры
-    await _add_build(
-        io,
-        row_id="b_16",
-        name="16 ГБ (дешевле)",
-        ram_gb=16,
-        slots=[{"type_id": "etype_cpu", "class_key": "cpu_6c", "mode": "dynamic", "qty": 1}],
+# ------------------------------------------------------------------ совместимость
+
+
+@pytest.mark.asyncio
+async def test_compat_domain_filters_candidates(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Сокет CPU-СЛОТА сужает кандидатов материнки: AM5-плата не подставится."""
+    _patch_docs(monkeypatch, DOCS)
+    io = FakeIO(
+        _tables(
+            cards=_cards_default(),
+            builds=[_build("b1")],
+            slots=[
+                _slot("sl_cpu", "b1", "etype_cpu", {"socket": "LGA1700"}),
+                _slot("sl_mb", "b1", "etype_motherboard"),  # без constraints
+            ],
+        )
     )
-    await _add_build(
-        io,
-        row_id="b_32",
-        name="32 ГБ (дороже)",
-        ram_gb=32,
-        slots=[{"type_id": "etype_cpu", "class_key": "cpu_6c", "mode": "dynamic", "qty": 1}],
+    await _run(io)
+    mb = io.body("ready_build_slots", "sl_mb")
+    assert mb["resolved_card_id"] == "c_mb_lga"  # не c_mb_am5
+    build = io.body("ready_builds", "b1")
+    assert build.get("compat_ok", True) is True
+    assert not build.get("compat_issues")
+
+
+@pytest.mark.asyncio
+async def test_compat_conflict_is_reported_not_blocking(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Явный конфликт constraints (LGA1700 + AM5) — сборка собирается, но с issue."""
+    _patch_docs(monkeypatch, DOCS)
+    io = FakeIO(
+        _tables(
+            cards=_cards_default(),
+            builds=[_build("b1")],
+            slots=[
+                _slot("sl_cpu", "b1", "etype_cpu", {"socket": "LGA1700"}),
+                _slot("sl_mb", "b1", "etype_motherboard", {"socket": "AM5"}),
+            ],
+        )
     )
-    await svc.run(io)
-
-    b16 = io.body("ready_builds", "b_16")
-    b32 = io.body("ready_builds", "b_32")
-    assert b16["class_signature"] != b32["class_signature"]
-    assert b16["price_total"] == b32["price_total"] == 11000.0
-    # обе «дешевлейшие» — каждая в своей витрине, альтернатив нет
-    assert b16["is_cheapest_in_class"] is True
-    assert b32["is_cheapest_in_class"] is True
-    assert b16.get("alternatives_count", 0) == 0
-    assert b32.get("alternatives_count", 0) == 0
+    await _run(io)
+    build = io.body("ready_builds", "b1")
+    assert build["compat_ok"] is False
+    assert "socket" in build["compat_issues"]
 
 
-async def test_same_class_competes_by_price(io: FakeIO) -> None:
-    """Внутри одной сигнатуры дешевейшая побеждает, вторая — альтернатива."""
-    svc = ReadyBuildsPipelineService(session=object())
-    await _add_build(
-        io,
-        row_id="b_cheap",
-        name="Дешевле",
-        ram_gb=16,
-        slots=[{"type_id": "etype_cpu", "class_key": "cpu_6c", "mode": "dynamic", "qty": 1}],
+@pytest.mark.asyncio
+async def test_ram_domain_carries_from_motherboard(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Тип ОЗУ материнки фиксирует домен: DDR5-модули не попадут в сборку DDR4."""
+    _patch_docs(monkeypatch, DOCS)
+    cards = _cards_default() + [
+        _card("c_ram_d5", "etype_ram", "RAM-16", {"ram_type": "DDR5", "module_capacity": "16"}),
+    ]
+    io = FakeIO(
+        _tables(
+            cards=cards,
+            builds=[_build("b1")],
+            slots=[
+                _slot("sl_mb", "b1", "etype_motherboard", {"ram_type": "DDR4"}),
+                _slot("sl_ram", "b1", "etype_ram"),  # без constraints
+            ],
+        )
     )
-    await _add_build(
-        io,
-        row_id="b_dear",
-        name="Дороже",
-        ram_gb=16,
-        slots=[{"type_id": "etype_cpu", "class_key": "cpu_6c", "mode": "fixed",
-                "item_id": "it_cpu_b", "qty": 1}],
+    await _run(io)
+    ram = io.body("ready_build_slots", "sl_ram")
+    assert ram["resolved_card_id"] in ("c_ram16", "c_ram16b")  # DDR4, не DDR5
+
+
+# ------------------------------------------------------------------ количество и итоги
+
+
+@pytest.mark.asyncio
+async def test_qty_multiplies_slot_and_counts_sticks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """2 плашки ОЗУ: сумма слота ×2, ram_sticks=2, qty_total учитывает."""
+    _patch_docs(monkeypatch, DOCS)
+    io = FakeIO(
+        _tables(
+            cards=_cards_default(),
+            builds=[_build("b1")],
+            slots=[
+                _slot("sl_cpu", "b1", "etype_cpu", {"socket": "LGA1700", "cores": "6"}),
+                _slot("sl_ram", "b1", "etype_ram", {"ram_type": "DDR4", "module_capacity": "16"}, qty=2),
+                _slot("sl_sto", "b1", "etype_storage", {"capacity": "256"}),
+            ],
+        )
     )
-    await svc.run(io)
-
-    cheap = io.body("ready_builds", "b_cheap")
-    dear = io.body("ready_builds", "b_dear")
-    assert cheap["class_signature"] == dear["class_signature"]
-    assert cheap["price_total"] == 11000.0
-    assert dear["price_total"] == 15000.0
-    assert cheap["is_cheapest_in_class"] is True
-    assert dear.get("is_cheapest_in_class") is not True
-    assert dear.get("alternatives_count", 0) == 1
-
-
-async def test_unresolved_slot_counted_and_on_order_flag(io: FakeIO) -> None:
-    svc = ReadyBuildsPipelineService(session=object())
-    await _add_build(
-        io,
-        row_id="b_ghost",
-        name="С неразрешённым слотом",
-        ram_gb=16,
-        slots=[
-            {"type_id": "etype_cpu", "class_key": "cpu_6c", "mode": "dynamic", "qty": 1},
-            {"type_id": "etype_cooling", "class_key": "cool_1", "mode": "dynamic", "qty": 1},
-        ],
-    )
-    await svc.run(io)
-
-    build = io.body("ready_builds", "b_ghost")
-    assert build["unresolved_count"] == 1
-    assert build["price_total"] == 11000.0  # только разрешённый слот
+    await _run(io)
+    ram = io.body("ready_build_slots", "sl_ram")
+    assert ram["resolved_card_id"] == "c_ram16b"  # 2800 < 3000
+    assert ram["line_total"] == 5600.0
+    build = io.body("ready_builds", "b1")
+    assert build["price_total"] == 11000.0 + 5600.0 + 3500.0
+    assert build["ram_sticks"] == 2
+    assert build["storage_drives"] == 1
+    assert build["qty_total"] == 4
+    assert build["unresolved_count"] == 0
     assert build.get("on_order") is not True
 
-    stats = await svc.run(io)
-    assert stats["unresolved_slots"] >= 1
 
-
-async def test_group_aggregates(io: FakeIO) -> None:
-    svc = ReadyBuildsPipelineService(session=object())
-    await _add_build(
-        io,
-        row_id="b_a",
-        name="A",
-        ram_gb=16,
-        slots=[{"type_id": "etype_cpu", "class_key": "cpu_6c", "mode": "dynamic", "qty": 1}],
+@pytest.mark.asyncio
+async def test_unresolved_slot_counted_and_excluded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Слот без подходящих карточек — в unresolved_count, цена без него."""
+    _patch_docs(monkeypatch, DOCS)
+    io = FakeIO(
+        _tables(
+            cards=_cards_default(),
+            builds=[_build("b1")],
+            slots=[
+                _slot("sl_cpu", "b1", "etype_cpu", {"cores": "6"}),
+                _slot("sl_cool", "b1", "etype_cooling", {"socket": "LGA1700"}),  # карточек нет
+            ],
+        )
     )
-    await _add_build(
-        io,
-        row_id="b_b",
-        name="B",
-        ram_gb=16,
-        slots=[{"type_id": "etype_cpu", "class_key": "cpu_6c", "mode": "fixed",
-                "item_id": "it_cpu_b", "qty": 1}],
+    await _run(io)
+    build = io.body("ready_builds", "b1")
+    assert build["unresolved_count"] == 1
+    assert build["price_total"] == 11000.0
+    assert "нет карточек" in build["compat_issues"]
+
+
+@pytest.mark.asyncio
+async def test_on_order_when_leader_out_of_stock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Лидер цены не в наличии → слот и сборка «под заказ»."""
+    docs = [d if d["part_number"] != "CPU-A" else {**d, "in_stock": False} for d in DOCS]
+    _patch_docs(monkeypatch, docs)
+    io = FakeIO(
+        _tables(
+            cards=[_card("c_cpu_a", "etype_cpu", "CPU-A", {"socket": "LGA1700", "cores": "6"})],
+            builds=[_build("b1")],
+            slots=[_slot("sl_cpu", "b1", "etype_cpu", {"cores": "6"})],
+        )
     )
-    await svc.run(io)
-
-    group = io.body("build_groups", "grp_am4")
-    assert group["items_count"] == 6
-    assert group["builds_count"] == 2
-    assert group["price_min"] == 11000.0
-    assert group["price_max"] == 15000.0
-    assert group["synced_at"]
+    await _run(io)
+    build = io.body("ready_builds", "b1")
+    assert build["on_order"] is True
+    assert build["price_total"] == 11000.0  # цена есть, наличия нет
 
 
-async def test_second_run_is_silent(io: FakeIO) -> None:
-    """Guard от write-amplification: повторный прогон ничего не пишет."""
-    svc = ReadyBuildsPipelineService(session=object())
-    await _add_build(
-        io,
-        row_id="b_stable",
-        name="Стабильная",
-        ram_gb=16,
-        slots=[{"type_id": "etype_cpu", "class_key": "cpu_6c", "mode": "dynamic", "qty": 1}],
+# ------------------------------------------------------------------ коридор цен
+
+
+@pytest.mark.asyncio
+async def test_target_max_picks_richer_combo(monkeypatch: pytest.MonkeyPatch) -> None:
+    """С потолком цены выбирается максимально наполненная комбинация ≤ max."""
+    _patch_docs(monkeypatch, DOCS)
+    io = FakeIO(
+        _tables(
+            cards=_cards_default(),
+            builds=[_build("b1", target_price_max=17000.0)],
+            slots=[
+                _slot("sl_cpu", "b1", "etype_cpu", {"socket": "LGA1700"}),
+                _slot("sl_ram", "b1", "etype_ram", {"ram_type": "DDR4"}),
+            ],
+        )
     )
-    await svc.run(io)
+    await _run(io)
+    build = io.body("ready_builds", "b1")
+    # дешевейшая: CPU-A (11000) + RAM-16B (2800) = 13800
+    # потолок 17000 позволяет RAM-32 (5500): 16500 ≤ 17000 — максимум наполнения
+    assert build["price_total"] == 16500.0
+    assert io.body("ready_build_slots", "sl_ram")["resolved_card_id"] == "c_ram32"
+    assert build["price_note"] == ""
+    assert build["price_min"] == 13800.0
+    assert build["price_max"] == 20500.0  # CPU-B + RAM-32
+
+
+@pytest.mark.asyncio
+async def test_target_min_upgrades_cheapest(monkeypatch: pytest.MonkeyPatch) -> None:
+    """С минимумом цены выбирается дешевейшая комбинация ≥ min."""
+    _patch_docs(monkeypatch, DOCS)
+    io = FakeIO(
+        _tables(
+            cards=_cards_default(),
+            builds=[_build("b1", target_price_min=15000.0)],
+            slots=[
+                _slot("sl_cpu", "b1", "etype_cpu", {"socket": "LGA1700"}),
+                _slot("sl_ram", "b1", "etype_ram", {"ram_type": "DDR4"}),
+            ],
+        )
+    )
+    await _run(io)
+    build = io.body("ready_builds", "b1")
+    # дешевейшая 13800 < 15000; апгрейд RAM-16B→RAM-32: 16500 ≥ 15000
+    assert build["price_total"] == 16500.0
+    assert io.body("ready_build_slots", "sl_ram")["resolved_card_id"] == "c_ram32"
+
+
+@pytest.mark.asyncio
+async def test_unreachable_corridor_falls_back_with_note(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Коридор недостижим — ближайшая крайняя конфигурация + честный price_note."""
+    _patch_docs(monkeypatch, DOCS)
+    io = FakeIO(
+        _tables(
+            cards=_cards_default(),
+            builds=[_build("b1", target_price_max=10000.0)],
+            slots=[_slot("sl_cpu", "b1", "etype_cpu", {"socket": "LGA1700"})],
+        )
+    )
+    await _run(io)
+    build = io.body("ready_builds", "b1")
+    assert build["price_total"] == 11000.0  # дешевейшая, хоть и выше потолка
+    assert "недостижим" in build["price_note"]
+
+
+# ------------------------------------------------------------------ guard от записей
+
+
+@pytest.mark.asyncio
+async def test_second_run_is_silent(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Повторный прогон без изменений не переписывает строки (write-amplification)."""
+    _patch_docs(monkeypatch, DOCS)
+    io = FakeIO(
+        _tables(
+            cards=_cards_default(),
+            builds=[_build("b1")],
+            slots=[
+                _slot("sl_cpu", "b1", "etype_cpu", {"socket": "LGA1700", "cores": "6"}),
+                _slot("sl_ram", "b1", "etype_ram", {"module_capacity": "16"}),
+            ],
+        )
+    )
+    await _run(io)
     io.updated.clear()
-
-    stats = await svc.run(io)
-    assert io.updated == []
-    assert stats["items_updated"] == 0
+    stats = await _run(io)
+    assert stats["cards_updated"] == 0
     assert stats["slots_updated"] == 0
     assert stats["builds_updated"] == 0
-    assert stats["groups_updated"] == 0
+    assert io.updated == []
 
 
-def test_class_signature_is_stable_and_separating() -> None:
-    base = {"cpu_cores": 6, "ram_gb": 16, "storage_kind": "SSD", "storage_gb": 256}
-    assert class_signature(base) == class_signature(dict(base))
-    assert class_signature(base) != class_signature({**base, "ram_gb": 32})
-    assert class_signature(base) != class_signature({**base, "storage_gb": 512})
-    assert class_signature(base) != class_signature({**base, "storage_kind": "HDD"})
-    assert class_signature(base) != class_signature({**base, "cpu_cores": 8})
-    # «SSD 256» и «HDD 256» — разные витрины, а не одна
-    assert class_signature({**base, "storage_kind": "HDD"}) != class_signature(base)
+# ------------------------------------------------------------------ шаблоны типов
 
 
-async def test_cascade_delete_catalog_group_and_build(io: FakeIO) -> None:
-    """Каскад каталога: группа тянет пул и сборки со слотами; сборка — слоты."""
-    from prodavan.application.modules.equipment_offers_service import (
-        cascade_equipment_delete,
+def test_parse_type_schemas_reads_groups_and_domains() -> None:
+    schemas = parse_type_schemas(TYPES)
+    cpu = schemas["etype_cpu"]
+    assert cpu["name"] == "Процессор"
+    assert cpu["fields"]["socket"]["compat_domain"] == "socket"
+    assert cpu["fields"]["socket"]["required"] is True
+    assert cpu["fields"]["cores"]["choices"] == {"4": "4 ядра", "6": "6 ядер", "8": "8 ядер"}
+    # старый формат (key/label) читается как text
+    legacy = parse_type_schemas(
+        [{"row_id": "t_x", "body": {"name": "X", "fields_json": [{"key": "a", "label": "A"}]}}]
     )
-
-    await _add_build(
-        io,
-        row_id="b_cas",
-        name="Каскадная",
-        ram_gb=16,
-        slots=[{"type_id": "etype_cpu", "class_key": "cpu_6c", "mode": "dynamic", "qty": 1}],
-    )
-    slot_ids = [s["row_id"] for s in io._tables["ready_build_slots"]]
-    assert slot_ids
-
-    # удаление готовой сборки → её слоты
-    await cascade_equipment_delete(
-        object(),
-        cabinet_id="cab",
-        project_id=None,
-        table_slug="ready_builds",
-        row_id="b_cas",
-        row_body={},
-        principal=None,
-        employee=None,
-        session_id=None,
-        io=io,
-    )
-    assert io._tables["ready_build_slots"] == []
-
-    # удаление группы → пул и все её сборки
-    await _add_build(
-        io,
-        row_id="b_group_cas",
-        name="В группе",
-        ram_gb=16,
-        slots=[{"type_id": "etype_cpu", "class_key": "cpu_6c", "mode": "dynamic", "qty": 1}],
-    )
-    await cascade_equipment_delete(
-        object(),
-        cabinet_id="cab",
-        project_id=None,
-        table_slug="build_groups",
-        row_id="grp_am4",
-        row_body={},
-        principal=None,
-        employee=None,
-        session_id=None,
-        io=io,
-    )
-    assert io._tables["build_group_items"] == []
-    assert io._tables["ready_builds"] == []
-    assert io._tables["ready_build_slots"] == []
+    assert legacy["t_x"]["fields"]["a"]["kind"] == "text"
+    assert legacy["t_x"]["fields"]["a"]["choices"] == {}
 
 
-# Чат-таблицы нужны только тесту attach: каталог копируется в бакет чата.
-def _chat_tables() -> dict[str, list[dict[str, Any]]]:
-    return {
-        "request_lines": [
-            {"row_id": "line_1", "body": {"title": "Сборка ПК", "qty": 1, "status": "open"}}
-        ],
-        "equipment_builds": [],
-        "found_groups": [],
-        "found_offers": [],
-        "budget_lines": [],
-        "procurement": [],
-        "equipment_items": [],
-    }
+def test_attrs_label_uses_group_labels() -> None:
+    schemas = parse_type_schemas(TYPES)
+    fields = schemas["etype_storage"]["fields"]
+    assert attrs_label(fields, {"drive_type": "SSD", "capacity": "512"}) == "SSD · 512 ГБ"
+    # значение вне шаблона показывается как есть
+    assert attrs_label(fields, {"drive_type": "NVMe"}) == "NVMe"
 
 
-async def test_attach_ready_build_copies_keys_into_chat(io: FakeIO, monkeypatch) -> None:
-    """ready_build_attach копирует КЛЮЧИ (не цены) в чат: сборка + группы слотов.
-
-    Копия живёт своей жизнью: материализация офферов, best, бюджет — штатная
-    механика WAVE10, поэтому в копию должны попасть партномер/алиасы/хэш и qty.
-    """
-    import prodavan.application.modules.equipment_offers_service as eos
-    from prodavan.application.modules.module_action_executor import ModuleActionExecutor
-    from prodavan.domain.identity import Principal
-
-    for table, rows in _chat_tables().items():
-        io._tables.setdefault(table, rows)
-
-    svc = ReadyBuildsPipelineService(session=object())
-    await _add_build(
-        io,
-        row_id="b_src",
-        name="Бюджетный ПК",
-        ram_gb=16,
-        slots=[
-            {"type_id": "etype_cpu", "class_key": "cpu_6c", "mode": "dynamic", "qty": 1},
-            {"type_id": "etype_ram", "class_key": "ram_16", "mode": "dynamic", "qty": 2},
-        ],
-    )
-    await svc.run(io)
-
-    # пайплайн чата проверен отдельными тестами — здесь фиксируем сам факт вызова
-    pipeline_calls: list[bool] = []
-
-    class _StubPipeline:
-        def __init__(self, session):  # noqa: ANN001, D107
-            pass
-
-        async def run(self, io, *, materialize=True):  # noqa: ANN001, D103
-            pipeline_calls.append(materialize)
-            return {"offers_created": 0}
-
-    monkeypatch.setattr(eos, "EquipmentPipelineService", _StubPipeline)
-    monkeypatch.setattr(eos, "ModuleRowIO", lambda *a, **k: io)
-
-    executor = ModuleActionExecutor(object())
-    result = await executor._attach_ready_build(
-        cabinet_id="cab",
-        module_id="mod_equipment",
-        params={"line_id": "line_1"},
-        row_id="b_src",
-        principal=Principal(sub="u1", roles=frozenset()),
-        employee=None,
-        project_id=None,
-        session_id="chat_1",
-    )
-
-    assert result["ok"] is True
-    assert result["line_id"] == "line_1"
-    assert result["groups_created"] == 2
-    # slot_qty ключуется по ИДЕНТИЧНОСТИ слота (row_id каталожного слота),
-    # а не по типу — иначе два компонента одного типа делили бы один счётчик
-    ram_slot = next(
-        r for r in io._tables["ready_build_slots"]
-        if (r.get("body") or {}).get("type_id") == "etype_ram"
-    )
-    ram_slot_id = ram_slot["row_id"]
-    assert result["slot_qty"] == {ram_slot_id: 2}
-    assert pipeline_calls == [True]  # копия сразу материализует офферы
-
-    build_id = result["build_id"]
-    chat_build = next(
-        b["body"] for b in io._tables["equipment_builds"] if b["row_id"] == build_id
-    )
-    assert chat_build["source_ready_build_id"] == "b_src"
-    assert chat_build["name"] == "Бюджетный ПК"
-    assert chat_build["slot_qty"] == {ram_slot_id: 2}
-    # карта слот→тип — редактор слотов рендерит их по ней (несколько компонентов
-    # одного типа остаются разными строками)
-    assert chat_build["slot_types"] == {
-        ram_slot_id: "etype_ram",
-        next(
-            r["row_id"] for r in io._tables["ready_build_slots"]
-            if (r.get("body") or {}).get("type_id") == "etype_cpu"
-        ): "etype_cpu",
-    }
-
-    copied = [
-        g["body"] for g in io._tables["found_groups"]
-        if g["body"].get("build_id") == build_id
-    ]
-    assert len(copied) == 2
-    by_slot = {g["slot_type_id"]: g for g in copied}
-    # ключи скопированы из РАЗРЕШЁННОГО компонента пула (дешевейшего в классе)
-    assert by_slot["etype_cpu"]["part_number"] == "CPU-A"
-    assert by_slot["etype_ram"]["part_number"] == "RAM-16B"
-    assert by_slot["etype_cpu"]["match_kind"] == "exact"
-    # владелец проставлен сразу: иначе до прогона пайплайна группы слотов
-    # мелькали бы в общем списке «Найденные товары» (фильтр owner_kind = line)
-    assert all(g["owner_kind"] == "build" for g in copied)
-    # цены в копию не переносятся — их материализует пайплайн чата
-    assert "best_price" not in by_slot["etype_cpu"]
-
-    # id созданных групп возвращаются агенту: без них он не может работать с
-    # копией прицельно (закрепить партномер слота, добавить алиас) —
-    # found_groups_list фильтруется по build_id, а угадывать row_id слота
-    # агент не должен
-    assert {g["slot_type_id"] for g in result["groups"]} == {"etype_cpu", "etype_ram"}
-    assert {g["group_id"] for g in result["groups"]} == {
-        g["row_id"] for g in io._tables["found_groups"]
-        if g["body"].get("build_id") == build_id
-    }
-    assert {g["slot_type_id"]: g["qty"] for g in result["groups"]} == {
-        "etype_cpu": 1,
-        "etype_ram": 2,
-    }
-    assert {g["slot_type_id"]: g["part_number"] for g in result["groups"]} == {
-        "etype_cpu": "CPU-A",
-        "etype_ram": "RAM-16B",
-    }
+def test_card_matches_constraints_normalizes_case() -> None:
+    assert card_matches_constraints({"capacity": "512"}, {"capacity": "512"}, {}) is True
+    assert card_matches_constraints({"capacity": "512"}, {"capacity": "256"}, {}) is False
+    assert card_matches_constraints({"socket": "lga1700"}, {"socket": "LGA1700"}, {}) is True
+    # пустые constraints подходят всем
+    assert card_matches_constraints({}, {"capacity": "512"}, {}) is False
+    assert card_matches_constraints({"capacity": "512"}, {}, {}) is True
 
 
-async def test_attach_ready_build_requires_existing_line(io: FakeIO, monkeypatch) -> None:
-    """Нельзя скопировать сборку на несуществующую позицию."""
-    import prodavan.application.modules.equipment_offers_service as eos
-    from prodavan.application.modules.module_action_executor import ModuleActionExecutor
-    from prodavan.domain.errors import AppError
-    from prodavan.domain.identity import Principal
-
-    for table, rows in _chat_tables().items():
-        io._tables.setdefault(table, rows)
-    monkeypatch.setattr(eos, "ModuleRowIO", lambda *a, **k: io)
-
-    executor = ModuleActionExecutor(object())
-    with pytest.raises(AppError) as err:
-        await executor._attach_ready_build(
-            cabinet_id="cab",
-            module_id="mod_equipment",
-            params={"line_id": "line_missing"},
-            row_id="b_src",
-            principal=Principal(sub="u1", roles=frozenset()),
-            employee=None,
-            project_id=None,
-            session_id="chat_1",
-        )
-    assert err.value.status == 404
-
-    # без line_id — валидация 422
-    with pytest.raises(AppError) as err2:
-        await executor._attach_ready_build(
-            cabinet_id="cab",
-            module_id="mod_equipment",
-            params={},
-            row_id="b_src",
-            principal=Principal(sub="u1", roles=frozenset()),
-            employee=None,
-            project_id=None,
-            session_id="chat_1",
-        )
-    assert err2.value.status == 422
-
-
-@pytest.mark.asyncio
-async def test_pipeline_fills_type_name_from_equipment_types(io: FakeIO) -> None:
-    """`type_name` — зеркало ref'а `type_id`; его отдают компактная проекция
-    каталога для агента и колонка «Тип» в UI, но сам никто не заполняет.
-
-    На dev у созданного агентом каталога названия типов были пустые
-    (`type_name: ""` у всех 4 слотов и 4 компонентов пула).
-    """
-    io._tables["equipment_types"] = [
-        {"row_id": "etype_cpu", "body": {"name": "Процессор"}},
-        {"row_id": "etype_ram", "body": {"name": "Оперативная память"}},
-        # типа без имени быть не должно, но зеркало не должно и затирать имеющееся
-        {"row_id": "etype_ghost", "body": {"name": "   "}},
-    ]
-    await _add_build(
-        io,
-        row_id="b_tn",
-        name="Сборка с именами типов",
-        ram_gb=16,
-        slots=[{"type_id": "etype_cpu", "class_key": "cpu_6c", "mode": "dynamic", "qty": 1}],
-    )
-
-    svc = ReadyBuildsPipelineService(session=object())
-    await svc.run(io)
-
-    # пул
-    cpu_item = io.body("build_group_items", "it_cpu_a")
-    assert cpu_item["type_name"] == "Процессор"
-    # слоты
-    slot = next(
-        io.body("ready_build_slots", r["row_id"])
-        for r in io._tables["ready_build_slots"]
-        if (r.get("body") or {}).get("build_id") == "b_tn"
-    )
-    assert slot["type_name"] == "Процессор"
-
-
-@pytest.mark.asyncio
-async def test_pipeline_does_not_invent_type_name_for_unknown_type(io: FakeIO) -> None:
-    """Нет справочника типов → поле не трогаем (и не пишем пустую строку)."""
-    io._tables.pop("equipment_types", None)
-    io._tables["build_group_items"][0]["body"]["type_name"] = "Ручное название"
-
-    svc = ReadyBuildsPipelineService(session=object())
-    await svc.run(io)
-
-    assert io.body("build_group_items", "it_cpu_a")["type_name"] == "Ручное название"
-
-
-@pytest.mark.asyncio
-async def test_signature_distinguishes_gpu_gb(io: FakeIO) -> None:
-    """gpu_gb — классовая характеристика, как ram_gb: две сборки с разным
-    объёмом видеопамяти не должны конкурировать по цене."""
-    base = {
-        "cpu_cores": 6,
-        "ram_gb": 16,
-        "storage_kind": "ssd",
-        "storage_gb": 500,
-        "gpu_class": "",
-        "budget_tier": "budget",
-    }
-    assert class_signature(base) == "cpu6|ram16|ssd|sto500|-|gpu-gb|budget"
-    with_gpu8 = {**base, "gpu_class": "rtx", "gpu_gb": 8}
-    with_gpu16 = {**base, "gpu_class": "rtx", "gpu_gb": 16}
-    assert class_signature(with_gpu8) != class_signature(with_gpu16)
-    assert "gpu8gb" in class_signature(with_gpu8)
-
-
-@pytest.mark.asyncio
-async def test_pipeline_counts_ram_sticks_and_drives_from_slots(io: FakeIO) -> None:
-    """«Плашек ОЗУ» и «накопителей» выводятся из слотов своего типа.
-
-    Не отдельное поле, которое надо заполнять руками, — а сумма qty по слотам
-    типа ОЗУ/накопитель. Ровно то, что просили: численность исходит из
-    добавленных компонентов.
-    """
-    await _add_build(
-        io,
-        row_id="b_counts",
-        name="Сборка со счётчиками",
-        ram_gb=32,
-        slots=[
-            {"type_id": "etype_cpu", "class_key": "cpu_6c", "mode": "dynamic", "qty": 1},
-            {"type_id": "etype_ram", "class_key": "ram_16", "mode": "dynamic", "qty": 2},
-            {"type_id": "etype_storage", "class_key": "ssd_500", "mode": "dynamic", "qty": 3},
-            {"type_id": "etype_psu", "class_key": "psu_500", "mode": "dynamic", "qty": 1},
-        ],
-    )
-
-    svc = ReadyBuildsPipelineService(session=object())
-    await svc.run(io)
-
-    build = io.body("ready_builds", "b_counts")
-    assert build["ram_sticks"] == 2.0
-    assert build["storage_drives"] == 3.0
-    # qty_total по-прежнему считает все слоты (psu не плашка и не диск)
-    assert build["qty_total"] == 7.0
-    assert build["slots_count"] == 4
-
-
-@pytest.mark.asyncio
-async def test_pipeline_writes_group_id_onto_slots(io: FakeIO) -> None:
-    """Слот получает group_id своей сборки (денормализация).
-
-    Без него список пула при замене компонента не может отфильтровать
-    альтернативы по группе без джойна сборка → группа.
-    """
-    await _add_build(
-        io,
-        row_id="b_gid",
-        name="Сборка с group_id на слотах",
-        ram_gb=16,
-        slots=[{"type_id": "etype_cpu", "class_key": "cpu_6c", "mode": "dynamic", "qty": 1}],
-    )
-
-    svc = ReadyBuildsPipelineService(session=object())
-    await svc.run(io)
-
-    slot = next(
-        r
-        for r in io._tables["ready_build_slots"]
-        if (r.get("body") or {}).get("build_id") == "b_gid"
-    )
-    assert (slot.get("body") or {}).get("group_id") == "grp_am4"
+def test_validate_card_attrs_required_and_groups() -> None:
+    schemas = parse_type_schemas(TYPES)
+    fields = schemas["etype_cpu"]["fields"]
+    errors = validate_card_attrs(fields, {"socket": "LGA1700"})
+    assert any("Ядра" in e for e in errors)  # cores required
+    errors = validate_card_attrs(fields, {"socket": "LGA9999", "cores": "6"})
+    assert any("вне групп" in e for e in errors)
+    assert validate_card_attrs(fields, {"socket": "AM5", "cores": "8"}) == []

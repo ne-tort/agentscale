@@ -1,33 +1,37 @@
-"""WAVE11 — пайплайн каталога «Готовые сборки».
+"""WAVE12 — пайплайн каталога «Готовые сборки» (v2: карточки + характеристики).
 
-Каталог хранит **ключи** (партномер / алиасы / хэш позиции), а не товары
-конкретных поставщиков. Этот сервис периодически резолвит ключи в лучшие цены
-батч-запросом в OpenSearch и пересчитывает состав сборок, поэтому каталог
-обновляется сам — и по ценам, и по комплектующим.
+Модель v2 (docs/WAVE12-READY-BUILDS-REWORK.md):
 
-Модель (docs/WAVE11-READY-BUILDS.md):
+- ``equipment_types`` — шаблоны: ``fields_json`` описывает характеристики типа
+  (``kind``: text|enum|groups, ``required``, ``compat_domain``, ``values`` /
+  ``groups``). Значения характеристик — заранее заданные группы, не строки;
+- ``part_cards`` — «Карточки комплектующих»: ключи (партномер/алиасы/хэш) +
+  ``type_id`` + ``attrs`` (значения из групп типа). Цены-лидеры резолвятся
+  батч-запросом в OpenSearch (как и раньше — каталог хранит ключи, не офферы);
+- ``ready_builds`` + ``ready_build_slots`` — сборка = набор слотов
+  ``type_id`` + ``constraints`` (поле → значение группы) + ``qty`` + опционально
+  закреплённая ``card_id``. Групп совместимости и бюджетных классов больше нет.
 
-- ``build_groups`` — домен совместимости (сокет / тип ОЗУ / форм-фактор)
-  + бюджетный класс;
-- ``build_group_items`` — пул оборудования группы: одна строка = одна
-  альтернатива компонента, с ``class_key`` (``ram_16``, ``ssd_256`` …). Класс
-  не даёт сравнивать несравнимое;
-- ``ready_builds`` — вариант конфигурации внутри группы;
-- ``ready_build_slots`` — слот: ``type_id`` + ``qty`` + ``mode``
-  (``dynamic`` → дешевейший доступный компонент класса, может дрейфовать;
-  ``fixed`` → закреплён, цена меняется, состав нет).
+Совместимость — автоматическая матрица из ``compat_domain``: поля разных типов
+с одним доменом (``socket`` у CPU/материнки/кулера, ``ram_type`` у материнки и
+ОЗУ, ``form_factor`` у материнки и корпуса) обязаны совпадать. Конфликты не
+блокируют сборку (грубой совместимости достаточно), а пишутся в
+``compat_issues`` — видно и в UI, и агенту.
 
-Инвариант ранжирования: «дешевлейшая сборка» считается **строго внутри**
-``(group_id, class_signature)``. Разные сигнатуры — разные витрины, они не
-конкурируют, поэтому «16 ГБ дешевле 32 ГБ» никогда не делает 16 ГБ победителем.
+Цена: для каждого слота кандидаты = карточки типа, чьи ``attrs`` покрывают
+``constraints`` (+ фильтр по зафиксированным значениям доменов); у каждой
+карточки — лидер цены по её ключам. Без целевого коридора выбирается дешевейший
+кандидат. С ``target_price_min``/``target_price_max`` перебирается пара десятков
+умных комбинаций (all-cheapest, all-priciest, покомпонентные апгрейды, жадные
+проходы к коридору) — детерминированно, без полной комбинаторики. ``price_min``
+/``price_max`` на сборке — коридор возможных конфигураций (дешевейшая/дорожайшая
+комбинация из текущих кандидатов).
 
 Все таблицы каталога ``chats: all`` → строки имеют ``session_id = NULL`` и
-читаются обычным ``io.list`` (``list_project_wide`` фильтрует
-``session_id IN (...)`` и NULL-строки не видит).
-
-Записи идут через ``ModuleRowIO`` (``run_actions=False``) — пайплайн не
-самотриггерится. Пишутся только изменённые поля: иначе каждый прогон
-переписывает все строки и проект ложно помечается «требует обновления».
+читаются обычным ``io.list``. Записи идут через ``ModuleRowIO``
+(``run_actions=False``) — пайплайн не самотриггерится. Пишутся только
+изменённые поля: иначе каждый прогон переписывает все строки и проект ложно
+помечается «требует обновления».
 """
 
 from __future__ import annotations
@@ -49,49 +53,21 @@ from prodavan.application.modules.equipment_offers_service import (
 
 logger = logging.getLogger(__name__)
 
-GROUPS_TABLE = "build_groups"
-POOL_TABLE = "build_group_items"
+CARDS_TABLE = "part_cards"
 BUILDS_TABLE = "ready_builds"
 SLOTS_TABLE = "ready_build_slots"
 TYPES_TABLE = "equipment_types"
-
-MODE_DYNAMIC = "dynamic"
-MODE_FIXED = "fixed"
 
 # Идентификаторы типов, чья численность показываем отдельно (плашки, диски).
 # Сидятся со стабильными id в product_module_seeds.
 RAM_TYPE_ID = "etype_ram"
 STORAGE_TYPE_ID = "etype_storage"
 
-
-def class_signature(body: dict[str, Any]) -> str:
-    """Нормализованная сигнатура класса сборки — ключ ранжирования.
-
-    Собирается из классовых атрибутов, а не из названия: две сборки с разными
-    объёмами ОЗУ обязаны попасть в разные сигнатуры, иначе дешевейшая «побеждает»
-    за счёт меньшего объёма.
-    """
-    def _num(field: str) -> str:
-        value = _num_or(body.get(field), None)
-        if value is None:
-            return "-"
-        return str(int(value)) if float(value).is_integer() else str(value)
-
-    def _text(field: str) -> str:
-        return str(body.get(field) or "").strip().casefold() or "-"
-
-    parts = [
-        f"cpu{_num('cpu_cores')}",
-        f"ram{_num('ram_gb')}",
-        _text("storage_kind"),
-        f"sto{_num('storage_gb')}",
-        _text("gpu_class"),
-        # gpu_gb — такая же классовая характеристика, как ram_gb: две сборки с
-        # разным объёмом видеопамяти не должны конкурировать по цене
-        f"gpu{_num('gpu_gb')}gb",
-        _text("budget_tier"),
-    ]
-    return "|".join(parts)
+# Сколько кандидатов слота участвует в комбинаторике коридора цен: дешевейший,
+# квартили, дорожайший. Полного перебора нет по дизайну.
+COMBO_SPREAD = 5
+# Жёсткий потолок комбинаций — паттерны дают ~2+4×слотов+2, но не доверяем.
+COMBO_LIMIT = 40
 
 
 def _qty_of(raw: Any) -> float:
@@ -102,8 +78,141 @@ def _qty_of(raw: Any) -> float:
     return float(int(value))
 
 
+def _norm(value: Any) -> str:
+    return str(value or "").strip().casefold()
+
+
+# ------------------------------------------------------------------ шаблоны
+
+
+def parse_type_schemas(type_rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """``{type_id: {"name", "sort_order", "fields": {key: field_def}}}``.
+
+    field_def: ``{key, label, kind, required, compat_domain, choices}`` —
+    ``choices`` = ``{value: label}`` для kind enum/groups, пусто для text.
+    Старый формат fields_json (только key/label) читается как kind=text.
+    """
+    out: dict[str, dict[str, Any]] = {}
+    for row in type_rows:
+        if not isinstance(row, dict):
+            continue
+        type_id = str(row.get("row_id") or "")
+        body = row.get("body") if isinstance(row.get("body"), dict) else {}
+        fields: dict[str, dict[str, Any]] = {}
+        raw_fields = body.get("fields_json")
+        for f in raw_fields if isinstance(raw_fields, list) else []:
+            if not isinstance(f, dict):
+                continue
+            key = str(f.get("key") or "").strip()
+            if not key:
+                continue
+            label = f.get("label")
+            if isinstance(label, dict):
+                label = str(label.get("ru") or label.get("en") or key)
+            kind = str(f.get("kind") or "text").strip() or "text"
+            choices: dict[str, str] = {}
+            if kind == "enum":
+                for v in f.get("values") if isinstance(f.get("values"), list) else []:
+                    sv = str(v).strip()
+                    if sv:
+                        choices[sv] = sv
+            elif kind == "groups":
+                for g in f.get("groups") if isinstance(f.get("groups"), list) else []:
+                    if isinstance(g, dict):
+                        sv = str(g.get("value") or "").strip()
+                        sl = str(g.get("label") or "").strip() or sv
+                    else:
+                        sv = str(g).strip()
+                        sl = sv
+                    if sv:
+                        choices[sv] = sl
+            fields[key] = {
+                "key": key,
+                "label": str(label or key),
+                "kind": kind,
+                "required": bool(f.get("required")),
+                "compat_domain": str(f.get("compat_domain") or "").strip(),
+                "choices": choices,
+            }
+        out[type_id] = {
+            "name": str(body.get("name") or "").strip(),
+            "sort_order": _num_or(body.get("sort_order"), 1000.0) or 1000.0,
+            "fields": fields,
+        }
+    return out
+
+
+def value_label(field_def: dict[str, Any], value: Any) -> str:
+    """Человекочитаемая подпись значения: label группы/enum или само значение."""
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    choices = field_def.get("choices") if isinstance(field_def.get("choices"), dict) else {}
+    return str(choices.get(raw) or raw)
+
+
+def attrs_label(fields: dict[str, dict[str, Any]], attrs: Any) -> str:
+    """«SSD · 512 ГБ» — подпись attrs/constraints по шаблону типа (в порядке полей)."""
+    if not isinstance(attrs, dict) or not attrs:
+        return ""
+    parts: list[str] = []
+    for key, fdef in fields.items():
+        if key not in attrs:
+            continue
+        label = value_label(fdef, attrs.get(key))
+        if label:
+            parts.append(label)
+    # ключи вне шаблона не теряем
+    for key in sorted(k for k in attrs if k not in fields):
+        raw = str(attrs.get(key) or "").strip()
+        if raw:
+            parts.append(raw)
+    return " · ".join(parts)
+
+
+def card_matches_constraints(
+    card_attrs: Any, constraints: Any, fields: dict[str, dict[str, Any]]
+) -> bool:
+    """Карточка покрывает требования слота: каждое constraint-поле совпадает."""
+    if not isinstance(constraints, dict) or not constraints:
+        return True
+    attrs = card_attrs if isinstance(card_attrs, dict) else {}
+    for key, want in constraints.items():
+        if _norm(want) == "":
+            continue
+        if _norm(attrs.get(key)) != _norm(want):
+            return False
+    return True
+
+
+def validate_card_attrs(
+    fields: dict[str, dict[str, Any]], attrs: Any
+) -> list[str]:
+    """Ошибки заполнения карточки: required-поля и значения вне групп."""
+    errors: list[str] = []
+    values = attrs if isinstance(attrs, dict) else {}
+    for key, fdef in fields.items():
+        raw = values.get(key)
+        empty = raw is None or str(raw).strip() == ""
+        if fdef.get("required") and empty:
+            errors.append(f"обязательное поле «{fdef.get('label') or key}» не заполнено")
+            continue
+        if empty:
+            continue
+        choices = fdef.get("choices") or {}
+        if choices and str(raw).strip() not in choices:
+            allowed = ", ".join(list(choices)[:12])
+            errors.append(
+                f"«{fdef.get('label') or key}»: значение «{raw}» вне групп ({allowed}…)"
+            )
+    return errors
+
+
+# ------------------------------------------------------------------ пайплайн
+
+
 class ReadyBuildsPipelineService:
-    """Резолв цен каталога сборок + пересчёт составов и итогов."""
+    """Резолв цен карточек + подбор компонентов сборок по constraints."""
 
     def __init__(self, *, session: Any) -> None:
         self._session = session
@@ -112,293 +221,191 @@ class ReadyBuildsPipelineService:
         stats: dict[str, Any] = {
             "kind": "equipment.ready_builds",
             "resolve": bool(resolve),
-            "groups": 0,
-            "items": 0,
+            "cards": 0,
             "builds": 0,
             "slots": 0,
-            "items_updated": 0,
+            "cards_updated": 0,
             "slots_updated": 0,
             "builds_updated": 0,
-            "groups_updated": 0,
             "unresolved_slots": 0,
+            "combos_tried": 0,
         }
 
-        groups = [r for r in await io.list(GROUPS_TABLE) if isinstance(r, dict)]
-        items = [r for r in await io.list(POOL_TABLE) if isinstance(r, dict)]
+        cards = [r for r in await io.list(CARDS_TABLE) if isinstance(r, dict)]
         builds = [r for r in await io.list(BUILDS_TABLE) if isinstance(r, dict)]
         slots = [r for r in await io.list(SLOTS_TABLE) if isinstance(r, dict)]
-        stats["groups"] = len(groups)
-        stats["items"] = len(items)
+        type_rows = [r for r in await io.list(TYPES_TABLE) if isinstance(r, dict)]
+        stats["cards"] = len(cards)
         stats["builds"] = len(builds)
         stats["slots"] = len(slots)
-        if not items and not slots:
+        if not cards and not slots and not builds:
             return stats
 
+        schemas = parse_type_schemas(type_rows)
         sellers = [r for r in await io.list(SELLERS_TABLE) if isinstance(r, dict)]
         registry = _SellerRegistry(sellers)
-        # `type_name` — денормализованное зеркало ref'а `type_id`: его отдают и
-        # компактная проекция каталога для агента, и колонка «Тип» в UI. Сам его
-        # никто не заполняет (агент передаёт не всегда), поэтому выводим из
-        # справочника типов — иначе в каталоге пустые названия.
-        type_names = await self._type_names(io)
-
-        # ------------------------------------------------ резолв цен из OS
-        best_by_item: dict[str, dict[str, Any]] = {}
-        best_by_slot_key: dict[str, dict[str, Any]] = {}
-        if resolve:
-            best_by_item, best_by_slot_key = await self._resolve_prices(
-                io, items=items, slots=slots, registry=registry
-            )
-
         now = datetime.now(UTC).isoformat(timespec="seconds")
 
-        # ------------------------------------------------ пул: цены и классы
-        item_best: dict[str, dict[str, Any]] = {}
-        for item in items:
-            iid = str(item.get("row_id") or "")
-            body = dict(item.get("body") or {})
-            best = best_by_item.get(iid)
+        # ------------------------------------------------ резолв цен карточек
+        best_by_card: dict[str, dict[str, Any]] = {}
+        if resolve:
+            best_by_card = await self._resolve_card_prices(
+                io, cards=cards, registry=registry
+            )
+
+        cards_by_id: dict[str, dict[str, Any]] = {}
+        for card in cards:
+            cid = str(card.get("row_id") or "")
+            body = dict(card.get("body") or {})
+            best = best_by_card.get(cid)
+            type_id = str(body.get("type_id") or "")
+            schema = schemas.get(type_id) or {}
             updates: dict[str, Any] = {}
             want_count = int((best or {}).get("offers_count") or 0)
             if int(_num_or(body.get("offers_count"), 0) or 0) != want_count:
                 updates["offers_count"] = want_count
-            for field, key in (
-                ("best_price", "price"),
-                ("best_title", "title"),
-                ("best_seller", "seller"),
-            ):
-                want = (best or {}).get(key)
-                if field == "best_price":
-                    if _num_or(body.get(field), None) != _num_or(want, None):
-                        updates[field] = want
-                elif str(body.get(field) or "") != str(want or ""):
-                    updates[field] = want or ""
+            want_price = (best or {}).get("price")
+            if _num_or(body.get("best_price"), None) != _num_or(want_price, None):
+                updates["best_price"] = want_price
+            for field, key in (("best_title", "title"), ("best_seller", "seller")):
+                want = str((best or {}).get(key) or "")
+                if str(body.get(field) or "") != want:
+                    updates[field] = want
             want_stock = bool((best or {}).get("in_stock"))
             if bool(body.get("in_stock")) is not want_stock:
                 updates["in_stock"] = want_stock
-            want_type_name = type_names.get(str(body.get("type_id") or ""), "")
+            want_type_name = str(schema.get("name") or "")
             if want_type_name and str(body.get("type_name") or "") != want_type_name:
                 updates["type_name"] = want_type_name
+            want_attrs_label = attrs_label(schema.get("fields") or {}, body.get("attrs"))
+            if str(body.get("attrs_label") or "") != want_attrs_label:
+                updates["attrs_label"] = want_attrs_label
             if updates:
                 updates["synced_at"] = now
                 body.update(updates)
-                await io.update(POOL_TABLE, iid, body)
-                item["body"] = body
-                stats["items_updated"] += 1
-            item_best[iid] = body
+                await io.update(CARDS_TABLE, cid, body)
+                card["body"] = body
+                stats["cards_updated"] += 1
+            cards_by_id[cid] = card
 
-        # дешевейший в классе: строго внутри (group_id, type_id, class_key)
-        by_class: dict[tuple[str, str, str], list[str]] = {}
-        for iid, body in item_best.items():
-            if _num_or(body.get("best_price"), None) is None:
-                continue
-            if int(_num_or(body.get("offers_count"), 0) or 0) <= 0:
-                continue
-            key = (
-                str(body.get("group_id") or ""),
-                str(body.get("type_id") or ""),
-                str(body.get("class_key") or ""),
-            )
-            by_class.setdefault(key, []).append(iid)
-
-        cheapest_by_class: dict[tuple[str, str, str], str] = {}
-        for key, ids in by_class.items():
-            ranked = sorted(
-                ids,
-                key=lambda i: (
-                    _num_or(item_best[i].get("best_price"), float("inf")),
-                    i,
-                ),
-            )
-            cheapest_by_class[key] = ranked[0]
-            alts = max(0, len(ids) - 1)
-            for iid in ids:
-                body = dict(item_best[iid])
-                updates = {}
-                want_cheapest = ranked[0] == iid
-                if bool(body.get("is_cheapest_in_class")) is not want_cheapest:
-                    updates["is_cheapest_in_class"] = want_cheapest
-                if _num_or(body.get("alternatives_count"), 0) != alts:
-                    updates["alternatives_count"] = alts
-                if updates:
-                    body.update(updates)
-                    await io.update(POOL_TABLE, iid, body)
-                    item_best[iid] = body
-                    stats["items_updated"] += 1
-
-        # ------------------------------------------------ слоты: dynamic/fixed
+        # ------------------------------------------------ слоты по сборкам
         slots_by_build: dict[str, list[dict[str, Any]]] = {}
-        resolved_by_slot: dict[str, dict[str, Any]] = {}
-        # group_id сборки — на слоте: денормализация, чтобы список пула
-        # фильтровался по группе без джойна сборка → группа
-        group_by_build = {
-            str(b.get("row_id") or ""): str((b.get("body") or {}).get("group_id") or "")
-            for b in builds
-        }
         for slot in slots:
-            sid = str(slot.get("row_id") or "")
-            body = dict(slot.get("body") or {})
-            bid = str(body.get("build_id") or "")
+            bid = str((slot.get("body") or {}).get("build_id") or "")
             slots_by_build.setdefault(bid, []).append(slot)
 
-            mode = str(body.get("mode") or MODE_DYNAMIC).strip() or MODE_DYNAMIC
-            type_id = str(body.get("type_id") or "")
-            class_key = str(body.get("class_key") or "")
-            pinned = str(body.get("item_id") or "")
-
-            chosen_id = ""
-            alternatives = 0
-            if mode == MODE_FIXED and pinned and pinned in item_best:
-                chosen_id = pinned
-            elif pinned and pinned in item_best:
-                # dynamic с явной привязкой: стартуем от класса, но берём дешевейший
-                cbody = item_best[pinned]
-                key = (
-                    str(cbody.get("group_id") or ""),
-                    str(cbody.get("type_id") or type_id),
-                    str(cbody.get("class_key") or class_key),
-                )
-                ids = by_class.get(key) or []
-                alternatives = max(0, len(ids) - 1)
-                chosen_id = cheapest_by_class.get(key) or pinned
-            if not chosen_id and class_key:
-                # dynamic без привязки: ищем дешевейший по классу в группе сборки
-                group_id = self._build_group(builds, bid)
-                for key, cheap in cheapest_by_class.items():
-                    if key[0] == group_id and key[1] == type_id and key[2] == class_key:
-                        chosen_id = cheap
-                        alternatives = max(0, len(by_class.get(key) or []) - 1)
-                        break
-
-            price: float | None = None
-            title = ""
-            pn = ""
-            seller = ""
-            in_stock = False
-            if chosen_id:
-                cbody = item_best.get(chosen_id) or {}
-                price = _num_or(cbody.get("best_price"), None)
-                title = str(cbody.get("best_title") or "")
-                pn = str(cbody.get("part_number") or "")
-                seller = str(cbody.get("best_seller") or "")
-                in_stock = bool(cbody.get("in_stock"))
-            else:
-                # собственные ключи слота (компонента нет в пуле группы)
-                own = best_by_slot_key.get(sid)
-                if own:
-                    price = _num_or(own.get("price"), None)
-                    title = str(own.get("title") or "")
-                    pn = str(own.get("part_number") or "")
-                    seller = str(own.get("seller") or "")
-                    in_stock = bool(own.get("in_stock"))
-
-            qty = _qty_of(body.get("qty"))
-            line_total = round(price * qty, 2) if price is not None else None
-            if price is None:
-                stats["unresolved_slots"] += 1
-
-            resolved_by_slot[sid] = {
-                "item_id": chosen_id,
-                "price": price,
-                "qty": qty,
-                "line_total": line_total,
-                "in_stock": in_stock,
-            }
-
-            updates = {}
-            if str(body.get("resolved_item_id") or "") != chosen_id:
-                updates["resolved_item_id"] = chosen_id
-            if str(body.get("resolved_title") or "") != title:
-                updates["resolved_title"] = title
-            if str(body.get("resolved_part_number") or "") != pn:
-                updates["resolved_part_number"] = pn
-            if str(body.get("resolved_seller") or "") != seller:
-                updates["resolved_seller"] = seller
-            if _num_or(body.get("resolved_price"), None) != price:
-                updates["resolved_price"] = price
-            if _num_or(body.get("line_total"), None) != line_total:
-                updates["line_total"] = line_total
-            if bool(body.get("in_stock")) is not in_stock:
-                updates["in_stock"] = in_stock
-            if _num_or(body.get("alternatives_count"), 0) != alternatives:
-                updates["alternatives_count"] = alternatives
-            want_type_name = type_names.get(str(body.get("type_id") or ""), "")
-            if want_type_name and str(body.get("type_name") or "") != want_type_name:
-                updates["type_name"] = want_type_name
-            # денормализация group_id на слот: пул-список фильтруется по группе
-            # без джойна сборка → группа
-            want_group = group_by_build.get(bid, "")
-            if want_group and str(body.get("group_id") or "") != want_group:
-                updates["group_id"] = want_group
-            # class_key из разрешённого компонента — у fixed-слотов он пустой,
-            # а пикер замены фильтрует пул по (группа, тип, класс)
-            chosen_class = ""
-            if chosen_id:
-                chosen_class = str((item_best.get(chosen_id) or {}).get("class_key") or "")
-            if chosen_class and str(body.get("class_key") or "") != chosen_class:
-                updates["class_key"] = chosen_class
-            if updates:
-                updates["synced_at"] = now
-                body.update(updates)
-                await io.update(SLOTS_TABLE, sid, body)
-                slot["body"] = body
-                stats["slots_updated"] += 1
-
-        # ------------------------------------------------ итоги сборок
-        build_price: dict[str, float] = {}
         for build in builds:
             bid = str(build.get("row_id") or "")
-            body = dict(build.get("body") or {})
             build_slots = slots_by_build.get(bid) or []
+            # порядок слотов — по sort_order типа: стабильные комбинации и
+            # одинаковый spec_summary между прогонами
+            build_slots.sort(
+                key=lambda s: (
+                    (schemas.get(str((s.get("body") or {}).get("type_id") or "")) or {}).get(
+                        "sort_order", 1000.0
+                    ),
+                    str(s.get("row_id") or ""),
+                )
+            )
+            resolution = self._resolve_build(
+                build_body=dict(build.get("body") or {}),
+                build_slots=build_slots,
+                cards_by_id=cards_by_id,
+                schemas=schemas,
+            )
+            stats["unresolved_slots"] += resolution["unresolved"]
+            stats["combos_tried"] += resolution["combos_tried"]
+
+            # запись слотов
+            for slot in build_slots:
+                sid = str(slot.get("row_id") or "")
+                body = dict(slot.get("body") or {})
+                res = resolution["slots"].get(sid) or {}
+                updates = {}
+                chosen_card_id = str(res.get("card_id") or "")
+                if str(body.get("resolved_card_id") or "") != chosen_card_id:
+                    updates["resolved_card_id"] = chosen_card_id
+                for field, key in (
+                    ("resolved_title", "title"),
+                    ("resolved_part_number", "part_number"),
+                    ("resolved_seller", "seller"),
+                ):
+                    want = str(res.get(key) or "")
+                    if str(body.get(field) or "") != want:
+                        updates[field] = want
+                want_price = res.get("price")
+                if _num_or(body.get("resolved_price"), None) != _num_or(want_price, None):
+                    updates["resolved_price"] = want_price
+                want_line = res.get("line_total")
+                if _num_or(body.get("line_total"), None) != want_line:
+                    updates["line_total"] = want_line
+                want_stock = bool(res.get("in_stock"))
+                if bool(body.get("in_stock")) is not want_stock:
+                    updates["in_stock"] = want_stock
+                want_alts = int(res.get("alternatives") or 0)
+                if int(_num_or(body.get("alternatives_count"), 0) or 0) != want_alts:
+                    updates["alternatives_count"] = want_alts
+                type_id = str(body.get("type_id") or "")
+                schema = schemas.get(type_id) or {}
+                want_type_name = str(schema.get("name") or "")
+                if want_type_name and str(body.get("type_name") or "") != want_type_name:
+                    updates["type_name"] = want_type_name
+                want_constraints_label = attrs_label(
+                    schema.get("fields") or {}, body.get("constraints")
+                )
+                if str(body.get("constraints_label") or "") != want_constraints_label:
+                    updates["constraints_label"] = want_constraints_label
+                if updates:
+                    updates["synced_at"] = now
+                    body.update(updates)
+                    await io.update(SLOTS_TABLE, sid, body)
+                    slot["body"] = body
+                    stats["slots_updated"] += 1
+
+            # ------------------------------------------------ итоги сборки
+            body = dict(build.get("body") or {})
+            updates = {}
             slots_count = len(build_slots)
             qty_total = 0.0
             ram_sticks = 0.0
             storage_drives = 0.0
-            total = 0.0
-            unresolved = 0
-            any_on_order = False
-            prices: list[float] = []
             for slot in build_slots:
-                sid = str(slot.get("row_id") or "")
-                res = resolved_by_slot.get(sid) or {}
-                qty = float(res.get("qty") or 1.0)
+                sbody = slot.get("body") or {}
+                qty = _qty_of(sbody.get("qty"))
                 qty_total += qty
-                # плашки ОЗУ и диски считаются по слотам своего типа — из
-                # добавленных компонентов, а не из отдельного поля
-                slot_type = str((slot.get("body") or {}).get("type_id") or "")
+                slot_type = str(sbody.get("type_id") or "")
                 if slot_type == RAM_TYPE_ID:
                     ram_sticks += qty
                 elif slot_type == STORAGE_TYPE_ID:
                     storage_drives += qty
-                price = res.get("price")
-                if price is None:
-                    unresolved += 1
-                    continue
-                total += float(price) * qty
-                prices.append(float(price) * qty)
-                if res.get("in_stock") is not True:
-                    any_on_order = True
-            total = round(total, 2)
-            build_price[bid] = total
-
-            signature = class_signature(body)
-            updates: dict[str, Any] = {}
-            if _num_or(body.get("slots_count"), 0) != slots_count:
-                updates["slots_count"] = slots_count
-            if _num_or(body.get("qty_total"), 0) != qty_total:
-                updates["qty_total"] = qty_total
-            if _num_or(body.get("ram_sticks"), 0) != ram_sticks:
-                updates["ram_sticks"] = ram_sticks
-            if _num_or(body.get("storage_drives"), 0) != storage_drives:
-                updates["storage_drives"] = storage_drives
-            if _num_or(body.get("price_total"), None) != total:
-                updates["price_total"] = total
-            if _num_or(body.get("unresolved_count"), 0) != unresolved:
-                updates["unresolved_count"] = unresolved
-            if bool(body.get("on_order")) is not any_on_order:
-                updates["on_order"] = any_on_order
-            if str(body.get("class_signature") or "") != signature:
-                updates["class_signature"] = signature
+            aggregates = {
+                "slots_count": slots_count,
+                "qty_total": qty_total,
+                "ram_sticks": ram_sticks,
+                "storage_drives": storage_drives,
+                "price_total": resolution["price_total"],
+                "price_min": resolution["price_min"],
+                "price_max": resolution["price_max"],
+                "unresolved_count": resolution["unresolved"],
+                "on_order": resolution["on_order"],
+                "compat_ok": resolution["compat_ok"],
+                "compat_issues": resolution["compat_issues"],
+                "price_note": resolution["price_note"],
+                "spec_summary": resolution["spec_summary"],
+            }
+            for field, want in aggregates.items():
+                if isinstance(want, bool):
+                    # compat_ok по умолчанию True (отсутствие ключа = True):
+                    # False обязан быть записан явно; остальные флаги наоборот
+                    default = True if field == "compat_ok" else False
+                    if bool(body.get(field, default)) is not want:
+                        updates[field] = want
+                elif isinstance(want, float) or want is None:
+                    if _num_or(body.get(field), None) != _num_or(want, None):
+                        updates[field] = want
+                else:
+                    if body.get(field) != want:
+                        updates[field] = want
             if updates:
                 updates["synced_at"] = now
                 body.update(updates)
@@ -406,104 +413,18 @@ class ReadyBuildsPipelineService:
                 build["body"] = body
                 stats["builds_updated"] += 1
 
-        # «дешевлейшая в классе» — строго внутри (group_id, class_signature)
-        priced_by_class: dict[tuple[str, str], list[str]] = {}
-        for build in builds:
-            body = build.get("body") or {}
-            price = _num_or(body.get("price_total"), None)
-            if price is None or price <= 0:
-                continue
-            key = (
-                str(body.get("group_id") or ""),
-                str(body.get("class_signature") or ""),
-            )
-            priced_by_class.setdefault(key, []).append(str(build.get("row_id") or ""))
-
-        for key, ids in priced_by_class.items():
-            ranked = sorted(ids, key=lambda b: (build_price.get(b, float("inf")), b))
-            alts = max(0, len(ids) - 1)
-            for bid in ids:
-                build = next((b for b in builds if str(b.get("row_id") or "") == bid), None)
-                if build is None:
-                    continue
-                body = dict(build.get("body") or {})
-                updates = {}
-                want_cheapest = ranked[0] == bid
-                if bool(body.get("is_cheapest_in_class")) is not want_cheapest:
-                    updates["is_cheapest_in_class"] = want_cheapest
-                if _num_or(body.get("alternatives_count"), 0) != alts:
-                    updates["alternatives_count"] = alts
-                if updates:
-                    body.update(updates)
-                    await io.update(BUILDS_TABLE, bid, body)
-                    build["body"] = body
-                    stats["builds_updated"] += 1
-
-        # ------------------------------------------------ агрегаты групп
-        builds_by_group: dict[str, list[dict[str, Any]]] = {}
-        for build in builds:
-            gid = str((build.get("body") or {}).get("group_id") or "")
-            if gid:
-                builds_by_group.setdefault(gid, []).append(build)
-        items_by_group: dict[str, int] = {}
-        for item in items:
-            gid = str((item.get("body") or {}).get("group_id") or "")
-            items_by_group[gid] = items_by_group.get(gid, 0) + 1
-
-        for group in groups:
-            gid = str(group.get("row_id") or "")
-            body = dict(group.get("body") or {})
-            group_builds = builds_by_group.get(gid) or []
-            prices = [
-                _num_or((b.get("body") or {}).get("price_total"), None) for b in group_builds
-            ]
-            priced = [p for p in prices if p is not None and p > 0]
-            updates: dict[str, Any] = {}
-            want_items = items_by_group.get(gid, 0)
-            if _num_or(body.get("items_count"), 0) != want_items:
-                updates["items_count"] = want_items
-            if _num_or(body.get("builds_count"), 0) != len(group_builds):
-                updates["builds_count"] = len(group_builds)
-            if _num_or(body.get("price_min"), None) != (min(priced) if priced else None):
-                updates["price_min"] = min(priced) if priced else None
-            if _num_or(body.get("price_max"), None) != (max(priced) if priced else None):
-                updates["price_max"] = max(priced) if priced else None
-            if updates:
-                updates["synced_at"] = now
-                body.update(updates)
-                await io.update(GROUPS_TABLE, gid, body)
-                group["body"] = body
-                stats["groups_updated"] += 1
-
         return stats
 
-    # ------------------------------------------------------- справочник типов
+    # ----------------------------------------------------- резолв цен карточек
 
-    @staticmethod
-    async def _type_names(io: ModuleRowIO) -> dict[str, str]:
-        """`equipment_types.row_id` → название типа (для зеркала `type_name`)."""
-        out: dict[str, str] = {}
-        for row in await io.list(TYPES_TABLE):
-            if not isinstance(row, dict):
-                continue
-            rid = str(row.get("row_id") or "")
-            body = row.get("body") if isinstance(row.get("body"), dict) else {}
-            name = str((body or {}).get("name") or "").strip()
-            if rid and name:
-                out[rid] = name
-        return out
-
-    # ------------------------------------------------------------ резолв цен
-
-    async def _resolve_prices(
+    async def _resolve_card_prices(
         self,
         io: ModuleRowIO,
         *,
-        items: list[dict[str, Any]],
-        slots: list[dict[str, Any]],
+        cards: list[dict[str, Any]],
         registry: _SellerRegistry,
-    ) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
-        """Один батч-запрос в OS на все ключи пула и «собственные» ключи слотов."""
+    ) -> dict[str, dict[str, Any]]:
+        """Один батч-запрос в OS на все ключи карточек → лидер цены на карточку."""
         catalogs = [r for r in await io.list(CATALOGS_TABLE) if isinstance(r, dict)]
         ready_ids = [
             str(c.get("row_id"))
@@ -511,56 +432,396 @@ class ReadyBuildsPipelineService:
             if str((c.get("body") or {}).get("status") or "").strip().lower() == "ready"
         ]
         if not ready_ids:
-            return {}, {}
+            return {}
 
-        # слоты с собственными ключами (компонента нет в пуле группы)
-        slot_bodies: dict[str, dict[str, Any]] = {}
-        for slot in slots:
-            sid = str(slot.get("row_id") or "")
-            body = slot.get("body") or {}
-            has_own = any(
-                str(body.get(k) or "").strip()
-                for k in ("part_number", "aliases_pn", "aliases_hash")
-            )
-            if has_own:
-                slot_bodies[sid] = body
-
-        owner_bodies: dict[str, dict[str, Any]] = {}
-        for item in items:
-            iid = str(item.get("row_id") or "")
-            if iid:
-                owner_bodies[f"i:{iid}"] = item.get("body") or {}
-        for sid, body in slot_bodies.items():
-            owner_bodies[f"s:{sid}"] = body
-
+        bodies: dict[str, dict[str, Any]] = {}
+        for card in cards:
+            cid = str(card.get("row_id") or "")
+            if cid:
+                bodies[cid] = card.get("body") or {}
         docs = await search_catalog_docs(
-            self._session, ready_ids=ready_ids, bodies=list(owner_bodies.values())
+            self._session, ready_ids=ready_ids, bodies=list(bodies.values())
         )
         if not docs:
-            return {}, {}
+            return {}
+        per_card = assign_docs_to_keys(docs, bodies, registry=registry)
+        out: dict[str, dict[str, Any]] = {}
+        for cid, card_docs in per_card.items():
+            best = await best_price_from_docs(card_docs, registry=registry)
+            if best is not None:
+                out[cid] = best
+        return out
 
-        # индексируем доки по владельцу ключей: порядок bodies совпадает с
-        # порядком owner_bodies, поэтому zip даёт соответствие.
-        keys = list(owner_bodies.keys())
-        per_owner = assign_docs_to_keys(
-            docs, {k: owner_bodies[k] for k in keys}, registry=registry
+    # ------------------------------------------------------- резолв одной сборки
+
+    def _resolve_build(
+        self,
+        *,
+        build_body: dict[str, Any],
+        build_slots: list[dict[str, Any]],
+        cards_by_id: dict[str, dict[str, Any]],
+        schemas: dict[str, dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Подбор компонентов сборки: constraints → кандидаты → комбинация.
+
+        Шаги: фиксация доменов совместимости (constraints + закреплённые
+        карточки) → кандидаты слота (constraints + домен) → выбор комбинации
+        (коридор цен или дешевейшая) → проверка совместимости выбранного.
+        """
+        issues: list[str] = []
+
+        # ---- фиксация значений доменов (constraints + закреплённые карточки)
+        domain_fixed: dict[str, str] = {}
+        for slot in build_slots:
+            sbody = slot.get("body") or {}
+            type_id = str(sbody.get("type_id") or "")
+            fields = (schemas.get(type_id) or {}).get("fields") or {}
+            constraints = (
+                sbody.get("constraints") if isinstance(sbody.get("constraints"), dict) else {}
+            )
+            pinned = cards_by_id.get(str(sbody.get("card_id") or ""))
+            pinned_attrs = (pinned.get("body") or {}).get("attrs") if pinned else None
+            for key, fdef in fields.items():
+                domain = str(fdef.get("compat_domain") or "")
+                if not domain:
+                    continue
+                value = constraints.get(key)
+                if _norm(value) == "" and isinstance(pinned_attrs, dict):
+                    value = pinned_attrs.get(key)
+                if _norm(value) == "":
+                    continue
+                norm_value = _norm(value)
+                if domain in domain_fixed and domain_fixed[domain] != norm_value:
+                    issues.append(
+                        f"домен «{domain}»: конфликт {domain_fixed[domain]} ≠ {norm_value}"
+                    )
+                    continue
+                domain_fixed.setdefault(domain, norm_value)
+
+        # ---- кандидаты слотов
+        slot_states: list[dict[str, Any]] = []
+        for slot in build_slots:
+            sid = str(slot.get("row_id") or "")
+            sbody = slot.get("body") or {}
+            type_id = str(sbody.get("type_id") or "")
+            schema = schemas.get(type_id) or {}
+            fields = schema.get("fields") or {}
+            constraints = (
+                sbody.get("constraints") if isinstance(sbody.get("constraints"), dict) else {}
+            )
+            qty = _qty_of(sbody.get("qty"))
+            pinned_id = str(sbody.get("card_id") or "").strip()
+
+            candidates: list[dict[str, Any]] = []
+            if pinned_id:
+                pinned = cards_by_id.get(pinned_id)
+                if pinned is None:
+                    issues.append(
+                        f"{schema.get('name') or type_id}: закреплённая карточка удалена"
+                    )
+                else:
+                    candidates = [pinned]
+                    if not card_matches_constraints(
+                        (pinned.get("body") or {}).get("attrs"), constraints, fields
+                    ):
+                        issues.append(
+                            f"{schema.get('name') or type_id}: закреплённая карточка "
+                            f"не отвечает требованиям слота"
+                        )
+            else:
+                for card in cards_by_id.values():
+                    cbody = card.get("body") or {}
+                    if str(cbody.get("type_id") or "") != type_id:
+                        continue
+                    if not card_matches_constraints(cbody.get("attrs"), constraints, fields):
+                        continue
+                    candidates.append(card)
+                # доменный фильтр: если домен зафиксирован, поле типа входит в
+                # домен и constraint его не пинает — предпочитаем согласованных
+                for key, fdef in fields.items():
+                    domain = str(fdef.get("compat_domain") or "")
+                    fixed = domain_fixed.get(domain)
+                    if not domain or not fixed or _norm(constraints.get(key)):
+                        continue
+                    agreed = [
+                        c
+                        for c in candidates
+                        if _norm(
+                            (c.get("body") or {}).get("attrs", {}).get(key)
+                            if isinstance((c.get("body") or {}).get("attrs"), dict)
+                            else None
+                        )
+                        == fixed
+                    ]
+                    if agreed:
+                        candidates = agreed
+                    elif candidates:
+                        issues.append(
+                            f"{schema.get('name') or type_id}: нет карточек с "
+                            f"{key}={fixed} — совместимость по «{domain}» ослаблена"
+                        )
+
+            # ценовые кандидаты: только с лидером цены
+            priced: list[tuple[str, float, bool]] = []
+            for card in candidates:
+                cid = str(card.get("row_id") or "")
+                cbody = card.get("body") or {}
+                price = _num_or(cbody.get("best_price"), None)
+                if price is None or int(_num_or(cbody.get("offers_count"), 0) or 0) <= 0:
+                    continue
+                priced.append((cid, float(price), bool(cbody.get("in_stock"))))
+            priced.sort(key=lambda t: (t[1], t[0]))
+
+            slot_states.append(
+                {
+                    "slot_id": sid,
+                    "type_id": type_id,
+                    "type_name": str(schema.get("name") or type_id),
+                    "qty": qty,
+                    "constraints": constraints,
+                    "fields": fields,
+                    "candidates": candidates,
+                    "priced": priced,
+                    "pinned_id": pinned_id,
+                }
+            )
+
+        # ---- выбор комбинации (коридор цен с тела сборки)
+        target_min = _num_or(build_body.get("target_price_min"), None)
+        target_max = _num_or(build_body.get("target_price_max"), None)
+        if target_min is not None and target_min <= 0:
+            target_min = None
+        if target_max is not None and target_max <= 0:
+            target_max = None
+        chosen, price_note, combos_tried, totals = self._choose_combo(
+            slot_states,
+            target_min=target_min,
+            target_max=target_max,
         )
 
-        best_by_item: dict[str, dict[str, Any]] = {}
-        best_by_slot: dict[str, dict[str, Any]] = {}
-        for owner_key, owner_docs in per_owner.items():
-            best = await best_price_from_docs(owner_docs, registry=registry)
-            if best is None:
-                continue
-            if owner_key.startswith("i:"):
-                best_by_item[owner_key[2:]] = best
-            elif owner_key.startswith("s:"):
-                best_by_slot[owner_key[2:]] = best
-        return best_by_item, best_by_slot
+        # ---- результат по слотам
+        out_slots: dict[str, dict[str, Any]] = {}
+        unresolved = 0
+        on_order = False
+        for state in slot_states:
+            sid = state["slot_id"]
+            chosen_id = chosen.get(sid, "")
+            card = cards_by_id.get(chosen_id) if chosen_id else None
+            cbody = (card or {}).get("body") or {}
+            price = _num_or(cbody.get("best_price"), None) if card else None
+            if card is None or price is None:
+                unresolved += 1
+                if not state["priced"] and not state["pinned_id"]:
+                    issues.append(
+                        f"{state['type_name']}: нет карточек по требованиям слота"
+                    )
+            in_stock = bool(cbody.get("in_stock")) if card else False
+            if card is not None and not in_stock:
+                on_order = True
+            out_slots[sid] = {
+                "card_id": chosen_id,
+                "title": str(cbody.get("best_title") or ""),
+                "part_number": str(cbody.get("part_number") or ""),
+                "seller": str(cbody.get("best_seller") or ""),
+                "price": price,
+                "in_stock": in_stock,
+                "line_total": round(price * state["qty"], 2) if price is not None else None,
+                "alternatives": max(0, len(state["priced"]) - 1),
+            }
+
+        # ---- совместимость выбранной комбинации по доменам
+        domain_seen: dict[str, dict[str, list[str]]] = {}
+        for state in slot_states:
+            chosen_id = chosen.get(state["slot_id"], "")
+            card = cards_by_id.get(chosen_id) if chosen_id else None
+            card_attrs = (card.get("body") or {}).get("attrs") if card else None
+            for key, fdef in (state["fields"] or {}).items():
+                domain = str(fdef.get("compat_domain") or "")
+                if not domain:
+                    continue
+                value = state["constraints"].get(key)
+                if _norm(value) == "" and isinstance(card_attrs, dict):
+                    value = card_attrs.get(key)
+                if _norm(value) == "":
+                    continue
+                domain_seen.setdefault(domain, {}).setdefault(_norm(value), []).append(
+                    state["type_name"]
+                )
+        compat_ok = True
+        for domain, values in domain_seen.items():
+            if len(values) > 1:
+                compat_ok = False
+                detail = ", ".join(
+                    f"{v} ({', '.join(sorted(set(owners)))})" for v, owners in values.items()
+                )
+                issues.append(f"домен «{domain}» не сходится: {detail}")
+        if issues:
+            compat_ok = False
+
+        # ---- spec_summary: «Процессор: LGA1700 · 6 ядер; ОЗУ: DDR4 · 16 ГБ ×2»
+        spec_parts: list[str] = []
+        for state in slot_states:
+            label = attrs_label(state["fields"] or {}, state["constraints"])
+            part = f"{state['type_name']}: {label}" if label else state["type_name"]
+            if state["qty"] > 1:
+                part = f"{part} ×{int(state['qty'])}"
+            spec_parts.append(part)
+
+        return {
+            "slots": out_slots,
+            "unresolved": unresolved,
+            "on_order": on_order,
+            "price_total": totals.get("price_total"),
+            "price_min": totals.get("price_min"),
+            "price_max": totals.get("price_max"),
+            "compat_ok": compat_ok,
+            "compat_issues": " · ".join(dict.fromkeys(issues)),
+            "price_note": price_note,
+            "spec_summary": " · ".join(spec_parts),
+            "combos_tried": combos_tried,
+        }
+
+    # ------------------------------------------------------------ комбинаторика
 
     @staticmethod
-    def _build_group(builds: list[dict[str, Any]], build_id: str) -> str:
-        for b in builds:
-            if str(b.get("row_id") or "") == build_id:
-                return str((b.get("body") or {}).get("group_id") or "")
-        return ""
+    def _spread(priced: list[tuple[str, float, bool]]) -> list[int]:
+        """Индексы кандидатов для комбинаторики: дешевейший, квартили, дорожайший."""
+        n = len(priced)
+        if n <= COMBO_SPREAD:
+            return list(range(n))
+        marks = {0, n // 4, n // 2, (3 * n) // 4, n - 1}
+        return sorted(marks)
+
+    def _choose_combo(
+        self,
+        slot_states: list[dict[str, Any]],
+        *,
+        target_min: float | None,
+        target_max: float | None,
+    ) -> tuple[dict[str, str], str, int, dict[str, Any]]:
+        """Выбор комбинации кандидатов по слотам.
+
+        Возвращает (chosen {slot_id: card_id}, note, combos_tried, totals).
+        Детерминированно: кандидаты отсортированы (цена, card_id), паттерны
+        комбинаций фиксированы.
+        """
+        chosen: dict[str, str] = {}
+        totals: dict[str, Any] = {}
+        active = [s for s in slot_states if s["priced"]]
+        # слоты без ценовых кандидатов — неразрешённые, выбора нет
+        if not active:
+            return chosen, "", 0, totals
+
+        def total_of(combo: tuple[int, ...]) -> float:
+            total = 0.0
+            for state, idx in zip(active, combo):
+                total += state["priced"][idx][1] * state["qty"]
+            return round(total, 2)
+
+        spreads = [self._spread(s["priced"]) for s in active]
+        cheapest = tuple(sp[0] for sp in spreads)
+        priciest = tuple(sp[-1] for sp in spreads)
+
+        combos: set[tuple[int, ...]] = {cheapest, priciest}
+        # покомпонентные апгрейды от дешевейшей базы
+        for i, sp in enumerate(spreads):
+            for idx in sp[1:]:
+                combo = list(cheapest)
+                combo[i] = idx
+                combos.add(tuple(combo))
+
+        if target_max is not None:
+            # жадный проход к потолку: каждый шаг — самый выгодный апгрейд,
+            # не выходящий за target_max
+            combo = list(cheapest)
+            while True:
+                current = total_of(tuple(combo))
+                best_move: tuple[int, int, float] | None = None
+                for i, sp in enumerate(spreads):
+                    higher = [idx for idx in sp if idx > combo[i]]
+                    if not higher:
+                        continue
+                    nxt = higher[0]
+                    delta = (active[i]["priced"][nxt][1] - active[i]["priced"][combo[i]][1]) * active[i]["qty"]
+                    if delta <= 0:
+                        continue
+                    if current + delta > target_max:
+                        continue
+                    if best_move is None or delta > best_move[2]:
+                        best_move = (i, nxt, delta)
+                if best_move is None:
+                    break
+                combo[best_move[0]] = best_move[1]
+                combos.add(tuple(combo))
+                if len(combos) >= COMBO_LIMIT:
+                    break
+
+        if target_min is not None and total_of(cheapest) < target_min:
+            # жадный проход к минимуму: самые дешёвые апгрейды, пока не доберём
+            combo = list(cheapest)
+            while total_of(tuple(combo)) < target_min and len(combos) < COMBO_LIMIT:
+                best_move = None
+                for i, sp in enumerate(spreads):
+                    higher = [idx for idx in sp if idx > combo[i]]
+                    if not higher:
+                        continue
+                    nxt = higher[0]
+                    delta = (active[i]["priced"][nxt][1] - active[i]["priced"][combo[i]][1]) * active[i]["qty"]
+                    if delta <= 0:
+                        continue
+                    if best_move is None or delta < best_move[2]:
+                        best_move = (i, nxt, delta)
+                if best_move is None:
+                    break
+                combo[best_move[0]] = best_move[1]
+                combos.add(tuple(combo))
+
+        ranked = sorted(combos, key=lambda c: (total_of(c), c))[:COMBO_LIMIT]
+        combos_tried = len(ranked)
+
+        def _combo_total(c: tuple[int, ...]) -> float:
+            return total_of(c)
+
+        if target_min is None and target_max is None:
+            picked = cheapest
+            note = ""
+        else:
+            in_corridor = [
+                c
+                for c in ranked
+                if (target_min is None or _combo_total(c) >= target_min)
+                and (target_max is None or _combo_total(c) <= target_max)
+            ]
+            if in_corridor:
+                # с потолком — максимально наполненная конфигурация в коридоре;
+                # только с минимумом — дешевейшая, которая его достигает
+                picked = (
+                    max(in_corridor, key=lambda c: (_combo_total(c), c))
+                    if target_max is not None
+                    else min(in_corridor, key=lambda c: (_combo_total(c), c))
+                )
+                note = ""
+            else:
+                totals_list = [_combo_total(c) for c in ranked]
+                if target_min is not None and max(totals_list) < target_min:
+                    picked = max(ranked, key=lambda c: (_combo_total(c), c))
+                    note = "целевой минимум недостижим — выбрана максимально близкая конфигурация"
+                elif target_max is not None and min(totals_list) > target_max:
+                    picked = cheapest
+                    note = "целевой максимум недостижим — выбрана минимальная конфигурация"
+                else:
+                    picked = cheapest
+                    note = "целевой коридор недостижим — выбрана минимальная конфигурация"
+
+        for state, idx in zip(active, picked):
+            chosen[state["slot_id"]] = state["priced"][idx][0]
+
+        # коридор возможных конфигураций (по полным спискам кандидатов, не spread)
+        totals["price_min"] = round(
+            sum(s["priced"][0][1] * s["qty"] for s in active), 2
+        )
+        totals["price_max"] = round(
+            sum(s["priced"][-1][1] * s["qty"] for s in active), 2
+        )
+        totals["price_total"] = total_of(picked)
+        return chosen, note, combos_tried, totals

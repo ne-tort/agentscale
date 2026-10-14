@@ -45,10 +45,10 @@ BUDGET_TABLE = "budget_lines"
 PROCUREMENT_TABLE = "procurement"
 CATALOGS_TABLE = "catalogs"
 BUILDS_TABLE = "equipment_builds"
-ITEMS_TABLE = "equipment_items"
-# WAVE11: каталог «Готовые сборки» (chats=all, глобальная библиотека)
-CATALOG_GROUPS_TABLE = "build_groups"
-CATALOG_POOL_TABLE = "build_group_items"
+# WAVE12: каталог «Готовые сборки» v2 (chats=all, глобальная библиотека).
+# Карточки комплектующих + сборки со слотами-требованиями; групп совместимости
+# и классов бюджетности больше нет.
+CATALOG_CARDS_TABLE = "part_cards"
 CATALOG_BUILDS_TABLE = "ready_builds"
 CATALOG_SLOTS_TABLE = "ready_build_slots"
 
@@ -139,7 +139,7 @@ async def search_catalog_docs(
     """Один батч-запрос в OpenSearch по всем ключам (партномер + хэши).
 
     Общий для пайплайна позиций (``found_groups``) и пайплайна каталога
-    «Готовые сборки» (``build_group_items`` / ``ready_build_slots``): обеим
+    «Готовые сборки» (``part_cards``): обеим
     нужно «найти все доки каталога по набору ключей», чанкование и пагинация
     одинаковые — дублировать их нельзя, иначе разойдутся лимиты.
 
@@ -565,6 +565,18 @@ class EquipmentPipelineService:
             if await io.delete(BUILDS_TABLE, bid):
                 stats["builds_deleted"] += 1
         build_rows = live_build_rows
+        # WAVE12: зеркало готовых сборок — found_groups слотов отражают
+        # ТЕКУЩЕЕ состояние каталога (не копия на момент attach). До чистки
+        # групп-сирот: зеркало пересоздаёт недостающие группы, поэтому
+        # чиститься должны уже только действительно лишние.
+        mirror_stats = await self._mirror_ready_builds(io, builds=build_rows)
+        stats.update(mirror_stats)
+        if any(mirror_stats.get(k) for k in ("mirror_groups_created", "mirror_groups_updated", "mirror_groups_deleted", "builds_unlinked")):
+            # зеркало могло создать/обновить/удалить группы, офферы и саму
+            # сборку — дальше работаем только по свежим снапшотам
+            groups = [r for r in await io.list(GROUPS_TABLE) if isinstance(r, dict)]
+            build_rows = [r for r in await io.list(BUILDS_TABLE) if isinstance(r, dict)]
+            offers = [r for r in await io.list(OFFERS_TABLE) if isinstance(r, dict)]
         build_ids = {str(r.get("row_id") or "") for r in build_rows}
         live_groups: list[dict[str, Any]] = []
         for g in groups:
@@ -1516,6 +1528,184 @@ class EquipmentPipelineService:
 
     # ---------------------------------------------------------------- сборка
 
+    async def _mirror_ready_builds(
+        self,
+        io: ModuleRowIO,
+        *,
+        builds: list[dict[str, Any]],
+    ) -> dict[str, int]:
+        """Зеркало слотов готовых сборок в found_groups чата (owner_kind=build).
+
+        WAVE12: сборка чата — глобальная ССЫЛКА на ready_builds, а не копия.
+        Группы-кандидаты слотов (ключи разрешённых карточек) отражают ТЕКУЩЕЕ
+        состояние каталога: смена цены-лидера, замена компонента слота или
+        требований в каталоге доезжают до заказа/бюджета/закупки ближайшим
+        прогоном пайплайна (on_load страниц Данных, attach, beat).
+
+        Все группы owner_kind=build — зеркало (агент/пользователь их не
+        создаёт), поэтому зеркало полностью владеет ими: создаёт недостающие,
+        обновляет изменённые ключи, удаляет лишние. Ссылка на удалённую
+        готовую сборку = битая → сборка чата удаляется вместе с группами.
+        """
+        stats = {
+            "mirror_groups_created": 0,
+            "mirror_groups_updated": 0,
+            "mirror_groups_deleted": 0,
+            "builds_unlinked": 0,
+        }
+        linked = [
+            b for b in builds if str((b.get("body") or {}).get("ready_build_id") or "")
+        ]
+        if not linked:
+            return stats
+
+        # каталог chats=all → строки session_id=NULL, читаются обычным io.list
+        ready_builds = {
+            str(r.get("row_id") or ""): (r.get("body") or {})
+            for r in await io.list(CATALOG_BUILDS_TABLE)
+            if isinstance(r, dict)
+        }
+        ready_slots = [
+            r for r in await io.list(CATALOG_SLOTS_TABLE) if isinstance(r, dict)
+        ]
+        cards = {
+            str(r.get("row_id") or ""): (r.get("body") or {})
+            for r in await io.list(CATALOG_CARDS_TABLE)
+            if isinstance(r, dict)
+        }
+        slots_by_build: dict[str, list[dict[str, Any]]] = {}
+        for slot in ready_slots:
+            bid = str((slot.get("body") or {}).get("build_id") or "")
+            slots_by_build.setdefault(bid, []).append(slot)
+
+        existing_groups = [
+            g for g in await io.list(GROUPS_TABLE) if isinstance(g, dict)
+        ]
+        groups_by_build: dict[str, list[dict[str, Any]]] = {}
+        for g in existing_groups:
+            gbody = g.get("body") or {}
+            if str(gbody.get("owner_kind") or "") != "build":
+                continue
+            bid = str(gbody.get("build_id") or "")
+            groups_by_build.setdefault(bid, []).append(g)
+
+        for build in linked:
+            bid = str(build.get("row_id") or "")
+            bbody = dict(build.get("body") or {})
+            rb_id = str(bbody.get("ready_build_id") or "")
+            rbody = ready_builds.get(rb_id)
+            current_groups = groups_by_build.get(bid) or []
+
+            if rbody is None:
+                # готовая сборка удалена из каталога → связь битая: сборка
+                # чата и её группы-зеркала удаляются (бюджет/закупка
+                # пересчитаются этим же прогоном).
+                for g in current_groups:
+                    gid = str(g.get("row_id") or "")
+                    for offer in [
+                        o
+                        for o in await io.list(OFFERS_TABLE)
+                        if str((o.get("body") or {}).get("group_id") or "") == gid
+                    ]:
+                        await io.delete(OFFERS_TABLE, str(offer.get("row_id") or ""))
+                    await io.delete(GROUPS_TABLE, gid)
+                    stats["mirror_groups_deleted"] += 1
+                if await io.delete(BUILDS_TABLE, bid):
+                    stats["builds_unlinked"] += 1
+                continue
+
+            slots = slots_by_build.get(rb_id) or []
+            slot_qty: dict[str, Any] = {}
+            slot_types: dict[str, str] = {}
+            want: dict[str, dict[str, Any]] = {}
+            for slot in slots:
+                sbody = slot.get("body") or {}
+                sid = str(slot.get("row_id") or "").strip()
+                type_id = str(sbody.get("type_id") or "").strip()
+                if not sid or not type_id:
+                    continue
+                slot_types[sid] = type_id
+                qty_raw = sbody.get("qty")
+                try:
+                    qty = int(float(qty_raw)) if qty_raw not in (None, "") else 1
+                except (TypeError, ValueError):
+                    qty = 1
+                if qty > 1:
+                    slot_qty[sid] = qty
+                # ключи — из РАЗРЕШЁННОЙ карточки слота (выбор пайплайна
+                # каталога), иначе из закреплённой вручную
+                card = cards.get(str(sbody.get("resolved_card_id") or "")) or cards.get(
+                    str(sbody.get("card_id") or "")
+                ) or {}
+                part_number = str(card.get("part_number") or "").strip()
+                aliases_pn = str(card.get("aliases_pn") or "").strip()
+                aliases_hash = str(card.get("aliases_hash") or "").strip()
+                if not (part_number or aliases_pn or aliases_hash):
+                    continue  # слот не разрешён — группы нет, счётчик на сборке
+                want[sid] = {
+                    "slot_type_id": type_id,
+                    "part_number": part_number,
+                    "aliases_pn": aliases_pn,
+                    "aliases_hash": aliases_hash,
+                    "note": str(sbody.get("note") or "").strip(),
+                }
+
+            existing_by_slot = {
+                str((g.get("body") or {}).get("slot_id") or ""): g
+                for g in current_groups
+            }
+            for sid, keys in want.items():
+                target = {
+                    "build_id": bid,
+                    "owner_kind": "build",
+                    # компонент каталога прошёл матрицу совместимости — для
+                    # заказа это точное соответствие спецификации сборки
+                    "match_kind": "exact",
+                    **keys,
+                }
+                existing = existing_by_slot.pop(sid, None)
+                if existing is None:
+                    await io.create(GROUPS_TABLE, {**target, "slot_id": sid})
+                    stats["mirror_groups_created"] += 1
+                    continue
+                gbody = dict(existing.get("body") or {})
+                changed = {
+                    k: v
+                    for k, v in {**target, "slot_id": sid}.items()
+                    if str(gbody.get(k) or "") != str(v or "")
+                }
+                if changed:
+                    gbody.update(changed)
+                    await io.update(GROUPS_TABLE, str(existing.get("row_id") or ""), gbody)
+                    stats["mirror_groups_updated"] += 1
+            # лишние группы (слот удалён/стал неразрешённым) — удаляем с офферами
+            for sid, g in existing_by_slot.items():
+                gid = str(g.get("row_id") or "")
+                for offer in [
+                    o
+                    for o in await io.list(OFFERS_TABLE)
+                    if str((o.get("body") or {}).get("group_id") or "") == gid
+                ]:
+                    await io.delete(OFFERS_TABLE, str(offer.get("row_id") or ""))
+                await io.delete(GROUPS_TABLE, gid)
+                stats["mirror_groups_deleted"] += 1
+
+            # денормализация на сборку чата: количество/типы слотов и платформа
+            updates: dict[str, Any] = {}
+            if (bbody.get("slot_qty") or {}) != slot_qty:
+                updates["slot_qty"] = slot_qty
+            if (bbody.get("slot_types") or {}) != slot_types:
+                updates["slot_types"] = slot_types
+            want_kind = str(rbody.get("build_kind") or "pc")
+            if str(bbody.get("build_kind") or "") != want_kind:
+                updates["build_kind"] = want_kind
+            if updates:
+                bbody.update(updates)
+                await io.update(BUILDS_TABLE, bid, bbody)
+                build["body"] = bbody
+
+        return stats
+
     async def _sync_builds(
         self,
         io: ModuleRowIO,
@@ -1525,14 +1715,12 @@ class EquipmentPipelineService:
     ) -> dict[str, int]:
         """equipment_builds: состав/цена из слотов + best-сборка позиции.
 
-        WAVE10. Слот сборки = тип комплектующего; его кандидаты — группы
-        `found_groups` с `build_id`+`slot_type_id` (материализуются как обычные
-        группы, офферы/цены — тот же пайплайн). Цена сборки = Σ(best-группа
-        слота × qty). Среди сборок одной позиции выбирается best (точность →
-        цена); остальные — альтернативы. Легаси-слоты (`slots` → item → offer)
-        продолжают учитываться, пока не переведены на группы.
+        WAVE12. Сборка чата — ссылка на готовую сборку каталога
+        (``ready_build_id``); её слоты — зеркало ``found_groups``
+        (owner_kind=build), которое ведёт ``_mirror_ready_builds``. Цена сборки
+        = Σ(best-группа слота × qty). Среди сборок одной позиции выбирается
+        best (точность → цена); остальные — альтернативы.
         """
-        items = [r for r in await io.list(ITEMS_TABLE) if isinstance(r, dict)]
         builds = [r for r in await io.list(BUILDS_TABLE) if isinstance(r, dict)]
         lines_rows = [r for r in await io.list(LINES_TABLE) if isinstance(r, dict)]
         if not builds:
@@ -1558,8 +1746,6 @@ class EquipmentPipelineService:
                 "build_slot_groups_updated": 0,
                 "build_lines_updated": lines_updated,
             }
-        items_by_id = {str(r.get("row_id") or ""): r for r in items}
-        offers_by_id = {str(r.get("row_id") or ""): r for r in offers}
 
         # Кандидаты слотов: группы с build_id И идентичностью слота. Группа без
         # слота (build_id есть, но ни slot_id, ни slot_type_id) в цену сборки
@@ -1599,22 +1785,18 @@ class EquipmentPipelineService:
             if line_id:
                 builds_by_line.setdefault(line_id, []).append(build)
 
-            # Слоты: объединяем ключи из легаси `slots` и из групп сборки.
-            legacy_slots = body.get("slots") if isinstance(body.get("slots"), dict) else {}
-            # WAVE11: количество на слот ({type_id: qty}) — свойство слота, а не
-            # кандидата: «2 плашки ОЗУ» верно для любой альтернативы слота.
+            # Слоты = группы-зеркала готовой сборки. Количество на слот —
+            # денормализованный slot_qty (зеркало ведёт из ready_build_slots).
             raw_slot_qty = body.get("slot_qty")
             build_slot_qty = raw_slot_qty if isinstance(raw_slot_qty, dict) else {}
-            slot_keys = set(str(k) for k in legacy_slots.keys())
-            slot_keys |= {slot for (b, slot) in groups_by_build_slot.keys() if b == bid}
+            slot_keys = {slot for (b, slot) in groups_by_build_slot.keys() if b == bid}
 
             count = 0
             total = 0.0
             worst_rank = -1  # худшая точность среди компонентов (0=exact лучше)
             any_on_order = False
-            want_slots = dict(legacy_slots)
             for slot in slot_keys:
-                # 1) группа-кандидат слота → best по (точность, приоритет, цена)
+                # группа-зеркало слота → best по (точность, приоритет, цена)
                 slot_groups = groups_by_build_slot.get((bid, slot)) or []
                 priced = [
                     g
@@ -1625,7 +1807,7 @@ class EquipmentPipelineService:
                 slot_price: float | None = None
                 chosen_g: dict[str, Any] | None = None
                 if priced:
-                    best_g = sorted(
+                    chosen_g = sorted(
                         priced,
                         key=lambda g: (
                             MATCH_ORDER.get(
@@ -1636,30 +1818,16 @@ class EquipmentPipelineService:
                             str(g.get("row_id") or ""),
                         ),
                     )[0]
-                    # Ручной выбор слота (slots[slot] = group_id) перекрывает
-                    # автобest, если указывает на живого кандидата слота.
-                    manual_id = str(legacy_slots.get(slot) or "")
-                    chosen_g = next(
-                        (g for g in priced if str(g.get("row_id") or "") == manual_id),
-                        best_g,
-                    )
                     # Цена/точность/наличие сборки считаются ПО ВЫБРАННОМУ
-                    # кандидату, а не по автобest: иначе ручной выбор в UI
-                    # расходится с итоговой ценой сборки.
+                    # кандидату (лидер слота на момент прогона).
                     gb = chosen_g.get("body") or {}
                     slot_price = _num_or(gb.get("face_price"), None)
                     rank = MATCH_ORDER.get(_valid_match_kind(gb.get("match_kind")), 3)
                     worst_rank = max(worst_rank, rank)
                     if gb.get("face_in_stock") is not True:
                         any_on_order = True
-                # is_best/альтернативы группы-кандидата: видно в pick-списке слота.
+                # is_best/альтернативы группы-зеркала: видно в UI слотов.
                 chosen_id = str((chosen_g or {}).get("row_id") or "")
-                if chosen_id:
-                    # Самовосстановление состава: если ручной выбор протух
-                    # (кандидат удалён или остался без офферов), в slots
-                    # пишется фактически учтённый в цене кандидат — иначе UI
-                    # показывает одно, а price_total считает другое.
-                    want_slots[slot] = chosen_id
                 slot_alts = max(0, len(priced) - 1)
                 for g in slot_groups:
                     gid = str(g.get("row_id") or "")
@@ -1676,21 +1844,9 @@ class EquipmentPipelineService:
                         await io.update(GROUPS_TABLE, gid, gbody)
                         g["body"] = gbody
                         slot_groups_updated += 1
-                # 2) количество слота: явный slot_qty сборки важнее qty
-                # легаси-item; по умолчанию 1.
+                # количество слота: slot_qty из зеркала, по умолчанию 1
                 explicit_qty = _num_or(build_slot_qty.get(slot), None)
                 slot_qty = explicit_qty if (explicit_qty or 0) > 0 else 1.0
-                if slot_price is None:
-                    item = items_by_id.get(str(legacy_slots.get(slot) or ""))
-                    if item is not None:
-                        ibody = item.get("body") or {}
-                        if explicit_qty is None:
-                            slot_qty = _num_or(ibody.get("qty"), 1.0) or 1.0
-                        offer = offers_by_id.get(str(ibody.get("offer_id") or ""))
-                        if offer is not None:
-                            slot_price = _num_or((offer.get("body") or {}).get("price"), None)
-                            if (offer.get("body") or {}).get("in_stock") is not True:
-                                any_on_order = True
                 if slot_price is not None:
                     count += 1
                     total += slot_price * slot_qty
@@ -1717,8 +1873,6 @@ class EquipmentPipelineService:
             # парсит текст match_label (локализация/формулировка могут меняться).
             if bool(body.get("on_order")) is not any_on_order:
                 updates["on_order"] = any_on_order
-            if want_slots != (body.get("slots") if isinstance(body.get("slots"), dict) else {}):
-                updates["slots"] = want_slots
             if updates:
                 body.update(updates)
                 await io.update(BUILDS_TABLE, bid, body)
@@ -2158,16 +2312,17 @@ async def cascade_equipment_delete(
 
     Связь по позиции заказчика (request_lines.row_id):
     - удаление позиции → её found_groups + found_offers + budget_lines
-      + сборки позиции (equipment_builds) вместе с их группами-кандидатами
+      + сборки позиции (equipment_builds) вместе с их группами-зеркалами
       слотов и офферами;
     - удаление строки бюджета → корневая позиция со всем каскадом;
     - удаление found_groups → её офферы;
-    - удаление сборки → её группы-кандидаты слотов (build_id) и их офферы.
+    - удаление сборки → её группы-зеркала слотов (build_id) и их офферы.
 
-    WAVE11, каталог «Готовые сборки»:
-    - удаление группы → её пул (build_group_items), сборки (ready_builds)
-      и их слоты (ready_build_slots);
-    - удаление готовой сборки → её слоты.
+    WAVE12, каталог «Готовые сборки» v2:
+    - удаление готовой сборки → её слоты. Привязанные сборки чатов
+      (equipment_builds с ready_build_id) живут в бакетах других сессий —
+      их снимает зеркало пайплайна (битая ссылка → удаление) при ближайшем
+      прогоне каждого чата.
 
     Записи идут через ModuleRowIO(run_actions=False) в бакете чата самой
     строки (session_id), пайплайн дочищает остатки на следующем прогоне.
@@ -2177,7 +2332,6 @@ async def cascade_equipment_delete(
         BUDGET_TABLE,
         GROUPS_TABLE,
         BUILDS_TABLE,
-        CATALOG_GROUPS_TABLE,
         CATALOG_BUILDS_TABLE,
     ):
         return {}
@@ -2255,23 +2409,9 @@ async def cascade_equipment_delete(
         elif table_slug == BUILDS_TABLE:
             await _cascade_build(row_id)
         elif table_slug == CATALOG_BUILDS_TABLE:
-            # готовая сборка → её слоты
+            # готовая сборка → её слоты (привязанные сборки чатов снимет
+            # зеркало пайплайна — битая ссылка удаляется при прогоне чата)
             await _delete_where(CATALOG_SLOTS_TABLE, "build_id", row_id)
-        elif table_slug == CATALOG_GROUPS_TABLE:
-            # группа → пул, её готовые сборки и их слоты
-            await _delete_where(CATALOG_POOL_TABLE, "group_id", row_id)
-            group_builds = [
-                r
-                for r in await io.list(CATALOG_BUILDS_TABLE)
-                if str((r.get("body") or {}).get("group_id") or "") == row_id
-            ]
-            for b in group_builds:
-                bid = str(b.get("row_id") or "")
-                await _delete_where(CATALOG_SLOTS_TABLE, "build_id", bid)
-                if await io.delete(CATALOG_BUILDS_TABLE, bid):
-                    deleted[CATALOG_BUILDS_TABLE] = (
-                        deleted.get(CATALOG_BUILDS_TABLE, 0) + 1
-                    )
         return deleted
     finally:
         _IN_CASCADE_DELETE.set(False)

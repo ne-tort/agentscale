@@ -9,7 +9,7 @@ Env:
 Catalog search goes through Pod Bridge → OpenSearch (no local SQLite / EQUIPMENT_*).
 SoT rows go through Bridge JWT (:8001).
 
-WAVE7 responsibility split (v2.1.1):
+WAVE7 responsibility split:
   agent — request_lines (customer positions) + found_groups (candidate selection:
            part numbers, aliases, match category); NEVER writes found_offers;
   platform pipeline — materializes found_offers from OpenSearch by group keys,
@@ -17,24 +17,28 @@ WAVE7 responsibility split (v2.1.1):
            request_lines status / found_count / selected_offer_id are owned by
            the pipeline too — the agent never sets them.
 
-WAVE10 builds (v2.3.0):
-  A «Сборка» (equipment_builds) belongs to ONE request line and represents one
-  compatible PC/server variant (e.g. Intel vs AMD platform). A build has SLOTS
-  keyed by equipment type (equipment_types.row_id). Slot candidates are the
-  SAME found_groups rows — a group belongs EITHER to a position (line_id) OR to
-  a build slot (build_id + slot_type_id). So recording a build component is
-  exactly found_groups_upsert with build_id + slot_type_id instead of line_id.
-  The pipeline then materializes offers, prices each slot's best group, sums the
-  build total, and picks the best build per line (alternatives + benefit).
-  Build fields components_count / price_total / match_kind / is_best /
-  alternatives_count / benefit_* are pipeline-owned — do NOT set them.
+WAVE12 builds v3.0.0 (каталог «Готовые сборки» + карточки комплектующих):
+  - equipment_types are TEMPLATES: fields_json declares each characteristic with
+    kind (text|enum|groups), required and compat_domain (socket / ram_type /
+    form_factor). Values come from predefined groups — never free-form strings.
+  - part_cards («Карточки комплектующих») map a part number (part_number /
+    aliases_pn / aliases_hash) to a type + attrs (values from the type groups).
+    The catalog pipeline resolves the price leader per card from OpenSearch.
+  - ready_builds = slots of {type_id, constraints {field: group value}, qty,
+    optional pinned card_id}. The pipeline picks compatible cheapest cards
+    (compat matrix = shared compat_domain values) and honors target_price_min /
+    target_price_max with a bounded smart combo search.
+  - equipment_builds is a GLOBAL LINK to a ready build (ready_build_id) for a
+    chat/order: composition and prices mirror the catalog automatically. Never
+    assemble builds from scratch in the chat — pick a ready build
+    (ready_builds_list) or create one (ready_build_upsert), then attach it
+    (ready_build_attach) to the request line.
 
 Linking IDs (visible to the agent — no hidden ids):
   - request_lines.row_id  → pass as found_groups.line_id (позиция заказчика)
-                            or equipment_builds.line_id (build → position)
-  - equipment_builds.row_id → pass as found_groups.build_id (build slot group)
-  - equipment_types.row_id  → pass as found_groups.slot_type_id (which slot)
-  - found_groups.row_id   → group identity (offers link back via group_id)
+  - equipment_types.row_id → part_cards.type_id / ready_build_slots.type_id
+  - part_cards.row_id     → ready_build_slots.card_id (manual pin)
+  - ready_builds.row_id   → ready_build_attach / equipment_builds.ready_build_id
   - catalog hit.src_hash  → stable catalog position id (supplier+title);
                            use it in aliases_hash when a position has no P/N
 """
@@ -52,9 +56,6 @@ from typing import Any
 DEFAULT_MODULE_ID = "mod_equipment"
 MATCH_KINDS = frozenset({"exact", "analog", "doubt"})
 BUILD_KINDS = frozenset({"pc", "server"})
-# WAVE11: каталог «Готовые сборки»
-BUDGET_TIERS = frozenset({"budget", "mid", "high"})
-SLOT_MODES = frozenset({"dynamic", "fixed"})
 
 
 def _env() -> tuple[str, str, str]:
@@ -201,10 +202,9 @@ TOOLS: list[dict[str, Any]] = [
             "List candidate groups (found_groups) — your selection of part numbers per "
             "request line: line_id, part_number, aliases_pn, aliases_hash, match_kind "
             "(exact|analog|doubt), note, offers_count, face fields (best offer per group). "
-            "A group belongs EITHER to a request line (line_id) OR to a build slot "
-            "(build_id + slot_type_id) — slot groups have NO line_id, so filtering by "
-            "line_id returns nothing for a build. To inspect the components of a build "
-            "(e.g. the copy made by ready_build_attach) filter by build_id."
+            "Build slot groups (owner_kind=build) are NOT writable here: they are a "
+            "mirror of the linked ready build maintained by the platform — read them "
+            "with the build_id filter to inspect what a linked build resolves to."
         ),
         "inputSchema": {
             "type": "object",
@@ -217,10 +217,8 @@ TOOLS: list[dict[str, Any]] = [
                 "build_id": {
                     "type": "string",
                     "description": (
-                        "Optional filter: equipment_builds.row_id — returns the build's "
-                        "slot groups (owner_kind=build). This is how you read the "
-                        "components of a build copy before pinning a part number or "
-                        "adding an alias to a slot."
+                        "Optional filter: equipment_builds.row_id — read the mirrored "
+                        "slot groups of a linked ready build (read-only for the agent)."
                     ),
                 },
             },
@@ -244,15 +242,14 @@ TOOLS: list[dict[str, Any]] = [
         "name": "found_groups_upsert",
         "description": (
             "Create or update a found_groups row — THE tool to record which products "
-            "match a customer position, OR which products fill a build slot. "
-            "One row = one part-number group for one request line (line_id) "
-            "OR for one build slot (build_id + slot_type_id). "
-            "Record EVERY distinct candidate part number as its own group; a slot may "
-            "have SEVERAL candidate groups — the platform prices them and picks the "
-            "cheapest as the slot's best, so record alternatives, not just one. "
-            "On create: EITHER line_id (request_lines.row_id, normal search) OR "
-            "build_id + slot_type_id (build component) is required, AND at least one of "
-            "part_number / aliases_pn / aliases_hash. "
+            "match a customer position (request line). "
+            "One row = one part-number group for one request line (line_id). "
+            "Build slots are NOT writable here: linked ready builds mirror their "
+            "composition automatically (see ready_build_attach / ready_build_upsert). "
+            "Record EVERY distinct candidate part number as its own group — the "
+            "platform prices them and picks the cheapest accurate one. "
+            "On create: line_id (request_lines.row_id) AND at least one of "
+            "part_number / aliases_pn / aliases_hash are required. "
             "part_number — canonical P/N of the group. aliases_pn — ALL other "
             "spellings of the SAME part number you saw across suppliers in the "
             "catalog hits (comma-separated). aliases_hash — src_hash ids of catalog "
@@ -267,9 +264,6 @@ TOOLS: list[dict[str, Any]] = [
             "prices from OpenSearch and auto-selects the best: cheapest offer wins, "
             "but a PRIORITY supplier beats price within the same match tier; "
             "analog/doubt groups never outrank exact ones regardless of supplier. "
-            "For builds the same rule applies per slot: the cheapest accurate "
-            "candidate becomes the slot's best; the build total is the sum of the "
-            "slot bests, and the cheapest accurate build of the line becomes is_best. "
             "The user can override the choice manually in the UI. "
             "Do NOT write found_offers (no such tool): offers/prices are owned by "
             "the platform. "
@@ -282,15 +276,7 @@ TOOLS: list[dict[str, Any]] = [
                 "row_id": {"type": "string"},
                 "line_id": {
                     "type": ["string", "null"],
-                    "description": "request_lines.row_id (normal search; required if no build_id)",
-                },
-                "build_id": {
-                    "type": ["string", "null"],
-                    "description": "equipment_builds.row_id (build slot component)",
-                },
-                "slot_type_id": {
-                    "type": ["string", "null"],
-                    "description": "equipment_types.row_id — which slot of the build",
+                    "description": "request_lines.row_id (required on create)",
                 },
                 "part_number": {
                     "type": ["string", "null"],
@@ -337,15 +323,16 @@ TOOLS: list[dict[str, Any]] = [
     {
         "name": "equipment_types_list",
         "description": (
-            "List component types (equipment_types) — the SLOT vocabulary of a build: "
-            "row_id (use as slot_type_id / build.slots key), name, sort_order, "
-            "build_scope (all|pc|server — which builds show this slot) and fields_json "
-            "(the characteristic keys to fill in equipment_items.attrs). "
-            "COMPATIBILITY keys are shared across types on purpose: cpu.socket ↔ "
-            "motherboard.socket, ram.ram_type ↔ motherboard.ram_type, "
-            "cooling.socket_compat, case.form_factor_support, psu.wattage vs "
-            "gpu.recommended_psu_w, storage.interface ↔ motherboard.sata_ports/m2_slots. "
-            "Use these keys to verify parts are compatible before adding them to a build."
+            "List component types (equipment_types) — the TEMPLATES of the equipment "
+            "model: row_id (use as type_id in part_cards / ready_build slots), name, "
+            "sort_order, build_scope (all|pc|server) and fields_json — the "
+            "characteristics of the type. Each field: key, label, kind "
+            "(text | enum | groups), required (must be filled on part cards), "
+            "compat_domain (socket | ram_type | form_factor — the compatibility "
+            "matrix: fields of different types sharing a domain must MATCH in a "
+            "build), values (enum) or groups (grouped values like \"512\" = 512 ГБ). "
+            "ALWAYS pick attr/constraint values from these predefined values — "
+            "never invent strings."
         ),
         "inputSchema": {
             "type": "object",
@@ -363,13 +350,14 @@ TOOLS: list[dict[str, Any]] = [
     {
         "name": "equipment_builds_list",
         "description": (
-            "List builds (equipment_builds) — PC/server variants for customer positions. "
-            "Each build: name, line_id (request_lines.row_id), build_kind (pc|server), "
-            "components_count, price_total (sum of slot best offers), match_kind, "
-            "is_best, alternatives_count, benefit_label, slots. "
-            "One line may have SEVERAL builds (e.g. Intel and AMD platforms): the "
-            "pipeline marks the cheapest accurate one is_best, the rest are "
-            "alternatives. Filter by line_id to see the variants of one position."
+            "List builds of this chat (equipment_builds) — GLOBAL LINKS to ready "
+            "builds attached to customer positions: name, line_id, ready_build_id, "
+            "build_kind, components_count, price_total (sum of slot bests), "
+            "match_kind, is_best, alternatives_count, benefit_label. "
+            "One line may have SEVERAL linked builds: the pipeline marks the cheapest "
+            "accurate one is_best, the rest are alternatives. Filter by line_id to "
+            "see the variants of one position. Composition/prices mirror the catalog: "
+            "edit the READY build (ready_build_upsert), not this row."
         ),
         "inputSchema": {
             "type": "object",
@@ -399,32 +387,18 @@ TOOLS: list[dict[str, Any]] = [
     {
         "name": "equipment_builds_upsert",
         "description": (
-            "Create or update a build (equipment_builds) — one compatible PC/server "
-            "variant for a customer position. "
-            "On create: name AND line_id (request_lines.row_id) are required; "
-            "build_kind defaults to 'pc'. "
-            "Create SEVERAL builds per position when the platform is not fixed "
-            "(e.g. one Intel, one AMD) — each with its own components; the pipeline "
-            "then picks the best by accuracy→price and lists the rest as alternatives. "
-            "Components are NOT written here: add each part with found_groups_upsert "
-            "passing build_id (this build's row_id) + slot_type_id (equipment_types.row_id). "
-            "slot_qty sets how many of a component the build needs "
-            "({equipment_types.row_id: qty}, e.g. {\"etype_ram\": 2} for two sticks — "
-            "use it when 2 cheaper sticks beat 1 larger one). Quantity belongs to the "
-            "SLOT, not to a candidate: it holds for any alternative of that slot. "
-            "The slot price is multiplied by qty in price_total. "
-            "slots PINS which candidate is the slot's component "
-            "({equipment_types.row_id: found_groups.row_id}). The pipeline picks the "
-            "cheapest accurate candidate automatically, BUT an existing slots entry "
-            "wins over that auto-pick — so after a build was priced once, adding a "
-            "cheaper candidate does NOT change the price until you re-pin the slot "
-            "here. This is how you fix a part number for a component type. The map is "
-            "stored whole: read the build first and send ALL slots with the one you "
-            "changed. Point a slot at a candidate of the SAME build+slot_type_id "
-            "(found_groups_list with build_id), otherwise it is ignored as stale. "
-            "PATCH merges: omit = leave; null = clear. Optional: build_kind, slots, "
-            "slot_qty, note, project_ids. components_count / price_total / match_kind / "
-            "is_best / alternatives_count / benefit_* are pipeline-owned — do not set them."
+            "Create or update a build LINK (equipment_builds) — attaches a ready "
+            "build to this chat/order. On create: name AND ready_build_id "
+            "(ready_builds.row_id from ready_builds_list) are required; line_id "
+            "(request_lines.row_id) binds the build to a customer position. "
+            "There is NO from-scratch composition here: slots/constraints live in "
+            "the catalog (ready_build_upsert / ready_build_slot_upsert) and mirror "
+            "into the chat automatically. "
+            "PATCH merges: omit = leave; null = clear. Optional: name, line_id, "
+            "note, is_selected (manual best override for the position), project_ids. "
+            "components_count / price_total / match_kind / is_best / "
+            "alternatives_count / benefit_* are pipeline-owned — do not set them. "
+            "In most cases prefer ready_build_attach (one call: link + pipeline)."
         ),
         "inputSchema": {
             "type": "object",
@@ -432,32 +406,15 @@ TOOLS: list[dict[str, Any]] = [
                 "module_id": {"type": "string", "default": DEFAULT_MODULE_ID},
                 "row_id": {"type": "string"},
                 "name": {"type": "string"},
+                "ready_build_id": {
+                    "type": ["string", "null"],
+                    "description": "ready_builds.row_id (required on create)",
+                },
                 "line_id": {
                     "type": ["string", "null"],
-                    "description": "request_lines.row_id (required on create)",
+                    "description": "request_lines.row_id (customer position)",
                 },
-                "build_kind": {
-                    "type": ["string", "null"],
-                    "enum": ["pc", "server", None],
-                },
-                "slots": {
-                    "type": ["object", "null"],
-                    "description": (
-                        "Chosen component per slot: {equipment_types.row_id: "
-                        "found_groups.row_id}. Overrides the pipeline's automatic "
-                        "cheapest pick. Send the WHOLE map (read the build first) — "
-                        "the field is replaced, not merged key by key."
-                    ),
-                    "additionalProperties": {"type": "string"},
-                },
-                "slot_qty": {
-                    "type": ["object", "null"],
-                    "description": (
-                        "Quantity per slot: {equipment_types.row_id: int >= 1}. "
-                        "Omitted slots default to 1."
-                    ),
-                    "additionalProperties": {"type": ["number", "integer"]},
-                },
+                "is_selected": {"type": ["boolean", "null"]},
                 "note": {"type": ["string", "null"]},
                 "project_ids": {"type": ["array", "null"], "items": {"type": "string"}},
             },
@@ -467,10 +424,104 @@ TOOLS: list[dict[str, Any]] = [
     {
         "name": "equipment_builds_delete",
         "description": (
-            "Delete a build (equipment_builds) by row_id. Its slot candidate groups "
-            "(found_groups with this build_id) and their materialized offers are "
-            "cleaned up by the platform pipeline automatically. Use it to drop a "
-            "mistaken or non-compatible variant."
+            "Delete a build link (equipment_builds) by row_id — detaches the ready "
+            "build from this chat. Its mirrored slot groups and materialized offers "
+            "are cleaned up by the platform pipeline automatically. The ready build "
+            "in the catalog is NOT touched."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "module_id": {"type": "string", "default": DEFAULT_MODULE_ID},
+                "row_id": {"type": "string"},
+            },
+            "required": ["row_id"],
+            "additionalProperties": False,
+        },
+    },
+    # ------------------------------------------------- WAVE12: карточки + сборки
+    {
+        "name": "part_cards_list",
+        "description": (
+            "List component cards (part_cards) — the catalog of identified part "
+            "numbers: type_id, part_number, aliases, attrs (characteristic values "
+            "from the type groups), attrs_label, and the resolved price leader "
+            "(best_price / best_title / best_seller / offers_count / in_stock). "
+            "Filters: type_id (equipment_types.row_id), constraints (object "
+            "{field: group value} — only cards whose attrs cover ALL of them, e.g. "
+            "{\"capacity\": \"512\"} for 512 ГБ drives). Use it to choose a card for "
+            "a build slot (card_id pin) or to check whether a part number already "
+            "has a card before creating one."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "module_id": {"type": "string", "default": DEFAULT_MODULE_ID},
+                "type_id": {
+                    "type": "string",
+                    "description": "Optional filter: equipment_types.row_id",
+                },
+                "constraints": {
+                    "type": ["object", "null"],
+                    "description": (
+                        "Optional filter: {field_key: group value} — cards whose "
+                        "attrs match ALL constraints (e.g. {\"socket\": \"LGA1700\"})"
+                    ),
+                    "additionalProperties": {"type": "string"},
+                },
+                "limit": {"type": "integer", "default": 100, "minimum": 1, "maximum": 500},
+            },
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "part_card_upsert",
+        "description": (
+            "Create or update a component card (part_cards) — THE way to register a "
+            "part number in the catalog. On create: type_id AND at least one of "
+            "part_number / aliases_pn / aliases_hash are required. attrs carries the "
+            "characteristics from the type template (equipment_types_list → "
+            "fields_json): EVERY required field must be filled with a value FROM the "
+            "field's values/groups (e.g. {\"socket\": \"LGA1700\", \"cores\": \"6\"}) — "
+            "required fields are what the compatibility matrix and build slots match "
+            "on. Unknown values are rejected. Fill attrs from the product title / "
+            "specs you saw in catalog hits; when unsure between two groups, pick the "
+            "closer one and leave a note. "
+            "PATCH merges: omit = leave; null = clear. Optional: part_number, "
+            "aliases_pn, aliases_hash, attrs, note, project_ids. "
+            "best_price / best_seller / in_stock / offers_count are pipeline-owned."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "module_id": {"type": "string", "default": DEFAULT_MODULE_ID},
+                "row_id": {"type": "string"},
+                "type_id": {
+                    "type": ["string", "null"],
+                    "description": "equipment_types.row_id (required on create)",
+                },
+                "part_number": {"type": ["string", "null"]},
+                "aliases_pn": {"type": ["string", "null"]},
+                "aliases_hash": {"type": ["string", "null"]},
+                "attrs": {
+                    "type": ["object", "null"],
+                    "description": (
+                        "Characteristic values keyed by the type's fields_json keys; "
+                        "values from the field's values/groups"
+                    ),
+                    "additionalProperties": {"type": "string"},
+                },
+                "note": {"type": ["string", "null"]},
+                "project_ids": {"type": ["array", "null"], "items": {"type": "string"}},
+            },
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "part_card_delete",
+        "description": (
+            "Delete a component card (part_cards) by row_id. Ready build slots pinned "
+            "to it fall back to automatic selection on the next catalog sync."
         ),
         "inputSchema": {
             "type": "object",
@@ -483,43 +534,25 @@ TOOLS: list[dict[str, Any]] = [
         },
     },
     {
-        "name": "ready_builds_catalog",
+        "name": "ready_builds_list",
         "description": (
-            "THE read tool for the «Готовые сборки» catalog (WAVE11) — a reusable, "
-            "price-auto-updating library of PC/server build templates. "
-            "ALWAYS prefer picking a ready build from here over assembling a PC from "
-            "scratch: the catalog already encodes verified compatibility. "
-            "scope: 'groups' (compatibility domains: socket / ram_type / budget tier), "
-            "'items' (group component pool: part numbers + class_key + resolved best "
-            "price), 'builds' (ready builds with totals), 'build' (ONE build with all "
-            "its slots — pass row_id). "
-            "detail: 'compact' (default — ids, names, class, price; use for browsing "
-            "dozens of builds) or 'full' (all fields incl. keys and notes). "
-            "Filters: group_id, build_id, type_id, class_key, build_kind, budget_tier, "
-            "only_enabled. The catalog stores KEYS (part number / aliases / hash), not "
-            "supplier offers: prices are re-resolved from OpenSearch automatically, and "
-            "dynamic slots may drift to a cheaper compatible component of the same class."
+            "List ready builds (ready_builds) — the reusable, price-auto-updating "
+            "build catalog. ALWAYS prefer picking a ready build here over inventing "
+            "a configuration: slots encode grouped characteristics (SSD 512 ГБ, "
+            "LGA1700, DDR4…) and the pipeline resolves compatible components with "
+            "best prices. Returns per build: row_id, name, build_kind, spec_summary "
+            "(composition in one line), slots_count, qty_total, price_total "
+            "(chosen combination), price_min / price_max (cheapest / priciest "
+            "possible combination from current candidates), target_price_min / "
+            "target_price_max, on_order, unresolved_count (slots without a priced "
+            "card — the catalog needs more part cards there), compat_ok. "
+            "Filters: build_kind, only_enabled (default true), limit."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
                 "module_id": {"type": "string", "default": DEFAULT_MODULE_ID},
-                "scope": {
-                    "type": "string",
-                    "enum": ["groups", "items", "builds", "build"],
-                    "default": "builds",
-                },
-                "detail": {"type": "string", "enum": ["compact", "full"], "default": "compact"},
-                "row_id": {
-                    "type": "string",
-                    "description": "Required for scope=build",
-                },
-                "group_id": {"type": "string"},
-                "build_id": {"type": "string"},
-                "type_id": {"type": "string"},
-                "class_key": {"type": "string"},
                 "build_kind": {"type": "string", "enum": ["pc", "server"]},
-                "budget_tier": {"type": "string", "enum": ["budget", "mid", "high"]},
                 "only_enabled": {"type": "boolean", "default": True},
                 "limit": {"type": "integer", "default": 100, "minimum": 1, "maximum": 500},
             },
@@ -527,123 +560,54 @@ TOOLS: list[dict[str, Any]] = [
         },
     },
     {
-        "name": "build_group_upsert",
+        "name": "ready_build_get",
         "description": (
-            "Create or update a build group (build_groups) — a COMPATIBILITY DOMAIN, "
-            "not a convenience folder: inside one group components are interchangeable. "
-            "socket / ram_type / form_factor are the compatibility anchors; budget_tier "
-            "(budget|mid|high) is a layer ON TOP of them, never a substitute — never put "
-            "AM4 and LGA1700 into one group. On create: name is required. "
-            "PATCH merges: omit = leave; null = clear."
+            "Get ONE ready build with all its slots: build (full body) + slots "
+            "(type_id, constraints, qty, pinned card_id, resolved component "
+            "title/part_number/price, alternatives_count). Use it before attaching "
+            "or editing a build."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
                 "module_id": {"type": "string", "default": DEFAULT_MODULE_ID},
                 "row_id": {"type": "string"},
-                "name": {"type": "string"},
-                "build_kind": {"type": ["string", "null"], "enum": ["pc", "server", None]},
-                "socket": {"type": ["string", "null"]},
-                "ram_type": {"type": ["string", "null"]},
-                "form_factor": {"type": ["string", "null"]},
-                "budget_tier": {
-                    "type": ["string", "null"],
-                    "enum": ["budget", "mid", "high", None],
-                },
-                "note": {"type": ["string", "null"]},
-                "is_enabled": {"type": ["boolean", "null"]},
-                "project_ids": {"type": ["array", "null"], "items": {"type": "string"}},
             },
-            "additionalProperties": False,
-        },
-    },
-    {
-        "name": "build_group_item_upsert",
-        "description": (
-            "Create or update one component alternative in a group's pool "
-            "(build_group_items). The pool holds KEYS, not supplier offers: "
-            "part_number + aliases_pn (other spellings, comma-separated) + aliases_hash "
-            "(src_hash ids from equipment_catalog_search for positions WITHOUT a P/N). "
-            "At least one key is required on create. "
-            "class_key is MANDATORY in practice — it is what stops incompatible "
-            "substitution: 'ram_16' and 'ram_32', 'ssd_256' and 'ssd_512', 'hdd_1000' "
-            "are DIFFERENT classes and never compete by price. Use stable snake_case "
-            "(type + the distinguishing spec). class_label is its human-readable form. "
-            "The platform resolves best_price / best_seller / in_stock / "
-            "is_cheapest_in_class from OpenSearch — do NOT set them. "
-            "qty_default = how many of this component a build typically needs "
-            "(e.g. 2 for RAM sticks)."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "module_id": {"type": "string", "default": DEFAULT_MODULE_ID},
-                "row_id": {"type": "string"},
-                "group_id": {
-                    "type": ["string", "null"],
-                    "description": "build_groups.row_id (required on create)",
-                },
-                "type_id": {
-                    "type": ["string", "null"],
-                    "description": "equipment_types.row_id (required on create)",
-                },
-                "class_key": {"type": ["string", "null"]},
-                "class_label": {"type": ["string", "null"]},
-                "part_number": {"type": ["string", "null"]},
-                "aliases_pn": {"type": ["string", "null"]},
-                "aliases_hash": {"type": ["string", "null"]},
-                "qty_default": {"type": ["number", "integer", "null"]},
-                "note": {"type": ["string", "null"]},
-                "project_ids": {"type": ["array", "null"], "items": {"type": "string"}},
-            },
+            "required": ["row_id"],
             "additionalProperties": False,
         },
     },
     {
         "name": "ready_build_upsert",
         "description": (
-            "Create or update a ready build (ready_builds) TOGETHER WITH its slots in "
-            "ONE call — pass `slots` as an array; existing slots of the build are "
-            "replaced by it (omit `slots` to leave them untouched). "
-            "On create: group_id and name are required. "
-            "Class attributes (cpu_cores, ram_gb, storage_kind, storage_gb, gpu_class, "
-            "gpu_gb) "
-            "are what a customer request is matched against ('budget PC, 6 cores, "
-            "256 GB SSD, 16 GB RAM') and what forms class_signature — two builds with "
-            "different RAM (or different VRAM) are DIFFERENT showcases and never compete "
-            "by price, so fill "
-            "them accurately. "
-            "Each slot: type_id (equipment_types.row_id, required), qty (default 1), "
-            "mode ('dynamic' = take the cheapest available component of class_key, may "
-            "drift as prices change; 'fixed' = pinned to item_id, price changes but the "
-            "component does not), class_key (which pool class to draw from), item_id "
-            "(build_group_items.row_id — the pinned/default component), or own "
-            "part_number/aliases_pn/aliases_hash when the component is not in the pool, "
-            "plus note. "
-            "price_total / slots_count / is_cheapest_in_class / unresolved_count are "
-            "computed by the platform — do NOT set them."
+            "Create or update a ready build (ready_builds) TOGETHER WITH its slots "
+            "in ONE call. On create: name is required. "
+            "target_price_min / target_price_max (optional) set a price corridor: "
+            "the platform then searches smart combinations of slot candidates "
+            "(price leaders per part number) and picks one inside the corridor — "
+            "the most complete configuration up to max, the cheapest reaching min. "
+            "Each slot: type_id (equipment_types.row_id, required), constraints "
+            "({field: group value} from the type template — e.g. "
+            "{\"drive_type\": \"SSD\", \"capacity\": \"512\"}; empty = any card of the "
+            "type), qty (default 1 — e.g. 2 RAM sticks), card_id (optional pin to a "
+            "part_cards.row_id — manual component choice), note. "
+            "Passing `slots` REPLACES the build's slot list, but existing slots are "
+            "matched by row_id (or reused by type_id) and updated in place — their "
+            "identity survives, so linked chats keep their mirror stable. "
+            "Compatibility is checked automatically (socket / ram_type / "
+            "form_factor domains): conflicts land in compat_ok / compat_issues. "
+            "price_total / price_min / price_max / spec_summary / slots_count / "
+            "unresolved_count are pipeline-owned — do NOT set them."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
                 "module_id": {"type": "string", "default": DEFAULT_MODULE_ID},
                 "row_id": {"type": "string"},
-                "group_id": {
-                    "type": ["string", "null"],
-                    "description": "build_groups.row_id (required on create)",
-                },
                 "name": {"type": "string"},
                 "build_kind": {"type": ["string", "null"], "enum": ["pc", "server", None]},
-                "budget_tier": {
-                    "type": ["string", "null"],
-                    "enum": ["budget", "mid", "high", None],
-                },
-                "cpu_cores": {"type": ["number", "integer", "null"]},
-                "ram_gb": {"type": ["number", "integer", "null"]},
-                "storage_kind": {"type": ["string", "null"]},
-                "storage_gb": {"type": ["number", "integer", "null"]},
-                "gpu_class": {"type": ["string", "null"]},
-                "gpu_gb": {"type": ["number", "integer", "null"]},
+                "target_price_min": {"type": ["number", "integer", "null"]},
+                "target_price_max": {"type": ["number", "integer", "null"]},
                 "note": {"type": ["string", "null"]},
                 "is_enabled": {"type": ["boolean", "null"]},
                 "project_ids": {"type": ["array", "null"], "items": {"type": "string"}},
@@ -653,14 +617,14 @@ TOOLS: list[dict[str, Any]] = [
                     "items": {
                         "type": "object",
                         "properties": {
+                            "row_id": {"type": "string"},
                             "type_id": {"type": "string"},
                             "qty": {"type": ["number", "integer"]},
-                            "mode": {"type": "string", "enum": ["dynamic", "fixed"]},
-                            "class_key": {"type": "string"},
-                            "item_id": {"type": "string"},
-                            "part_number": {"type": "string"},
-                            "aliases_pn": {"type": "string"},
-                            "aliases_hash": {"type": "string"},
+                            "constraints": {
+                                "type": "object",
+                                "additionalProperties": {"type": "string"},
+                            },
+                            "card_id": {"type": "string"},
                             "note": {"type": "string"},
                         },
                         "required": ["type_id"],
@@ -674,20 +638,19 @@ TOOLS: list[dict[str, Any]] = [
     {
         "name": "ready_build_attach",
         "description": (
-            "Copy a ready build from the catalog into THIS chat as a working build for a "
-            "customer position: creates equipment_builds (line_id = the position) plus "
-            "one found_groups candidate per slot, then materializes offers. "
-            "KEYS are copied, not prices — the copy immediately lives its own life and "
-            "pulls current offers through the normal pipeline, so budget and procurement "
-            "work exactly as for a build made from scratch. "
-            "After this call, work with the COPY (equipment_builds / found_groups): "
-            "you may pin a part number for a slot, add an alias or src_hash of a product "
-            "you found, or change a quantity. The catalog itself is not modified — it is "
-            "the shop window, the copy belongs to the request. "
-            "Returns build_id, groups_created, groups (per slot: slot_type_id, group_id, "
-            "part_number, qty — use these group_id values to inspect or pin the copy's "
-            "components), slot_qty and slots_skipped_no_keys "
-            "(slots whose component had no keys — tell the manager about those)."
+            "Attach a ready build from the catalog to a customer position in THIS "
+            "chat — creates a GLOBAL LINK (equipment_builds with ready_build_id), "
+            "NOT a copy: the build's composition and prices mirror the catalog from "
+            "now on (slot changes, price-leader drift, target corridor re-picks all "
+            "flow into the order automatically on pipeline runs). "
+            "The mirrored slot components appear as found_groups (owner_kind=build) "
+            "and flow into «Найденные товары» / budget / procurement like any "
+            "found product. "
+            "Returns build_id, groups (per slot: slot_type_id, slot_id, group_id, "
+            "part_number) and the pipeline stats. "
+            "To change a component AFTER attaching, edit the READY build "
+            "(ready_build_slot_upsert) — or create a variant build and attach it "
+            "instead."
         ),
         "inputSchema": {
             "type": "object",
@@ -695,7 +658,7 @@ TOOLS: list[dict[str, Any]] = [
                 "module_id": {"type": "string", "default": DEFAULT_MODULE_ID},
                 "ready_build_id": {
                     "type": "string",
-                    "description": "ready_builds.row_id from ready_builds_catalog",
+                    "description": "ready_builds.row_id from ready_builds_list",
                 },
                 "line_id": {
                     "type": "string",
@@ -710,15 +673,16 @@ TOOLS: list[dict[str, Any]] = [
     {
         "name": "ready_build_slot_upsert",
         "description": (
-            "Create or patch ONE slot of a ready build (ready_build_slots) — use this "
-            "to change a single component WITHOUT resending the whole slots array "
-            "(ready_build_upsert replaces ALL slots). "
-            "On create: build_id AND type_id (equipment_types.row_id) are required; "
-            "for mode='fixed' also item_id (pool component) or own part_number / "
-            "aliases_pn / aliases_hash to pin; for mode='dynamic' a class_key to draw "
-            "from. To CHANGE the component of an existing slot, patch it with the new "
-            "item_id (a build_group_items.row_id from the SAME group + class). "
-            "qty is a whole number >= 1 (e.g. 2 RAM sticks)."
+            "Create or patch ONE slot of a ready build (ready_build_slots) — use "
+            "this to change a single slot WITHOUT resending the whole slots array "
+            "(ready_build_upsert replaces the list). "
+            "On create: build_id AND type_id (equipment_types.row_id) are required. "
+            "constraints — {field: group value} from the type template (empty = any "
+            "card of the type). card_id pins the slot to a part_cards.row_id "
+            "(manual replacement; pick candidates with part_cards_list filtered by "
+            "type_id + constraints). qty is a whole number >= 1. "
+            "PATCH merges: omit = leave; null = clear (clearing card_id returns the "
+            "slot to automatic selection)."
         ),
         "inputSchema": {
             "type": "object",
@@ -737,15 +701,14 @@ TOOLS: list[dict[str, Any]] = [
                     "description": "equipment_types.row_id (required on create)",
                 },
                 "qty": {"type": ["number", "integer", "null"]},
-                "mode": {"type": ["string", "null"], "enum": ["dynamic", "fixed", None]},
-                "class_key": {"type": ["string", "null"]},
-                "item_id": {
-                    "type": ["string", "null"],
-                    "description": "build_group_items.row_id (pinned pool component)",
+                "constraints": {
+                    "type": ["object", "null"],
+                    "additionalProperties": {"type": "string"},
                 },
-                "part_number": {"type": ["string", "null"]},
-                "aliases_pn": {"type": ["string", "null"]},
-                "aliases_hash": {"type": ["string", "null"]},
+                "card_id": {
+                    "type": ["string", "null"],
+                    "description": "part_cards.row_id (pinned component)",
+                },
                 "note": {"type": ["string", "null"]},
             },
             "additionalProperties": False,
@@ -853,15 +816,12 @@ def _validate_line_body(body: dict[str, Any], *, creating: bool) -> None:
 def _validate_group_body(body: dict[str, Any], *, creating: bool) -> None:
     if creating:
         line_id = body.get("line_id")
-        build_id = body.get("build_id")
-        has_line = isinstance(line_id, str) and bool(line_id.strip())
-        has_build = isinstance(build_id, str) and bool(build_id.strip())
-        if not has_line and not has_build:
+        if not (isinstance(line_id, str) and line_id.strip()):
             raise RuntimeError(
-                "found_groups must belong to EITHER a request line (line_id = "
-                "request_lines.row_id from request_lines_list) OR a build slot "
-                "(build_id = equipment_builds.row_id + slot_type_id = "
-                "equipment_types.row_id)"
+                "found_groups belongs to a request line: line_id = "
+                "request_lines.row_id from request_lines_list. Build slots are "
+                "mirror-managed by the platform — edit the ready build instead "
+                "(ready_build_slot_upsert)"
             )
         has_keys = any(
             str(body.get(k) or "").strip()
@@ -872,17 +832,6 @@ def _validate_group_body(body: dict[str, Any], *, creating: bool) -> None:
                 "at least one of part_number / aliases_pn / aliases_hash is required "
                 "when creating found_groups (group keys to search the catalog)"
             )
-    # build_id без slot_type_id недопустим и на PATCH: группа без слота попала бы
-    # в фантомный слот "" и молча вошла в цену сборки.
-    if "build_id" in body:
-        build_id = body.get("build_id")
-        if isinstance(build_id, str) and build_id.strip():
-            slot = body.get("slot_type_id")
-            if not (isinstance(slot, str) and slot.strip()):
-                raise RuntimeError(
-                    "slot_type_id is required with build_id (use equipment_types.row_id "
-                    "from equipment_types_list)"
-                )
     if "match_kind" in body and body["match_kind"] is not None:
         if str(body["match_kind"]) not in MATCH_KINDS:
             raise RuntimeError(f"match_kind must be one of {sorted(MATCH_KINDS)}")
@@ -892,45 +841,16 @@ def _validate_build_body(body: dict[str, Any], *, creating: bool) -> None:
     if creating:
         if not str(body.get("name") or "").strip():
             raise RuntimeError("name is required when creating equipment_builds")
-        if not str(body.get("line_id") or "").strip():
+        if not str(body.get("ready_build_id") or "").strip():
             raise RuntimeError(
-                "line_id is required when creating equipment_builds "
-                "(use request_lines.row_id from request_lines_list)"
+                "ready_build_id is required when creating equipment_builds: a chat "
+                "build is a LINK to a ready build (use ready_builds_list to pick, "
+                "ready_build_upsert to create one, or ready_build_attach for a "
+                "one-call attach to a position)"
             )
     if "build_kind" in body and body["build_kind"] is not None:
         if str(body["build_kind"]) not in BUILD_KINDS:
             raise RuntimeError(f"build_kind must be one of {sorted(BUILD_KINDS)}")
-    if "slot_qty" in body and body["slot_qty"] is not None:
-        qty = body["slot_qty"]
-        if not isinstance(qty, dict):
-            raise RuntimeError(
-                "slot_qty must be an object {equipment_types.row_id: quantity}"
-            )
-        for slot, value in qty.items():
-            try:
-                num = float(value)
-            except (TypeError, ValueError):
-                raise RuntimeError(
-                    f"slot_qty[{slot!r}] must be a number >= 1"
-                ) from None
-            if num < 1 or num != int(num):
-                raise RuntimeError(
-                    f"slot_qty[{slot!r}] must be a whole number >= 1 (got {value!r})"
-                )
-    if "slots" in body and body["slots"] is not None:
-        slots = body["slots"]
-        if not isinstance(slots, dict):
-            raise RuntimeError(
-                "slots must be an object {equipment_types.row_id: found_groups.row_id}"
-            )
-        for slot, group_id in slots.items():
-            if not str(slot or "").strip():
-                raise RuntimeError("slots keys must be non-empty equipment_types.row_id")
-            if not str(group_id or "").strip():
-                raise RuntimeError(
-                    f"slots[{slot!r}] must be a found_groups.row_id of THIS build's slot "
-                    "(use found_groups_list with build_id to get them)"
-                )
 
 
 def _scope_fits(build_scope: str, build_kind: str) -> bool:
@@ -976,48 +896,27 @@ def _catalog_search(arguments: dict[str, Any]) -> dict[str, Any]:
     )
 
 
-# ------------------------------------------------------- WAVE11: каталог сборок
+# ------------------------------------------------------- WAVE12: карточки и сборки
 
-# Поля, отдаваемые агенту в compact-режиме. Полный список тел съел бы контекст
-# на десятках сборок, поэтому компактность — часть контракта инструмента.
+# Поля, отдаваемые агенту в компактных списках. Полный список тел съел бы
+# контекст на десятках сборок, поэтому компактность — часть контракта.
 _CATALOG_COMPACT_FIELDS: dict[str, tuple[str, ...]] = {
-    "build_groups": (
-        "name",
-        "build_kind",
-        "socket",
-        "ram_type",
-        "budget_tier",
-        "items_count",
-        "builds_count",
-        "price_min",
-        "price_max",
-        "is_enabled",
-    ),
-    "build_group_items": (
-        "group_id",
+    "part_cards": (
         "type_id",
         "type_name",
-        "class_key",
-        "class_label",
         "part_number",
+        "attrs",
+        "attrs_label",
         "best_price",
         "best_seller",
+        "best_title",
         "in_stock",
         "offers_count",
-        "is_cheapest_in_class",
-        "qty_default",
     ),
     "ready_builds": (
-        "group_id",
         "name",
         "build_kind",
-        "budget_tier",
-        "cpu_cores",
-        "ram_gb",
-        "storage_kind",
-        "storage_gb",
-        "gpu_class",
-        "gpu_gb",
+        "spec_summary",
         "slots_count",
         "qty_total",
         "ram_sticks",
@@ -1025,23 +924,29 @@ _CATALOG_COMPACT_FIELDS: dict[str, tuple[str, ...]] = {
         "price_total",
         "price_min",
         "price_max",
+        "target_price_min",
+        "target_price_max",
+        "price_note",
         "on_order",
         "unresolved_count",
-        "is_cheapest_in_class",
-        "alternatives_count",
+        "compat_ok",
+        "compat_issues",
         "is_enabled",
     ),
     "ready_build_slots": (
         "build_id",
         "type_id",
         "type_name",
+        "constraints",
+        "constraints_label",
         "qty",
-        "mode",
-        "class_key",
-        "item_id",
+        "card_id",
+        "resolved_card_id",
         "resolved_title",
         "resolved_part_number",
         "resolved_price",
+        "resolved_seller",
+        "in_stock",
         "line_total",
         "alternatives_count",
     ),
@@ -1072,105 +977,89 @@ def _project_rows(
     return out
 
 
-def _ready_builds_catalog(
-    mid: str, arguments: dict[str, Any], sid: str | None
-) -> dict[str, Any]:
-    """Чтение каталога с уровнями компактности и фильтрами.
+def _norm_value(value: Any) -> str:
+    return str(value or "").strip().casefold()
 
-    Отдельный инструмент (а не generic module_data_list) потому, что каталог
-    рассчитан на десятки-сотни сборок: без compact-режима и фильтров агент
-    утонет в контексте раньше, чем выберет сборку.
-    """
-    scope = str(arguments.get("scope") or "builds").strip() or "builds"
-    full = str(arguments.get("detail") or "compact").strip().lower() == "full"
-    only_enabled = arguments.get("only_enabled") is not False
+
+def _constraints_cover(attrs: Any, constraints: Any) -> bool:
+    """attrs карточки покрывают ВСЕ constraint-поля (нормализация регистра)."""
+    if not isinstance(constraints, dict) or not constraints:
+        return True
+    values = attrs if isinstance(attrs, dict) else {}
+    for key, want in constraints.items():
+        if _norm_value(want) == "":
+            continue
+        if _norm_value(values.get(key)) != _norm_value(want):
+            return False
+    return True
+
+
+def _part_cards_list(mid: str, arguments: dict[str, Any], sid: str | None) -> Any:
+    type_id = str(arguments.get("type_id") or "").strip()
+    constraints = arguments.get("constraints")
+    if constraints is not None and not isinstance(constraints, dict):
+        raise RuntimeError("constraints must be an object {field_key: group value}")
     try:
         limit = max(1, min(int(arguments.get("limit") or 100), 500))
     except (TypeError, ValueError):
         limit = 100
-
-    group_id = str(arguments.get("group_id") or "").strip()
-    build_id = str(arguments.get("build_id") or "").strip()
-    type_id = str(arguments.get("type_id") or "").strip()
-    class_key = str(arguments.get("class_key") or "").strip()
-    build_kind = str(arguments.get("build_kind") or "").strip()
-    budget_tier = str(arguments.get("budget_tier") or "").strip()
-
-    def _matches(body: dict[str, Any]) -> bool:
-        if only_enabled and body.get("is_enabled") is False:
-            return False
-        for field, want in (
-            ("group_id", group_id),
-            ("build_id", build_id),
-            ("type_id", type_id),
-            ("class_key", class_key),
-            ("build_kind", build_kind),
-            ("budget_tier", budget_tier),
-        ):
-            if want and str(body.get(field) or "") != want:
-                return False
-        return True
-
-    table = {
-        "groups": "build_groups",
-        "items": "build_group_items",
-        "builds": "ready_builds",
-        "build": "ready_builds",
-    }.get(scope)
-    if table is None:
-        raise RuntimeError(
-            "scope must be one of groups | items | builds | build"
-        )
-
-    rows = _list_rows(mid, table, session_id=sid)
-    if scope == "build":
-        row_id = str(arguments.get("row_id") or "").strip()
-        if not row_id:
-            raise RuntimeError("row_id is required for scope=build")
-        build = next(
-            (r for r in rows if str(r.get("row_id") or "") == row_id), None
-        )
-        if build is None:
-            raise RuntimeError(f"ready_builds row not found: {row_id}")
-        slots = [
-            r
-            for r in _list_rows(mid, "ready_build_slots", session_id=sid)
-            if str(_rows_body(r).get("build_id") or "") == row_id
-        ]
-        return {
-            "build": _project_rows([build], "ready_builds", full=True)[0],
-            "slots": _project_rows(slots, "ready_build_slots", full=full),
-        }
-
-    filtered = [r for r in rows if _matches(_rows_body(r))]
-    items = _project_rows(filtered[:limit], table, full=full)
+    rows = _list_rows(mid, "part_cards", session_id=sid)
+    filtered = []
+    for row in rows:
+        body = _rows_body(row)
+        if type_id and str(body.get("type_id") or "") != type_id:
+            continue
+        if constraints and not _constraints_cover(body.get("attrs"), constraints):
+            continue
+        filtered.append(row)
     return {
-        "scope": scope,
-        "detail": "full" if full else "compact",
         "total": len(filtered),
-        "returned": len(items),
-        "items": items,
+        "items": _project_rows(filtered[:limit], "part_cards", full=False),
     }
 
 
-def _validate_group_meta(body: dict[str, Any], *, creating: bool) -> None:
-    if creating and not str(body.get("name") or "").strip():
-        raise RuntimeError("name is required when creating build_groups")
-    if "build_kind" in body and body["build_kind"] is not None:
-        if str(body["build_kind"]) not in BUILD_KINDS:
-            raise RuntimeError(f"build_kind must be one of {sorted(BUILD_KINDS)}")
-    if "budget_tier" in body and body["budget_tier"] is not None:
-        if str(body["budget_tier"]) not in BUDGET_TIERS:
-            raise RuntimeError(f"budget_tier must be one of {sorted(BUDGET_TIERS)}")
+def _type_schema(mid: str, type_id: str, sid: str | None) -> dict[str, Any]:
+    """Шаблон типа для валидации attrs: {field_key: {required, choices}}."""
+    for row in _list_rows(mid, "equipment_types", session_id=sid):
+        if str(row.get("row_id") or "") != type_id:
+            continue
+        fields: dict[str, Any] = {}
+        raw = _rows_body(row).get("fields_json")
+        for f in raw if isinstance(raw, list) else []:
+            if not isinstance(f, dict):
+                continue
+            key = str(f.get("key") or "").strip()
+            if not key:
+                continue
+            choices: set[str] = set()
+            for v in f.get("values") if isinstance(f.get("values"), list) else []:
+                if str(v).strip():
+                    choices.add(str(v).strip())
+            for g in f.get("groups") if isinstance(f.get("groups"), list) else []:
+                gv = str(g.get("value") if isinstance(g, dict) else g or "").strip()
+                if gv:
+                    choices.add(gv)
+            label = f.get("label")
+            if isinstance(label, dict):
+                label = str(label.get("ru") or label.get("en") or key)
+            fields[key] = {
+                "required": bool(f.get("required")),
+                "choices": choices,
+                "label": str(label or key),
+            }
+        return {"name": str(_rows_body(row).get("name") or type_id), "fields": fields}
+    return {}
 
 
-def _validate_pool_item(body: dict[str, Any], *, creating: bool) -> None:
+def _validate_card_body(
+    body: dict[str, Any], *, creating: bool, mid: str, sid: str | None
+) -> None:
     if creating:
-        for field in ("group_id", "type_id"):
-            if not str(body.get(field) or "").strip():
-                raise RuntimeError(
-                    f"{field} is required when creating build_group_items"
-                )
+        if not str(body.get("type_id") or "").strip():
+            raise RuntimeError(
+                "type_id is required when creating part_cards "
+                "(use equipment_types.row_id from equipment_types_list)"
+            )
         has_keys = any(
             str(body.get(k) or "").strip()
             for k in ("part_number", "aliases_pn", "aliases_hash")
@@ -1178,20 +1067,95 @@ def _validate_pool_item(body: dict[str, Any], *, creating: bool) -> None:
         if not has_keys:
             raise RuntimeError(
                 "at least one of part_number / aliases_pn / aliases_hash is required: "
-                "the pool stores KEYS, the platform resolves prices from them"
+                "the card stores KEYS, the platform resolves prices from them"
             )
-        if not str(body.get("class_key") or "").strip():
-            raise RuntimeError(
-                "class_key is required (e.g. ram_16, ssd_256): it is what stops "
-                "incompatible substitution — different classes never compete by price"
-            )
-    if "qty_default" in body and body["qty_default"] is not None:
-        try:
-            qty = float(body["qty_default"])
-        except (TypeError, ValueError):
-            raise RuntimeError("qty_default must be a number >= 1") from None
-        if qty < 1:
-            raise RuntimeError("qty_default must be >= 1")
+    if "attrs" in body and body["attrs"] is not None:
+        attrs = body["attrs"]
+        if not isinstance(attrs, dict):
+            raise RuntimeError("attrs must be an object {field_key: value}")
+        for key, value in attrs.items():
+            if not isinstance(value, str):
+                attrs[key] = str(value)
+        # валидация по шаблону типа: обязательные поля + значения из групп
+        type_id = str(body.get("type_id") or "").strip()
+        if type_id:
+            schema = _type_schema(mid, type_id, sid)
+            fields = schema.get("fields") or {}
+            if not fields:
+                raise RuntimeError(
+                    f"equipment_types row not found: {type_id} "
+                    f"(see equipment_types_list)"
+                )
+            errors: list[str] = []
+            if creating:
+                for key, fdef in fields.items():
+                    if fdef.get("required") and _norm_value(attrs.get(key)) == "":
+                        errors.append(
+                            f"required field '{key}' ({fdef.get('label')}) is missing "
+                            f"in attrs"
+                        )
+            for key, value in attrs.items():
+                fdef = fields.get(key)
+                if fdef is None:
+                    errors.append(
+                        f"attrs key '{key}' is not declared in the type template"
+                    )
+                    continue
+                choices = fdef.get("choices") or set()
+                if choices and str(value).strip() not in choices:
+                    allowed = ", ".join(sorted(choices)[:12])
+                    errors.append(
+                        f"attrs['{key}'] = {value!r} is not in the type's groups "
+                        f"({allowed}…)"
+                    )
+            if errors:
+                raise RuntimeError(
+                    "part card does not fit the type template: " + "; ".join(errors)
+                )
+
+
+def _ready_builds_list(mid: str, arguments: dict[str, Any], sid: str | None) -> Any:
+    build_kind = str(arguments.get("build_kind") or "").strip()
+    only_enabled = arguments.get("only_enabled") is not False
+    try:
+        limit = max(1, min(int(arguments.get("limit") or 100), 500))
+    except (TypeError, ValueError):
+        limit = 100
+    rows = _list_rows(mid, "ready_builds", session_id=sid)
+    filtered = []
+    for row in rows:
+        body = _rows_body(row)
+        if only_enabled and body.get("is_enabled") is False:
+            continue
+        if build_kind and str(body.get("build_kind") or "") != build_kind:
+            continue
+        filtered.append(row)
+    return {
+        "total": len(filtered),
+        "items": _project_rows(filtered[:limit], "ready_builds", full=False),
+    }
+
+
+def _ready_build_get(mid: str, arguments: dict[str, Any], sid: str | None) -> Any:
+    row_id = str(arguments.get("row_id") or "").strip()
+    if not row_id:
+        raise RuntimeError("row_id is required for ready_build_get")
+    build = next(
+        (r for r in _list_rows(mid, "ready_builds", session_id=sid)
+         if str(r.get("row_id") or "") == row_id),
+        None,
+    )
+    if build is None:
+        raise RuntimeError(f"ready_builds row not found: {row_id}")
+    slots = [
+        r
+        for r in _list_rows(mid, "ready_build_slots", session_id=sid)
+        if str(_rows_body(r).get("build_id") or "") == row_id
+    ]
+    return {
+        "build": _project_rows([build], "ready_builds", full=True)[0],
+        "slots": _project_rows(slots, "ready_build_slots", full=False),
+    }
 
 
 def _upsert_row(
@@ -1222,12 +1186,8 @@ def _upsert_row(
 _SLOT_KEYS = (
     "type_id",
     "qty",
-    "mode",
-    "class_key",
-    "item_id",
-    "part_number",
-    "aliases_pn",
-    "aliases_hash",
+    "constraints",
+    "card_id",
     "note",
 )
 
@@ -1238,26 +1198,16 @@ def _validate_slot(slot: Any) -> dict[str, Any]:
     type_id = str(slot.get("type_id") or "").strip()
     if not type_id:
         raise RuntimeError("slots[].type_id is required (equipment_types.row_id)")
-    mode = str(slot.get("mode") or "dynamic").strip() or "dynamic"
-    if mode not in SLOT_MODES:
-        raise RuntimeError(f"slots[].mode must be one of {sorted(SLOT_MODES)}")
-    if mode == "fixed" and not (
-        str(slot.get("item_id") or "").strip()
-        or any(str(slot.get(k) or "").strip() for k in ("part_number", "aliases_pn", "aliases_hash"))
-    ):
-        raise RuntimeError(
-            "slots[].mode='fixed' needs item_id (pool component) or own "
-            "part_number / aliases_pn / aliases_hash to pin"
-        )
-    if mode == "dynamic" and not (
-        str(slot.get("class_key") or "").strip()
-        or str(slot.get("item_id") or "").strip()
-        or any(str(slot.get(k) or "").strip() for k in ("part_number", "aliases_pn", "aliases_hash"))
-    ):
-        raise RuntimeError(
-            "slots[].mode='dynamic' needs class_key (to draw the cheapest of the "
-            "class), item_id, or own part_number / aliases_pn / aliases_hash"
-        )
+    constraints = slot.get("constraints")
+    if constraints is not None:
+        if not isinstance(constraints, dict):
+            raise RuntimeError(
+                "slots[].constraints must be an object {field_key: group value} "
+                "from the type template (equipment_types_list → fields_json)"
+            )
+        for key, value in constraints.items():
+            if not isinstance(value, str):
+                constraints[key] = str(value)
     qty = slot.get("qty")
     if qty is not None:
         try:
@@ -1266,22 +1216,19 @@ def _validate_slot(slot: Any) -> dict[str, Any]:
             raise RuntimeError("slots[].qty must be a whole number >= 1") from None
         if qty_num < 1 or qty_num != int(qty_num):
             raise RuntimeError("slots[].qty must be a whole number >= 1")
-    return {k: slot[k] for k in _SLOT_KEYS if k in slot}
+    out = {k: slot[k] for k in _SLOT_KEYS if k in slot}
+    if slot.get("row_id"):
+        out["row_id"] = str(slot["row_id"]).strip()
+    return out
 
 
 def _ready_build_upsert(mid: str, arguments: dict[str, Any], sid: str | None) -> Any:
     """Сборка + её слоты одним вызовом: ИИ создаёт сборку за один ход, а не за N."""
     keys = (
-        "group_id",
         "name",
         "build_kind",
-        "budget_tier",
-        "cpu_cores",
-        "ram_gb",
-        "storage_kind",
-        "storage_gb",
-        "gpu_class",
-        "gpu_gb",
+        "target_price_min",
+        "target_price_max",
         "note",
         "is_enabled",
         "project_ids",
@@ -1314,27 +1261,63 @@ def _ready_build_upsert(mid: str, arguments: dict[str, Any], sid: str | None) ->
     if not build_id:
         raise RuntimeError("cannot replace slots: build row_id is unknown")
 
-    # слоты заменяются набором из вызова: удаляем прежние, пишем новые
+    # Слоты заменяются набором из вызова, но идентичность сохраняется: слот с
+    # переданным row_id (или того же типа, первый свободный) патчится на месте,
+    # а не пересоздаётся — зеркала чатов привязаны к row_id слотов.
     existing = [
         r
         for r in _list_rows(mid, "ready_build_slots", session_id=sid)
         if str(_rows_body(r).get("build_id") or "") == build_id
     ]
-    for row in existing:
-        old_id = str(row.get("row_id") or "")
-        if old_id:
-            _http("DELETE", _data_path(mid, "ready_build_slots", old_id), session_id=sid)
-    created: list[Any] = []
+    existing_by_id = {str(r.get("row_id") or ""): r for r in existing}
+    used: set[str] = set()
+    written: list[Any] = []
     for slot in slots:
-        created.append(
+        slot_body = {k: v for k, v in slot.items() if k != "row_id"}
+        target_id = str(slot.get("row_id") or "").strip()
+        target = existing_by_id.get(target_id) if target_id else None
+        if target is None:
+            # переиспользование по типу: первый свободный слот того же type_id
+            for cand in existing:
+                cid = str(cand.get("row_id") or "")
+                if cid in used:
+                    continue
+                if str(_rows_body(cand).get("type_id") or "") == slot_body.get("type_id"):
+                    target = cand
+                    target_id = cid
+                    break
+        if target is not None and target_id not in used:
+            used.add(target_id)
+            written.append(
+                _http(
+                    "PATCH",
+                    _data_path(mid, "ready_build_slots", target_id),
+                    {"body": slot_body},
+                    session_id=sid,
+                )
+            )
+            continue
+        written.append(
             _http(
                 "POST",
                 _data_path(mid, "ready_build_slots"),
-                {"body": {"build_id": build_id, **slot}},
+                {"body": {"build_id": build_id, **slot_body}},
                 session_id=sid,
             )
         )
-    return {"build": result, "slots_replaced": True, "slots": created}
+    deleted = 0
+    for row in existing:
+        old_id = str(row.get("row_id") or "")
+        if old_id and old_id not in used:
+            _http("DELETE", _data_path(mid, "ready_build_slots", old_id), session_id=sid)
+            deleted += 1
+    return {
+        "build": result,
+        "slots_replaced": True,
+        "slots_written": len(written),
+        "slots_deleted": deleted,
+        "slots": written,
+    }
 
 
 def _ready_build_slot_upsert(mid: str, arguments: dict[str, Any], sid: str | None) -> Any:
@@ -1361,11 +1344,13 @@ def _ready_build_slot_upsert(mid: str, arguments: dict[str, Any], sid: str | Non
             raise RuntimeError("qty must be a whole number >= 1") from None
         if qty_num < 1 or qty_num != int(qty_num):
             raise RuntimeError("qty must be a whole number >= 1")
-    if "mode" in body and body["mode"] is not None:
-        mode = str(body["mode"]).strip() or "dynamic"
-        if mode not in SLOT_MODES:
-            raise RuntimeError(f"mode must be one of {sorted(SLOT_MODES)}")
-        body["mode"] = mode
+    if "constraints" in body and body["constraints"] is not None:
+        constraints = body["constraints"]
+        if not isinstance(constraints, dict):
+            raise RuntimeError("constraints must be an object {field_key: group value}")
+        for key, value in constraints.items():
+            if not isinstance(value, str):
+                constraints[key] = str(value)
     return _http(
         "PATCH",
         _data_path(mid, "ready_build_slots", row_id),
@@ -1376,19 +1361,21 @@ def _ready_build_slot_upsert(mid: str, arguments: dict[str, Any], sid: str | Non
 
 def _validate_build_meta(body: dict[str, Any], *, creating: bool) -> None:
     if creating:
-        if not str(body.get("group_id") or "").strip():
-            raise RuntimeError(
-                "group_id is required when creating ready_builds "
-                "(use build_groups.row_id from ready_builds_catalog scope=groups)"
-            )
         if not str(body.get("name") or "").strip():
             raise RuntimeError("name is required when creating ready_builds")
     if "build_kind" in body and body["build_kind"] is not None:
         if str(body["build_kind"]) not in BUILD_KINDS:
             raise RuntimeError(f"build_kind must be one of {sorted(BUILD_KINDS)}")
-    if "budget_tier" in body and body["budget_tier"] is not None:
-        if str(body["budget_tier"]) not in BUDGET_TIERS:
-            raise RuntimeError(f"budget_tier must be one of {sorted(BUDGET_TIERS)}")
+    for field in ("target_price_min", "target_price_max"):
+        if field in body and body[field] is not None:
+            try:
+                value = float(body[field])
+            except (TypeError, ValueError):
+                raise RuntimeError(f"{field} must be a number") from None
+            if value < 0:
+                raise RuntimeError(f"{field} must be >= 0")
+
+
 
 
 def _ready_build_attach(mid: str, arguments: dict[str, Any], sid: str | None) -> Any:
@@ -1482,10 +1469,6 @@ def _call_tool(name: str, arguments: dict[str, Any]) -> Any:
     if name == "found_groups_upsert":
         keys = (
             "line_id",
-            "build_id",
-            "slot_type_id",
-            # идентичность конкретного слота — несколько компонентов одного типа
-            "slot_id",
             "part_number",
             "aliases_pn",
             "aliases_hash",
@@ -1496,12 +1479,6 @@ def _call_tool(name: str, arguments: dict[str, Any]) -> Any:
         body = _pick_present(arguments, keys)
         row_id = str(arguments.get("row_id") or "").strip() or None
         _validate_group_body(body, creating=not row_id)
-        # Владелец группы проставляется сразу: дефолт колонки "line", поэтому
-        # группа слота сборки до прогона пайплайна мелькала бы в общем списке
-        # «Найденные товары» (он фильтрует по owner_kind = line).
-        if "build_id" in body:
-            bid = body.get("build_id")
-            body["owner_kind"] = "build" if isinstance(bid, str) and bid.strip() else "line"
         if row_id:
             return _http(
                 "PATCH",
@@ -1554,10 +1531,9 @@ def _call_tool(name: str, arguments: dict[str, Any]) -> Any:
     if name == "equipment_builds_upsert":
         keys = (
             "name",
+            "ready_build_id",
             "line_id",
-            "build_kind",
-            "slots",
-            "slot_qty",
+            "is_selected",
             "note",
             "project_ids",
         )
@@ -1587,50 +1563,42 @@ def _call_tool(name: str, arguments: dict[str, Any]) -> Any:
             session_id=sid,
         )
 
-    # ------------------------------------------------- WAVE11: каталог сборок
-    if name == "ready_builds_catalog":
-        return _ready_builds_catalog(mid, arguments, sid)
-    if name == "build_group_upsert":
+    # ------------------------------------------------- WAVE12: карточки и сборки
+    if name == "part_cards_list":
+        return _part_cards_list(mid, arguments, sid)
+    if name == "part_card_upsert":
         return _upsert_row(
             mid,
-            "build_groups",
+            "part_cards",
             arguments,
             sid,
             keys=(
-                "name",
-                "build_kind",
-                "socket",
-                "ram_type",
-                "form_factor",
-                "budget_tier",
-                "note",
-                "is_enabled",
-                "project_ids",
-            ),
-            required_on_create=("name",),
-            validate=_validate_group_meta,
-        )
-    if name == "build_group_item_upsert":
-        return _upsert_row(
-            mid,
-            "build_group_items",
-            arguments,
-            sid,
-            keys=(
-                "group_id",
                 "type_id",
-                "class_key",
-                "class_label",
                 "part_number",
                 "aliases_pn",
                 "aliases_hash",
-                "qty_default",
+                "attrs",
                 "note",
                 "project_ids",
             ),
-            required_on_create=("group_id", "type_id"),
-            validate=_validate_pool_item,
+            required_on_create=("type_id",),
+            validate=lambda body, creating: _validate_card_body(
+                body, creating=creating, mid=mid, sid=sid
+            ),
         )
+    if name == "part_card_delete":
+        row_id = str(arguments.get("row_id") or "").strip()
+        if not row_id:
+            raise RuntimeError("row_id is required for part_card_delete")
+        return _http(
+            "DELETE",
+            _data_path(mid, "part_cards", row_id),
+            session_id=sid,
+        )
+    if name == "ready_builds_list":
+        return _ready_builds_list(mid, arguments, sid)
+    if name == "ready_build_get":
+        return _ready_build_get(mid, arguments, sid)
     if name == "ready_build_upsert":
         return _ready_build_upsert(mid, arguments, sid)
     if name == "ready_build_slot_upsert":
@@ -1702,7 +1670,7 @@ def _handle(msg: dict[str, Any]) -> dict[str, Any] | None:
             "result": {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "prodavan-equipment", "version": "2.4.4"},
+                "serverInfo": {"name": "prodavan-equipment", "version": "3.0.0"},
             },
         }
     if method == "notifications/initialized":

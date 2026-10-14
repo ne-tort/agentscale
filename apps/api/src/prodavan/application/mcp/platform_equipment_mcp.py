@@ -9,7 +9,7 @@ from prodavan.application.mcp.bridge_env import platform_mcp_bridge_env_refs
 from prodavan.infrastructure.projects.workspace import WorkspaceLayoutWriter
 
 PACKAGE_NAME = "prodavan-equipment"
-PACKAGE_VERSION = "2.4.4"
+PACKAGE_VERSION = "3.0.0"
 
 _TOOL_NAMES = (
     "equipment_catalog_sources",
@@ -27,10 +27,12 @@ _TOOL_NAMES = (
     "equipment_builds_get",
     "equipment_builds_upsert",
     "equipment_builds_delete",
-    # WAVE11: каталог «Готовые сборки»
-    "ready_builds_catalog",
-    "build_group_upsert",
-    "build_group_item_upsert",
+    # WAVE12: карточки комплектующих + каталог «Готовые сборки» v2
+    "part_cards_list",
+    "part_card_upsert",
+    "part_card_delete",
+    "ready_builds_list",
+    "ready_build_get",
     "ready_build_upsert",
     "ready_build_slot_upsert",
     "ready_build_attach",

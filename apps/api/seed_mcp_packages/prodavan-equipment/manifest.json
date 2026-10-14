@@ -2,7 +2,7 @@
   "format": "mcp.package",
   "format_version": 1,
   "name": "prodavan-equipment",
-  "version": "2.4.0",
+  "version": "3.0.0",
   "entry": {
     "command": "python",
     "args": [
@@ -25,10 +25,13 @@
     "equipment_builds_get",
     "equipment_builds_upsert",
     "equipment_builds_delete",
-    "ready_builds_catalog",
-    "build_group_upsert",
-    "build_group_item_upsert",
+    "part_cards_list",
+    "part_card_upsert",
+    "part_card_delete",
+    "ready_builds_list",
+    "ready_build_get",
     "ready_build_upsert",
+    "ready_build_slot_upsert",
     "ready_build_attach"
   ]
 }

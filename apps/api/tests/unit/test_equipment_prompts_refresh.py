@@ -116,7 +116,7 @@ def test_agents_row_updated_when_stock(agents_migration: ModuleType) -> None:
     assert new_body is not None
     text = next(f["body"] for f in new_body["files_json"] if f["name"] == "AGENTS.md")
     assert text == EQUIPMENT_AGENTS_MD
-    assert "ready_builds_catalog" in text
+    assert "ready_builds_list" in text
     assert "70-ready-builds.md" in text
 
 
@@ -154,4 +154,4 @@ def test_seed_agents_md_matches_migration_expectations() -> None:
     каждом применении.
     """
     assert EQUIPMENT_AGENTS_MD.lstrip().startswith(_STOCK_HEADER)
-    assert "ready_builds_catalog" in EQUIPMENT_AGENTS_MD
+    assert "ready_builds_list" in EQUIPMENT_AGENTS_MD
