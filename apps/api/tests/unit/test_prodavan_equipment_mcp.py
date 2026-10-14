@@ -511,15 +511,7 @@ def test_tools_list_survives_override_fetch_failure(monkeypatch) -> None:
 
 
 
-@pytest.mark.parametrize(
-    "bad_qty",
-    [{"etype_ram": 0}, {"etype_ram": -1}, {"etype_ram": 1.5}, {"etype_ram": "много"}, "not-a-map"],
-)
-
-
-# ------------------------------------------------- WAVE11: каталог сборок
-
-
+# ------------------------------------------------- WAVE12: карточки и сборки v2
 
 @pytest.fixture()
 def _env(monkeypatch):
