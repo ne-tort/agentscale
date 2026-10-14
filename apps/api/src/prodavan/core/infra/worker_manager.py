@@ -224,6 +224,12 @@ class WorkerManager(LifespanResource):
             "task": job_names.SWEEP_READY_BUILDS,
             "schedule": schedule(run_every=3600.0),
         }
+        # Исходящие вебхуки: outbox-доставка каждые 15с (подписанные POST +
+        # ретраи с бэкоффом). Отдельный beat, чтобы не ждать часовые sweep'ы.
+        beat["prodavan-webhook-deliver"] = {
+            "task": job_names.WEBHOOK_DELIVER,
+            "schedule": schedule(run_every=15.0),
+        }
         app.conf.beat_schedule = beat
         job_tasks.register_tasks(app)
         return app

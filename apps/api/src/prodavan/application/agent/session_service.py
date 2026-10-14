@@ -1567,7 +1567,48 @@ class AgentSessionService:
                 )
 
         await self._session.commit()
+
+        # Исходящие вебхуки: завершение хода (ответ готов) / ошибка хода.
+        # Fire-and-forget: вебхуки не должны ломать запись события.
+        if event_type in (AgentEventType.DONE, AgentEventType.ERROR):
+            try:
+                await self._emit_webhook_on_turn_end(
+                    project_id=project_id, session_id=session_id, event_type=event_type, data=data
+                )
+            except Exception:
+                logger.exception(
+                    "webhook emit failed project=%s session=%s", project_id, session_id
+                )
         return _event_public(ev_row)
+
+    async def _emit_webhook_on_turn_end(
+        self, *, project_id: str, session_id: str, event_type: str, data: dict
+    ) -> None:
+        """Fanout chat turn completion/failure to matching webhook subscriptions."""
+        from prodavan.application.external.webhooks import (
+            EVENT_CHAT_MESSAGE_COMPLETED,
+            EVENT_CHAT_TURN_FAILED,
+            WebhookService,
+        )
+
+        project = await self._session.get(ProjectRow, project_id)
+        if project is None:
+            return
+        event_name = (
+            EVENT_CHAT_MESSAGE_COMPLETED if event_type == AgentEventType.DONE else EVENT_CHAT_TURN_FAILED
+        )
+        await WebhookService(self._session).emit(
+            company_id=project.company_id,
+            project_id=project_id,
+            event_type=event_name,
+            payload={
+                "project_id": project_id,
+                "session_id": session_id,
+                "at": datetime.now(UTC).isoformat(),
+                **({"reason": str(data.get("reason") or "")} if isinstance(data, dict) else {}),
+            },
+        )
+        await self._session.commit()
 
     async def get_transcript(
         self,
