@@ -273,7 +273,12 @@ async def send_message(
         employee=ctx.employee,
         model=body.model,
     )
-    return {"session_id": session_id, "wait": False, "turn": turn}
+    # DetachedTurn несёт asyncio.Task — отдаём только идентификаторы
+    return {
+        "session_id": session_id,
+        "wait": False,
+        "turn_id": getattr(turn, "turn_id", None),
+    }
 
 
 @router.get("/chats/{session_id}/messages")

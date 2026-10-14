@@ -1019,6 +1019,13 @@ class AgentSessionService:
                             )
                         turn_ok = True
                     await self._flush_events()
+                    # исходящие вебхуки: конец хода (ответ готов / ошибка)
+                    await self._emit_webhook_on_turn_end(
+                        project_id=project_id,
+                        session_id=session_id,
+                        event_type=normalized.type,
+                        data=normalized.data if isinstance(normalized.data, dict) else {},
+                    )
                     if turn_ok:
                         await self._checkpoint_workspace_after_turn(project_id=project_id)
                     return
@@ -1068,6 +1075,13 @@ class AgentSessionService:
                 turn_ok = True
             if normalized.type in {AgentEventType.DONE, AgentEventType.ERROR}:
                 await self._flush_events()
+                # исходящие вебхуки: конец хода (ответ готов / ошибка)
+                await self._emit_webhook_on_turn_end(
+                    project_id=project_id,
+                    session_id=session_id,
+                    event_type=normalized.type,
+                    data=normalized.data if isinstance(normalized.data, dict) else {},
+                )
                 if turn_ok:
                     await self._checkpoint_workspace_after_turn(project_id=project_id)
                 return
