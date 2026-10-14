@@ -43,10 +43,11 @@ def upgrade() -> None:
         sa.Column("last_used_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("created_by", sa.String(40), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
         sa.Column(
             "updated_at",
             sa.DateTime(timezone=True),
+            nullable=False,
             server_default=sa.func.now(),
             onupdate=sa.func.now(),
         ),
@@ -75,10 +76,11 @@ def upgrade() -> None:
         sa.Column("enabled", sa.Boolean, nullable=False, server_default=sa.true()),
         sa.Column("fail_count", sa.Integer, nullable=False, server_default="0"),
         sa.Column("created_by", sa.String(40), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
         sa.Column(
             "updated_at",
             sa.DateTime(timezone=True),
+            nullable=False,
             server_default=sa.func.now(),
             onupdate=sa.func.now(),
         ),
@@ -109,7 +111,7 @@ def upgrade() -> None:
         sa.Column("last_error", sa.Text, nullable=True),
         sa.Column("lease_until", sa.DateTime(timezone=True), nullable=True),
         sa.Column("leased_by", sa.String(64), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
         sa.Column("delivered_at", sa.DateTime(timezone=True), nullable=True),
     )
     op.create_index(
