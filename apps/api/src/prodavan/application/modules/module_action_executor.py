@@ -466,11 +466,11 @@ class ModuleActionExecutor:
         session_id: str | None = None,
         resolve: bool = True,
     ) -> dict[str, Any]:
-        """WAVE11: пайплайн каталога «Готовые сборки».
+        """WAVE12: пайплайн каталога «Готовые сборки» v2.
 
-        Резолвит ключи пула (партномер/алиасы/хэш) в лучшие цены одним
-        батч-запросом в OpenSearch, разрешает dynamic/fixed слоты и
-        пересчитывает итоги сборок и агрегаты групп — см.
+        Резолвит ключи карточек (партномер/алиасы/хэш) в лучшие цены одним
+        батч-запросом в OpenSearch, подбирает компоненты слотов по constraints
+        и доменам совместимости, пересчитывает коридор цен и итоги сборок — см.
         equipment_ready_builds_service.
         """
         from prodavan.application.modules.equipment_offers_service import ModuleRowIO
@@ -500,28 +500,20 @@ class ModuleActionExecutor:
         project_id: str | None = None,
         session_id: str | None = None,
     ) -> dict[str, Any]:
-        """WAVE11: копирование «Готовой сборки» из каталога в чат на позицию.
+        """WAVE12: привязка «Готовой сборки» к позиции заказчика — ГЛОБАЛЬНАЯ
+        ССЫЛКА, а не копия.
 
-        Каталог — библиотека шаблонов (``chats: all``), чат — рабочая копия
-        (``chats: current``). Копируются **ключи** (партномер / алиасы / хэш),
-        а не цены: копия сразу начинает жить своей жизнью и тянет актуальные
-        офферы штатной механикой WAVE10 (материализация → best → бюджет →
-        закупка). Дальше ИИ может править копию прицельно: заменить слот,
-        добавить алиас/хэш, поменять количество.
-
-        Обратная синхронизация (чат → каталог) намеренно не делается: копия
-        принадлежит заявке, каталог — витрина. Перенос решения в каталог —
-        отдельное осознанное действие, не автоматика.
+        В чате создаётся строка ``equipment_builds`` с ``ready_build_id``.
+        Состав (found_groups слотов) и цены зеркалит пайплайн из каталога при
+        каждом прогоне: изменение готовой сборки (компоненты, цены-лидеры)
+        доезжает до всех заказов автоматически. Обратной синхронизации
+        (чат → каталог) нет: правка состава — осознанное действие в каталоге.
         """
         from prodavan.application.modules.equipment_offers_service import (
             ModuleRowIO,
         )
         from prodavan.application.modules.equipment_ready_builds_service import (
             BUILDS_TABLE as CATALOG_BUILDS,
-        )
-        from prodavan.application.modules.equipment_ready_builds_service import (
-            POOL_TABLE,
-            SLOTS_TABLE,
         )
 
         ready_build_id = (row_id or str(params.get("ready_build_id") or "")).strip()
@@ -565,128 +557,47 @@ class ModuleActionExecutor:
                 detail=f"позиция заказчика не найдена: {line_id}",
             )
 
-        slots = [
-            s
-            for s in await io.list(SLOTS_TABLE)
-            if str((s.get("body") or {}).get("build_id") or "") == ready_build_id
-        ]
-        pool = {
-            str(r.get("row_id") or ""): (r.get("body") or {})
-            for r in await io.list(POOL_TABLE)
-        }
         rbody = ready.get("body") or {}
-
         created = await io.create(
             "equipment_builds",
             {
                 "name": str(rbody.get("name") or "Сборка").strip() or "Сборка",
                 "line_id": line_id,
+                "ready_build_id": ready_build_id,
                 "build_kind": str(rbody.get("build_kind") or "pc"),
                 "note": str(params.get("note") or "").strip(),
-                # провенанс: копия готова пересоздаться/сравниться с каталогом
-                "source_ready_build_id": ready_build_id,
             },
         )
         build_id = str(created.get("row_id") or "")
 
-        slot_qty: dict[str, Any] = {}
-        groups_created = 0
-        groups: list[dict[str, Any]] = []
-        skipped: list[str] = []
-        slot_types: dict[str, str] = {}
-        for slot in slots:
-            sbody = slot.get("body") or {}
-            type_id = str(sbody.get("type_id") or "")
-            if not type_id:
-                continue
-            # идентичность слота — row_id каталожного слота: две строки одного
-            # типа (например SSD + HDD) остаются разными слотами и в копии
-            slot_row_id = str(slot.get("row_id") or "").strip()
-            slot_id = slot_row_id or type_id
-            slot_types[slot_id] = type_id
-            qty_raw = sbody.get("qty")
-            try:
-                qty = int(float(qty_raw)) if qty_raw not in (None, "") else 1
-            except (TypeError, ValueError):
-                qty = 1
-            if qty > 1:
-                slot_qty[slot_id] = qty
-
-            # Ключи берём у РАЗРЕШЁННОГО компонента пула (то, что пайплайн
-            # каталога выбрал по цене), иначе — у собственных ключей слота.
-            resolved_id = str(sbody.get("resolved_item_id") or "")
-            source = pool.get(resolved_id) or pool.get(str(sbody.get("item_id") or "")) or {}
-            part_number = str(source.get("part_number") or sbody.get("part_number") or "").strip()
-            aliases_pn = str(source.get("aliases_pn") or sbody.get("aliases_pn") or "").strip()
-            aliases_hash = str(source.get("aliases_hash") or sbody.get("aliases_hash") or "").strip()
-            if not (part_number or aliases_pn or aliases_hash):
-                skipped.append(type_id)
-                continue
-            group = await io.create(
-                "found_groups",
-                {
-                    "build_id": build_id,
-                    "slot_type_id": type_id,
-                    # идентичность конкретного слота — по нему пайплайн
-                    # группирует кандидатов; без неё две строки одного типа
-                    # схлопывались бы в один слот
-                    "slot_id": slot_id,
-                    "part_number": part_number,
-                    "aliases_pn": aliases_pn,
-                    "aliases_hash": aliases_hash,
-                    # компонент каталога уже был проверен на совместимость —
-                    # для копии это точное соответствие её же спецификации
-                    "match_kind": "exact",
-                    # владелец — слот сборки. Дефолт колонки "line", и до
-                    # прогона пайплайна группа мелькала бы в общем списке
-                    # «Найденные товары» (он фильтрует по owner_kind = line).
-                    "owner_kind": "build",
-                    "note": str(sbody.get("note") or "").strip(),
-                },
-            )
-            groups_created += 1
-            # id групп возвращаем агенту: без них копию сборки не прочитать
-            # прицельно (found_groups_list фильтруется по build_id, а
-            # угадывать row_id слота агент не должен)
-            groups.append(
-                {
-                    "slot_type_id": type_id,
-                    "slot_id": slot_id,
-                    "group_id": str((group or {}).get("row_id") or ""),
-                    "part_number": part_number,
-                    "qty": qty,
-                }
-            )
-
-        if slot_qty or slot_types:
-            await io.update(
-                "equipment_builds",
-                build_id,
-                {
-                    **(created.get("body") or {}),
-                    "slot_qty": slot_qty,
-                    # карта слот→тип — UI редактора слотов рендерит слоты по ней
-                    # (несколько компонентов одного типа остаются разными строками)
-                    "slot_types": slot_types,
-                },
-            )
-
-        # Материализация офферов копии — штатный пайплайн позиций.
+        # Зеркало слотов + материализация офферов — штатный пайплайн позиций.
         from prodavan.application.modules.equipment_offers_service import (
             EquipmentPipelineService,
         )
 
         pipeline = await EquipmentPipelineService(self._session).run(io, materialize=True)
 
+        # возвращаем агенту зеркальные группы: без них состав связанной сборки
+        # не прочитать прицельно (found_groups_list фильтруется по build_id)
+        groups = [
+            {
+                "slot_type_id": str((g.get("body") or {}).get("slot_type_id") or ""),
+                "slot_id": str((g.get("body") or {}).get("slot_id") or ""),
+                "group_id": str(g.get("row_id") or ""),
+                "part_number": str((g.get("body") or {}).get("part_number") or ""),
+            }
+            for g in await io.list("found_groups")
+            if str((g.get("body") or {}).get("build_id") or "") == build_id
+        ]
+
         return {
             "ok": True,
             "ready_build_id": ready_build_id,
             "build_id": build_id,
             "line_id": line_id,
-            "groups_created": groups_created,
+            "linked": True,
+            "groups_created": len(groups),
             "groups": groups,
-            "slot_qty": slot_qty,
-            "slots_skipped_no_keys": skipped,
             "pipeline": {
                 k: pipeline.get(k)
                 for k in ("offers_created", "builds_updated", "budget_created", "budget_updated")
@@ -1303,8 +1214,8 @@ class ModuleActionExecutor:
           без материализации (пересчёт best/бюджета/закупки — например после
           ручной правки оффера или выбора сборки);
         - ``procurement`` → ``equipment.procurement_apply`` (маржа/доставка);
-        - WAVE11: ``build_groups`` / ``build_group_items`` / ``ready_builds`` /
-          ``ready_build_slots`` → пайплайн каталога «Готовые сборки».
+        - WAVE12: ``part_cards`` / ``ready_builds`` / ``ready_build_slots`` →
+          пайплайн каталога «Готовые сборки».
 
         Пайплайн пишет строки с ``run_actions=False`` — рекурсии нет.
         ``session_id`` задаёт скоп чата (None → общий бакет main).
@@ -1328,10 +1239,9 @@ class ModuleActionExecutor:
                     # закупка: только её таблица, отдельный экшен (маржа/доставка)
                     watched = {str(params.get("procurement_table") or "procurement")}
                 elif kind == "equipment.ready_builds":
-                    # каталог «Готовые сборки»: свои 4 таблицы, свой пайплайн
+                    # каталог «Готовые сборки» v2: карточки + сборки + слоты
                     watched = {
-                        str(params.get("groups_table") or "build_groups"),
-                        str(params.get("items_table") or "build_group_items"),
+                        str(params.get("cards_table") or "part_cards"),
                         str(params.get("builds_table") or "ready_builds"),
                         str(params.get("slots_table") or "ready_build_slots"),
                     }

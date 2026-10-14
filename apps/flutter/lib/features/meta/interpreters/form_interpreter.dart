@@ -14,6 +14,7 @@ import 'package:prodavan/features/meta/poll_while.dart';
 import 'package:prodavan/features/meta/runtime/module_runtime_scope.dart';
 import 'package:prodavan/features/meta/meta_icon.dart';
 import 'package:prodavan/features/meta/widgets/column_map_field.dart';
+import 'package:prodavan/features/meta/widgets/constraint_attrs_field.dart';
 import 'package:prodavan/features/meta/widgets/fields_schema_editor_field.dart';
 import 'package:prodavan/features/meta/widgets/prompt_files_editor_field.dart';
 import 'package:prodavan/features/meta/widgets/file_upload_field.dart';
@@ -22,7 +23,6 @@ import 'package:prodavan/features/meta/widgets/markdown_editor_field.dart';
 import 'package:prodavan/features/meta/widgets/project_multiselect_field.dart';
 import 'package:prodavan/features/meta/widgets/remote_database_picker_field.dart';
 import 'package:prodavan/features/meta/widgets/remote_table_picker_field.dart';
-import 'package:prodavan/features/meta/widgets/build_slots_field.dart';
 import 'package:prodavan/features/meta/widgets/text_editor_nav_field.dart';
 import 'package:prodavan/features/meta/widgets/type_ref_picker_field.dart';
 import 'package:prodavan/features/meta/meta_label.dart';
@@ -432,7 +432,18 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
     final title = resolveMetaLabel(link['label'], l10n, locale: locale);
     final iconName = link['icon'] as String?;
     final openView = link['open_view'] as String?;
-    final enabled = openView != null && openView.isNotEmpty && widget.onOpenView != null;
+    // row_id_from_field: цель навигации — строка из поля текущей записи
+    // (например «Открыть готовую сборку» по ready_build_id ссылки), а не сама
+    // открытая строка.
+    final rowIdFromField = link['row_id_from_field']?.toString() ?? '';
+    final targetRowId = rowIdFromField.isNotEmpty
+        ? (_values[rowIdFromField]?.toString() ?? '')
+        : _rowId;
+    final enabled = openView != null &&
+        openView.isNotEmpty &&
+        widget.onOpenView != null &&
+        targetRowId != null &&
+        targetRowId.isNotEmpty;
     return AppNavPreference(
       title: title,
       icon: iconName != null && iconName.isNotEmpty
@@ -441,7 +452,7 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
       enabled: enabled,
       // Открываем связанный список с контекстом текущей строки: целевой вид
       // фильтрует по row_filter_from_context (group_id / build_id = contextRowId).
-      onTap: enabled ? () => widget.onOpenView!(openView, rowId: _rowId) : () {},
+      onTap: enabled ? () => widget.onOpenView!(openView, rowId: targetRowId) : () {},
     );
   }
 
@@ -450,6 +461,35 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
       if (f['column'] == name) return f;
     }
     return null;
+  }
+
+  /// Поля шаблона типа (fields_json строки equipment_types) для виджетов
+  /// schema_attrs / constraint_attrs: живой ряд по type_id, иначе скан таблицы.
+  List<Map<String, dynamic>> _typeFieldsOf(Map<String, dynamic>? fieldCfg) {
+    final typeIdField = fieldCfg?['type_id_field']?.toString() ?? 'type_id';
+    final typesTable = fieldCfg?['types_table']?.toString() ?? 'equipment_types';
+    final fieldsFrom = fieldCfg?['fields_from']?.toString() ?? 'fields_json';
+    final typeId = _values[typeIdField]?.toString() ?? '';
+    if (typeId.isEmpty) return const [];
+    final typeItem = widget.seeds.itemById(typeId);
+    final typeBody = typeItem is Map
+        ? (typeItem['body'] is Map
+            ? Map<String, dynamic>.from(typeItem['body'] as Map)
+            : <String, dynamic>{})
+        : <String, dynamic>{};
+    if (typeBody.isNotEmpty) {
+      return parseFieldsJson(typeBody[fieldsFrom]);
+    }
+    for (final item in widget.seeds.itemsForTable(typesTable) as List) {
+      if (item is Map && item['row_id']?.toString() == typeId) {
+        final body = item['body'];
+        if (body is Map) {
+          return parseFieldsJson(body[fieldsFrom]);
+        }
+        break;
+      }
+    }
+    return const [];
   }
 
   bool _isFieldVisible(Map<String, dynamic>? fieldCfg) {
@@ -627,72 +667,27 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
         onSelected: (table) => _persist(name, table),
       );
     }
-    if (widgetKind == 'schema_attrs') {
-      final typeIdField = fieldCfg?['type_id_field']?.toString() ?? 'type_id';
-      final typesTable = fieldCfg?['types_table']?.toString() ?? 'equipment_types';
-      final fieldsFrom = fieldCfg?['fields_from']?.toString() ?? 'fields_json';
-      final typeId = _values[typeIdField]?.toString() ?? '';
-      List<Map<String, dynamic>> fields = const [];
-      if (typeId.isNotEmpty) {
-        final typeItem = widget.seeds.itemById(typeId);
-        final typeBody = typeItem is Map
-            ? (typeItem['body'] is Map
-                ? Map<String, dynamic>.from(typeItem['body'] as Map)
-                : <String, dynamic>{})
-            : <String, dynamic>{};
-        // Prefer live type row; fall back to table scan if id lookup misses.
-        if (typeBody.isEmpty) {
-          for (final item in widget.seeds.itemsForTable(typesTable) as List) {
-            if (item is Map && item['row_id']?.toString() == typeId) {
-              final body = item['body'];
-              if (body is Map) {
-                fields = parseFieldsJson(body[fieldsFrom]);
-              }
-              break;
-            }
-          }
-        } else {
-          fields = parseFieldsJson(typeBody[fieldsFrom]);
-        }
+    if (widgetKind == 'schema_attrs' || widgetKind == 'constraint_attrs') {
+      final fields = _typeFieldsOf(fieldCfg);
+      final attrs = parseAttrsMap(value);
+      final sectionTitle = schemaAttrsSectionTitle(fieldCfg, l10n, locale);
+      if (widgetKind == 'constraint_attrs') {
+        // значения характеристик — выбор из групп типа (карточки и слоты
+        // готовых сборок делят одну семантику: только значения из groups)
+        return ConstraintAttrsField(
+          fields: fields,
+          attrs: attrs,
+          readOnly: fieldReadOnly,
+          sectionTitle: sectionTitle,
+          onChanged: (next) => _persist(name, next),
+        );
       }
       return SchemaAttrsField(
         fields: fields,
-        attrs: parseAttrsMap(value),
+        attrs: attrs,
         readOnly: fieldReadOnly,
-        sectionTitle: schemaAttrsSectionTitle(fieldCfg, l10n, locale),
+        sectionTitle: sectionTitle,
         onChanged: (attrs) => _persist(name, attrs),
-      );
-    }
-    if (widgetKind == 'build_slots') {
-      return BuildSlotsField(
-        seeds: widget.seeds,
-        slots: parseSlotsMap(value),
-        buildKind: _values['build_kind']?.toString() ?? 'pc',
-        readOnly: fieldReadOnly,
-        typesTable: fieldCfg?['types_table']?.toString() ?? 'equipment_types',
-        itemsTable: fieldCfg?['items_table']?.toString() ?? 'equipment_items',
-        offersTable: fieldCfg?['offers_table']?.toString() ?? 'found_offers',
-        pickView: fieldCfg?['pick_view']?.toString() ?? 'equipment_items_pick',
-        sectionTitle: buildSlotsSectionTitle(fieldCfg, l10n, locale),
-        emptyLabel: buildSlotsEmptyLabel(fieldCfg, l10n, locale),
-        rowId: _rowId,
-        onOpenPick: widget.onOpenView,
-        // WAVE11: количество на слот. Пересчёт цены делает серверный пайплайн
-        // (запись equipment_builds триггерит equipment_pipeline_sync).
-        slotQty: parseSlotQtyMap(_values['slot_qty']),
-        // карта слот→тип — рендерит несколько слотов одного типа (SSD+HDD)
-        slotTypes: parseSlotsMap(_values['slot_types']),
-        onQtyChanged: fieldReadOnly
-            ? null
-            : (typeId, qty) {
-                final next = parseSlotQtyMap(_values['slot_qty']);
-                if (qty <= 1) {
-                  next.remove(typeId);
-                } else {
-                  next[typeId] = qty;
-                }
-                _persist('slot_qty', next);
-              },
       );
     }
     if (widgetKind == 'fields_schema_editor') {

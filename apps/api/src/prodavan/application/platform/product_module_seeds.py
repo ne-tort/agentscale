@@ -34,7 +34,7 @@ def _equipment_mcp_list_header() -> dict[str, Any]:
         "table_slug": "equipment_mcp",
         "ensure_row": {
             "name": "prodavan-equipment",
-            "version": "2.2.0",
+            "version": "3.0.0",
             "enabled": True,
         },
         "fields": [
@@ -49,17 +49,59 @@ def _equipment_mcp_list_header() -> dict[str, Any]:
     }
 
 
-def _eq_field(key: str, label_ru: str, label_en: str) -> dict[str, Any]:
-    return {"key": key, "label": {"ru": label_ru, "en": label_en}}
+def _eq_field(
+    key: str,
+    label_ru: str,
+    label_en: str,
+    *,
+    kind: str = "text",
+    required: bool = False,
+    compat_domain: str = "",
+    values: list[str] | None = None,
+    groups: list[dict[str, str]] | None = None,
+) -> dict[str, Any]:
+    """Характеристика типа комплектующего (шаблон для карточек и слотов).
 
+    kind: text (свободное), enum (значение из values), groups (значение из
+    groups — «диапазон» типа «512 ГБ»). required — обязательно для идентификации
+    совместимости при заполнении карточки. compat_domain связывает типы в
+    матрицу совместимости: поля разных типов с одним доменом (socket, ram_type,
+    form_factor) должны совпадать в сборке.
+    """
+    out: dict[str, Any] = {
+        "key": key,
+        "label": {"ru": label_ru, "en": label_en},
+        "kind": kind,
+        "required": required,
+    }
+    if compat_domain:
+        out["compat_domain"] = compat_domain
+    if values:
+        out["values"] = values
+    if groups:
+        out["groups"] = groups
+    return out
+
+
+def _gb_groups(values: list[int]) -> list[dict[str, str]]:
+    return [{"value": str(v), "label": f"{v} ГБ"} for v in values]
+
+
+# Общие домены совместимости: списки значений дублируются в полях разных типов
+# намеренно (тип — самодостаточный шаблон), а связывает их имя домена.
+_SOCKET_VALUES = ["AM4", "AM5", "LGA1200", "LGA1700", "LGA1851", "SP3", "SP5", "sTR5"]
+_RAM_TYPE_VALUES = ["DDR4", "DDR5"]
+_FORM_FACTOR_VALUES = ["ITX", "mATX", "ATX", "E-ATX", "SSI-EEB"]
 
 # PC/server component types — order = matching priority (lower sort_order first).
 #
-# Аудит WAVE10: ВСЕ свойства опциональны (нет required-флага — тип не блокирует
-# сохранение комплектующего при неполных характеристиках). Ключи совместимости
-# намеренно совпадают между типами (cpu.socket ↔ motherboard.socket,
-# ram.ram_type ↔ motherboard.ram_type, cooling.socket_compat, case.form_factor_support…)
-# — именно по ним ИИ сверяет совместимость деталей сборки.
+# WAVE12: тип — ШАБЛОН для «Карточек комплектующих» и слотов готовых сборок.
+# У каждого типа есть обязательные характеристики со значениями из заранее
+# заданных групп (не свободные строки): по ним грубо группируется совместимость
+# (SSD 128/256/512/1024…, сокет, тип ОЗУ). Поля с одинаковым compat_domain
+# образуют матрицу совместимости: cpu.socket ↔ motherboard.socket ↔
+# cooling.socket, motherboard.ram_type ↔ ram.ram_type, motherboard.form_factor
+# ↔ case.form_factor. Остальные поля — информационные (kind=text).
 _EQUIPMENT_TYPE_SEEDS: list[dict[str, Any]] = [
     {
         "row_id": "etype_cpu",
@@ -67,19 +109,22 @@ _EQUIPMENT_TYPE_SEEDS: list[dict[str, Any]] = [
         "sort_order": 10,
         "build_scope": "all",
         "fields": [
-            _eq_field("socket", "Сокет", "Socket"),
+            _eq_field(
+                "socket", "Сокет", "Socket",
+                kind="enum", required=True, compat_domain="socket",
+                values=_SOCKET_VALUES,
+            ),
+            _eq_field(
+                "cores", "Ядра", "Cores",
+                kind="groups", required=True,
+                groups=[
+                    {"value": str(n), "label": f"{n} ядер"} for n in (2, 4, 6, 8, 12, 16, 24, 32, 64)
+                ],
+            ),
             _eq_field("generation", "Поколение / платформа", "Generation"),
-            _eq_field("cores", "Ядра", "Cores"),
             _eq_field("threads", "Потоки", "Threads"),
-            _eq_field("base_clock", "Базовая частота", "Base clock"),
             _eq_field("boost_clock", "Turbo частота", "Boost clock"),
             _eq_field("tdp", "TDP", "TDP"),
-            _eq_field("lithography", "Техпроцесс", "Lithography"),
-            _eq_field("memory_types", "Типы памяти", "Memory types"),
-            _eq_field("memory_channels", "Каналы памяти", "Memory channels"),
-            _eq_field("max_memory", "Макс. память", "Max memory"),
-            _eq_field("ecc", "ECC", "ECC"),
-            _eq_field("pcie_gen", "PCIe поколение", "PCIe gen"),
         ],
     },
     {
@@ -88,19 +133,24 @@ _EQUIPMENT_TYPE_SEEDS: list[dict[str, Any]] = [
         "sort_order": 20,
         "build_scope": "all",
         "fields": [
-            _eq_field("socket", "Сокет", "Socket"),
+            _eq_field(
+                "socket", "Сокет", "Socket",
+                kind="enum", required=True, compat_domain="socket",
+                values=_SOCKET_VALUES,
+            ),
+            _eq_field(
+                "ram_type", "Тип ОЗУ", "RAM type",
+                kind="enum", required=True, compat_domain="ram_type",
+                values=_RAM_TYPE_VALUES,
+            ),
+            _eq_field(
+                "form_factor", "Форм-фактор", "Form factor",
+                kind="enum", required=True, compat_domain="form_factor",
+                values=_FORM_FACTOR_VALUES,
+            ),
             _eq_field("chipset", "Чипсет", "Chipset"),
-            _eq_field("form_factor", "Форм-фактор", "Form factor"),
-            _eq_field("ram_type", "Тип ОЗУ", "RAM type"),
             _eq_field("ram_slots", "Слоты ОЗУ", "RAM slots"),
-            _eq_field("max_ram", "Макс. ОЗУ", "Max RAM"),
-            _eq_field("memory_speed_max", "Макс. частота ОЗУ", "Max memory speed"),
-            _eq_field("cpu_sockets", "Сокетов CPU", "CPU sockets"),
-            _eq_field("pcie_gen", "PCIe поколение", "PCIe gen"),
-            _eq_field("pcie_slots", "PCIe слоты", "PCIe slots"),
             _eq_field("m2_slots", "M.2 слоты", "M.2 slots"),
-            _eq_field("sata_ports", "SATA порты", "SATA ports"),
-            _eq_field("ecc_support", "Поддержка ECC", "ECC support"),
         ],
     },
     {
@@ -109,15 +159,19 @@ _EQUIPMENT_TYPE_SEEDS: list[dict[str, Any]] = [
         "sort_order": 30,
         "build_scope": "all",
         "fields": [
-            _eq_field("ram_type", "Тип ОЗУ", "RAM type"),
-            _eq_field("form_factor", "Форм-фактор", "Form factor"),
-            _eq_field("module_capacity", "Объём модуля", "Module capacity"),
-            _eq_field("modules", "Модулей", "Modules"),
-            _eq_field("total_capacity", "Суммарный объём", "Total capacity"),
+            _eq_field(
+                "ram_type", "Тип ОЗУ", "RAM type",
+                kind="enum", required=True, compat_domain="ram_type",
+                values=_RAM_TYPE_VALUES,
+            ),
+            _eq_field(
+                "module_capacity", "Объём модуля", "Module capacity",
+                kind="groups", required=True,
+                groups=_gb_groups([4, 8, 16, 24, 32, 48, 64, 128]),
+            ),
             _eq_field("frequency", "Частота", "Frequency"),
             _eq_field("ecc", "ECC", "ECC"),
             _eq_field("registered", "Registered/LRDIMM", "Registered"),
-            _eq_field("voltage", "Напряжение", "Voltage"),
         ],
     },
     {
@@ -126,15 +180,18 @@ _EQUIPMENT_TYPE_SEEDS: list[dict[str, Any]] = [
         "sort_order": 40,
         "build_scope": "all",
         "fields": [
-            _eq_field("drive_type", "Тип", "Drive type"),
+            _eq_field(
+                "drive_type", "Тип", "Drive type",
+                kind="enum", required=True,
+                values=["SSD", "HDD"],
+            ),
+            _eq_field(
+                "capacity", "Объём", "Capacity",
+                kind="groups", required=True,
+                groups=_gb_groups([128, 256, 512, 1024, 2048, 4096, 8192]),
+            ),
             _eq_field("interface", "Интерфейс", "Interface"),
-            _eq_field("capacity", "Объём", "Capacity"),
             _eq_field("form_factor", "Форм-фактор", "Form factor"),
-            _eq_field("protocol_gen", "Поколение протокола", "Protocol gen"),
-            _eq_field("seq_read", "Чтение", "Seq. read"),
-            _eq_field("seq_write", "Запись", "Seq. write"),
-            _eq_field("endurance", "Ресурс (TBW/DWPD)", "Endurance"),
-            _eq_field("hot_swap", "Hot-swap", "Hot-swap"),
         ],
     },
     {
@@ -143,16 +200,14 @@ _EQUIPMENT_TYPE_SEEDS: list[dict[str, Any]] = [
         "sort_order": 50,
         "build_scope": "all",
         "fields": [
+            _eq_field(
+                "vram", "Память", "VRAM",
+                kind="groups", required=True,
+                groups=_gb_groups([2, 4, 6, 8, 12, 16, 24, 48]),
+            ),
             _eq_field("chipset", "Чипсет / GPU", "Chipset"),
-            _eq_field("gpu_memory", "Память", "Memory"),
-            _eq_field("vram_type", "Тип памяти", "VRAM type"),
-            _eq_field("memory_bus", "Шина памяти", "Memory bus"),
-            _eq_field("interface", "Интерфейс", "Interface"),
             _eq_field("tdp", "TDP", "TDP"),
             _eq_field("length_mm", "Длина, мм", "Length mm"),
-            _eq_field("slot_width", "Ширина слотов", "Slot width"),
-            _eq_field("power_connectors", "Питание", "Power connectors"),
-            _eq_field("recommended_psu_w", "Реком. БП, Вт", "Recommended PSU W"),
         ],
     },
     {
@@ -161,14 +216,16 @@ _EQUIPMENT_TYPE_SEEDS: list[dict[str, Any]] = [
         "sort_order": 60,
         "build_scope": "all",
         "fields": [
-            _eq_field("wattage", "Мощность", "Wattage"),
+            _eq_field(
+                "wattage", "Мощность", "Wattage",
+                kind="groups", required=True,
+                groups=[
+                    {"value": str(n), "label": f"{n} Вт"}
+                    for n in (400, 450, 550, 650, 750, 850, 1000, 1200, 1600)
+                ],
+            ),
             _eq_field("efficiency", "КПД", "Efficiency"),
             _eq_field("modular", "Модульность", "Modular"),
-            _eq_field("form_factor", "Форм-фактор", "Form factor"),
-            _eq_field("pcie_cables", "PCIe кабели", "PCIe cables"),
-            _eq_field("atx_version", "ATX версия", "ATX version"),
-            _eq_field("eps_8pin", "EPS 8-pin", "EPS 8-pin"),
-            _eq_field("12vhpwr", "12VHPWR", "12VHPWR"),
         ],
     },
     {
@@ -177,13 +234,14 @@ _EQUIPMENT_TYPE_SEEDS: list[dict[str, Any]] = [
         "sort_order": 70,
         "build_scope": "all",
         "fields": [
+            _eq_field(
+                "socket", "Сокет", "Socket",
+                kind="enum", required=True, compat_domain="socket",
+                values=_SOCKET_VALUES,
+            ),
             _eq_field("cooling_kind", "Тип", "Kind"),
-            _eq_field("socket_compat", "Сокеты", "Socket compat"),
             _eq_field("tdp_rating", "TDP рейтинг", "TDP rating"),
-            _eq_field("radiator_size", "Радиатор", "Radiator size"),
             _eq_field("height_mm", "Высота, мм", "Height mm"),
-            _eq_field("mount_type", "Крепление", "Mount type"),
-            _eq_field("clearance_mm", "Клиренс, мм", "Clearance mm"),
         ],
     },
     {
@@ -192,13 +250,14 @@ _EQUIPMENT_TYPE_SEEDS: list[dict[str, Any]] = [
         "sort_order": 80,
         "build_scope": "all",
         "fields": [
-            _eq_field("form_factor_support", "Форм-факторы", "Form factors"),
+            _eq_field(
+                "form_factor", "Форм-фактор материнской платы", "MB form factor",
+                kind="enum", required=True, compat_domain="form_factor",
+                values=_FORM_FACTOR_VALUES,
+            ),
             _eq_field("max_gpu_length", "Макс. GPU", "Max GPU length"),
             _eq_field("max_cooler_height", "Макс. кулер", "Max cooler height"),
             _eq_field("drive_bays", "Отсеки", "Drive bays"),
-            _eq_field("psu_form_factor", "БП форм-фактор", "PSU form factor"),
-            _eq_field("rad_support", "Радиаторы СЖО", "Rad support"),
-            _eq_field("psu_max_length", "Макс. длина БП", "PSU max length"),
         ],
     },
     {
@@ -207,10 +266,14 @@ _EQUIPMENT_TYPE_SEEDS: list[dict[str, Any]] = [
         "sort_order": 85,
         "build_scope": "all",
         "fields": [
-            _eq_field("count", "Количество", "Count"),
-            _eq_field("size_mm", "Размер, мм", "Size mm"),
+            _eq_field(
+                "size_mm", "Размер, мм", "Size mm",
+                kind="groups",
+                groups=[
+                    {"value": str(n), "label": f"{n} мм"} for n in (80, 92, 120, 140, 200)
+                ],
+            ),
             _eq_field("pwm", "PWM", "PWM"),
-            _eq_field("connector", "Разъём", "Connector"),
         ],
     },
     {
@@ -219,12 +282,13 @@ _EQUIPMENT_TYPE_SEEDS: list[dict[str, Any]] = [
         "sort_order": 90,
         "build_scope": "all",
         "fields": [
-            _eq_field("controller", "Контроллер / чип", "Controller"),
-            _eq_field("port_speed", "Скорость", "Port speed"),
+            _eq_field(
+                "port_speed", "Скорость", "Port speed",
+                kind="enum",
+                values=["1G", "2.5G", "10G", "25G", "40G", "100G"],
+            ),
             _eq_field("ports", "Порты", "Ports"),
             _eq_field("interface", "Интерфейс", "Interface"),
-            _eq_field("form_factor", "Форм-фактор", "Form factor"),
-            _eq_field("rdma", "RDMA", "RDMA"),
         ],
     },
     {
@@ -234,11 +298,8 @@ _EQUIPMENT_TYPE_SEEDS: list[dict[str, Any]] = [
         "build_scope": "server",
         "fields": [
             _eq_field("interface", "Интерфейс", "Interface"),
-            _eq_field("internal_ports", "Внутр. порты", "Internal ports"),
-            _eq_field("external_ports", "Внеш. порты", "External ports"),
             _eq_field("raid_levels", "Уровни RAID", "RAID levels"),
             _eq_field("cache", "Кэш", "Cache"),
-            _eq_field("battery_backup", "Батарея (BBU)", "Battery backup"),
         ],
     },
     {
@@ -250,7 +311,6 @@ _EQUIPMENT_TYPE_SEEDS: list[dict[str, Any]] = [
             _eq_field("bays", "Отсеки", "Bays"),
             _eq_field("drive_form_factor", "Форм-фактор дисков", "Drive form factor"),
             _eq_field("interface", "Интерфейс", "Interface"),
-            _eq_field("hot_swap", "Hot-swap", "Hot-swap"),
         ],
     },
     {
@@ -261,7 +321,6 @@ _EQUIPMENT_TYPE_SEEDS: list[dict[str, Any]] = [
         "fields": [
             _eq_field("mgmt_port", "Порт управления", "Mgmt port"),
             _eq_field("protocols", "Протоколы", "Protocols"),
-            _eq_field("remote_console", "Удалённая консоль", "Remote console"),
         ],
     },
 ]
@@ -1069,16 +1128,6 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "scope": {"projects": "all", "chats": "all"},
             },
             {
-                "slug": "equipment_items",
-                "label": {
-                    "ru": "Характеристики оборудования",
-                    "en": "Equipment characteristics",
-                },
-                "storage_kind": "json_document",
-                "enabled": True,
-                "scope": {"projects": "all", "chats": "current"},
-            },
-            {
                 "slug": "equipment_builds",
                 "label": {"ru": "Сборка", "en": "Builds"},
                 "storage_kind": "json_document",
@@ -1191,21 +1240,17 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "enabled": True,
                 "scope": {"projects": "all", "chats": "all"},
             },
-            # WAVE11: каталог «Готовые сборки» — глобальная библиотека шаблонов.
-            # chats=all: строки общие на проект (session_id NULL), видны из любого
-            # чата; читать только io.list (list_project_wide не видит NULL-строк).
-            # Хранят КЛЮЧИ (партномер/алиасы/хэш), а не офферы: цены резолвит
-            # пайплайн каталога батч-запросом в OpenSearch.
+            # WAVE12: каталог «Готовые сборки» v2 — глобальная библиотека.
+            # «Карточки комплектующих» (part_cards): партномер + тип +
+            # характеристики из групп типа. «Готовые сборки» (ready_builds) =
+            # слоты (ready_build_slots) с требованиями (constraints) к группам
+            # характеристик типа; пайплайн каталога подбирает карточки и цены.
+            # chats=all: строки общие на проект (session_id NULL), видны из
+            # любого чата; читать только io.list (list_project_wide не видит
+            # NULL-строки). Хранят КЛЮЧИ (партномер/алиасы/хэш), а не офферы.
             {
-                "slug": "build_groups",
-                "label": {"ru": "Группы сборок", "en": "Build groups"},
-                "storage_kind": "json_document",
-                "enabled": True,
-                "scope": {"projects": "all", "chats": "all"},
-            },
-            {
-                "slug": "build_group_items",
-                "label": {"ru": "Оборудование группы", "en": "Group components"},
+                "slug": "part_cards",
+                "label": {"ru": "Карточки комплектующих", "en": "Component cards"},
                 "storage_kind": "json_document",
                 "enabled": True,
                 "scope": {"projects": "all", "chats": "all"},
@@ -2037,66 +2082,6 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
             },
             _project_ids_column("equipment_types"),
             {
-                "table_slug": "equipment_items",
-                "name": "name",
-                "label": {"ru": "Название", "en": "Name"},
-                "type": "text",
-                "required": True,
-            },
-            {
-                "table_slug": "equipment_items",
-                "name": "offer_id",
-                "label": {"ru": "Найденный товар", "en": "Found offer"},
-                "type": "ref",
-                "required": False,
-                "ref": {"table_slug": "found_offers"},
-            },
-            {
-                "table_slug": "equipment_items",
-                "name": "offer_title",
-                "label": {"ru": "Товар", "en": "Offer"},
-                "type": "text",
-                "required": False,
-            },
-            {
-                "table_slug": "equipment_items",
-                "name": "type_id",
-                "label": {"ru": "Тип", "en": "Type"},
-                "type": "ref",
-                "required": False,
-                "ref": {"table_slug": "equipment_types"},
-            },
-            {
-                "table_slug": "equipment_items",
-                "name": "type_name",
-                "label": {"ru": "Тип", "en": "Type"},
-                "type": "text",
-                "required": False,
-            },
-            {
-                "table_slug": "equipment_items",
-                "name": "part_number",
-                "label": {"ru": "Партномер", "en": "Part number"},
-                "type": "text",
-                "required": False,
-            },
-            {
-                "table_slug": "equipment_items",
-                "name": "qty",
-                "label": {"ru": "Количество", "en": "Quantity"},
-                "type": "number",
-                "required": False,
-            },
-            {
-                "table_slug": "equipment_items",
-                "name": "attrs",
-                "label": {"ru": "Параметры", "en": "Attributes"},
-                "type": "json",
-                "required": False,
-                "default": {},
-            },
-            _project_ids_column("equipment_items"),
-            {
                 "table_slug": "equipment_builds",
                 "name": "name",
                 "label": {"ru": "Название", "en": "Name"},
@@ -2104,7 +2089,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "required": True,
             },
             # WAVE10: сборка привязана к позиции заказчика. На одну позицию —
-            # несколько сборок (разные сокеты/платформы), одна из них is_best;
+            # несколько сборок (разные конфигурации), одна из них is_best;
             # остальные — альтернативы (alternatives_count).
             {
                 "table_slug": "equipment_builds",
@@ -2115,16 +2100,15 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "ref": {"table_slug": "request_lines"},
             },
             {
-                # WAVE11: провенанс — из какой «Готовой сборки» каталога
-                # скопирована эта рабочая сборка чата (пусто = собрана с нуля).
+                # WAVE12: сборка чата — ГЛОБАЛЬНАЯ ССЫЛКА на «Готовую сборку»
+                # каталога, а не копия. Состав/цены зеркалятся пайплайном из
+                # ready_build_slots: изменение каталога доезжает до заказа.
                 "table_slug": "equipment_builds",
-                "name": "source_ready_build_id",
-                "label": {"ru": "Источник (каталог)", "en": "Source (catalog)"},
-                "type": "text",
-                "required": False,
-                "default": "",
-                "read_only": True,
-                "hidden": True,
+                "name": "ready_build_id",
+                "label": {"ru": "Готовая сборка", "en": "Ready build"},
+                "type": "ref",
+                "required": True,
+                "ref": {"table_slug": "ready_builds"},
             },
             {
                 "table_slug": "equipment_builds",
@@ -2139,23 +2123,27 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 },
             },
             {
-                "table_slug": "equipment_builds",
-                "name": "slots",
-                "label": {"ru": "Комплектующие", "en": "Slots"},
-                "type": "json",
-                "required": False,
-                "default": {},
-            },
-            {
-                # WAVE11: количество на слот — {type_id: qty}. Свойство СЛОТА, а
-                # не кандидата: у слота несколько альтернатив, но «2 плашки ОЗУ»
-                # верно для любой из них. Цена слота = цена кандидата × qty.
+                # Денормализация из готовой сборки (пишет зеркало пайплайна):
+                # {slot_id: qty} — количество на слот (2 плашки ОЗУ) и
+                # {slot_id: type_id} — тип каждого слота. Руками не правится.
                 "table_slug": "equipment_builds",
                 "name": "slot_qty",
                 "label": {"ru": "Количество по слотам", "en": "Slot quantity"},
                 "type": "json",
                 "required": False,
                 "default": {},
+                "read_only": True,
+                "hidden": True,
+            },
+            {
+                "table_slug": "equipment_builds",
+                "name": "slot_types",
+                "label": {"ru": "Типы слотов", "en": "Slot types"},
+                "type": "json",
+                "required": False,
+                "default": {},
+                "read_only": True,
+                "hidden": True,
             },
             {
                 "table_slug": "equipment_builds",
@@ -2725,142 +2713,13 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "default": 0,
             },
             _project_ids_column("procurement"),
-            # ------------------------------------------------ WAVE11: каталог
-            # «Готовые сборки». Группа = домен совместимости (сокет/тип ОЗУ/
-            # форм-фактор) + бюджетный класс. Пул группы хранит КЛЮЧИ
-            # (партномер/алиасы/хэш) и класс компонента — цены резолвит
-            # пайплайн каталога. Все вычисляемые поля — read_only.
+            # ------------------------------------------------ WAVE12: каталог
+            # «Готовые сборки» v2. Карточка комплектующего = партномер + тип +
+            # характеристики (значения из групп типа). Пайплайн каталога
+            # резолвит ключи карточек в лучшие цены батч-запросом в OpenSearch.
+            # Все вычисляемые поля — read_only.
             {
-                "table_slug": "build_groups",
-                "name": "name",
-                "label": {"ru": "Название", "en": "Name"},
-                "type": "text",
-                "required": True,
-            },
-            {
-                "table_slug": "build_groups",
-                "name": "build_kind",
-                "label": {"ru": "Платформа", "en": "Platform"},
-                "type": "enum",
-                "required": True,
-                "default": "pc",
-                "enum": {
-                    "values": ["pc", "server"],
-                    "labels": {"pc": "ПК", "server": "Сервер"},
-                },
-            },
-            {
-                # Якорь совместимости: внутри группы компоненты взаимозаменяемы.
-                "table_slug": "build_groups",
-                "name": "socket",
-                "label": {"ru": "Сокет", "en": "Socket"},
-                "type": "text",
-                "required": False,
-                "default": "",
-            },
-            {
-                "table_slug": "build_groups",
-                "name": "ram_type",
-                "label": {"ru": "Тип ОЗУ", "en": "RAM type"},
-                "type": "text",
-                "required": False,
-                "default": "",
-            },
-            {
-                "table_slug": "build_groups",
-                "name": "form_factor",
-                "label": {"ru": "Форм-фактор", "en": "Form factor"},
-                "type": "text",
-                "required": False,
-                "default": "",
-            },
-            {
-                "table_slug": "build_groups",
-                "name": "budget_tier",
-                "label": {"ru": "Бюджетный класс", "en": "Budget tier"},
-                "type": "enum",
-                "required": False,
-                "default": "mid",
-                "enum": {
-                    "values": ["budget", "mid", "high"],
-                    "labels": {
-                        "budget": "Бюджетный",
-                        "mid": "Средний",
-                        "high": "Верхний",
-                    },
-                },
-            },
-            {
-                "table_slug": "build_groups",
-                "name": "note",
-                "label": {"ru": "Комментарий", "en": "Note"},
-                "type": "text",
-                "required": False,
-                "default": "",
-            },
-            {
-                "table_slug": "build_groups",
-                "name": "is_enabled",
-                "label": {"ru": "Включена", "en": "Enabled"},
-                "type": "bool",
-                "required": False,
-                "default": True,
-            },
-            {
-                "table_slug": "build_groups",
-                "name": "items_count",
-                "label": {"ru": "Компонентов в пуле", "en": "Pool items"},
-                "type": "number",
-                "required": False,
-                "default": 0,
-                "read_only": True,
-            },
-            {
-                "table_slug": "build_groups",
-                "name": "builds_count",
-                "label": {"ru": "Сборок", "en": "Builds"},
-                "type": "number",
-                "required": False,
-                "default": 0,
-                "read_only": True,
-            },
-            {
-                "table_slug": "build_groups",
-                "name": "price_min",
-                "label": {"ru": "Цена от, ₽", "en": "Price from"},
-                "type": "number",
-                "required": False,
-                "read_only": True,
-            },
-            {
-                "table_slug": "build_groups",
-                "name": "price_max",
-                "label": {"ru": "Цена до, ₽", "en": "Price to"},
-                "type": "number",
-                "required": False,
-                "read_only": True,
-            },
-            {
-                "table_slug": "build_groups",
-                "name": "synced_at",
-                "label": {"ru": "Сверено", "en": "Synced at"},
-                "type": "text",
-                "required": False,
-                "read_only": True,
-                "hidden": True,
-            },
-            _project_ids_column("build_groups"),
-            # Пул оборудования группы: один ряд = одна альтернатива компонента.
-            {
-                "table_slug": "build_group_items",
-                "name": "group_id",
-                "label": {"ru": "Группа", "en": "Group"},
-                "type": "ref",
-                "required": True,
-                "ref": {"table_slug": "build_groups"},
-            },
-            {
-                "table_slug": "build_group_items",
+                "table_slug": "part_cards",
                 "name": "type_id",
                 "label": {"ru": "Тип комплектующего", "en": "Component type"},
                 "type": "ref",
@@ -2868,33 +2727,16 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "ref": {"table_slug": "equipment_types"},
             },
             {
-                "table_slug": "build_group_items",
+                "table_slug": "part_cards",
                 "name": "type_name",
                 "label": {"ru": "Тип", "en": "Type"},
                 "type": "text",
                 "required": False,
                 "default": "",
+                "read_only": True,
             },
             {
-                # Класс не даёт сравнивать несравнимое: «SSD 256» и «SSD 512» —
-                # разные классы, поэтому cheaper-несовместимое не подставится.
-                "table_slug": "build_group_items",
-                "name": "class_key",
-                "label": {"ru": "Класс (ключ)", "en": "Class key"},
-                "type": "text",
-                "required": False,
-                "default": "",
-            },
-            {
-                "table_slug": "build_group_items",
-                "name": "class_label",
-                "label": {"ru": "Класс", "en": "Class"},
-                "type": "text",
-                "required": False,
-                "default": "",
-            },
-            {
-                "table_slug": "build_group_items",
+                "table_slug": "part_cards",
                 "name": "part_number",
                 "label": {"ru": "Партномер", "en": "Part number"},
                 "type": "text",
@@ -2902,7 +2744,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "default": "",
             },
             {
-                "table_slug": "build_group_items",
+                "table_slug": "part_cards",
                 "name": "aliases_pn",
                 "label": {"ru": "Алиасы партномера", "en": "P/N aliases"},
                 "type": "text",
@@ -2910,7 +2752,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "default": "",
             },
             {
-                "table_slug": "build_group_items",
+                "table_slug": "part_cards",
                 "name": "aliases_hash",
                 "label": {"ru": "Алиасы хэшей позиций", "en": "Hash aliases"},
                 "type": "text",
@@ -2918,15 +2760,27 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "default": "",
             },
             {
-                "table_slug": "build_group_items",
-                "name": "qty_default",
-                "label": {"ru": "Количество по умолчанию", "en": "Default quantity"},
-                "type": "number",
+                # Характеристики карточки — значения из групп типа
+                # (equipment_types.fields_json). Обязательные поля типа должны
+                # быть заполнены: по ним работает матрица совместимости.
+                "table_slug": "part_cards",
+                "name": "attrs",
+                "label": {"ru": "Характеристики", "en": "Attributes"},
+                "type": "json",
                 "required": False,
-                "default": 1,
+                "default": {},
             },
             {
-                "table_slug": "build_group_items",
+                "table_slug": "part_cards",
+                "name": "attrs_label",
+                "label": {"ru": "Характеристики", "en": "Attributes"},
+                "type": "text",
+                "required": False,
+                "default": "",
+                "read_only": True,
+            },
+            {
+                "table_slug": "part_cards",
                 "name": "note",
                 "label": {"ru": "Комментарий", "en": "Note"},
                 "type": "text",
@@ -2934,7 +2788,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "default": "",
             },
             {
-                "table_slug": "build_group_items",
+                "table_slug": "part_cards",
                 "name": "offers_count",
                 "label": {"ru": "Предложений", "en": "Offers"},
                 "type": "number",
@@ -2943,7 +2797,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "read_only": True,
             },
             {
-                "table_slug": "build_group_items",
+                "table_slug": "part_cards",
                 "name": "best_price",
                 "label": {"ru": "Лучшая цена ₽", "en": "Best price"},
                 "type": "number",
@@ -2951,7 +2805,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "read_only": True,
             },
             {
-                "table_slug": "build_group_items",
+                "table_slug": "part_cards",
                 "name": "best_title",
                 "label": {"ru": "Товар", "en": "Product"},
                 "type": "text",
@@ -2960,7 +2814,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "read_only": True,
             },
             {
-                "table_slug": "build_group_items",
+                "table_slug": "part_cards",
                 "name": "best_seller",
                 "label": {"ru": "Поставщик", "en": "Supplier"},
                 "type": "text",
@@ -2969,7 +2823,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "read_only": True,
             },
             {
-                "table_slug": "build_group_items",
+                "table_slug": "part_cards",
                 "name": "in_stock",
                 "label": {"ru": "В наличии", "en": "In stock"},
                 "type": "bool",
@@ -2978,25 +2832,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "read_only": True,
             },
             {
-                "table_slug": "build_group_items",
-                "name": "is_cheapest_in_class",
-                "label": {"ru": "Дешевлейший в классе", "en": "Cheapest in class"},
-                "type": "bool",
-                "required": False,
-                "default": False,
-                "read_only": True,
-            },
-            {
-                "table_slug": "build_group_items",
-                "name": "alternatives_count",
-                "label": {"ru": "Альтернатив в классе", "en": "Class alternatives"},
-                "type": "number",
-                "required": False,
-                "default": 0,
-                "read_only": True,
-            },
-            {
-                "table_slug": "build_group_items",
+                "table_slug": "part_cards",
                 "name": "synced_at",
                 "label": {"ru": "Сверено", "en": "Synced at"},
                 "type": "text",
@@ -3004,16 +2840,9 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "read_only": True,
                 "hidden": True,
             },
-            _project_ids_column("build_group_items"),
-            # Готовая сборка: вариант конфигурации внутри группы.
-            {
-                "table_slug": "ready_builds",
-                "name": "group_id",
-                "label": {"ru": "Группа", "en": "Group"},
-                "type": "ref",
-                "required": True,
-                "ref": {"table_slug": "build_groups"},
-            },
+            _project_ids_column("part_cards"),
+            # Готовая сборка: набор слотов с требованиями к группам
+            # характеристик + опциональный целевой коридор цены.
             {
                 "table_slug": "ready_builds",
                 "name": "name",
@@ -3034,100 +2863,21 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 },
             },
             {
+                # Целевой коридор: система перебирает умные комбинации
+                # кандидатов (лидеры цены по каждому партномеру) и выбирает
+                # конфигурацию внутри [min, max]. Пусто = дешевейшая.
                 "table_slug": "ready_builds",
-                "name": "budget_tier",
-                "label": {"ru": "Бюджетный класс", "en": "Budget tier"},
-                "type": "enum",
-                "required": False,
-                "default": "mid",
-                "enum": {
-                    "values": ["budget", "mid", "high"],
-                    "labels": {
-                        "budget": "Бюджетный",
-                        "mid": "Средний",
-                        "high": "Верхний",
-                    },
-                },
-            },
-            # Классовые атрибуты — по ним заявка сопоставляется со сборкой
-            # («Бюджетный ПК, 6 ядер, 256 ГБ SSD, 16 ГБ ОЗУ»).
-            {
-                "table_slug": "ready_builds",
-                "name": "cpu_cores",
-                "label": {"ru": "Ядер CPU", "en": "CPU cores"},
+                "name": "target_price_min",
+                "label": {"ru": "Целевая цена от, ₽", "en": "Target price from"},
                 "type": "number",
                 "required": False,
             },
             {
                 "table_slug": "ready_builds",
-                "name": "ram_gb",
-                "label": {"ru": "ОЗУ, ГБ", "en": "RAM, GB"},
+                "name": "target_price_max",
+                "label": {"ru": "Целевая цена до, ₽", "en": "Target price to"},
                 "type": "number",
                 "required": False,
-            },
-            {
-                "table_slug": "ready_builds",
-                "name": "storage_kind",
-                "label": {"ru": "Тип накопителя", "en": "Storage kind"},
-                "type": "text",
-                "required": False,
-                "default": "",
-            },
-            {
-                "table_slug": "ready_builds",
-                "name": "storage_gb",
-                "label": {"ru": "Накопитель, ГБ", "en": "Storage, GB"},
-                "type": "number",
-                "required": False,
-            },
-            {
-                "table_slug": "ready_builds",
-                "name": "gpu_class",
-                "label": {"ru": "Класс GPU", "en": "GPU class"},
-                "type": "text",
-                "required": False,
-                "default": "",
-            },
-            {
-                "table_slug": "ready_builds",
-                "name": "gpu_gb",
-                "label": {"ru": "GPU, ГБ", "en": "GPU, GB"},
-                "type": "number",
-                "required": False,
-            },
-            {
-                # Плашки ОЗУ и диски — производные от слотов своего типа, а не
-                # отдельно вводимые поля: «сколько плашек/дисков» должно
-                # отвечать на вопрос, сколько таких компонентов добавлено.
-                "table_slug": "ready_builds",
-                "name": "ram_sticks",
-                "label": {"ru": "ОЗУ, плашек", "en": "RAM sticks"},
-                "type": "number",
-                "required": False,
-                "default": 0,
-                "read_only": True,
-            },
-            {
-                "table_slug": "ready_builds",
-                "name": "storage_drives",
-                "label": {"ru": "Накопителей, шт", "en": "Drives"},
-                "type": "number",
-                "required": False,
-                "default": 0,
-                "read_only": True,
-            },
-            {
-                # Ключ ранжирования: «дешевлейшая сборка» считается СТРОГО внутри
-                # (group_id, class_signature). Разные сигнатуры = разные витрины,
-                # они не конкурируют (16 ГБ не «побеждает» 32 ГБ ценой).
-                "table_slug": "ready_builds",
-                "name": "class_signature",
-                "label": {"ru": "Сигнатура класса", "en": "Class signature"},
-                "type": "text",
-                "required": False,
-                "default": "",
-                "read_only": True,
-                "hidden": True,
             },
             {
                 "table_slug": "ready_builds",
@@ -3144,6 +2894,17 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "type": "bool",
                 "required": False,
                 "default": True,
+            },
+            {
+                # Состав сборки одной строкой: «Процессор: LGA1700 · 6 ядер ·
+                # ОЗУ: DDR4 · 16 ГБ ×2». Пишется пайплайном из слотов.
+                "table_slug": "ready_builds",
+                "name": "spec_summary",
+                "label": {"ru": "Состав", "en": "Spec"},
+                "type": "text",
+                "required": False,
+                "default": "",
+                "read_only": True,
             },
             {
                 "table_slug": "ready_builds",
@@ -3164,6 +2925,25 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "read_only": True,
             },
             {
+                # Плашки ОЗУ и диски — производные от слотов своего типа.
+                "table_slug": "ready_builds",
+                "name": "ram_sticks",
+                "label": {"ru": "ОЗУ, плашек", "en": "RAM sticks"},
+                "type": "number",
+                "required": False,
+                "default": 0,
+                "read_only": True,
+            },
+            {
+                "table_slug": "ready_builds",
+                "name": "storage_drives",
+                "label": {"ru": "Накопителей, шт", "en": "Drives"},
+                "type": "number",
+                "required": False,
+                "default": 0,
+                "read_only": True,
+            },
+            {
                 "table_slug": "ready_builds",
                 "name": "price_total",
                 "label": {"ru": "Цена ₽", "en": "Price"},
@@ -3172,9 +2952,11 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "read_only": True,
             },
             {
+                # Коридор возможных конфигураций: дешевейшая/дорожайшая
+                # комбинация из текущих кандидатов слотов.
                 "table_slug": "ready_builds",
                 "name": "price_min",
-                "label": {"ru": "Мин. цена ₽", "en": "Min price"},
+                "label": {"ru": "Мин. комбинация ₽", "en": "Min combo"},
                 "type": "number",
                 "required": False,
                 "read_only": True,
@@ -3182,9 +2964,18 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
             {
                 "table_slug": "ready_builds",
                 "name": "price_max",
-                "label": {"ru": "Макс. цена ₽", "en": "Max price"},
+                "label": {"ru": "Макс. комбинация ₽", "en": "Max combo"},
                 "type": "number",
                 "required": False,
+                "read_only": True,
+            },
+            {
+                "table_slug": "ready_builds",
+                "name": "price_note",
+                "label": {"ru": "Подбор цены", "en": "Price note"},
+                "type": "text",
+                "required": False,
+                "default": "",
                 "read_only": True,
             },
             {
@@ -3206,21 +2997,24 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "read_only": True,
             },
             {
+                # Матрица совместимости: домены (socket/ram_type/form_factor)
+                # выбранных карточек сходятся. Грубая проверка — конфликты не
+                # блокируют, а фиксируются в compat_issues.
                 "table_slug": "ready_builds",
-                "name": "is_cheapest_in_class",
-                "label": {"ru": "Дешевлейшая в классе", "en": "Cheapest in class"},
+                "name": "compat_ok",
+                "label": {"ru": "Совместимость", "en": "Compatibility"},
                 "type": "bool",
                 "required": False,
-                "default": False,
+                "default": True,
                 "read_only": True,
             },
             {
                 "table_slug": "ready_builds",
-                "name": "alternatives_count",
-                "label": {"ru": "Альтернатив в классе", "en": "Class alternatives"},
-                "type": "number",
+                "name": "compat_issues",
+                "label": {"ru": "Замечания совместимости", "en": "Compatibility issues"},
+                "type": "text",
                 "required": False,
-                "default": 0,
+                "default": "",
                 "read_only": True,
             },
             {
@@ -3233,7 +3027,8 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "hidden": True,
             },
             _project_ids_column("ready_builds"),
-            # Слот готовой сборки: тип + количество + режим (dynamic|fixed).
+            # Слот готовой сборки: тип + требования (значения групп характеристик
+            # типа) + количество + опционально закреплённая карточка.
             {
                 "table_slug": "ready_build_slots",
                 "name": "build_id",
@@ -3257,6 +3052,26 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "type": "text",
                 "required": False,
                 "default": "",
+                "read_only": True,
+            },
+            {
+                # Требования слота: {ключ характеристики: значение группы},
+                # например {"capacity": "512"}. Пусто = любая карточка типа.
+                "table_slug": "ready_build_slots",
+                "name": "constraints",
+                "label": {"ru": "Требования", "en": "Constraints"},
+                "type": "json",
+                "required": False,
+                "default": {},
+            },
+            {
+                "table_slug": "ready_build_slots",
+                "name": "constraints_label",
+                "label": {"ru": "Требования", "en": "Constraints"},
+                "type": "text",
+                "required": False,
+                "default": "",
+                "read_only": True,
             },
             {
                 "table_slug": "ready_build_slots",
@@ -3267,59 +3082,14 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "default": 1,
             },
             {
-                # dynamic → резолвится в дешевейший доступный компонент класса
-                # (может дрейфовать при смене цен); fixed → закреплён.
+                # Ручная замена: закреплённая карточка из альтернатив слота.
+                # Пусто = автоподбор дешевейшей подходящей (или по коридору).
                 "table_slug": "ready_build_slots",
-                "name": "mode",
-                "label": {"ru": "Режим", "en": "Mode"},
-                "type": "enum",
-                "required": True,
-                "default": "dynamic",
-                "enum": {
-                    "values": ["dynamic", "fixed"],
-                    "labels": {"dynamic": "Динамический", "fixed": "Фиксированный"},
-                },
-            },
-            {
-                "table_slug": "ready_build_slots",
-                "name": "class_key",
-                "label": {"ru": "Класс (ключ)", "en": "Class key"},
-                "type": "text",
-                "required": False,
-                "default": "",
-            },
-            {
-                "table_slug": "ready_build_slots",
-                "name": "item_id",
-                "label": {"ru": "Компонент пула", "en": "Pool item"},
+                "name": "card_id",
+                "label": {"ru": "Закреплённая карточка", "en": "Pinned card"},
                 "type": "ref",
                 "required": False,
-                "ref": {"table_slug": "build_group_items"},
-            },
-            {
-                # Собственные ключи слота — когда компонента нет в пуле группы.
-                "table_slug": "ready_build_slots",
-                "name": "part_number",
-                "label": {"ru": "Партномер", "en": "Part number"},
-                "type": "text",
-                "required": False,
-                "default": "",
-            },
-            {
-                "table_slug": "ready_build_slots",
-                "name": "aliases_pn",
-                "label": {"ru": "Алиасы партномера", "en": "P/N aliases"},
-                "type": "text",
-                "required": False,
-                "default": "",
-            },
-            {
-                "table_slug": "ready_build_slots",
-                "name": "aliases_hash",
-                "label": {"ru": "Алиасы хэшей позиций", "en": "Hash aliases"},
-                "type": "text",
-                "required": False,
-                "default": "",
+                "ref": {"table_slug": "part_cards"},
             },
             {
                 "table_slug": "ready_build_slots",
@@ -3331,8 +3101,8 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
             },
             {
                 "table_slug": "ready_build_slots",
-                "name": "resolved_item_id",
-                "label": {"ru": "Разрешённый компонент", "en": "Resolved item"},
+                "name": "resolved_card_id",
+                "label": {"ru": "Разрешённая карточка", "en": "Resolved card"},
                 "type": "text",
                 "required": False,
                 "default": "",
@@ -3806,15 +3576,6 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "title": "Найденные товары",
                             "icon": "inventory_2",
                             "target": {"kind": "view", "view": "found_groups_list"},
-                            "scope": {"active_chat": "required"},
-                        },
-                        {
-                            "title": "Характеристики оборудования",
-                            "icon": "tune",
-                            "target": {
-                                "kind": "view",
-                                "view": "equipment_items_list",
-                            },
                             "scope": {"active_chat": "required"},
                         },
                         {
@@ -4963,133 +4724,6 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 },
             },
             {
-                "slug": "equipment_items_list",
-                "table_slug": "equipment_items",
-                "kind": "collection",
-                "ui_json": {
-                    "version": 1,
-                    "kind": "collection",
-                    "scaffold": {
-                        "title": {
-                            "ru": "Характеристики оборудования",
-                            "en": "Equipment characteristics",
-                        }
-                    },
-                    "title_field": "name",
-                    "subtitle_fields": ["type_name", "part_number"],
-                    "columns": [
-                        {
-                            "field": "name",
-                            "label": {"ru": "Название", "en": "Name"},
-                            "max_lines": 3,
-                            "max_width": 300,
-                        },
-                        {
-                            "field": "type_name",
-                            "label": {"ru": "Тип", "en": "Type"},
-                            "max_width": 140,
-                        },
-                        {
-                            "field": "part_number",
-                            "label": {"ru": "Партномер", "en": "P/N"},
-                            "max_lines": 2,
-                            "max_width": 150,
-                        },
-                        {
-                            "field": "qty",
-                            "label": {"ru": "Кол-во", "en": "Qty"},
-                            "align": "end",
-                            "max_width": 90,
-                        },
-                    ],
-                    "row_tap": {
-                        "kind": "open_view",
-                        "view": "equipment_item_settings",
-                    },
-                    "inline_add": {
-                        "field": "name",
-                        "title": "Добавить позицию",
-                    },
-                    "empty": _empty(
-                        "Нет характеристик",
-                        "No characteristics",
-                        icon="tune",
-                    ),
-                },
-            },
-            {
-                "slug": "equipment_item_settings",
-                "table_slug": "equipment_items",
-                "kind": "detail",
-                "ui_json": {
-                    "version": 1,
-                    "kind": "detail",
-                    "mode": "edit",
-                    "title": {
-                        "ru": "Характеристики",
-                        "en": "Characteristics",
-                    },
-                    "fields": [
-                        {
-                            "column": "name",
-                            "widget": "value",
-                            "icon": "label_outline",
-                        },
-                        {
-                            "column": "offer_id",
-                            "widget": "type_ref_picker",
-                            "pick_view": "found_offers_pick",
-                            "title_field": "offer_title",
-                            "icon": "inventory_2",
-                            "empty_style": "warning",
-                            "empty_label": {
-                                "ru": "Не выбран",
-                                "en": "Not selected",
-                            },
-                            "label": {
-                                "ru": "Найденный товар",
-                                "en": "Found offer",
-                            },
-                        },
-                        {
-                            "column": "type_id",
-                            "widget": "type_ref_picker",
-                            "pick_view": "equipment_types_pick",
-                            "empty_style": "warning",
-                            "empty_label": {
-                                "ru": "Не выбран",
-                                "en": "Not selected",
-                            },
-                        },
-                        {
-                            "column": "part_number",
-                            "widget": "value",
-                            "icon": "qr_code_2",
-                        },
-                        {
-                            "column": "qty",
-                            "widget": "value",
-                            "icon": "numbers",
-                        },
-                        {
-                            "column": "attrs",
-                            "widget": "schema_attrs",
-                            "type_id_field": "type_id",
-                            "types_table": "equipment_types",
-                            "fields_from": "fields_json",
-                            "section_title": {
-                                "ru": "Характеристики",
-                                "en": "Characteristics",
-                            },
-                            "visible_when": {
-                                "field": "type_id",
-                                "not_empty": True,
-                            },
-                        },
-                    ],
-                },
-            },
-            {
                 "slug": "equipment_types_list",
                 "table_slug": "equipment_types",
                 "kind": "collection",
@@ -5152,11 +4786,13 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                         "placement": "trailing",
                         "disable_row_tap": True,
                         "match_context_field": "type_id",
-                        "set_on_context": {
+                            "set_on_context": {
                             "field": "type_id",
                             "value_from": "row_id",
                             "also_copy": [{"from": "name", "to": "type_name"}],
-                            "clear_fields": ["attrs"],
+                            # смена типа сбрасывает характеристики карточки,
+                            # требования слота и закреплённую карточку
+                            "clear_fields": ["attrs", "constraints", "card_id"],
                             "pop_after": True,
                         },
                     },
@@ -5262,144 +4898,6 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 },
             },
             {
-                "slug": "equipment_items_pick",
-                "table_slug": "equipment_items",
-                "kind": "collection",
-                "ui_json": {
-                    "version": 1,
-                    "kind": "collection",
-                    "scaffold": {
-                        "title": {
-                            "ru": "Выбор комплектующего",
-                            "en": "Select component",
-                        }
-                    },
-                    "title_field": "name",
-                    "subtitle_fields": ["part_number", "offer_title"],
-                    "columns": [
-                        {
-                            "field": "name",
-                            "label": {"ru": "Название", "en": "Name"},
-                        }
-                    ],
-                    "row_filter_from_context": {"type_id": "_pick_type_id"},
-                    "selection": {
-                        "kind": "single",
-                        "control": "switch",
-                        "placement": "trailing",
-                        "disable_row_tap": True,
-                        "match_map_field": "slots",
-                        "match_map_key_from_context": "_slot_key",
-                        "set_on_context": {
-                            "map_field": "slots",
-                            "map_key_from_context": "_slot_key",
-                            "value_from": "row_id",
-                            "recompute_build_totals": True,
-                            "pop_after": True,
-                        },
-                    },
-                    "empty": _empty(
-                        "Нет позиций",
-                        "No items",
-                        icon="tune",
-                    ),
-                },
-            },
-            {
-                "slug": "found_groups_pick",
-                "table_slug": "found_groups",
-                "kind": "collection",
-                "ui_json": {
-                    "version": 1,
-                    "kind": "collection",
-                    "scaffold": {
-                        "title": {
-                            "ru": "Выбор комплектующего",
-                            "en": "Select component",
-                        }
-                    },
-                    "title_field": "face_title",
-                    "subtitle_fields": ["part_number", "match_label", "note"],
-                    # Кандидаты слота: группы ЭТОЙ сборки (build_id = открытая
-                    # сборка) и ЭТОГО слота (slot_type_id из pick-контекста).
-                    "row_filter_from_context": {
-                        "build_id": "contextRowId",
-                        "slot_type_id": "_pick_type_id",
-                    },
-                    "no_offers_placeholder": {"text": "Нет оффера"},
-                    "columns": [
-                        {
-                            "field": "face_title",
-                            "label": {"ru": "Товар", "en": "Product"},
-                            "max_lines": 3,
-                            "max_width": 240,
-                        },
-                        {
-                            "field": "part_number",
-                            "label": {"ru": "Партномер", "en": "P/N"},
-                            "max_lines": 2,
-                            "max_width": 130,
-                            "format": "pn_fallback",
-                        },
-                        {
-                            "field": "match_label",
-                            "label": {"ru": "Совпадение", "en": "Match"},
-                            "max_width": 140,
-                        },
-                        {
-                            "field": "face_price",
-                            "label": {"ru": "Цена ₽", "en": "Price RUB"},
-                            "format": "face_price",
-                            "align": "end",
-                            "max_width": 110,
-                        },
-                        {
-                            "field": "face_seller",
-                            "label": {"ru": "Поставщик", "en": "Supplier"},
-                            "max_lines": 2,
-                            "max_width": 140,
-                        },
-                        {
-                            "field": "benefit",
-                            "label": {"ru": "Выгода", "en": "Benefit"},
-                            "format": "benefit",
-                            "price_field": "face_price",
-                            "current_field": "is_best",
-                            "align": "center",
-                            "max_width": 120,
-                        },
-                    ],
-                    "sort": [
-                        {"field": "rank", "dir": "asc"},
-                        {"field": "face_priority", "dir": "desc"},
-                        {"field": "face_price", "dir": "asc"},
-                    ],
-                    "row_style": [
-                        {"when": {"field": "face_stale", "eq": True}, "accent": "warning"},
-                    ],
-                    "selection": {
-                        "kind": "single",
-                        "control": "switch",
-                        "placement": "trailing",
-                        "disable_row_tap": True,
-                        "match_map_field": "slots",
-                        "match_map_key_from_context": "_slot_key",
-                        "set_on_context": {
-                            "map_field": "slots",
-                            "map_key_from_context": "_slot_key",
-                            "value_from": "row_id",
-                            "recompute_build_totals": True,
-                            "pop_after": True,
-                        },
-                    },
-                    "empty": _empty(
-                        "Нет кандидатов",
-                        "No candidates",
-                        icon="inventory_2",
-                    ),
-                },
-            },
-            {
                 "slug": "equipment_type_settings",
                 "table_slug": "equipment_types",
                 "kind": "detail",
@@ -5434,6 +4932,17 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                                 "ru": "Характеристики",
                                 "en": "Characteristics",
                             },
+                        },
+                    ],
+                    # карточки этого типа (партномера + заполненные характеристики)
+                    "links": [
+                        {
+                            "label": {
+                                "ru": "Карточки типа",
+                                "en": "Type cards",
+                            },
+                            "icon": "inventory_2",
+                            "open_view": "part_cards_list",
                         },
                     ],
                 },
@@ -5519,6 +5028,9 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     ),
                 },
             },
+            # WAVE12: сборка чата — глобальная ссылка на готовую сборку
+            # каталога. Состав и цены зеркалятся пайплайном; локальных слотов
+            # нет — правка состава идёт в «Готовых сборках» (или новой сборкой).
             {
                 "slug": "equipment_build_settings",
                 "table_slug": "equipment_builds",
@@ -5535,6 +5047,18 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "icon": "label_outline",
                         },
                         {
+                            "column": "ready_build_id",
+                            "widget": "pick",
+                            "icon": "precision_manufacturing",
+                            "pick_view": "ready_builds_pick",
+                            "title_field": "name",
+                            "empty_style": "warning",
+                            "empty_label": {
+                                "ru": "Не выбрана",
+                                "en": "Not selected",
+                            },
+                        },
+                        {
                             "column": "line_id",
                             "widget": "ref",
                             "icon": "list_alt",
@@ -5543,6 +5067,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "column": "build_kind",
                             "widget": "choice",
                             "icon": "precision_manufacturing",
+                            "read_only": True,
                         },
                         {
                             "column": "match_label",
@@ -5563,31 +5088,40 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "icon": "payments",
                         },
                         {
-                            "column": "slots",
-                            "widget": "build_slots",
-                            "types_table": "equipment_types",
-                            "items_table": "equipment_items",
-                            "offers_table": "found_offers",
-                            "groups_table": "found_groups",
-                            "pick_view": "found_groups_pick",
-                        },
-                        {
                             "column": "note",
                             "widget": "value",
                             "icon": "edit_note",
                         },
                     ],
+                    # переход в каталог — к самой готовой сборке (её слоты,
+                    # требования, выбранные компоненты), а не к строке ссылки
+                    "links": [
+                        {
+                            "label": {
+                                "ru": "Открыть готовую сборку",
+                                "en": "Open ready build",
+                            },
+                            "icon": "precision_manufacturing",
+                            "open_view": "ready_build_settings",
+                            "row_id_from_field": "ready_build_id",
+                        },
+                    ],
                 },
             },
+            # WAVE12: «Карточки комплектующих» — партномер + тип + характеристики
+            # из групп типа. Лидеры цен (best_*) резолвит пайплайн каталога.
             {
-                "slug": "build_groups_list",
-                "table_slug": "build_groups",
+                "slug": "part_cards_list",
+                "table_slug": "part_cards",
                 "kind": "collection",
                 "ui_json": {
                     "version": 1,
                     "kind": "collection",
                     "scaffold": {
-                        "title": {"ru": "Группы сборок", "en": "Build groups"},
+                        "title": {
+                            "ru": "Карточки комплектующих",
+                            "en": "Component cards",
+                        },
                         "actions": [
                             {
                                 "kind": "invoke_action",
@@ -5600,146 +5134,27 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             },
                         ],
                     },
-                    "title_field": "name",
-                    "subtitle_fields": ["socket", "ram_type", "budget_tier"],
-                    "columns": [
-                        {
-                            "field": "name",
-                            "label": {"ru": "Название", "en": "Name"},
-                            "max_lines": 2,
-                            "max_width": 240,
-                        },
-                        {
-                            "field": "build_kind",
-                            "label": {"ru": "Платформа", "en": "Platform"},
-                            "max_width": 100,
-                        },
-                        {
-                            "field": "socket",
-                            "label": {"ru": "Сокет", "en": "Socket"},
-                            "max_width": 120,
-                        },
-                        {
-                            "field": "ram_type",
-                            "label": {"ru": "ОЗУ", "en": "RAM"},
-                            "max_width": 100,
-                        },
-                        {
-                            "field": "budget_tier",
-                            "label": {"ru": "Класс", "en": "Tier"},
-                            "max_width": 110,
-                        },
-                        {
-                            "field": "items_count",
-                            "label": {"ru": "В пуле", "en": "Pool"},
-                            "align": "end",
-                            "max_width": 90,
-                        },
-                        {
-                            "field": "builds_count",
-                            "label": {"ru": "Сборок", "en": "Builds"},
-                            "align": "end",
-                            "max_width": 90,
-                        },
-                        {
-                            "field": "price_min",
-                            "label": {"ru": "Сборки от ₽", "en": "Builds from"},
-                            "format": "offer_price",
-                            "align": "end",
-                            "max_width": 110,
-                        },
-                        {
-                            "field": "price_max",
-                            "label": {"ru": "Сборки до ₽", "en": "Builds up to"},
-                            "format": "offer_price",
-                            "align": "end",
-                            "max_width": 110,
-                        },
-                    ],
-                    "row_tap": {"kind": "open_view", "view": "build_group_settings"},
-                    "context_bind": {"group_id": "contextRowId"},
-                    "inline_add": {"field": "name", "title": "Добавить группу"},
-                    "empty": _empty(
-                        "Нет групп сборок",
-                        "No build groups",
-                        icon="precision_manufacturing",
-                    ),
-                },
-            },
-            {
-                "slug": "build_group_settings",
-                "table_slug": "build_groups",
-                "kind": "detail",
-                "ui_json": {
-                    "version": 1,
-                    "kind": "detail",
-                    "mode": "edit",
-                    "title": {"ru": "Группа сборок", "en": "Build group"},
-                    "fields": [
-                        {"column": "name", "widget": "value", "icon": "label_outline"},
-                        {
-                            "column": "build_kind",
-                            "widget": "choice",
-                            "icon": "precision_manufacturing",
-                        },
-                        {"column": "socket", "widget": "value", "icon": "memory"},
-                        {"column": "ram_type", "widget": "value", "icon": "view_week"},
-                        {
-                            "column": "form_factor",
-                            "widget": "value",
-                            "icon": "aspect_ratio",
-                        },
-                        {"column": "budget_tier", "widget": "choice", "icon": "payments"},
-                        {"column": "is_enabled", "widget": "switch", "icon": "toggle_on"},
-                        {"column": "note", "widget": "value", "icon": "edit_note"},
-                    ],
-                    # переходы к связанным спискам этой группы
-                    "links": [
-                        {
-                            "label": {"ru": "Пул компонентов", "en": "Component pool"},
-                            "icon": "inventory_2",
-                            "open_view": "build_group_items_list",
-                        },
-                        {
-                            "label": {"ru": "Сборки группы", "en": "Group builds"},
-                            "icon": "precision_manufacturing",
-                            "open_view": "ready_builds_list",
-                        },
-                    ],
-                },
-            },
-            {
-                "slug": "build_group_items_list",
-                "table_slug": "build_group_items",
-                "kind": "collection",
-                "ui_json": {
-                    "version": 1,
-                    "kind": "collection",
-                    "scaffold": {
-                        "title": {"ru": "Оборудование группы", "en": "Group components"},
-                    },
-                    "title_field": "class_label",
-                    "subtitle_fields": ["type_name", "part_number"],
-                    "context_bind": {"group_id": "contextRowId"},
-                    # список пула открывается из группы — показываем только её строки
-                    "row_filter_from_context": {"group_id": "contextRowId"},
+                    "title_field": "part_number",
+                    "subtitle_fields": ["type_name", "attrs_label"],
+                    # открыто из типа → только его карточки; иначе весь список
+                    "row_filter_from_context": {"type_id": "contextRowId"},
                     "columns": [
                         {
                             "field": "type_name",
                             "label": {"ru": "Тип", "en": "Type"},
-                            "max_width": 150,
-                        },
-                        {
-                            "field": "class_label",
-                            "label": {"ru": "Класс", "en": "Class"},
-                            "max_lines": 2,
-                            "max_width": 170,
+                            "max_width": 140,
                         },
                         {
                             "field": "part_number",
                             "label": {"ru": "Партномер", "en": "P/N"},
                             "max_lines": 2,
-                            "max_width": 150,
+                            "max_width": 170,
+                        },
+                        {
+                            "field": "attrs_label",
+                            "label": {"ru": "Характеристики", "en": "Attributes"},
+                            "max_lines": 2,
+                            "max_width": 200,
                         },
                         {
                             "field": "best_title",
@@ -5772,53 +5187,244 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "format": "bool_yes_no",
                             "max_width": 90,
                         },
-                        {
-                            "field": "is_cheapest_in_class",
-                            "label": {"ru": "Дешевлейший", "en": "Cheapest"},
-                            "format": "bool_yes_no",
-                            "max_width": 110,
-                        },
                     ],
                     "sort": [
                         {"field": "type_name", "dir": "asc"},
-                        {"field": "class_key", "dir": "asc"},
                         {"field": "best_price", "dir": "asc"},
                     ],
-                    "row_tap": {"kind": "open_form", "view": "build_group_item_settings"},
+                    "row_tap": {"kind": "open_view", "view": "part_card_settings"},
                     "inline_add": {
-                        "field": "class_label",
-                        "title": "Добавить компонент",
+                        "field": "part_number",
+                        "title": "Добавить карточку",
                     },
                     "empty": _empty(
-                        "Пул пуст",
-                        "No components",
+                        "Нет карточек комплектующих",
+                        "No component cards",
                         icon="inventory_2",
                     ),
                 },
             },
             {
-                "slug": "build_group_item_settings",
-                "table_slug": "build_group_items",
+                "slug": "part_card_settings",
+                "table_slug": "part_cards",
                 "kind": "detail",
                 "ui_json": {
                     "version": 1,
                     "kind": "detail",
                     "mode": "edit",
-                    "title": {"ru": "Компонент пула", "en": "Pool component"},
+                    "title": {"ru": "Карточка комплектующего", "en": "Component card"},
                     "fields": [
-                        {"column": "type_id", "widget": "ref", "icon": "category"},
-                        {"column": "class_key", "widget": "value", "icon": "sell"},
-                        {"column": "class_label", "widget": "value", "icon": "label"},
-                        {"column": "part_number", "widget": "value", "icon": "qr_code_2"},
-                        {"column": "aliases_pn", "widget": "value", "icon": "alt_route"},
-                        {"column": "aliases_hash", "widget": "value", "icon": "fingerprint"},
-                        {"column": "qty_default", "widget": "value", "icon": "numbers"},
-                        {"column": "best_title", "widget": "value", "read_only": True},
-                        {"column": "best_price", "widget": "value", "read_only": True},
-                        {"column": "best_seller", "widget": "value", "read_only": True},
-                        {"column": "offers_count", "widget": "value", "read_only": True},
+                        {
+                            "column": "type_id",
+                            "widget": "type_ref_picker",
+                            "pick_view": "equipment_types_pick",
+                            "empty_style": "warning",
+                            "empty_label": {
+                                "ru": "Не выбран",
+                                "en": "Not selected",
+                            },
+                        },
+                        {
+                            "column": "part_number",
+                            "widget": "value",
+                            "icon": "qr_code_2",
+                        },
+                        {
+                            "column": "aliases_pn",
+                            "widget": "value",
+                            "icon": "alt_route",
+                        },
+                        {
+                            "column": "aliases_hash",
+                            "widget": "value",
+                            "icon": "fingerprint",
+                        },
+                        {
+                            # значения — из групп типа (equipment_types.fields_json);
+                            # обязательные поля типа нужны матрице совместимости
+                            "column": "attrs",
+                            "widget": "constraint_attrs",
+                            "type_id_field": "type_id",
+                            "types_table": "equipment_types",
+                            "fields_from": "fields_json",
+                            "section_title": {
+                                "ru": "Характеристики",
+                                "en": "Attributes",
+                            },
+                            "visible_when": {
+                                "field": "type_id",
+                                "not_empty": True,
+                            },
+                        },
+                        {
+                            "column": "best_title",
+                            "widget": "value",
+                            "read_only": True,
+                        },
+                        {
+                            "column": "best_price",
+                            "widget": "value",
+                            "read_only": True,
+                        },
+                        {
+                            "column": "best_seller",
+                            "widget": "value",
+                            "read_only": True,
+                        },
+                        {
+                            "column": "offers_count",
+                            "widget": "value",
+                            "read_only": True,
+                        },
                         {"column": "note", "widget": "value", "icon": "edit_note"},
                     ],
+                },
+            },
+            # Выбор карточки в слот готовой сборки: альтернативы ЭТОГО типа,
+            # удовлетворяющие требованиям слота (constraints), с лидерами цен
+            # по каждому партномеру — как «Найденные товары».
+            {
+                "slug": "part_cards_pick",
+                "table_slug": "part_cards",
+                "kind": "collection",
+                "ui_json": {
+                    "version": 1,
+                    "kind": "collection",
+                    "scaffold": {
+                        "title": {"ru": "Заменить компонент", "en": "Replace component"},
+                    },
+                    "title_field": "best_title",
+                    "subtitle_fields": ["part_number", "attrs_label"],
+                    "row_filter_from_context": {"type_id": "type_id"},
+                    # строка подходит, если её attrs покрывают constraints
+                    # контекстной строки (слота): attrs[k] == v для всех k,v
+                    "row_matches_context_map": {
+                        "field": "attrs",
+                        "context_field": "constraints",
+                    },
+                    "columns": [
+                        {
+                            "field": "best_title",
+                            "label": {"ru": "Товар", "en": "Product"},
+                            "max_lines": 2,
+                            "max_width": 240,
+                        },
+                        {
+                            "field": "part_number",
+                            "label": {"ru": "Партномер", "en": "P/N"},
+                            "max_lines": 2,
+                            "max_width": 150,
+                            "format": "pn_fallback",
+                        },
+                        {
+                            "field": "attrs_label",
+                            "label": {"ru": "Характеристики", "en": "Attributes"},
+                            "max_lines": 2,
+                            "max_width": 180,
+                        },
+                        {
+                            "field": "best_price",
+                            "label": {"ru": "Цена ₽", "en": "Price"},
+                            "format": "offer_price",
+                            "align": "end",
+                            "max_width": 110,
+                        },
+                        {
+                            "field": "best_seller",
+                            "label": {"ru": "Поставщик", "en": "Supplier"},
+                            "max_lines": 2,
+                            "max_width": 140,
+                        },
+                        {
+                            "field": "in_stock",
+                            "label": {"ru": "Наличие", "en": "Stock"},
+                            "format": "bool_yes_no",
+                            "max_width": 90,
+                        },
+                        {
+                            "field": "offers_count",
+                            "label": {"ru": "Офферов", "en": "Offers"},
+                            "align": "end",
+                            "max_width": 90,
+                        },
+                    ],
+                    "sort": [{"field": "best_price", "dir": "asc"}],
+                    "selection": {
+                        "kind": "single",
+                        "control": "switch",
+                        "placement": "trailing",
+                        # текущий выбор — card_id открытого слота
+                        "match_context_field": "card_id",
+                        "set_on_context": {
+                            "field": "card_id",
+                            "value_from": "row_id",
+                            "pop_after": True,
+                        },
+                    },
+                    "empty": _empty(
+                        "Нет карточек по требованиям слота",
+                        "No matching cards",
+                        icon="inventory_2",
+                    ),
+                },
+            },
+            # Выбор готовой сборки для связи «Сборка» ↔ каталог (чат/заказ).
+            {
+                "slug": "ready_builds_pick",
+                "table_slug": "ready_builds",
+                "kind": "collection",
+                "ui_json": {
+                    "version": 1,
+                    "kind": "collection",
+                    "scaffold": {
+                        "title": {"ru": "Выбор готовой сборки", "en": "Select ready build"},
+                    },
+                    "title_field": "name",
+                    "subtitle_fields": ["spec_summary", "price_total"],
+                    "row_filter": {"is_enabled": True},
+                    "columns": [
+                        {
+                            "field": "name",
+                            "label": {"ru": "Сборка", "en": "Build"},
+                            "max_lines": 2,
+                            "max_width": 220,
+                        },
+                        {
+                            "field": "spec_summary",
+                            "label": {"ru": "Состав", "en": "Spec"},
+                            "max_lines": 2,
+                            "max_width": 300,
+                        },
+                        {
+                            "field": "price_total",
+                            "label": {"ru": "Цена ₽", "en": "Price"},
+                            "format": "offer_price",
+                            "align": "end",
+                            "max_width": 110,
+                        },
+                    ],
+                    "sort": [{"field": "price_total", "dir": "asc"}],
+                    "selection": {
+                        "kind": "single",
+                        "control": "switch",
+                        "placement": "trailing",
+                        "disable_row_tap": True,
+                        "match_context_field": "ready_build_id",
+                        "set_on_context": {
+                            "field": "ready_build_id",
+                            "value_from": "row_id",
+                            "also_copy": [
+                                {"from": "name", "to": "name"},
+                                {"from": "build_kind", "to": "build_kind"},
+                            ],
+                            "pop_after": True,
+                        },
+                    },
+                    "empty": _empty(
+                        "Нет готовых сборок",
+                        "No ready builds",
+                        icon="precision_manufacturing",
+                    ),
                 },
             },
             {
@@ -5840,70 +5446,22 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                                     "en": "Refresh prices",
                                 },
                             },
-                            {
-                                "kind": "open_view",
-                                "view": "build_groups_list",
-                                "icon": "workspaces",
-                                "label": {"ru": "Группы", "en": "Groups"},
-                            },
                         ],
                     },
                     "title_field": "name",
-                    "subtitle_fields": ["budget_tier", "slots_count", "price_total"],
-                    # Открыто из группы → только её сборки; иначе весь каталог.
-                    "row_filter_from_context": {"group_id": "contextRowId"},
+                    "subtitle_fields": ["spec_summary", "price_total"],
                     "columns": [
                         {
                             "field": "name",
                             "label": {"ru": "Сборка", "en": "Build"},
                             "max_lines": 2,
-                            "max_width": 260,
+                            "max_width": 240,
                         },
                         {
-                            "field": "budget_tier",
-                            "label": {"ru": "Класс", "en": "Tier"},
-                            "max_width": 110,
-                        },
-                        {
-                            "field": "cpu_cores",
-                            "label": {"ru": "Ядер", "en": "Cores"},
-                            "align": "end",
-                            "max_width": 70,
-                        },
-                        {
-                            "field": "ram_gb",
-                            "label": {"ru": "ОЗУ ГБ", "en": "RAM GB"},
-                            "align": "end",
-                            "max_width": 70,
-                        },
-                        {
-                            "field": "ram_sticks",
-                            "label": {"ru": "Плашек", "en": "Sticks"},
-                            "align": "end",
-                            "max_width": 70,
-                        },
-                        {
-                            "field": "storage_kind",
-                            "label": {"ru": "Диск", "en": "Drive"},
-                            "max_width": 70,
-                        },
-                        {
-                            "field": "storage_gb",
-                            "label": {"ru": "Диск ГБ", "en": "GB"},
-                            "align": "end",
-                            "max_width": 80,
-                        },
-                        {
-                            "field": "storage_drives",
-                            "label": {"ru": "Дисков", "en": "Drives"},
-                            "align": "end",
-                            "max_width": 70,
-                        },
-                        {
-                            "field": "gpu_gb",
-                            "label": {"ru": "GPU ГБ", "en": "GPU GB"},
-                            "align": "end",
-                            "max_width": 70,
+                            "field": "spec_summary",
+                            "label": {"ru": "Состав", "en": "Spec"},
+                            "max_lines": 2,
+                            "max_width": 320,
                         },
                         {
                             "field": "slots_count",
@@ -5925,21 +5483,40 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "max_width": 110,
                         },
                         {
+                            "field": "price_min",
+                            "label": {"ru": "Мин. ₽", "en": "Min"},
+                            "format": "offer_price",
+                            "align": "end",
+                            "max_width": 100,
+                        },
+                        {
+                            "field": "price_max",
+                            "label": {"ru": "Макс. ₽", "en": "Max"},
+                            "format": "offer_price",
+                            "align": "end",
+                            "max_width": 100,
+                        },
+                        {
                             "field": "on_order",
                             "label": {"ru": "Под заказ", "en": "On order"},
                             "format": "bool_yes_no",
                             "max_width": 100,
                         },
                         {
-                            "field": "is_cheapest_in_class",
-                            "label": {"ru": "Дешевлейшая", "en": "Cheapest"},
+                            "field": "compat_ok",
+                            "label": {"ru": "Совместима", "en": "Compatible"},
                             "format": "bool_yes_no",
-                            "max_width": 115,
+                            "max_width": 110,
+                        },
+                        {
+                            "field": "unresolved_count",
+                            "label": {"ru": "Без компонента", "en": "Unresolved"},
+                            "align": "end",
+                            "max_width": 110,
                         },
                     ],
                     "sort": [
-                        {"field": "is_cheapest_in_class", "dir": "desc"},
-                        {"field": "price_total", "dir": "asc"},
+                        {"field": "name", "dir": "asc"},
                     ],
                     "row_tap": {"kind": "open_view", "view": "ready_build_settings"},
                     "inline_add": {"field": "name", "title": "Добавить сборку"},
@@ -5961,32 +5538,49 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "title": {"ru": "Готовая сборка", "en": "Ready build"},
                     "fields": [
                         {"column": "name", "widget": "value", "icon": "label_outline"},
-                        {"column": "group_id", "widget": "ref", "icon": "workspaces"},
                         {
                             "column": "build_kind",
                             "widget": "choice",
                             "icon": "precision_manufacturing",
                         },
-                        {"column": "budget_tier", "widget": "choice", "icon": "payments"},
-                        {"column": "cpu_cores", "widget": "value", "icon": "memory"},
-                        {"column": "ram_gb", "widget": "value", "icon": "view_week"},
-                        {"column": "storage_kind", "widget": "value", "icon": "storage"},
-                        {"column": "storage_gb", "widget": "value", "icon": "sd_card"},
-                        {"column": "gpu_class", "widget": "value", "icon": "videogame_asset"},
+                        {
+                            "column": "target_price_min",
+                            "widget": "value",
+                            "icon": "savings",
+                        },
+                        {
+                            "column": "target_price_max",
+                            "widget": "value",
+                            "icon": "payments",
+                        },
                         {"column": "is_enabled", "widget": "switch", "icon": "toggle_on"},
-                        {"column": "slots_count", "widget": "value", "read_only": True},
-                        {"column": "qty_total", "widget": "value", "read_only": True},
+                        {
+                            "column": "spec_summary",
+                            "widget": "value",
+                            "read_only": True,
+                            "icon": "list",
+                        },
                         {"column": "price_total", "widget": "value", "read_only": True},
                         {"column": "price_min", "widget": "value", "read_only": True},
                         {"column": "price_max", "widget": "value", "read_only": True},
+                        {"column": "price_note", "widget": "value", "read_only": True},
+                        {"column": "slots_count", "widget": "value", "read_only": True},
+                        {"column": "qty_total", "widget": "value", "read_only": True},
                         {
                             "column": "unresolved_count",
                             "widget": "value",
                             "read_only": True,
                         },
+                        {"column": "compat_ok", "widget": "value", "read_only": True},
+                        {
+                            "column": "compat_issues",
+                            "widget": "value",
+                            "read_only": True,
+                        },
                         {"column": "note", "widget": "value", "icon": "edit_note"},
                     ],
-                    # переход к слотам сборки (типы + выбранный компонент + цена)
+                    # переход к слотам сборки (типы + требования + выбранный
+                    # компонент + цена)
                     "links": [
                         {
                             "label": {"ru": "Слоты сборки", "en": "Build slots"},
@@ -6007,7 +5601,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                         "title": {"ru": "Слоты сборки", "en": "Build slots"},
                     },
                     "title_field": "type_name",
-                    "subtitle_fields": ["class_key", "resolved_part_number"],
+                    "subtitle_fields": ["constraints_label", "resolved_part_number"],
                     "context_bind": {"build_id": "contextRowId"},
                     # список слотов открывается из сборки — только её строки
                     "row_filter_from_context": {"build_id": "contextRowId"},
@@ -6018,14 +5612,10 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "max_width": 150,
                         },
                         {
-                            "field": "class_key",
-                            "label": {"ru": "Класс", "en": "Class"},
-                            "max_width": 130,
-                        },
-                        {
-                            "field": "mode",
-                            "label": {"ru": "Режим", "en": "Mode"},
-                            "max_width": 120,
+                            "field": "constraints_label",
+                            "label": {"ru": "Требования", "en": "Constraints"},
+                            "max_lines": 2,
+                            "max_width": 170,
                         },
                         {
                             "field": "qty",
@@ -6076,112 +5666,48 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "mode": "edit",
                     "title": {"ru": "Слот сборки", "en": "Build slot"},
                     "fields": [
-                        {"column": "type_id", "widget": "ref", "icon": "category"},
-                        {"column": "qty", "widget": "value", "icon": "numbers"},
-                        {"column": "mode", "widget": "choice", "icon": "swap_horiz"},
-                        {"column": "class_key", "widget": "value", "icon": "sell"},
                         {
-                            "column": "item_id",
+                            "column": "type_id",
+                            "widget": "type_ref_picker",
+                            "pick_view": "equipment_types_pick",
+                            "empty_style": "warning",
+                            "empty_label": {
+                                "ru": "Не выбран",
+                                "en": "Not selected",
+                            },
+                        },
+                        {
+                            # требования слота — значения из групп типа
+                            # (SSD 512 ГБ, сокет LGA1700…)
+                            "column": "constraints",
+                            "widget": "constraint_attrs",
+                            "type_id_field": "type_id",
+                            "types_table": "equipment_types",
+                            "fields_from": "fields_json",
+                            "section_title": {
+                                "ru": "Требования",
+                                "en": "Constraints",
+                            },
+                            "visible_when": {
+                                "field": "type_id",
+                                "not_empty": True,
+                            },
+                        },
+                        {"column": "qty", "widget": "value", "icon": "numbers"},
+                        {
+                            "column": "card_id",
                             "widget": "pick",
                             "icon": "inventory_2",
-                            # выбор компонента из пула группы (по типу и классу слота)
-                            "pick_view": "build_group_items_pick",
+                            # ручная замена: карточки типа по требованиям слота
+                            "pick_view": "part_cards_pick",
                             "title_field": "resolved_title",
                         },
-                        {"column": "part_number", "widget": "value", "icon": "qr_code_2"},
-                        {"column": "aliases_pn", "widget": "value", "icon": "alt_route"},
-                        {"column": "aliases_hash", "widget": "value", "icon": "fingerprint"},
                         {"column": "resolved_title", "widget": "value", "read_only": True},
                         {"column": "resolved_price", "widget": "value", "read_only": True},
                         {"column": "line_total", "widget": "value", "read_only": True},
                         {"column": "resolved_seller", "widget": "value", "read_only": True},
                         {"column": "note", "widget": "value", "icon": "edit_note"},
                     ],
-                },
-            },
-            # Выбор компонента из пула группы при замене в слоте готовой сборки.
-            # Контекст — открытый слот: пул фильтруется по group_id сборки и
-            # class_key слота (оба пишутся на слот пайплайном).
-            {
-                "slug": "build_group_items_pick",
-                "table_slug": "build_group_items",
-                "kind": "collection",
-                "ui_json": {
-                    "version": 1,
-                    "kind": "collection",
-                    "scaffold": {
-                        "title": {"ru": "Заменить компонент", "en": "Replace component"},
-                    },
-                    "title_field": "best_title",
-                    "subtitle_fields": ["class_label", "part_number"],
-                    "row_filter_from_context": {
-                        "group_id": "group_id",
-                        "class_key": "class_key",
-                    },
-                    "columns": [
-                        {
-                            "field": "best_title",
-                            "label": {"ru": "Товар", "en": "Product"},
-                            "max_lines": 2,
-                            "max_width": 240,
-                        },
-                        {
-                            "field": "part_number",
-                            "label": {"ru": "Партномер", "en": "P/N"},
-                            "max_lines": 2,
-                            "max_width": 150,
-                            "format": "pn_fallback",
-                        },
-                        {
-                            "field": "class_label",
-                            "label": {"ru": "Класс", "en": "Class"},
-                            "max_width": 150,
-                        },
-                        {
-                            "field": "best_price",
-                            "label": {"ru": "Цена ₽", "en": "Price"},
-                            "format": "offer_price",
-                            "align": "end",
-                            "max_width": 110,
-                        },
-                        {
-                            "field": "best_seller",
-                            "label": {"ru": "Поставщик", "en": "Supplier"},
-                            "max_lines": 2,
-                            "max_width": 140,
-                        },
-                        {
-                            "field": "in_stock",
-                            "label": {"ru": "Наличие", "en": "Stock"},
-                            "format": "bool_yes_no",
-                            "max_width": 90,
-                        },
-                        {
-                            "field": "offers_count",
-                            "label": {"ru": "Офферов", "en": "Offers"},
-                            "align": "end",
-                            "max_width": 90,
-                        },
-                    ],
-                    "sort": [{"field": "best_price", "dir": "asc"}],
-                    "selection": {
-                        "kind": "single",
-                        "control": "switch",
-                        "placement": "trailing",
-                        # текущий выбор — item_id открытого слота
-                        "match_context_field": "item_id",
-                        "set_on_context": {
-                            # пишем выбранный компонент пула в item_id слота
-                            "field": "item_id",
-                            "value_from": "row_id",
-                            "pop_after": True,
-                        },
-                    },
-                    "empty": _empty(
-                        "Нет совместимых компонентов в группе и классе",
-                        "No compatible components",
-                        icon="inventory_2",
-                    ),
                 },
             },
             {
@@ -6748,12 +6274,19 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "target": {"kind": "view", "view": "equipment_types_list"},
                         },
                         {
-                            # WAVE11: глобальная библиотека шаблонов сборок.
-                            # Точка входа — группы (домены совместимости), внутри
-                            # группы — готовые сборки и их слоты.
+                            # WAVE12: карточки = партномера + характеристики из
+                            # групп типа; по ним собираются готовые сборки.
+                            "title": "Карточки комплектующих",
+                            "icon": "inventory_2",
+                            "target": {"kind": "view", "view": "part_cards_list"},
+                        },
+                        {
+                            # WAVE12: глобальная библиотека сборок. Слоты =
+                            # типы + требования к группам характеристик;
+                            # совместимость — автоматическая матрица доменов.
                             "title": "Готовые сборки",
                             "icon": "precision_manufacturing",
-                            "target": {"kind": "view", "view": "build_groups_list"},
+                            "target": {"kind": "view", "view": "ready_builds_list"},
                         },
                         {
                             "title": "Поставщики",
@@ -6960,31 +6493,31 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "trigger": {"on": ["row.created", "row.updated"], "async": True},
                     "ui": {"placement": ["scaffold"], "icon": "refresh"},
                 },
-                # WAVE11: пайплайн каталога «Готовые сборки». Резолвит ключи
-                # пула (партномер/алиасы/хэш) в лучшие цены батч-запросом в
-                # OpenSearch, разрешает dynamic/fixed слоты и считает итоги
-                # сборок. Триггер — записи в таблицы каталога + кнопка
-                # «Обновить цены» + beat-расписание (цены меняются в каталоге,
-                # а не в наших строках, поэтому одних триггеров мало).
+                # WAVE12: пайплайн каталога «Готовые сборки» v2. Резолвит ключи
+                # карточек (партномер/алиасы/хэш) в лучшие цены батч-запросом в
+                # OpenSearch, подбирает компоненты слотов по constraints и
+                # доменам совместимости, считает коридор цен и итоги сборок.
+                # Триггер — записи в таблицы каталога + кнопка «Обновить цены»
+                # + beat-расписание (цены меняются в каталоге, а не в наших
+                # строках, поэтому одних триггеров мало).
                 {
                     "id": "ready_builds_sync",
                     "label": {"ru": "Обновить цены", "en": "Refresh prices"},
                     "kind": "equipment.ready_builds",
                     "enabled": True,
                     "params": {
-                        "groups_table": "build_groups",
-                        "items_table": "build_group_items",
+                        "cards_table": "part_cards",
                         "builds_table": "ready_builds",
                         "slots_table": "ready_build_slots",
                     },
                     "trigger": {"on": ["row.created", "row.updated"], "async": True},
                     "ui": {"placement": ["scaffold"], "icon": "refresh"},
                 },
-                # WAVE11: копирование «Готовой сборки» из каталога в чат на
-                # позицию заказчика. Копируются КЛЮЧИ (партномер/алиасы/хэш),
-                # а не цены — копия сразу тянет актуальные офферы штатным
-                # пайплайном WAVE10. Вызывается из MCP (ready_build_attach)
-                # и кнопкой «В чат» на карточке сборки.
+                # WAVE12: привязка «Готовой сборки» к позиции заказчика —
+                # ГЛОБАЛЬНАЯ ССЫЛКА, а не копия: в чате создаётся строка
+                # equipment_builds с ready_build_id, а состав/цены зеркалит
+                # пайплайн из каталога при каждом прогоне. Вызывается из MCP
+                # (ready_build_attach) и кнопкой «В чат» на карточке сборки.
                 {
                     "id": "ready_build_attach",
                     "label": {"ru": "В чат", "en": "Attach to position"},
@@ -7190,21 +6723,33 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
             },
             {
                 "server": "prodavan-equipment",
-                "tool": "ready_builds_catalog",
-                "label": "Каталог готовых сборок",
-                "description": "Группы, пул компонентов и готовые сборки",
+                "tool": "part_cards_list",
+                "label": "Карточки комплектующих",
+                "description": "Карточки партномеров: тип, характеристики, лидеры цен",
             },
             {
                 "server": "prodavan-equipment",
-                "tool": "build_group_upsert",
-                "label": "Запись группы сборок",
-                "description": "Создание или обновление группы сборок",
+                "tool": "part_card_upsert",
+                "label": "Запись карточки",
+                "description": "Создание или обновление карточки комплектующего",
             },
             {
                 "server": "prodavan-equipment",
-                "tool": "build_group_item_upsert",
-                "label": "Запись компонента пула",
-                "description": "Компонент группы: ключи и класс",
+                "tool": "part_card_delete",
+                "label": "Удаление карточки",
+                "description": "Удаление карточки комплектующего",
+            },
+            {
+                "server": "prodavan-equipment",
+                "tool": "ready_builds_list",
+                "label": "Готовые сборки",
+                "description": "Каталог готовых сборок с составом и ценами",
+            },
+            {
+                "server": "prodavan-equipment",
+                "tool": "ready_build_get",
+                "label": "Готовая сборка",
+                "description": "Готовая сборка со слотами по идентификатору",
             },
             {
                 "server": "prodavan-equipment",
@@ -7216,7 +6761,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "server": "prodavan-equipment",
                 "tool": "ready_build_attach",
                 "label": "Сборка в чат",
-                "description": "Копирование готовой сборки на позицию заказчика",
+                "description": "Привязка готовой сборки к позиции заказчика (глобальная связь)",
             },
             {
                 "server": "prodavan-equipment",
@@ -7251,8 +6796,9 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "name": "equipment_types_list",
                 "label": "List component types",
                 "description": (
-                    "List equipment_types rows (name, sort_order, fields_json schema). "
-                    "Use field keys when writing equipment_items.attrs."
+                    "List equipment_types rows (name, sort_order, fields_json schema "
+                    "with kind/required/compat_domain/groups). Use field keys when "
+                    "writing part_cards.attrs and ready_build_slots.constraints."
                 ),
                 "enabled": True,
                 "kind": "rows_query",
@@ -7263,38 +6809,29 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 },
             },
             {
-                "id": "equipment_items_list",
-                "name": "equipment_items_list",
-                "label": "List equipment characteristics",
+                "id": "part_cards_list",
+                "name": "part_cards_list",
+                "label": "List component cards",
                 "description": (
-                    "List equipment_items (name, type_id, type_name, part_number, qty, attrs)."
+                    "List part_cards (type_id, part_number, aliases, attrs, "
+                    "best_price/best_seller leaders resolved by the catalog pipeline)."
                 ),
                 "enabled": True,
                 "kind": "rows_query",
                 "params_schema": {"type": "object", "properties": {}},
                 "implementation": {
-                    "table_slug": "equipment_items",
+                    "table_slug": "part_cards",
                     "query": {"limit": 500},
                 },
-            },
-            {
-                "id": "equipment_items_upsert",
-                "name": "equipment_items_upsert",
-                "label": "Upsert equipment characteristics",
-                "description": (
-                    "Create/update equipment_items. attrs values are plain strings keyed by "
-                    "equipment_types.fields_json[].key. Prefer type_id from equipment_types_list."
-                ),
-                "enabled": True,
-                "kind": "rows_upsert",
-                "implementation": {"table_slug": "equipment_items"},
             },
             {
                 "id": "equipment_builds_list",
                 "name": "equipment_builds_list",
                 "label": "List builds",
                 "description": (
-                    "List equipment_builds (name, build_kind, slots, components_count, price_total)."
+                    "List equipment_builds (name, ready_build_id, line_id, "
+                    "components_count, price_total). Chat builds are links to "
+                    "ready_builds — composition is mirrored from the catalog."
                 ),
                 "enabled": True,
                 "kind": "rows_query",
@@ -7309,8 +6846,9 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "name": "equipment_builds_upsert",
                 "label": "Upsert builds",
                 "description": (
-                    "Create/update equipment_builds. slots maps equipment_types.row_id → "
-                    "equipment_items.row_id. price_total is sum of linked found_offers.price * qty."
+                    "Create/update equipment_builds — a chat-side link to a "
+                    "ready_builds row (ready_build_id required on create). "
+                    "Composition/prices come from the catalog via pipeline."
                 ),
                 "enabled": True,
                 "kind": "rows_upsert",
@@ -7437,7 +6975,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "row_id": "equipment_mcp_default",
                     "body": {
                         "name": "prodavan-equipment",
-                        "version": "2.4.4",
+                        "version": "3.0.0",
                         "enabled": True,
                     },
                 },

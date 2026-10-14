@@ -31,7 +31,10 @@ down_revision = "2026100527"
 _AGENTS_ROW_ID = "equipment_prompts_agents_default"
 _AGENTS_FILE_NAME = "AGENTS.md"
 _AGENTS_HEADER = "# Prodavan — агент подбора техники"
-_AGENTS_MARKER = "ready_builds_catalog"
+# Маркер актуальности обязан присутствовать в текущем сиде AGENTS.md (это
+# проверяет test_equipment_prompts_refresh): при WAVE11 это был
+# ready_builds_catalog, WAVE12 переименовал инструмент в ready_builds_list.
+_AGENTS_MARKER = "ready_builds_list"
 
 
 def _refresh_agents_body(body: dict) -> tuple[dict | None, str]:

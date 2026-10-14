@@ -30,7 +30,7 @@ def test_tools_list_contains_catalog_and_sot_tools() -> None:
         mcp_server._handle({"jsonrpc": "2.0", "id": 9, "method": "initialize"})["result"][
             "serverInfo"
         ]["version"]
-        == "2.4.4"
+        == "3.0.0"
     )
 
 
@@ -103,10 +103,10 @@ def test_tools_list_contains_build_tools() -> None:
         "equipment_builds_delete",
     ):
         assert name in names
-    # found_groups_upsert теперь умеет слоты сборки
+    # WAVE12: слоты сборок агент не пишет — их зеркалит платформа
     group = next(t for t in listed["result"]["tools"] if t["name"] == "found_groups_upsert")
     props = group["inputSchema"]["properties"]
-    assert "build_id" in props and "slot_type_id" in props
+    assert "build_id" not in props and "slot_type_id" not in props
 
 
 def test_delete_tools_call_pod_delete(monkeypatch) -> None:
@@ -281,8 +281,9 @@ def test_found_groups_create_requires_owner_and_keys(monkeypatch) -> None:
     assert "part_number" in resp2["result"]["content"][0]["text"]
 
 
-def test_found_groups_build_slot_requires_slot_type(monkeypatch) -> None:
-    """Слот сборки: build_id без slot_type_id — ошибка; с ним — POST."""
+def test_found_groups_build_slot_rejected(monkeypatch) -> None:
+    """WAVE12: группы слотов сборок пишет только платформа (зеркало готовой
+    сборки) — агенту путь сборок отклонён с подсказкой про ready build."""
     monkeypatch.setenv("PRODAVAN_API_BASE_URL", "http://api.example/api/v1")
     monkeypatch.setenv("PRODAVAN_AUTH_TOKEN", "tok")
     monkeypatch.setenv("PRODAVAN_PROJECT_ID", "proj-1")
@@ -294,13 +295,15 @@ def test_found_groups_build_slot_requires_slot_type(monkeypatch) -> None:
             "method": "tools/call",
             "params": {
                 "name": "found_groups_upsert",
-                "arguments": {"build_id": "b1", "part_number": "X"},
+                "arguments": {"part_number": "X", "note": "без line_id"},
             },
         }
     )
     assert resp["result"].get("isError") is True
-    assert "slot_type_id" in resp["result"]["content"][0]["text"]
+    assert "line_id" in resp["result"]["content"][0]["text"]
+    assert "ready_build" in resp["result"]["content"][0]["text"]
 
+    # обычная позиция — проходит
     posted: dict = {}
 
     def fake_http(method, path, payload=None, *, session_id=None):
@@ -316,8 +319,7 @@ def test_found_groups_build_slot_requires_slot_type(monkeypatch) -> None:
                 "params": {
                     "name": "found_groups_upsert",
                     "arguments": {
-                        "build_id": "b1",
-                        "slot_type_id": "etype_cpu",
+                        "line_id": "line-1",
                         "part_number": "X",
                         "match_kind": "exact",
                     },
@@ -325,8 +327,7 @@ def test_found_groups_build_slot_requires_slot_type(monkeypatch) -> None:
             }
         )
     assert ok["result"].get("isError") is not True
-    assert posted["body"]["build_id"] == "b1"
-    assert posted["body"]["slot_type_id"] == "etype_cpu"
+    assert posted["body"]["line_id"] == "line-1"
 
 
 def test_equipment_builds_upsert_and_delete(monkeypatch) -> None:
@@ -334,7 +335,7 @@ def test_equipment_builds_upsert_and_delete(monkeypatch) -> None:
     monkeypatch.setenv("PRODAVAN_AUTH_TOKEN", "tok")
     monkeypatch.setenv("PRODAVAN_PROJECT_ID", "proj-1")
 
-    # создание без line_id — ошибка
+    # создание без ready_build_id — ошибка: сборка чата = ссылка на каталог
     bad = mcp_server._handle(
         {
             "jsonrpc": "2.0",
@@ -347,7 +348,7 @@ def test_equipment_builds_upsert_and_delete(monkeypatch) -> None:
         }
     )
     assert bad["result"].get("isError") is True
-    assert "line_id" in bad["result"]["content"][0]["text"]
+    assert "ready_build_id" in bad["result"]["content"][0]["text"]
 
     calls: list[tuple] = []
 
@@ -366,7 +367,7 @@ def test_equipment_builds_upsert_and_delete(monkeypatch) -> None:
                     "arguments": {
                         "name": "Intel сборка",
                         "line_id": "line-1",
-                        "build_kind": "pc",
+                        "ready_build_id": "rb-1",
                     },
                 },
             }
@@ -381,117 +382,18 @@ def test_equipment_builds_upsert_and_delete(monkeypatch) -> None:
             }
         )
     assert calls[0][0] == "POST"
-    assert calls[0][2]["body"]["line_id"] == "line-1"
+    assert calls[0][2]["body"]["ready_build_id"] == "rb-1"
+    # slots/slot_qty не принадлежат агенту — их в теле нет
+    assert "slots" not in calls[0][2]["body"]
+    assert "slot_qty" not in calls[0][2]["body"]
     assert calls[1][0] == "DELETE"
     assert calls[1][1].endswith("/equipment_builds/b1")
 
 
-def test_equipment_builds_upsert_pins_slot_component(monkeypatch) -> None:
-    """`slots` — закрепление кандидата за слотом (аналог found_groups_pick в UI).
-
-    Пайплайн сам выбирает дешёвейшего кандидата, НО существующая запись в
-    `slots` перекрывает автовыбор. Поэтому без этого параметра агент не мог
-    ни зафиксировать партномер за слотом, ни перевыбрать компонент после
-    добавления более дешёвой альтернативы — цена копии сборки не менялась.
-    """
-    monkeypatch.setenv("PRODAVAN_API_BASE_URL", "http://api.example/api/v1")
-    monkeypatch.setenv("PRODAVAN_AUTH_TOKEN", "tok")
-    monkeypatch.setenv("PRODAVAN_PROJECT_ID", "proj-1")
-
-    listed = mcp_server._handle({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
-    tool = next(
-        t for t in listed["result"]["tools"] if t["name"] == "equipment_builds_upsert"
-    )
-    assert "slots" in tool["inputSchema"]["properties"]
-    assert "slots" in tool["description"]
-
-    posted: dict = {}
-
-    def fake_http(method, path, payload=None, *, session_id=None):
-        posted.update(payload or {})
-        return {"row_id": "b1"}
-
-    with patch.object(mcp_server, "_http", side_effect=fake_http):
-        resp = mcp_server._handle(
-            {
-                "jsonrpc": "2.0",
-                "id": 17,
-                "method": "tools/call",
-                "params": {
-                    "name": "equipment_builds_upsert",
-                    "arguments": {
-                        "row_id": "b1",
-                        "slots": {"etype_ram": "g_ram_8gb", "etype_cpu": "g_cpu"},
-                    },
-                },
-            }
-        )
-
-    assert resp["result"].get("isError") is not True
-    assert posted["body"]["slots"] == {"etype_ram": "g_ram_8gb", "etype_cpu": "g_cpu"}
 
 
-def test_equipment_builds_upsert_rejects_bad_slots(monkeypatch) -> None:
-    monkeypatch.setenv("PRODAVAN_API_BASE_URL", "http://api.example/api/v1")
-    monkeypatch.setenv("PRODAVAN_AUTH_TOKEN", "tok")
-    monkeypatch.setenv("PRODAVAN_PROJECT_ID", "proj-1")
-
-    for args, needle in (
-        ({"row_id": "b1", "slots": "g1"}, "slots must be an object"),
-        ({"row_id": "b1", "slots": {"etype_ram": ""}}, "must be a found_groups.row_id"),
-        ({"row_id": "b1", "slots": {"": "g1"}}, "non-empty equipment_types.row_id"),
-    ):
-        resp = mcp_server._handle(
-            {
-                "jsonrpc": "2.0",
-                "id": 18,
-                "method": "tools/call",
-                "params": {"name": "equipment_builds_upsert", "arguments": args},
-            }
-        )
-        assert resp["result"].get("isError") is True, args
-        assert needle in resp["result"]["content"][0]["text"], args
-
-    # null — легально: снять закрепление
-    posted: dict = {}
-
-    def fake_http(method, path, payload=None, *, session_id=None):
-        posted.update(payload or {})
-        return {"row_id": "b1"}
-
-    with patch.object(mcp_server, "_http", side_effect=fake_http):
-        resp = mcp_server._handle(
-            {
-                "jsonrpc": "2.0",
-                "id": 19,
-                "method": "tools/call",
-                "params": {
-                    "name": "equipment_builds_upsert",
-                    "arguments": {"row_id": "b1", "slots": None},
-                },
-            }
-        )
-    assert resp["result"].get("isError") is not True
-    assert posted["body"]["slots"] is None
 
 
-def test_equipment_builds_upsert_rejects_bad_kind(monkeypatch) -> None:
-    monkeypatch.setenv("PRODAVAN_API_BASE_URL", "http://api.example/api/v1")
-    monkeypatch.setenv("PRODAVAN_AUTH_TOKEN", "tok")
-    monkeypatch.setenv("PRODAVAN_PROJECT_ID", "proj-1")
-    resp = mcp_server._handle(
-        {
-            "jsonrpc": "2.0",
-            "id": 16,
-            "method": "tools/call",
-            "params": {
-                "name": "equipment_builds_upsert",
-                "arguments": {"name": "X", "line_id": "l1", "build_kind": "workstation"},
-            },
-        }
-    )
-    assert resp["result"].get("isError") is True
-    assert "build_kind" in resp["result"]["content"][0]["text"]
 
 
 def test_equipment_types_list_filters_by_build_kind(monkeypatch) -> None:
@@ -603,189 +505,20 @@ def test_tools_list_survives_override_fetch_failure(monkeypatch) -> None:
     assert "equipment_catalog_search" in names
 
 
-def test_found_groups_upsert_sets_owner_kind(monkeypatch) -> None:
-    """Владелец группы проставляется при записи, а не только пайплайном.
-
-    Дефолт колонки owner_kind = "line", а общий список «Найденные товары»
-    фильтрует по owner_kind = line — без явной простановки группа слота сборки
-    мелькала бы в нём до первого прогона пайплайна.
-    """
-    monkeypatch.setenv("PRODAVAN_API_BASE_URL", "http://api.example/api/v1")
-    monkeypatch.setenv("PRODAVAN_AUTH_TOKEN", "tok")
-    monkeypatch.setenv("PRODAVAN_PROJECT_ID", "proj-1")
-
-    posted: dict = {}
-
-    def fake_http(method, path, payload=None, *, session_id=None):
-        posted.clear()
-        posted.update(payload or {})
-        return {"row_id": "g1"}
-
-    with patch.object(mcp_server, "_http", side_effect=fake_http):
-        # слот сборки → owner_kind = build
-        mcp_server._handle(
-            {
-                "jsonrpc": "2.0",
-                "id": 41,
-                "method": "tools/call",
-                "params": {
-                    "name": "found_groups_upsert",
-                    "arguments": {
-                        "build_id": "b1",
-                        "slot_type_id": "etype_cpu",
-                        "part_number": "X",
-                    },
-                },
-            }
-        )
-        assert posted["body"]["owner_kind"] == "build"
-
-        # обычная позиция → owner_kind = line
-        mcp_server._handle(
-            {
-                "jsonrpc": "2.0",
-                "id": 42,
-                "method": "tools/call",
-                "params": {
-                    "name": "found_groups_upsert",
-                    "arguments": {"line_id": "line1", "part_number": "Y"},
-                },
-            }
-        )
-        assert "owner_kind" not in posted["body"]
-
-        # снятие привязки к сборке (build_id = null) возвращает группу позиции
-        mcp_server._handle(
-            {
-                "jsonrpc": "2.0",
-                "id": 43,
-                "method": "tools/call",
-                "params": {
-                    "name": "found_groups_upsert",
-                    "arguments": {"row_id": "g1", "build_id": None},
-                },
-            }
-        )
-        assert posted["body"]["owner_kind"] == "line"
 
 
-def test_found_groups_patch_build_id_requires_slot_type(monkeypatch) -> None:
-    """PATCH с build_id без slot_type_id отклоняется (фантомный слот)."""
-    monkeypatch.setenv("PRODAVAN_API_BASE_URL", "http://api.example/api/v1")
-    monkeypatch.setenv("PRODAVAN_AUTH_TOKEN", "tok")
-    monkeypatch.setenv("PRODAVAN_PROJECT_ID", "proj-1")
-
-    resp = mcp_server._handle(
-        {
-            "jsonrpc": "2.0",
-            "id": 21,
-            "method": "tools/call",
-            "params": {
-                "name": "found_groups_upsert",
-                "arguments": {"row_id": "g1", "build_id": "b1"},
-            },
-        }
-    )
-    assert resp["result"].get("isError") is True
-    assert "slot_type_id" in resp["result"]["content"][0]["text"]
-
-    # с slot_type_id — проходит
-    with patch.object(mcp_server, "_http", return_value={"row_id": "g1"}) as http:
-        ok = mcp_server._handle(
-            {
-                "jsonrpc": "2.0",
-                "id": 22,
-                "method": "tools/call",
-                "params": {
-                    "name": "found_groups_upsert",
-                    "arguments": {"row_id": "g1", "build_id": "b1", "slot_type_id": "etype_cpu"},
-                },
-            }
-        )
-    assert ok["result"].get("isError") is not True
-    assert http.call_args.args[0] == "PATCH"
 
 
-def test_equipment_builds_upsert_accepts_slot_qty(monkeypatch) -> None:
-    """WAVE11: количество на слот передаётся в equipment_builds.slot_qty."""
-    monkeypatch.setenv("PRODAVAN_API_BASE_URL", "http://api.example/api/v1")
-    monkeypatch.setenv("PRODAVAN_AUTH_TOKEN", "tok")
-    monkeypatch.setenv("PRODAVAN_PROJECT_ID", "proj-1")
-
-    posted: dict = {}
-
-    def fake_http(method, path, payload=None, *, session_id=None):
-        posted.update(payload or {})
-        return {"row_id": "b1"}
-
-    with patch.object(mcp_server, "_http", side_effect=fake_http):
-        resp = mcp_server._handle(
-            {
-                "jsonrpc": "2.0",
-                "id": 31,
-                "method": "tools/call",
-                "params": {
-                    "name": "equipment_builds_upsert",
-                    "arguments": {
-                        "row_id": "b1",
-                        "slot_qty": {"etype_ram": 2, "etype_case_fans": 3},
-                    },
-                },
-            }
-        )
-    assert resp["result"].get("isError") is not True
-    assert posted["body"]["slot_qty"] == {"etype_ram": 2, "etype_case_fans": 3}
 
 
 @pytest.mark.parametrize(
     "bad_qty",
     [{"etype_ram": 0}, {"etype_ram": -1}, {"etype_ram": 1.5}, {"etype_ram": "много"}, "not-a-map"],
 )
-def test_equipment_builds_upsert_rejects_bad_slot_qty(monkeypatch, bad_qty) -> None:
-    """slot_qty — целые ≥ 1 и обязательно словарь."""
-    monkeypatch.setenv("PRODAVAN_API_BASE_URL", "http://api.example/api/v1")
-    monkeypatch.setenv("PRODAVAN_AUTH_TOKEN", "tok")
-    monkeypatch.setenv("PRODAVAN_PROJECT_ID", "proj-1")
-
-    resp = mcp_server._handle(
-        {
-            "jsonrpc": "2.0",
-            "id": 32,
-            "method": "tools/call",
-            "params": {
-                "name": "equipment_builds_upsert",
-                "arguments": {"row_id": "b1", "slot_qty": bad_qty},
-            },
-        }
-    )
-    assert resp["result"].get("isError") is True
-    assert "slot_qty" in resp["result"]["content"][0]["text"]
 
 
 # ------------------------------------------------- WAVE11: каталог сборок
 
-def test_tools_list_contains_ready_builds_catalog_tools() -> None:
-    listed = mcp_server._handle({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
-    names = {t["name"] for t in listed["result"]["tools"]}
-    for name in (
-        "ready_builds_catalog",
-        "build_group_upsert",
-        "build_group_item_upsert",
-        "ready_build_upsert",
-        "ready_build_slot_upsert",
-        "ready_build_attach",
-    ):
-        assert name in names
-    # прежние инструменты не потеряны при добавлении новых
-    assert "equipment_builds_delete" in names
-    assert "found_groups_upsert" in names
-    assert len(names) == 21
-    assert (
-        mcp_server._handle({"jsonrpc": "2.0", "id": 2, "method": "initialize"})["result"][
-            "serverInfo"
-        ]["version"]
-        == "2.4.4"
-    )
 
 
 @pytest.fixture()
@@ -806,199 +539,16 @@ def _call(tool: str, arguments: dict):
     )
 
 
-def test_ready_builds_catalog_compact_strips_bodies(_env) -> None:
-    """compact-режим отдаёт только нужные поля: каталог на сотни сборок
-    не должен съедать контекст агента."""
-    rows = [
-        {
-            "row_id": "rb1",
-            "body": {
-                "name": "Бюджетный 6 ядер",
-                "group_id": "g1",
-                "budget_tier": "budget",
-                "cpu_cores": 6,
-                "ram_gb": 16,
-                "price_total": 30000,
-                "is_enabled": True,
-                "note": "длинный комментарий, которого в compact быть не должно",
-                "synced_at": "2026-10-09T00:00:00+00:00",
-            },
-        }
-    ]
-    with patch.object(mcp_server, "_list_rows", return_value=rows):
-        resp = _call("ready_builds_catalog", {"scope": "builds", "detail": "compact"})
-    payload = json.loads(resp["result"]["content"][0]["text"])
-    item = payload["items"][0]
-    assert item["row_id"] == "rb1"
-    assert item["name"] == "Бюджетный 6 ядер"
-    assert item["price_total"] == 30000
-    assert "note" not in item
-    assert "synced_at" not in item
-    assert "body" not in item
-    assert payload["total"] == 1
 
 
-def test_ready_builds_catalog_full_keeps_body_and_filters(_env) -> None:
-    rows = [
-        {"row_id": "rb1", "body": {"name": "A", "group_id": "g1", "budget_tier": "budget",
-                                   "note": "полный", "is_enabled": True}},
-        {"row_id": "rb2", "body": {"name": "B", "group_id": "g2", "budget_tier": "high",
-                                   "is_enabled": True}},
-        {"row_id": "rb3", "body": {"name": "C", "group_id": "g1", "budget_tier": "budget",
-                                   "is_enabled": False}},
-    ]
-    with patch.object(mcp_server, "_list_rows", return_value=rows):
-        resp = _call(
-            "ready_builds_catalog",
-            {"scope": "builds", "detail": "full", "group_id": "g1"},
-        )
-    payload = json.loads(resp["result"]["content"][0]["text"])
-    # only_enabled=True по умолчанию отсекает выключенную
-    assert [i["row_id"] for i in payload["items"]] == ["rb1"]
-    assert payload["items"][0]["body"]["note"] == "полный"
-
-    with patch.object(mcp_server, "_list_rows", return_value=rows):
-        resp2 = _call(
-            "ready_builds_catalog",
-            {"scope": "builds", "group_id": "g1", "only_enabled": False},
-        )
-    payload2 = json.loads(resp2["result"]["content"][0]["text"])
-    assert sorted(i["row_id"] for i in payload2["items"]) == ["rb1", "rb3"]
 
 
-def test_ready_builds_catalog_build_scope_returns_slots(_env) -> None:
-    builds = [{"row_id": "rb1", "body": {"name": "A", "is_enabled": True}}]
-    slots = [
-        {"row_id": "s1", "body": {"build_id": "rb1", "type_id": "etype_cpu", "qty": 1,
-                                  "mode": "dynamic", "class_key": "cpu_6c",
-                                  "resolved_price": 11000}},
-        {"row_id": "s2", "body": {"build_id": "other", "type_id": "etype_ram", "qty": 2}},
-    ]
-
-    def fake_list(mid, table, *, session_id=None):
-        return builds if table == "ready_builds" else slots
-
-    with patch.object(mcp_server, "_list_rows", side_effect=fake_list):
-        resp = _call("ready_builds_catalog", {"scope": "build", "row_id": "rb1"})
-    payload = json.loads(resp["result"]["content"][0]["text"])
-    assert payload["build"]["row_id"] == "rb1"
-    assert [s["row_id"] for s in payload["slots"]] == ["s1"]
-
-    with patch.object(mcp_server, "_list_rows", side_effect=fake_list):
-        bad = _call("ready_builds_catalog", {"scope": "build"})
-    assert bad["result"].get("isError") is True
-    assert "row_id" in bad["result"]["content"][0]["text"]
 
 
-def test_build_group_item_requires_keys_and_class(_env) -> None:
-    """Пул хранит КЛЮЧИ: без них и без класса компонент бессмыслен."""
-    resp = _call(
-        "build_group_item_upsert",
-        {"group_id": "g1", "type_id": "etype_ram", "class_key": "ram_16"},
-    )
-    assert resp["result"].get("isError") is True
-    assert "part_number" in resp["result"]["content"][0]["text"]
-
-    resp2 = _call(
-        "build_group_item_upsert",
-        {"group_id": "g1", "type_id": "etype_ram", "part_number": "RAM-16"},
-    )
-    assert resp2["result"].get("isError") is True
-    assert "class_key" in resp2["result"]["content"][0]["text"]
-
-    posted: dict = {}
-
-    def fake_http(method, path, payload=None, *, session_id=None):
-        posted.update(payload or {})
-        return {"row_id": "it1"}
-
-    with patch.object(mcp_server, "_http", side_effect=fake_http):
-        ok = _call(
-            "build_group_item_upsert",
-            {
-                "group_id": "g1",
-                "type_id": "etype_ram",
-                "class_key": "ram_16",
-                "class_label": "16 ГБ DDR4",
-                "part_number": "RAM-16",
-                "aliases_pn": "RAM16, RAM 16",
-                "qty_default": 2,
-            },
-        )
-    assert ok["result"].get("isError") is not True
-    assert posted["body"]["class_key"] == "ram_16"
-    assert posted["body"]["qty_default"] == 2
 
 
-def test_ready_build_upsert_writes_slots_in_one_call(_env) -> None:
-    """Сборка + слоты одним вызовом: прежние слоты заменяются новыми."""
-    calls: list[tuple] = []
-    existing_slots = [{"row_id": "old_slot", "body": {"build_id": "rb1"}}]
-
-    def fake_http(method, path, payload=None, *, session_id=None):
-        calls.append((method, path, payload))
-        if method == "POST" and path.endswith("/ready_builds"):
-            return {"row_id": "rb1", "body": (payload or {}).get("body")}
-        return {"row_id": "new_slot"}
-
-    with (
-        patch.object(mcp_server, "_http", side_effect=fake_http),
-        patch.object(mcp_server, "_list_rows", return_value=existing_slots),
-    ):
-        resp = _call(
-            "ready_build_upsert",
-            {
-                "group_id": "g1",
-                "name": "Бюджетный ПК",
-                "budget_tier": "budget",
-                "cpu_cores": 6,
-                "ram_gb": 16,
-                "slots": [
-                    {"type_id": "etype_cpu", "mode": "dynamic", "class_key": "cpu_6c", "qty": 1},
-                    {"type_id": "etype_ram", "mode": "fixed", "item_id": "it_ram", "qty": 2},
-                ],
-            },
-        )
-    assert resp["result"].get("isError") is not True
-    payload = json.loads(resp["result"]["content"][0]["text"])
-    assert payload["slots_replaced"] is True
-    assert len(payload["slots"]) == 2
-    # старый слот удалён, два новых созданы
-    assert (
-        "DELETE",
-        "/projects/proj-1/modules/mod_equipment/data/ready_build_slots/old_slot",
-        None,
-    ) in calls
-    created = [c for c in calls if c[0] == "POST" and c[1].endswith("/ready_build_slots")]
-    assert len(created) == 2
-    assert created[1][2]["body"]["build_id"] == "rb1"
-    assert created[1][2]["body"]["qty"] == 2
 
 
-def test_ready_build_upsert_validates_slots(_env) -> None:
-    resp = _call(
-        "ready_build_upsert",
-        {"group_id": "g1", "name": "X", "slots": [{"type_id": "etype_cpu", "mode": "fixed"}]},
-    )
-    assert resp["result"].get("isError") is True
-    assert "fixed" in resp["result"]["content"][0]["text"]
-
-    # class_key задан, чтобы дошли до проверки количества (иначе раньше
-    # сработает валидация dynamic-слота)
-    resp2 = _call(
-        "ready_build_upsert",
-        {
-            "group_id": "g1",
-            "name": "X",
-            "slots": [{"type_id": "etype_cpu", "class_key": "cpu_6c", "qty": 0}],
-        },
-    )
-    assert resp2["result"].get("isError") is True
-    assert "qty" in resp2["result"]["content"][0]["text"]
-
-    resp3 = _call("ready_build_upsert", {"name": "X"})
-    assert resp3["result"].get("isError") is True
-    assert "group_id" in resp3["result"]["content"][0]["text"]
 
 
 def test_ready_build_attach_invokes_action(_env) -> None:
@@ -1028,15 +578,261 @@ def _env_ccc(monkeypatch):
     monkeypatch.setenv("PRODAVAN_API_BASE_URL", "http://api.example/api/v1")
     monkeypatch.setenv("PRODAVAN_AUTH_TOKEN", "tok")
     monkeypatch.setenv("PRODAVAN_PROJECT_ID", "proj-1")
+# ------------------------------------------------- WAVE12: карточки и сборки v3
+
+def test_tools_list_contains_v2_tools() -> None:
+    listed = mcp_server._handle({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+    names = {t["name"] for t in listed["result"]["tools"]}
+    for name in (
+        "part_cards_list",
+        "part_card_upsert",
+        "part_card_delete",
+        "ready_builds_list",
+        "ready_build_get",
+        "ready_build_upsert",
+        "ready_build_slot_upsert",
+        "ready_build_attach",
+    ):
+        assert name in names
+    # старая модель (группы совместимости, классы) убрана
+    assert "ready_builds_catalog" not in names
+    assert "build_group_upsert" not in names
+    assert "build_group_item_upsert" not in names
+    # прежние инструменты не потеряны
+    assert "equipment_builds_delete" in names
+    assert "found_groups_upsert" in names
+    assert len(names) == 23
+    assert (
+        mcp_server._handle({"jsonrpc": "2.0", "id": 2, "method": "initialize"})["result"][
+            "serverInfo"
+        ]["version"]
+        == "3.0.0"
+    )
+
+
+def test_ready_builds_list_compact_and_filters(_env) -> None:
+    """Компактный список: только рабочие поля, фильтры по платформе и enabled."""
+    rows = [
+        {"row_id": "rb1", "body": {"name": "Офисный ПК", "build_kind": "pc",
+                                   "spec_summary": "Процессор: LGA1700",
+                                   "price_total": 30000, "is_enabled": True,
+                                   "note": "в compact не попадает"}},
+        {"row_id": "rb2", "body": {"name": "Сервер old", "build_kind": "server",
+                                   "is_enabled": False}},
+        {"row_id": "rb3", "body": {"name": "Сервер 2U", "build_kind": "server",
+                                   "is_enabled": True}},
+    ]
+    with patch.object(mcp_server, "_list_rows", return_value=rows):
+        resp = _call("ready_builds_list", {})
+    payload = json.loads(resp["result"]["content"][0]["text"])
+    assert [i["row_id"] for i in payload["items"]] == ["rb1", "rb3"]
+    item = payload["items"][0]
+    assert item["spec_summary"] == "Процессор: LGA1700"
+    assert "note" not in item
+    assert "body" not in item
+
+    with patch.object(mcp_server, "_list_rows", return_value=rows):
+        resp = _call("ready_builds_list", {"build_kind": "server"})
+    payload = json.loads(resp["result"]["content"][0]["text"])
+    assert [i["row_id"] for i in payload["items"]] == ["rb3"]
+
+    with patch.object(mcp_server, "_list_rows", return_value=rows):
+        resp = _call("ready_builds_list", {"build_kind": "server", "only_enabled": False})
+    payload = json.loads(resp["result"]["content"][0]["text"])
+    assert sorted(i["row_id"] for i in payload["items"]) == ["rb2", "rb3"]
+
+
+def test_ready_build_get_returns_slots(_env) -> None:
+    builds = [{"row_id": "rb1", "body": {"name": "A", "is_enabled": True}}]
+    slots = [
+        {"row_id": "s1", "body": {"build_id": "rb1", "type_id": "etype_cpu",
+                                  "qty": 1, "constraints": {"socket": "LGA1700"},
+                                  "resolved_price": 11000}},
+        {"row_id": "s2", "body": {"build_id": "other", "type_id": "etype_ram", "qty": 2}},
+    ]
+
+    def fake_list(mid, table, *, session_id=None):
+        return builds if table == "ready_builds" else slots
+
+    with patch.object(mcp_server, "_list_rows", side_effect=fake_list):
+        resp = _call("ready_build_get", {"row_id": "rb1"})
+    payload = json.loads(resp["result"]["content"][0]["text"])
+    assert payload["build"]["row_id"] == "rb1"
+    assert [s["row_id"] for s in payload["slots"]] == ["s1"]
+    assert payload["slots"][0]["constraints"] == {"socket": "LGA1700"}
+
+    with patch.object(mcp_server, "_list_rows", side_effect=fake_list):
+        bad = _call("ready_build_get", {"row_id": "ghost"})
+    assert bad["result"].get("isError") is True
+    assert "not found" in bad["result"]["content"][0]["text"]
+
+
+_TYPE_ROWS = [
+    {
+        "row_id": "etype_cpu",
+        "body": {
+            "name": "Процессор",
+            "fields_json": [
+                {"key": "socket", "label": {"ru": "Сокет"}, "kind": "enum",
+                 "required": True, "values": ["AM4", "LGA1700"]},
+                {"key": "cores", "label": {"ru": "Ядра"}, "kind": "groups",
+                 "required": True, "groups": [{"value": "6", "label": "6 ядер"}]},
+            ],
+        },
+    }
+]
+
+
+def test_part_card_upsert_validates_against_type_template(_env) -> None:
+    """Карточка: ключи + обязательные поля типа + значения из групп."""
+    resp = _call("part_card_upsert", {"type_id": "etype_cpu"})
+    assert resp["result"].get("isError") is True
+    assert "part_number" in resp["result"]["content"][0]["text"]
+
+    resp = _call("part_card_upsert", {"part_number": "CPU-A"})
+    assert resp["result"].get("isError") is True
+    assert "type_id" in resp["result"]["content"][0]["text"]
+
+    with patch.object(mcp_server, "_list_rows", return_value=_TYPE_ROWS):
+        resp = _call(
+            "part_card_upsert",
+            {"type_id": "etype_cpu", "part_number": "CPU-A", "attrs": {"cores": "6"}},
+        )
+        assert resp["result"].get("isError") is True
+        assert "socket" in resp["result"]["content"][0]["text"]
+
+        resp = _call(
+            "part_card_upsert",
+            {"type_id": "etype_cpu", "part_number": "CPU-A",
+             "attrs": {"socket": "LGA9999", "cores": "6"}},
+        )
+        assert resp["result"].get("isError") is True
+        assert "groups" in resp["result"]["content"][0]["text"]
+
+        resp = _call(
+            "part_card_upsert",
+            {"type_id": "etype_cpu", "part_number": "CPU-A",
+             "attrs": {"socket": "AM4", "cores": "6", "zzz": "1"}},
+        )
+        assert resp["result"].get("isError") is True
+        assert "not declared" in resp["result"]["content"][0]["text"]
+
+        posted: dict = {}
+
+        def fake_http(method, path, payload=None, *, session_id=None):
+            posted.update(payload or {})
+            return {"row_id": "pc1"}
+
+        with patch.object(mcp_server, "_http", side_effect=fake_http):
+            ok = _call(
+                "part_card_upsert",
+                {"type_id": "etype_cpu", "part_number": "CPU-A",
+                 "aliases_pn": "CPUA", "attrs": {"socket": "AM4", "cores": "6"}},
+            )
+        assert ok["result"].get("isError") is not True
+        assert posted["body"]["attrs"] == {"socket": "AM4", "cores": "6"}
+
+
+def test_part_cards_list_filters_by_type_and_constraints(_env) -> None:
+    cards = [
+        {"row_id": "c1", "body": {"type_id": "etype_storage",
+                                  "attrs": {"drive_type": "SSD", "capacity": "512"}}},
+        {"row_id": "c2", "body": {"type_id": "etype_storage",
+                                  "attrs": {"drive_type": "SSD", "capacity": "256"}}},
+        {"row_id": "c3", "body": {"type_id": "etype_cpu",
+                                  "attrs": {"socket": "AM4"}}},
+    ]
+    with patch.object(mcp_server, "_list_rows", return_value=cards):
+        resp = _call("part_cards_list", {"type_id": "etype_storage",
+                                         "constraints": {"capacity": "512"}})
+    payload = json.loads(resp["result"]["content"][0]["text"])
+    assert [i["row_id"] for i in payload["items"]] == ["c1"]
+    # регистр значений не важен; обе SSD-карточки подходят
+    with patch.object(mcp_server, "_list_rows", return_value=cards):
+        resp = _call("part_cards_list", {"constraints": {"drive_type": "ssd"}})
+    payload = json.loads(resp["result"]["content"][0]["text"])
+    assert [i["row_id"] for i in payload["items"]] == ["c1", "c2"]
+
+
+def test_ready_build_upsert_writes_slots_in_one_call(_env) -> None:
+    """Сборка + слоты одним вызовом; существующие слоты переиспользуются по
+    row_id или типу (идентичность слота стабильна для зеркал чатов)."""
+    calls: list[tuple] = []
+    existing_slots = [
+        {"row_id": "old_cpu", "body": {"build_id": "rb1", "type_id": "etype_cpu"}},
+        {"row_id": "old_ram", "body": {"build_id": "rb1", "type_id": "etype_ram"}},
+    ]
+
+    def fake_http(method, path, payload=None, *, session_id=None):
+        calls.append((method, path, payload))
+        if method == "POST" and path.endswith("/ready_builds"):
+            return {"row_id": "rb1", "body": (payload or {}).get("body")}
+        if method == "PATCH" and "/ready_builds/" in path:
+            return {"row_id": "rb1", "body": (payload or {}).get("body")}
+        return {"row_id": "x"}
+
+    with (
+        patch.object(mcp_server, "_http", side_effect=fake_http),
+        patch.object(mcp_server, "_list_rows", return_value=existing_slots),
+    ):
+        resp = _call(
+            "ready_build_upsert",
+            {
+                "row_id": "rb1",
+                "name": "Офисный ПК",
+                "target_price_max": 50000,
+                "slots": [
+                    {"type_id": "etype_cpu", "constraints": {"socket": "LGA1700"}, "qty": 1},
+                    {"type_id": "etype_storage", "constraints": {"capacity": "512"}},
+                ],
+            },
+        )
+    assert resp["result"].get("isError") is not True
+    payload = json.loads(resp["result"]["content"][0]["text"])
+    assert payload["slots_replaced"] is True
+    # старый CPU-слот патчится на месте, RAM удаляется, storage создаётся
+    patched = [c for c in calls if c[0] == "PATCH" and "ready_build_slots/old_cpu" in c[1]]
+    assert patched and patched[0][2]["body"]["constraints"] == {"socket": "LGA1700"}
+    assert (
+        "DELETE",
+        "/projects/proj-1/modules/mod_equipment/data/ready_build_slots/old_ram",
+        None,
+    ) in calls
+    created = [c for c in calls if c[0] == "POST" and c[1].endswith("/ready_build_slots")]
+    assert len(created) == 1
+    assert created[0][2]["body"]["build_id"] == "rb1"
+    assert created[0][2]["body"]["constraints"] == {"capacity": "512"}
+
+
+def test_ready_build_upsert_validates_slots(_env) -> None:
+    resp = _call("ready_build_upsert", {"name": "X", "slots": [{"qty": 1}]})
+    assert resp["result"].get("isError") is True
+    assert "type_id" in resp["result"]["content"][0]["text"]
+
+    resp2 = _call(
+        "ready_build_upsert",
+        {"name": "X", "slots": [{"type_id": "etype_cpu", "qty": 0}]},
+    )
+    assert resp2["result"].get("isError") is True
+    assert "qty" in resp2["result"]["content"][0]["text"]
+
+    resp3 = _call(
+        "ready_build_upsert",
+        {"name": "X", "slots": [{"type_id": "etype_cpu", "constraints": "ssd"}]},
+    )
+    assert resp3["result"].get("isError") is True
+    assert "constraints" in resp3["result"]["content"][0]["text"]
+
+    resp4 = _call("ready_build_upsert", {"slots": []})
+    assert resp4["result"].get("isError") is True
+    assert "name" in resp4["result"]["content"][0]["text"]
 
 
 def test_ready_build_slot_upsert_creates_and_patches_single_slot(monkeypatch) -> None:
-    """Патч ОДНОГО слота сборки — без перезаписи всего массива.
-
-    `ready_build_upsert` при наличии slots удаляет все слоты сборки и пишет
-    новые; чтобы перевыбрать/докрутить один компонент, нужен патч одной строки.
-    """
-    _env_ccc(monkeypatch)
+    """Патч ОДНОГО слота сборки — без перезаписи всего массива."""
+    monkeypatch.setenv("PRODAVAN_API_BASE_URL", "http://api.example/api/v1")
+    monkeypatch.setenv("PRODAVAN_AUTH_TOKEN", "tok")
+    monkeypatch.setenv("PRODAVAN_PROJECT_ID", "proj-1")
 
     posted: list[tuple] = []
 
@@ -1045,7 +841,6 @@ def test_ready_build_slot_upsert_creates_and_patches_single_slot(monkeypatch) ->
         return {"row_id": "slot_new"}
 
     with patch.object(mcp_server, "_http", side_effect=fake_http):
-        # создание слота
         resp = mcp_server._handle(
             {
                 "jsonrpc": "2.0",
@@ -1057,8 +852,7 @@ def test_ready_build_slot_upsert_creates_and_patches_single_slot(monkeypatch) ->
                         "build_id": "b1",
                         "type_id": "etype_ram",
                         "qty": 2,
-                        "mode": "dynamic",
-                        "class_key": "ram_16",
+                        "constraints": {"ram_type": "DDR4", "module_capacity": "16"},
                     },
                 },
             }
@@ -1067,9 +861,8 @@ def test_ready_build_slot_upsert_creates_and_patches_single_slot(monkeypatch) ->
         assert posted[-1][0] == "POST"
         assert posted[-1][1].endswith("/ready_build_slots")
         assert posted[-1][2]["body"]["qty"] == 2
-        assert posted[-1][2]["body"]["build_id"] == "b1"
+        assert posted[-1][2]["body"]["constraints"] == {"ram_type": "DDR4", "module_capacity": "16"}
 
-        # патч существующего: только qty, ничего лишнего
         resp = mcp_server._handle(
             {
                 "jsonrpc": "2.0",
@@ -1077,26 +870,26 @@ def test_ready_build_slot_upsert_creates_and_patches_single_slot(monkeypatch) ->
                 "method": "tools/call",
                 "params": {
                     "name": "ready_build_slot_upsert",
-                    "arguments": {"row_id": "slot_ram", "qty": 4},
+                    "arguments": {"row_id": "slot_ram", "card_id": "card_1"},
                 },
             }
         )
         assert resp["result"].get("isError") is not True
         assert posted[-1][0] == "PATCH"
         assert posted[-1][1].endswith("/ready_build_slots/slot_ram")
-        assert posted[-1][2]["body"] == {"qty": 4}
+        assert posted[-1][2]["body"] == {"card_id": "card_1"}
 
 
-def test_ready_build_slot_upsert_validates_qty_and_mode(monkeypatch) -> None:
-    _env_ccc(monkeypatch)
+def test_ready_build_slot_upsert_validates_qty_and_constraints(monkeypatch) -> None:
+    monkeypatch.setenv("PRODAVAN_API_BASE_URL", "http://api.example/api/v1")
+    monkeypatch.setenv("PRODAVAN_AUTH_TOKEN", "tok")
+    monkeypatch.setenv("PRODAVAN_PROJECT_ID", "proj-1")
 
     for args, needle in (
-        ({"build_id": "b1", "type_id": "etype_ram", "qty": 1.5, "class_key": "ram_16"},
-         "qty must be a whole number"),
-        ({"build_id": "b1", "type_id": "etype_ram", "mode": "nope", "class_key": "ram_16"},
-         "mode must be one of"),
+        ({"build_id": "b1", "type_id": "etype_ram", "qty": 1.5}, "qty must be a whole number"),
         ({"build_id": "b1"}, "type_id is required"),
         ({"row_id": "slot_x", "qty": 0}, "qty must be a whole number"),
+        ({"row_id": "slot_x", "constraints": "ssd"}, "constraints must be an object"),
     ):
         resp = mcp_server._handle(
             {

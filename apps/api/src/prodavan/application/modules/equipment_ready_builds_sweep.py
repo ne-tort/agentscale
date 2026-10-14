@@ -27,7 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from prodavan.application.modules.equipment_offers_service import MODULE_ID
 from prodavan.application.modules.equipment_ready_builds_service import (
     BUILDS_TABLE,
-    POOL_TABLE,
+    CARDS_TABLE,
     ReadyBuildsPipelineService,
 )
 from prodavan.infrastructure.persistence.models.modules import (
@@ -112,7 +112,7 @@ async def _catalog_instance_ids(session: AsyncSession) -> list[str]:
             ModuleInstanceRow.id == ModuleInstanceDataRow.instance_id,
         )
         .where(
-            ModuleInstanceDataRow.table_slug.in_([POOL_TABLE, BUILDS_TABLE]),
+            ModuleInstanceDataRow.table_slug.in_([CARDS_TABLE, BUILDS_TABLE]),
             ModuleInstanceRow.module_id == MODULE_ID,
         )
         .distinct()
@@ -137,14 +137,14 @@ async def sweep_ready_builds(session: AsyncSession) -> dict[str, Any]:
             continue
         touched = sum(
             int(result.get(k) or 0)
-            for k in ("items_updated", "slots_updated", "builds_updated", "groups_updated")
+            for k in ("cards_updated", "slots_updated", "builds_updated")
         )
         if touched:
             stats["updated"] += 1
         logger.info(
-            "ready_builds sweep instance=%s items=%s builds=%s touched=%s unresolved=%s",
+            "ready_builds sweep instance=%s cards=%s builds=%s touched=%s unresolved=%s",
             instance_id,
-            result.get("items"),
+            result.get("cards"),
             result.get("builds"),
             touched,
             result.get("unresolved_slots"),

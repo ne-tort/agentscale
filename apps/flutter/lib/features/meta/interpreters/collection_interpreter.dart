@@ -495,9 +495,13 @@ class CollectionViewInterpreter extends StatelessWidget {
       }
     }
     final filterFromCtx = uiJson['row_filter_from_context'];
+    // row_matches_context_map: строка подходит, если её map-поле (attrs)
+    // покрывает map-поле контекстной строки (constraints): attrs[k] == v для
+    // всех k,v требований. Это «подбор альтернатив по требованиям слота».
+    final matchesMap = uiJson['row_matches_context_map'];
     final ctxFilterEntries = <MapEntry<String, String>>[];
-    if (filterFromCtx is Map) {
-      final pick = _pickContextMap();
+    Map<String, dynamic> matchesCtxMap = const {};
+    if (filterFromCtx is Map || matchesMap is Map) {
       Map<String, dynamic> ctxBody = const {};
       if (contextRowId != null) {
         final ctx = seeds.itemById(contextRowId!);
@@ -505,23 +509,41 @@ class CollectionViewInterpreter extends StatelessWidget {
           ctxBody = Map<String, dynamic>.from(ctx['body'] as Map);
         }
       }
-      for (final e in filterFromCtx.entries) {
-        final ctxKey = e.value?.toString();
-        if (ctxKey == null || ctxKey.isEmpty) continue;
-        // `contextRowId` — сам открытый ряд (родитель pick-вида): слот сборки
-        // фильтрует кандидатов по build_id = row_id сборки.
-        if (ctxKey == 'contextRowId') {
-          if (contextRowId != null && contextRowId!.isNotEmpty) {
-            ctxFilterEntries.add(MapEntry(e.key.toString(), contextRowId!));
-          }
-          continue;
+      if (matchesMap is Map) {
+        final ctxField = matchesMap['context_field']?.toString() ?? '';
+        final ctxRaw = ctxBody[ctxField];
+        if (ctxRaw is Map) {
+          matchesCtxMap = {
+            for (final e in ctxRaw.entries)
+              e.key.toString(): e.value?.toString() ?? '',
+          }..removeWhere((k, v) => v.trim().isEmpty);
         }
-        final v = _resolvePickOrBody(ctxKey, pick: pick, body: ctxBody);
-        if (v == null || v.isEmpty) continue;
-        ctxFilterEntries.add(MapEntry(e.key.toString(), v));
+      }
+      if (filterFromCtx is Map) {
+        final pick = _pickContextMap();
+        for (final e in filterFromCtx.entries) {
+          final ctxKey = e.value?.toString();
+          if (ctxKey == null || ctxKey.isEmpty) continue;
+          // `contextRowId` — сам открытый ряд (родитель pick-вида): слот сборки
+          // фильтрует кандидатов по build_id = row_id сборки.
+          if (ctxKey == 'contextRowId') {
+            if (contextRowId != null && contextRowId!.isNotEmpty) {
+              ctxFilterEntries.add(MapEntry(e.key.toString(), contextRowId!));
+            }
+            continue;
+          }
+          final v = _resolvePickOrBody(ctxKey, pick: pick, body: ctxBody);
+          if (v == null || v.isEmpty) continue;
+          ctxFilterEntries.add(MapEntry(e.key.toString(), v));
+        }
       }
     }
-    if (filter is! Map && bindEntries.isEmpty && ctxFilterEntries.isEmpty) {
+    final matchesField = matchesMap is Map ? matchesMap['field']?.toString() ?? '' : '';
+    final hasMatchesMap = matchesField.isNotEmpty && matchesCtxMap.isNotEmpty;
+    if (filter is! Map &&
+        bindEntries.isEmpty &&
+        ctxFilterEntries.isEmpty &&
+        !hasMatchesMap) {
       return _applySort(uiJson, all);
     }
     return _applySort(
@@ -540,6 +562,16 @@ class CollectionViewInterpreter extends StatelessWidget {
         }
         for (final bind in ctxFilterEntries) {
           if (body[bind.key]?.toString() != bind.value) return false;
+        }
+        if (hasMatchesMap) {
+          final rowMap = body[matchesField];
+          if (rowMap is! Map) return false;
+          for (final req in matchesCtxMap.entries) {
+            if ((rowMap[req.key]?.toString() ?? '').trim().toLowerCase() !=
+                req.value.trim().toLowerCase()) {
+              return false;
+            }
+          }
         }
         return true;
       }).toList(),
