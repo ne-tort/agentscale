@@ -453,3 +453,29 @@ def register_tasks(app) -> None:
 
         logger.info("celery task %s", job_names.WEBHOOK_DELIVER)
         return run_async(_run())
+
+    @app.task(name=job_names.BIND_REFRESH_SWEEP, bind=False)
+    def bind_refresh_sweep() -> dict[str, Any]:
+        """Проактивный перевыпуск bridge-токена подов до истечения (24ч).
+
+        Токен живёт 24 ч; в простаивающем поде он протухает, и первый вызов
+        после простоя отвечает 401. Sweep перевыпускает токены проектов с живым
+        подом задолго до истечения (ensure_recent_bind сам троттлит по метке).
+        """
+        from prodavan.application.agent.bind_refresh_sweep import sweep_bind_refresh
+        from prodavan.infrastructure.persistence.database import get_session_factory
+
+        async def _run() -> dict[str, Any]:
+            async def _work() -> dict[str, Any]:
+                factory = get_session_factory()
+                async with factory() as session:
+                    return await sweep_bind_refresh(session)
+
+            return await run_with_job_lock(
+                "bind_refresh_sweep",
+                ttl_sec=300,
+                fn=_work,
+            )
+
+        logger.info("celery task %s", job_names.BIND_REFRESH_SWEEP)
+        return run_async(_run())

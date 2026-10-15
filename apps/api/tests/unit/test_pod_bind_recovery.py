@@ -252,3 +252,17 @@ def test_both_mcp_packages_emit_the_marker(monkeypatch: pytest.MonkeyPatch) -> N
         assert any(
             marker in str(exc.value) for marker in bridge_mod._MCP_ENV_MISSING_MARKERS
         )
+
+
+# --- детектор протухшего bridge-токена -------------------------------------
+
+
+def test_detects_bridge_token_expired() -> None:
+    """401 «pod bridge token expired» из API → сброс метки bind."""
+    ev = _tool_result("provider error 401: pod bridge token expired")
+    assert bridge_mod.tool_result_bridge_token_expired(ev)
+
+
+def test_token_expired_ignores_unrelated() -> None:
+    assert not bridge_mod.tool_result_bridge_token_expired(_tool_result("ok", is_error=False))
+    assert not bridge_mod.tool_result_bridge_token_expired(_tool_result("some other error"))
