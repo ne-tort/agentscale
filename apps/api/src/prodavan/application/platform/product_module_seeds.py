@@ -2983,7 +2983,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 # конфигурацию внутри [min, max]. Пусто = дешевейшая.
                 "table_slug": "ready_builds",
                 "name": "target_price_min",
-                "label": {"ru": "Целевая цена от, ₽", "en": "Target price from"},
+                "label": {"ru": "Целевая цена, ₽", "en": "Target price"},
                 "type": "number",
                 "required": False,
             },
@@ -5630,24 +5630,6 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "align": "end",
                             "max_width": 100,
                         },
-                        {
-                            "field": "on_order",
-                            "label": {"ru": "Под заказ", "en": "On order"},
-                            "format": "bool_yes_no",
-                            "max_width": 100,
-                        },
-                        {
-                            "field": "compat_ok",
-                            "label": {"ru": "Совместима", "en": "Compatible"},
-                            "format": "bool_yes_no",
-                            "max_width": 110,
-                        },
-                        {
-                            "field": "unresolved_count",
-                            "label": {"ru": "Без компонента", "en": "Unresolved"},
-                            "align": "end",
-                            "max_width": 110,
-                        },
                     ],
                     "sort": [
                         {"field": "name", "dir": "asc"},
@@ -5693,12 +5675,14 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "widget": "choice",
                             "icon": "precision_manufacturing",
                         },
-                        # целевой коридор цены: два ввода + мин/макс комбинации
-                        # зелёным справа в спокойном состоянии
+                        # целевой коридор цены: одно поле «100-10000»
+                        # (одно число — минимум, 0-X — максимум), мин/макс
+                        # комбинации зелёным справа в спокойном состоянии
                         {
                             "column": "target_price_min",
                             "widget": "target_price_range",
                             "icon": "savings",
+                            "hint": "Формат: 100-10000 (от–до); одно число — минимум; 0-10000 — не дороже",
                         },
                         {
                             "column": "price_total",

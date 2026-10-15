@@ -725,6 +725,7 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
       return TargetPriceRangeField(
         label: label,
         icon: fieldIcon,
+        hint: fieldCfg?['hint']?.toString(),
         valueMin: _values['target_price_min'] as num?,
         valueMax: _values['target_price_max'] as num?,
         priceMin: _values['price_min'] as num?,

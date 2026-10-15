@@ -121,7 +121,45 @@ ModuleMetaManifest _manifest() => ModuleMetaManifest.fromJson({
     });
 
 void main() {
-  testWidgets('TargetPriceRangeField: коридор зелёным, ввод от/до', (tester) async {
+  group('parseTargetPriceRange', () {
+    test('диапазон «100-10000»', () {
+      expect(parseTargetPriceRange('100-10000'), (100, 10000));
+    });
+
+    test('одно число — минимум', () {
+      expect(parseTargetPriceRange('100'), (100, null));
+    });
+
+    test('«0-10000» — не дороже 10000', () {
+      expect(parseTargetPriceRange('0-10000'), (0, 10000));
+    });
+
+    test('пустая строка — очистка', () {
+      expect(parseTargetPriceRange(''), (null, null));
+      expect(parseTargetPriceRange('   '), (null, null));
+    });
+
+    test('запятая и точка как разделитель дробной части', () {
+      expect(parseTargetPriceRange('100,5-10000.75'), (100.5, 10000.75));
+    });
+
+    test('лишние знаки после запятой отсекаются', () {
+      expect(parseTargetPriceRange('100,999'), (100.99, null));
+      expect(parseTargetPriceRange('0.299-10'), (0.29, 10));
+    });
+
+    test('пробелы и тире нормализуются', () {
+      expect(parseTargetPriceRange('10 000 – 20 000'), (10000, 20000));
+    });
+
+    test('мусор — null', () {
+      expect(parseTargetPriceRange('abc'), isNull);
+      expect(parseTargetPriceRange('1-2-3'), isNull);
+      expect(parseTargetPriceRange('-'), isNull);
+    });
+  });
+
+  testWidgets('TargetPriceRangeField: одно поле, коридор зелёным', (tester) async {
     num? savedMin;
     num? savedMax;
     await tester.pumpWidget(
@@ -141,12 +179,18 @@ void main() {
       ),
     );
     // коридор возможных комбинаций — зелёным справа
-    expect(find.text('37414–49299 ₽'), findsOneWidget);
-    // ввод «до» сохраняется; «от» тоже проходит через onChanged
-    await tester.enterText(find.byType(TextField).at(1), '48000');
+    expect(find.text('37414-49299 ₽'), findsOneWidget);
+    // текущее значение одной строкой
+    expect(find.text('30000-45000'), findsOneWidget);
+
+    // тап → инлайн-редактирование → ввод диапазона
+    await tester.tap(find.text('30000-45000'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), '31000.5-48000');
     await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pumpAndSettle();
+    expect(savedMin, 31000.5);
     expect(savedMax, 48000);
-    expect(savedMin, 30000);
   });
 
   testWidgets('BuildSpecEditor: девять полей, выбор пишет constraints слота',
