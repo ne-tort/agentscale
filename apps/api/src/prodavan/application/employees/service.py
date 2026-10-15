@@ -87,11 +87,19 @@ class EmployeesCommandService:
         employee = existing.scalars().first()
         if employee is None:
             local = email_l.split("@", 1)[0] if "@" in email_l else email_l
-            handle = (
-                employee_login_handle(local, company_login_slug)
-                if company_login_slug
-                else (local or "pending")
-            )
+            try:
+                handle = (
+                    employee_login_handle(local, company_login_slug)
+                    if company_login_slug
+                    else (local or "pending")
+                )
+            except AppError:
+                # Короткий/невалидный local part email («a@x.co»): логин
+                # обязателен и уникален, поэтому временно ставим uuid-заглушку —
+                # _assign_login ниже заменит её на employee.id.
+                import uuid
+
+                handle = f"pending-{uuid.uuid4().hex}"
             employee = EmployeeRow(
                 email=email_l,
                 login=handle[:200],
