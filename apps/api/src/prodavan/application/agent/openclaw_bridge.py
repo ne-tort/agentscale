@@ -122,6 +122,13 @@ _MCP_ENV_MISSING_MARKERS = (
     "PRODAVAN_API_BASE_URL, PRODAVAN_AUTH_TOKEN, and PRODAVAN_PROJECT_ID are required",
 )
 
+# Токен моста пода протух (TTL 24ч): MCP-вызов в поде отвечает этой 401-ошибкой
+# от API. Текст — detail AppError verify_pod_bridge_token.
+_TOKEN_EXPIRED_MARKERS = (
+    "pod bridge token expired",
+    "token expired",
+)
+
 
 def tool_result_lost_pod_bind(event: AgentEvent) -> bool:
     """True, если tool_result принёс ошибку про отсутствующий проектный env.
@@ -144,6 +151,25 @@ def tool_result_lost_pod_bind(event: AgentEvent) -> bool:
         return False
     text = tool_result_text(data.get("output"))
     return bool(text) and any(marker in text for marker in _MCP_ENV_MISSING_MARKERS)
+
+
+def tool_result_bridge_token_expired(event: AgentEvent) -> bool:
+    """True, если tool_result принёс 401 «токен моста протух».
+
+    Токен живёт 24ч; истёкший токен в env MCP-сервера пода даёт 401 на каждый
+    вызов модуля. По этому признаку сбрасываем метку bind: следующий send
+    перепривяжет под и перезапустит MCP с новым токеном.
+    """
+    if event.type != AgentEventType.TOOL_RESULT:
+        return False
+    data = event.data if isinstance(event.data, dict) else {}
+    if not tool_result_is_error(data):
+        return False
+    text = tool_result_text(data.get("output"))
+    if not text:
+        return False
+    low = text.lower()
+    return any(marker in low for marker in _TOKEN_EXPIRED_MARKERS)
 
 
 async def ensure_recent_bind(
@@ -545,6 +571,15 @@ class OpenClawBridgeBootstrap:
                     # оставались бы сломаны до 12 ч.
                     logger.warning(
                         "openclaw send: pod lost project bind, invalidating "
+                        "bind mark project_id=%s",
+                        project_id,
+                    )
+                    await invalidate_bind_mark(project_id, endpoint)
+                if tool_result_bridge_token_expired(event):
+                    # Токен моста протух: сбрасываем метку bind, чтобы следующий
+                    # send перепривязал под (свежий токен + рестарт MCP).
+                    logger.warning(
+                        "openclaw send: pod bridge token expired, invalidating "
                         "bind mark project_id=%s",
                         project_id,
                     )

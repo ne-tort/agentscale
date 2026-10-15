@@ -16,3 +16,4 @@ SWEEP_EQUIPMENT_CATALOG_REINDEX = "prodavan.jobs.sweep_equipment_catalog_reindex
 AGENT_RUN_STALL_SWEEP = "prodavan.jobs.agent_run_stall_sweep"
 SWEEP_READY_BUILDS = "prodavan.jobs.sweep_ready_builds"
 WEBHOOK_DELIVER = "prodavan.jobs.webhook_deliver"
+BIND_REFRESH_SWEEP = "prodavan.jobs.bind_refresh_sweep"

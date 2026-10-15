@@ -230,6 +230,13 @@ class WorkerManager(LifespanResource):
             "task": job_names.WEBHOOK_DELIVER,
             "schedule": schedule(run_every=15.0),
         }
+        # Перевыпуск bridge-токена подов до истечения (токен 24ч): sweep каждые
+        # 4ч по проектам с живым подом. ensure_recent_bind сам троттлит по
+        # метке (12ч), так что реально перепривязывает только протухшее.
+        beat["prodavan-bind-refresh-sweep"] = {
+            "task": job_names.BIND_REFRESH_SWEEP,
+            "schedule": schedule(run_every=14400.0),
+        }
         app.conf.beat_schedule = beat
         job_tasks.register_tasks(app)
         return app
