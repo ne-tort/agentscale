@@ -74,10 +74,14 @@ spec:
             periodSeconds: 5
             failureThreshold: 60
           readinessProbe:
+            # /health/ready бьёт в БД + redis + lifespan health_report — на
+            # холодной/загруженной ноде дольше дефолтной 1с (на prod это давало
+            # вечный «context deadline exceeded» при 200 на /health/live).
             httpGet:
               path: /health/ready
               port: http
             periodSeconds: 10
+            timeoutSeconds: 5
             failureThreshold: 12
           livenessProbe:
             httpGet:
