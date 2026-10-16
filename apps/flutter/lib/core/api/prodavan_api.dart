@@ -1535,6 +1535,8 @@ class ProdavanApi {
     required String sessionId,
     String? title,
     bool? pin,
+    int? maxTurns,
+    bool updateMaxTurns = false,
   }) async {
     final prevProj = this.projectId;
     this.projectId = projectId;
@@ -1542,6 +1544,9 @@ class ProdavanApi {
       final body = <String, dynamic>{};
       if (title != null) body['title'] = title;
       if (pin != null) body['pin'] = pin;
+      // Лимит шагов на ход. Флаг нужен, чтобы отличить «не трогаем» от
+      // «снимаем лимит»: null в теле — это «без ограничений».
+      if (updateMaxTurns) body['max_turns'] = maxTurns;
       final res = await AuthHttp.patch(
         _uri('/projects/$projectId/agent/sessions/$sessionId'),
         body: jsonEncode(body),

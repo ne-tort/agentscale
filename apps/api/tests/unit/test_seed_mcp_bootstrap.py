@@ -32,9 +32,10 @@ def test_build_seed_mcp_zip_contains_sources() -> None:
     assert "server.py" in names
     assert "equipment_catalog_search.py" not in names
     assert storage_key_for(spec, version=str(manifest["version"])) == (
-        "platform/seed-mcp/prodavan-equipment-2.2.0.zip"
+        f"platform/seed-mcp/prodavan-equipment-{manifest['version']}.zip"
     )
-    assert load_manifest(spec)["version"] == "2.2.0"
+    assert load_manifest(spec)["version"] == manifest["version"]
+    assert "equipment_builds_upsert" in manifest["tools"]
 
 
 def test_load_manifest_fallback_when_seed_dir_missing(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -44,6 +44,13 @@ SELLERS_TABLE = "trusted_sellers"
 BUDGET_TABLE = "budget_lines"
 PROCUREMENT_TABLE = "procurement"
 CATALOGS_TABLE = "catalogs"
+BUILDS_TABLE = "equipment_builds"
+# WAVE12: каталог «Готовые сборки» v2 (chats=all, глобальная библиотека).
+# Карточки комплектующих + сборки со слотами-требованиями; групп совместимости
+# и классов бюджетности больше нет.
+CATALOG_CARDS_TABLE = "part_cards"
+CATALOG_BUILDS_TABLE = "ready_builds"
+CATALOG_SLOTS_TABLE = "ready_build_slots"
 
 MATCH_EXACT = "exact"
 MATCH_ANALOG = "analog"
@@ -73,6 +80,15 @@ SYNCED_OFFER_FIELDS = (
 
 # Валюты, которые умеет FX и схема колонки found_offers.currency.
 SUPPORTED_CURRENCIES = frozenset({"RUB", "USD", "EUR"})
+
+
+def _qty_mul(line_qty: Any, build_qty: Any) -> float:
+    """Количество в бюджете/закупке: позиция × сборок на позицию (оба ≥1)."""
+    lq = _num_or(line_qty, None)
+    bq = _num_or(build_qty, None)
+    lq = lq if lq and lq >= 1 else 1.0
+    bq = bq if bq and bq >= 1 else 1.0
+    return lq * bq
 
 
 def alias_tokens(raw: Any) -> list[str]:
@@ -121,6 +137,177 @@ def group_pn_keys(body: dict[str, Any]) -> list[str]:
 
 def group_hash_keys(body: dict[str, Any]) -> list[str]:
     return [t for t in alias_tokens(body.get("aliases_hash")) if t]
+
+
+async def search_catalog_docs(
+    session: Any,
+    *,
+    ready_ids: list[str],
+    bodies: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Один батч-запрос в OpenSearch по всем ключам (партномер + хэши).
+
+    Общий для пайплайна позиций (``found_groups``) и пайплайна каталога
+    «Готовые сборки» (``part_cards``): обеим
+    нужно «найти все доки каталога по набору ключей», чанкование и пагинация
+    одинаковые — дублировать их нельзя, иначе разойдутся лимиты.
+
+    ``bodies`` — любые тела со стандартными полями ключей
+    (``part_number`` / ``aliases_pn`` / ``aliases_hash``).
+    """
+    from prodavan.application.modules.equipment_catalog_opensearch import (
+        OS_NAMESPACE,
+        catalog_os_index_name,
+    )
+    from prodavan.core.infra.opensearch_manager import get_search_index_service
+
+    pn_terms: list[str] = []
+    hash_terms: list[str] = []
+    for body in bodies:
+        for key in group_pn_keys(body):
+            if key not in pn_terms:
+                pn_terms.append(key)
+        for key in group_hash_keys(body):
+            if key not in hash_terms:
+                hash_terms.append(key)
+    if not pn_terms and not hash_terms:
+        return []
+
+    pn_set = set(pn_terms)
+    svc = get_search_index_service()
+    docs: dict[str, dict[str, Any]] = {}
+    all_terms = pn_terms + hash_terms
+    # чанки терминов; MAX_SEARCH_SIZE=200 на запрос → пагинируем до 5 страниц
+    for start in range(0, len(all_terms), 20):
+        chunk = all_terms[start : start + 20]
+        chunk_pn = [t for t in chunk if t in pn_set]
+        chunk_hash = [t for t in chunk if t not in pn_set]
+        chunk_should: list[dict[str, Any]] = []
+        if chunk_pn:
+            chunk_should.append({"terms": {"part_number": chunk_pn}})
+        if chunk_hash:
+            chunk_should.append({"terms": {"src_hash": chunk_hash}})
+        chunk_query = {
+            "bool": {
+                "filter": [
+                    {"bool": {"should": chunk_should, "minimum_should_match": 1}}
+                ]
+            }
+        }
+        for catalog_row_id in ready_ids:
+            page = 0
+            while page < 5:
+                try:
+                    result = await svc.search(
+                        namespace=OS_NAMESPACE,
+                        index=catalog_os_index_name(catalog_row_id),
+                        query=chunk_query,
+                        from_=page * 200,
+                        size=200,
+                        company_id="platform",
+                        cabinet_id=None,
+                        project_id=None,
+                        apply_tenant_filter=False,
+                        session=session,
+                    )
+                except Exception:
+                    logger.exception(
+                        "equipment catalog search failed catalog=%s", catalog_row_id
+                    )
+                    break
+                page_hits = result.hits or []
+                for hit in page_hits:
+                    doc = hit.source if isinstance(hit.source, dict) else {}
+                    h = str(doc.get("src_hash") or "")
+                    if h and h not in docs:
+                        docs[h] = doc
+                if len(page_hits) < 200:
+                    break
+                page += 1
+    return list(docs.values())
+
+
+def assign_docs_to_keys(
+    docs: list[dict[str, Any]],
+    bodies: dict[str, dict[str, Any]],
+    *,
+    registry: _SellerRegistry | None = None,
+) -> dict[str, list[dict[str, Any]]]:
+    """Раскладка доков каталога по владельцам ключей.
+
+    ``bodies`` — {owner_id: body}. Возвращает {owner_id: [docs]}. Совпадение по
+    партномеру (в любом из написаний) или по ``src_hash``. Доки отключённых
+    поставщиков исключаются — как в поиске агента и в пайплайне позиций.
+    """
+    pn_sets = {oid: {p.casefold() for p in group_pn_keys(b)} for oid, b in bodies.items()}
+    hash_sets = {oid: set(group_hash_keys(b)) for oid, b in bodies.items()}
+    out: dict[str, list[dict[str, Any]]] = {oid: [] for oid in bodies}
+    for doc in docs:
+        if registry is not None and registry.is_disabled(str(doc.get("supplier") or "")):
+            continue
+        h = str(doc.get("src_hash") or "")
+        pn_cf = str(doc.get("part_number") or "").casefold()
+        for oid in bodies:
+            if pn_cf and pn_cf in pn_sets[oid]:
+                out[oid].append(doc)
+            elif h and h in hash_sets[oid]:
+                out[oid].append(doc)
+    return out
+
+
+async def best_price_from_docs(
+    docs: list[dict[str, Any]],
+    *,
+    registry: _SellerRegistry | None = None,
+) -> dict[str, Any] | None:
+    """Лучшее предложение из доков каталога: наличие → цена → приоритет.
+
+    Тот же порядок критериев, что ``_best_offer`` для офферов позиции, поэтому
+    цена в каталоге сборок и цена в чате не расходятся. Валюта приводится к ₽.
+    Возвращает None, если ценовых доков нет.
+    """
+    from prodavan.application.modules.equipment_fx import convert_offer_price
+
+    best: dict[str, Any] | None = None
+    best_key: tuple | None = None
+    offers_count = 0
+    for doc in docs:
+        currency = str(doc.get("currency") or "RUB").upper() or "RUB"
+        if currency not in SUPPORTED_CURRENCIES:
+            continue
+        price_num = _float_or_none(doc.get("price_num"))
+        if price_num is None:
+            price_num = parse_price(str(doc.get("price") or ""))
+        if price_num is None:
+            continue
+        rub = price_num
+        if currency != "RUB":
+            rub, _ = await convert_offer_price(price=price_num, currency=currency)
+        offers_count += 1
+        seller = str(doc.get("supplier") or "")
+        in_stock = bool(doc.get("in_stock"))
+        disabled = registry is not None and registry.is_disabled(seller)
+        priority = registry is not None and registry.is_priority(seller)
+        key = (
+            1 if disabled else 0,
+            0 if in_stock else 1,
+            0 if priority else 1,
+            rub,
+            str(doc.get("src_hash") or ""),
+        )
+        if best_key is None or key < best_key:
+            best_key = key
+            best = {
+                "title": str(doc.get("title") or ""),
+                "part_number": str(doc.get("part_number") or ""),
+                "seller": seller,
+                "price": rub,
+                "in_stock": in_stock,
+            }
+    if best is None:
+        return None
+    best["offers_count"] = offers_count
+    return best
 
 
 class ModuleRowIO:
@@ -357,6 +544,9 @@ class EquipmentPipelineService:
             "budget_created": 0,
             "budget_updated": 0,
             "builds_updated": 0,
+            "builds_deleted": 0,
+            "build_slot_groups_updated": 0,
+            "build_lines_updated": 0,
             "procurement_rows": 0,
             "checked": 0,
         }
@@ -366,14 +556,49 @@ class EquipmentPipelineService:
         offers = [r for r in await io.list(OFFERS_TABLE) if isinstance(r, dict)]
         sellers = [r for r in await io.list(SELLERS_TABLE) if isinstance(r, dict)]
 
-        # Группы-сироты (позиция заказчика удалена) — чистим вместе с офферами,
-        # иначе мусорные группы продолжают материализоваться и висеть в UI.
+        # Группы-сироты (владелец удалён) — чистим вместе с офферами, иначе
+        # мусорные группы продолжают материализоваться и висеть в UI.
+        # WAVE10: группа принадлежит ЛИБО позиции (line_id), ЛИБО слоту сборки
+        # (build_id + slot_type_id) — «живая», если её владелец существует.
         line_ids = {str(r.get("row_id") or "") for r in lines}
+        build_rows = [r for r in await io.list(BUILDS_TABLE) if isinstance(r, dict)]
+        # Сборки-сироты (позиция удалена в обход каскада, например через MCP) —
+        # удаляем ДО групп: иначе их слот-группы считаются «живыми» вечно.
+        live_build_rows: list[dict[str, Any]] = []
+        for b in build_rows:
+            bid = str(b.get("row_id") or "")
+            blid = str((b.get("body") or {}).get("line_id") or "")
+            if not blid or blid in line_ids:
+                live_build_rows.append(b)
+                continue
+            if await io.delete(BUILDS_TABLE, bid):
+                stats["builds_deleted"] += 1
+        build_rows = live_build_rows
+        # WAVE12: зеркало готовых сборок — found_groups слотов отражают
+        # ТЕКУЩЕЕ состояние каталога (не копия на момент attach). До чистки
+        # групп-сирот: зеркало пересоздаёт недостающие группы, поэтому
+        # чиститься должны уже только действительно лишние.
+        mirror_stats = await self._mirror_ready_builds(io, builds=build_rows)
+        stats.update(mirror_stats)
+        if any(mirror_stats.get(k) for k in ("mirror_groups_created", "mirror_groups_updated", "mirror_groups_deleted", "builds_unlinked")):
+            # зеркало могло создать/обновить/удалить группы, офферы и саму
+            # сборку — дальше работаем только по свежим снапшотам
+            groups = [r for r in await io.list(GROUPS_TABLE) if isinstance(r, dict)]
+            build_rows = [r for r in await io.list(BUILDS_TABLE) if isinstance(r, dict)]
+            offers = [r for r in await io.list(OFFERS_TABLE) if isinstance(r, dict)]
+        build_ids = {str(r.get("row_id") or "") for r in build_rows}
         live_groups: list[dict[str, Any]] = []
         for g in groups:
             gid = str(g.get("row_id") or "")
-            line_id = str((g.get("body") or {}).get("line_id") or "")
-            if line_id and line_id in line_ids:
+            gbody = g.get("body") or {}
+            line_id = str(gbody.get("line_id") or "")
+            build_id = str(gbody.get("build_id") or "")
+            owner_alive = (
+                build_id in build_ids
+                if build_id
+                else (bool(line_id) and line_id in line_ids)
+            )
+            if owner_alive:
                 live_groups.append(g)
                 continue
             if await io.delete(GROUPS_TABLE, gid):
@@ -420,13 +645,18 @@ class EquipmentPipelineService:
         offers = [r for r in await io.list(OFFERS_TABLE) if isinstance(r, dict)]
         stats["checked"] = len(offers)
 
+        # «Сборка» ДО бюджета: бюджет позиции-сборки читает уже посчитанную
+        # price_total сборки. Состав/цена из слотов (группы-кандидаты + легаси
+        # item-слоты), best-сборка позиции, альтернативы и выгода.
+        build_stats = await self._sync_builds(
+            io, groups=groups, offers=offers
+        )
+        stats.update(build_stats)
+
         budget_stats = await self._sync_budget(
             io, lines=lines, groups=groups, offers=offers, registry=registry
         )
         stats.update(budget_stats)
-
-        # «Сборка»: цена/состав следуют за актуальными ценами офферов.
-        stats["builds_updated"] = await self._sync_builds(io, offers=offers)
 
         proc_stats = await self._sync_procurement(io, registry=registry)
         stats.update(proc_stats)
@@ -580,77 +810,9 @@ class EquipmentPipelineService:
     async def _search_docs(
         self, *, ready_ids: list[str], groups: list[dict[str, Any]]
     ) -> list[dict[str, Any]]:
-        from prodavan.application.modules.equipment_catalog_opensearch import (
-            OS_NAMESPACE,
-            catalog_os_index_name,
+        return await search_catalog_docs(
+            self._session, ready_ids=ready_ids, bodies=[g.get("body") or {} for g in groups]
         )
-        from prodavan.core.infra.opensearch_manager import get_search_index_service
-
-        pn_terms: list[str] = []
-        hash_terms: list[str] = []
-        for g in groups:
-            body = g.get("body") or {}
-            for key in group_pn_keys(body):
-                if key not in pn_terms:
-                    pn_terms.append(key)
-            for key in group_hash_keys(body):
-                if key not in hash_terms:
-                    hash_terms.append(key)
-        if not pn_terms and not hash_terms:
-            return []
-
-        pn_set = set(pn_terms)
-        svc = get_search_index_service()
-        docs: dict[str, dict[str, Any]] = {}
-        all_terms = pn_terms + hash_terms
-        # чанки терминов; MAX_SEARCH_SIZE=200 на запрос → пагинируем до 5 страниц
-        for start in range(0, len(all_terms), 20):
-            chunk = all_terms[start : start + 20]
-            chunk_pn = [t for t in chunk if t in pn_set]
-            chunk_hash = [t for t in chunk if t not in pn_set]
-            chunk_should: list[dict[str, Any]] = []
-            if chunk_pn:
-                chunk_should.append({"terms": {"part_number": chunk_pn}})
-            if chunk_hash:
-                chunk_should.append({"terms": {"src_hash": chunk_hash}})
-            chunk_query = {
-                "bool": {
-                    "filter": [
-                        {"bool": {"should": chunk_should, "minimum_should_match": 1}}
-                    ]
-                }
-            }
-            for catalog_row_id in ready_ids:
-                page = 0
-                while page < 5:
-                    try:
-                        result = await svc.search(
-                            namespace=OS_NAMESPACE,
-                            index=catalog_os_index_name(catalog_row_id),
-                            query=chunk_query,
-                            from_=page * 200,
-                            size=200,
-                            company_id="platform",
-                            cabinet_id=None,
-                            project_id=None,
-                            apply_tenant_filter=False,
-                            session=self._session,
-                        )
-                    except Exception:
-                        logger.exception(
-                            "equipment pipeline: os search failed catalog=%s", catalog_row_id
-                        )
-                        break
-                    page_hits = result.hits or []
-                    for hit in page_hits:
-                        doc = hit.source if isinstance(hit.source, dict) else {}
-                        h = str(doc.get("src_hash") or "")
-                        if h and h not in docs:
-                            docs[h] = doc
-                    if len(page_hits) < 200:
-                        break
-                    page += 1
-        return list(docs.values())
 
     async def _offer_body_from_doc(
         self,
@@ -852,7 +1014,9 @@ class EquipmentPipelineService:
             gid = str(g.get("row_id") or "")
             body = dict(g.get("body") or {})
             line_id = str(body.get("line_id") or "")
-            if line_id:
+            # WAVE10: группы-кандидаты слота сборки (build_id) не участвуют в
+            # выборе best-группы позиции — у них своя логика в _sync_builds.
+            if line_id and not str(body.get("build_id") or ""):
                 groups_by_line.setdefault(line_id, []).append(g)
 
             group_offers = offers_by_group.get(gid) or []
@@ -889,6 +1053,12 @@ class EquipmentPipelineService:
             )
 
             updates: dict[str, Any] = {}
+            # WAVE10: владелец группы — позиция («line») или слот сборки
+            # («build»). Глобальный список «Найденные товары» показывает только
+            # позиционные группы; кандидаты слота видны внутри сборки.
+            want_owner = "build" if str(body.get("build_id") or "") else "line"
+            if str(body.get("owner_kind") or "") != want_owner:
+                updates["owner_kind"] = want_owner
             want_rank = MATCH_ORDER.get(_valid_match_kind(body.get("match_kind")), 3)
             if body.get("rank") != want_rank:
                 updates["rank"] = want_rank
@@ -1200,16 +1370,84 @@ class EquipmentPipelineService:
             str(o.get("row_id") or ""): o for o in offers
         }
 
+        # WAVE10: сборки позиции. Если у позиции есть best-сборка с ценой, строка
+        # бюджета берётся ИЗ СБОРКИ (build_id + сумма), а не из одиночного
+        # оффера — расчёты остаются в «Найденных товарах», но сопоставляются
+        # со Сборкой.
+        builds = [r for r in await io.list(BUILDS_TABLE) if isinstance(r, dict)]
+        best_build_by_line: dict[str, dict[str, Any]] = {}
+        for b in builds:
+            bbody = b.get("body") or {}
+            blid = str(bbody.get("line_id") or "")
+            if not blid:
+                continue
+            price = _num_or(bbody.get("price_total"), None)
+            if price in (None, 0):
+                continue
+            cur = best_build_by_line.get(blid)
+            # best-сборка: явный is_best → дешевле.
+            if cur is None:
+                best_build_by_line[blid] = b
+                continue
+            cur_body = cur.get("body") or {}
+            if (bbody.get("is_best") is True) or (
+                cur_body.get("is_best") is not True
+                and _num_or(bbody.get("price_total"), float("inf"))
+                < _num_or(cur_body.get("price_total"), float("inf"))
+            ):
+                best_build_by_line[blid] = b
+
         groups_by_line: dict[str, list[dict[str, Any]]] = {}
         for g in groups:
             body = g.get("body") or {}
             lid = str(body.get("line_id") or "")
-            if lid:
+            # группы-кандидаты слота сборки (build_id) не «лицо» позиции
+            if lid and not str(body.get("build_id") or ""):
                 groups_by_line.setdefault(lid, []).append(g)
 
         for line in lines:
             line_id = str(line.get("row_id") or "")
             line_body = line.get("body") or {}
+
+            # Приоритет — сборка позиции (если собрана).
+            build = best_build_by_line.get(line_id)
+            if build is not None:
+                bbody = build.get("body") or {}
+                build_id = str(build.get("row_id") or "")
+                snapshot = {
+                    "line_id": line_id,
+                    "build_id": build_id,
+                    "title": str(bbody.get("name") or line_body.get("title") or "").strip()
+                    or "Сборка",
+                    "part_number": str(line_body.get("part_number") or "").strip()
+                    or "Сборка",
+                    # WAVE13: количество позиции × количество сборок на позицию
+                    # (заказ на 2 сборки из 2 плашек = 4 планки ОЗУ).
+                    "qty": _qty_mul(line_body.get("qty"), bbody.get("qty")),
+                    "price_in": _num_or(bbody.get("price_total"), None),
+                    # «под заказ» — флаг сборки (пишет _sync_builds), а не разбор
+                    # текста match_label.
+                    "on_order": bbody.get("on_order") is True,
+                    "match_kind": _valid_match_kind(bbody.get("match_kind")),
+                    "seller": "",
+                    "brand": "",
+                }
+                existing = budget_by_line.get(line_id)
+                if existing is None:
+                    body = dict(snapshot)
+                    body.setdefault("vat", 0.22)
+                    body["markup"] = DEFAULT_MARKUP
+                    body["markup_source"] = "default"
+                    await io.create(BUDGET_TABLE, body)
+                    stats["budget_created"] += 1
+                else:
+                    row_id = str(existing.get("row_id") or "")
+                    body = dict(existing.get("body") or {})
+                    body.update(snapshot)
+                    if body != (existing.get("body") or {}):
+                        await io.update(BUDGET_TABLE, row_id, body)
+                        stats["budget_updated"] += 1
+                continue
 
             offer = None
             selected_id = str(line_body.get("selected_offer_id") or "")
@@ -1243,6 +1481,9 @@ class EquipmentPipelineService:
             seller = str(obody.get("seller") or "").strip()
             snapshot = {
                 "line_id": line_id,
+                # строка больше не из сборки (сборку удалили / осталась без цены)
+                # — гасим ссылку, иначе UI/документы читают мёртвую сборку.
+                "build_id": "",
                 "title": str(obody.get("title") or line_body.get("title") or "").strip()
                 or "Не найден",
                 "part_number": str(
@@ -1298,47 +1539,501 @@ class EquipmentPipelineService:
 
     # ---------------------------------------------------------------- сборка
 
+    async def _mirror_ready_builds(
+        self,
+        io: ModuleRowIO,
+        *,
+        builds: list[dict[str, Any]],
+    ) -> dict[str, int]:
+        """Зеркало слотов готовых сборок в found_groups чата (owner_kind=build).
+
+        WAVE12: сборка чата — глобальная ССЫЛКА на ready_builds, а не копия.
+        Группы-кандидаты слотов (ключи разрешённых карточек) отражают ТЕКУЩЕЕ
+        состояние каталога: смена цены-лидера, замена компонента слота или
+        требований в каталоге доезжают до заказа/бюджета/закупки ближайшим
+        прогоном пайплайна (on_load страниц Данных, attach, beat).
+
+        Все группы owner_kind=build — зеркало (агент/пользователь их не
+        создаёт), поэтому зеркало полностью владеет ими: создаёт недостающие,
+        обновляет изменённые ключи, удаляет лишние. Ссылка на удалённую
+        готовую сборку = битая → сборка чата удаляется вместе с группами.
+        """
+        stats = {
+            "mirror_groups_created": 0,
+            "mirror_groups_updated": 0,
+            "mirror_groups_deleted": 0,
+            "builds_unlinked": 0,
+        }
+        linked = [
+            b for b in builds if str((b.get("body") or {}).get("ready_build_id") or "")
+        ]
+        if not linked:
+            return stats
+
+        # каталог chats=all → строки session_id=NULL, читаются обычным io.list
+        ready_builds = {
+            str(r.get("row_id") or ""): (r.get("body") or {})
+            for r in await io.list(CATALOG_BUILDS_TABLE)
+            if isinstance(r, dict)
+        }
+        ready_slots = [
+            r for r in await io.list(CATALOG_SLOTS_TABLE) if isinstance(r, dict)
+        ]
+        cards = {
+            str(r.get("row_id") or ""): (r.get("body") or {})
+            for r in await io.list(CATALOG_CARDS_TABLE)
+            if isinstance(r, dict)
+        }
+        slots_by_build: dict[str, list[dict[str, Any]]] = {}
+        for slot in ready_slots:
+            bid = str((slot.get("body") or {}).get("build_id") or "")
+            slots_by_build.setdefault(bid, []).append(slot)
+
+        existing_groups = [
+            g for g in await io.list(GROUPS_TABLE) if isinstance(g, dict)
+        ]
+        groups_by_build: dict[str, list[dict[str, Any]]] = {}
+        for g in existing_groups:
+            gbody = g.get("body") or {}
+            if str(gbody.get("owner_kind") or "") != "build":
+                continue
+            bid = str(gbody.get("build_id") or "")
+            groups_by_build.setdefault(bid, []).append(g)
+
+        for build in linked:
+            bid = str(build.get("row_id") or "")
+            bbody = dict(build.get("body") or {})
+            rb_id = str(bbody.get("ready_build_id") or "")
+            rbody = ready_builds.get(rb_id)
+            current_groups = groups_by_build.get(bid) or []
+
+            if rbody is None:
+                # готовая сборка удалена из каталога → связь битая: сборка
+                # чата и её группы-зеркала удаляются (бюджет/закупка
+                # пересчитаются этим же прогоном).
+                for g in current_groups:
+                    gid = str(g.get("row_id") or "")
+                    for offer in [
+                        o
+                        for o in await io.list(OFFERS_TABLE)
+                        if str((o.get("body") or {}).get("group_id") or "") == gid
+                    ]:
+                        await io.delete(OFFERS_TABLE, str(offer.get("row_id") or ""))
+                    await io.delete(GROUPS_TABLE, gid)
+                    stats["mirror_groups_deleted"] += 1
+                if await io.delete(BUILDS_TABLE, bid):
+                    stats["builds_unlinked"] += 1
+                continue
+
+            slots = slots_by_build.get(rb_id) or []
+            slot_qty: dict[str, Any] = {}
+            slot_types: dict[str, str] = {}
+            want: dict[str, dict[str, Any]] = {}
+            for slot in slots:
+                sbody = slot.get("body") or {}
+                sid = str(slot.get("row_id") or "").strip()
+                type_id = str(sbody.get("type_id") or "").strip()
+                if not sid or not type_id:
+                    continue
+                slot_types[sid] = type_id
+                qty_raw = sbody.get("qty")
+                try:
+                    qty = int(float(qty_raw)) if qty_raw not in (None, "") else 1
+                except (TypeError, ValueError):
+                    qty = 1
+                if qty > 1:
+                    slot_qty[sid] = qty
+                # ключи — из РАЗРЕШЁННОЙ карточки слота (выбор пайплайна
+                # каталога), иначе из закреплённой вручную
+                card = cards.get(str(sbody.get("resolved_card_id") or "")) or cards.get(
+                    str(sbody.get("card_id") or "")
+                ) or {}
+                part_number = str(card.get("part_number") or "").strip()
+                aliases_pn = str(card.get("aliases_pn") or "").strip()
+                aliases_hash = str(card.get("aliases_hash") or "").strip()
+                if not (part_number or aliases_pn or aliases_hash):
+                    continue  # слот не разрешён — группы нет, счётчик на сборке
+                want[sid] = {
+                    "slot_type_id": type_id,
+                    "part_number": part_number,
+                    "aliases_pn": aliases_pn,
+                    "aliases_hash": aliases_hash,
+                    "note": str(sbody.get("note") or "").strip(),
+                }
+
+            existing_by_slot = {
+                str((g.get("body") or {}).get("slot_id") or ""): g
+                for g in current_groups
+            }
+            for sid, keys in want.items():
+                target = {
+                    "build_id": bid,
+                    "owner_kind": "build",
+                    # компонент каталога прошёл матрицу совместимости — для
+                    # заказа это точное соответствие спецификации сборки
+                    "match_kind": "exact",
+                    **keys,
+                }
+                existing = existing_by_slot.pop(sid, None)
+                if existing is None:
+                    await io.create(GROUPS_TABLE, {**target, "slot_id": sid})
+                    stats["mirror_groups_created"] += 1
+                    continue
+                gbody = dict(existing.get("body") or {})
+                changed = {
+                    k: v
+                    for k, v in {**target, "slot_id": sid}.items()
+                    if str(gbody.get(k) or "") != str(v or "")
+                }
+                if changed:
+                    gbody.update(changed)
+                    await io.update(GROUPS_TABLE, str(existing.get("row_id") or ""), gbody)
+                    stats["mirror_groups_updated"] += 1
+            # лишние группы (слот удалён/стал неразрешённым) — удаляем с офферами
+            for sid, g in existing_by_slot.items():
+                gid = str(g.get("row_id") or "")
+                for offer in [
+                    o
+                    for o in await io.list(OFFERS_TABLE)
+                    if str((o.get("body") or {}).get("group_id") or "") == gid
+                ]:
+                    await io.delete(OFFERS_TABLE, str(offer.get("row_id") or ""))
+                await io.delete(GROUPS_TABLE, gid)
+                stats["mirror_groups_deleted"] += 1
+
+            # денормализация на сборку чата: количество/типы слотов, платформа
+            # и имя готовой сборки (список «Сборка» показывает, что привязано)
+            updates: dict[str, Any] = {}
+            if (bbody.get("slot_qty") or {}) != slot_qty:
+                updates["slot_qty"] = slot_qty
+            if (bbody.get("slot_types") or {}) != slot_types:
+                updates["slot_types"] = slot_types
+            want_kind = str(rbody.get("build_kind") or "pc")
+            if str(bbody.get("build_kind") or "") != want_kind:
+                updates["build_kind"] = want_kind
+            want_name = str(rbody.get("name") or "")
+            if str(bbody.get("ready_build_name") or "") != want_name:
+                updates["ready_build_name"] = want_name
+            if updates:
+                bbody.update(updates)
+                await io.update(BUILDS_TABLE, bid, bbody)
+                build["body"] = bbody
+
+        return stats
+
     async def _sync_builds(
         self,
         io: ModuleRowIO,
         *,
+        groups: list[dict[str, Any]],
         offers: list[dict[str, Any]],
-    ) -> int:
-        """equipment_builds: components_count/price_total из slots → items → offers.
+    ) -> dict[str, int]:
+        """equipment_builds: состав/цена из слотов + best-сборка позиции.
 
-        UI пересчитывает сборку в момент выбора комплектующего; пайплайн
-        догоняет её при обновлении цен/состава офферов (связь с OpenSearch).
+        WAVE12. Сборка чата — ссылка на готовую сборку каталога
+        (``ready_build_id``); её слоты — зеркало ``found_groups``
+        (owner_kind=build), которое ведёт ``_mirror_ready_builds``. Цена сборки
+        = Σ(best-группа слота × qty). Среди сборок одной позиции выбирается
+        best (точность → цена); остальные — альтернативы.
         """
-        items = [r for r in await io.list("equipment_items") if isinstance(r, dict)]
-        builds = [r for r in await io.list("equipment_builds") if isinstance(r, dict)]
+        builds = [r for r in await io.list(BUILDS_TABLE) if isinstance(r, dict)]
+        lines_rows = [r for r in await io.list(LINES_TABLE) if isinstance(r, dict)]
         if not builds:
-            return 0
-        items_by_id = {str(r.get("row_id") or ""): r for r in items}
-        offers_by_id = {str(r.get("row_id") or ""): r for r in offers}
+            # Сборок нет вовсе — всё равно гасим протухшие снапшоты на позициях.
+            lines_updated = 0
+            for line_row in lines_rows:
+                if await self._write_line_build_snapshot(
+                    io,
+                    lines_rows=lines_rows,
+                    line_id=str(line_row.get("row_id") or ""),
+                    snap={
+                        "builds_count": 0,
+                        "build_best_id": "",
+                        "build_best_price": None,
+                        "build_match_label": "",
+                        "build_benefit_label": "",
+                        "build_benefit_tone": "",
+                    },
+                ):
+                    lines_updated += 1
+            return {
+                "builds_updated": 0,
+                "build_slot_groups_updated": 0,
+                "build_lines_updated": lines_updated,
+            }
+
+        # Кандидаты слотов: группы с build_id И идентичностью слота. Группа без
+        # слота (build_id есть, но ни slot_id, ни slot_type_id) в цену сборки
+        # не входит: иначе она попала бы в фантомный слот "" и молча увеличила
+        # price_total.
+        #
+        # Ключ слота — slot_id, а при его отсутствии slot_type_id. Так две
+        # группы одного ТИПА (например SSD + HDD в одной сборке) остаются
+        # разными слотами, а не схлопываются в один; для сборок с одним
+        # компонентом на тип ключ равен slot_type_id, как раньше.
+        groups_by_build_slot: dict[tuple[str, str], list[dict[str, Any]]] = {}
+        unassigned_slot_groups = 0
+        for g in groups:
+            gbody = g.get("body") or {}
+            bid = str(gbody.get("build_id") or "")
+            if not bid:
+                continue
+            slot = str(gbody.get("slot_id") or gbody.get("slot_type_id") or "").strip()
+            if not slot:
+                unassigned_slot_groups += 1
+                continue
+            groups_by_build_slot.setdefault((bid, slot), []).append(g)
+        if unassigned_slot_groups:
+            logger.warning(
+                "pipeline: %d групп(а) сборки без слота — не учтены в цене",
+                unassigned_slot_groups,
+            )
+
         updated = 0
+        slot_groups_updated = 0
+        lines_updated = 0
+        builds_by_line: dict[str, list[dict[str, Any]]] = {}
         for build in builds:
+            bid = str(build.get("row_id") or "")
             body = dict(build.get("body") or {})
-            slots = body.get("slots")
-            slots = slots if isinstance(slots, dict) else {}
+            line_id = str(body.get("line_id") or "")
+            if line_id:
+                builds_by_line.setdefault(line_id, []).append(build)
+
+            # Слоты = группы-зеркала готовой сборки. Количество на слот —
+            # денормализованный slot_qty (зеркало ведёт из ready_build_slots).
+            raw_slot_qty = body.get("slot_qty")
+            build_slot_qty = raw_slot_qty if isinstance(raw_slot_qty, dict) else {}
+            slot_keys = {slot for (b, slot) in groups_by_build_slot.keys() if b == bid}
+
             count = 0
             total = 0.0
-            for item_id in slots.values():
-                item = items_by_id.get(str(item_id or ""))
-                if item is None:
-                    continue
-                count += 1
-                ibody = item.get("body") or {}
-                qty = _num_or(ibody.get("qty"), 1.0) or 1.0
-                offer = offers_by_id.get(str(ibody.get("offer_id") or ""))
-                price = _num_or((offer or {}).get("body", {}).get("price"), 0.0) if offer else 0.0
-                total += (price or 0.0) * qty
+            worst_rank = -1  # худшая точность среди компонентов (0=exact лучше)
+            any_on_order = False
+            for slot in slot_keys:
+                # группа-зеркало слота → best по (точность, приоритет, цена)
+                slot_groups = groups_by_build_slot.get((bid, slot)) or []
+                priced = [
+                    g
+                    for g in slot_groups
+                    if _num_or((g.get("body") or {}).get("face_price"), None) is not None
+                    and int(_num_or((g.get("body") or {}).get("offers_count"), 0) or 0) > 0
+                ]
+                slot_price: float | None = None
+                chosen_g: dict[str, Any] | None = None
+                if priced:
+                    chosen_g = sorted(
+                        priced,
+                        key=lambda g: (
+                            MATCH_ORDER.get(
+                                _valid_match_kind((g.get("body") or {}).get("match_kind")), 3
+                            ),
+                            0 if (g.get("body") or {}).get("face_priority") is True else 1,
+                            _num_or((g.get("body") or {}).get("face_price"), float("inf")),
+                            str(g.get("row_id") or ""),
+                        ),
+                    )[0]
+                    # Цена/точность/наличие сборки считаются ПО ВЫБРАННОМУ
+                    # кандидату (лидер слота на момент прогона).
+                    gb = chosen_g.get("body") or {}
+                    slot_price = _num_or(gb.get("face_price"), None)
+                    rank = MATCH_ORDER.get(_valid_match_kind(gb.get("match_kind")), 3)
+                    worst_rank = max(worst_rank, rank)
+                    if gb.get("face_in_stock") is not True:
+                        any_on_order = True
+                # is_best/альтернативы группы-зеркала: видно в UI слотов.
+                chosen_id = str((chosen_g or {}).get("row_id") or "")
+                slot_alts = max(0, len(priced) - 1)
+                for g in slot_groups:
+                    gid = str(g.get("row_id") or "")
+                    gbody = dict(g.get("body") or {})
+                    gupdates: dict[str, Any] = {}
+                    want_best = chosen_id != "" and gid == chosen_id
+                    if bool(gbody.get("is_best")) is not want_best:
+                        gupdates["is_best"] = want_best
+                    want_alts = slot_alts if gbody.get("offers_count") else 0
+                    if _num_or(gbody.get("alternatives_count"), 0) != want_alts:
+                        gupdates["alternatives_count"] = want_alts
+                    if gupdates:
+                        gbody.update(gupdates)
+                        await io.update(GROUPS_TABLE, gid, gbody)
+                        g["body"] = gbody
+                        slot_groups_updated += 1
+                # количество слота: slot_qty из зеркала, по умолчанию 1
+                explicit_qty = _num_or(build_slot_qty.get(slot), None)
+                slot_qty = explicit_qty if (explicit_qty or 0) > 0 else 1.0
+                if slot_price is not None:
+                    count += 1
+                    total += slot_price * slot_qty
             total = round(total, 2)
-            if body.get("components_count") != count or _num_or(body.get("price_total"), 0.0) != total:
-                body["components_count"] = count
-                body["price_total"] = total
-                await io.update("equipment_builds", str(build.get("row_id") or ""), body)
+
+            # match_kind сборки — по слабейшему звену (сборка не надёжнее
+            # самого сомнительного компонента).
+            kind_by_rank = {0: MATCH_EXACT, 1: MATCH_ANALOG, 2: MATCH_DOUBT}
+            want_kind = kind_by_rank.get(worst_rank, MATCH_ANALOG) if count else MATCH_ANALOG
+            want_label = _match_label(
+                _valid_match_kind(want_kind), not any_on_order, has_offers=count > 0
+            )
+
+            updates: dict[str, Any] = {}
+            if body.get("components_count") != count:
+                updates["components_count"] = count
+            if _num_or(body.get("price_total"), 0.0) != total:
+                updates["price_total"] = total
+            if str(body.get("match_kind") or "") != want_kind:
+                updates["match_kind"] = want_kind
+            if str(body.get("match_label") or "") != want_label:
+                updates["match_label"] = want_label
+            # «под заказ» — отдельный флаг: бюджет читает его напрямую, а не
+            # парсит текст match_label (локализация/формулировка могут меняться).
+            if bool(body.get("on_order")) is not any_on_order:
+                updates["on_order"] = any_on_order
+            if updates:
+                body.update(updates)
+                await io.update(BUILDS_TABLE, bid, body)
+                build["body"] = body
                 updated += 1
-        return updated
+
+        # best-сборка позиции: точность → цена; остальные — альтернативы.
+        for line_id, line_builds in builds_by_line.items():
+            priced = [
+                b
+                for b in line_builds
+                if _num_or((b.get("body") or {}).get("price_total"), None) not in (None, 0)
+            ]
+            ranked = sorted(
+                priced,
+                key=lambda b: (
+                    MATCH_ORDER.get(
+                        _valid_match_kind((b.get("body") or {}).get("match_kind")), 3
+                    ),
+                    _num_or((b.get("body") or {}).get("price_total"), float("inf")),
+                    str(b.get("row_id") or ""),
+                ),
+            )
+            # ручной выбор сборки (is_selected) перекрывает автобest
+            selected = next(
+                (b for b in line_builds if (b.get("body") or {}).get("is_selected") is True),
+                None,
+            )
+            winner = str(
+                (selected or (ranked[0] if ranked else {})).get("row_id") or ""
+            )
+            min_price = (
+                _num_or((ranked[0].get("body") or {}).get("price_total"), None) if ranked else None
+            )
+            alternatives = max(0, len(ranked) - 1)
+            for b in line_builds:
+                bid = str(b.get("row_id") or "")
+                body = dict(b.get("body") or {})
+                price = _num_or(body.get("price_total"), None)
+                want_best = bid != "" and bid == winner
+                label, tone = _benefit_label(
+                    is_effective=want_best,
+                    price=price,
+                    reference=min_price,
+                    min_price=min_price,
+                    total_offers=len(ranked),
+                )
+                updates = {}
+                if bool(body.get("is_best")) is not want_best:
+                    updates["is_best"] = want_best
+                if _num_or(body.get("alternatives_count"), 0) != alternatives:
+                    updates["alternatives_count"] = alternatives
+                if str(body.get("benefit_label") or "") != label:
+                    updates["benefit_label"] = label
+                if str(body.get("benefit_tone") or "") != tone:
+                    updates["benefit_tone"] = tone
+                if updates:
+                    body.update(updates)
+                    await io.update(BUILDS_TABLE, bid, body)
+                    b["body"] = body
+                    updated += 1
+
+            # снапшот сборок на позиции: список показывает «Сборка» (счётчик,
+            # цена лучшей, совпадение, выгода) без дрилл-дауна в сборки.
+            winner_build = next(
+                (b for b in line_builds if str(b.get("row_id") or "") == winner), None
+            )
+            wbody = (winner_build or {}).get("body") or {}
+            best_price = _num_or(wbody.get("price_total"), None)
+            if await self._write_line_build_snapshot(
+                io,
+                lines_rows=lines_rows,
+                line_id=line_id,
+                snap={
+                    "builds_count": len(line_builds),
+                    "build_best_id": winner,
+                    "build_best_price": best_price,
+                    "build_match_label": str(wbody.get("match_label") or ""),
+                    "build_benefit_label": str(wbody.get("benefit_label") or ""),
+                    "build_benefit_tone": str(wbody.get("benefit_tone") or ""),
+                },
+                # сборка с ценой закрывает позицию — статус не должен оставаться «Открыта»
+                priced_build=winner != "" and best_price not in (None, 0),
+            ):
+                lines_updated += 1
+
+        # Позиции без сборок: гасим протухший снапшот (сборки удалили) — иначе
+        # «Сборка ₽» и бейдж выгоды продолжают показывать несуществующее.
+        for line_row in lines_rows:
+            lid = str(line_row.get("row_id") or "")
+            if lid in builds_by_line:
+                continue
+            if await self._write_line_build_snapshot(
+                io,
+                lines_rows=lines_rows,
+                line_id=lid,
+                snap={
+                    "builds_count": 0,
+                    "build_best_id": "",
+                    "build_best_price": None,
+                    "build_match_label": "",
+                    "build_benefit_label": "",
+                    "build_benefit_tone": "",
+                },
+            ):
+                lines_updated += 1
+
+        return {
+            "builds_updated": updated,
+            "build_slot_groups_updated": slot_groups_updated,
+            "build_lines_updated": lines_updated,
+        }
+
+    async def _write_line_build_snapshot(
+        self,
+        io: ModuleRowIO,
+        *,
+        lines_rows: list[dict[str, Any]],
+        line_id: str,
+        snap: dict[str, Any],
+        priced_build: bool = False,
+    ) -> bool:
+        """Пишет снапшот сборок на позицию только если он изменился.
+
+        `priced_build` — у позиции есть сборка с ценой. Тогда «открытая» позиция
+        становится «Есть кандидаты»: её закрыла сборка, а не одиночная группа,
+        поэтому found_count (счётчик групп позиции) остаётся 0, но статус
+        «Открыта» вводил бы в заблуждение. Ручной выбор оффера (`selected`)
+        не понижаем.
+        """
+        line_row = next(
+            (r for r in lines_rows if str(r.get("row_id") or "") == line_id), None
+        )
+        if line_row is None:
+            return False
+        lbody = dict(line_row.get("body") or {})
+        want = dict(snap)
+        if priced_build and str(lbody.get("status") or "") == "open":
+            want["status"] = "matched"
+        changed = {k: v for k, v in want.items() if lbody.get(k) != v}
+        if not changed:
+            return False
+        lbody.update(changed)
+        await io.update(LINES_TABLE, line_id, lbody)
+        line_row["body"] = lbody
+        return True
 
     # ---------------------------------------------------------------- закупка
 
@@ -1364,6 +2059,12 @@ class EquipmentPipelineService:
         offers = [
             r for r in await io.list_project_wide(OFFERS_TABLE) if isinstance(r, dict)
         ]
+        groups = [
+            r for r in await io.list_project_wide(GROUPS_TABLE) if isinstance(r, dict)
+        ]
+        builds = [
+            r for r in await io.list_project_wide(BUILDS_TABLE) if isinstance(r, dict)
+        ]
 
         offers_count_by_seller: dict[str, int] = {}
         for o in offers:
@@ -1372,6 +2073,26 @@ class EquipmentPipelineService:
                 offers_count_by_seller[seller.casefold()] = (
                     offers_count_by_seller.get(seller.casefold(), 0) + 1
                 )
+
+        # WAVE10: выбранные комплектующие сборок (группы слота с is_best) —
+        # строка бюджета сборки не имеет одного продавца, поэтому закупка
+        # раскладывается по поставщикам компонентов.
+        chosen_groups_by_build: dict[str, list[dict[str, Any]]] = {}
+        for g in groups:
+            gbody = g.get("body") or {}
+            bid = str(gbody.get("build_id") or "")
+            if bid and gbody.get("is_best") is True:
+                chosen_groups_by_build.setdefault(bid, []).append(gbody)
+
+        # WAVE11: количество на слот ({type_id: qty}) — без него закупка
+        # расходится с бюджетом: «2 плашки ОЗУ» попали бы в закупку как одна.
+        slot_qty_by_build: dict[str, dict[str, Any]] = {}
+        for b in builds:
+            bbody = b.get("body") or {}
+            bid = str(b.get("row_id") or "")
+            raw = bbody.get("slot_qty")
+            if bid and isinstance(raw, dict):
+                slot_qty_by_build[bid] = raw
 
         # Позиции проекта из бюджетных снапшотов (line_id уникален в рамках
         # чата; при дубле из другого чата побеждает последний апдейт).
@@ -1384,6 +2105,34 @@ class EquipmentPipelineService:
             seller = str(body.get("seller") or "").strip()
             if seller:
                 lines_by_seller.setdefault(seller.casefold(), []).append(body)
+                continue
+            # строка сборки: раскладываем по поставщикам её компонентов
+            build_id = str(body.get("build_id") or "")
+            if not build_id:
+                continue
+            line_qty = _num_or(body.get("qty"), 1.0) or 1.0
+            slot_qty = slot_qty_by_build.get(build_id) or {}
+            # бюджет уже несёт line.qty × link.qty — второй раз не множим
+            for gb in chosen_groups_by_build.get(build_id) or []:
+                comp_seller = str(gb.get("face_seller") or "").strip()
+                comp_price = _num_or(gb.get("face_price"), None)
+                if not comp_seller or comp_price is None:
+                    continue
+                per_slot = _num_or(
+                    # по идентичности слота (slot_id или slot_type_id)
+                    slot_qty.get(str(gb.get("slot_id") or gb.get("slot_type_id") or "")), 1.0
+                ) or 1.0
+                lines_by_seller.setdefault(comp_seller.casefold(), []).append(
+                    {
+                        "line_id": line_id,
+                        # (позиция × сборок, из бюджета) × в слоте
+                        "qty": line_qty * per_slot,
+                        "price_in": comp_price,
+                        "seller": comp_seller,
+                        # маржа — из реестра поставщика (не ручная)
+                        "markup_source": "",
+                    }
+                )
 
         proc_rows = [r for r in await io.list(PROCUREMENT_TABLE) if isinstance(r, dict)]
         proc_by_seller: dict[str, dict[str, Any]] = {}
@@ -1578,14 +2327,29 @@ async def cascade_equipment_delete(
     """Каскадное удаление связанных строк mod_equipment.
 
     Связь по позиции заказчика (request_lines.row_id):
-    - удаление позиции → её found_groups + found_offers + budget_lines;
+    - удаление позиции → её found_groups + found_offers + budget_lines
+      + сборки позиции (equipment_builds) вместе с их группами-зеркалами
+      слотов и офферами;
     - удаление строки бюджета → корневая позиция со всем каскадом;
-    - удаление found_groups → её офферы.
+    - удаление found_groups → её офферы;
+    - удаление сборки → её группы-зеркала слотов (build_id) и их офферы.
+
+    WAVE12, каталог «Готовые сборки» v2:
+    - удаление готовой сборки → её слоты. Привязанные сборки чатов
+      (equipment_builds с ready_build_id) живут в бакетах других сессий —
+      их снимает зеркало пайплайна (битая ссылка → удаление) при ближайшем
+      прогоне каждого чата.
 
     Записи идут через ModuleRowIO(run_actions=False) в бакете чата самой
     строки (session_id), пайплайн дочищает остатки на следующем прогоне.
     """
-    if table_slug not in (LINES_TABLE, BUDGET_TABLE, GROUPS_TABLE):
+    if table_slug not in (
+        LINES_TABLE,
+        BUDGET_TABLE,
+        GROUPS_TABLE,
+        BUILDS_TABLE,
+        CATALOG_BUILDS_TABLE,
+    ):
         return {}
     if _IN_CASCADE_DELETE.get():
         return {}  # каскад уже идёт — не рекурсируем через сервисные хуки
@@ -1611,11 +2375,37 @@ async def cascade_equipment_delete(
                 if await io.delete(table, rid):
                     deleted[table] = deleted.get(table, 0) + 1
 
+        async def _cascade_build(build_id: str) -> None:
+            """Сборка → её группы-кандидаты слотов и их офферы."""
+            slot_groups = [
+                row
+                for row in await io.list(GROUPS_TABLE)
+                if str((row.get("body") or {}).get("build_id") or "") == build_id
+            ]
+            for row in slot_groups:
+                gid = str(row.get("row_id") or "")
+                await _delete_where(OFFERS_TABLE, "group_id", gid)
+                if await io.delete(GROUPS_TABLE, gid):
+                    deleted[GROUPS_TABLE] = deleted.get(GROUPS_TABLE, 0) + 1
+
         async def _cascade_line(line_id: str) -> None:
             # офферы — по line_id и по группам позиции (страховка на разрыв дубля)
             await _delete_where(OFFERS_TABLE, "line_id", line_id)
             await _delete_where(GROUPS_TABLE, "line_id", line_id)
             await _delete_where(BUDGET_TABLE, "line_id", line_id)
+            # WAVE10: сборки позиции и их комплектующие. Группы слотов несут
+            # build_id (не line_id), поэтому без этого каскада они остаются
+            # «живыми» для пайплайна и продолжают материализоваться.
+            builds = [
+                row
+                for row in await io.list(BUILDS_TABLE)
+                if str((row.get("body") or {}).get("line_id") or "") == line_id
+            ]
+            for row in builds:
+                bid = str(row.get("row_id") or "")
+                await _cascade_build(bid)
+                if await io.delete(BUILDS_TABLE, bid):
+                    deleted[BUILDS_TABLE] = deleted.get(BUILDS_TABLE, 0) + 1
 
         if table_slug == LINES_TABLE:
             await _cascade_line(row_id)
@@ -1632,6 +2422,12 @@ async def cascade_equipment_delete(
                 await _cascade_line(line_id)
         elif table_slug == GROUPS_TABLE:
             await _delete_where(OFFERS_TABLE, "group_id", row_id)
+        elif table_slug == BUILDS_TABLE:
+            await _cascade_build(row_id)
+        elif table_slug == CATALOG_BUILDS_TABLE:
+            # готовая сборка → её слоты (привязанные сборки чатов снимет
+            # зеркало пайплайна — битая ссылка удаляется при прогоне чата)
+            await _delete_where(CATALOG_SLOTS_TABLE, "build_id", row_id)
         return deleted
     finally:
         _IN_CASCADE_DELETE.set(False)

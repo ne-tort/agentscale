@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field, model_validator
 from prodavan.api.agent_auth import AgentAuthDep
 from prodavan.api.deps import PrincipalDep, SessionDep, get_current_employee
 from prodavan.application.agent import AgentSessionService, AgentTriggerDispatcher
+from prodavan.domain.agent.turn_limits import MAX_TURNS_CEILING
 from prodavan.domain.errors import AppError
 from prodavan.domain.projects import CHAT_MAX_ATTACHMENTS_PER_MESSAGE, CHAT_MAX_MESSAGE_CHARS
 from prodavan.domain.projects.chat_error_policy import (
@@ -204,6 +205,10 @@ class PatchSessionBody(BaseModel):
 
     title: str | None = Field(default=None, max_length=200)
     pin: bool | None = None
+    # Лимит шагов на ход: null/0 = без ограничений. «Отсутствие поля» и
+    # «явный null» различаем через model_fields_set — иначе снятие лимита
+    # было бы неотличимо от запроса, который его не трогает.
+    max_turns: int | None = Field(default=None, ge=0, le=MAX_TURNS_CEILING)
 
 
 @router.patch("/projects/{project_id}/agent/sessions/{session_id}")
@@ -222,6 +227,8 @@ async def patch_agent_session(
         employee=employee,
         title=body.title,
         pin=body.pin,
+        max_turns=body.max_turns,
+        update_max_turns="max_turns" in body.model_fields_set,
     )
 
 

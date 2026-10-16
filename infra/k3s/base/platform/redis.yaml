@@ -110,6 +110,11 @@ spec:
             preStop:
               exec:
                 command: ["redis-cli", "SHUTDOWN", "SAVE"]
+          startupProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            periodSeconds: 5
+            failureThreshold: 60
           readinessProbe:
             exec:
               command: ["redis-cli", "ping"]

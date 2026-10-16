@@ -15,8 +15,34 @@ from prodavan.core.jobs.locks import run_with_job_lock
 logger = logging.getLogger(__name__)
 
 
+async def ensure_worker_redis() -> None:
+    """Поднять Redis в процессе-воркере.
+
+    Redis — основа job-локов (`run_with_job_lock` без него МОЛЧА выполняет
+    задачу без блокировки) и отзыва bridge-токенов
+    (`bump_pod_bridge_generation`). API и pod-surface поднимают менеджер в
+    своих lifespan'ах, а воркер — отдельный процесс: без явного startup
+    `get_redis_manager()` возвращал None, `cache_set` — False, и
+    rematerialize в strict-режиме падал с
+    «cannot persist pod bridge generation; revocation unavailable»,
+    из-за чего пересборка workspace проекта не происходила вовсе.
+
+    `required=False` намеренно: воркер обязан поднимать остальные ресурсы
+    даже без Redis, а задачи, которым отзыв критичен, упадут сами с внятной
+    ошибкой (как и до этого).
+    """
+    from prodavan.config.settings import settings
+    from prodavan.core.infra.redis_manager import RedisManager, get_redis_manager
+
+    if get_redis_manager() is not None:
+        return
+    redis_mgr = RedisManager(url=settings.redis_url, required=False)
+    await redis_mgr.startup()
+    logger.info("worker: RedisManager started enabled=%s", redis_mgr.enabled)
+
+
 def _register_worker_k8s_bootstrap(app) -> None:
-    """Start K8sManager + OpenSearch + FileStore in Celery worker processes."""
+    """Start Redis + K8sManager + OpenSearch + FileStore in Celery worker processes."""
     from celery.signals import worker_process_init
 
     @worker_process_init.connect(weak=False)
@@ -27,6 +53,8 @@ def _register_worker_k8s_bootstrap(app) -> None:
         from prodavan.infrastructure.files.manager import FileStoreManager, get_file_store_optional
 
         async def _start() -> None:
+            await ensure_worker_redis()
+
             mode = (settings.pod_runtime_mode or "stub").strip().lower()
             if mode == "k8s" and get_k8s_manager() is None:
                 mgr = k8s_manager_from_settings()
@@ -374,4 +402,80 @@ def register_tasks(app) -> None:
             )
 
         logger.info("celery task %s", job_names.SWEEP_EQUIPMENT_CATALOG_REINDEX)
+        return run_async(_run())
+
+    @app.task(name=job_names.SWEEP_READY_BUILDS, bind=False)
+    def sweep_ready_builds() -> dict[str, Any]:
+        """WAVE11: автообновление каталога «Готовые сборки».
+
+        Цены меняются в каталоге поставщика, а не в наших строках, поэтому
+        одних триггеров на запись мало — sweep периодически резолвит ключи
+        пула (партномер/алиасы/хэш) в свежие лучшие цены и пересчитывает
+        составы dynamic-слотов и итоги сборок.
+        """
+        from prodavan.application.modules.equipment_ready_builds_sweep import (
+            sweep_ready_builds as _sweep_catalog,
+        )
+        from prodavan.infrastructure.persistence.database import get_session_factory
+
+        async def _run() -> dict[str, Any]:
+            async def _work() -> dict[str, Any]:
+                factory = get_session_factory()
+                async with factory() as session:
+                    return await _sweep_catalog(session)
+
+            return await run_with_job_lock(
+                "sweep_ready_builds",
+                ttl_sec=900,
+                fn=_work,
+            )
+
+        logger.info("celery task %s", job_names.SWEEP_READY_BUILDS)
+        return run_async(_run())
+
+    @app.task(name=job_names.WEBHOOK_DELIVER, bind=False)
+    def webhook_deliver() -> dict[str, Any]:
+        """Исходящие вебхуки: доставка outbox (подписанные POST + ретраи)."""
+        from prodavan.application.external.webhooks import WebhookService
+        from prodavan.infrastructure.persistence.database import get_session_factory
+
+        async def _run() -> dict[str, Any]:
+            async def _work() -> dict[str, Any]:
+                factory = get_session_factory()
+                async with factory() as session:
+                    return await WebhookService(session).deliver_pending()
+
+            return await run_with_job_lock(
+                "webhook_deliver",
+                ttl_sec=120,
+                fn=_work,
+            )
+
+        logger.info("celery task %s", job_names.WEBHOOK_DELIVER)
+        return run_async(_run())
+
+    @app.task(name=job_names.BIND_REFRESH_SWEEP, bind=False)
+    def bind_refresh_sweep() -> dict[str, Any]:
+        """Проактивный перевыпуск bridge-токена подов до истечения (24ч).
+
+        Токен живёт 24 ч; в простаивающем поде он протухает, и первый вызов
+        после простоя отвечает 401. Sweep перевыпускает токены проектов с живым
+        подом задолго до истечения (ensure_recent_bind сам троттлит по метке).
+        """
+        from prodavan.application.agent.bind_refresh_sweep import sweep_bind_refresh
+        from prodavan.infrastructure.persistence.database import get_session_factory
+
+        async def _run() -> dict[str, Any]:
+            async def _work() -> dict[str, Any]:
+                factory = get_session_factory()
+                async with factory() as session:
+                    return await sweep_bind_refresh(session)
+
+            return await run_with_job_lock(
+                "bind_refresh_sweep",
+                ttl_sec=300,
+                fn=_work,
+            )
+
+        logger.info("celery task %s", job_names.BIND_REFRESH_SWEEP)
         return run_async(_run())

@@ -19,19 +19,25 @@ FIRST_PARTY_DEPLOYMENTS = (
     "agentscale-web",
     "agentscale-celery-worker",
     "agentscale-celery-beat",
+    # Индексатор каталогов — отдельный deployment на том же образе :latest.
+    # Без него в списке rollout не трогал индексер, и правки индексации
+    # (например doc_id офферов) не доезжали до dev: под продолжал жить на
+    # старом коде неделями, пока его не пересоздавали по другой причине.
+    "agentscale-celery-indexer",
 )
 
 # Deployment targets for rollout: (name, namespace) pairs. The probe pod
-# (agent-runtime) lives in agentscale-dev-sandboxes (not agentscale), so rollout must
-# cross namespaces. After a fresh prodavan-agent-runtime:latest is pushed by
-# openclaw-images (claw repo), rollout restarts this so the probe pod re-pulls
-# the new digest (imagePullPolicy: Always). Project sandbox pods are dynamic
-# (per-project, created by pod_service) and re-pull on recreate by design.
+# (agent-runtime) lives in agentscale-dev-sandboxes (not agentscale-dev), so
+# rollout must cross namespaces. After a fresh prodavan-agent-runtime:latest is
+# pushed by openclaw-images (claw repo), rollout restarts this so the probe pod
+# re-pulls the new digest (imagePullPolicy: Always). Project sandbox pods are
+# dynamic (per-project, created by pod_service) and re-pull on recreate by design.
 DEPLOYMENT_TARGETS: tuple[tuple[str, str], ...] = (
     ("agentscale-api", "agentscale-dev"),
     ("agentscale-web", "agentscale-dev"),
     ("agentscale-celery-worker", "agentscale-dev"),
     ("agentscale-celery-beat", "agentscale-dev"),
+    ("agentscale-celery-indexer", "agentscale-dev"),
     ("agentscale-probe-pod", "agentscale-dev-sandboxes"),
 )
 
@@ -244,10 +250,10 @@ def rollout_restart(
 ) -> None:
     """Patch pod-template annotation so kubelet re-pulls :latest (Always).
 
-    By default restarts all DEPLOYMENT_TARGETS (agentscale namespace: api/web/
-    celery-worker/celery-beat; agentscale-dev-sandboxes: agentscale-probe-pod). When
-    `namespace` + `deployments` are passed, overrides the default target set
-    (legacy single-namespace call path).
+    By default restarts all DEPLOYMENT_TARGETS (agentscale-dev namespace:
+    api/web/celery-worker/celery-beat/celery-indexer; agentscale-dev-sandboxes:
+    agentscale-probe-pod). When `namespace` + `deployments` are passed,
+    overrides the default target set (legacy single-namespace call path).
     """
     require_k8s_api()
     load_kube()

@@ -29,6 +29,11 @@ class PodModuleMetaBody(BaseModel):
 
 class PodModuleActionBody(BaseModel):
     row_id: str | None = None
+    # Контекст вызова действия — то же, что `params` в cabinet-маршруте
+    # (ActionInvokeBody). Без него действие, которому нужен не только row_id,
+    # из пода невызываем в принципе: например ready_build_attach требует
+    # params.line_id и всегда отвечал 422.
+    params: dict[str, Any] | None = None
 
 
 class EquipmentCatalogSearchBody(BaseModel):
@@ -200,6 +205,7 @@ async def invoke_pod_module_action(
         action_id=action_id,
         row_id=body.row_id if body else None,
         session_id=x_prodavan_session_id,
+        extra_params=body.params if body else None,
     )
 
 

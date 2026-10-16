@@ -149,6 +149,34 @@ def main() -> None:
     print("==> CI docker network for bridge e2e (matches PRODAVAN_E2E_DOCKER_NETWORK)")
     sh("docker network inspect prodavan-runners >/dev/null 2>&1 || docker network create prodavan-runners")
 
+    print("==> disk guard (prune CI docker leftovers + warn on high usage)")
+    # Smoke/nightly postgres containers leak anonymous volumes (`docker rm -f`
+    # keeps them), and stacked image builds bloat docker images; both filled the
+    # CI VM disk to 84% (2026-10-14). The guard runs from a timer so a cancelled
+    # or crashed workflow cannot leave the disk to rot.
+    sh("install -m 0755 " + str(Path(__file__).with_name("ci-disk-guard.py"))
+       + " /usr/local/sbin/ci-disk-guard.py")
+    Path("/etc/systemd/system/ci-disk-guard.service").write_text(
+        "[Unit]\n"
+        "Description=Prune CI docker leftovers and warn on high disk usage\n\n"
+        "[Service]\n"
+        "Type=oneshot\n"
+        "ExecStart=/usr/bin/python3 /usr/local/sbin/ci-disk-guard.py\n",
+        encoding="utf-8",
+    )
+    Path("/etc/systemd/system/ci-disk-guard.timer").write_text(
+        "[Unit]\n"
+        "Description=Periodic CI VM disk hygiene\n\n"
+        "[Timer]\n"
+        "OnBootSec=5min\n"
+        "OnUnitActiveSec=30min\n"
+        "Persistent=true\n\n"
+        "[Install]\n"
+        "WantedBy=timers.target\n",
+        encoding="utf-8",
+    )
+    sh("systemctl daemon-reload && systemctl enable --now ci-disk-guard.timer")
+
     print("==> verify docker as runner user")
     sh("sudo -u runner docker version --format '{{.Server.Version}}'")
     sh("sudo -u runner docker network inspect prodavan-runners --format '{{.Name}} ok'")

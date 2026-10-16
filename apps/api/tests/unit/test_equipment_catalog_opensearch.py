@@ -32,6 +32,75 @@ def test_catalog_doc_id_deterministic() -> None:
     assert len(a) == 40
 
 
+def test_source_row_key_keeps_suppliers_of_same_part_number_apart() -> None:
+    """Регресс: один партномер у нескольких поставщиков — это НЕСКОЛЬКО офферов.
+
+    Документ индекса плоский (supplier/price/in_stock/src_hash на строку), а
+    прежний ключ `pn:{pn}` не включал поставщика, поэтому все строки одного
+    партномера получали ОДИН doc_id и перезаписывали друг друга
+    (last-write-wins). На файле из 75 строк с 25 партномерами в индексе
+    оказывалось 25 документов — «лучшая цена по поставщику внутри партномера»
+    вырождалась в единственную случайную цену, а WAVE11 терял выбор более
+    дешёвой альтернативы.
+    """
+    from prodavan.application.modules.equipment_catalog_opensearch import (
+        _source_row_key,
+        source_hash,
+    )
+
+    suppliers = ["ТехноОпт", "ЦифроСклад", "СерверПро"]
+    keys = [
+        _source_row_key(
+            {
+                "part_number": "MZ-V8V500BW",
+                "title": f"Samsung 980 NVMe SSD 500GB [{s}]",
+                "supplier": s,
+                "price": "5000",
+            },
+            {},
+            seq=i,
+        )
+        for i, s in enumerate(suppliers)
+    ]
+    assert len(set(keys)) == 3, keys
+
+    # идентичность предложения = (pn, src_hash): стабильна к порядку строк
+    again = _source_row_key(
+        {
+            "part_number": "MZ-V8V500BW",
+            "title": "Samsung 980 NVMe SSD 500GB [ТехноОпт]",
+            "supplier": "ТехноОпт",
+            "price": "5000",
+        },
+        {},
+        seq=999,
+    )
+    assert again == keys[0]
+    assert source_hash("ТехноОпт", "Samsung 980 NVMe SSD 500GB [ТехноОпт]") in again
+
+    # один и тот же поставщик+наименование+PN — одно предложение (дедуп)
+    dup = _source_row_key(
+        {
+            "part_number": "MZ-V8V500BW",
+            "title": "Samsung 980 NVMe SSD 500GB [ТехноОпт]",
+            "supplier": "ТехноОпт",
+            "price": "4800",
+        },
+        {},
+        seq=7,
+    )
+    assert dup == keys[0]
+
+
+def test_source_row_key_without_part_number_still_unique_per_row() -> None:
+    from prodavan.application.modules.equipment_catalog_opensearch import _source_row_key
+
+    a = _source_row_key({"title": "Кабель RJ45", "supplier": "S1"}, {}, seq=1)
+    b = _source_row_key({"title": "Кабель RJ45", "supplier": "S1"}, {}, seq=2)
+    assert a != b
+    assert a.startswith("t:")
+
+
 def test_column_map_ready_requires_title_price() -> None:
     assert not column_map_ready({"column_map": {"title": "Name"}})
     assert column_map_ready(

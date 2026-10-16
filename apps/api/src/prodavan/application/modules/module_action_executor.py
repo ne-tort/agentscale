@@ -303,6 +303,30 @@ class ModuleActionExecutor:
                 materialize=params.get("materialize") is not False,
             )
 
+        if kind == "equipment.ready_builds":
+            return await self._ready_builds_pipeline(
+                cabinet_id=cabinet_id,
+                module_id=module_id,
+                params=params,
+                principal=principal,
+                employee=employee,
+                project_id=project_id,
+                session_id=session_id,
+                resolve=params.get("resolve") is not False,
+            )
+
+        if kind == "equipment.attach_ready_build":
+            return await self._attach_ready_build(
+                cabinet_id=cabinet_id,
+                module_id=module_id,
+                params=params,
+                row_id=row_id,
+                principal=principal,
+                employee=employee,
+                project_id=project_id,
+                session_id=session_id,
+            )
+
         if kind == "equipment.procurement_apply":
             return await self._procurement_apply(
                 cabinet_id=cabinet_id,
@@ -429,6 +453,165 @@ class ModuleActionExecutor:
             session_id=session_id,
         )
         return await EquipmentPipelineService(self._session).run(io, materialize=materialize)
+
+    async def _ready_builds_pipeline(
+        self,
+        *,
+        cabinet_id: str,
+        module_id: str,
+        params: dict[str, Any],
+        principal: Principal,
+        employee: EmployeeRow | None,
+        project_id: str | None = None,
+        session_id: str | None = None,
+        resolve: bool = True,
+    ) -> dict[str, Any]:
+        """WAVE12: пайплайн каталога «Готовые сборки» v2.
+
+        Резолвит ключи карточек (партномер/алиасы/хэш) в лучшие цены одним
+        батч-запросом в OpenSearch, подбирает компоненты слотов по constraints
+        и доменам совместимости, пересчитывает коридор цен и итоги сборок — см.
+        equipment_ready_builds_service.
+        """
+        from prodavan.application.modules.equipment_offers_service import ModuleRowIO
+        from prodavan.application.modules.equipment_ready_builds_service import (
+            ReadyBuildsPipelineService,
+        )
+
+        io = ModuleRowIO(
+            self._session,
+            cabinet_id=cabinet_id,
+            project_id=project_id,
+            principal=principal,
+            employee=employee,
+            session_id=session_id,
+        )
+        return await ReadyBuildsPipelineService(session=self._session).run(io, resolve=resolve)
+
+    async def _attach_ready_build(
+        self,
+        *,
+        cabinet_id: str,
+        module_id: str,
+        params: dict[str, Any],
+        row_id: str | None,
+        principal: Principal,
+        employee: EmployeeRow | None,
+        project_id: str | None = None,
+        session_id: str | None = None,
+    ) -> dict[str, Any]:
+        """WAVE12: привязка «Готовой сборки» к позиции заказчика — ГЛОБАЛЬНАЯ
+        ССЫЛКА, а не копия.
+
+        В чате создаётся строка ``equipment_builds`` с ``ready_build_id``.
+        Состав (found_groups слотов) и цены зеркалит пайплайн из каталога при
+        каждом прогоне: изменение готовой сборки (компоненты, цены-лидеры)
+        доезжает до всех заказов автоматически. Обратной синхронизации
+        (чат → каталог) нет: правка состава — осознанное действие в каталоге.
+        """
+        from prodavan.application.modules.equipment_offers_service import (
+            ModuleRowIO,
+        )
+        from prodavan.application.modules.equipment_ready_builds_service import (
+            BUILDS_TABLE as CATALOG_BUILDS,
+        )
+
+        ready_build_id = (row_id or str(params.get("ready_build_id") or "")).strip()
+        line_id = str(params.get("line_id") or "").strip()
+        if not ready_build_id or not line_id:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="row_id (готовая сборка) и params.line_id (позиция) обязательны",
+            )
+
+        io = ModuleRowIO(
+            self._session,
+            cabinet_id=cabinet_id,
+            project_id=project_id,
+            principal=principal,
+            employee=employee,
+            session_id=session_id,
+        )
+
+        # Каталог chats:all → io.list отдаёт строки независимо от чата.
+        catalog_builds = await io.list(CATALOG_BUILDS)
+        ready = next(
+            (b for b in catalog_builds if str(b.get("row_id") or "") == ready_build_id),
+            None,
+        )
+        if ready is None:
+            raise AppError(
+                code="NOT_FOUND",
+                title="Not Found",
+                status=404,
+                detail=f"готовая сборка не найдена: {ready_build_id}",
+            )
+        lines = await io.list("request_lines")
+        if not any(str(r.get("row_id") or "") == line_id for r in lines):
+            raise AppError(
+                code="NOT_FOUND",
+                title="Not Found",
+                status=404,
+                detail=f"позиция заказчика не найдена: {line_id}",
+            )
+
+        rbody = ready.get("body") or {}
+        # WAVE13: количество сборок на позиции — масштабирует все компоненты
+        qty_raw = params.get("qty")
+        try:
+            qty = int(float(qty_raw)) if qty_raw not in (None, "") else 1
+        except (TypeError, ValueError):
+            qty = 1
+        if qty < 1:
+            qty = 1
+        created = await io.create(
+            "equipment_builds",
+            {
+                "name": str(rbody.get("name") or "Сборка").strip() or "Сборка",
+                "line_id": line_id,
+                "ready_build_id": ready_build_id,
+                "build_kind": str(rbody.get("build_kind") or "pc"),
+                "qty": qty,
+                "note": str(params.get("note") or "").strip(),
+            },
+        )
+        build_id = str(created.get("row_id") or "")
+
+        # Зеркало слотов + материализация офферов — штатный пайплайн позиций.
+        from prodavan.application.modules.equipment_offers_service import (
+            EquipmentPipelineService,
+        )
+
+        pipeline = await EquipmentPipelineService(self._session).run(io, materialize=True)
+
+        # возвращаем агенту зеркальные группы: без них состав связанной сборки
+        # не прочитать прицельно (found_groups_list фильтруется по build_id)
+        groups = [
+            {
+                "slot_type_id": str((g.get("body") or {}).get("slot_type_id") or ""),
+                "slot_id": str((g.get("body") or {}).get("slot_id") or ""),
+                "group_id": str(g.get("row_id") or ""),
+                "part_number": str((g.get("body") or {}).get("part_number") or ""),
+            }
+            for g in await io.list("found_groups")
+            if str((g.get("body") or {}).get("build_id") or "") == build_id
+        ]
+
+        return {
+            "ok": True,
+            "ready_build_id": ready_build_id,
+            "build_id": build_id,
+            "line_id": line_id,
+            "linked": True,
+            "groups_created": len(groups),
+            "groups": groups,
+            "pipeline": {
+                k: pipeline.get(k)
+                for k in ("offers_created", "builds_updated", "budget_created", "budget_updated")
+            },
+        }
 
     async def _equipment_match_to_line(
         self,
@@ -1036,9 +1219,12 @@ class ModuleActionExecutor:
         """Best-effort WAVE7: авто-пайплайн «Подбора товаров» после записей строк.
 
         - ``found_groups`` → полный пайплайн (материализация офферов из OS);
-        - ``request_lines`` / ``found_offers`` → пайплайн без материализации
-          (пересчёт best/бюджета/закупки — например после ручной правки оффера);
-        - ``procurement`` → ``equipment.procurement_apply`` (маржа/доставка).
+        - ``request_lines`` / ``found_offers`` / ``equipment_builds`` → пайплайн
+          без материализации (пересчёт best/бюджета/закупки — например после
+          ручной правки оффера или выбора сборки);
+        - ``procurement`` → ``equipment.procurement_apply`` (маржа/доставка);
+        - WAVE12: ``part_cards`` / ``ready_builds`` / ``ready_build_slots`` →
+          пайплайн каталога «Готовые сборки».
 
         Пайплайн пишет строки с ``run_actions=False`` — рекурсии нет.
         ``session_id`` задаёт скоп чата (None → общий бакет main).
@@ -1054,17 +1240,29 @@ class ModuleActionExecutor:
                     "equipment.budget_sync",
                     "equipment.offers_refresh",
                     "equipment.procurement_apply",
+                    "equipment.ready_builds",
                 ):
                     continue
                 params = action.get("params") if isinstance(action.get("params"), dict) else {}
                 if kind == "equipment.procurement_apply":
                     # закупка: только её таблица, отдельный экшен (маржа/доставка)
                     watched = {str(params.get("procurement_table") or "procurement")}
+                elif kind == "equipment.ready_builds":
+                    # каталог «Готовые сборки» v2: карточки + сборки + слоты
+                    watched = {
+                        str(params.get("cards_table") or "part_cards"),
+                        str(params.get("builds_table") or "ready_builds"),
+                        str(params.get("slots_table") or "ready_build_slots"),
+                    }
                 else:
                     watched = {
                         str(params.get("groups_table") or "found_groups"),
                         str(params.get("lines_table") or "request_lines"),
                         str(params.get("offers_table") or "found_offers"),
+                        # WAVE10: правка сборки (ручной выбор is_selected, смена
+                        # позиции или состава) тоже должна пересчитать
+                        # best-сборку, бюджет и статус позиции.
+                        str(params.get("builds_table") or "equipment_builds"),
                     }
                 if table_slug not in watched:
                     continue
@@ -1083,6 +1281,17 @@ class ModuleActionExecutor:
                     cabinet_id=cabinet_id,
                     module_id=module_id,
                     row_id=row_id,
+                    principal=principal,
+                    employee=employee,
+                    project_id=project_id,
+                    session_id=session_id,
+                )
+                return
+            if matched_kind == "equipment.ready_builds":
+                await self._ready_builds_pipeline(
+                    cabinet_id=cabinet_id,
+                    module_id=module_id,
+                    params={},
                     principal=principal,
                     employee=employee,
                     project_id=project_id,

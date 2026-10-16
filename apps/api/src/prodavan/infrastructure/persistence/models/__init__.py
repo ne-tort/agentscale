@@ -58,6 +58,11 @@ from prodavan.infrastructure.persistence.models.modules import (
 )
 from prodavan.infrastructure.persistence.models.platform import PlatformBootstrapRow
 from prodavan.infrastructure.persistence.models.platform_events import PlatformEventRow
+from prodavan.infrastructure.persistence.models.external_api import (
+    ApiAppKeyRow,
+    WebhookDeliveryRow,
+    WebhookSubscriptionRow,
+)
 from prodavan.infrastructure.persistence.models.projects import (
     ProjectAttachmentRow,
     ProjectRow,
@@ -67,6 +72,9 @@ from prodavan.infrastructure.persistence.models.projects import (
 __all__ = [
     "AgentEventRow",
     "AgentSessionRow",
+    "ApiAppKeyRow",
+    "WebhookDeliveryRow",
+    "WebhookSubscriptionRow",
     "AgentUsageRow",
     "EmployeeChatPinRow",
     "EmployeeComposerDraftRow",

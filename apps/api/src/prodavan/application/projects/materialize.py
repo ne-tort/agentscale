@@ -20,6 +20,7 @@ from prodavan.application.projects.openclaw_config_materializer import (
     render_openclaw_config_yaml,
 )
 from prodavan.domain.agent import default_tool_policy
+from prodavan.domain.agent.turn_limits import UNLIMITED_MAX_TURNS
 from prodavan.domain.ai_keys import is_http_probe_kind
 from prodavan.domain.projects import workspace_key_for
 from prodavan.infrastructure.persistence.models.ai_keys import AiProviderKeyRow
@@ -293,10 +294,12 @@ class ProjectMaterializeService:
             provider_key_id=provider_key_id,
             provider_endpoint=provider_endpoint,
             mcp_packages=mcp_packages,
-            # 12 хватало только на 4-6 позиций подбора (поиск+запись на
-            # позицию — 2-3 тул-кола); прогон обрывался с reason=max_turns.
-            # Страж расхода — budget.max_tokens (company policy), не турн-кап.
-            max_turns=50,
+            # По умолчанию БЕЗ ограничений: 12 хватало только на 4-6 позиций
+            # подбора, а жёсткие 50 обрывали содержательные прогоны
+            # (reason=max_turns) без внятной подписи в чате. Лимит — настройка
+            # чата (agent_sessions.max_turns, уходит в теле send), страж расхода
+            # — budget.max_tokens (company policy), а не турн-кап.
+            max_turns=UNLIMITED_MAX_TURNS,
         )
         writer.write_text_file(
             relative_path=openclaw_config_relative_path(),

@@ -74,3 +74,49 @@ def test_employee_login_handle_same_local_different_companies() -> None:
 
 def test_employee_kc_email_is_the_handle() -> None:
     assert employee_kc_email("alice", "romashka") == "alice@romashka.local"
+
+
+# --- upsert_invited: короткий local part email не должен ронять создание ----
+
+
+@pytest.mark.asyncio
+async def test_upsert_invited_short_email_local_part() -> None:
+    """Регресс nightly test_admin_cabinet_crud: company admin с email
+    «a@cabadmin.test» (local part < 3 символов) ронял создание компании с
+    422 «login must be 3-64 chars» — employee_login_handle валидирует local,
+    а upsert_invited звал его без обработки. Теперь: временный уникальный
+    логин, который _assign_login заменяет на employee.id."""
+    from sqlalchemy.dialects.postgresql import JSONB
+    from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+    from sqlalchemy.ext.compiler import compiles
+
+    from prodavan.application.employees.service import EmployeesCommandService
+    from prodavan.infrastructure.persistence.models.identity import EmployeeRow
+
+    @compiles(JSONB, "sqlite")
+    def _jsonb_as_json(element, compiler, **kw):  # noqa: ANN001, ANN202
+        return "JSON"
+
+    engine = create_async_engine("sqlite+aiosqlite://")
+    async with engine.begin() as conn:
+        await conn.run_sync(EmployeeRow.__table__.create, checkfirst=True)
+    session = AsyncSession(engine)
+    try:
+        svc = EmployeesCommandService(session)
+        emp = await svc.upsert_invited(
+            email="a@cabadmin.test",
+            display_name="Admin",
+            company_login_slug="cabadminco",
+        )
+        # короткий local part → fallback на id сотрудника (валидный логин)
+        assert emp.login == emp.id
+        # валидный local part по-прежнему получает handle
+        emp2 = await svc.upsert_invited(
+            email="alice@cabadmin.test",
+            display_name=None,
+            company_login_slug="cabadminco",
+        )
+        assert emp2.login == "alice@cabadminco.local"
+    finally:
+        await session.close()
+        await engine.dispose()

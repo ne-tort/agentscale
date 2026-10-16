@@ -555,7 +555,8 @@ class PodModuleDataService:
         if not deleted:
             raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="row not found")
         if module_id == "mod_equipment" and existing is not None:
-            # Каскад как в UI: позиция → группы/офферы/бюджет.
+            # Каскад как в UI: позиция → группы/офферы/бюджет/сборки;
+            # сборка → её группы-кандидаты слотов и их офферы.
             from prodavan.application.modules.equipment_offers_service import (
                 cascade_equipment_delete,
             )
@@ -586,6 +587,35 @@ class PodModuleDataService:
                     project_id=project_id,
                 )
         await self._session.commit()
+        # Пересчёт после удаления (как на записи): иначе вычисляемые итоги —
+        # цена сборки, бюджет, «Закупка», агрегаты каталога готовых сборок —
+        # остаются посчитанными по удалённой строке.
+        try:
+            await self._maybe_run_row_actions(
+                bridge=bridge,
+                cabinet_id=bridge.cabinet_id,
+                project_id=project_id,
+                module_id=module_id,
+                table_slug=table_slug,
+                row_id=row_id,
+                session_id=(
+                    str(existing.get("session_id") or "") or None
+                    if existing is not None
+                    else None
+                ),
+                previous_body=(
+                    existing.get("body")
+                    if existing is not None and isinstance(existing.get("body"), dict)
+                    else None
+                ),
+            )
+        except Exception:
+            logger.exception(
+                "pod module row actions after delete failed project=%s module=%s table=%s",
+                project_id,
+                module_id,
+                table_slug,
+            )
         return {"module_id": module_id, "deleted": True, "row_id": row_id}
 
     async def invoke_action(
@@ -597,6 +627,7 @@ class PodModuleDataService:
         action_id: str,
         row_id: str | None = None,
         session_id: str | None = None,
+        extra_params: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         project = await self._require_project_row(project_id, bridge)
         self._require_module_actions(bridge, module_id)
@@ -622,6 +653,7 @@ class PodModuleDataService:
             row_id=row_id,
             project_id=project_id,
             session_id=session_id,
+            extra_params=extra_params,
         )
         return {"module_id": module_id, **result}
 

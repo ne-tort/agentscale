@@ -3728,6 +3728,36 @@ abstract class AppLocalizations {
   /// **'None selected'**
   String get projectChatErrorPolicyFallbackModelsNone;
 
+  /// No description provided for @projectChatMaxTurnsLimit.
+  ///
+  /// In en, this message translates to:
+  /// **'Limit steps per run'**
+  String get projectChatMaxTurnsLimit;
+
+  /// No description provided for @projectChatMaxTurnsValue.
+  ///
+  /// In en, this message translates to:
+  /// **'Steps per run'**
+  String get projectChatMaxTurnsValue;
+
+  /// No description provided for @projectChatMaxTurnsUnlimited.
+  ///
+  /// In en, this message translates to:
+  /// **'Unlimited'**
+  String get projectChatMaxTurnsUnlimited;
+
+  /// No description provided for @projectChatMaxTurnsInvalid.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter a whole number from 1 to 1000'**
+  String get projectChatMaxTurnsInvalid;
+
+  /// No description provided for @projectChatMaxTurnsReached.
+  ///
+  /// In en, this message translates to:
+  /// **'Step limit reached — ask the agent to continue'**
+  String get projectChatMaxTurnsReached;
+
   /// No description provided for @chatCopyMessage.
   ///
   /// In en, this message translates to:

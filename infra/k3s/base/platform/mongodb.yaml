@@ -99,6 +99,20 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /data/db
+          startupProbe:
+            # WiredTiger recovery после ребута ноды может идти минуты.
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  mongosh --quiet \
+                    -u "$MONGO_INITDB_ROOT_USERNAME" \
+                    -p "$MONGO_INITDB_ROOT_PASSWORD" \
+                    --authenticationDatabase admin \
+                    --eval "db.adminCommand('ping')"
+            periodSeconds: 10
+            failureThreshold: 60
           readinessProbe:
             exec:
               command:

@@ -17,6 +17,12 @@ permissions:
   packages: write
   actions: write
 
+# Every runner lives on ONE VM: stacking image builds (each ~2 GB of layers)
+# on top of each other is what pushed the CI disk to 84%. Newest push wins.
+concurrency:
+  group: ci-images-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   REGISTRY: ghcr.io
 
@@ -124,8 +130,28 @@ jobs:
           docker run --rm --network "$NET" \
             -e DATABASE_URL="$DATABASE_URL" \
             "$IMAGE" ./scripts/migrate.sh
-          docker rm -f "$NAME"
+          # -v removes the anonymous postgres volume: without it every smoke run
+          # leaks ~140 MB and the CI VM disk fills up unnoticed.
+          docker rm -fv "$NAME"
           docker network rm "$NET"
+
+      - name: Reclaim disk (dangling volumes + stale images)
+        if: always()
+        run: |
+          set -euo pipefail
+          # Belt-and-braces: a cancelled/failed run must not leave its smoke
+          # container, anonymous volume or stale sha-tagged image behind.
+          docker rm -fv "agentscale-migrate-smoke-${{ github.run_id }}-${{ github.job }}" 2>/dev/null || true
+          docker volume prune -f >/dev/null 2>&1 || true
+          # Keep only the two newest sha tags per repo (rollback window); k3s
+          # runs from containerd, so docker-side sha images are CI leftovers.
+          for repo in agentscale-api agentscale-web; do
+            docker images --format '{{.Repository}}:{{.Tag}} {{.CreatedAt}}' \
+              | grep -E "^${REGISTRY}/[^/]+/${repo}:[0-9a-f]{12} " \
+              | sort -k2 -r | tail -n +3 | awk '{print $1}' \
+              | xargs -r -n1 docker rmi >/dev/null 2>&1 || true
+          done
+          df -h /
 
   build-web:
     runs-on: [self-hosted, linux, docker]

@@ -61,6 +61,17 @@ class _ProjectChatSettingsPageState extends State<ProjectChatSettingsPage> {
   bool _deleting = false;
   Map<String, dynamic>? _metrics;
 
+  /// Лимит шагов модели на один ход; null = без ограничений (дефолт).
+  int? _maxTurns;
+  bool _maxTurnsLoaded = false;
+
+  /// Значение, которое подставляется при включении ограничения.
+  static const int _defaultMaxTurns = 25;
+
+  /// Потолок настройки — как `MAX_TURNS_CEILING` на сервере; больше не имеет
+  /// смысла (это уже «без ограничений»).
+  static const int _maxTurnsCeiling = 1000;
+
   @override
   void initState() {
     super.initState();
@@ -89,9 +100,12 @@ class _ProjectChatSettingsPageState extends State<ProjectChatSettingsPage> {
           'agent_requests':
               body['agent_requests'] ?? body['agent_messages'] ?? 0,
         };
+        _maxTurns = (body['max_turns'] as num?)?.toInt();
+        _maxTurnsLoaded = true;
       });
     } catch (_) {
       // Keep initial metrics from list row / defaults.
+      if (mounted) setState(() => _maxTurnsLoaded = true);
     }
   }
 
@@ -155,6 +169,19 @@ class _ProjectChatSettingsPageState extends State<ProjectChatSettingsPage> {
     final next = body['pinned'] == true;
     setState(() => _pinned = next);
     widget.onPinnedChanged(next);
+  }
+
+  /// null снимает лимит («без ограничений»), иначе — положительное целое.
+  Future<void> _saveMaxTurns(int? value) async {
+    final body = await workContext.api.patchAgentSession(
+      projectId: widget.projectId,
+      sessionId: widget.sessionId,
+      maxTurns: value,
+      updateMaxTurns: true,
+    );
+    final next = (body['max_turns'] as num?)?.toInt();
+    if (!mounted) return;
+    setState(() => _maxTurns = next);
   }
 
   Future<void> _deleteDialog() async {
@@ -226,6 +253,31 @@ class _ProjectChatSettingsPageState extends State<ProjectChatSettingsPage> {
               trailing: const AppTrailingChevron(),
               enabled: enabled,
               onTap: _pickModel,
+            ),
+          AppSwitchPreference(
+            title: l10n.projectChatMaxTurnsLimit,
+            icon: Icons.format_list_numbered,
+            // До загрузки не показываем выключенным — иначе первый же тап
+            // молча перезапишет серверное значение
+            value: _maxTurns != null,
+            enabled: enabled && _maxTurnsLoaded,
+            onChanged: (on) => _saveMaxTurns(on ? _defaultMaxTurns : null),
+          ),
+          if (_maxTurns != null)
+            AppValuePreference<int>(
+              title: l10n.projectChatMaxTurnsValue,
+              icon: Icons.tag_outlined,
+              value: _maxTurns!,
+              digitsOnly: true,
+              enabled: enabled,
+              invalidMessage: l10n.projectChatMaxTurnsInvalid,
+              validateInput: (raw) {
+                final parsed = int.tryParse(raw);
+                return parsed != null &&
+                    parsed >= 1 &&
+                    parsed <= _maxTurnsCeiling;
+              },
+              onSave: _saveMaxTurns,
             ),
           AppNavPreference(
             title: l10n.projectChatErrorPolicyTitle,

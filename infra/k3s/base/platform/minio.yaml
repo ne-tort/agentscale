@@ -114,6 +114,12 @@ spec:
               exec:
                 # No graceful CLI; give endpoints time to fail readiness before SIGTERM.
                 command: ["/bin/sh", "-c", "sleep 10"]
+          startupProbe:
+            httpGet:
+              path: /minio/health/live
+              port: s3
+            periodSeconds: 5
+            failureThreshold: 60
           readinessProbe:
             httpGet:
               path: /minio/health/ready

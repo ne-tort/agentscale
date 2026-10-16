@@ -316,7 +316,7 @@ resource "null_resource" "gitops_bootstrap" {
 
   triggers = {
     repo       = var.remote_repo_path
-    gitops_rev = "v12-templatefile"
+    gitops_rev = "v13-apps-profile"
     token_fp   = var.ghcr_token != "" ? substr(sha256(var.ghcr_token), 0, 12) : "none"
     script_sha = filesha256("${path.module}/templates/gitops-bootstrap.sh.tpl")
   }
@@ -340,6 +340,7 @@ resource "null_resource" "gitops_bootstrap" {
       kubeconfig_path  = local.kubeconfig_path
       remote_repo_path = var.remote_repo_path
       ghcr_username    = var.ghcr_username
+      gitops_apps      = var.gitops_apps
     })
     destination = "/tmp/prodavan-gitops.sh"
   }

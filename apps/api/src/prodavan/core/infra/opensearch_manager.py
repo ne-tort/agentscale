@@ -8,6 +8,7 @@ from prodavan.application.search_index.adapters.memory_store import InMemorySear
 from prodavan.application.search_index.adapters.opensearch_store import OpenSearchStore
 from prodavan.application.search_index.ports.search_index import SearchIndexPort
 from prodavan.application.search_index.service import SearchIndexService
+from prodavan.core.infra.startup_ping import ping_with_retry, resolve_ping_retry
 from prodavan.core.lifespan.resource import LifespanResource
 
 logger = logging.getLogger(__name__)
@@ -42,12 +43,17 @@ class OpenSearchManager(LifespanResource):
         required: bool = False,
         username: str | None = None,
         password: str | None = None,
+        ping_attempts: int | None = None,
+        ping_delay_sec: float | None = None,
     ) -> None:
         self._url = (url or "").strip() or None
         self._enabled_flag = bool(enabled) and self._url is not None
         self._required = required
         self._username = (username or "").strip() or None
         self._password = (password or "").strip() or None
+        self._ping_attempts, self._ping_delay_sec = resolve_ping_retry(
+            ping_attempts, ping_delay_sec
+        )
         self._store: SearchIndexPort = InMemorySearchIndexStore()
         self._os_store: OpenSearchStore | None = None
         self._service = SearchIndexService(self._store)
@@ -81,7 +87,12 @@ class OpenSearchManager(LifespanResource):
                 username=self._username,
                 password=self._password,
             )
-            ok = await store.ping()
+            ok = await ping_with_retry(
+                "opensearch",
+                store.ping,
+                attempts=self._ping_attempts,
+                delay_sec=self._ping_delay_sec,
+            )
             if not ok:
                 raise RuntimeError("opensearch ping returned false")
             self._os_store = store

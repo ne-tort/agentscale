@@ -87,8 +87,19 @@ async def defer_or_schedule_project_sync(
     *,
     project_id: str,
     source: str,
+    force: bool = False,
 ) -> WorkspaceSyncNotification:
-    if settings.projects_auto_rematerialize_on_cabinet_change:
+    """Рематериализовать workspace проекта либо отложить (метка outdated).
+
+    `force=True` запускает рематериализацию даже при выключенном
+    `projects_auto_rematerialize_on_cabinet_change`. Нужна для смены
+    провайдера/AI-ключа проекта: этот флаг описывает реакцию на изменения
+    КАБИНЕТА (состав модулей, контент страниц), где отложенный sync — лишь
+    вопрос свежести файлов. Устаревший `.prodavan/config.yaml` — другое: под
+    продолжает ходить на endpoint прежнего провайдера, и чат падает в 401
+    немедленно, а не «когда пользователь соизволит обновить workspace».
+    """
+    if force or settings.projects_auto_rematerialize_on_cabinet_change:
         result = await request_rematerialize_project(project_id, source=source)
         if result.get("enqueued"):
             return WorkspaceSyncNotification(

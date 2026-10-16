@@ -186,7 +186,6 @@ def test_equipment_meta_hub_on_data_placement() -> None:
         "found_groups",
         "found_offers",
         "equipment_types",
-        "equipment_items",
         "equipment_builds",
         "trusted_sellers",
         "web_shops",
@@ -200,6 +199,23 @@ def test_equipment_meta_hub_on_data_placement() -> None:
         "document_fields",
         "master_price",
         "equipment_search",
+        # WAVE12: каталог «Готовые сборки» v2 (карточки + сборки + слоты)
+        "part_cards",
+        "ready_builds",
+        "ready_build_slots",
+    }
+    # Каталог сборок — глобальная библиотека: chats=all (строки общие на проект,
+    # session_id NULL). Чат-скоп сломал бы переиспользование между заявками.
+    catalog_scopes = {
+        t["slug"]: (t.get("scope") or {}).get("chats")
+        for t in meta["tables"]
+        if t["slug"]
+        in ("part_cards", "ready_builds", "ready_build_slots")
+    }
+    assert catalog_scopes == {
+        "part_cards": "all",
+        "ready_builds": "all",
+        "ready_build_slots": "all",
     }
     kinds = {a["kind"] for a in meta["actions"]}
     assert "content.index_opensearch" in kinds
@@ -327,7 +343,10 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     assert "equipment_catalog_query" not in tool_names
     assert "equipment_offers_upsert" not in tool_names
     assert "equipment_types_list" in tool_names
-    assert "equipment_items_upsert" in tool_names
+    # WAVE12: equipment_items убраны; карточки комплектующих — read-only для
+    # платформенного mcp_tools (запись — через first-party part_card_upsert)
+    assert "equipment_items_upsert" not in tool_names
+    assert "part_cards_list" in tool_names
     assert "equipment_builds_list" in tool_names
     assert "equipment_builds_upsert" in tool_names
     # sellers / web shops are READ-ONLY for the agent
@@ -344,8 +363,9 @@ def test_equipment_meta_hub_on_data_placement() -> None:
 
     hub = next(v for v in meta["views"] if v["slug"] == "equipment_hub")
     hub_titles = {i["title"] for i in hub["ui_json"]["items"]}
-    # Данные: рабочие таблицы подбора
-    assert "Характеристики оборудования" in hub_titles
+    # Данные: рабочие таблицы подбора (характеристики-легаси WAVE12 убраны —
+    # их роль несут «Карточки комплектующих» в Управлении)
+    assert "Характеристики оборудования" not in hub_titles
     assert "Сборка" in hub_titles
     assert "Бюджетирование" in hub_titles
     assert "Позиции заказчика" in hub_titles
@@ -363,12 +383,24 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     assert mgmt_titles == {
         "Базы данных",
         "Типы комплектующих",
+        # WAVE12: карточки партномеров + глобальная библиотека сборок
+        "Карточки комплектующих",
+        "Готовые сборки",
         "Поставщики",
         "Интернет магазины",
         "Шаблоны",
         "Промпты",
         "Инструкции MCP",
     }
+    # «Готовые сборки» ведут сразу в плоский список сборок (групп больше нет)
+    ready_item = next(
+        i for i in mgmt_hub["ui_json"]["items"] if i["title"] == "Готовые сборки"
+    )
+    assert ready_item["target"]["view"] == "ready_builds_list"
+    cards_item = next(
+        i for i in mgmt_hub["ui_json"]["items"] if i["title"] == "Карточки комплектующих"
+    )
+    assert cards_item["target"]["view"] == "part_cards_list"
     tabs = {t["id"]: t for t in meta["tabs"]}
     assert tabs["tab_equipment"]["nav"]["placement"] == "data"
     assert tabs["tab_equipment_management"]["nav"]["placement"] == "management"
@@ -429,20 +461,16 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     assert {"line_id", "title", "part_number", "seller", "qty", "price_in", "vat", "markup"} <= budget_columns
     assert not any("s4b" in v["slug"] for v in meta["views"])
 
-    items_list = next(v for v in meta["views"] if v["slug"] == "equipment_items_list")
-    assert items_list["ui_json"]["inline_add"]["field"] == "name"
-    item_settings = next(v for v in meta["views"] if v["slug"] == "equipment_item_settings")
-    item_cols = [f["column"] for f in item_settings["ui_json"]["fields"]]
-    assert item_cols[:3] == ["name", "offer_id", "type_id"]
-    offer_field = next(f for f in item_settings["ui_json"]["fields"] if f["column"] == "offer_id")
-    assert offer_field["widget"] == "type_ref_picker"
-    assert offer_field["pick_view"] == "found_offers_pick"
-    assert offer_field["title_field"] == "offer_title"
-    type_field = next(f for f in item_settings["ui_json"]["fields"] if f["column"] == "type_id")
+    # WAVE12: «Карточки комплектующих» вместо equipment_items
+    cards_list = next(v for v in meta["views"] if v["slug"] == "part_cards_list")
+    assert cards_list["ui_json"]["inline_add"]["field"] == "part_number"
+    card_settings = next(v for v in meta["views"] if v["slug"] == "part_card_settings")
+    card_cols = [f["column"] for f in card_settings["ui_json"]["fields"]]
+    assert card_cols[:2] == ["type_id", "part_number"]
+    type_field = next(f for f in card_settings["ui_json"]["fields"] if f["column"] == "type_id")
     assert type_field["widget"] == "type_ref_picker"
-    assert type_field["empty_style"] == "warning"
-    attrs_field = next(f for f in item_settings["ui_json"]["fields"] if f["column"] == "attrs")
-    assert attrs_field["widget"] == "schema_attrs"
+    attrs_field = next(f for f in card_settings["ui_json"]["fields"] if f["column"] == "attrs")
+    assert attrs_field["widget"] == "constraint_attrs"
     assert attrs_field["section_title"]["ru"] == "Характеристики"
 
     types_pick = next(v for v in meta["views"] if v["slug"] == "equipment_types_pick")
@@ -450,6 +478,10 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     assert types_pick["ui_json"]["selection"]["control"] == "switch"
     assert types_pick["ui_json"]["selection"]["placement"] == "trailing"
     assert types_pick["ui_json"]["selection"]["disable_row_tap"] is True
+    # смена типа сбрасывает характеристики/требования и закреплённую карточку
+    assert set(types_pick["ui_json"]["selection"]["set_on_context"]["clear_fields"]) == {
+        "attrs", "constraints", "card_id",
+    }
     assert "row_tap" not in types_pick["ui_json"]
 
     offers_pick = next(v for v in meta["views"] if v["slug"] == "found_offers_pick")
@@ -457,9 +489,16 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     assert offers_pick["ui_json"]["selection"]["disable_row_tap"] is True
     assert offers_pick["ui_json"]["selection"]["set_on_context"]["field"] == "offer_id"
 
-    items_pick = next(v for v in meta["views"] if v["slug"] == "equipment_items_pick")
-    assert items_pick["ui_json"]["selection"]["set_on_context"]["map_field"] == "slots"
-    assert items_pick["ui_json"]["row_filter_from_context"]["type_id"] == "_pick_type_id"
+    # пикер карточки для слота: фильтр по типу + покрытию требований слота
+    cards_pick = next(v for v in meta["views"] if v["slug"] == "part_cards_pick")
+    assert cards_pick["ui_json"]["row_filter_from_context"] == {"type_id": "type_id"}
+    assert cards_pick["ui_json"]["row_matches_context_map"] == {
+        "field": "attrs",
+        "context_field": "constraints",
+    }
+    assert cards_pick["ui_json"]["selection"]["set_on_context"]["field"] == "card_id"
+    assert not any(v["slug"] == "equipment_items_pick" for v in meta["views"])
+    assert not any(v["slug"] == "found_groups_pick" for v in meta["views"])
 
     type_settings = next(v for v in meta["views"] if v["slug"] == "equipment_type_settings")
     type_cols = [f["column"] for f in type_settings["ui_json"]["fields"]]
@@ -468,6 +507,9 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     assert scope_field["widget"] == "choice"
     fields_ed = next(f for f in type_settings["ui_json"]["fields"] if f["column"] == "fields_json")
     assert fields_ed["widget"] == "fields_schema_editor"
+    # из типа — переход к его карточкам
+    type_links = type_settings["ui_json"]["links"]
+    assert any(l["open_view"] == "part_cards_list" for l in type_links)
 
     types_list = next(v for v in meta["views"] if v["slug"] == "equipment_types_list")
     assert all(c["field"] != "sort_order" for c in types_list["ui_json"]["columns"])
@@ -476,35 +518,88 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     assert builds_list["ui_json"]["inline_add"]["field"] == "name"
     build_settings = next(v for v in meta["views"] if v["slug"] == "equipment_build_settings")
     build_cols = [f["column"] for f in build_settings["ui_json"]["fields"]]
+    # WAVE12/13: сборка чата — ссылка на готовую сборку + количество;
+    # редактора слотов нет
     assert build_cols == [
         "name",
+        "ready_build_id",
+        "line_id",
+        "qty",
         "build_kind",
+        "match_label",
         "components_count",
         "price_total",
-        "slots",
+        "note",
     ]
-    slots_field = next(f for f in build_settings["ui_json"]["fields"] if f["column"] == "slots")
-    assert slots_field["widget"] == "build_slots"
-    assert slots_field["pick_view"] == "equipment_items_pick"
-    assert "section_title" not in slots_field
+    ready_field = next(f for f in build_settings["ui_json"]["fields"] if f["column"] == "ready_build_id")
+    assert ready_field["widget"] == "pick"
+    assert ready_field["pick_view"] == "ready_builds_pick"
+    # переход в каталог — на саму готовую сборку (по ready_build_id из тела)
+    build_links = build_settings["ui_json"]["links"]
+    open_ready = next(l for l in build_links if l["open_view"] == "ready_build_settings")
+    assert open_ready["row_id_from_field"] == "ready_build_id"
+
+    # список готовых сборок: все сборки проекта + inline «Добавить сборку»
+    ready_list = next(v for v in meta["views"] if v["slug"] == "ready_builds_list")
+    assert ready_list["ui_json"]["inline_add"] == {"field": "name", "title": "Добавить сборку"}
+    assert "row_filter_from_context" not in ready_list["ui_json"]
+    slot_settings = next(v for v in meta["views"] if v["slug"] == "ready_build_slot_settings")
+    slot_cols = [f["column"] for f in slot_settings["ui_json"]["fields"]]
+    assert "constraints" in slot_cols and "card_id" in slot_cols
+    slot_constraints = next(f for f in slot_settings["ui_json"]["fields"] if f["column"] == "constraints")
+    assert slot_constraints["widget"] == "constraint_attrs"
+    slot_card = next(f for f in slot_settings["ui_json"]["fields"] if f["column"] == "card_id")
+    assert slot_card["pick_view"] == "part_cards_pick"
 
     seed_items = meta["seed_rows"]["items"]
-    # 14 base seeds + 4 built-in template rows (incl. master price) + 2 prompt rows
-    assert len(seed_items) == 20
+    # 17 типов (13 базовые + 4 устройства-комплекта) + 4 шаблона + 2 промпта + 1 MCP
+    assert len(seed_items) == 24
     by_row = {s["row_id"]: s for s in seed_items}
     assert "tpl_budget_builtin" in by_row
-    assert by_row["etype_cpu"]["body"]["name"] if "etype_cpu" in by_row else True
     etypes = [s for s in seed_items if s["table_slug"] == "equipment_types"]
     assert etypes and etypes[0]["body"]["sort_order"] == 10
     assert etypes[0]["body"]["build_scope"] == "all"
-    assert any(f["key"] == "cores" for f in etypes[0]["body"]["fields_json"])
-    assert any(f["key"] == "memory_channels" for f in etypes[0]["body"]["fields_json"])
     assert any(s["row_id"] == "etype_case_fans" for s in seed_items)
     assert any(s["row_id"] == "etype_bmc" for s in seed_items)
+    # WAVE12: типы — шаблоны с группами значений и доменами совместимости.
+    by_type = {s["row_id"]: s["body"] for s in etypes}
+    cpu = {f["key"]: f for f in by_type["etype_cpu"]["fields_json"]}
+    mb = {f["key"]: f for f in by_type["etype_motherboard"]["fields_json"]}
+    ram = {f["key"]: f for f in by_type["etype_ram"]["fields_json"]}
+    cooling = {f["key"]: f for f in by_type["etype_cooling"]["fields_json"]}
+    case = {f["key"]: f for f in by_type["etype_case"]["fields_json"]}
+    storage = {f["key"]: f for f in by_type["etype_storage"]["fields_json"]}
+    psu = {f["key"]: f for f in by_type["etype_psu"]["fields_json"]}
+    # матрица совместимости: одинаковые домены у общих полей
+    assert cpu["socket"]["compat_domain"] == "socket"
+    assert mb["socket"]["compat_domain"] == "socket"
+    assert cooling["socket"]["compat_domain"] == "socket"
+    assert mb["ram_type"]["compat_domain"] == ram["ram_type"]["compat_domain"] == "ram_type"
+    assert mb["form_factor"]["compat_domain"] == case["form_factor"]["compat_domain"] == "form_factor"
+    # обязательные для идентификации поля помечены required
+    assert cpu["socket"]["required"] is True
+    assert ram["module_capacity"]["required"] is True
+    # значения — заранее заданные группы, не свободный текст
+    assert "LGA1700" in cpu["socket"]["values"]
+    assert "512" in {g["value"] for g in storage["capacity"]["groups"]}
+    assert "650" in {g["value"] for g in psu["wattage"]["groups"]}
+    # WAVE13: устройства-комплекты (ноутбук/неттоп/моноблок/телефон) —
+    # свои типы со scope под свой вид сборки, поля-группы (память/ОЗУ/экран/
+    # камера/аккумулятор) с заранее заданными значениями
+    for scope, row_id in (("laptop", "etype_laptop"), ("nettop", "etype_nettop"),
+                          ("monoblock", "etype_monoblock"), ("phone", "etype_phone")):
+        assert row_id in by_type, row_id
+        assert by_type[row_id]["build_scope"] == scope
+        assert any(f.get("required") for f in by_type[row_id]["fields_json"])
+    phone = {f["key"]: f for f in by_type["etype_phone"]["fields_json"]}
+    assert phone["storage_gb"]["kind"] == "groups"  # «SSD телефона»
+    assert phone["camera_mp"]["kind"] == "groups"
+    assert phone["battery_mah"]["kind"] == "groups"
     mcp_seed = next(s for s in seed_items if s["row_id"] == "equipment_mcp_default")
     assert mcp_seed["table_slug"] == "equipment_mcp"
     assert mcp_seed["body"]["enabled"] is True
     assert mcp_seed["body"]["name"] == "prodavan-equipment"
+    assert mcp_seed["body"]["version"] == "3.0.0"
     assert seed_items[-1]["row_id"] == "equipment_mcp_default"
 
     # Системные промпты подбора: AGENTS.md в корне + правила в prompts/equipment
@@ -531,7 +626,35 @@ def test_equipment_meta_hub_on_data_placement() -> None:
         "30-identify.md",
         "40-groups.md",
         "50-rank.md",
+        "60-builds.md",
+        "70-ready-builds.md",
     ]
+    # WAVE12: правила учат новой модели (карточки + готовые сборки-ссылки).
+    assert "equipment_builds" in agents_file["body"]
+    assert "part_cards" in agents_file["body"]
+    builds_rule = next(
+        f for f in rules_seed["body"]["files_json"] if f["name"] == "60-builds.md"
+    )
+    catalog_rule = next(
+        f for f in rules_seed["body"]["files_json"] if f["name"] == "70-ready-builds.md"
+    )
+    # правило каталога учит приоритету «сначала готовая сборка», связи вместо
+    # копии и новым инструментам (старых build_group_*/class_key нет)
+    for probe in (
+        "ready_builds_list",
+        "ready_build_get",
+        "ready_build_attach",
+        "part_card_upsert",
+        "constraints",
+    ):
+        assert probe in catalog_rule["body"], probe
+    assert "build_group" not in catalog_rule["body"]
+    assert "class_key" not in catalog_rule["body"]
+    assert "сначала ищи готовую" in catalog_rule["body"].lower()
+    # создание сборки со слотами — в правиле 60
+    assert "ready_build_upsert" in builds_rule["body"]
+    assert "part_cards_list" in builds_rule["body"]
+    assert "constraints" in builds_rule["body"]
     assert all(f["body"].strip() for f in rules_seed["body"]["files_json"])
     priorities = [f["priority"] for f in rules_seed["body"]["files_json"]]
     assert priorities == sorted(priorities)
@@ -637,7 +760,7 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     assert any(c["name"] == "paused" for c in meta["columns"])
     assert any(c["name"] == "column_map" for c in meta["columns"])
     assert any(
-        c["name"] == "offer_id" and c["table_slug"] == "equipment_items" for c in meta["columns"]
+        c["name"] == "attrs" and c["table_slug"] == "part_cards" for c in meta["columns"]
     )
     assert any(
         c["name"] == "build_scope" and c["table_slug"] == "equipment_types" for c in meta["columns"]
@@ -689,13 +812,77 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     )
     assert line_col["required"] is False
     assert line_col["label"]["ru"] == "Запрос"
-    # WAVE7: у группы line_id обязателен (позиция, для которой выбираем)
+    # WAVE10: группа принадлежит ЛИБО позиции (line_id), ЛИБО слоту сборки
+    # (build_id + slot_type_id) — поэтому line_id больше не обязателен.
     group_line_col = next(
         c
         for c in meta["columns"]
         if c["name"] == "line_id" and c["table_slug"] == "found_groups"
     )
-    assert group_line_col["required"] is True
+    assert group_line_col["required"] is False
+    build_col = next(
+        c
+        for c in meta["columns"]
+        if c["name"] == "build_id" and c["table_slug"] == "found_groups"
+    )
+    assert build_col["ref"]["table_slug"] == "equipment_builds"
+    slot_col = next(
+        c
+        for c in meta["columns"]
+        if c["name"] == "slot_type_id" and c["table_slug"] == "found_groups"
+    )
+    assert slot_col["ref"]["table_slug"] == "equipment_types"
+    # equipment_builds привязана к позиции и получает поля пайплайна (best/выгода).
+    build_line = next(
+        c
+        for c in meta["columns"]
+        if c["name"] == "line_id" and c["table_slug"] == "equipment_builds"
+    )
+    assert build_line["ref"]["table_slug"] == "request_lines"
+    build_names = {c["name"] for c in meta["columns"] if c["table_slug"] == "equipment_builds"}
+    assert {"is_best", "is_selected", "alternatives_count", "benefit_label"} <= build_names
+    # WAVE11: количество на слот — параллельная карта к slots (не ломает их).
+    assert "slot_qty" in build_names
+    slot_qty_col = next(
+        c for c in meta["columns"]
+        if c["name"] == "slot_qty" and c["table_slug"] == "equipment_builds"
+    )
+    assert slot_qty_col["type"] == "json"
+    assert slot_qty_col["required"] is False
+    # on_order — явный флаг «под заказ» сборки (бюджет читает его, а не текст
+    # match_label); owner_kind — владелец группы (позиция или слот сборки).
+    assert "on_order" in build_names
+    group_names = {c["name"] for c in meta["columns"] if c["table_slug"] == "found_groups"}
+    assert "owner_kind" in group_names
+    # снапшот сборок на позиции (колонки списка «Позиции заказчика»)
+    line_names = {c["name"] for c in meta["columns"] if c["table_slug"] == "request_lines"}
+    assert {
+        "builds_count",
+        "build_best_id",
+        "build_best_price",
+        "build_match_label",
+        "build_benefit_label",
+        "build_benefit_tone",
+    } <= line_names
+    # кандидаты слотов не должны попадать в общие списки найденных товаров
+    for slug in ("found_groups_list", "groups_for_line"):
+        view = next(v for v in meta["views"] if v["slug"] == slug)
+        assert view["ui_json"]["row_filter"] == {"owner_kind": "line"}
+    # позиция показывает сборку и даёт переход к её вариантам
+    lines_list = next(v for v in meta["views"] if v["slug"] == "request_lines_list")
+    line_fields = {c["field"] for c in lines_list["ui_json"]["columns"]}
+    assert {"build_best_price", "build_benefit_label"} <= line_fields
+    builds_btn = next(
+        t for t in lines_list["ui_json"]["toolbar"] if t.get("view") == "equipment_builds_list"
+    )
+    assert builds_btn["context"] == "row"
+    # budget_lines может быть сборкой.
+    budget_build = next(
+        c
+        for c in meta["columns"]
+        if c["name"] == "build_id" and c["table_slug"] == "budget_lines"
+    )
+    assert budget_build["ref"]["table_slug"] == "equipment_builds"
     form = next(v for v in meta["views"] if v["slug"] == "found_offers_form")
     form_cols = [f["column"] for f in form["ui_json"]["fields"]]
     assert "catalog_id" not in form_cols

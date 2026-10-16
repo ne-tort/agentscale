@@ -39,6 +39,22 @@ def workspace_object_key(*, workspace_key: str, relative_path: str) -> str:
     return f"projects/{workspace_key}/workspace/{rel}"
 
 
+def workspace_meta_object_key(*, workspace_key: str, name: str) -> str:
+    """Служебный объект проекта ВНЕ ``workspace/`` — в гидрацию пода не попадает.
+
+    Там живёт, например, манифест материализованных путей: дегидратация читает
+    его, чтобы не выкачивать из пода файлы, которые платформа всё равно
+    перезаписывает из Postgres.
+    """
+    safe = Path(name).name
+    if not safe or safe.startswith("."):
+        raise ValueError(f"unsafe meta name: {name!r}")
+    key = (workspace_key or "").strip().strip("/")
+    if not key or ".." in key.split("/"):
+        raise ValueError(f"unsafe workspace_key: {workspace_key!r}")
+    return f"projects/{key}/meta/{safe}"
+
+
 def cabinet_package_object_key(*, cabinet_id: str, name: str, version: str) -> str:
     return f"cabinet_packages/{cabinet_id}/{name}-{version}.zip"
 
