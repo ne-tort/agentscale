@@ -71,17 +71,19 @@ def test_same_tool_different_servers_allowed() -> None:
 
 
 def test_equipment_seed_aliases_validate() -> None:
+    from prodavan.application.mcp.platform_equipment_mcp import _TOOL_NAMES
     from prodavan.application.platform.product_module_seeds import mod_equipment_meta
 
     aliases = mod_equipment_meta().get("mcp_aliases")
     assert isinstance(aliases, list)
-    assert len(aliases) == 10  # +delete-инструменты (v2.1.0)
     validate_document_body("mcp_aliases", aliases)
     # Every item must carry a non-empty server-qualified tool + label.
     for item in aliases:
         assert item["server"] == "prodavan-equipment"
         assert item["tool"]
         assert item["label"]
+    # Every MCP tool has a human-readable chat alias (no raw wire names in chat).
+    assert {item["tool"] for item in aliases} == set(_TOOL_NAMES)
 
 
 def test_modules_seed_aliases_validate() -> None:

@@ -209,7 +209,8 @@ async def test_budget_export_requires_rows(monkeypatch) -> None:
 @pytest.mark.asyncio
 async def test_maybe_auto_equipment_pipeline_routing(monkeypatch) -> None:
     """WAVE7 роутер: found_groups → материализация; lines/offers → пересчёт;
-    procurement → procurement_apply; прочие таблицы — ничего."""
+    procurement → procurement_apply; прочие таблицы — ничего.
+    WAVE10: equipment_builds → пересчёт без материализации."""
     executor = _executor()
 
     async def _list_actions(*args, **kwargs):  # noqa: ANN003
@@ -222,6 +223,7 @@ async def test_maybe_auto_equipment_pipeline_routing(monkeypatch) -> None:
                     "groups_table": "found_groups",
                     "lines_table": "request_lines",
                     "offers_table": "found_offers",
+                    "builds_table": "equipment_builds",
                 },
                 "trigger": {"on": ["row.created", "row.updated"]},
             },
@@ -257,6 +259,10 @@ async def test_maybe_auto_equipment_pipeline_routing(monkeypatch) -> None:
         principal=principal, employee=None,
     )
     await executor.maybe_auto_budget_sync(
+        cabinet_id="cab_1", module_id="mod_equipment", table_slug="equipment_builds",
+        principal=principal, employee=None,
+    )
+    await executor.maybe_auto_budget_sync(
         cabinet_id="cab_1", module_id="mod_equipment", table_slug="procurement",
         row_id="proc_row_1", principal=principal, employee=None,
     )
@@ -265,7 +271,8 @@ async def test_maybe_auto_equipment_pipeline_routing(monkeypatch) -> None:
         principal=principal, employee=None,
     )
 
-    assert [c["materialize"] for c in pipeline_calls] == [True, False]
+    # groups → материализация; lines и builds → пересчёт без материализации
+    assert [c["materialize"] for c in pipeline_calls] == [True, False, False]
     assert apply_calls == ["proc_row_1"]
 
 

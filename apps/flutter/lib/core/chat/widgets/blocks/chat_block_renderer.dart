@@ -240,8 +240,19 @@ class ChatBlockRenderer extends StatelessWidget {
         return ChatMutedLine(
           label: '${l10n.projectChatPermissionDenied}: ${presentation.label}',
         );
-      case 'status':
       case 'system_notice':
+        // Платформенное уведомление. Видимая причина сейчас одна — исчерпан
+        // лимит шагов: без подписи пользователь видит просто оборванный ответ
+        // и не понимает, что делать дальше. Прочие причины (compact_boundary)
+        // остаются невидимыми, как и раньше.
+        final noticeReason = block.raw['reason'] as String? ?? '';
+        if (noticeReason == 'max_turns') {
+          return ChatMutedLine(
+            label: AppLocalizations.of(context).projectChatMaxTurnsReached,
+          );
+        }
+        return const SizedBox.shrink();
+      case 'status':
       case 'tool_progress':
       case 'tool_call_delta':
         return const SizedBox.shrink();

@@ -9,6 +9,12 @@ on:
       - ".github/workflows/ci-flutter.yml"
   workflow_dispatch:
 
+# One VM runs every runner: parallel Flutter analyze/test/build each spawn
+# several dart VMs (~1 GB each) and this is what exhausted the CI VM RAM.
+concurrency:
+  group: ci-flutter-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   analyze:
     # github-hosted ubuntu-latest fails instantly in this org.

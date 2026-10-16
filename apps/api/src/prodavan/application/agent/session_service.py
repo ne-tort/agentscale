@@ -62,6 +62,7 @@ from prodavan.domain.agent import (
     ChatMessage,
 )
 from prodavan.domain.agent.errors import agent_runtime_unavailable, app_error_from_bridge_event
+from prodavan.domain.agent.turn_limits import normalize_max_turns, resolve_send_max_turns
 from prodavan.domain.errors import AppError
 from prodavan.domain.identity import Principal
 from prodavan.domain.projects import CHAT_MAX_ATTACHMENTS_PER_MESSAGE, CHAT_MAX_MESSAGE_CHARS
@@ -85,6 +86,8 @@ def _session_public(row: AgentSessionRow) -> dict:
         "cwd": row.cwd,
         "status": row.status,
         "title": row.title,
+        # None = без ограничений (дефолт); N > 0 = лимит шагов на один ход
+        "max_turns": row.max_turns,
         "last_message_at": row.last_message_at.isoformat() if row.last_message_at else None,
         "created_at": row.created_at.isoformat() if row.created_at else None,
         "agent_tokens_used": 0,
@@ -717,6 +720,8 @@ class AgentSessionService:
         employee: EmployeeRow | None,
         title: str | None = None,
         pin: bool | None = None,
+        max_turns: int | None = None,
+        update_max_turns: bool = False,
     ) -> dict:
         from prodavan.application.agent.chat_sidebar_service import ChatSidebarService
 
@@ -729,6 +734,12 @@ class AgentSessionService:
         if title is not None:
             cleaned = title.strip()
             row.title = cleaned[:200] if cleaned else None
+            await self._session.commit()
+            await self._session.refresh(row)
+        if update_max_turns:
+            # None (или 0) = «без ограничений» — настройка снимается, а не
+            # обнуляется: рантайм принимает только положительное целое
+            row.max_turns = normalize_max_turns(max_turns)
             await self._session.commit()
             await self._session.refresh(row)
         pinned = None
@@ -962,6 +973,7 @@ class AgentSessionService:
                 model=send_model,
                 endpoint=runtime_endpoint,
                 retry=policy_to_send_fields(project.chat_error_policy),
+                max_turns=resolve_send_max_turns(row.max_turns),
                 bootstrap=BridgeSessionBootstrap(
                     session_id=row.id,
                     prodavan_session_id=row.id,
@@ -1007,6 +1019,13 @@ class AgentSessionService:
                             )
                         turn_ok = True
                     await self._flush_events()
+                    # исходящие вебхуки: конец хода (ответ готов / ошибка)
+                    await self._emit_webhook_on_turn_end(
+                        project_id=project_id,
+                        session_id=session_id,
+                        event_type=normalized.type,
+                        data=normalized.data if isinstance(normalized.data, dict) else {},
+                    )
                     if turn_ok:
                         await self._checkpoint_workspace_after_turn(project_id=project_id)
                     return
@@ -1056,6 +1075,13 @@ class AgentSessionService:
                 turn_ok = True
             if normalized.type in {AgentEventType.DONE, AgentEventType.ERROR}:
                 await self._flush_events()
+                # исходящие вебхуки: конец хода (ответ готов / ошибка)
+                await self._emit_webhook_on_turn_end(
+                    project_id=project_id,
+                    session_id=session_id,
+                    event_type=normalized.type,
+                    data=normalized.data if isinstance(normalized.data, dict) else {},
+                )
                 if turn_ok:
                     await self._checkpoint_workspace_after_turn(project_id=project_id)
                 return
@@ -1555,7 +1581,48 @@ class AgentSessionService:
                 )
 
         await self._session.commit()
+
+        # Исходящие вебхуки: завершение хода (ответ готов) / ошибка хода.
+        # Fire-and-forget: вебхуки не должны ломать запись события.
+        if event_type in (AgentEventType.DONE, AgentEventType.ERROR):
+            try:
+                await self._emit_webhook_on_turn_end(
+                    project_id=project_id, session_id=session_id, event_type=event_type, data=data
+                )
+            except Exception:
+                logger.exception(
+                    "webhook emit failed project=%s session=%s", project_id, session_id
+                )
         return _event_public(ev_row)
+
+    async def _emit_webhook_on_turn_end(
+        self, *, project_id: str, session_id: str, event_type: str, data: dict
+    ) -> None:
+        """Fanout chat turn completion/failure to matching webhook subscriptions."""
+        from prodavan.application.external.webhooks import (
+            EVENT_CHAT_MESSAGE_COMPLETED,
+            EVENT_CHAT_TURN_FAILED,
+            WebhookService,
+        )
+
+        project = await self._session.get(ProjectRow, project_id)
+        if project is None:
+            return
+        event_name = (
+            EVENT_CHAT_MESSAGE_COMPLETED if event_type == AgentEventType.DONE else EVENT_CHAT_TURN_FAILED
+        )
+        await WebhookService(self._session).emit(
+            company_id=project.company_id,
+            project_id=project_id,
+            event_type=event_name,
+            payload={
+                "project_id": project_id,
+                "session_id": session_id,
+                "at": datetime.now(UTC).isoformat(),
+                **({"reason": str(data.get("reason") or "")} if isinstance(data, dict) else {}),
+            },
+        )
+        await self._session.commit()
 
     async def get_transcript(
         self,
@@ -1942,6 +2009,51 @@ class AgentSessionService:
             .where(AgentSessionRow.status == AgentSessionStatus.ACTIVE)
         )
         return await self._cancel_session_rows(list(result.scalars().all()))
+
+    async def rebind_active_to_project_key(self, *, project: ProjectRow) -> int:
+        """Перепривязать ACTIVE-сессии проекта к его текущему AI-ключу.
+
+        Снапшот `resolved_key_id` / `provider` / `api_kind` / `model` пишется
+        только при создании и форке сессии. После смены провайдера проекта
+        живые сессии продолжали слать в под lease СТАРОГО ключа, а список
+        моделей в чате при этом брался из свежего `/models/live` — в итоге
+        валидный токен нового провайдера уезжал на старый endpoint (или старый
+        токен на новый) и апстрим отвечал 401 «Invalid token».
+
+        Модель сбрасываем: она принадлежала старому провайдеру и для нового
+        бессмысленна. Следующий send поднимет дефолт нового ключа через
+        `_resolve_send_model` → `_resolve_live_default_model`.
+
+        Bridge отдельно дёргать не нужно: пред-send PATCH каждый раз повторно
+        шлёт `bootstrap.provider_key_id` из строки сессии, а lease пушится для
+        `row.resolved_key_id`, так что правка строк сама доезжает до пода.
+        """
+        try:
+            chosen = await self._keys.select_runtime_key_for_project(project=project)
+        except AppError:
+            # Runtime-ключа нет (все отозваны/only cli_subscription). Patch
+            # проекта из-за этого падать не должен: сессии остаются как есть,
+            # а send сам вернёт NO_AI_KEY — как и до смены провайдера.
+            return 0
+        result = await self._session.execute(
+            select(AgentSessionRow)
+            .where(AgentSessionRow.project_id == project.id)
+            .where(AgentSessionRow.status == AgentSessionStatus.ACTIVE)
+        )
+        changed = 0
+        for row in result.scalars().all():
+            if (
+                row.resolved_key_id == chosen.id
+                and row.provider == chosen.provider
+                and row.api_kind == chosen.api_kind
+            ):
+                continue
+            row.resolved_key_id = chosen.id
+            row.provider = chosen.provider
+            row.api_kind = chosen.api_kind
+            row.model = None
+            changed += 1
+        return changed
 
     async def _cancel_session_rows(self, rows: list[AgentSessionRow]) -> int:
         for row in rows:

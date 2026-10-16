@@ -6,6 +6,11 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# All runners share one VM — supersede a pending run instead of stacking.
+concurrency:
+  group: ci-schemas-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   validate:
     # Same runner as Images — github-hosted ubuntu-latest fails empty in this org.

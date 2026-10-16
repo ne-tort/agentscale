@@ -2103,6 +2103,23 @@ class AppLocalizationsEn extends AppLocalizations {
   String get projectChatErrorPolicyFallbackModelsNone => 'None selected';
 
   @override
+  String get projectChatMaxTurnsLimit => 'Limit steps per run';
+
+  @override
+  String get projectChatMaxTurnsValue => 'Steps per run';
+
+  @override
+  String get projectChatMaxTurnsUnlimited => 'Unlimited';
+
+  @override
+  String get projectChatMaxTurnsInvalid =>
+      'Enter a whole number from 1 to 1000';
+
+  @override
+  String get projectChatMaxTurnsReached =>
+      'Step limit reached — ask the agent to continue';
+
+  @override
   String get chatCopyMessage => 'Copy reply';
 
   @override

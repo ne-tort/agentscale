@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from prodavan.core.infra.startup_ping import ping_with_retry, resolve_ping_retry
 from prodavan.core.lifespan.resource import LifespanResource
 
 logger = logging.getLogger(__name__)
@@ -24,9 +25,19 @@ def set_redis_manager(manager: RedisManager | None) -> None:
 class RedisManager(LifespanResource):
     """Async Redis client. Disabled when ``url`` is empty (transitional until Redis in all envs)."""
 
-    def __init__(self, url: str | None = None, *, required: bool = False) -> None:
+    def __init__(
+        self,
+        url: str | None = None,
+        *,
+        required: bool = False,
+        ping_attempts: int | None = None,
+        ping_delay_sec: float | None = None,
+    ) -> None:
         self._url = (url or "").strip() or None
         self._required = required
+        self._ping_attempts, self._ping_delay_sec = resolve_ping_retry(
+            ping_attempts, ping_delay_sec
+        )
         self._client: Any = None
 
     @property
@@ -56,7 +67,14 @@ class RedisManager(LifespanResource):
             decode_responses=True,
         )
         try:
-            await self._client.ping()
+            ok = await ping_with_retry(
+                "redis",
+                self._client.ping,
+                attempts=self._ping_attempts,
+                delay_sec=self._ping_delay_sec,
+            )
+            if not ok:
+                raise RuntimeError("redis ping failed")
             logger.info("redis: connected")
         except Exception:
             logger.exception("redis: ping failed on startup")

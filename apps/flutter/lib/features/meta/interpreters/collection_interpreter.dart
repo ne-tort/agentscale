@@ -495,9 +495,13 @@ class CollectionViewInterpreter extends StatelessWidget {
       }
     }
     final filterFromCtx = uiJson['row_filter_from_context'];
+    // row_matches_context_map: строка подходит, если её map-поле (attrs)
+    // покрывает map-поле контекстной строки (constraints): attrs[k] == v для
+    // всех k,v требований. Это «подбор альтернатив по требованиям слота».
+    final matchesMap = uiJson['row_matches_context_map'];
     final ctxFilterEntries = <MapEntry<String, String>>[];
-    if (filterFromCtx is Map) {
-      final pick = _pickContextMap();
+    Map<String, dynamic> matchesCtxMap = const {};
+    if (filterFromCtx is Map || matchesMap is Map) {
       Map<String, dynamic> ctxBody = const {};
       if (contextRowId != null) {
         final ctx = seeds.itemById(contextRowId!);
@@ -505,15 +509,41 @@ class CollectionViewInterpreter extends StatelessWidget {
           ctxBody = Map<String, dynamic>.from(ctx['body'] as Map);
         }
       }
-      for (final e in filterFromCtx.entries) {
-        final ctxKey = e.value?.toString();
-        if (ctxKey == null || ctxKey.isEmpty) continue;
-        final v = _resolvePickOrBody(ctxKey, pick: pick, body: ctxBody);
-        if (v == null || v.isEmpty) continue;
-        ctxFilterEntries.add(MapEntry(e.key.toString(), v));
+      if (matchesMap is Map) {
+        final ctxField = matchesMap['context_field']?.toString() ?? '';
+        final ctxRaw = ctxBody[ctxField];
+        if (ctxRaw is Map) {
+          matchesCtxMap = {
+            for (final e in ctxRaw.entries)
+              e.key.toString(): e.value?.toString() ?? '',
+          }..removeWhere((k, v) => v.trim().isEmpty);
+        }
+      }
+      if (filterFromCtx is Map) {
+        final pick = _pickContextMap();
+        for (final e in filterFromCtx.entries) {
+          final ctxKey = e.value?.toString();
+          if (ctxKey == null || ctxKey.isEmpty) continue;
+          // `contextRowId` — сам открытый ряд (родитель pick-вида): слот сборки
+          // фильтрует кандидатов по build_id = row_id сборки.
+          if (ctxKey == 'contextRowId') {
+            if (contextRowId != null && contextRowId!.isNotEmpty) {
+              ctxFilterEntries.add(MapEntry(e.key.toString(), contextRowId!));
+            }
+            continue;
+          }
+          final v = _resolvePickOrBody(ctxKey, pick: pick, body: ctxBody);
+          if (v == null || v.isEmpty) continue;
+          ctxFilterEntries.add(MapEntry(e.key.toString(), v));
+        }
       }
     }
-    if (filter is! Map && bindEntries.isEmpty && ctxFilterEntries.isEmpty) {
+    final matchesField = matchesMap is Map ? matchesMap['field']?.toString() ?? '' : '';
+    final hasMatchesMap = matchesField.isNotEmpty && matchesCtxMap.isNotEmpty;
+    if (filter is! Map &&
+        bindEntries.isEmpty &&
+        ctxFilterEntries.isEmpty &&
+        !hasMatchesMap) {
       return _applySort(uiJson, all);
     }
     return _applySort(
@@ -532,6 +562,16 @@ class CollectionViewInterpreter extends StatelessWidget {
         }
         for (final bind in ctxFilterEntries) {
           if (body[bind.key]?.toString() != bind.value) return false;
+        }
+        if (hasMatchesMap) {
+          final rowMap = body[matchesField];
+          if (rowMap is! Map) return false;
+          for (final req in matchesCtxMap.entries) {
+            if ((rowMap[req.key]?.toString() ?? '').trim().toLowerCase() !=
+                req.value.trim().toLowerCase()) {
+              return false;
+            }
+          }
         }
         return true;
       }).toList(),
@@ -946,12 +986,14 @@ class CollectionViewInterpreter extends StatelessWidget {
       for (final cfg in configs) {
         final columnId = cfg['field']?.toString() ?? '';
         if (columnId.isEmpty) continue;
-        final label = body['benefit_label']?.toString() ?? '';
+        final labelField = cfg['label_field']?.toString() ?? 'benefit_label';
+        final toneField = cfg['tone_field']?.toString() ?? 'benefit_tone';
+        final label = body[labelField]?.toString() ?? '';
         if (label.isEmpty) continue;
         widgets[columnId] = BenefitBadge(
           data: BenefitBadgeData(
             label: label,
-            tone: toneOf(body['benefit_tone']?.toString() ?? ''),
+            tone: toneOf(body[toneField]?.toString() ?? ''),
           ),
         );
         changed = true;
@@ -1194,11 +1236,15 @@ class CollectionViewInterpreter extends StatelessWidget {
           if (targetView.isEmpty) continue;
           final label = resolveMetaLabel(t['label'], l10n, locale: Localizations.localeOf(context));
           final iconName = t['icon'] as String?;
+          final passContext = t['context'] == 'row' || t['context_row'] == true;
           items.add(
             AppIconButton(
               icon: metaIconFromName(iconName),
               tooltip: label.isNotEmpty ? label : targetView,
-              onPressed: () => onOpenForm!(targetView),
+              onPressed: () => onOpenForm!(
+                targetView,
+                rowId: passContext ? contextRowId : null,
+              ),
             ),
           );
         }
@@ -1515,20 +1561,49 @@ class CollectionViewInterpreter extends StatelessWidget {
     final slots = slotsRaw is Map
         ? Map<String, dynamic>.from(slotsRaw)
         : <String, dynamic>{};
+    // WAVE11: количество на слот ({type_id: qty}) — свойство слота, а не
+    // кандидата; явный slot_qty важнее qty легаси-комплектующего.
+    final slotQtyRaw = body['slot_qty'];
+    final slotQty = slotQtyRaw is Map
+        ? Map<String, dynamic>.from(slotQtyRaw)
+        : <String, dynamic>{};
+
+    double qtyFor(String typeId, Map<String, dynamic> itemBody) {
+      final raw = slotQty[typeId];
+      final explicit = raw is num
+          ? raw.toDouble()
+          : double.tryParse(raw?.toString() ?? '');
+      if (explicit != null && explicit > 0) return explicit;
+      final legacy = itemBody['qty'];
+      final legacyQty = legacy is num
+          ? legacy.toDouble()
+          : double.tryParse(legacy?.toString() ?? '') ?? 1.0;
+      return legacyQty <= 0 ? 1.0 : legacyQty;
+    }
+
     var count = 0;
     var total = 0.0;
     for (final entry in slots.entries) {
-      final itemId = entry.value?.toString();
-      if (itemId == null || itemId.isEmpty) continue;
+      final slotValue = entry.value?.toString();
+      if (slotValue == null || slotValue.isEmpty) continue;
       count += 1;
-      final item = seeds.itemById(itemId);
-      final itemBody = item is Map && item['body'] is Map
-          ? Map<String, dynamic>.from(item['body'] as Map)
+      // WAVE10: слот хранит найденную группу (found_groups) — цена её «лица».
+      // Легаси-слот (equipment_items → offer) поддержан ниже.
+      final candidate = seeds.itemById(slotValue);
+      final candidateBody = candidate is Map && candidate['body'] is Map
+          ? Map<String, dynamic>.from(candidate['body'] as Map)
           : <String, dynamic>{};
-      final qtyRaw = itemBody['qty'];
-      final qty = qtyRaw is num
-          ? qtyRaw.toDouble()
-          : double.tryParse(qtyRaw?.toString() ?? '') ?? 1.0;
+      if (candidateBody.containsKey('face_price') ||
+          candidateBody.containsKey('match_kind')) {
+        final priceRaw = candidateBody['face_price'];
+        final price = priceRaw is num
+            ? priceRaw.toDouble()
+            : double.tryParse(priceRaw?.toString() ?? '') ?? 0.0;
+        total += price * qtyFor(entry.key.toString(), const {});
+        continue;
+      }
+      final itemBody = candidateBody;
+      final qty = qtyFor(entry.key.toString(), itemBody);
       final offerId = itemBody['offer_id']?.toString();
       if (offerId == null || offerId.isEmpty) continue;
       final offer = seeds.itemById(offerId);
@@ -1539,7 +1614,7 @@ class CollectionViewInterpreter extends StatelessWidget {
       final price = priceRaw is num
           ? priceRaw.toDouble()
           : double.tryParse(priceRaw?.toString() ?? '') ?? 0.0;
-      total += price * (qty <= 0 ? 1.0 : qty);
+      total += price * qty;
     }
     body['components_count'] = count;
     body['price_total'] = total;

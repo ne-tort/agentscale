@@ -34,6 +34,11 @@ logger = logging.getLogger(__name__)
 _TERMINATE_REASONS = frozenset({"delete", "purge", "terminate", "detach", "force_kill"})
 _FORCE_REHYDRATE_REASONS = frozenset({"rematerialize", "sync", "reload"})
 
+
+def _runtime_mode_is_sandbox() -> bool:
+    """Warm-pool sandbox: единственный режим, где под нельзя перегидрировать на месте."""
+    return (settings.pod_runtime_mode or "").strip().lower() == "sandbox"
+
 _LIFECYCLE_BY_REASON: dict[str, str] = {
     "launch": "project.launch",
     "lazy.start": "project.launch",
@@ -85,12 +90,24 @@ class PodCommand:
         if pod is None:
             pod = await self._ensure_live_row(project, desired=desired)
 
-        if reason == "reload" and desired == PodDesiredState.RUNNING:
-            await self._prepare_reload(project, pod)
-
         force_rehydrate = (
             reason in _FORCE_REHYDRATE_REASONS and desired == PodDesiredState.RUNNING and pod is not None
         )
+
+        # В sandbox-режиме «пересобрать workspace» без перевыпуска claim
+        # невозможно: API-сторона гидрацию не делает вовсе (build_hydrate →
+        # StubHydrateAdapter), а bridge-гидрация идемпотентна по маркеру
+        # .hydrated — `hydrateOnBind` выходит сразу и ничего не перечитывает.
+        # Значит rematerialize/sync обязаны форсить пересоздание, иначе живой
+        # под продолжает ходить на ПРЕЖНИЙ provider endpoint и со старыми
+        # MCP-пакетами, хотя в БД всё уже новое. k8s-адаптер пересоздаёт под
+        # сам по hydrate_generation (_needs_recreate), ему форс не нужен.
+        # _prepare_reload сначала чекапоинтит workspace, поэтому файлы агента
+        # не теряются.
+        if desired == PodDesiredState.RUNNING and (
+            reason == "reload" or (force_rehydrate and _runtime_mode_is_sandbox())
+        ):
+            await self._prepare_reload(project, pod)
 
         if pod.desired_state == desired.value:
             if self._status_matches_desired(pod, desired) and not force_rehydrate:

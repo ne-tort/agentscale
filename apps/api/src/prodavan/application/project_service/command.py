@@ -347,6 +347,10 @@ class ProjectCommand:
             write=True,
             allow_paused=True,
         )
+        # Смена провайдера/ключа — не «ещё одно поле»: от этой пары зависят
+        # `.prodavan/config.yaml` в поде и снапшоты ACTIVE-сессий. Фиксируем до
+        # правок, чтобы ниже отличить реальное изменение от no-op PATCH.
+        provider_before = (row.agent_provider, row.resolved_ai_key_id)
         if name is not None:
             trimmed = name.strip()
             if not trimmed:
@@ -377,7 +381,43 @@ class ProjectCommand:
             row.resolved_ai_key_id = resolved_ai_key_id
         await self._session.commit()
         await self._session.refresh(row)
+        if (row.agent_provider, row.resolved_ai_key_id) != provider_before:
+            return await self._after_provider_change(row)
         return await self._project_public(row)
+
+    async def _after_provider_change(self, row: ProjectRow) -> dict:
+        """Провайдер/AI-ключ проекта сменились — переводим под и сессии на новые.
+
+        Без этого `.prodavan/config.yaml` в поде остаётся с прежним
+        `base_url`/`key_ref`: bridge кэширует их в `providerResolveOpts` при
+        старте процесса и перечитывает только на bind, а bind подавлен троттлингом.
+        ACTIVE-сессии вдобавок продолжают слать lease прежнего ключа — их
+        `resolved_key_id` пишется лишь при создании/форке.
+
+        Чат при этом показывает модели НОВОГО провайдера, потому что
+        `/models/live` резолвит ключ и endpoint заново на каждый запрос и
+        передаёт их в под query-параметрами, минуя оба кэша. Отсюда и симптом:
+        список свежий, а вызов падает в 401 «Invalid token» — валидный токен
+        нового провайдера уходит на чужой endpoint.
+        """
+        from prodavan.application.agent.session_service import AgentSessionService
+        from prodavan.application.projects.workspace_sync_policy import (
+            attach_workspace_sync,
+            defer_or_schedule_project_sync,
+        )
+
+        await AgentSessionService(self._session).rebind_active_to_project_key(project=row)
+        await self._session.commit()
+        # force: рематериализация здесь обязательна, а не откладывается меткой
+        # outdated (см. докстринг defer_or_schedule_project_sync)
+        notification = await defer_or_schedule_project_sync(
+            self._session,
+            project_id=row.id,
+            source="project_provider",
+            force=True,
+        )
+        await self._session.commit()
+        return attach_workspace_sync(await self._project_public(row), notification)
 
     async def set_visibility(
         self,

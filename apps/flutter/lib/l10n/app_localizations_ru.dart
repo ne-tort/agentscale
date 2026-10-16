@@ -2122,6 +2122,22 @@ class AppLocalizationsRu extends AppLocalizations {
   String get projectChatErrorPolicyFallbackModelsNone => 'Не выбраны';
 
   @override
+  String get projectChatMaxTurnsLimit => 'Ограничить количество шагов за раз';
+
+  @override
+  String get projectChatMaxTurnsValue => 'Шагов за раз';
+
+  @override
+  String get projectChatMaxTurnsUnlimited => 'Без ограничений';
+
+  @override
+  String get projectChatMaxTurnsInvalid => 'Введите целое число от 1 до 1000';
+
+  @override
+  String get projectChatMaxTurnsReached =>
+      'Лимит шагов закончен, попросите агента продолжить';
+
+  @override
   String get chatCopyMessage => 'Копировать ответ';
 
   @override

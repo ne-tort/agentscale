@@ -90,6 +90,17 @@ variable "bootstrap_gitops" {
   description = "Apply Argo CD install + root-app after k3s is Ready."
 }
 
+variable "gitops_apps" {
+  type        = string
+  default     = "all"
+  description = "Which contours the root-app syncs: all (dev+prod+e2e — shared host) or prod (dedicated prod server: projects + agent-sandbox + agentscale-prod only)."
+
+  validation {
+    condition     = contains(["all", "prod"], var.gitops_apps)
+    error_message = "gitops_apps must be all or prod."
+  }
+}
+
 variable "ghcr_token" {
   type        = string
   default     = ""

@@ -49,9 +49,10 @@ def rollout_cmd(
 ) -> None:
     """Restart first-party Deployments so :latest+Always re-pulls after CI Images.
 
-    By default restarts all DEPLOYMENT_TARGETS (agentscale: api/web/celery-worker/
-    celery-beat; agentscale-dev-sandboxes: agentscale-probe-pod). Pass --namespace to
-    restrict to a single namespace's first-party deployments.
+    By default restarts all DEPLOYMENT_TARGETS (agentscale-dev: api/web/
+    celery-worker/celery-beat/celery-indexer; agentscale-dev-sandboxes:
+    agentscale-probe-pod). Pass --namespace to restrict to a single namespace's
+    first-party deployments.
     """
     assert_kubeconfig_docker_ready()
     if namespace is not None:

@@ -217,6 +217,26 @@ class WorkerManager(LifespanResource):
             "task": job_names.AGENT_RUN_STALL_SWEEP,
             "schedule": schedule(run_every=60.0),
         }
+        # WAVE11: каталог «Готовые сборки» должен обновляться сам — цены
+        # меняются в каталоге поставщика, а не в наших строках, поэтому
+        # триггеров на запись недостаточно. Час — как у catalog-reindex.
+        beat["prodavan-ready-builds-sweep"] = {
+            "task": job_names.SWEEP_READY_BUILDS,
+            "schedule": schedule(run_every=3600.0),
+        }
+        # Исходящие вебхуки: outbox-доставка каждые 15с (подписанные POST +
+        # ретраи с бэкоффом). Отдельный beat, чтобы не ждать часовые sweep'ы.
+        beat["prodavan-webhook-deliver"] = {
+            "task": job_names.WEBHOOK_DELIVER,
+            "schedule": schedule(run_every=15.0),
+        }
+        # Перевыпуск bridge-токена подов до истечения (токен 24ч): sweep каждые
+        # 4ч по проектам с живым подом. ensure_recent_bind сам троттлит по
+        # метке (12ч), так что реально перепривязывает только протухшее.
+        beat["prodavan-bind-refresh-sweep"] = {
+            "task": job_names.BIND_REFRESH_SWEEP,
+            "schedule": schedule(run_every=14400.0),
+        }
         app.conf.beat_schedule = beat
         job_tasks.register_tasks(app)
         return app
