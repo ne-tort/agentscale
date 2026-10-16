@@ -101,6 +101,8 @@ spec:
               mountPath: /data/db
           startupProbe:
             # WiredTiger recovery после ребута ноды может идти минуты.
+            # timeoutSeconds=10 обязателен: mongosh с auth отвечает ~10с,
+            # дефолтная 1с давала вечный «probe timed out».
             exec:
               command:
                 - /bin/sh
@@ -112,6 +114,7 @@ spec:
                     --authenticationDatabase admin \
                     --eval "db.adminCommand('ping')"
             periodSeconds: 10
+            timeoutSeconds: 10
             failureThreshold: 60
           readinessProbe:
             exec:

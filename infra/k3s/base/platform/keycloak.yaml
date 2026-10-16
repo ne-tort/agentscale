@@ -113,6 +113,7 @@ spec:
               path: /realms/master
               port: http
             periodSeconds: 10
+            timeoutSeconds: 5
             failureThreshold: 60
           readinessProbe:
             httpGet:
