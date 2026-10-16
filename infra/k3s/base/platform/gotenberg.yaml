@@ -68,6 +68,12 @@ spec:
               port: 3000
             initialDelaySeconds: 15
             periodSeconds: 30
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            periodSeconds: 5
+            failureThreshold: 60
           readinessProbe:
             httpGet:
               path: /health

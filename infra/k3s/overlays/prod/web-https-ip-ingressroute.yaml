@@ -1,15 +1,15 @@
-# Явный HTTPS-маршрут к prod по адресу ВМ: https://172.31.156.203
+# Явный HTTPS-маршрут к prod по адресу сервера: https://185.103.100.124
 #
 # Роль после инверсии маршрутизации: prod-контур на websecure теперь ПО
 # УМОЛЧАНИЮ wildcard (agentscale-https в patch-prod, priority 50) — любой
 # публичный Host и так попадает в prod. Этот IngressRoute оставлен как
 # belt-and-suspenders для конкретного адреса ВМ (стабильный приватный IP,
 # НЕ меняющийся публичный адрес туннеля): высокий priority 1010/1020 гарантирует,
-# что https://172.31.156.203 точно идёт в prod независимо от wildcard-приоритета.
+# что https://185.103.100.124 точно идёт в prod независимо от wildcard-приоритета.
 # k8s Ingress не принимает IP в host, поэтому маршрут — Traefik IngressRoute CRD.
 #
 # TLS: без secretName → дефолтный TLSStore (kube-system/agentscale-tls);
-# его сертификат содержит SAN IP:172.31.156.203, а браузер не отправляет SNI
+# его сертификат содержит SAN IP:185.103.100.124, а браузер не отправляет SNI
 # для IP-литералов — совпадение имени чистое.
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
@@ -21,19 +21,19 @@ spec:
   entryPoints:
     - websecure
   routes:
-    - match: "Host(`172.31.156.203`) && PathPrefix(`/api`)"
+    - match: "Host(`185.103.100.124`) && PathPrefix(`/api`)"
       kind: Rule
       priority: 1020
       services:
         - name: agentscale-api
           port: 8000
-    - match: "Host(`172.31.156.203`) && PathPrefix(`/health`)"
+    - match: "Host(`185.103.100.124`) && PathPrefix(`/health`)"
       kind: Rule
       priority: 1020
       services:
         - name: agentscale-api
           port: 8000
-    - match: "Host(`172.31.156.203`)"
+    - match: "Host(`185.103.100.124`)"
       kind: Rule
       priority: 1010
       services:
