@@ -1,7 +1,23 @@
 #!/bin/sh
 # Kubernetes initContainer: apply Alembic head, then verify ORM ↔ DB parity.
 # Deploy applies committed revisions only — never autogenerate here.
+#
+# Boot ordering: после рестарта ноды postgres поднимается дольше, чем api-под
+# доходит до init. Раньше первый alembic падал по коннекту → initContainer
+# CrashLoop (Error у api на каждом ребуте). Ждём БД до ~5 минут внутри init —
+# под остаётся Init:0/N без крашей.
 set -eu
+
+echo "alembic: waiting for database"
+i=0
+until alembic current >/dev/null 2>&1; do
+  i=$((i + 1))
+  if [ "$i" -ge 60 ]; then
+    echo "alembic: ERROR database unreachable after 300s" >&2
+    exit 1
+  fi
+  sleep 5
+done
 
 echo "alembic: upgrade head"
 alembic upgrade head

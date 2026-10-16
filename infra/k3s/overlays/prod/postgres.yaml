@@ -66,6 +66,13 @@ spec:
                   - /bin/sh
                   - -c
                   - pg_ctl stop -D "$PGDATA" -m fast -w || true
+          startupProbe:
+            # WAL-recovery после грязного shutdown (ребут VM) может идти минуты;
+            # без startupProbe liveness (20s) убивал postgres на восстановлении.
+            exec:
+              command: ["pg_isready", "-U", "agentscale", "-d", "agentscale"]
+            periodSeconds: 5
+            failureThreshold: 120
           readinessProbe:
             exec:
               command: ["pg_isready", "-U", "agentscale", "-d", "agentscale"]

@@ -1,0 +1,29 @@
+# PROD-server root app: syncs ONLY the prod contour (agent-sandbox + projects +
+# agentscale-prod) — dev/e2e apps stay out of a dedicated prod host.
+# Applied by Terraform gitops_bootstrap when gitops_apps = "prod".
+# Requires apps/ to be a PLAIN directory (no kustomization.yaml) — Argo then
+# honours spec.source.directory.include.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: agentscale-root
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/ne-tort/agentscale.git
+    targetRevision: main
+    path: infra/argocd/apps
+    directory:
+      include: "{00-*.yaml,agent-sandbox.yaml,agentscale-prod.yaml}"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

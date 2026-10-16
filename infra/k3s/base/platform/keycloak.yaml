@@ -105,6 +105,15 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /opt/keycloak/data
+          startupProbe:
+            # JVM + импорт realm на холодной ноде может идти минуты; без
+            # startupProbe liveness (initialDelay 90s) убивал контейнер
+            # на медленном старте → CrashLoop после ребута.
+            httpGet:
+              path: /realms/master
+              port: http
+            periodSeconds: 10
+            failureThreshold: 60
           readinessProbe:
             httpGet:
               path: /realms/master
