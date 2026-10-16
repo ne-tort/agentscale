@@ -77,18 +77,47 @@ prodavan-claw PR → openclaw-ci → auto-merge
 
 **Только два шага: SSH-хост + Terraform.**
 
+### 2.1 Dev-кластер (общий хост, dev+prod контуры)
+
 ```bash
-cd infra/terraform/environments/local
+cd infra/terraform/environments/vm
 export TF_VAR_ghcr_token="$(gh auth token)"
 terraform init
 terraform apply -auto-approve
 # UI:
-#   http://127.0.0.1:8088/  → Sign in → Demo Employee / Platform Admin
+#   https://172.31.156.203/  (или http://172.31.156.203:8088/)
 ```
 
-Подробности хоста/ключа: [`infra/terraform/environments/local/README.md`](../../infra/terraform/environments/local/README.md).
+Подробности хоста/ключа: [`infra/terraform/environments/vm/README.md`](../../infra/terraform/environments/vm/README.md).
+
+### 2.2 Prod-кластер (выделенный сервер, только prod)
+
+```bash
+cd infra/terraform/environments/prod
+export TF_VAR_ghcr_token="$(gh auth token)"
+terraform init
+terraform apply -auto-approve
+# UI: https://185.103.100.124/  (или http://185.103.100.124:30090/)
+```
+
+Отличия: ssh `vzlet-ai@185.103.100.124:44345` (ключ `~/.ssh/myserver_key`),
+`gitops_apps = "prod"` → root-app-prod синкает **только** projects + agent-sandbox +
+agentscale-prod (dev/e2e на этот хост не ставятся), Traefik на 80/443, CI-раннеров нет.
+Подробности: [`infra/terraform/environments/prod/README.md`](../../infra/terraform/environments/prod/README.md).
 
 Day-2: merge в `main` + Argo. Не `kubectl apply -k infra/k3s/...` руками.
+
+### 2.3 Устойчивость старта кластера
+
+После ребута ноды сервисы поднимаются неравномерно (postgres/opensearch/keycloak —
+минуты). Чтобы медленный старт не превращался в CrashLoop:
+
+- **api initContainer `migrate.sh`** ждёт БД до 5 мин (alembic current в цикле) —
+  под висит в `Init:0/N` вместо падения по коннекту.
+- **`startupProbe`** на keycloak/postgres/minio/mongodb/redis/searxng/gotenberg:
+  liveness/readiness не срабатывают, пока старт не завершился (бюджет 5–10 мин).
+- **boot-heal** (`/usr/local/lib/prodavan/post-k3s-heal.sh`, ExecStartPost k3s):
+  чистит Terminating/Unknown/Failed поды, перезапускает Traefik, ждёт smoke.
 
 ---
 
