@@ -13,6 +13,14 @@ patches:
 # First-party: movable :latest. IfNotPresent + node image cache survives reboot.
 # Kubelet pulls from GHCR via SealedSecret ghcr-pull — no image import.
 # Third-party brokers are version-pinned in base/platform + postgres.yaml — not :latest.
+# Argo не должен блокировать sync на health-гейтинге волн: неудачный проб
+# (например mongodb startupProbe) держал операцию в Running и не давал
+# применить НОВУЮ ревизию, которая этот проб чинит (catch-22). skip-health-check
+# заставляет Argo считать ресурс Healthy сразу → волны применяются по порядку,
+# но без ожидания здоровья. Реальное состояние видно в kubectl/пробах.
+commonAnnotations:
+  argocd.argoproj.io/skip-health-check: "true"
+
 images:
   - name: ghcr.io/ne-tort/agentscale-api
     newName: ghcr.io/ne-tort/agentscale-api

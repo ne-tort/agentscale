@@ -19,6 +19,14 @@ patches:
   - path: patch-prod.yaml
 transformers:
   - namespace-transformer.yaml
+# Argo не должен блокировать sync на health-гейтинге волн: неудачный проб
+# (например mongodb startupProbe) держал операцию в Running и не давал
+# применить НОВУЮ ревизию, которая этот проб чинит (catch-22). skip-health-check
+# заставляет Argo считать ресурс Healthy сразу → волны применяются по порядку,
+# но без ожидания здоровья. Реальное состояние видно в kubectl/пробах.
+commonAnnotations:
+  argocd.argoproj.io/skip-health-check: "true"
+
 images:
   - name: ghcr.io/ne-tort/agentscale-api
     newName: ghcr.io/ne-tort/agentscale-api
