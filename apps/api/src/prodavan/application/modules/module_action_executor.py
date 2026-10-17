@@ -327,6 +327,18 @@ class ModuleActionExecutor:
                 session_id=session_id,
             )
 
+        if kind == "equipment.tender_attach":
+            return await self._tender_attach(
+                cabinet_id=cabinet_id,
+                module_id=module_id,
+                params=params,
+                row_id=row_id,
+                principal=principal,
+                employee=employee,
+                project_id=project_id,
+                session_id=session_id,
+            )
+
         if kind == "equipment.procurement_apply":
             return await self._procurement_apply(
                 cabinet_id=cabinet_id,
@@ -610,6 +622,150 @@ class ModuleActionExecutor:
             "pipeline": {
                 k: pipeline.get(k)
                 for k in ("offers_created", "builds_updated", "budget_created", "budget_updated")
+            },
+        }
+
+    async def _tender_attach(
+        self,
+        *,
+        cabinet_id: str,
+        module_id: str,
+        params: dict[str, Any],
+        row_id: str | None,
+        principal: Principal,
+        employee: EmployeeRow | None,
+        project_id: str | None = None,
+        session_id: str | None = None,
+    ) -> dict[str, Any]:
+        """WAVE14: «взять тендер в работу» — позиции тендера → request_lines чата.
+
+        Каждая позиция tenders.lines_json копируется в request_lines АКТИВНОГО
+        чата со связкой tender_id (row_id тендера) + tender_line_id (id позиции
+        в lines_json). Идемпотентно: повторный вызов обновляет title/
+        part_number/qty уже импортированных позиций и добавляет новые, а не
+        дублирует. Удалённые из тендера позиции в чате не трогаем — по ним
+        мог быть прогресс (группы/офферы/бюджет). После импорта — штатный
+        прогон пайплайна (материализация офферов, бюджет, закупка, тендеры).
+        """
+        from prodavan.application.modules.equipment_offers_service import (
+            ModuleRowIO,
+            TENDERS_TABLE,
+        )
+
+        tender_id = (row_id or str(params.get("tender_id") or "")).strip()
+        if not tender_id:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="row_id (тендер) обязателен",
+            )
+
+        io = ModuleRowIO(
+            self._session,
+            cabinet_id=cabinet_id,
+            project_id=project_id,
+            principal=principal,
+            employee=employee,
+            session_id=session_id,
+        )
+
+        # Тендеры chats=all → io.list отдаёт строки независимо от чата.
+        tenders = await io.list(TENDERS_TABLE)
+        tender = next(
+            (t for t in tenders if str(t.get("row_id") or "") == tender_id),
+            None,
+        )
+        if tender is None:
+            raise AppError(
+                code="NOT_FOUND",
+                title="Not Found",
+                status=404,
+                detail=f"тендер не найден: {tender_id}",
+            )
+
+        tbody = tender.get("body") or {}
+        raw_lines = tbody.get("lines_json")
+        lines = [x for x in raw_lines if isinstance(x, dict)] if isinstance(raw_lines, list) else []
+
+        existing = await io.list("request_lines")
+        by_tender_line: dict[str, dict[str, Any]] = {}
+        for r in existing:
+            rbody = r.get("body") or {}
+            if str(rbody.get("tender_id") or "") != tender_id:
+                continue
+            tlid = str(rbody.get("tender_line_id") or "")
+            if tlid:
+                by_tender_line[tlid] = r
+
+        created = 0
+        updated = 0
+        for idx, line in enumerate(lines):
+            title = str(line.get("title") or "").strip()
+            if not title:
+                continue
+            tlid = str(line.get("id") or "").strip() or f"tl{idx + 1}"
+            qty_raw = line.get("qty")
+            try:
+                qty = float(qty_raw) if qty_raw not in (None, "") else 1.0
+            except (TypeError, ValueError):
+                qty = 1.0
+            part_number = str(line.get("part_number") or "").strip()
+            found = by_tender_line.get(tlid)
+            if found is None:
+                await io.create(
+                    "request_lines",
+                    {
+                        "title": title,
+                        "part_number": part_number,
+                        "qty": qty,
+                        "tender_id": tender_id,
+                        "tender_line_id": tlid,
+                    },
+                )
+                created += 1
+                continue
+            fbody = dict(found.get("body") or {})
+            patch: dict[str, Any] = {}
+            if str(fbody.get("title") or "") != title:
+                patch["title"] = title
+            if str(fbody.get("part_number") or "") != part_number:
+                patch["part_number"] = part_number
+            if fbody.get("qty") != qty:
+                patch["qty"] = qty
+            if patch:
+                fbody.update(patch)
+                await io.update("request_lines", str(found.get("row_id") or ""), fbody)
+                updated += 1
+
+        # метка «в работе» на самом тендере (идемпотентно)
+        chat_id = (session_id or "").strip()
+        if chat_id:
+            imported = tbody.get("imported_chat_ids")
+            imported_list = [str(x) for x in imported] if isinstance(imported, list) else []
+            if chat_id not in imported_list:
+                imported_list.append(chat_id)
+                new_body = dict(tbody)
+                new_body["imported_chat_ids"] = imported_list
+                await io.update(TENDERS_TABLE, tender_id, new_body)
+
+        # Материализация офферов + бюджет + закупка + агрегаты тендера.
+        from prodavan.application.modules.equipment_offers_service import (
+            EquipmentPipelineService,
+        )
+
+        pipeline = await EquipmentPipelineService(self._session).run(io, materialize=True)
+
+        return {
+            "ok": True,
+            "tender_id": tender_id,
+            "lines_total": len(lines),
+            "created": created,
+            "updated": updated,
+            "session_id": chat_id or None,
+            "pipeline": {
+                k: pipeline.get(k)
+                for k in ("offers_created", "budget_created", "budget_updated", "tenders_updated")
             },
         }
 

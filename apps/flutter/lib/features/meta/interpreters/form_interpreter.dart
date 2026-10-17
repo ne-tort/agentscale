@@ -17,6 +17,7 @@ import 'package:prodavan/features/meta/widgets/column_map_field.dart';
 import 'package:prodavan/features/meta/widgets/constraint_attrs_field.dart';
 import 'package:prodavan/features/meta/widgets/build_spec_editor.dart';
 import 'package:prodavan/features/meta/widgets/ready_build_slots_table.dart';
+import 'package:prodavan/features/meta/widgets/tender_lines_table.dart';
 import 'package:prodavan/features/meta/widgets/target_price_field.dart';
 import 'package:prodavan/features/meta/widgets/fields_schema_editor_field.dart';
 import 'package:prodavan/features/meta/widgets/prompt_files_editor_field.dart';
@@ -146,6 +147,7 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
       body['type_name'],
       body['attrs'],
       body['fields_json'],
+      body['lines_json'],
       fileKey,
     ].join('¦');
   }
@@ -743,6 +745,14 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
         readOnly: fieldReadOnly,
         pickView: fieldCfg?['pick_view']?.toString() ?? 'part_cards_pick',
         onOpenPick: widget.onOpenView,
+      );
+    }
+    if (widgetKind == 'tender_lines_table') {
+      // WAVE14: позиции тендера (tenders.lines_json) — подтаблица в карточке.
+      return TenderLinesTable(
+        value: value,
+        readOnly: fieldReadOnly,
+        onChanged: (lines) => _persist(name, lines),
       );
     }
     if (widgetKind == 'build_spec_editor') {

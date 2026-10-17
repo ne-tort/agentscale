@@ -732,6 +732,148 @@ TOOLS: list[dict[str, Any]] = [
             "additionalProperties": False,
         },
     },
+    {
+        "name": "tenders_list",
+        "description": (
+            "List tenders (тендеры) — global groups of customer positions with "
+            "aggregates: positions_count, linked_positions_count (already in chats), "
+            "found_pct, sum_rub, margin_pct, suppliers_count, deadline_at, status. "
+            "Aggregates are materialized by the platform pipeline — do not set them."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "module_id": {"type": "string", "default": DEFAULT_MODULE_ID},
+            },
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "tender_get",
+        "description": "Get one tenders row by row_id (including lines_json positions).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "module_id": {"type": "string", "default": DEFAULT_MODULE_ID},
+                "row_id": {"type": "string"},
+            },
+            "required": ["row_id"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "tender_upsert",
+        "description": (
+            "Create or update a tender (тендер). title required on create. "
+            "PATCH merges: omit a field to leave it unchanged; pass null to clear. "
+            "Optional: customer, deadline_at (ISO datetime), status "
+            "(draft|active|submitted|won|lost|cancelled), comment, lines (array of "
+            "{id?, title, part_number?, qty?} — replaces the whole positions list; "
+            "missing ids are generated). positions_count/found_pct/sum_rub/margin_pct/"
+            "suppliers_count/imported_chat_ids are computed by the platform — do not "
+            "set them."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "module_id": {"type": "string", "default": DEFAULT_MODULE_ID},
+                "row_id": {"type": "string"},
+                "title": {"type": "string"},
+                "customer": {"type": ["string", "null"]},
+                "deadline_at": {"type": ["string", "null"]},
+                "status": {
+                    "type": ["string", "null"],
+                    "enum": ["draft", "active", "submitted", "won", "lost", "cancelled", None],
+                },
+                "comment": {"type": ["string", "null"]},
+                "lines": {
+                    "type": ["array", "null"],
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "id": {"type": "string"},
+                            "title": {"type": "string"},
+                            "part_number": {"type": ["string", "null"]},
+                            "qty": {"type": ["number", "integer", "null"]},
+                        },
+                        "required": ["title"],
+                        "additionalProperties": False,
+                    },
+                },
+                "project_ids": {"type": ["array", "null"], "items": {"type": "string"}},
+            },
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "tender_delete",
+        "description": (
+            "Delete a tender. Positions already imported into chats keep their "
+            "tender_id but stay in place (they may carry progress)."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "module_id": {"type": "string", "default": DEFAULT_MODULE_ID},
+                "row_id": {"type": "string"},
+            },
+            "required": ["row_id"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "tender_positions_upsert",
+        "description": (
+            "Create or update positions of a tender (lines_json) WITHOUT touching "
+            "the rest of the tender. Each item: {id?, title, part_number?, qty?}; "
+            "missing ids are generated. Pass replace=true to drop positions that "
+            "are not in the payload; default merges (update by id, append new)."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "module_id": {"type": "string", "default": DEFAULT_MODULE_ID},
+                "tender_id": {"type": "string"},
+                "lines": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "id": {"type": "string"},
+                            "title": {"type": "string"},
+                            "part_number": {"type": ["string", "null"]},
+                            "qty": {"type": ["number", "integer", "null"]},
+                        },
+                        "required": ["title"],
+                        "additionalProperties": False,
+                    },
+                },
+                "replace": {"type": "boolean", "default": False},
+            },
+            "required": ["tender_id", "lines"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "tender_attach",
+        "description": (
+            "Take a tender into work (взять в работу): copies tender positions "
+            "(lines_json) into the CURRENT chat's request_lines with tender_id + "
+            "tender_line_id links, then runs the equipment pipeline (offers, "
+            "budget, procurement, tender aggregates). Idempotent: re-running "
+            "updates titles/part_numbers/qty of already imported positions and "
+            "adds new ones — no duplicates."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "module_id": {"type": "string", "default": DEFAULT_MODULE_ID},
+                "tender_id": {"type": "string"},
+            },
+            "required": ["tender_id"],
+            "additionalProperties": False,
+        },
+    },
 ]
 
 
@@ -1428,6 +1570,109 @@ def _ready_build_attach(mid: str, arguments: dict[str, Any], sid: str | None) ->
     )
 
 
+_TENDER_STATUSES = frozenset(
+    {"draft", "active", "submitted", "won", "lost", "cancelled"}
+)
+
+
+def _normalize_tender_lines(raw: Any) -> list[dict[str, Any]]:
+    """lines_json элементы: {id, title, part_number, qty}; id добиваем."""
+    if not isinstance(raw, list):
+        raise RuntimeError("lines must be an array of {id?, title, part_number?, qty?}")
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for idx, item in enumerate(raw):
+        if not isinstance(item, dict):
+            raise RuntimeError(f"lines[{idx}] must be an object")
+        title = str(item.get("title") or "").strip()
+        if not title:
+            raise RuntimeError(f"lines[{idx}].title is required")
+        tlid = str(item.get("id") or "").strip() or f"tl{idx + 1}"
+        if tlid in seen:
+            raise RuntimeError(f"duplicate line id: {tlid}")
+        seen.add(tlid)
+        qty_raw = item.get("qty")
+        qty: float | None
+        if qty_raw in (None, ""):
+            qty = None
+        else:
+            try:
+                qty = float(qty_raw)
+            except (TypeError, ValueError):
+                raise RuntimeError(f"lines[{idx}].qty must be a number") from None
+            if qty <= 0:
+                raise RuntimeError(f"lines[{idx}].qty must be > 0")
+        out.append(
+            {
+                "id": tlid,
+                "title": title,
+                "part_number": str(item.get("part_number") or "").strip(),
+                "qty": qty if qty is not None else 1,
+            }
+        )
+    return out
+
+
+def _tender_body_from_args(arguments: dict[str, Any], *, creating: bool) -> dict[str, Any]:
+    body = _pick_present(
+        arguments, ("title", "customer", "deadline_at", "status", "comment", "project_ids")
+    )
+    if creating and not str(body.get("title") or "").strip():
+        raise RuntimeError("title is required when creating tenders")
+    if "status" in body and body["status"] is not None:
+        status = str(body["status"]).strip()
+        if status not in _TENDER_STATUSES:
+            raise RuntimeError(f"status must be one of {sorted(_TENDER_STATUSES)}")
+        body["status"] = status
+    if "lines" in arguments:
+        body["lines_json"] = _normalize_tender_lines(arguments.get("lines"))
+    return body
+
+
+def _tender_attach(mid: str, arguments: dict[str, Any], sid: str | None) -> Any:
+    """«Взять тендер в работу» (серверное действие tender_attach)."""
+    tender_id = str(arguments.get("tender_id") or "").strip()
+    if not tender_id:
+        raise RuntimeError("tender_id is required for tender_attach")
+    _, _, project_id = _env()
+    return _http(
+        "POST",
+        f"/projects/{project_id}/modules/{mid}/actions/tender_attach/invoke",
+        {"row_id": tender_id, "params": {}},
+        session_id=sid,
+    )
+
+
+def _tender_positions_upsert(mid: str, arguments: dict[str, Any], sid: str | None) -> Any:
+    """Массовый upsert позиций тендера (lines_json), merge по id."""
+    tender_id = str(arguments.get("tender_id") or "").strip()
+    if not tender_id:
+        raise RuntimeError("tender_id is required for tender_positions_upsert")
+    new_lines = _normalize_tender_lines(arguments.get("lines"))
+    replace = bool(arguments.get("replace"))
+    if replace:
+        merged = new_lines
+    else:
+        row = _get_row(mid, "tenders", tender_id, session_id=sid)
+        body = row.get("body") if isinstance(row.get("body"), dict) else row
+        existing = (body or {}).get("lines_json")
+        merged = [dict(x) for x in existing if isinstance(x, dict)] if isinstance(existing, list) else []
+        by_id = {str(x.get("id") or ""): i for i, x in enumerate(merged)}
+        for line in new_lines:
+            idx = by_id.get(str(line["id"]))
+            if idx is None:
+                by_id[str(line["id"])] = len(merged)
+                merged.append(line)
+            else:
+                merged[idx] = line
+    return _http(
+        "PATCH",
+        _data_path(mid, "tenders", tender_id),
+        {"body": {"lines_json": merged}},
+        session_id=sid,
+    )
+
+
 def _call_tool(name: str, arguments: dict[str, Any]) -> Any:
     if name == "equipment_catalog_sources":
         return _catalog_sources()
@@ -1634,6 +1879,41 @@ def _call_tool(name: str, arguments: dict[str, Any]) -> Any:
     if name == "ready_build_attach":
         return _ready_build_attach(mid, arguments, sid)
 
+    # WAVE14: тендеры (глобальная группировка позиций заказчика).
+    if name == "tenders_list":
+        return {"items": _list_rows(mid, "tenders", session_id=sid)}
+    if name == "tender_get":
+        return _get_row(mid, "tenders", str(arguments.get("row_id") or ""), session_id=sid)
+    if name == "tender_upsert":
+        body = _tender_body_from_args(arguments, creating=not str(arguments.get("row_id") or "").strip())
+        row_id = str(arguments.get("row_id") or "").strip() or None
+        if row_id:
+            return _http(
+                "PATCH",
+                _data_path(mid, "tenders", row_id),
+                {"body": body},
+                session_id=sid,
+            )
+        return _http(
+            "POST",
+            _data_path(mid, "tenders"),
+            {"body": body},
+            session_id=sid,
+        )
+    if name == "tender_delete":
+        row_id = str(arguments.get("row_id") or "").strip()
+        if not row_id:
+            raise RuntimeError("row_id is required for tender_delete")
+        return _http(
+            "DELETE",
+            _data_path(mid, "tenders", row_id),
+            session_id=sid,
+        )
+    if name == "tender_positions_upsert":
+        return _tender_positions_upsert(mid, arguments, sid)
+    if name == "tender_attach":
+        return _tender_attach(mid, arguments, sid)
+
     raise RuntimeError(f"unknown tool: {name}")
 
 
@@ -1698,7 +1978,7 @@ def _handle(msg: dict[str, Any]) -> dict[str, Any] | None:
             "result": {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "prodavan-equipment", "version": "3.0.0"},
+                "serverInfo": {"name": "prodavan-equipment", "version": "3.1.0"},
             },
         }
     if method == "notifications/initialized":

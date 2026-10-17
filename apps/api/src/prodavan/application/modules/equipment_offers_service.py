@@ -51,6 +51,8 @@ BUILDS_TABLE = "equipment_builds"
 CATALOG_CARDS_TABLE = "part_cards"
 CATALOG_BUILDS_TABLE = "ready_builds"
 CATALOG_SLOTS_TABLE = "ready_build_slots"
+# WAVE14: «Тендеры» — глобальная (chats=all) группировка позиций заказчика.
+TENDERS_TABLE = "tenders"
 
 MATCH_EXACT = "exact"
 MATCH_ANALOG = "analog"
@@ -548,6 +550,7 @@ class EquipmentPipelineService:
             "build_slot_groups_updated": 0,
             "build_lines_updated": 0,
             "procurement_rows": 0,
+            "tenders_updated": 0,
             "checked": 0,
         }
 
@@ -660,6 +663,12 @@ class EquipmentPipelineService:
 
         proc_stats = await self._sync_procurement(io, registry=registry)
         stats.update(proc_stats)
+
+        # WAVE14: агрегаты тендеров — после бюджета/закупки: суммы читают
+        # бюджетные снапшоты всех чатов (effective выбор), найдено — статусы
+        # позиций. Тендер сам правок не требует: позиции связаны tender_id.
+        tender_stats = await self._sync_tenders(io, registry=registry)
+        stats.update(tender_stats)
         return stats
 
     # --------------------------------------------------------- материализация
@@ -2234,6 +2243,101 @@ class EquipmentPipelineService:
         for token, row in proc_by_seller.items():
             if token not in keep_sellers:
                 await io.delete(PROCUREMENT_TABLE, str(row.get("row_id") or ""))
+        return stats
+
+    # ---------------------------------------------------------------- тендеры
+
+    async def _sync_tenders(
+        self,
+        io: ModuleRowIO,
+        *,
+        registry: _SellerRegistry,
+    ) -> dict[str, Any]:
+        """Таблица «Тендеры»: агрегаты по связанным позициям всех чатов.
+
+        Тендер — глобальная группировка (chats=all): суммы/маржа/поставщики
+        считаются по бюджетным снапшотам (эффективный выбор) тех позиций
+        ВСЕХ чатов проекта, у которых body.tender_id совпадает с тендером —
+        та же «проектная» семантика, что и у _sync_procurement. Состав до
+        импорта берётся из lines_json: positions_count = max(план, факт).
+
+        Найдено % — доля связанных позиций со статусом matched/selected
+        (status пишет _recompute_groups_and_lines). Если позиций в чатах
+        ещё нет (тендер не взят в работу) — 0.
+        """
+        stats = {"tenders_updated": 0}
+        tenders = [r for r in await io.list(TENDERS_TABLE) if isinstance(r, dict)]
+        if not tenders:
+            return stats
+
+        budget_rows = [
+            r for r in await io.list_project_wide(BUDGET_TABLE) if isinstance(r, dict)
+        ]
+        lines_wide = [
+            r for r in await io.list_project_wide(LINES_TABLE) if isinstance(r, dict)
+        ]
+
+        for tender in tenders:
+            tender_id = str(tender.get("row_id") or "")
+            if not tender_id:
+                continue
+            body = dict(tender.get("body") or {})
+            lines_json = body.get("lines_json")
+            planned = len(lines_json) if isinstance(lines_json, list) else 0
+
+            tender_lines = [
+                r
+                for r in lines_wide
+                if str((r.get("body") or {}).get("tender_id") or "") == tender_id
+            ]
+            linked = len(tender_lines)
+            line_ids = {str(r.get("row_id") or "") for r in tender_lines}
+
+            found = sum(
+                1
+                for r in tender_lines
+                if str((r.get("body") or {}).get("status") or "") in ("matched", "selected")
+            )
+            found_pct = round(100.0 * found / linked, 1) if linked else 0.0
+
+            # Суммы по бюджетным снапшотам связанных позиций — формулы те же,
+            # что в _sync_procurement: эффективная маржа строки = ручная из
+            # бюджета, иначе актуальная маржа поставщика из реестра.
+            sum_rub = 0.0
+            margin_rub = 0.0
+            suppliers: set[str] = set()
+            for r in budget_rows:
+                bbody = r.get("body") or {}
+                if str(bbody.get("line_id") or "") not in line_ids:
+                    continue
+                seller = str(bbody.get("seller") or "").strip()
+                if seller:
+                    suppliers.add(seller.casefold())
+                qty = _num_or(bbody.get("qty"), 1.0) or 1.0
+                price = _num_or(bbody.get("price_in"), 0.0) or 0.0
+                if str(bbody.get("markup_source") or "") == "manual":
+                    markup = _num_or(bbody.get("markup"), DEFAULT_MARKUP)
+                else:
+                    seller_pct = registry.margin_pct(seller) if seller else None
+                    markup = (seller_pct / 100.0) if seller_pct is not None else DEFAULT_MARKUP
+                sum_rub += qty * price
+                margin_rub += qty * price * markup
+
+            updates: dict[str, Any] = {
+                "positions_count": max(planned, linked),
+                "linked_positions_count": linked,
+                "found_pct": found_pct,
+                "sum_rub": round(sum_rub, 2),
+                # средняя маржа от суммы закупки (взвешенная), как Н4/О4 бюджета
+                "margin_pct": round(100.0 * margin_rub / sum_rub, 2) if sum_rub else 0.0,
+                "sum_margin_rub": round(margin_rub, 2),
+                "suppliers_count": len(suppliers),
+            }
+            changed = any(body.get(k) != v for k, v in updates.items())
+            if changed:
+                body.update(updates)
+                await io.update(TENDERS_TABLE, tender_id, body)
+                stats["tenders_updated"] += 1
         return stats
 
     # ------------------------------------------------- закупка: ручные правки
