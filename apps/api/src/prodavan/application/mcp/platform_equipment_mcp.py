@@ -9,7 +9,7 @@ from prodavan.application.mcp.bridge_env import platform_mcp_bridge_env_refs
 from prodavan.infrastructure.projects.workspace import WorkspaceLayoutWriter
 
 PACKAGE_NAME = "prodavan-equipment"
-PACKAGE_VERSION = "3.0.0"
+PACKAGE_VERSION = "3.1.0"
 
 _TOOL_NAMES = (
     "equipment_catalog_sources",
@@ -36,6 +36,13 @@ _TOOL_NAMES = (
     "ready_build_upsert",
     "ready_build_slot_upsert",
     "ready_build_attach",
+    # WAVE14: тендеры (глобальная группировка позиций заказчика)
+    "tenders_list",
+    "tender_get",
+    "tender_upsert",
+    "tender_delete",
+    "tender_positions_upsert",
+    "tender_attach",
 )
 
 

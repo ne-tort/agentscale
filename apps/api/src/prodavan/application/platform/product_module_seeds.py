@@ -34,7 +34,7 @@ def _equipment_mcp_list_header() -> dict[str, Any]:
         "table_slug": "equipment_mcp",
         "ensure_row": {
             "name": "prodavan-equipment",
-            "version": "3.0.0",
+            "version": "3.1.0",
             "enabled": True,
         },
         "fields": [
@@ -1361,6 +1361,19 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "enabled": True,
                 "scope": {"projects": "all", "chats": "all"},
             },
+            # WAVE14: «Тендеры» — глобальная (chats=all) группировка позиций
+            # заказчика. Тендер хранит свой состав в lines_json; чат «берёт в
+            # работу» тендер (действие tender_attach) — позиции копируются в
+            # request_lines чата со ссылкой tender_id. Агрегаты (позиций,
+            # найдено %, сумма, маржа, поставщики) материализует пайплайн
+            # (_sync_tenders) по связанным позициям ВСЕХ чатов проекта.
+            {
+                "slug": "tenders",
+                "label": {"ru": "Тендеры", "en": "Tenders"},
+                "storage_kind": "json_document",
+                "enabled": True,
+                "scope": {"projects": "all", "chats": "all"},
+            },
         ],
         "columns": [
             {
@@ -1641,6 +1654,27 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "values": ["open", "matched", "selected"],
                     "labels": {"open": "Открыта", "matched": "Есть кандидаты", "selected": "Выбрано"},
                 },
+            },
+            # WAVE14: позиция может быть импортирована из тендера. tender_id —
+            # row_id строки tenders (текстом, не ref: позиция chat-scoped,
+            # тендер chats=all); tender_line_id — id позиции внутри
+            # lines_json тендера (ключ идемпотентного импорта tender_attach).
+            {
+                "table_slug": "request_lines",
+                "name": "tender_id",
+                "label": {"ru": "Тендер", "en": "Tender"},
+                "type": "text",
+                "required": False,
+                "read_only": True,
+            },
+            {
+                "table_slug": "request_lines",
+                "name": "tender_line_id",
+                "label": {"ru": "Позиция тендера", "en": "Tender line"},
+                "type": "text",
+                "required": False,
+                "read_only": True,
+                "hidden": True,
             },
             _project_ids_column("request_lines"),
             # WAVE10: снапшот сборок позиции (пишет пайплайн). Позиция может
@@ -3656,6 +3690,144 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "required": False,
                 "default": "10-12 недель",
             },
+            # WAVE14 «Тендеры»: редактируемые поля + агрегаты пайплайна.
+            {
+                "table_slug": "tenders",
+                "name": "title",
+                "label": {"ru": "Название", "en": "Title"},
+                "type": "text",
+                "required": True,
+            },
+            {
+                "table_slug": "tenders",
+                "name": "customer",
+                "label": {"ru": "Заказчик", "en": "Customer"},
+                "type": "text",
+                "required": False,
+            },
+            {
+                "table_slug": "tenders",
+                "name": "deadline_at",
+                "label": {"ru": "Срок подачи", "en": "Deadline"},
+                "type": "datetime",
+                "required": False,
+            },
+            {
+                "table_slug": "tenders",
+                "name": "status",
+                "label": {"ru": "Статус", "en": "Status"},
+                "type": "enum",
+                "required": True,
+                "default": "draft",
+                "enum": {
+                    "values": ["draft", "active", "submitted", "won", "lost", "cancelled"],
+                    "labels": {
+                        "draft": "Черновик",
+                        "active": "В работе",
+                        "submitted": "Заявка подана",
+                        "won": "Выигран",
+                        "lost": "Проигран",
+                        "cancelled": "Отменён",
+                    },
+                },
+            },
+            {
+                "table_slug": "tenders",
+                "name": "comment",
+                "label": {"ru": "Комментарий", "en": "Comment"},
+                "type": "text",
+                "required": False,
+            },
+            # Позиции тендера — SoT состава. Элемент: {id, title, part_number,
+            # qty}. Импорт в чат (tender_attach) копирует их в request_lines с
+            # tender_id + tender_line_id = lines_json[].id.
+            {
+                "table_slug": "tenders",
+                "name": "lines_json",
+                "label": {"ru": "Позиции тендера", "en": "Tender lines"},
+                "type": "json",
+                "required": False,
+                "default": [],
+                "ui": {"widget": "tender_lines_table"},
+            },
+            # Чаты, взявшие тендер в работу (session_id) — пишет tender_attach.
+            {
+                "table_slug": "tenders",
+                "name": "imported_chat_ids",
+                "label": {"ru": "В работе у чатов", "en": "Imported by chats"},
+                "type": "json",
+                "required": False,
+                "default": [],
+                "read_only": True,
+                "hidden": True,
+            },
+            # Агрегаты — пишет _sync_tenders (equipment pipeline), руками не
+            # редактируются. positions_count = max(len(lines_json), связанных
+            # позиций в чатах): до импорта виден плановый состав.
+            {
+                "table_slug": "tenders",
+                "name": "positions_count",
+                "label": {"ru": "Позиций", "en": "Positions"},
+                "type": "number",
+                "required": False,
+                "default": 0,
+                "read_only": True,
+            },
+            {
+                "table_slug": "tenders",
+                "name": "linked_positions_count",
+                "label": {"ru": "В чатах", "en": "Linked"},
+                "type": "number",
+                "required": False,
+                "default": 0,
+                "read_only": True,
+            },
+            {
+                "table_slug": "tenders",
+                "name": "found_pct",
+                "label": {"ru": "Найдено %", "en": "Found %"},
+                "type": "number",
+                "required": False,
+                "default": 0,
+                "read_only": True,
+            },
+            {
+                "table_slug": "tenders",
+                "name": "sum_rub",
+                "label": {"ru": "Сумма ₽", "en": "Sum RUB"},
+                "type": "number",
+                "required": False,
+                "default": 0,
+                "read_only": True,
+            },
+            {
+                "table_slug": "tenders",
+                "name": "margin_pct",
+                "label": {"ru": "Маржа %", "en": "Margin %"},
+                "type": "number",
+                "required": False,
+                "default": 0,
+                "read_only": True,
+            },
+            {
+                "table_slug": "tenders",
+                "name": "sum_margin_rub",
+                "label": {"ru": "Маржа ₽", "en": "Margin RUB"},
+                "type": "number",
+                "required": False,
+                "default": 0,
+                "read_only": True,
+            },
+            {
+                "table_slug": "tenders",
+                "name": "suppliers_count",
+                "label": {"ru": "Поставщиков", "en": "Suppliers"},
+                "type": "number",
+                "required": False,
+                "default": 0,
+                "read_only": True,
+            },
+            _project_ids_column("tenders"),
         ],
         "views": [
             {
@@ -4345,6 +4517,16 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "tone_field": "build_benefit_tone",
                             "align": "center",
                             "max_width": 130,
+                        },
+                        {
+                            # WAVE14: имя тендера по tender_id (резолв на
+                            # клиенте через lookup_table — позиция chat-scoped,
+                            # тендер chats=all, FK-ref не подходит).
+                            "field": "tender_id",
+                            "label": {"ru": "Тендер", "en": "Tender"},
+                            "lookup_table": "tenders",
+                            "max_lines": 2,
+                            "max_width": 160,
                         },
                     ],
                     "row_tap": {"kind": "open_view", "view": "groups_for_line"},
@@ -6438,6 +6620,13 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "target": {"kind": "view", "view": "trusted_sellers_list"},
                         },
                         {
+                            # WAVE14: тендеры — глобальная группировка позиций
+                            # заказчика; активный чат не нужен (chats=all).
+                            "title": "Тендеры",
+                            "icon": "gavel",
+                            "target": {"kind": "view", "view": "tenders_list"},
+                        },
+                        {
                             "title": "Интернет магазины",
                             "icon": "language",
                             "target": {"kind": "view", "view": "web_shops_list"},
@@ -6457,6 +6646,114 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "icon": "tune",
                             "target": {"kind": "view", "view": "mcp_tool_overrides_list"},
                         },
+                    ],
+                },
+            },
+            {
+                "slug": "tenders_list",
+                "table_slug": "tenders",
+                "kind": "collection",
+                "ui_json": {
+                    "version": 1,
+                    "kind": "collection",
+                    "scaffold": {"title": {"ru": "Тендеры", "en": "Tenders"}},
+                    "title_field": "title",
+                    "subtitle_fields": ["customer"],
+                    # агрегаты (позиций/найдено/суммы/поставщики) пересобирает
+                    # пайплайн — сверка при открытии таблицы, как у «Закупки»
+                    "on_load": {"action": "equipment_pipeline_sync"},
+                    "columns": [
+                        {
+                            "field": "title",
+                            "label": {"ru": "Название", "en": "Title"},
+                            "max_lines": 2,
+                            "width": 240,
+                        },
+                        {
+                            "field": "customer",
+                            "label": {"ru": "Заказчик", "en": "Customer"},
+                            "max_lines": 2,
+                            "max_width": 180,
+                        },
+                        {
+                            "field": "positions_count",
+                            "label": {"ru": "Позиций", "en": "Positions"},
+                            "align": "end",
+                            "max_width": 90,
+                        },
+                        {
+                            "field": "found_pct",
+                            "label": {"ru": "Найдено", "en": "Found"},
+                            "format": "percent",
+                            "align": "end",
+                            "max_width": 100,
+                        },
+                        {
+                            "field": "sum_rub",
+                            "label": {"ru": "Сумма ₽", "en": "Sum RUB"},
+                            "format": "money",
+                            "align": "end",
+                            "max_width": 130,
+                        },
+                        {
+                            "field": "sum_margin_rub",
+                            "label": {"ru": "Маржа", "en": "Margin"},
+                            "format": "margin_pair",
+                            "align": "end",
+                            "max_width": 150,
+                        },
+                        {
+                            "field": "suppliers_count",
+                            "label": {"ru": "Поставщиков", "en": "Suppliers"},
+                            "align": "end",
+                            "max_width": 110,
+                        },
+                        {
+                            "field": "deadline_at",
+                            "label": {"ru": "Срок подачи", "en": "Deadline"},
+                            "format": "deadline",
+                            "align": "end",
+                            "max_width": 120,
+                        },
+                        {
+                            "field": "status",
+                            "label": {"ru": "Статус", "en": "Status"},
+                            "max_width": 130,
+                        },
+                    ],
+                    "row_tap": {"kind": "open_form", "view": "tenders_form"},
+                    "primary_action": {"kind": "create_row"},
+                    "empty": _empty(
+                        "Нет тендеров",
+                        "No tenders",
+                        icon="gavel",
+                    ),
+                },
+            },
+            {
+                "slug": "tenders_form",
+                "table_slug": "tenders",
+                "kind": "form",
+                "ui_json": {
+                    "version": 1,
+                    "kind": "form",
+                    "mode": "edit",
+                    "title": {"ru": "Тендер", "en": "Tender"},
+                    "fields": [
+                        {"column": "title", "widget": "value"},
+                        {"column": "customer", "widget": "value"},
+                        {"column": "deadline_at", "widget": "value"},
+                        {"column": "status", "widget": "choice"},
+                        {"column": "comment", "widget": "value"},
+                        {"column": "lines_json", "widget": "tender_lines_table"},
+                        {"column": "positions_count", "widget": "value"},
+                        {"column": "linked_positions_count", "widget": "value"},
+                        {"column": "found_pct", "widget": "value"},
+                        {"column": "sum_rub", "widget": "value"},
+                        {"column": "margin_pct", "widget": "value"},
+                        {"column": "sum_margin_rub", "widget": "value"},
+                        {"column": "suppliers_count", "widget": "value"},
+                        {"column": "project_ids", "widget": "project_multiselect"},
                     ],
                 },
             },
@@ -6670,6 +6967,20 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "params": {},
                     "trigger": {"on": [], "async": False},
                     "ui": {"placement": ["row"], "icon": "add_shopping_cart"},
+                },
+                # WAVE14: «Взять в работу» — позиции тендера (lines_json)
+                # копируются в request_lines АКТИВНОГО чата со ссылкой
+                # tender_id + tender_line_id (идемпотентно: повторный вызов
+                # обновляет существующие позиции, а не дублирует). Вызывается
+                # из MCP (tender_attach) и кнопкой на карточке/строке тендера.
+                {
+                    "id": "tender_attach",
+                    "label": {"ru": "В чат", "en": "Take to chat"},
+                    "kind": "equipment.tender_attach",
+                    "enabled": True,
+                    "params": {},
+                    "trigger": {"on": [], "async": False},
+                    "ui": {"placement": ["row", "scaffold"], "icon": "playlist_add_check"},
                 },
                 # WAVE7: ручная правка строки «Закупка» (маржа % → реестр
                 # поставщиков и бюджетные строки, доставка → суммы).
@@ -6913,6 +7224,42 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "label": "Слот готовой сборки",
                 "description": "Создание или правка одного слота сборки (не всех)",
             },
+            {
+                "server": "prodavan-equipment",
+                "tool": "tenders_list",
+                "label": "Тендеры",
+                "description": "Список тендеров с агрегатами (позиции, сумма, срок)",
+            },
+            {
+                "server": "prodavan-equipment",
+                "tool": "tender_get",
+                "label": "Тендер",
+                "description": "Тендер с позициями по идентификатору",
+            },
+            {
+                "server": "prodavan-equipment",
+                "tool": "tender_upsert",
+                "label": "Запись тендера",
+                "description": "Создание или обновление тендера (состав — tender_positions_upsert)",
+            },
+            {
+                "server": "prodavan-equipment",
+                "tool": "tender_delete",
+                "label": "Удаление тендера",
+                "description": "Удаление тендера (позиции в чатах остаются)",
+            },
+            {
+                "server": "prodavan-equipment",
+                "tool": "tender_positions_upsert",
+                "label": "Позиции тендера",
+                "description": "Создание или обновление позиций тендера (lines_json)",
+            },
+            {
+                "server": "prodavan-equipment",
+                "tool": "tender_attach",
+                "label": "Тендер в чат",
+                "description": "Взять тендер в работу: позиции копируются в чат",
+            },
         ],
         "mcp_tools": [
                     {
@@ -7119,7 +7466,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "row_id": "equipment_mcp_default",
                     "body": {
                         "name": "prodavan-equipment",
-                        "version": "3.0.0",
+                        "version": "3.1.0",
                         "enabled": True,
                     },
                 },

@@ -203,6 +203,8 @@ def test_equipment_meta_hub_on_data_placement() -> None:
         "part_cards",
         "ready_builds",
         "ready_build_slots",
+        # WAVE14: тендеры (глобальная группировка позиций заказчика)
+        "tenders",
     }
     # Каталог сборок — глобальная библиотека: chats=all (строки общие на проект,
     # session_id NULL). Чат-скоп сломал бы переиспользование между заявками.
@@ -387,6 +389,8 @@ def test_equipment_meta_hub_on_data_placement() -> None:
         "Карточки комплектующих",
         "Готовые сборки",
         "Поставщики",
+        # WAVE14: тендеры — глобальная группировка позиций заказчика
+        "Тендеры",
         "Интернет магазины",
         "Шаблоны",
         "Промпты",
@@ -599,7 +603,7 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     assert mcp_seed["table_slug"] == "equipment_mcp"
     assert mcp_seed["body"]["enabled"] is True
     assert mcp_seed["body"]["name"] == "prodavan-equipment"
-    assert mcp_seed["body"]["version"] == "3.0.0"
+    assert mcp_seed["body"]["version"] == "3.1.0"
     assert seed_items[-1]["row_id"] == "equipment_mcp_default"
 
     # Системные промпты подбора: AGENTS.md в корне + правила в prompts/equipment

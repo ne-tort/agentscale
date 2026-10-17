@@ -883,6 +883,7 @@ class CollectionViewInterpreter extends StatelessWidget {
     final priceInFields = <String>[];
     final offerPriceFields = <String>[];
     final stockFields = <String>[];
+    final deadlineFields = <String>[];
     final matchWarn = <String, Set<String>>{};
     for (final c in columns.whereType<Map>()) {
       final field = c['field']?.toString() ?? '';
@@ -894,6 +895,8 @@ class CollectionViewInterpreter extends StatelessWidget {
           offerPriceFields.add(field);
         case 'stock_label':
           stockFields.add(field);
+        case 'deadline':
+          deadlineFields.add(field);
       }
       final when = c['warning_when_match'];
       if (when is List && when.isNotEmpty) {
@@ -903,10 +906,12 @@ class CollectionViewInterpreter extends StatelessWidget {
     if (priceInFields.isEmpty &&
         offerPriceFields.isEmpty &&
         stockFields.isEmpty &&
+        deadlineFields.isEmpty &&
         matchWarn.isEmpty) {
       return rows;
     }
     final warning = context.appColors.warning;
+    final danger = context.appColors.danger;
     return rows.map((row) {
       final item = seeds.itemById(row.id);
       final body = item is Map && item['body'] is Map
@@ -914,6 +919,22 @@ class CollectionViewInterpreter extends StatelessWidget {
           : const <String, dynamic>{};
       final widgets = Map<String, Widget>.from(row.cellWidgets);
       var changed = false;
+      if (deadlineFields.isNotEmpty) {
+        // «Срок подачи»: <1 дня — warning, просрочен — «Истёк» danger.
+        for (final field in deadlineFields) {
+          final state = deadlineStateOf(body[field]);
+          if (state == DeadlineState.soon) {
+            widgets[field] = Text(
+              row.cells[field] ?? '',
+              style: TextStyle(color: warning),
+            );
+            changed = true;
+          } else if (state == DeadlineState.expired) {
+            widgets[field] = Text('Истёк', style: TextStyle(color: danger));
+            changed = true;
+          }
+        }
+      }
       if (priceInFields.isNotEmpty) {
         final label = budgetPriceInLabel(body);
         if (label != null) {
