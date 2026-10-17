@@ -6658,9 +6658,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "kind": "collection",
                     "scaffold": {"title": {"ru": "Тендеры", "en": "Tenders"}},
                     "title_field": "title",
-                    "subtitle_fields": ["customer"],
-                    # агрегаты (позиций/найдено/суммы/поставщики) пересобирает
-                    # пайплайн — сверка при открытии таблицы, как у «Закупки»
+                    "subtitle_fields": ["customer", "status"],
                     "on_load": {"action": "equipment_pipeline_sync"},
                     "columns": [
                         {
@@ -6722,7 +6720,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                         },
                     ],
                     "row_tap": {"kind": "open_form", "view": "tenders_form"},
-                    "primary_action": {"kind": "create_row"},
+                    "inline_add": {"field": "title", "title": "Добавить тендер"},
                     "empty": _empty(
                         "Нет тендеров",
                         "No tenders",
@@ -6740,19 +6738,12 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "mode": "edit",
                     "title": {"ru": "Тендер", "en": "Tender"},
                     "fields": [
-                        {"column": "title", "widget": "value"},
-                        {"column": "customer", "widget": "value"},
-                        {"column": "deadline_at", "widget": "value"},
-                        {"column": "status", "widget": "choice"},
-                        {"column": "comment", "widget": "value"},
+                        {"column": "title", "widget": "value", "icon": "gavel"},
+                        {"column": "customer", "widget": "value", "icon": "business"},
+                        {"column": "deadline_at", "widget": "value", "icon": "event"},
+                        {"column": "status", "widget": "choice", "icon": "flag"},
+                        {"column": "comment", "widget": "value", "icon": "notes"},
                         {"column": "lines_json", "widget": "tender_lines_table"},
-                        {"column": "positions_count", "widget": "value"},
-                        {"column": "linked_positions_count", "widget": "value"},
-                        {"column": "found_pct", "widget": "value"},
-                        {"column": "sum_rub", "widget": "value"},
-                        {"column": "margin_pct", "widget": "value"},
-                        {"column": "sum_margin_rub", "widget": "value"},
-                        {"column": "suppliers_count", "widget": "value"},
                         {"column": "project_ids", "widget": "project_multiselect"},
                     ],
                 },
