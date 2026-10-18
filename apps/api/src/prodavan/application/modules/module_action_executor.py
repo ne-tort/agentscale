@@ -339,6 +339,17 @@ class ModuleActionExecutor:
                 session_id=session_id,
             )
 
+        if kind == "equipment.mail_send":
+            return await self._mail_send(
+                cabinet_id=cabinet_id,
+                module_id=module_id,
+                row_id=row_id,
+                principal=principal,
+                employee=employee,
+                project_id=project_id,
+                session_id=session_id,
+            )
+
         if kind == "equipment.procurement_apply":
             return await self._procurement_apply(
                 cabinet_id=cabinet_id,
@@ -768,6 +779,67 @@ class ModuleActionExecutor:
                 for k in ("offers_created", "budget_created", "budget_updated", "tenders_updated")
             },
         }
+
+    async def _mail_send(
+        self,
+        *,
+        cabinet_id: str,
+        module_id: str,
+        row_id: str | None,
+        principal: Principal,
+        employee: EmployeeRow | None,
+        project_id: str | None = None,
+        session_id: str | None = None,
+    ) -> dict[str, Any]:
+        """WAVE16: отправить письмо из «Исходящих писем» (mail_outbox).
+
+        Строка queued → отправляем через профиль mail_senders; статус и ошибка
+        пишутся обратно (sent_at / error). Повторная отправка возможна
+        (status не блокирует).
+        """
+        from prodavan.application.modules.equipment_mail import MailSendError, send_mail_for_row
+        from prodavan.application.modules.equipment_offers_service import ModuleRowIO
+
+        if not row_id:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="row_id (письмо) обязателен",
+            )
+        io = ModuleRowIO(
+            self._session,
+            cabinet_id=cabinet_id,
+            project_id=project_id,
+            principal=principal,
+            employee=employee,
+            session_id=session_id,
+        )
+        rows = await io.list("mail_outbox")
+        row = next((r for r in rows if str(r.get("row_id") or "") == row_id), None)
+        if row is None:
+            raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="mail row not found")
+        body = dict(row.get("body") or {})
+        try:
+            await send_mail_for_row(
+                self._session,
+                cabinet_id=cabinet_id,
+                row_body=body,
+                principal=principal,
+                employee=employee,
+            )
+        except (MailSendError, AppError) as exc:
+            body["status"] = "failed"
+            body["error"] = str(exc)[:500]
+            await io.update("mail_outbox", row_id, body)
+            raise
+        from datetime import UTC, datetime as _dt
+
+        body["status"] = "sent"
+        body["error"] = ""
+        body["sent_at"] = _dt.now(UTC).isoformat(timespec="seconds")
+        await io.update("mail_outbox", row_id, body)
+        return {"ok": True, "status": "sent"}
 
     async def _equipment_match_to_line(
         self,
