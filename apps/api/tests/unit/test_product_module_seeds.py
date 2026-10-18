@@ -603,7 +603,7 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     assert mcp_seed["table_slug"] == "equipment_mcp"
     assert mcp_seed["body"]["enabled"] is True
     assert mcp_seed["body"]["name"] == "prodavan-equipment"
-    assert mcp_seed["body"]["version"] == "3.1.0"
+    assert mcp_seed["body"]["version"] == "3.2.0"
     assert seed_items[-1]["row_id"] == "equipment_mcp_default"
 
     # Системные промпты подбора: AGENTS.md в корне + правила в prompts/equipment

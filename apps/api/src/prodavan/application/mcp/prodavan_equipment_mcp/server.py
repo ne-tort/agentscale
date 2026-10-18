@@ -783,9 +783,12 @@ TOOLS: list[dict[str, Any]] = [
                 "deadline_at": {"type": ["string", "null"]},
                 "status": {
                     "type": ["string", "null"],
-                    "enum": ["draft", "active", "submitted", "won", "lost", "cancelled", None],
+                    "enum": ["draft", "active", "submitted", "won", "lost", "cancelled", "irrelevant", None],
                 },
                 "comment": {"type": ["string", "null"]},
+                "source_url": {"type": ["string", "null"]},
+                "source_ref": {"type": ["string", "null"]},
+                "relevance_note": {"type": ["string", "null"]},
                 "lines": {
                     "type": ["array", "null"],
                     "items": {
@@ -1571,7 +1574,7 @@ def _ready_build_attach(mid: str, arguments: dict[str, Any], sid: str | None) ->
 
 
 _TENDER_STATUSES = frozenset(
-    {"draft", "active", "submitted", "won", "lost", "cancelled"}
+    {"draft", "active", "submitted", "won", "lost", "cancelled", "irrelevant"}
 )
 
 
@@ -1615,7 +1618,9 @@ def _normalize_tender_lines(raw: Any) -> list[dict[str, Any]]:
 
 def _tender_body_from_args(arguments: dict[str, Any], *, creating: bool) -> dict[str, Any]:
     body = _pick_present(
-        arguments, ("title", "customer", "deadline_at", "status", "comment", "project_ids")
+        arguments,
+        ("title", "customer", "deadline_at", "status", "comment",
+         "source_url", "source_ref", "relevance_note", "project_ids"),
     )
     if creating and not str(body.get("title") or "").strip():
         raise RuntimeError("title is required when creating tenders")
@@ -1978,7 +1983,7 @@ def _handle(msg: dict[str, Any]) -> dict[str, Any] | None:
             "result": {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "prodavan-equipment", "version": "3.1.0"},
+                "serverInfo": {"name": "prodavan-equipment", "version": "3.2.0"},
             },
         }
     if method == "notifications/initialized":
