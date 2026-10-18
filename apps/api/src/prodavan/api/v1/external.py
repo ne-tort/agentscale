@@ -336,6 +336,182 @@ async def latest_answer(
     }
 
 
+# ------------------------------------------------------------------ тендеры (WAVE15)
+# Внешний intake: создать тендер из внешнего источника (b2b-center и т.п.) и
+# при желании сразу взять в работу — чат создаётся, позиции копируются, агент
+# получает стартовое сообщение. Скоупы: tenders:write / chat:write.
+
+_TENDER_STATUSES_EXT = frozenset(
+    {"draft", "active", "submitted", "won", "lost", "cancelled", "irrelevant"}
+)
+
+
+class ExternalTenderLine(BaseModel):
+    model_config = {"extra": "forbid"}
+    id: str | None = Field(default=None, max_length=64)
+    title: str = Field(min_length=1, max_length=1000)
+    part_number: str | None = Field(default=None, max_length=200)
+    qty: float | None = Field(default=None, gt=0)
+
+
+class ExternalTenderBody(BaseModel):
+    """Тендер из внешнего источника; обязательный title, позиции в lines."""
+
+    model_config = {"extra": "forbid"}
+    title: str = Field(min_length=1, max_length=500)
+    customer: str | None = Field(default=None, max_length=500)
+    deadline_at: str | None = Field(default=None, max_length=64)
+    status: str | None = Field(default=None, max_length=32)
+    comment: str | None = Field(default=None, max_length=8000)
+    source_url: str | None = Field(default=None, max_length=2000)
+    source_ref: str | None = Field(default=None, max_length=200)
+    lines: list[ExternalTenderLine] = Field(default_factory=list, max_length=500)
+    # сразу взять в работу: создать чат и импортировать позиции
+    attach: bool = False
+    chat_title: str | None = Field(default=None, max_length=200)
+    kickoff: bool = True  # стартовое сообщение агенту после attach
+
+
+def _ext_lines_json(lines: list[ExternalTenderLine]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for idx, line in enumerate(lines):
+        lid = (line.id or "").strip() or f"tl{idx + 1}"
+        if lid in seen:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail=f"duplicate line id: {lid}",
+            )
+        seen.add(lid)
+        out.append(
+            {
+                "id": lid,
+                "title": line.title.strip(),
+                "part_number": (line.part_number or "").strip(),
+                "qty": line.qty if line.qty is not None else 1,
+            }
+        )
+    return out
+
+
+@router.post("/projects/{project_id}/tenders", status_code=201)
+async def create_external_tender(
+    project_id: str,
+    body: ExternalTenderBody,
+    ctx: _ExternalCtx = ExternalDep,
+    session: AsyncSession = SessionDep,
+) -> dict[str, Any]:
+    """Создать тендер из внешнего источника (и опционально сразу взять в работу).
+
+    attach=true: создаётся чат (chat_title или «Тендер: {title}»), позиции
+    копируются в request_lines чата (tender_attach, идемпотентно), при
+    kickoff=true агенту уходит стартовое сообщение (detached turn).
+    """
+    _require_scope(ctx, "chat:write")
+    project = await _project_visible(ctx, session, project_id)
+    status = (body.status or "active").strip()
+    if status not in _TENDER_STATUSES_EXT:
+        raise AppError(
+            code="VALIDATION_ERROR",
+            title="Validation Error",
+            status=422,
+            detail=f"status must be one of {sorted(_TENDER_STATUSES_EXT)}",
+        )
+    deadline = (body.deadline_at or "").strip()
+    if deadline:
+        from datetime import datetime as _dt
+
+        try:
+            _dt.fromisoformat(deadline.replace("Z", "+00:00"))
+        except ValueError:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="deadline_at must be ISO-8601",
+            ) from None
+
+    from prodavan.application.modules.equipment_offers_service import ModuleRowIO
+    from prodavan.application.modules.module_action_executor import ModuleActionExecutor
+
+    io = ModuleRowIO(
+        session,
+        cabinet_id=project.cabinet_id,
+        project_id=project_id,
+        principal=ctx.principal,
+        employee=ctx.employee,
+        session_id=None,
+    )
+    tender_body: dict[str, Any] = {
+        "title": body.title.strip(),
+        "customer": (body.customer or "").strip(),
+        "status": status,
+        "comment": (body.comment or "").strip(),
+        "source_url": (body.source_url or "").strip(),
+        "source_ref": (body.source_ref or "").strip(),
+        "lines_json": _ext_lines_json(body.lines),
+    }
+    if deadline:
+        tender_body["deadline_at"] = deadline
+    created = await io.create("tenders", tender_body)
+    tender_id = str(created.get("row_id") or "")
+
+    result: dict[str, Any] = {"tender_id": tender_id, "attached": False}
+    if not body.attach:
+        return result
+
+    chat_title = (body.chat_title or "").strip() or f"Тендер: {body.title.strip()[:120]}"
+    chat = await AgentSessionService(session).create_session(
+        project_id=project_id,
+        principal=ctx.principal,
+        employee=ctx.employee,
+        model=None,
+        title=chat_title,
+    )
+    session_id = str(chat.get("id") or chat.get("session_id") or "")
+    attach = await ModuleActionExecutor(session).invoke(
+        cabinet_id=project.cabinet_id,
+        module_id="mod_equipment",
+        action_id="tender_attach",
+        principal=ctx.principal,
+        employee=ctx.employee,
+        row_id=tender_id,
+        project_id=project_id,
+        session_id=session_id,
+    )
+    result.update(
+        {
+            "attached": True,
+            "session_id": session_id,
+            "attach": {k: attach.get(k) for k in ("created", "updated", "lines_total")},
+        }
+    )
+    if body.kickoff:
+        kickoff_text = (
+            f"В работу взят тендер «{body.title.strip()}»"
+            + (f" (заказчик: {body.customer.strip()})" if body.customer else "")
+            + ". Его позиции уже импортированы в позиции заказчика этого чата. "
+            "Сначала оцени релевантность: если тендер не про компьютерную/"
+            "электронную технику или не наш профиль — отбракуй его "
+            "(tender_upsert: status=irrelevant, relevance_note с причиной) и "
+            "остановись. Иначе подбери кандидатов по каждой позиции по правилам "
+            "модуля (поиск в каталогах, found_groups_upsert)."
+        )
+        turn = await AgentSessionService(session).start_detached_turn(
+            project_id=project_id,
+            session_id=session_id,
+            text=kickoff_text,
+            attachment_refs=None,
+            principal=ctx.principal,
+            employee=ctx.employee,
+            model=None,
+        )
+        result["kickoff_turn_id"] = getattr(turn, "turn_id", None)
+    return result
+
+
 # ------------------------------------------------------------------ управление
 # Создание ключей и подписок вебхуков — от человека (OIDC), не от app key.
 # Компания-scope: участник компании (сотрудник) управляет своими ключами.

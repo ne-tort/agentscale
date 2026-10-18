@@ -34,7 +34,7 @@ def _equipment_mcp_list_header() -> dict[str, Any]:
         "table_slug": "equipment_mcp",
         "ensure_row": {
             "name": "prodavan-equipment",
-            "version": "3.1.0",
+            "version": "3.2.0",
             "enabled": True,
         },
         "fields": [
@@ -3720,7 +3720,9 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "required": True,
                 "default": "draft",
                 "enum": {
-                    "values": ["draft", "active", "submitted", "won", "lost", "cancelled"],
+                    # WAVE15: irrelevant — тендер не про технику/не наш профиль;
+                    # ставит агент (tender_upsert) при отбраковке, можно и вручную.
+                    "values": ["draft", "active", "submitted", "won", "lost", "cancelled", "irrelevant"],
                     "labels": {
                         "draft": "Черновик",
                         "active": "В работе",
@@ -3728,6 +3730,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                         "won": "Выигран",
                         "lost": "Проигран",
                         "cancelled": "Отменён",
+                        "irrelevant": "Нерелевантен",
                     },
                 },
             },
@@ -3735,6 +3738,29 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "table_slug": "tenders",
                 "name": "comment",
                 "label": {"ru": "Комментарий", "en": "Comment"},
+                "type": "text",
+                "required": False,
+            },
+            # WAVE15: внешний источник тендера (b2b-center intake) + причина
+            # отбраковки. Пишет внешний API / агент, руками обычно не трогают.
+            {
+                "table_slug": "tenders",
+                "name": "source_url",
+                "label": {"ru": "Источник (URL)", "en": "Source URL"},
+                "type": "text",
+                "required": False,
+            },
+            {
+                "table_slug": "tenders",
+                "name": "source_ref",
+                "label": {"ru": "Внешний ID", "en": "External ID"},
+                "type": "text",
+                "required": False,
+            },
+            {
+                "table_slug": "tenders",
+                "name": "relevance_note",
+                "label": {"ru": "Причина отбраковки", "en": "Relevance note"},
                 "type": "text",
                 "required": False,
             },
@@ -6721,6 +6747,14 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     ],
                     "row_tap": {"kind": "open_form", "view": "tenders_form"},
                     "inline_add": {"field": "title", "title": "Добавить тендер"},
+                    # отбракованные (агентом или вручную) — приглушены warning-ом
+                    "row_style": [
+                        {
+                            "when": {"field": "status", "eq": "irrelevant"},
+                            "accent": "warning",
+                        },
+                        {"when": {"field": "status", "eq": "won"}, "accent": "success"},
+                    ],
                     "empty": _empty(
                         "Нет тендеров",
                         "No tenders",
@@ -6743,6 +6777,11 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                         {"column": "deadline_at", "widget": "value", "icon": "event"},
                         {"column": "status", "widget": "choice", "icon": "flag"},
                         {"column": "comment", "widget": "value", "icon": "notes"},
+                        # WAVE15: источник тендера (b2b-center и т.п.) — read-only,
+                        # заполняется внешним intake (external API), не пайплайном.
+                        {"column": "source_url", "widget": "value", "icon": "link"},
+                        {"column": "source_ref", "widget": "value", "icon": "tag"},
+                        {"column": "relevance_note", "widget": "value", "icon": "psychology"},
                         {"column": "lines_json", "widget": "tender_lines_table"},
                         {"column": "project_ids", "widget": "project_multiselect"},
                     ],
@@ -7457,7 +7496,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "row_id": "equipment_mcp_default",
                     "body": {
                         "name": "prodavan-equipment",
-                        "version": "3.1.0",
+                        "version": "3.2.0",
                         "enabled": True,
                     },
                 },
