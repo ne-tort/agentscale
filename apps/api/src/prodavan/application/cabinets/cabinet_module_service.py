@@ -370,6 +370,20 @@ class CabinetModuleService:
             cabinet_id=cabinet_id, principal=principal, employee=employee, write=True
         )
         await self._require_module_binding(cabinet_id=cabinet_id, module_id=module_id)
+        # WAVE16: виртуальные таблицы (equipment_search/master_price) — строки
+        # живут в OpenSearch, удаление напрямую по row_id = "os:{doc_id}".
+        if table_slug in ("equipment_search", "master_price") and row_id.startswith("os:"):
+            from prodavan.application.modules.equipment_master_price import (
+                delete_virtual_row,
+            )
+
+            return await delete_virtual_row(
+                self._session,
+                cabinet_id=cabinet_id,
+                row_id=row_id,
+                principal=principal,
+                employee=employee,
+            )
         inst = await self._cabinet_sot(cabinet_id=cabinet_id, module_id=module_id, write=True)
         delete_session = await self._chat_scope_session(
             inst=inst, module_id=module_id, table_slug=table_slug, session_id=session_id

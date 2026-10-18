@@ -607,6 +607,20 @@ class ProjectRuntimeModuleService:
         project = await self._require_project(
             project_id=project_id, principal=principal, employee=employee, write=True
         )
+        # WAVE16: виртуальные таблицы (equipment_search/master_price) — строки
+        # живут в OpenSearch, удаление идёт напрямую по row_id = "os:{doc_id}".
+        if table_slug in ("equipment_search", "master_price") and row_id.startswith("os:"):
+            from prodavan.application.modules.equipment_master_price import (
+                delete_virtual_row,
+            )
+
+            return await delete_virtual_row(
+                self._session,
+                cabinet_id=str(project.cabinet_id or ""),
+                row_id=row_id,
+                principal=principal,
+                employee=employee,
+            )
         inst = await self._sot_for_project(
             project_id=project_id, module_id=module_id, write=True
         )

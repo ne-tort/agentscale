@@ -124,7 +124,7 @@ class EquipmentSearchService:
                 sort=SEARCH_SORT,
             )
             total += result.total
-            items.extend(doc_to_master_row(h.source) for h in result.hits)
+            items.extend(doc_to_master_row(h.source, doc_id=getattr(h, "doc_id", None)) for h in result.hits)
         items.sort(key=lambda r: r["src_hash"])
         return {"items": items, "total": total, "page": page, "page_size": size}
 
