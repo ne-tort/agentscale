@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -50,6 +51,8 @@ from prodavan.application.projects.attachment_delivery import AttachmentDelivery
 from prodavan.application.projects.attachment_service import ProjectAttachmentService
 from prodavan.application.projects.workspace_checkpoint import checkpoint_project_workspace
 from prodavan.config.settings import settings
+
+logger = logging.getLogger(__name__)
 from prodavan.domain.agent import (
     FROZEN_EVENT_TYPES,
     PLATFORM_EVENT_TOOL_APPROVAL_DECISION,
@@ -1623,6 +1626,35 @@ class AgentSessionService:
             },
         )
         await self._session.commit()
+        # WAVE16: отложенный sync — rematerialize по окончании хода (сессия не
+        # прерывалась). Снимаем метку и ставим задачу; если воркер недоступен,
+        # метку подберёт sweep (list_workspace_sync_pending по таймауту).
+        await self._run_pending_workspace_sync(project_id=project_id)
+
+    async def _run_pending_workspace_sync(self, *, project_id: str) -> None:
+        from prodavan.application.projects.workspace_outdated import (
+            take_workspace_sync_pending,
+        )
+        from prodavan.core.jobs.rematerialize_bus import request_rematerialize_project
+
+        source = await take_workspace_sync_pending(self._session, project_id=project_id)
+        if source is None:
+            return
+        await self._session.commit()
+        try:
+            result = await request_rematerialize_project(project_id, source=source)
+            if not result.get("enqueued"):
+                from prodavan.application.project_service.command import ProjectCommand
+
+                await ProjectCommand(self._session).rematerialize_background(
+                    project_id=project_id
+                )
+        except Exception:
+            logger.exception(
+                "pending workspace sync failed project_id=%s (source=%s)",
+                project_id,
+                source,
+            )
 
     async def get_transcript(
         self,

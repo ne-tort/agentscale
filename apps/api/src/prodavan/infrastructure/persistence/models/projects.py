@@ -46,6 +46,13 @@ class ProjectRow(Base):
     # NULL = server default (10s / unlimited / no fallbacks).
     chat_error_policy: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     workspace_outdated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # WAVE16: sync отложен из-за активного хода агента (rematerialize при
+    # turn-in-progress). Снимается и исполняется при окончании хода
+    # (_emit_webhook_on_turn_end) или sweep'ом по таймауту.
+    workspace_sync_pending_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    workspace_sync_pending_source: Mapped[str | None] = mapped_column(String(128), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

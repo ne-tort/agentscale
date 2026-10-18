@@ -87,3 +87,54 @@ async def mark_workspace_outdated_for_project(session: AsyncSession, *, project_
 
 def clear_workspace_outdated(row: ProjectRow) -> None:
     row.workspace_outdated_at = None
+
+
+# ---------------------------------------------------------------- WAVE16: pending sync
+
+async def mark_workspace_sync_pending(
+    session: AsyncSession,
+    *,
+    project_id: str,
+    source: str,
+) -> bool:
+    """Отложить sync: агент в ходу — rematerialize сработает по окончании хода."""
+    row = await session.get(ProjectRow, project_id)
+    if row is None or row.status == ProjectStatus.DELETED:
+        return False
+    row.workspace_sync_pending_at = datetime.now(UTC)
+    row.workspace_sync_pending_source = source
+    return True
+
+
+async def take_workspace_sync_pending(
+    session: AsyncSession,
+    *,
+    project_id: str,
+) -> str | None:
+    """Снять метку pending (атомарно в рамках транзакции); вернуть source или None."""
+    row = await session.get(ProjectRow, project_id)
+    if row is None or row.workspace_sync_pending_at is None:
+        return None
+    source = row.workspace_sync_pending_source or "unknown"
+    row.workspace_sync_pending_at = None
+    row.workspace_sync_pending_source = None
+    return source
+
+
+async def list_workspace_sync_pending(
+    session: AsyncSession,
+    *,
+    older_than_minutes: int = 30,
+) -> list[str]:
+    """Проекты с зависшим pending (turn-end не дошёл — воркер упал, рестарт)."""
+    from datetime import timedelta
+
+    cutoff = datetime.now(UTC) - timedelta(minutes=older_than_minutes)
+    q = await session.execute(
+        select(ProjectRow.id).where(
+            ProjectRow.workspace_sync_pending_at.is_not(None),
+            ProjectRow.workspace_sync_pending_at < cutoff,
+            ProjectRow.status != ProjectStatus.DELETED,
+        )
+    )
+    return [str(r) for r in q.scalars().all()]
