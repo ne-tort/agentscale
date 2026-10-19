@@ -225,9 +225,15 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
     runs-on: [self-hosted, linux, docker]
     steps:
+      # checkout с GITHUB_TOKEN НЕ видит приватный prodavan-claw (вложенный
+      # сабмодуль prodavan) — recursive падает. Для сборки searchnet нужен
+      # ТОЛЬКО сабмодуль searchnet (публичный): чекаутим репу, затем
+      # ограниченный submodule update --init searchnet.
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive
+      - name: Init searchnet submodule only
+        run: |
+          set -euo pipefail
+          git submodule update --init searchnet
 
       - name: Image names
         id: meta
