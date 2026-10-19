@@ -223,6 +223,7 @@ jobs:
   # совпадать с poetry.lock, иначе кэш-слои расходятся с ревизиями chromium.
   build-searchnet:
     if: github.event_name == 'workflow_dispatch'
+    timeout-minutes: 45
     runs-on: [self-hosted, linux, docker]
     steps:
       # searchnet — отдельный публичный репозиторий (ne-tort/searchnet); в этой
