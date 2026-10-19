@@ -43,6 +43,9 @@ jobs:
           KCFG="$HOME/.kube/prodavan-dev.yaml"
           [ -f "$KCFG" ] || { echo "no $KCFG"; ls -la "$HOME/.kube/" || true; exit 1; }
           echo "KUBECONFIG=${KCFG}" >> "${GITHUB_ENV}"
+          echo "--- runner: $(hostname) ---"
+          kubectl version --client 2>/dev/null | head -2
+          grep -E "server:" "$KCFG" | head -2
           kubectl get ns agentscale-dev --request-timeout=10s
 
       - name: Application full status
