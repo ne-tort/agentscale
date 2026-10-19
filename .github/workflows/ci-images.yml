@@ -225,15 +225,13 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
     runs-on: [self-hosted, linux, docker]
     steps:
-      # checkout с GITHUB_TOKEN НЕ видит приватный prodavan-claw (вложенный
-      # сабмодуль prodavan) — recursive падает. Для сборки searchnet нужен
-      # ТОЛЬКО сабмодуль searchnet (публичный): чекаутим репу, затем
-      # ограниченный submodule update --init searchnet.
-      - uses: actions/checkout@v4
-      - name: Init searchnet submodule only
+      # searchnet — отдельный публичный репозиторий (ne-tort/searchnet); в этой
+      # репе сабмодуля нет (суперрепозиторий — локальная рабочая копия). Чекаутим
+      # исходник прямо из GitHub по коммиту пина из infra/k3s/base/platform/searchnet.yaml.
+      - name: Clone searchnet source
         run: |
           set -euo pipefail
-          git submodule update --init searchnet
+          git clone --depth 1 https://github.com/ne-tort/searchnet.git searchnet
 
       - name: Image names
         id: meta
