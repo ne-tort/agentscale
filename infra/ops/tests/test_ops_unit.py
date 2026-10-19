@@ -241,6 +241,8 @@ def test_first_party_latest_constants() -> None:
     assert "ghcr.io/ne-tort/agentscale-web:latest" in FIRST_PARTY_LATEST
     # Platform probe pod ships in the overlay render as :latest (first-party).
     assert "ghcr.io/ne-tort/prodavan-agent-runtime:latest" in FIRST_PARTY_LATEST
+    # WAVE17 — searchnet (web-search gateway) is our CI-built :latest image.
+    assert "ghcr.io/ne-tort/searchnet:latest" in FIRST_PARTY_LATEST
 
 
 def test_pod_stuck_detects_terminating_and_failed() -> None:

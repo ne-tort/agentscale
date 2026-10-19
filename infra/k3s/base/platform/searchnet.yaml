@@ -1,0 +1,117 @@
+# SearchNet — единый агентный шлюз веб-поиска (CLAW-WEB v2). Заменяет SearXNG:
+# собственный метапоиск (браузерные SERP-движки chromium/camoufox + чистые
+# JSON-API, RRF-слияние) + extract/fetch с anti-bot + remote MCP на /mcp.
+# Исходник — сабмодуль ../searchnet (github.com/ne-tort/searchnet); образ
+# ghcr.io/ne-tort/searchnet собирает CI (ci-images.yml, job build-searchnet).
+# Экспонирует REST+MCP на :3950, потребляется ТОЛЬКО приложением (API-прокси
+# /projects/{id}/web-search на :8001) — песочница хост не видит (NetworkPolicy
+# пропускает из sandboxes только :8001 в agentscale).
+# Метапоиск SearXNG в searchnet выключен по умолчанию (legacy-провайдер).
+apiVersion: v1
+kind: Service
+metadata:
+  name: searchnet
+  labels:
+    app.kubernetes.io/name: searchnet
+    app.kubernetes.io/part-of: agentscale
+    app.kubernetes.io/component: web-search
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  ports:
+    - name: http
+      port: 3950
+      targetPort: 3950
+  selector:
+    app.kubernetes.io/name: searchnet
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: searchnet
+  labels:
+    app.kubernetes.io/name: searchnet
+    app.kubernetes.io/part-of: agentscale
+    app.kubernetes.io/component: web-search
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: searchnet
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: searchnet
+        app.kubernetes.io/part-of: agentscale
+        app.kubernetes.io/component: web-search
+    spec:
+      # Браузеры (chromium по умолчанию, camoufox эскалацией) требуют /dev/shm
+      # и RAM: 2g/4g — как в docker-compose searchnet.
+      containers:
+        - name: searchnet
+          image: ghcr.io/ne-tort/searchnet:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 3950
+          env:
+            - name: SEARCHNET_API__HOST
+              value: "0.0.0.0"
+            - name: SEARCHNET_API__PORT
+              value: "3950"
+            - name: SEARCHNET_DATA_DIR
+              value: /app/data
+            # Холодный старт ленив: chromium спавнится ~0.3с по запросу;
+            # camoufox — эскалация per-domain (ROUTES) для защищённых сайтов.
+            - name: SEARCHNET_ENGINES__ENABLED
+              value: '["camoufox","chromium","http"]'
+            - name: SEARCHNET_ENGINES__DEFAULT
+              value: "chromium"
+            - name: SEARCHNET_ENGINES__WARM_ENGINES
+              value: "[]"
+            - name: SEARCHNET_ENGINES__WARM_SHOPS
+              value: "[]"
+            - name: SEARCHNET_ENGINES__ROUTES
+              value: "[]"
+            - name: SEARCHNET_LOG_LEVEL
+              value: "INFO"
+            # REST-мост с кластером не ищет в K8s: k3s-нода должна уметь
+            # резолвить публичные поисковые домены (node DNS, не coredns-фича).
+          resources:
+            requests:
+              cpu: 200m
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 4Gi
+          volumeMounts:
+            - name: data
+              mountPath: /app/data
+          # startupProbe щедрее compose-дефолта (start-period 60s): браузерные
+          # бинари на первой странице качаются/копятся при холодном старте.
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3950
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 3950
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3950
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+      volumes:
+        - name: data
+          emptyDir: {}

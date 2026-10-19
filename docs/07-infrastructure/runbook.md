@@ -114,7 +114,7 @@ Day-2: merge в `main` + Argo. Не `kubectl apply -k infra/k3s/...` рукам�
 
 - **api initContainer `migrate.sh`** ждёт БД до 5 мин (alembic current в цикле) —
   под висит в `Init:0/N` вместо падения по коннекту.
-- **`startupProbe`** на keycloak/postgres/minio/mongodb/redis/searxng/gotenberg:
+- **`startupProbe`** на keycloak/postgres/minio/mongodb/redis/searchnet/gotenberg:
   liveness/readiness не срабатывают, пока старт не завершился (бюджет 5–10 мин).
 - **boot-heal** (`/usr/local/lib/prodavan/post-k3s-heal.sh`, ExecStartPost k3s):
   чистит Terminating/Unknown/Failed поды, перезапускает Traefik, ждёт smoke.

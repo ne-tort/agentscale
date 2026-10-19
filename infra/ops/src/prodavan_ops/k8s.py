@@ -24,6 +24,11 @@ FIRST_PARTY_DEPLOYMENTS = (
     # (например doc_id офферов) не доезжали до dev: под продолжал жить на
     # старом коде неделями, пока его не пересоздавали по другой причине.
     "agentscale-celery-indexer",
+    # WAVE17 — web-search gateway (searchnet вместо searxng). Образ :latest в
+    # GHCR; rollout перезапускает его вместе с приложением. Не «first-party
+    # приложение» семантически, но живёт в том же ns и рассинхрон образа с
+    # манифестом ломает поиск тише всего — держим в одном списке.
+    "searchnet",
 )
 
 # Deployment targets for rollout: (name, namespace) pairs. The probe pod
@@ -39,6 +44,10 @@ DEPLOYMENT_TARGETS: tuple[tuple[str, str], ...] = (
     ("agentscale-celery-beat", "agentscale-dev"),
     ("agentscale-celery-indexer", "agentscale-dev"),
     ("agentscale-probe-pod", "agentscale-dev-sandboxes"),
+    # WAVE17 — web-search gateway (заменил searxng). :latest + Always: новый
+    # образ в GHCR подхватывается rollout'ом; поиск деградирует, но не рвёт
+    # smoke ( readiness-проба /health).
+    ("searchnet", "agentscale-dev"),
 )
 
 _cached_kubeconfig: Path | None = None

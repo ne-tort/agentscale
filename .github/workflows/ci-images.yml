@@ -216,6 +216,79 @@ jobs:
             ${{ steps.meta.outputs.web }}:${{ steps.meta.outputs.tag }}
             ${{ steps.meta.outputs.web }}:latest
 
+  # WAVE17 — searchnet (web-search gateway, сабмодуль ../searchnet). Образ
+  # тяжёлый (~4.4GB: camoufox+chromium бинари) и не зависит от кода apps/*,
+  # поэтому собирается ТОЛЬКО по workflow_dispatch (смена пина сабмодуля
+  # searchnet). Пин версий браузерных пакетов в Dockerfile.recovery обязан
+  # совпадать с poetry.lock, иначе кэш-слои расходятся с ревизиями chromium.
+  build-searchnet:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: [self-hosted, linux, docker]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Image names
+        id: meta
+        run: |
+          python3 - <<'PY'
+          import os
+          owner = os.environ["GITHUB_REPOSITORY_OWNER"].lower()
+          registry = os.environ["REGISTRY"]
+          sha = os.environ["GITHUB_SHA"][:12]
+          out = os.environ["GITHUB_OUTPUT"]
+          lines = [
+              f"searchnet={registry}/{owner}/searchnet",
+              f"tag={sha}",
+              "push=true",
+          ]
+          with open(out, "a", encoding="utf-8") as f:
+              f.write("\n".join(lines) + "\n")
+          PY
+
+      - name: Use persistent buildx builder
+        run: |
+          set -euo pipefail
+          if ! docker buildx inspect agentscale-ci >/dev/null 2>&1; then
+            docker buildx create --name agentscale-ci \
+              --driver docker-container \
+              --driver-opt network=host \
+              --config /etc/buildkit/buildkitd.toml \
+              || docker buildx create --name agentscale-ci \
+                --driver docker-container --driver-opt network=host
+          fi
+          docker buildx use agentscale-ci
+          docker buildx inspect --bootstrap agentscale-ci >/dev/null
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GHCR_PUSH_TOKEN || secrets.GITHUB_TOKEN }}
+
+      # Recovery-путь: свежий camoufox fetch / playwright download с CI-VM
+      # стабильно падает (GitHub 403 rate-limit / CDN EOF). Браузерные кэши
+      # берём из предыдущего успешно собранного образа в GHCR; source-слои
+      # (pip install из pyproject+src) пересобираются как обычно.
+      - name: Pull previous searchnet image (browser caches)
+        run: |
+          set -euo pipefail
+          docker pull ${{ steps.meta.outputs.searchnet }}:latest || \
+            echo "no previous image — first build will fetch browsers from upstream"
+
+      - name: Build searchnet image (recovery path)
+        uses: docker/build-push-action@v6
+        with:
+          context: searchnet
+          file: searchnet/Dockerfile
+          push: true
+          provenance: false
+          sbom: false
+          tags: |
+            ${{ steps.meta.outputs.searchnet }}:${{ steps.meta.outputs.tag }}
+            ${{ steps.meta.outputs.searchnet }}:latest
+
   trigger-verify:
     name: trigger-verify
     needs: [build-api, build-web]

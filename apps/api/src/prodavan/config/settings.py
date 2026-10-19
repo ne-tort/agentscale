@@ -262,24 +262,23 @@ class Settings(BaseSettings):
             "OPENCLAW_WEB_SEARCH_API_KEY",
         ),
     )
-    # CLAW-WEB — backend SearxNG endpoint the *API application* proxies to. This is
-    # the upstream the new `/projects/{id}/web-search` endpoint forwards queries to
+    # CLAW-WEB v2 (WAVE17) — backend searchnet endpoint the *API application*
+    # proxies to (native REST POST {base}/search; SearXNG removed). This is
+    # the upstream the `/projects/{id}/web-search` endpoint forwards queries to
     # (with metrics + rate-limit). Distinct from `pod_agent_runtime_web_search_url`:
     # the latter is injected into the sandbox agent-runtime and must point at the
-    # API proxy (so the pod never reaches SearxNG directly), while this is the
-    # real SearxNG URL reachable only from the API pod (not the sandbox namespace).
+    # API proxy (so the pod never reaches searchnet directly), while this is the
+    # real searchnet URL reachable only from the API pod (not the sandbox namespace).
     web_search_backend_url: str = Field(
         default="",
         validation_alias=AliasChoices(
             "WEB_SEARCH_BACKEND_URL",
-            "SEARXNG_URL",
         ),
     )
     web_search_backend_api_key: str = Field(
         default="",
         validation_alias=AliasChoices(
             "WEB_SEARCH_BACKEND_API_KEY",
-            "SEARXNG_API_KEY",
         ),
     )
     # Per-pod rate limit for the web-search proxy (requests / window). 0 disables.
@@ -291,8 +290,10 @@ class Settings(BaseSettings):
         default=60,
         validation_alias=AliasChoices("WEB_SEARCH_RATE_WINDOW_SEC", "POD_WEB_SEARCH_RATE_WINDOW_SEC"),
     )
+    # searchnet: метапоиск ходит в живые SERP-движки — первый контакт с движком
+    # может стоить секунд (прогрев/anti-bot); 30с вместо searxng-овских 15.
     web_search_timeout_sec: float = Field(
-        default=15.0,
+        default=30.0,
         validation_alias=AliasChoices("WEB_SEARCH_TIMEOUT_SEC", "POD_WEB_SEARCH_TIMEOUT_SEC"),
     )
     # Documents module (DOCUM). GOTENBERG_URL empty -> local in-proc converter
