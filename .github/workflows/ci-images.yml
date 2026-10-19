@@ -154,6 +154,7 @@ jobs:
           df -h /
 
   build-web:
+    needs: [build-api]
     runs-on: [self-hosted, linux, docker]
     steps:
       - uses: actions/checkout@v4
@@ -222,7 +223,8 @@ jobs:
   # searchnet). Пин версий браузерных пакетов в Dockerfile.recovery обязан
   # совпадать с poetry.lock, иначе кэш-слои расходятся с ревизиями chromium.
   build-searchnet:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && needs.build-web.result == 'success'
+    needs: [build-api, build-web]
     timeout-minutes: 45
     runs-on: [self-hosted, linux, docker]
     steps:
