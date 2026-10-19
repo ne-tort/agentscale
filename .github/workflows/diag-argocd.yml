@@ -95,8 +95,14 @@ jobs:
           echo '=== searchnet events ==='
           kubectl -n agentscale-dev describe deploy searchnet | tail -20 || true
           echo '=== searchnet health from inside cluster ==='
-          kubectl -n agentscale-dev run -q --rm curl-probe --image=curlimages/curl:8.10.1 --restart=Never -- \
-            curl -s -m 20 http://searchnet.agentscale-dev.svc:3950/health | head -c 400 || true
+          kubectl -n agentscale-dev run curl-probe --image=curlimages/curl:8.10.1 --restart=Never -- \
+            curl -s -m 30 http://searchnet.agentscale-dev.svc:3950/health || true
+          sleep 25
+          kubectl -n agentscale-dev logs curl-probe 2>/dev/null | head -c 500 || true
+          kubectl -n agentscale-dev delete pod curl-probe --wait=false 2>/dev/null || true
           echo
-          kubectl -n agentscale-dev run -q --rm curl-search --image=curlimages/curl:8.10.1 --restart=Never -- \
-            sh -c 'curl -s -m 90 -X POST http://searchnet.agentscale-dev.svc:3950/search -H "content-type: application/json" -d "{\"q\":\"playwright python\",\"max_results\":3}" | head -c 600' || true
+          kubectl -n agentscale-dev run curl-search --image=curlimages/curl:8.10.1 --restart=Never -- \
+            sh -c 'curl -s -m 90 -X POST http://searchnet.agentscale-dev.svc:3950/search -H "content-type: application/json" -d "{\"q\":\"playwright python\",\"max_results\":3}"' || true
+          sleep 100
+          kubectl -n agentscale-dev logs curl-search 2>/dev/null | head -c 700 || true
+          kubectl -n agentscale-dev delete pod curl-search --wait=false 2>/dev/null || true
