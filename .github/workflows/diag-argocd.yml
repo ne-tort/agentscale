@@ -422,3 +422,16 @@ jobs:
               echo "--- $P sessions: ${SESSIONS:0:200}"
             fi
           done
+
+  w17-hmzh5:
+    needs: diag
+    continue-on-error: true
+    runs-on: [self-hosted, linux, docker]
+    steps:
+      - name: Resolve kubeconfig
+        run: echo "KUBECONFIG=$HOME/.kube/prodavan-dev.yaml" >> "${GITHUB_ENV}"
+      - name: hmzh5 config
+        run: |
+          set -euo pipefail
+          P=pod/agentscale-agent-pool-hmzh5
+          kubectl -n agentscale-dev-sandboxes exec "$P" -- sh -c 'ls -la /workspace/; echo ---; ls /workspace/.prodavan 2>/dev/null; echo ---; cat /workspace/.prodavan/config.yaml 2>/dev/null | head -40' || true
