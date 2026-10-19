@@ -17,16 +17,11 @@ jobs:
       - name: Resolve kubeconfig (host, not checkout)
         run: |
           set -euo pipefail
-          ls -la /home/runner/.kube/config 2>/dev/null || true
-          for f in /home/runner/.kube/config /home/www/.kube/config; do
-            [ -f "$f" ] && echo "found: $f"
-          done
-          KCFG=""
-          for f in /home/runner/.kube/config /home/www/.kube/config /etc/rancher/k3s/k3s.yaml; do
-            [ -f "$f" ] && KCFG="$f" && break
-          done
+          # Тот же путь, что verify-dev: prodavan-ops берёт ~/.kube/prodavan-dev.yaml
+          # (подготовлен на runner-хосте).
+          KCFG="$HOME/.kube/prodavan-dev.yaml"
+          [ -f "$KCFG" ] || { echo "no $KCFG"; ls -la "$HOME/.kube/" || true; exit 1; }
           echo "KUBECONFIG=${KCFG}" >> "${GITHUB_ENV}"
-          echo "kubeconfig: ${KCFG}"
           kubectl get ns agentscale-dev --request-timeout=10s
 
       - name: Application full status
