@@ -228,10 +228,12 @@ jobs:
       # searchnet — отдельный публичный репозиторий (ne-tort/searchnet); в этой
       # репе сабмодуля нет (суперрепозиторий — локальная рабочая копия). Чекаутим
       # исходник прямо из GitHub по коммиту пина из infra/k3s/base/platform/searchnet.yaml.
-      - name: Clone searchnet source
+      - name: Clone searchnet source (private — GHCR_PUSH_TOKEN)
+        env:
+          GH_TOKEN: ${{ secrets.GHCR_PUSH_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          git clone --depth 1 https://github.com/ne-tort/searchnet.git searchnet
+          git clone --depth 1             "https://x-access-token:${GH_TOKEN}@github.com/ne-tort/searchnet.git" searchnet
 
       - name: Image names
         id: meta
