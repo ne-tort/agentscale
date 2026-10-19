@@ -1346,6 +1346,17 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "enabled": True,
                 "scope": {"projects": "all", "chats": "all"},
             },
+            # Настройки отправки мастер-прайса: выбранный получатель живёт
+            # отдельной строкой, а не в самой виртуальной таблице master_price
+            # (её строки приходят из OpenSearch и писать в них некуда).
+            # chats=all — выбор общий на кабинет/проект, как и почтовые профили.
+            {
+                "slug": "master_price_mail",
+                "label": {"ru": "Отправка мастер-прайса", "en": "Master price mail"},
+                "storage_kind": "json_document",
+                "enabled": True,
+                "scope": {"projects": "all", "chats": "all"},
+            },
             # WAVE7: «Закупка» — агрегат по поставщикам (материализуется пайплайном).
             # chats=all: общий проектный датасет (агрегатор между чатами), а не
             # per-chat зеркала — строки одни на проект, видны из любого чата.
@@ -3597,6 +3608,16 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "default": True,
             },
             {
+                # Implicit TLS (SMTPS): Яндекс.Почта и часть корпоративных
+                # релеев слушают 465 с TLS с первого байта, STARTTLS там нет.
+                "table_slug": "mail_senders",
+                "name": "smtp_ssl",
+                "label": {"ru": "SSL (порт 465)", "en": "SSL (port 465)"},
+                "type": "bool",
+                "required": False,
+                "default": False,
+            },
+            {
                 "table_slug": "mail_senders",
                 "name": "is_default",
                 "label": {"ru": "По умолчанию", "en": "Default"},
@@ -3698,6 +3719,32 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "required": False,
             },
             _project_ids_column("mail_outbox"),
+            # Получатель мастер-прайса: row_id контакта из mail_contacts.
+            # Храним ссылку, а не адрес — правка контакта не требует
+            # перенастройки страницы, а удалённый контакт даёт внятную ошибку.
+            {
+                "table_slug": "master_price_mail",
+                "name": "recipient_id",
+                "label": {"ru": "Получатель", "en": "Recipient"},
+                "type": "text",
+                "required": False,
+            },
+            {
+                "table_slug": "master_price_mail",
+                "name": "subject",
+                "label": {"ru": "Тема письма", "en": "Subject"},
+                "type": "text",
+                "required": False,
+                "default": "Мастер-прайс",
+            },
+            {
+                "table_slug": "master_price_mail",
+                "name": "comment",
+                "label": {"ru": "Комментарий", "en": "Comment"},
+                "type": "text",
+                "required": False,
+            },
+            _project_ids_column("master_price_mail"),
             {
                 "table_slug": "document_company_fields",
                 "name": "supplier_name",
@@ -6619,6 +6666,33 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                                     "ru": "Скачать мастер-прайс",
                                     "en": "Download master price",
                                 },
+                            },
+                            {
+                                # Получатель берётся из виджета «Получатель»
+                                # (строка master_price_mail) — в шапке только
+                                # кнопка, чтобы не дублировать выбор.
+                                "kind": "invoke_action",
+                                "action": "master_price_send",
+                                "icon": "send",
+                                "label": {
+                                    "ru": "Отправить мастер-прайс",
+                                    "en": "Send master price",
+                                },
+                            },
+                        ],
+                    },
+                    # Виджет над inline-поиском: выбор получателя из адресной
+                    # книги (mail_contacts). Строка настроек создаётся сама.
+                    "list_header": {
+                        "table_slug": "master_price_mail",
+                        "ensure_row": {"subject": "Мастер-прайс"},
+                        "fields": [
+                            {
+                                "column": "recipient_id",
+                                "widget": "contact_picker",
+                                "label": {"ru": "Получатель", "en": "Recipient"},
+                                "contacts_table": "mail_contacts",
+                                "empty_style": "warning",
                             }
                         ],
                     },
@@ -6919,6 +6993,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                         {"column": "smtp_user", "widget": "value", "icon": "account_circle"},
                         {"column": "smtp_password", "widget": "value", "icon": "key"},
                         {"column": "smtp_tls", "widget": "switch"},
+                        {"column": "smtp_ssl", "widget": "switch"},
                         {"column": "is_default", "widget": "switch"},
                         {"column": "enabled", "widget": "switch"},
                         {"column": "project_ids", "widget": "project_multiselect"},
@@ -7240,6 +7315,26 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 },
                 "trigger": {"on": []},
                 "ui": {"placement": ["scaffold"], "icon": "download"},
+            },
+            # WAVE16.3: мастер-прайс письмом — тот же xlsx, что и «Скачать»,
+            # вложением. Отправитель фиксирован профилем «price», получатель —
+            # выбранный контакт на странице (master_price_mail.recipient_id).
+            {
+                "id": "master_price_send",
+                "label": {
+                    "ru": "Отправить мастер-прайс",
+                    "en": "Send master price",
+                },
+                "kind": "equipment.master_price_mail",
+                "enabled": True,
+                "params": {
+                    "sellers_table": "trusted_sellers",
+                    "templates_type": "master_price",
+                    "mail_settings_table": "master_price_mail",
+                    "sender_name": "price",
+                },
+                "trigger": {"on": []},
+                "ui": {"placement": ["scaffold"], "icon": "send"},
             },
             {
                 "id": "budget_sync_lines",
@@ -7820,6 +7915,26 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "body": {
                         "name": "prodavan-equipment",
                         "version": "3.2.0",
+                        "enabled": True,
+                    },
+                },
+                # WAVE16.3: профиль отправки «price» — им уходит мастер-прайс.
+                # Пароль НЕ в сидах: smtp_password остаётся пустым, secret_ref
+                # проставляется в контуре через upload secret (сиды общие для
+                # всех инсталляций, класть туда живой пароль нельзя).
+                {
+                    "table_slug": "mail_senders",
+                    "row_id": "mail_sender_price",
+                    "body": {
+                        "name": "price",
+                        "from_address": "price@itvzlet.ru",
+                        "from_name": "ИТ Взлёт — прайс",
+                        "smtp_host": "smtp.yandex.ru",
+                        "smtp_port": 465,
+                        "smtp_user": "price@itvzlet.ru",
+                        "smtp_tls": False,
+                        "smtp_ssl": True,
+                        "is_default": True,
                         "enabled": True,
                     },
                 },

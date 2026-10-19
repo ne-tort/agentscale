@@ -209,6 +209,8 @@ def test_equipment_meta_hub_on_data_placement() -> None:
         "mail_senders",
         "mail_contacts",
         "mail_outbox",
+        # WAVE16.3: настройки отправки мастер-прайса (получатель на странице)
+        "master_price_mail",
     }
     # Каталог сборок — глобальная библиотека: chats=all (строки общие на проект,
     # session_id NULL). Чат-скоп сломал бы переиспользование между заявками.
@@ -564,8 +566,9 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     assert slot_card["pick_view"] == "part_cards_pick"
 
     seed_items = meta["seed_rows"]["items"]
-    # 17 типов (13 базовые + 4 устройства-комплекта) + 4 шаблона + 2 промпта + 1 MCP
-    assert len(seed_items) == 24
+    # 17 типов (13 базовые + 4 устройства-комплекта) + 4 шаблона + 2 промпта
+    # + 1 MCP + 1 ящик отправки «price» (WAVE16.3)
+    assert len(seed_items) == 25
     by_row = {s["row_id"]: s for s in seed_items}
     assert "tpl_budget_builtin" in by_row
     etypes = [s for s in seed_items if s["table_slug"] == "equipment_types"]
@@ -612,7 +615,13 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     assert mcp_seed["body"]["enabled"] is True
     assert mcp_seed["body"]["name"] == "prodavan-equipment"
     assert mcp_seed["body"]["version"] == "3.2.0"
-    assert seed_items[-1]["row_id"] == "equipment_mcp_default"
+    # WAVE16.3: сид-ящик «price» для отправки мастер-прайса (без пароля —
+    # secret_ref проставляется в контуре)
+    price_seed = next(s for s in seed_items if s["row_id"] == "mail_sender_price")
+    assert price_seed["table_slug"] == "mail_senders"
+    assert price_seed["body"]["name"] == "price"
+    assert price_seed["body"]["smtp_ssl"] is True
+    assert not price_seed["body"].get("smtp_password")
 
     # Системные промпты подбора: AGENTS.md в корне + правила в prompts/equipment
     prompts_seed = [s for s in seed_items if s["table_slug"] == "equipment_prompts"]
