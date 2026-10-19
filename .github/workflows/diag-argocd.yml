@@ -1,0 +1,62 @@
+name: Diag ArgoCD
+
+# WAVE17: agentscale-dev stuck в ComparisonError «Failed to load target state»
+# после мержа WAVE17. Раннер на VM с kubeconfig — читаем repo-server логи и
+# полный статус приложения. Только чтение, только dev.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diag:
+    runs-on: [self-hosted, linux, docker]
+    steps:
+      - name: Resolve kubeconfig (host, not checkout)
+        run: |
+          set -euo pipefail
+          ls -la /home/runner/.kube/config 2>/dev/null || true
+          for f in /home/runner/.kube/config /home/www/.kube/config; do
+            [ -f "$f" ] && echo "found: $f"
+          done
+          KCFG=""
+          for f in /home/runner/.kube/config /home/www/.kube/config /etc/rancher/k3s/k3s.yaml; do
+            [ -f "$f" ] && KCFG="$f" && break
+          done
+          echo "KUBECONFIG=${KCFG}" >> "${GITHUB_ENV}"
+          echo "kubeconfig: ${KCFG}"
+          kubectl get ns agentscale-dev --request-timeout=10s
+
+      - name: Application full status
+        run: |
+          set -euo pipefail
+          kubectl -n argocd get application agentscale-dev -o yaml | sed -n '1,120p'
+          echo '=== sync/conditions ==='
+          kubectl -n argocd get application agentscale-dev -o json | python3 -c "
+          import json,sys
+          o=json.load(sys.stdin)
+          st=o.get('status',{})
+          print('sync:', json.dumps(st.get('sync',{}).get('status'), ensure_ascii=False))
+          for c in st.get('conditions',[]):
+              print('condition:', c.get('type'), '-', c.get('message'))
+          "
+
+      - name: Repo-server logs (errors)
+        run: |
+          set -euo pipefail
+          echo '=== repo-server recent errors ==='
+          kubectl -n argocd logs deploy/argocd-repo-server --tail=300 2>&1 | grep -iE "error|fail|manifest|kustomize" | tail -40 || true
+          echo '=== application-controller errors ==='
+          kubectl -n argocd logs deploy/argocd-application-controller --tail=200 2>&1 | grep -iE "agentscale-dev|error|comparison" | tail -20 || true
+
+      - name: Git fetch probe (как repo-server)
+        run: |
+          set -euo pipefail
+          cd "$(mktemp -d)"
+          git clone --depth 1 https://github.com/ne-tort/agentscale.git repo 2>&1 | tail -2
+          cd repo
+          git log --oneline -1
+          echo '=== submodule probe ==='
+          git submodule status || true
