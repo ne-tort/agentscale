@@ -236,3 +236,20 @@ jobs:
           done
           echo '=== claims CR list ==='
           kubectl -n agentscale-dev-sandboxes get agentsandboxes 2>/dev/null || kubectl -n agentscale-dev-sandboxes get agentsandbox 2>/dev/null || kubectl api-resources 2>/dev/null | grep -i sandbox | head -5 || true
+
+  w17-claim:
+    needs: diag
+    continue-on-error: true
+    runs-on: [self-hosted, linux, docker]
+    steps:
+      - name: Resolve kubeconfig
+        run: echo "KUBECONFIG=$HOME/.kube/prodavan-dev.yaml" >> "${GITHUB_ENV}"
+      - name: claim + pod for W17
+        run: |
+          set -euo pipefail
+          echo '=== sandboxclaims ==='
+          kubectl -n agentscale-dev-sandboxes get sandboxclaims -o wide 2>/dev/null | head -12
+          echo '=== claim for our project (по имени/annotation) ==='
+          kubectl -n agentscale-dev-sandboxes get sandboxclaims -o yaml 2>/dev/null | grep -B5 -A15 "60023937403249dc" | head -50 || true
+          echo '=== sandboxes ==='
+          kubectl -n agentscale-dev-sandboxes get sandboxes -o wide 2>/dev/null | head -12
