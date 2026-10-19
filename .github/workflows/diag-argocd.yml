@@ -177,3 +177,17 @@ jobs:
           kubectl -n agentscale-dev-sandboxes exec "$POD" -- ls -la /workspace/.prodavan/ 2>/dev/null || true
           echo "=== live model stream error (последний send) ==="
           kubectl -n agentscale-dev-sandboxes logs "$POD" --tail=100 --timestamps 2>&1 | tail -30 || true
+
+  config-dump:
+    needs: diag
+    continue-on-error: true
+    runs-on: [self-hosted, linux, docker]
+    steps:
+      - name: Resolve kubeconfig
+        run: echo "KUBECONFIG=$HOME/.kube/prodavan-dev.yaml" >> "${GITHUB_ENV}"
+      - name: exec cat config
+        run: |
+          set -euo pipefail
+          POD=$(kubectl -n agentscale-dev-sandboxes get pods -o name | grep -m1 agent-pool)
+          echo "POD=$POD"
+          kubectl -n agentscale-dev-sandboxes exec "$POD" -- sh -c 'ls -la /workspace/ 2>&1 | head; echo ---; ls -la /workspace/.prodavan 2>&1 | head; echo ---; cat /workspace/.prodavan/config.yaml 2>&1 | head -50' || true
