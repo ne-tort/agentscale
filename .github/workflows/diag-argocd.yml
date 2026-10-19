@@ -140,3 +140,22 @@ jobs:
           kubectl -n agentscale-dev-sandboxes get "$POD" -o yaml | grep -A2 -iE "OPENCLAW_WEB|PRODAVAN|NAME: OPENCLAW" | head -30 || true
           echo '=== pod logs (provider/401) ==='
           kubectl -n agentscale-dev-sandboxes logs "$POD" --tail=300 2>&1 | grep -iE "provider|401|auth|api.x.ai|credential|lease" | tail -25 || true
+
+  deep:
+    needs: diag
+    continue-on-error: true
+    runs-on: [self-hosted, linux, docker]
+    steps:
+      - name: Resolve kubeconfig
+        run: echo "KUBECONFIG=$HOME/.kube/prodavan-dev.yaml" >> "${GITHUB_ENV}"
+      - name: deep dive
+        run: |
+          set -euo pipefail
+          echo '=== api logs credential/lease (tail 5000) ==='
+          kubectl -n agentscale-dev logs deploy/agentscale-api --tail=5000 2>&1 | grep -iE "credential|lease|web_search|xai|openclaw send" | tail -40 || true
+          echo '=== api-pod container too ==='
+          kubectl -n agentscale-dev get pods -l app=agentscale-api -o name | head -2
+          kubectl -n agentscale-dev logs deploy/agentscale-api -c api --tail=5000 2>&1 | grep -iE "credential|lease|web_search|openclaw" | tail -30 || true
+          echo '=== agent-pod logs full tail (401/provider) ==='
+          POD=$(kubectl -n agentscale-dev-sandboxes get pods -o name | grep -m1 agent-pool)
+          kubectl -n agentscale-dev-sandboxes logs "$POD" --tail=500 2>&1 | tail -40 || true
