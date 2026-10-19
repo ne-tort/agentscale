@@ -326,3 +326,23 @@ jobs:
           echo
           echo '=== env PROVIDER/OPEN match ==='
           kubectl -n agentscale-dev-sandboxes exec "$P" -- sh -c 'env | grep -iE "openrouter|openai|anthropic|provider|dialect|model" | sed "s/=.*/=***/" ' || true
+
+  buildkit-heal:
+    continue-on-error: true
+    runs-on: [self-hosted, linux, docker]
+    steps:
+      - name: Inspect and heal buildkit
+        run: |
+          set -euo pipefail
+          echo '=== buildx builders ==='
+          docker buildx ls || true
+          echo '=== buildkitd status ==='
+          docker ps -a | grep buildkitd || true
+          echo '=== disk ==='
+          df -h / | tail -1
+          echo '=== restart buildx builder agentscale-ci ==='
+          docker buildx stop agentscale-ci 2>/dev/null || true
+          docker buildx rm --keep-state agentscale-ci 2>/dev/null || true
+          docker buildx create --name agentscale-ci --driver docker-container --driver-opt network=host --config /etc/buildkit/buildkitd.toml 2>/dev/null || \
+            docker buildx create --name agentscale-ci --driver docker-container --driver-opt network=host || true
+          docker buildx inspect --bootstrap agentscale-ci >/dev/null && echo "builder healthy"
