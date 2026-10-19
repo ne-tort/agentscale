@@ -191,3 +191,28 @@ jobs:
           POD=$(kubectl -n agentscale-dev-sandboxes get pods -o name | grep -m1 agent-pool)
           echo "POD=$POD"
           kubectl -n agentscale-dev-sandboxes exec "$POD" -- sh -c 'ls -la /workspace/ 2>&1 | head; echo ---; ls -la /workspace/.prodavan 2>&1 | head; echo ---; cat /workspace/.prodavan/config.yaml 2>&1 | head -50' || true
+
+  w17-pod:
+    needs: diag
+    continue-on-error: true
+    runs-on: [self-hosted, linux, docker]
+    steps:
+      - name: Resolve kubeconfig
+        run: echo "KUBECONFIG=$HOME/.kube/prodavan-dev.yaml" >> "${GITHUB_ENV}"
+      - name: find W17 project pod (label by project)
+        run: |
+          set -euo pipefail
+          echo '=== all sandbox pods with labels ==='
+          kubectl -n agentscale-dev-sandboxes get pods -o custom-columns=NAME:.metadata.name,PROJECT:.metadata.labels.proj --no-headers 2>/dev/null || \
+            kubectl -n agentscale-dev-sandboxes get pods --show-labels | head -10 || true
+          echo '=== find pod bound to proj_60023937403249dc (session-map scan) ==='
+          for P in $(kubectl -n agentscale-dev-sandboxes get pods -o name | grep agent-pool); do
+            OUT=$(kubectl -n agentscale-dev-sandboxes exec "$P" -- sh -c 'ls /workspace/.prodavan 2>/dev/null; cat /workspace/.prodavan/config.yaml 2>/dev/null | head -30' 2>/dev/null || true)
+            if echo "$OUT" | grep -q "60023937403249dc\|provider"; then
+              echo "FOUND pod: $P"
+              echo "$OUT" | sed 's/apiKey:.*/apiKey: ***MASKED***/'
+              break
+            fi
+          done
+          echo '=== claim CRs for the project ==='
+          kubectl -n agentscale-dev-sandboxes get claims 2>/dev/null | grep -i 60023937403249dc || kubectl get claims -A 2>/dev/null | grep -i 60023937403249dc | head -3 || true
