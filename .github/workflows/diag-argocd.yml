@@ -346,3 +346,31 @@ jobs:
           docker buildx create --name agentscale-ci --driver docker-container --driver-opt network=host --config /etc/buildkit/buildkitd.toml 2>/dev/null || \
             docker buildx create --name agentscale-ci --driver docker-container --driver-opt network=host || true
           docker buildx inspect --bootstrap agentscale-ci >/dev/null && echo "builder healthy"
+
+  push-probe:
+    continue-on-error: true
+    runs-on: [self-hosted, linux, docker]
+    steps:
+      - name: docker login + direct push test
+        env:
+          GH_TOKEN: ${{ secrets.GHCR_PUSH_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          echo "$GH_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          echo '=== build tiny image and push directly (no buildx) ==='
+          echo "probe $(date -u +%s)" > probe.txt
+          docker build -t ghcr.io/ne-tort/push-probe:latest - <<'EOF2'
+          FROM alpine:3.20
+          COPY probe.txt /
+          EOF2
+          time docker push ghcr.io/ne-tort/push-probe:latest 2>&1 | tail -5 || true
+          docker logout ghcr.io
+      - name: net throughput to ghcr
+        run: |
+          set -euo pipefail
+          echo '=== curl speed to ghcr.io upload ==='
+          curl -s -o /dev/null -w 'connect: %{time_connect}s ttfb: %{time_starttransfer}s\n' https://ghcr.io/v2/ || true
+          echo '=== upload test file 50MB ==='
+          dd if=/dev/zero of=/tmp/blob.bin bs=1M count=50 2>/dev/null
+          time curl -s -o /dev/null -w '%{http_code} %{speed_upload}B/s\n' -X POST --data-binary @/tmp/blob.bin https://ghcr.io/v2/ || true
+          rm -f /tmp/blob.bin
