@@ -134,7 +134,7 @@ jobs:
           set -euo pipefail
           echo '=== sandbox pods ==='
           kubectl -n agentscale-dev-sandboxes get pods -o wide | head -10 || true
-          POD=$(kubectl -n agentscale-dev-sandboxes get pods -o name | grep -m1 sandbox)
+          POD=$(kubectl -n agentscale-dev-sandboxes get pods -o name | grep -m1 agent-pool)
           echo "POD=$POD"
           echo '=== pod env (websearch/provider) ==='
           kubectl -n agentscale-dev-sandboxes get "$POD" -o yaml | grep -A2 -iE "OPENCLAW_WEB|PRODAVAN|NAME: OPENCLAW" | head -30 || true
