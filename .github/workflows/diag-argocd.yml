@@ -106,3 +106,18 @@ jobs:
           sleep 100
           kubectl -n agentscale-dev logs curl-search 2>/dev/null | head -c 700 || true
           kubectl -n agentscale-dev delete pod curl-search --wait=false 2>/dev/null || true
+
+  api-logs:
+    needs: diag
+    continue-on-error: true
+    runs-on: [self-hosted, linux, docker]
+    steps:
+      - name: Resolve kubeconfig
+        run: echo "KUBECONFIG=$HOME/.kube/prodavan-dev.yaml" >> "${GITHUB_ENV}"
+      - name: api logs (websearch + credentials)
+        run: |
+          set -euo pipefail
+          echo '=== web_search proxy lines (last 200) ==='
+          kubectl -n agentscale-dev logs deploy/agentscale-api --tail=2000 2>&1 | grep -iE "web_search|credential (lease|push)|xai" | tail -30 || true
+          echo '=== api errors tail ==='
+          kubectl -n agentscale-dev logs deploy/agentscale-api --tail=200 2>&1 | grep -iE "error|401" | tail -15 || true
