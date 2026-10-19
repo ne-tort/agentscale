@@ -272,3 +272,22 @@ jobs:
           echo
           echo '=== send last error from pod logs ==='
           kubectl -n agentscale-dev-sandboxes logs "$P" --tail=60 2>&1 | grep -vE "^$" | tail -25 || true
+
+  w17-env:
+    needs: diag
+    continue-on-error: true
+    runs-on: [self-hosted, linux, docker]
+    steps:
+      - name: Resolve kubeconfig
+        run: echo "KUBECONFIG=$HOME/.kube/prodavan-dev.yaml" >> "${GITHUB_ENV}"
+      - name: W17 pod env + leases
+        run: |
+          set -euo pipefail
+          P=pod/agentscale-agent-pool-wf89q
+          echo '=== provider env vars ==='
+          kubectl -n agentscale-dev-sandboxes exec "$P" -- sh -c 'env | grep -iE "OPENROUTER|OPENAI|ANTHROPIC|PROVIDER" | sed "s/=.*/=***/" ' || true
+          echo '=== leases list (auth по BRIDGE_AUTH_TOKEN) ==='
+          kubectl -n agentscale-dev-sandboxes exec "$P" -- sh -c 'wget -qO- --header "Authorization: Bearer $(cat /var/run/bridge-token 2>/dev/null || echo $BRIDGE_AUTH_TOKEN)" http://127.0.0.1:3921/v1/credentials/leases 2>&1 | head -c 500' || true
+          echo
+          echo '=== bridges health ==='
+          kubectl -n agentscale-dev-sandboxes exec "$P" -- sh -c 'wget -qO- http://127.0.0.1:3921/v1/health 2>&1 | head -c 300' || true
