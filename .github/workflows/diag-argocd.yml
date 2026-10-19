@@ -253,3 +253,22 @@ jobs:
           kubectl -n agentscale-dev-sandboxes get sandboxclaims -o yaml 2>/dev/null | grep -B5 -A15 "60023937403249dc" | head -50 || true
           echo '=== sandboxes ==='
           kubectl -n agentscale-dev-sandboxes get sandboxes -o wide 2>/dev/null | head -12
+
+  w17-cfg:
+    needs: diag
+    continue-on-error: true
+    runs-on: [self-hosted, linux, docker]
+    steps:
+      - name: Resolve kubeconfig
+        run: echo "KUBECONFIG=$HOME/.kube/prodavan-dev.yaml" >> "${GITHUB_ENV}"
+      - name: W17 pod config + leases
+        run: |
+          set -euo pipefail
+          P=pod/agentscale-agent-pool-wf89q
+          echo '=== /workspace tree ==='
+          kubectl -n agentscale-dev-sandboxes exec "$P" -- sh -c 'ls -la /workspace/ | head -15; echo ---; ls -la /workspace/.prodavan 2>/dev/null | head -8; echo ---; cat /workspace/.prodavan/config.yaml 2>/dev/null' || true
+          echo '=== leases via bridge API ==='
+          kubectl -n agentscale-dev-sandboxes exec "$P" -- sh -c 'wget -qO- --header="Authorization: Bearer $BRIDGE_AUTH_TOKEN" http://127.0.0.1:3921/v1/credentials/leases 2>/dev/null | head -c 400 || echo NOLEAK' || true
+          echo
+          echo '=== send last error from pod logs ==='
+          kubectl -n agentscale-dev-sandboxes logs "$P" --tail=60 2>&1 | grep -vE "^$" | tail -25 || true
