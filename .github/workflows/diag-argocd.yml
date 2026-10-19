@@ -397,3 +397,28 @@ jobs:
           echo '=== agentscale-api pod started ==='
           kubectl -n agentscale-dev get pods -l app=agentscale-api -o jsonpath='{.items[0].status.startTime}'
           echo
+
+  post-fix2:
+    needs: diag
+    continue-on-error: true
+    runs-on: [self-hosted, linux, docker]
+    steps:
+      - name: Resolve kubeconfig
+        run: echo "KUBECONFIG=$HOME/.kube/prodavan-dev.yaml" >> "${GITHUB_ENV}"
+      - name: find new W17 pod and config
+        run: |
+          set -euo pipefail
+          echo '=== current sandboxclaims ==='
+          kubectl -n agentscale-dev-sandboxes get sandboxclaims -o wide | head -8
+          POD=$(kubectl -n agentscale-dev-sandboxes get pods -o name | grep -m1 agent-pool)
+          echo "=== checking all pods for W17 config ==="
+          for P in $(kubectl -n agentscale-dev-sandboxes get pods -o name | grep agent-pool); do
+            OUT=$(kubectl -n agentscale-dev-sandboxes exec "$P" -- sh -c 'grep -A6 "^provider:" /workspace/.prodavan/config.yaml 2>/dev/null' 2>/dev/null || true)
+            if [ -n "$OUT" ]; then
+              echo "=== $P has provider block ==="
+              echo "$OUT"
+            else
+              SESSIONS=$(kubectl -n agentscale-dev-sandboxes exec "$P" -- sh -c 'cat /workspace/.openclaw-data/session-map.json 2>/dev/null | head -c 300' 2>/dev/null || true)
+              echo "--- $P sessions: ${SESSIONS:0:200}"
+            fi
+          done
