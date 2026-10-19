@@ -79,3 +79,24 @@ jobs:
           git log --oneline -1
           echo '=== submodule probe ==='
           git submodule status || true
+
+  pods:
+    needs: diag
+    continue-on-error: true
+    runs-on: [self-hosted, linux, docker]
+    steps:
+      - name: Resolve kubeconfig
+        run: echo "KUBECONFIG=$HOME/.kube/prodavan-dev.yaml" >> "${GITHUB_ENV}"
+      - name: searchnet pod state
+        run: |
+          set -euo pipefail
+          kubectl -n agentscale-dev get pods -o wide | grep -E "searchnet|searxng|NAME" || true
+          kubectl -n agentscale-dev get deploy searchnet -o wide || true
+          echo '=== searchnet events ==='
+          kubectl -n agentscale-dev describe deploy searchnet | tail -20 || true
+          echo '=== searchnet health from inside cluster ==='
+          kubectl -n agentscale-dev run -q --rm curl-probe --image=curlimages/curl:8.10.1 --restart=Never -- \
+            curl -s -m 20 http://searchnet.agentscale-dev.svc:3950/health | head -c 400 || true
+          echo
+          kubectl -n agentscale-dev run -q --rm curl-search --image=curlimages/curl:8.10.1 --restart=Never -- \
+            sh -c 'curl -s -m 90 -X POST http://searchnet.agentscale-dev.svc:3950/search -H "content-type: application/json" -d "{\"q\":\"playwright python\",\"max_results\":3}" | head -c 600' || true
