@@ -30,6 +30,7 @@ import 'package:prodavan/features/meta/widgets/budget_summary_strip.dart';
 import 'package:prodavan/features/meta/widgets/document_fields_panel.dart';
 import 'package:prodavan/features/meta/widgets/editable_number_cell.dart';
 import 'package:prodavan/features/meta/widgets/file_upload_field.dart';
+import 'package:prodavan/features/meta/widgets/contact_picker_field.dart';
 import 'package:prodavan/features/meta/widgets/project_multiselect_field.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
@@ -1997,6 +1998,27 @@ class _CollectionListHeaderState extends State<_CollectionListHeader> {
         readOnly: widget.readOnly,
         subtitleMode: fieldCfg['subtitle']?.toString(),
         onChanged: (ids) => persist(ids),
+      );
+    }
+
+    // Выбор строки связанной таблицы (Получатель на Мастер-прайсе): контакты
+    // общие на кабинет, поэтому читаем их из общего списка таблиц адаптера,
+    // а не из сессионного itemsForTable.
+    if (widgetKind == 'contact_picker') {
+      final contactsTable =
+          fieldCfg['contacts_table']?.toString() ?? 'mail_contacts';
+      final rows = widget.seeds.itemsForTable(contactsTable) as List;
+      return ContactPickerField(
+        label: label.isNotEmpty ? label : columnName,
+        rows: [
+          for (final r in rows)
+            if (r is Map && (r['row_id'] as String?)?.isNotEmpty == true)
+              Map<String, dynamic>.from(r),
+        ],
+        value: value?.toString(),
+        readOnly: widget.readOnly,
+        emptyStyle: fieldCfg['empty_style']?.toString(),
+        onChanged: (rowId) => persist(rowId),
       );
     }
 

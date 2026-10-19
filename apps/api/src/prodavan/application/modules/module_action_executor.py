@@ -350,6 +350,17 @@ class ModuleActionExecutor:
                 session_id=session_id,
             )
 
+        if kind == "equipment.master_price_mail":
+            return await self._master_price_mail(
+                cabinet_id=cabinet_id,
+                module_id=module_id,
+                params=params,
+                principal=principal,
+                employee=employee,
+                project_id=project_id,
+                session_id=session_id,
+            )
+
         if kind == "equipment.procurement_apply":
             return await self._procurement_apply(
                 cabinet_id=cabinet_id,
@@ -1018,19 +1029,15 @@ class ModuleActionExecutor:
             "match_kind": match_kind,
         }
 
-    async def _master_price_export(
+    async def _build_master_price_bytes(
         self,
         *,
         cabinet_id: str,
-        module_id: str,
         params: dict[str, Any],
         principal: Principal,
         employee: EmployeeRow | None,
-        project_id: str | None = None,
-    ) -> dict[str, Any]:
-        """Мастер-прайс xlsx: строки батчами из OpenSearch (search_after),
-        заполнение шаблона «Прайс» (layout легаси-Commerce)."""
-        from prodavan.application.documents.service import DocumentsService
+    ) -> tuple[bytes, int]:
+        """Собрать xlsx мастер-прайса (общий путь для «Скачать» и «Отправить»)."""
         from prodavan.application.modules.equipment_budget import load_default_template
         from prodavan.application.modules.equipment_master_price import (
             MasterPriceService,
@@ -1081,6 +1088,28 @@ class ModuleActionExecutor:
                 status=422,
                 detail="no master price rows (check supplier master_price flags)",
             )
+        return data, rows_count
+
+    async def _master_price_export(
+        self,
+        *,
+        cabinet_id: str,
+        module_id: str,
+        params: dict[str, Any],
+        principal: Principal,
+        employee: EmployeeRow | None,
+        project_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Мастер-прайс xlsx: строки батчами из OpenSearch (search_after),
+        заполнение шаблона «Прайс» (layout легаси-Commerce)."""
+        from prodavan.application.documents.service import DocumentsService
+
+        data, rows_count = await self._build_master_price_bytes(
+            cabinet_id=cabinet_id,
+            params=params,
+            principal=principal,
+            employee=employee,
+        )
         company_id = await self._resolve_documents_company_id(
             cabinet_id=cabinet_id, project_id=project_id
         )
@@ -1102,6 +1131,188 @@ class ModuleActionExecutor:
             employee=employee,
         )
         return {"kind": "equipment.master_price", "file_ref": ref, "rows": rows_count}
+
+    async def _master_price_mail(
+        self,
+        *,
+        cabinet_id: str,
+        module_id: str,
+        params: dict[str, Any],
+        principal: Principal,
+        employee: EmployeeRow | None,
+        project_id: str | None = None,
+        session_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Отправить мастер-прайс письмом получателю со страницы.
+
+        Получатель — контакт из mail_contacts, выбранный в виджете «Получатель»
+        (master_price_mail.recipient_id). Отправитель — профиль mail_senders
+        с именем ``price``: письмо про прайс должно уходить из выделенного
+        ящика, а не из «ящика по умолчанию». Каждая отправка пишется в
+        mail_outbox, чтобы результат был виден в «Исходящих».
+        """
+        from prodavan.application.modules.equipment_mail import (
+            DEFAULT_MAX_ATTACHMENT_MB,
+            MailSendError,
+            list_sender_rows,
+            resolve_recipient,
+            resolve_sender,
+            send_via_profile,
+        )
+        from prodavan.application.modules.equipment_offers_service import ModuleRowIO
+
+        settings_table = str(params.get("mail_settings_table") or "master_price_mail")
+        sender_name = str(params.get("sender_name") or "price")
+
+        # Настройки страницы: recipient_id живёт в единственной строке таблицы
+        # (её создаёт list_header, если строки ещё нет).
+        settings_rows = await self._list_rows_for_scope(
+            cabinet_id=cabinet_id,
+            project_id=project_id,
+            module_id=module_id,
+            table_slug=settings_table,
+            principal=principal,
+            employee=employee,
+            session_id=session_id,
+        )
+        settings = (settings_rows[0].get("body") if settings_rows else {}) or {}
+        contact_id = str(settings.get("recipient_id") or "").strip()
+
+        contact_rows = await self._list_rows_for_scope(
+            cabinet_id=cabinet_id,
+            project_id=project_id,
+            module_id=module_id,
+            table_slug="mail_contacts",
+            principal=principal,
+            employee=employee,
+            session_id=session_id,
+        )
+        to_address = resolve_recipient(contact_rows, contact_id=contact_id)
+
+        sender_rows = await self._list_rows_for_scope(
+            cabinet_id=cabinet_id,
+            project_id=project_id,
+            module_id=module_id,
+            table_slug="mail_senders",
+            principal=principal,
+            employee=employee,
+            session_id=session_id,
+        )
+        if not sender_rows:
+            # Профили общие на кабинет: в проектном контуре их может не быть,
+            # хотя в кабинете они настроены.
+            sender_rows = await list_sender_rows(
+                self._session,
+                cabinet_id=cabinet_id,
+                principal=principal,
+                employee=employee,
+            )
+        profile = resolve_sender(sender_rows, sender_name=sender_name)
+
+        data, rows_count = await self._build_master_price_bytes(
+            cabinet_id=cabinet_id,
+            params=params,
+            principal=principal,
+            employee=employee,
+        )
+        max_bytes = DEFAULT_MAX_ATTACHMENT_MB * 1024 * 1024
+        if len(data) > max_bytes:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail=(
+                    f"мастер-прайс {len(data) // (1024 * 1024)} МБ больше лимита "
+                    f"вложения {DEFAULT_MAX_ATTACHMENT_MB} МБ — скачайте файлом"
+                ),
+            )
+
+        subject = str(settings.get("subject") or "").strip() or "Мастер-прайс"
+        comment = str(settings.get("comment") or "").strip()
+        body_text = (
+            f"Мастер-прайс во вложении.\n\nПозиций: {rows_count}.\n"
+            f"Сформирован: {datetime.now(UTC).strftime('%d.%m.%Y %H:%M')} UTC."
+        )
+        if comment:
+            body_text += f"\n\n{comment}"
+
+        io = ModuleRowIO(
+            self._session,
+            cabinet_id=cabinet_id,
+            project_id=project_id,
+            principal=principal,
+            employee=employee,
+            session_id=session_id,
+        )
+        outbox = await io.create(
+            "mail_outbox",
+            {
+                "sender_id": profile.get("_row_id") or "",
+                "to_address": to_address,
+                "subject": subject,
+                "body_text": body_text,
+                "status": "queued",
+            },
+        )
+        outbox_id = str(outbox.get("row_id") or "")
+        try:
+            send_via_profile(
+                profile,
+                to_address=to_address,
+                subject=subject,
+                body_text=body_text,
+                attachments=[
+                    (
+                        "master-price.xlsx",
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        data,
+                    )
+                ],
+            )
+        except (MailSendError, AppError) as exc:
+            if outbox_id:
+                await io.update(
+                    "mail_outbox",
+                    outbox_id,
+                    {
+                        "sender_id": profile.get("_row_id") or "",
+                        "to_address": to_address,
+                        "subject": subject,
+                        "body_text": body_text,
+                        "status": "failed",
+                        "error": str(exc)[:500],
+                    },
+                )
+            raise AppError(
+                code="MAIL_SEND_FAILED",
+                title="Mail send failed",
+                status=502,
+                detail=f"письмо не отправлено: {exc}",
+            ) from exc
+        if outbox_id:
+            await io.update(
+                "mail_outbox",
+                outbox_id,
+                {
+                    "sender_id": profile.get("_row_id") or "",
+                    "to_address": to_address,
+                    "subject": subject,
+                    "body_text": body_text,
+                    "status": "sent",
+                    "error": "",
+                    "sent_at": datetime.now(UTC).isoformat(timespec="seconds"),
+                },
+            )
+        return {
+            "kind": "equipment.master_price_mail",
+            "ok": True,
+            "to": to_address,
+            "from": str(profile.get("from_address") or ""),
+            "sender": str(profile.get("name") or ""),
+            "rows": rows_count,
+            "bytes": len(data),
+            "outbox_id": outbox_id,
+        }
 
     async def _procurement_apply(
         self,
