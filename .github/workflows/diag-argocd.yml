@@ -350,6 +350,8 @@ jobs:
           docker logs buildx_buildkit_agentscale-ci0 --tail 60 2>&1 | grep -iE "error|fatal|oom|kill|restart|timeout" | tail -20 || true
           echo '=== buildkitd mem info ==='
           docker stats --no-stream --format "{{.Name}} {{.MemUsage}}" | grep buildkit || true
+          echo '=== buildkitd.toml ==='
+          cat /etc/buildkit/buildkitd.toml 2>/dev/null || echo "NO TOML"
 
   push-probe:
     continue-on-error: true
