@@ -288,6 +288,30 @@ class ProjectMaterializeService:
                     }
         if not api_kind:
             api_kind = provider_to_default_api_kind(project.agent_provider)
+        # W17-фикс: endpoint из каталога нужен и БЕЗ pinned-ключа — lease при
+        # send доезжает по provider_key_id сессии, но без base_url в config.yaml
+        # bridge резолвит токен на env-дефолт (openrouter) → 401 «Missing
+        # Authentication header». Провайдер проекта (agent_provider) обязан
+        # давать endpoint.
+        if provider_endpoint is None and api_kind and is_http_probe_kind(api_kind):
+            agent_provider = str(project.agent_provider or "").strip()
+            if agent_provider:
+                try:
+                    endpoint = await ProviderResolver(session).resolve(
+                        api_kind=api_kind,
+                        provider=agent_provider,
+                        secret=None,
+                        catalog_entry_id=None,
+                    )
+                    if endpoint is not None:
+                        provider_endpoint = {
+                            "base_url": endpoint.base_url,
+                            "auth_scheme": endpoint.auth_scheme,
+                            "chat_completions_path": endpoint.chat_completions_path,
+                            "models_path": endpoint.models_path,
+                        }
+                except Exception:  # noqa: BLE001 — каталог best-effort
+                    provider_endpoint = None
         cfg = build_openclaw_config(
             company_policy=company_policy,
             api_kind=api_kind,
