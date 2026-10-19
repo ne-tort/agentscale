@@ -272,6 +272,7 @@ def rollout_restart(
         targets: tuple[tuple[str, str], ...] = tuple((n, namespace) for n in deployments)
     else:
         targets = DEPLOYMENT_TARGETS
+    skipped: list[str] = []
     for name, ns in targets:
         body = {
             "spec": {
@@ -287,14 +288,29 @@ def rollout_restart(
         try:
             apps.patch_namespaced_deployment(name=name, namespace=ns, body=body)
         except ApiException as exc:
+            # 404 на rollout-цели — нормальная гонка GitOps: verify-dev
+            # перезапускает деплойменты ДО wait-argo, а новый деплоймент
+            # (напр. searchnet в WAVE17) существует только после синка Argo.
+            # Пропускаем: Argo применит манифест и поднимет под сам.
+            if exc.status == 404:
+                skipped.append(f"{ns}/{name}")
+                print(f"rollout skip (not found yet; Argo will create): {ns}/{name}")
+                continue
             _fail_unreachable(exc, streak=1, limit=1)
             raise
         except Exception as exc:
             _fail_unreachable(exc, streak=1, limit=1)
             raise
         print(f"rollout restart requested: {ns}/{name}")
+    if skipped:
+        print(
+            "rollout: skipped targets (404) will be created by Argo sync — "
+            "verify their health after `prodavan-ops wait`."
+        )
     deadline = time.time() + timeout_sec
     for name, ns in targets:
+        if f"{ns}/{name}" in skipped:
+            continue
         unreachable_streak = 0
         while time.time() < deadline:
             try:
