@@ -80,6 +80,27 @@ def build_message(
     return msg
 
 
+def _smtp_addresses(host: str) -> list[tuple]:
+    """Все адреса хоста в порядке getaddrinfo (IPv6 обычно первым).
+
+    Некоторые сети режут IPv4-SMTP на DPI, но пропускают IPv6 (и наоборот);
+    перебор адресов даёт отправке шанс там, где smtplib по одному адресу
+    падает с network unreachable.
+    """
+    import socket
+
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except OSError:
+        return []
+    seen: list[tuple] = []
+    for info in infos:
+        addr = info[4]
+        if addr not in seen:
+            seen.append(addr)
+    return seen
+
+
 def send_smtp(
     *,
     host: str,
@@ -94,29 +115,36 @@ def send_smtp(
     """Отправить письмо; MailSendError при сбое.
 
     ``use_ssl`` — implicit TLS (SMTPS, обычно 465). Иначе при ``starttls``
-    выполняется апгрейд открытого соединения (587).
+    выполняется апгрейд открытого соединения (587). Адреса хоста
+    перебираются все (IPv6-первый): сети бывают с асимметричным
+    SMTP-фильтром по протоколу.
     """
     if not host.strip():
         raise MailSendError("smtp host is empty")
+    host = host.strip()
     port = int(port or (465 if use_ssl else 587))
     context = ssl.create_default_context()
-    try:
-        if use_ssl:
-            smtp: smtplib.SMTP = smtplib.SMTP_SSL(
-                host.strip(), port, timeout=timeout, context=context
-            )
-        else:
-            smtp = smtplib.SMTP(host.strip(), port, timeout=timeout)
-        with smtp:
-            smtp.ehlo()
-            if not use_ssl and starttls:
-                smtp.starttls(context=context)
+    errors: list[str] = []
+    for addr in _smtp_addresses(host) or [(host,)]:
+        try:
+            if use_ssl:
+                smtp: smtplib.SMTP = smtplib.SMTP_SSL(
+                    host, port, timeout=timeout, context=context
+                )
+            else:
+                smtp = smtplib.SMTP(host, port, timeout=timeout)
+            with smtp:
                 smtp.ehlo()
-            if user.strip():
-                smtp.login(user.strip(), password)
-            smtp.send_message(msg)
-    except (OSError, smtplib.SMTPException) as exc:
-        raise MailSendError(f"{type(exc).__name__}: {exc}") from exc
+                if not use_ssl and starttls:
+                    smtp.starttls(context=context)
+                    smtp.ehlo()
+                if user.strip():
+                    smtp.login(user.strip(), password)
+                smtp.send_message(msg)
+            return
+        except (OSError, smtplib.SMTPException) as exc:
+            errors.append(f"{type(exc).__name__}: {exc}")
+    raise MailSendError("; ".join(errors) or "no smtp addresses resolved")
 
 
 def resolve_sender(
