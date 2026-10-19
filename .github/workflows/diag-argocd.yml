@@ -216,3 +216,23 @@ jobs:
           done
           echo '=== claim CRs for the project ==='
           kubectl -n agentscale-dev-sandboxes get claims 2>/dev/null | grep -i 60023937403249dc || kubectl get claims -A 2>/dev/null | grep -i 60023937403249dc | head -3 || true
+
+  session-map:
+    needs: diag
+    continue-on-error: true
+    runs-on: [self-hosted, linux, docker]
+    steps:
+      - name: Resolve kubeconfig
+        run: echo "KUBECONFIG=$HOME/.kube/prodavan-dev.yaml" >> "${GITHUB_ENV}"
+      - name: session-map scan
+        run: |
+          set -euo pipefail
+          for P in $(kubectl -n agentscale-dev-sandboxes get pods -o name | grep -E "agent-pool|sandbox"); do
+            OUT=$(kubectl -n agentscale-dev-sandboxes exec "$P" -- sh -c 'cat /workspace/.openclaw-data/session-map.json 2>/dev/null | head -c 2000' 2>/dev/null || true)
+            if [ -n "$OUT" ]; then
+              echo "=== $P session-map ==="
+              echo "$OUT"
+            fi
+          done
+          echo '=== claims CR list ==='
+          kubectl -n agentscale-dev-sandboxes get agentsandboxes 2>/dev/null || kubectl -n agentscale-dev-sandboxes get agentsandbox 2>/dev/null || kubectl api-resources 2>/dev/null | grep -i sandbox | head -5 || true
