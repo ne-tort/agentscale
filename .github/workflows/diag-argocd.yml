@@ -307,3 +307,22 @@ jobs:
           echo
           echo '=== env полностью (маскируя значения) ==='
           kubectl -n agentscale-dev-sandboxes exec "$P" -- sh -c 'env | cut -d= -f1 | sort' || true
+
+  w17-full:
+    needs: diag
+    continue-on-error: true
+    runs-on: [self-hosted, linux, docker]
+    steps:
+      - name: Resolve kubeconfig
+        run: echo "KUBECONFIG=$HOME/.kube/prodavan-dev.yaml" >> "${GITHUB_ENV}"
+      - name: full config + sessions
+        run: |
+          set -euo pipefail
+          P=pod/agentscale-agent-pool-wf89q
+          echo '=== config.yaml FULL ==='
+          kubectl -n agentscale-dev-sandboxes exec "$P" -- cat /workspace/.prodavan/config.yaml || true
+          echo '=== bridge sessions list ==='
+          kubectl -n agentscale-dev-sandboxes exec "$P" -- sh -c 'wget -qO- --header "Authorization: Bearer $BRIDGE_AUTH_TOKEN" http://127.0.0.1:3921/v1/sessions 2>&1 | head -c 1500' || true
+          echo
+          echo '=== env PROVIDER/OPEN match ==='
+          kubectl -n agentscale-dev-sandboxes exec "$P" -- sh -c 'env | grep -iE "openrouter|openai|anthropic|provider|dialect|model" | sed "s/=.*/=***/" ' || true
