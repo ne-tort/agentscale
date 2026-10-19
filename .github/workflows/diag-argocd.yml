@@ -377,3 +377,23 @@ jobs:
           dd if=/dev/zero of=/tmp/blob.bin bs=1M count=50 2>/dev/null
           time curl -s -o /dev/null -w '%{http_code} %{speed_upload}B/s\n' -X POST --data-binary @/tmp/blob.bin https://ghcr.io/v2/ || true
           rm -f /tmp/blob.bin
+
+  post-fix:
+    needs: diag
+    continue-on-error: true
+    runs-on: [self-hosted, linux, docker]
+    steps:
+      - name: Resolve kubeconfig
+        run: echo "KUBECONFIG=$HOME/.kube/prodavan-dev.yaml" >> "${GITHUB_ENV}"
+      - name: W17 config after fix
+        run: |
+          set -euo pipefail
+          P=pod/agentscale-agent-pool-wf89q
+          echo '=== config.yaml provider section ==='
+          kubectl -n agentscale-dev-sandboxes exec "$P" -- sh -c 'cat /workspace/.prodavan/config.yaml | grep -A8 "provider:"' || echo "NO PROVIDER BLOCK"
+          echo '=== api pod image ==='
+          kubectl -n agentscale-dev get deploy agentscale-api -o jsonpath='{.spec.template.spec.containers[0].image}'
+          echo
+          echo '=== agentscale-api pod started ==='
+          kubectl -n agentscale-dev get pods -l app=agentscale-api -o jsonpath='{.items[0].status.startTime}'
+          echo
