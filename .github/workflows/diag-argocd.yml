@@ -346,6 +346,10 @@ jobs:
           docker buildx create --name agentscale-ci --driver docker-container --driver-opt network=host --config /etc/buildkit/buildkitd.toml 2>/dev/null || \
             docker buildx create --name agentscale-ci --driver docker-container --driver-opt network=host || true
           docker buildx inspect --bootstrap agentscale-ci >/dev/null && echo "builder healthy"
+          echo '=== buildkitd container logs (errors) ==='
+          docker logs buildx_buildkit_agentscale-ci0 --tail 60 2>&1 | grep -iE "error|fatal|oom|kill|restart|timeout" | tail -20 || true
+          echo '=== buildkitd mem info ==='
+          docker stats --no-stream --format "{{.Name}} {{.MemUsage}}" | grep buildkit || true
 
   push-probe:
     continue-on-error: true
