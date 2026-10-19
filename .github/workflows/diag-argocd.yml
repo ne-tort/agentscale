@@ -159,3 +159,21 @@ jobs:
           echo '=== agent-pod logs full tail (401/provider) ==='
           POD=$(kubectl -n agentscale-dev-sandboxes get pods -o name | grep -m1 agent-pool)
           kubectl -n agentscale-dev-sandboxes logs "$POD" --tail=500 2>&1 | tail -40 || true
+
+  workspace:
+    needs: diag
+    continue-on-error: true
+    runs-on: [self-hosted, linux, docker]
+    steps:
+      - name: Resolve kubeconfig
+        run: echo "KUBECONFIG=$HOME/.kube/prodavan-dev.yaml" >> "${GITHUB_ENV}"
+      - name: workspace config + send trace
+        run: |
+          set -euo pipefail
+          POD=$(kubectl -n agentscale-dev-sandboxes get pods -o name | grep -m1 agent-pool)
+          echo "=== .prodavan/config.yaml ==="
+          kubectl -n agentscale-dev-sandboxes exec "$POD" -- cat /workspace/.prodavan/config.yaml 2>/dev/null | sed -n '1,40p' || true
+          echo "=== workspace layout ==="
+          kubectl -n agentscale-dev-sandboxes exec "$POD" -- ls -la /workspace/.prodavan/ 2>/dev/null || true
+          echo "=== live model stream error (последний send) ==="
+          kubectl -n agentscale-dev-sandboxes logs "$POD" --tail=100 --timestamps 2>&1 | tail -30 || true
