@@ -236,6 +236,11 @@ jobs:
           GH_TOKEN: ${{ secrets.GHCR_PUSH_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
+          # Самохостед-раннер переиспользует workspace между прогонами, а этот
+          # job НЕ делает actions/checkout (searchnet клонируется вручную) —
+          # без очистки повторный прогон падал на "целевой путь searchnet уже
+          # существует и не является пустым каталогом" (run 39409091214).
+          rm -rf searchnet
           git clone --depth 1             "https://x-access-token:${GH_TOKEN}@github.com/ne-tort/searchnet.git" searchnet
 
       - name: Image names
