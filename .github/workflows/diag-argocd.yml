@@ -508,3 +508,18 @@ jobs:
           kubectl -n agentscale-dev exec deploy/agentscale-api -c api -- sh -c 'ls -la /data/storage/projects/60023937403249dc/workspace/.prodavan/ 2>/dev/null; stat -c "%y %n" /data/storage/projects/60023937403249dc/workspace/.prodavan/config.yaml 2>/dev/null'
           echo '=== celery worker logs: rematerialize/materialize для проекта ==='
           kubectl -n agentscale-dev logs deploy/agentscale-celery-worker --tail=500 2>&1 | grep -iE "60023937403249dc|materializ" | tail -10 || true
+
+  final-logs:
+    needs: diag
+    continue-on-error: true
+    runs-on: [self-hosted, linux, docker]
+    steps:
+      - name: Resolve kubeconfig
+        run: echo "KUBECONFIG=$HOME/.kube/prodavan-dev.yaml" >> "${GITHUB_ENV}"
+      - name: websearch proxy logs
+        run: |
+          set -euo pipefail
+          echo '=== web_search proxy lines ==='
+          kubectl -n agentscale-dev logs deploy/agentscale-api -c api --tail=1000 2>&1 | grep -E "web_search proxy" | tail -8 || echo NONE
+          echo '=== searchnet search log lines ==='
+          kubectl -n agentscale-dev logs deploy/searchnet --tail=200 2>&1 | grep -iE "search|POST" | tail -8 || echo NONE
