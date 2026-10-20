@@ -101,51 +101,30 @@ spec:
               mountPath: /data/db
           startupProbe:
             # WiredTiger recovery после ребута ноды может идти минуты.
-            # timeoutSeconds=10 обязателен: mongosh с auth отвечает ~10с,
-            # дефолтная 1с давала вечный «probe timed out».
-            exec:
-              command:
-                - /bin/sh
-                - -c
-                - |
-                  mongosh --quiet \
-                    -u "$MONGO_INITDB_ROOT_USERNAME" \
-                    -p "$MONGO_INITDB_ROOT_PASSWORD" \
-                    --authenticationDatabase admin \
-                    --eval "db.adminCommand('ping')"
+            #
+            # ВАЖНО (2026-10-20): probe — tcpSocket, а НЕ `mongosh --eval`.
+            # mongosh — это отдельный Node-процесс (~1 CPU на старт), и mongod
+            # как PID 1 не реапит его детей: на dev-ноде накопилось 88 зомби
+            # `mongosh <defunct>` + постоянные CPU-пики от трёх probe каждые
+            # 10-20с. TCP-коннект к 27017 проверяет то же самое (процесс жив и
+            # слушает порт) без спавна процессов.
+            tcpSocket:
+              port: 27017
             periodSeconds: 10
             timeoutSeconds: 10
             failureThreshold: 60
           readinessProbe:
-            exec:
-              command:
-                - /bin/sh
-                - -c
-                - |
-                  mongosh --quiet \
-                    -u "$MONGO_INITDB_ROOT_USERNAME" \
-                    -p "$MONGO_INITDB_ROOT_PASSWORD" \
-                    --authenticationDatabase admin \
-                    --eval "db.adminCommand('ping')"
+            tcpSocket:
+              port: 27017
             initialDelaySeconds: 15
             periodSeconds: 10
             timeoutSeconds: 10
             failureThreshold: 6
           livenessProbe:
-            exec:
-              command:
-                - /bin/sh
-                - -c
-                - |
-                  mongosh --quiet \
-                    -u "$MONGO_INITDB_ROOT_USERNAME" \
-                    -p "$MONGO_INITDB_ROOT_PASSWORD" \
-                    --authenticationDatabase admin \
-                    --eval "db.adminCommand('ping')"
+            tcpSocket:
+              port: 27017
             initialDelaySeconds: 40
             periodSeconds: 20
-            # mongosh-ping на нагруженной ноде бывает дольше секунды —
-            # дефолдный timeout=1s ронял под по liveness (6+ рестартов)
             timeoutSeconds: 10
             failureThreshold: 6
           resources:
