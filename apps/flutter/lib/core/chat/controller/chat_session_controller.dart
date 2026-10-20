@@ -499,12 +499,23 @@ class ChatSessionController {
         } else {
           _liveTurnBlocks = applyStreamEvent(_liveTurnBlocks, event);
           if (type == 'text_delta' || type == 'thinking_delta') {
-            // First output after (re)connect — the retry worked.
+            // Первый вывод после reconnect — подтверждаем немедленно (retry сработал).
+            final firstAfterReconnect =
+                reconnectAttempt != null || reconnectNextModel != null;
             reconnectAttempt = null;
             reconnectNextModel = null;
             // First assistant output of the turn — duration start.
             _turnFirstOutputAt ??= DateTime.now().toUtc();
-            notifyImmediate();
+            // Потоковые дельты: НЕ перерисовываем на каждый токен. Чат рендерится
+            // eager-ListView'ом (см. ChatMessageList), поэтому notifyImmediate на
+            // каждый дельта-токен = O(блоки × токены) перестроек: чем длиннее
+            // ответ и чат, тем сильнее UI встаёт. Дебаунс notify() (24мс) держит
+            // ~40fps; финальный кадр всё равно отправляется notifyImmediate().
+            if (firstAfterReconnect) {
+              notifyImmediate();
+            } else {
+              notify();
+            }
           } else {
             notify();
           }
