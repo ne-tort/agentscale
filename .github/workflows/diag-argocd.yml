@@ -435,3 +435,25 @@ jobs:
           set -euo pipefail
           P=pod/agentscale-agent-pool-hmzh5
           kubectl -n agentscale-dev-sandboxes exec "$P" -- sh -c 'ls -la /workspace/; echo ---; ls /workspace/.prodavan 2>/dev/null; echo ---; cat /workspace/.prodavan/config.yaml 2>/dev/null | head -40' || true
+
+  post-sync:
+    needs: diag
+    continue-on-error: true
+    runs-on: [self-hosted, linux, docker]
+    steps:
+      - name: Resolve kubeconfig
+        run: echo "KUBECONFIG=$HOME/.kube/prodavan-dev.yaml" >> "${GITHUB_ENV}"
+      - name: W17 pod after sync
+        run: |
+          set -euo pipefail
+          echo '=== claims ==='
+          kubectl -n agentscale-dev-sandboxes get sandboxclaims -o wide | grep 60023937403249dc
+          P=$(kubectl -n agentscale-dev-sandboxes get sandboxclaims -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.status.sandboxName}{"\n"}{end}' | grep 60023937403249dc | awk '{print "pod/"$2}')
+          echo "P=$P"
+          echo '=== config provider ==='
+          kubectl -n agentscale-dev-sandboxes exec "$P" -- sh -c 'grep -A6 "^provider:" /workspace/.prodavan/config.yaml 2>/dev/null || echo NO_PROVIDER; echo ---; grep -c . /workspace/.prodavan/config.yaml' || true
+          echo '=== bridge sessions ==='
+          kubectl -n agentscale-dev-sandboxes exec "$P" -- sh -c 'wget -qO- --header "Authorization: Bearer $BRIDGE_AUTH_TOKEN" http://127.0.0.1:3921/v1/sessions 2>&1 | head -c 800' || true
+          echo
+          echo '=== leases ==='
+          kubectl -n agentscale-dev-sandboxes exec "$P" -- sh -c 'wget -qO- --header "Authorization: Bearer $BRIDGE_AUTH_TOKEN" http://127.0.0.1:3921/v1/credentials 2>&1 | head -c 300' || true
