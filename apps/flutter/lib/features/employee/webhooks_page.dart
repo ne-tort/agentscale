@@ -5,6 +5,7 @@ import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
+import 'package:prodavan/core/widgets/app_snack_bar.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
@@ -79,9 +80,8 @@ class _WebhooksPageState extends State<WebhooksPage>
   }
 
   Future<void> _createWebhook() async {
-    final result = await showDialog<_HookDraft>(
-      context: context,
-      builder: (_) => const _WebhookDialog(),
+    final result = await Navigator.of(context).push<_HookDraft>(
+      MaterialPageRoute<_HookDraft>(builder: (_) => const _WebhookFormPage()),
     );
     if (result == null || !mounted) return;
     try {
@@ -91,7 +91,7 @@ class _WebhooksPageState extends State<WebhooksPage>
         projectId: result.projectId,
       );
       if (!mounted) return;
-      await _showSecretDialog(
+      await _showSecret(
         title: 'Вебхук создан',
         secret: (created['secret'] ?? '').toString(),
         hint: 'Секрет подписи (X-Prodavan-Signature). Сохраните: он больше не '
@@ -104,9 +104,8 @@ class _WebhooksPageState extends State<WebhooksPage>
   }
 
   Future<void> _createKey() async {
-    final result = await showDialog<_KeyDraft>(
-      context: context,
-      builder: (_) => const _AppKeyDialog(),
+    final result = await Navigator.of(context).push<_KeyDraft>(
+      MaterialPageRoute<_KeyDraft>(builder: (_) => const _AppKeyFormPage()),
     );
     if (result == null || !mounted) return;
     try {
@@ -115,7 +114,7 @@ class _WebhooksPageState extends State<WebhooksPage>
         scopes: result.scopes,
       );
       if (!mounted) return;
-      await _showSecretDialog(
+      await _showSecret(
         title: 'Токен создан',
         secret: (created['token'] ?? '').toString(),
         hint: 'API-токен (Bearer). Сохраните: он показывается один раз. '
@@ -127,41 +126,15 @@ class _WebhooksPageState extends State<WebhooksPage>
     }
   }
 
-  Future<void> _showSecretDialog({
+  Future<void> _showSecret({
     required String title,
     required String secret,
     required String hint,
   }) async {
     if (secret.isEmpty) return;
-    await showDialog<void>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(title),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            SelectableText(
-              secret,
-              style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
-            ),
-            const SizedBox(height: AppSpacing.sm),
-            Text(hint, style: Theme.of(ctx).textTheme.bodySmall),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () async {
-              await Clipboard.setData(ClipboardData(text: secret));
-              if (ctx.mounted) Navigator.of(ctx).pop();
-            },
-            child: const Text('Скопировать'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Готово'),
-          ),
-        ],
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => _SecretPage(title: title, secret: secret, hint: hint),
       ),
     );
   }
@@ -193,21 +166,9 @@ class _WebhooksPageState extends State<WebhooksPage>
   }
 
   Future<bool> _confirm(String title, String subtitle) async {
-    final res = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(title),
-        content: Text(subtitle),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Отмена'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Удалить'),
-          ),
-        ],
+    final res = await Navigator.of(context).push<bool>(
+      MaterialPageRoute<bool>(
+        builder: (_) => _ConfirmPage(title: title, subtitle: subtitle),
       ),
     );
     return res ?? false;
@@ -371,14 +332,14 @@ class _HookDraft {
   final String? projectId;
 }
 
-class _WebhookDialog extends StatefulWidget {
-  const _WebhookDialog();
+class _WebhookFormPage extends StatefulWidget {
+  const _WebhookFormPage();
 
   @override
-  State<_WebhookDialog> createState() => _WebhookDialogState();
+  State<_WebhookFormPage> createState() => _WebhookFormPageState();
 }
 
-class _WebhookDialogState extends State<_WebhookDialog> {
+class _WebhookFormPageState extends State<_WebhookFormPage> {
   final _url = TextEditingController();
   final _project = TextEditingController();
   final _selected = <String>{'chat.message.completed'};
@@ -393,69 +354,61 @@ class _WebhookDialogState extends State<_WebhookDialog> {
   @override
   Widget build(BuildContext context) {
     final valid = _url.text.trim().startsWith('http') && _selected.isNotEmpty;
-    return AlertDialog(
+    return AppScaffold(
       title: const Text('Новый вебхук'),
-      content: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            TextField(
-              controller: _url,
-              autofocus: true,
-              decoration: const InputDecoration(
-                labelText: 'URL приёмника',
-                hintText: 'https://example.com/hooks/agentscale',
-              ),
-              onChanged: (_) => setState(() {}),
+      body: ListView(
+        padding: const EdgeInsets.all(AppSpacing.md),
+        children: [
+          TextField(
+            controller: _url,
+            autofocus: true,
+            decoration: const InputDecoration(
+              labelText: 'URL приёмника',
+              hintText: 'https://example.com/hooks/agentscale',
             ),
-            const SizedBox(height: AppSpacing.sm),
-            TextField(
-              controller: _project,
-              decoration: const InputDecoration(
-                labelText: 'ID проекта (необязательно)',
-                helperText: 'Пусто — события всех проектов компании',
-              ),
+            onChanged: (_) => setState(() {}),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          TextField(
+            controller: _project,
+            decoration: const InputDecoration(
+              labelText: 'ID проекта (необязательно)',
+              helperText: 'Пусто — события всех проектов компании',
             ),
-            const SizedBox(height: AppSpacing.md),
-            const Text('События'),
-            for (final entry in _webhookEvents.entries)
-              CheckboxListTile(
-                dense: true,
-                contentPadding: EdgeInsets.zero,
-                controlAffinity: ListTileControlAffinity.leading,
-                title: Text(entry.value),
-                subtitle: Text(entry.key),
-                value: _selected.contains(entry.key),
-                onChanged: (on) => setState(() {
-                  if (on == true) {
-                    _selected.add(entry.key);
-                  } else {
-                    _selected.remove(entry.key);
-                  }
-                }),
-              ),
-          ],
-        ),
+          ),
+          const SizedBox(height: AppSpacing.md),
+          const Text('События'),
+          for (final entry in _webhookEvents.entries)
+            CheckboxListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              controlAffinity: ListTileControlAffinity.leading,
+              title: Text(entry.value),
+              subtitle: Text(entry.key),
+              value: _selected.contains(entry.key),
+              onChanged: (on) => setState(() {
+                if (on == true) {
+                  _selected.add(entry.key);
+                } else {
+                  _selected.remove(entry.key);
+                }
+              }),
+            ),
+          const SizedBox(height: AppSpacing.lg),
+          FilledButton(
+            onPressed: valid
+                ? () => Navigator.of(context).pop(
+                      _HookDraft(
+                        _url.text.trim(),
+                        _selected.toList(),
+                        _project.text.trim().isEmpty ? null : _project.text.trim(),
+                      ),
+                    )
+                : null,
+            child: const Text('Создать'),
+          ),
+        ],
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Отмена'),
-        ),
-        FilledButton(
-          onPressed: valid
-              ? () => Navigator.of(context).pop(
-                    _HookDraft(
-                      _url.text.trim(),
-                      _selected.toList(),
-                      _project.text.trim().isEmpty ? null : _project.text.trim(),
-                    ),
-                  )
-              : null,
-          child: const Text('Создать'),
-        ),
-      ],
     );
   }
 }
@@ -466,14 +419,14 @@ class _KeyDraft {
   final List<String> scopes;
 }
 
-class _AppKeyDialog extends StatefulWidget {
-  const _AppKeyDialog();
+class _AppKeyFormPage extends StatefulWidget {
+  const _AppKeyFormPage();
 
   @override
-  State<_AppKeyDialog> createState() => _AppKeyDialogState();
+  State<_AppKeyFormPage> createState() => _AppKeyFormPageState();
 }
 
-class _AppKeyDialogState extends State<_AppKeyDialog> {
+class _AppKeyFormPageState extends State<_AppKeyFormPage> {
   final _label = TextEditingController();
   final _selected = <String>{'chat:read', 'chat:write'};
 
@@ -486,57 +439,127 @@ class _AppKeyDialogState extends State<_AppKeyDialog> {
   @override
   Widget build(BuildContext context) {
     final valid = _label.text.trim().isNotEmpty && _selected.isNotEmpty;
-    return AlertDialog(
+    return AppScaffold(
       title: const Text('Новый API-токен'),
-      content: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            TextField(
-              controller: _label,
-              autofocus: true,
-              decoration: const InputDecoration(
-                labelText: 'Название',
-                hintText: 'например, b2b-crawler',
-              ),
-              onChanged: (_) => setState(() {}),
+      body: ListView(
+        padding: const EdgeInsets.all(AppSpacing.md),
+        children: [
+          TextField(
+            controller: _label,
+            autofocus: true,
+            decoration: const InputDecoration(
+              labelText: 'Название',
+              hintText: 'например, b2b-crawler',
             ),
-            const SizedBox(height: AppSpacing.md),
-            const Text('Права'),
-            for (final entry in _appKeyScopes.entries)
-              CheckboxListTile(
-                dense: true,
-                contentPadding: EdgeInsets.zero,
-                controlAffinity: ListTileControlAffinity.leading,
-                title: Text(entry.key),
-                subtitle: Text(entry.value),
-                value: _selected.contains(entry.key),
-                onChanged: (on) => setState(() {
-                  if (on == true) {
-                    _selected.add(entry.key);
-                  } else {
-                    _selected.remove(entry.key);
-                  }
-                }),
-              ),
-          ],
-        ),
+            onChanged: (_) => setState(() {}),
+          ),
+          const SizedBox(height: AppSpacing.md),
+          const Text('Права'),
+          for (final entry in _appKeyScopes.entries)
+            CheckboxListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              controlAffinity: ListTileControlAffinity.leading,
+              title: Text(entry.key),
+              subtitle: Text(entry.value),
+              value: _selected.contains(entry.key),
+              onChanged: (on) => setState(() {
+                if (on == true) {
+                  _selected.add(entry.key);
+                } else {
+                  _selected.remove(entry.key);
+                }
+              }),
+            ),
+          const SizedBox(height: AppSpacing.lg),
+          FilledButton(
+            onPressed: valid
+                ? () => Navigator.of(context).pop(
+                      _KeyDraft(_label.text.trim(), _selected.toList()),
+                    )
+                : null,
+            child: const Text('Создать'),
+          ),
+        ],
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Отмена'),
-        ),
-        FilledButton(
-          onPressed: valid
-              ? () => Navigator.of(context).pop(
-                    _KeyDraft(_label.text.trim(), _selected.toList()),
-                  )
-              : null,
-          child: const Text('Создать'),
-        ),
-      ],
+    );
+  }
+}
+
+/// Одноразовый показ секрета (секрет подписки / API-токен).
+class _SecretPage extends StatelessWidget {
+  const _SecretPage({
+    required this.title,
+    required this.secret,
+    required this.hint,
+  });
+
+  final String title;
+  final String secret;
+  final String hint;
+
+  @override
+  Widget build(BuildContext context) {
+    return AppScaffold(
+      title: Text(title),
+      body: ListView(
+        padding: const EdgeInsets.all(AppSpacing.md),
+        children: [
+          SelectableText(
+            secret,
+            style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          Text(hint, style: Theme.of(context).textTheme.bodySmall),
+          const SizedBox(height: AppSpacing.lg),
+          FilledButton.tonalIcon(
+            onPressed: () async {
+              await Clipboard.setData(ClipboardData(text: secret));
+              if (context.mounted) {
+                AppSnackBar.success(context, 'Скопировано');
+              }
+            },
+            icon: const Icon(Icons.copy_outlined, size: 18),
+            label: const Text('Скопировать'),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          OutlinedButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Готово'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Страница подтверждения удаления/отзыва.
+class _ConfirmPage extends StatelessWidget {
+  const _ConfirmPage({required this.title, required this.subtitle});
+
+  final String title;
+  final String subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    return AppScaffold(
+      title: Text(title),
+      body: ListView(
+        padding: const EdgeInsets.all(AppSpacing.md),
+        children: [
+          Text(subtitle),
+          const SizedBox(height: AppSpacing.lg),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Удалить'),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          OutlinedButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Отмена'),
+          ),
+        ],
+      ),
     );
   }
 }
