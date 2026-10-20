@@ -237,6 +237,14 @@ class WorkerManager(LifespanResource):
             "task": job_names.BIND_REFRESH_SWEEP,
             "schedule": schedule(run_every=14400.0),
         }
+        # TTL 72ч для «Интернет товары» (web_products): строки, добавленные
+        # агентом из интернет-магазинов, удаляются через трое суток без правки.
+        # 15 минут — компромисс: истёкший товар не висит в подборе долго,
+        # а проход по одной таблице дешёвый.
+        beat["prodavan-web-products-ttl-sweep"] = {
+            "task": job_names.SWEEP_WEB_PRODUCTS_TTL,
+            "schedule": schedule(run_every=900.0),
+        }
         app.conf.beat_schedule = beat
         job_tasks.register_tasks(app)
         return app

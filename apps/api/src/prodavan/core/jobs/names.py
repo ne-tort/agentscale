@@ -17,3 +17,5 @@ AGENT_RUN_STALL_SWEEP = "prodavan.jobs.agent_run_stall_sweep"
 SWEEP_READY_BUILDS = "prodavan.jobs.sweep_ready_builds"
 WEBHOOK_DELIVER = "prodavan.jobs.webhook_deliver"
 BIND_REFRESH_SWEEP = "prodavan.jobs.bind_refresh_sweep"
+# TTL 72ч для «Интернет товары» (web_products)
+SWEEP_WEB_PRODUCTS_TTL = "prodavan.jobs.sweep_web_products_ttl"

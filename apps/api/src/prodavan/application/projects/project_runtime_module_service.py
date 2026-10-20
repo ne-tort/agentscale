@@ -530,6 +530,26 @@ class ProjectRuntimeModuleService:
             session_id=stamp_sid,
         )
         await self._session.commit()
+        # «Интернет товары»: каждая запись сразу индексируется в ОТДЕЛЬНЫЙ
+        # OpenSearch-индекс кабинета (не в общий каталог), чтобы найденный в
+        # интернете товар конкурировал с каталогом по цене в подборе.
+        # Best-effort: сбой индексации не отменяет запись строки.
+        if table_slug == "web_products" and module_id == "mod_equipment":
+            try:
+                from prodavan.application.modules.web_products_opensearch import (
+                    index_web_product,
+                )
+
+                await index_web_product(
+                    self._session,
+                    cabinet_id=project.cabinet_id,
+                    row_id=str(row.get("row_id") or row_id or ""),
+                    body=body,
+                )
+            except Exception:
+                logger.exception(
+                    "web_products indexing after write failed project=%s", project_id
+                )
         remat: dict[str, Any] | None = None
         try:
             from prodavan.application.projects.workspace_sync_policy import (

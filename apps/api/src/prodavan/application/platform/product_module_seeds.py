@@ -1247,6 +1247,21 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "scope": {"projects": "all", "chats": "all"},
             },
             {
+                # «Интернет товары»: товары, найденные агентом в магазинах из
+                # web_shops. Отдельная таблица (а не запись в общий каталог),
+                # чтобы не ломать автоподтягивание found_offers из каталогов.
+                # TTL 72 часа с момента добавления/правки — истёкшие строки
+                # удаляются sweep'ом и выпадают из индекса.
+                "slug": "web_products",
+                "label": {
+                    "ru": "Интернет товары",
+                    "en": "Web products",
+                },
+                "storage_kind": "json_document",
+                "enabled": True,
+                "scope": {"projects": "all", "chats": "all"},
+            },
+            {
                 "slug": "templates",
                 "label": "Шаблоны документов",
                 "storage_kind": "json_document",
@@ -2651,6 +2666,70 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "default": "",
             },
             _project_ids_column("web_shops"),
+            # ── web_products: товары, найденные агентом в интернет-магазинах ──
+            {
+                "table_slug": "web_products",
+                "name": "title",
+                "label": {"ru": "Название товара", "en": "Title"},
+                "type": "text",
+                "required": True,
+            },
+            {
+                "table_slug": "web_products",
+                "name": "part_number",
+                "label": {"ru": "Партномер", "en": "Part number"},
+                "type": "text",
+                "required": False,
+                "default": "",
+            },
+            {
+                "table_slug": "web_products",
+                "name": "brand",
+                "label": {"ru": "Бренд", "en": "Brand"},
+                "type": "text",
+                "required": False,
+                "default": "",
+            },
+            {
+                "table_slug": "web_products",
+                "name": "price",
+                "label": {"ru": "Цена, ₽", "en": "Price"},
+                "type": "number",
+                "required": False,
+            },
+            {
+                "table_slug": "web_products",
+                "name": "shop",
+                "label": {"ru": "Магазин", "en": "Shop"},
+                "type": "text",
+                "required": False,
+                "default": "",
+            },
+            {
+                "table_slug": "web_products",
+                "name": "url",
+                "label": {"ru": "Ссылка на товар", "en": "URL"},
+                "type": "text",
+                "required": False,
+                "default": "",
+            },
+            {
+                "table_slug": "web_products",
+                "name": "qty",
+                "label": {"ru": "Наличие", "en": "Qty"},
+                "type": "text",
+                "required": False,
+                "default": "",
+            },
+            {
+                "table_slug": "web_products",
+                "name": "line_id",
+                "label": {"ru": "Позиция заказчика", "en": "Request line"},
+                "type": "text",
+                "required": False,
+                "default": "",
+            },
+            _project_ids_column("web_products"),
             {
                 "table_slug": "equipment_mcp",
                 "name": "name",
@@ -7818,6 +7897,53 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "table_slug": "web_shops",
                     "query": {"limit": 200},
                 },
+            },
+            {
+                "id": "web_products_list",
+                "name": "web_products_list",
+                "label": "List web products",
+                "description": (
+                    "«Интернет товары» этого проекта: товары, найденные агентом в "
+                    "магазинах из web_shops (title, part_number, brand, price, shop, "
+                    "url, qty, line_id). Строки живут 72 часа с момента добавления/"
+                    "правки. Участвуют в подборе found_offers наравне с каталогом."
+                ),
+                "enabled": True,
+                "kind": "rows_query",
+                "params_schema": {"type": "object", "properties": {}},
+                "implementation": {
+                    "table_slug": "web_products",
+                    "query": {"limit": 300},
+                },
+            },
+            {
+                "id": "web_product_add",
+                "name": "web_product_add",
+                "label": "Add web product",
+                "description": (
+                    "Добавить товар, найденный в интернет-магазине, в «Интернет товары». "
+                    "Обязательно: title. Желательно: part_number (для сопоставления с "
+                    "позицией), price (₽), shop (название магазина из web_shops_list), "
+                    "brand, url, line_id (если товар подобран под конкретную позицию). "
+                    "Товар автоматически индексируется и начинает конкурировать с "
+                    "каталогом по цене. TTL 72 часа: повторный add с тем же "
+                    "part_number+shop обновляет строку и продлевает срок."
+                ),
+                "enabled": True,
+                "kind": "rows_upsert",
+                "implementation": {
+                    "table_slug": "web_products",
+                    "upsert_key": ["part_number", "shop", "title"],
+                },
+            },
+            {
+                "id": "web_product_delete",
+                "name": "web_product_delete",
+                "label": "Delete web product",
+                "description": "Удалить запись из «Интернет товары» (web_products).",
+                "enabled": True,
+                "kind": "rows_delete",
+                "implementation": {"table_slug": "web_products"},
             },
             {
                 "id": "budget_lines_list",

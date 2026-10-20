@@ -551,15 +551,50 @@ async def create_external_tender(
         }
     )
     if body.kickoff:
+        # Кикофф отдаёт ВСЕ данные тендера сразу: позиции уже скопированы в
+        # request_lines (attach), а контекст (заказчик, срок, ссылка, номер,
+        # закон) идёт прямо в сообщении. Агенту не нужно дополнительно читать
+        # тендер — он работает с позициями заказчика и найденными товарами.
+        lines_preview: list[str] = []
+        for i, ln in enumerate(body.lines, start=1):
+            t = (ln.title or "").strip()
+            if not t:
+                continue
+            qty = ln.qty if ln.qty is not None else 1
+            pn = (ln.part_number or "").strip()
+            lines_preview.append(
+                f"{i}. {t} — {qty:g} шт." + (f" (партномер: {pn})" if pn else "")
+            )
+        header = f"В работу взят тендер «{body.title.strip()}»."
+        meta: list[str] = []
+        if body.customer:
+            meta.append(f"Заказчик: {body.customer.strip()}")
+        if deadline:
+            meta.append(f"Срок: {deadline}")
+        if body.source_url:
+            meta.append(f"Источник: {body.source_url.strip()}")
+        if body.source_ref:
+            meta.append(f"Внешний ключ: {body.source_ref.strip()}")
+        positions_block = (
+            "\n\nПозиции заказчика (уже импортированы в этот чат):\n"
+            + "\n".join(lines_preview)
+            if lines_preview
+            else ""
+        )
         kickoff_text = (
-            f"В работу взят тендер «{body.title.strip()}»"
-            + (f" (заказчик: {body.customer.strip()})" if body.customer else "")
-            + ". Его позиции уже импортированы в позиции заказчика этого чата. "
-            "Сначала оцени релевантность: если тендер не про компьютерную/"
-            "электронную технику или не наш профиль — отбракуй его "
-            "(tender_upsert: status=irrelevant, relevance_note с причиной) и "
-            "остановись. Иначе подбери кандидатов по каждой позиции по правилам "
-            "модуля (поиск в каталогах, found_groups_upsert)."
+            header
+            + (("\n" + "\n".join(meta)) if meta else "")
+            + positions_block
+            + "\n\nДанные тендера переданы целиком — читать тендер отдельно не нужно. "
+            "Работай с позициями заказчика этого чата.\n\n"
+            "1) Оцени релевантность: если это не компьютерная/электронная техника "
+            "или не наш профиль — отбракуй тендер (tender_upsert: status=irrelevant, "
+            "relevance_note с причиной) и остановись.\n"
+            "2) Иначе по КАЖДОЙ позиции подбери кандидатов по правилам модуля: "
+            "сначала каталоги (equipment_catalog_sources), затем интернет-магазины "
+            "из «Интернет магазины» (web_shops_list) — товары из интернета "
+            "добавляй через web_product_add и они конкурируют с каталогом наравне.\n"
+            "3) Результат — found_groups_upsert по каждой позиции."
         )
         turn = await AgentSessionService(session).start_detached_turn(
             project_id=project_id,
