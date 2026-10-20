@@ -277,3 +277,57 @@ async def test_webhook_delivery_retry_and_exhaustion(monkeypatch: pytest.MonkeyP
     finally:
         await session.close()
         await engine.dispose()
+
+
+# ------------------------------------------- идемпотентность внешнего тендера
+# Повторный POST того же source_ref (ретрай кравлера / падение между push и
+# подтверждением) не должен создавать второй тендер и второй чат.
+
+
+class _FakeIO:
+    def __init__(self, rows: list[dict]) -> None:
+        self.rows = rows
+
+    async def list(self, table_slug: str) -> list[dict]:
+        assert table_slug == "tenders"
+        return self.rows
+
+
+@pytest.mark.asyncio
+async def test_find_tender_by_source_ref_matches() -> None:
+    from prodavan.api.v1.external import _find_tender_by_source_ref
+
+    io = _FakeIO(
+        [
+            {"row_id": "row_a", "body": {"source_ref": "b2b-center:111"}},
+            {"row_id": "row_b", "body": {"source_ref": "b2b-center:222"}},
+        ]
+    )
+    assert await _find_tender_by_source_ref(io, "b2b-center:222") == "row_b"
+
+
+@pytest.mark.asyncio
+async def test_find_tender_by_source_ref_missing() -> None:
+    from prodavan.api.v1.external import _find_tender_by_source_ref
+
+    io = _FakeIO([{"row_id": "row_a", "body": {"source_ref": "b2b-center:111"}}])
+    assert await _find_tender_by_source_ref(io, "b2b-center:999") == ""
+    assert await _find_tender_by_source_ref(io, "") == ""
+
+
+@pytest.mark.asyncio
+async def test_find_tender_by_source_ref_flat_row_shape() -> None:
+    """Некоторые источники отдают строку без вложенного body."""
+    from prodavan.api.v1.external import _find_tender_by_source_ref
+
+    io = _FakeIO([{"row_id": "row_c", "source_ref": "b2b-center:333"}])
+    assert await _find_tender_by_source_ref(io, "b2b-center:333") == "row_c"
+
+
+@pytest.mark.asyncio
+async def test_find_tender_by_source_ref_ignores_blank_refs() -> None:
+    """Пустой source_ref в строке не должен совпадать с поиском."""
+    from prodavan.api.v1.external import _find_tender_by_source_ref
+
+    io = _FakeIO([{"row_id": "row_d", "body": {"source_ref": ""}}])
+    assert await _find_tender_by_source_ref(io, "") == ""
