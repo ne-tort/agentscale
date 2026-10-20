@@ -486,7 +486,9 @@ class ModuleActionExecutor:
             employee=employee,
             session_id=session_id,
         )
-        return await EquipmentPipelineService(self._session).run(io, materialize=materialize)
+        return await EquipmentPipelineService(
+            self._session, cabinet_id=cabinet_id
+        ).run(io, materialize=materialize)
 
     async def _ready_builds_pipeline(
         self,
@@ -618,7 +620,7 @@ class ModuleActionExecutor:
             EquipmentPipelineService,
         )
 
-        pipeline = await EquipmentPipelineService(self._session).run(io, materialize=True)
+        pipeline = await EquipmentPipelineService(self._session, cabinet_id=cabinet_id).run(io, materialize=True)
 
         # возвращаем агенту зеркальные группы: без них состав связанной сборки
         # не прочитать прицельно (found_groups_list фильтруется по build_id)
@@ -776,7 +778,7 @@ class ModuleActionExecutor:
             EquipmentPipelineService,
         )
 
-        pipeline = await EquipmentPipelineService(self._session).run(io, materialize=True)
+        pipeline = await EquipmentPipelineService(self._session, cabinet_id=cabinet_id).run(io, materialize=True)
 
         return {
             "ok": True,
