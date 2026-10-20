@@ -364,6 +364,32 @@ async def _find_tender_by_source_ref(io, source_ref: str) -> str:
     return ""
 
 
+async def _find_session_for_tender(
+    session: AsyncSession, *, tender_id: str, project_id: str
+) -> str:
+    """session_id чата, уже взявшего этот тендер в работу ("" — нет).
+
+    Связь «чат ↔ тендер» хранится в позициях чата (`request_lines.tender_id`).
+    Так повторный импорт переиспользует существующий чат вместо создания
+    нового — один тендер = один чат.
+    """
+    if not tender_id:
+        return ""
+    from sqlalchemy import text as _sql
+
+    rows = await session.execute(
+        _sql(
+            "SELECT DISTINCT l.session_id FROM module_instance_data_rows l "
+            "WHERE l.table_slug = 'request_lines' "
+            "AND l.body->>'tender_id' = :tid "
+            "AND l.session_id IS NOT NULL LIMIT 1"
+        ),
+        {"tid": tender_id},
+    )
+    row = rows.first()
+    return str(row[0]) if row and row[0] else ""
+
+
 class ExternalTenderLine(BaseModel):
     model_config = {"extra": "forbid"}
     id: str | None = Field(default=None, max_length=64)
@@ -486,19 +512,27 @@ async def create_external_tender(
         created = await io.create("tenders", tender_body)
         tender_id = str(created.get("row_id") or "")
 
-    result: dict[str, Any] = {"tender_id": tender_id, "attached": False}
+    result: dict[str, Any] = {"tender_id": tender_id, "attached": False, "created": not existing_id}
     if not body.attach:
         return result
 
-    chat_title = (body.chat_title or "").strip() or f"Тендер: {body.title.strip()[:120]}"
-    chat = await AgentSessionService(session).create_session(
-        project_id=project_id,
-        principal=ctx.principal,
-        employee=ctx.employee,
-        model=None,
-        title=chat_title,
-    )
-    session_id = str(chat.get("id") or chat.get("session_id") or "")
+    # Один тендер = один чат: если у тендера уже есть рабочая сессия — берём в
+    # работу заново в НЕЙ, а не плодим чат на каждый повторный push. Это делает
+    # повторный POST (ретрай после сетевого сбоя, повторный ingest) полностью
+    # идемпотентным и не засоряет список чатов.
+    session_id = await _find_session_for_tender(session, tender_id=tender_id, project_id=project_id)
+    chat_reused = bool(session_id)
+    if not session_id:
+        chat_title = (body.chat_title or "").strip() or f"Тендер: {body.title.strip()[:120]}"
+        chat = await AgentSessionService(session).create_session(
+            project_id=project_id,
+            principal=ctx.principal,
+            employee=ctx.employee,
+            model=None,
+            title=chat_title,
+        )
+        session_id = str(chat.get("id") or chat.get("session_id") or "")
+    result["chat_reused"] = chat_reused
     attach = await ModuleActionExecutor(session).invoke(
         cabinet_id=project.cabinet_id,
         module_id="mod_equipment",

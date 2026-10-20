@@ -279,9 +279,10 @@ async def test_webhook_delivery_retry_and_exhaustion(monkeypatch: pytest.MonkeyP
         await engine.dispose()
 
 
-# ------------------------------------------- идемпотентность внешнего тендера
+# ------------------------------------- идемпотентность внешнего импорта тендера
 # Повторный POST того же source_ref (ретрай кравлера / падение между push и
-# подтверждением) не должен создавать второй тендер и второй чат.
+# подтверждением) не должен создавать ни второй тендер, ни второй чат:
+# один тендер = один чат.
 
 
 class _FakeIO:
@@ -312,12 +313,13 @@ async def test_find_tender_by_source_ref_missing() -> None:
 
     io = _FakeIO([{"row_id": "row_a", "body": {"source_ref": "b2b-center:111"}}])
     assert await _find_tender_by_source_ref(io, "b2b-center:999") == ""
+    # пустой source_ref никогда не совпадает — каждый такой push создаёт строку
     assert await _find_tender_by_source_ref(io, "") == ""
 
 
 @pytest.mark.asyncio
 async def test_find_tender_by_source_ref_flat_row_shape() -> None:
-    """Некоторые источники отдают строку без вложенного body."""
+    """Строка без вложенного body (плоская) тоже находится."""
     from prodavan.api.v1.external import _find_tender_by_source_ref
 
     io = _FakeIO([{"row_id": "row_c", "source_ref": "b2b-center:333"}])
@@ -331,3 +333,12 @@ async def test_find_tender_by_source_ref_ignores_blank_refs() -> None:
 
     io = _FakeIO([{"row_id": "row_d", "body": {"source_ref": ""}}])
     assert await _find_tender_by_source_ref(io, "") == ""
+
+
+@pytest.mark.asyncio
+async def test_find_tender_by_source_ref_exact_match_only() -> None:
+    """Сравнение точное: подстрока не должна давать ложное совпадение."""
+    from prodavan.api.v1.external import _find_tender_by_source_ref
+
+    io = _FakeIO([{"row_id": "row_a", "body": {"source_ref": "b2b-center:1111"}}])
+    assert await _find_tender_by_source_ref(io, "b2b-center:111") == ""
