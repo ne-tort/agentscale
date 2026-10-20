@@ -479,3 +479,18 @@ jobs:
           echo
           echo '=== pod log tail ==='
           kubectl -n agentscale-dev-sandboxes logs "$P" --tail=30 2>&1 | tail -12
+
+  api-side-ws:
+    needs: diag
+    continue-on-error: true
+    runs-on: [self-hosted, linux, docker]
+    steps:
+      - name: Resolve kubeconfig
+        run: echo "KUBECONFIG=$HOME/.kube/prodavan-dev.yaml" >> "${GITHUB_ENV}"
+      - name: API-side workspace config
+        run: |
+          set -euo pipefail
+          echo '=== config.yaml в PVC API ==='
+          kubectl -n agentscale-dev exec deploy/agentscale-api -c api -- sh -c 'cat /data/storage/projects/60023937403249dc/workspace/.prodavan/config.yaml 2>/dev/null | grep -A6 "^provider:" || echo NO_PROVIDER_API_SIDE; md5sum /data/storage/projects/60023937403249dc/workspace/.prodavan/config.yaml 2>/dev/null'
+          echo '=== grepping fix code in image ==='
+          kubectl -n agentscale-dev exec deploy/agentscale-api -c api -- sh -c 'grep -n "W17-фикс" /app/src/prodavan/application/projects/materialize.py 2>/dev/null | head -2 || echo FIX_NOT_IN_IMAGE'
