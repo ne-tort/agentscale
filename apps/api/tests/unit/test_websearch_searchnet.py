@@ -179,7 +179,10 @@ async def test_fetch_maps_rendered_dom(monkeypatch, backend):
         bridge=_claims(), url="https://www.dns-shop.ru/product/x/"
     )
     assert client.captured["url"] == f"{backend}/fetch"
-    assert client.captured["body"] == {"url": "https://www.dns-shop.ru/product/x/"}
+    assert client.captured["body"] == {
+        "url": "https://www.dns-shop.ru/product/x/",
+        "wait_until": "networkidle",
+    }
     assert out["url"] == "https://www.dns-shop.ru/product/x/"
     assert out["status"] == 200
     assert out["content_type"].startswith("text/html")
@@ -236,3 +239,25 @@ async def test_fetch_http_error_and_timeout(monkeypatch, backend):
     with pytest.raises(AppError) as ei2:
         await WebSearchService().fetch(bridge=_claims(), url="https://x/")
     assert ei2.value.status == 504
+
+
+async def test_fetch_shop_defaults_to_networkidle(monkeypatch, backend):
+    """Цены DNS отрисовываются после domcontentloaded — для магазинов ждём networkidle."""
+    resp = _FakeResp(200, {"url": "u", "status": 200, "block": "ok", "html": "<html></html>"})
+    client = _install(monkeypatch, resp)
+    await WebSearchService().fetch(
+        bridge=_claims(), url="https://www.dns-shop.ru/product/701949711f27d9cb/x/"
+    )
+    assert client.captured["body"]["wait_until"] == "networkidle"
+
+    # обычный сайт — дефолт движка (никакого wait_until)
+    client2 = _install(monkeypatch, resp)
+    await WebSearchService().fetch(bridge=_claims(), url="https://example.com/page")
+    assert "wait_until" not in client2.captured["body"]
+
+    # явный wait_until уважается
+    client3 = _install(monkeypatch, resp)
+    await WebSearchService().fetch(
+        bridge=_claims(), url="https://www.dns-shop.ru/product/x/", wait_until="load"
+    )
+    assert client3.captured["body"]["wait_until"] == "load"

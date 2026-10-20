@@ -274,6 +274,8 @@ class WebFetchBody(BaseModel):
     max_bytes: int | None = Field(default=None, ge=1, le=5 * 1024 * 1024)
     engine: str = Field(default="", max_length=32)
     shop: str = Field(default="", max_length=64)
+    # domcontentloaded | load | networkidle; пусто → networkidle для магазинов
+    wait_until: str = Field(default="", max_length=32)
 
 
 @router.post("/projects/{project_id}/web-fetch")
@@ -296,4 +298,5 @@ async def web_fetch(
         max_bytes=body.max_bytes,
         engine=body.engine,
         shop=body.shop,
+        wait_until=body.wait_until,
     )

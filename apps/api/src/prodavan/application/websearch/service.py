@@ -18,6 +18,7 @@ from __future__ import annotations
 import logging
 import time
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -33,6 +34,24 @@ _MAX_LIMIT = 20
 # web.fetch: тот же дефолт/кап, что у SDK-тула (1MB / 5MB).
 _MAX_FETCH_BYTES = 1 * 1024 * 1024
 _MAX_FETCH_BYTES_CAP = 5 * 1024 * 1024
+
+# Магазины с JS-рендером цен (Qrator + отложенная отрисовка карточки): для них
+# ждём networkidle, иначе цена просто отсутствует в DOM.
+_SHOP_HOST_SUFFIXES = (
+    "dns-shop.ru",
+    "citilink.ru",
+    "mvideo.ru",
+    "eldorado.ru",
+    "ozon.ru",
+    "wildberries.ru",
+    "regard.ru",
+    "aliexpress.ru",
+)
+
+
+def _is_shop_host(url: str) -> bool:
+    host = (urlsplit(url).hostname or "").lower()
+    return any(host == s or host.endswith("." + s) for s in _SHOP_HOST_SUFFIXES)
 
 
 class WebSearchService:
@@ -175,6 +194,7 @@ class WebSearchService:
         max_bytes: int | None = None,
         engine: str = "",
         shop: str = "",
+        wait_until: str = "",
     ) -> dict[str, Any]:
         """CLAW-WEB — `web.fetch` proxy: agentscale API → searchnet `POST /fetch`.
 
@@ -218,6 +238,13 @@ class WebSearchService:
             body["engine"] = engine.strip()
         if shop.strip():
             body["shop"] = shop.strip()
+        # Цены/ленивые блоки DNS приходят ПОСЛЕ domcontentloaded (замер: на
+        # product-buy__price при domcontentloaded пусто, при networkidle —
+        # «51 499 ₽»). Для магазинных карточек ждём networkidle по умолчанию.
+        if wait_until.strip():
+            body["wait_until"] = wait_until.strip()
+        elif _is_shop_host(url):
+            body["wait_until"] = "networkidle"
 
         headers = {"Accept": "application/json", "Content-Type": "application/json"}
         key = (settings.web_search_backend_api_key or "").strip()
