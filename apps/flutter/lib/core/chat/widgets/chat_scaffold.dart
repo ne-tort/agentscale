@@ -39,6 +39,34 @@ String _displayEntryKey(ChatDisplayEntry entry) {
   };
 }
 
+/// Signature of a rendered entry for the widget cache.
+///
+/// Includes everything that can change the rendered subtree: block/paired keys,
+/// text lengths (markdown growth), streaming flags and item counts — a group may
+/// absorb a new tool call without changing its first/last keys, and a tool_call
+/// may gain its `paired` result later.
+({String key, bool streaming}) _entrySignature(ChatDisplayEntry entry) {
+  bool pairStreaming(ChatDisplayPair p) =>
+      p.block.isStreaming || (p.paired?.isStreaming ?? false);
+  String pairSig(ChatDisplayPair p) =>
+      '${p.block.key}|${p.paired?.key ?? ''}|${p.block.text.length}|'
+      '${p.paired?.text.length ?? 0}|${pairStreaming(p) ? 1 : 0}';
+  switch (entry) {
+    case ChatDisplaySingle(:final item):
+      return (key: 's:${pairSig(item)}', streaming: pairStreaming(item));
+    case ChatDisplayGroup(:final kind, :final items):
+      return (
+        key: 'g:${kind.name}:${items.length}:${items.map(pairSig).join(',')}',
+        streaming: items.any(pairStreaming),
+      );
+    case ChatDisplayWorkSession(:final items, :final streaming):
+      return (
+        key: 'w:$streaming:${items.length}:${items.map(pairSig).join(',')}',
+        streaming: streaming || items.any(pairStreaming),
+      );
+  }
+}
+
 String _groupLabel(AppLocalizations l10n, ActivityGroupKind kind, int count) {
   return switch (kind) {
     ActivityGroupKind.thinking => l10n.projectChatGroupThinking(count),
@@ -184,6 +212,16 @@ class ChatMessageList extends StatefulWidget {
 class ChatMessageListState extends State<ChatMessageList> {
   final _scroll = ScrollController();
   bool _pinnedToBottom = true;
+
+  // Кэш отрисованных записей. Чат рендерится eager-ListView'ом (см. build),
+  // поэтому раньше КАЖДЫЙ кадр перестраивал ВСЕ блоки — чем длиннее чат, тем
+  // сильнее подвисал UI. Финализированные (не стримящие) блоки иммутабельны:
+  // переиспользуем их виджет, и Flutter пропускает поддерево (identical widget).
+  final Map<String, Widget> _entryCache = {};
+  Object? _cacheApi;
+  Object? _cacheCostResolver;
+  Object? _cacheAliases;
+  Object? _cacheResolveApproval;
   bool _didInitialBottom = false;
   int _lastFingerprint = 0;
   int _lastBlockCount = 0;
@@ -265,6 +303,22 @@ class ChatMessageListState extends State<ChatMessageList> {
       mcpAliases: widget.mcpAliases,
       turnStreaming: widget.turnStreaming,
     );
+  }
+
+  Widget _cachedEntry(
+    AppLocalizations l10n,
+    ChatDisplayEntry entry,
+    Set<String> liveKeys,
+  ) {
+    final sig = _entrySignature(entry);
+    liveKeys.add(sig.key);
+    // Стримящие записи меняются на каждой дельте — кэшировать нельзя.
+    if (sig.streaming) return _renderEntry(l10n, entry);
+    final cached = _entryCache[sig.key];
+    if (cached != null) return cached;
+    final built = _renderEntry(l10n, entry);
+    _entryCache[sig.key] = built;
+    return built;
   }
 
   Widget _renderEntry(AppLocalizations l10n, ChatDisplayEntry entry) {
@@ -367,6 +421,18 @@ class ChatMessageListState extends State<ChatMessageList> {
     //
     // reverse:true — first child is visual bottom (newest). The working
     // indicator is the newest thing in the list while it shows.
+    if (!identical(_cacheApi, widget.api) ||
+        !identical(_cacheCostResolver, widget.costResolver) ||
+        !identical(_cacheAliases, widget.mcpAliases) ||
+        !identical(_cacheResolveApproval, widget.onResolveApproval)) {
+      // Пропсы, от которых зависит отрисовка блоков, сменились — кэш невалиден.
+      _entryCache.clear();
+      _cacheApi = widget.api;
+      _cacheCostResolver = widget.costResolver;
+      _cacheAliases = widget.mcpAliases;
+      _cacheResolveApproval = widget.onResolveApproval;
+    }
+    final liveKeys = <String>{};
     final children = <Widget>[
       if (widget.showReconnectIndicator)
         SizedBox(
@@ -384,8 +450,12 @@ class ChatMessageListState extends State<ChatMessageList> {
           key: ValueKey('agent-working-indicator'),
           child: AgentWorkingIndicator(),
         ),
-        for (final e in entries.reversed) _renderEntry(l10n, e),
+        for (final e in entries.reversed) _cachedEntry(l10n, e, liveKeys),
     ];
+    if (_entryCache.length > liveKeys.length) {
+      // Блоки исчезли (смена сессии/истории) — не держим их виджеты.
+      _entryCache.removeWhere((k, _) => !liveKeys.contains(k));
+    }
 
     return Stack(
       children: [
