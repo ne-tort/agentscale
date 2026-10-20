@@ -53,7 +53,10 @@ CATALOG_BUILDS_TABLE = "ready_builds"
 CATALOG_SLOTS_TABLE = "ready_build_slots"
 # WAVE14: «Тендеры» — глобальная (chats=all) группировка позиций заказчика.
 TENDERS_TABLE = "tenders"
-
+# «Интернет товары»: найденные агентом товары из магазинов web_shops (TTL 72ч).
+# Живут отдельной таблицей + отдельным OS-индексом, но участвуют в подборе
+# наравне с каталогами — иначе схема ломала бы автоподтягивание found_offers.
+WEB_PRODUCTS_TABLE = "web_products"
 MATCH_EXACT = "exact"
 MATCH_ANALOG = "analog"
 MATCH_DOUBT = "doubt"
@@ -521,8 +524,10 @@ class ModuleRowIO:
 class EquipmentPipelineService:
     """Полный пайплайн модуля «Подбор товаров» (WAVE7)."""
 
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(self, session: AsyncSession, *, cabinet_id: str | None = None) -> None:
         self._session = session
+        # Нужен для поиска по индексу «Интернет товары» (он на кабинет).
+        self._cabinet_id = cabinet_id or ""
 
     # ------------------------------------------------------------------ run
 
@@ -707,7 +712,11 @@ class EquipmentPipelineService:
             for c in catalogs
             if str((c.get("body") or {}).get("status") or "").strip().lower() == "ready"
         ]
-        if not ready:
+        # Интернет-товары (web_products) участвуют наравне с каталогами, поэтому
+        # их наличие — тоже основание считать подбор возможным: без каталогов,
+        # но с найденными в интернете товарами пайплайн обязан работать.
+        has_web = bool(await io.list(WEB_PRODUCTS_TABLE))
+        if not ready and not has_web:
             return {**stats, "reason": "no_ready_catalogs"}
 
         lines = [r for r in await io.list(LINES_TABLE) if isinstance(r, dict)]
@@ -819,9 +828,83 @@ class EquipmentPipelineService:
     async def _search_docs(
         self, *, ready_ids: list[str], groups: list[dict[str, Any]]
     ) -> list[dict[str, Any]]:
-        return await search_catalog_docs(
-            self._session, ready_ids=ready_ids, bodies=[g.get("body") or {} for g in groups]
+        bodies = [g.get("body") or {} for g in groups]
+        docs = await search_catalog_docs(self._session, ready_ids=ready_ids, bodies=bodies)
+        # «Интернет товары» ищем тем же способом (партномер / src_hash), но в
+        # их собственном индексе, и складываем в общий список: дальше пайплайн
+        # не различает источник и выбирает по цене/совпадению.
+        try:
+            web_docs = await self._search_web_products(bodies=bodies)
+        except Exception:
+            logger.exception("web_products search failed (catalogs still used)")
+            web_docs = []
+        if web_docs:
+            seen = {str(d.get("src_hash") or "") for d in docs}
+            for d in web_docs:
+                h = str(d.get("src_hash") or "")
+                # Не затираем каталоговый док с тем же ключом: каталог —
+                # источник с историей, интернет-товар — временный (TTL 72ч).
+                if h and h in seen:
+                    continue
+                docs.append(d)
+        return docs
+
+    async def _search_web_products(
+        self, *, bodies: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """Поиск по индексу «Интернет товары» кабинета (best-effort)."""
+        from prodavan.application.modules.web_products_opensearch import (
+            OS_NAMESPACE,
+            web_products_index_name,
         )
+        from prodavan.core.infra.opensearch_manager import get_search_index_service
+
+        cabinet_id = str(getattr(self, "_cabinet_id", "") or "")
+        if not cabinet_id:
+            return []
+        pn_terms: list[str] = []
+        hash_terms: list[str] = []
+        for body in bodies:
+            for key in group_pn_keys(body):
+                if key not in pn_terms:
+                    pn_terms.append(key)
+            for key in group_hash_keys(body):
+                if key not in hash_terms:
+                    hash_terms.append(key)
+        if not pn_terms and not hash_terms:
+            return []
+        should: list[dict[str, Any]] = []
+        if pn_terms:
+            should.append({"terms": {"part_number": pn_terms}})
+        if hash_terms:
+            should.append({"terms": {"src_hash": hash_terms}})
+        query = {"bool": {"should": should, "minimum_should_match": 1}}
+        svc = get_search_index_service()
+        out: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        try:
+            result = await svc.search(
+                namespace=OS_NAMESPACE,
+                index=web_products_index_name(cabinet_id),
+                query=query,
+                size=200,
+                company_id="platform",
+                cabinet_id=cabinet_id,
+                project_id=None,
+                apply_tenant_filter=False,
+                session=self._session,
+            )
+        except Exception:
+            return []
+        for hit in result.hits or []:
+            doc = hit.source if isinstance(hit.source, dict) else {}
+            key = str(doc.get("src_hash") or "") or str(doc.get("row_id") or "")
+            if key and key in seen:
+                continue
+            if key:
+                seen.add(key)
+            out.append(doc)
+        return out
 
     async def _offer_body_from_doc(
         self,
