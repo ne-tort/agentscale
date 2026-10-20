@@ -457,3 +457,25 @@ jobs:
           echo
           echo '=== leases ==='
           kubectl -n agentscale-dev-sandboxes exec "$P" -- sh -c 'wget -qO- --header "Authorization: Bearer $BRIDGE_AUTH_TOKEN" http://127.0.0.1:3921/v1/credentials 2>&1 | head -c 300' || true
+
+  post-sync2:
+    needs: diag
+    continue-on-error: true
+    runs-on: [self-hosted, linux, docker]
+    steps:
+      - name: Resolve kubeconfig
+        run: echo "KUBECONFIG=$HOME/.kube/prodavan-dev.yaml" >> "${GITHUB_ENV}"
+      - name: rwp4k config
+        run: |
+          set -euo pipefail
+          P=pod/agentscale-agent-pool-rwp4k
+          echo '=== config provider ==='
+          kubectl -n agentscale-dev-sandboxes exec "$P" -- sh -c 'grep -A6 "^provider:" /workspace/.prodavan/config.yaml 2>/dev/null || echo NO_PROVIDER'
+          echo '=== sessions ==='
+          kubectl -n agentscale-dev-sandboxes exec "$P" -- sh -c 'wget -qO- --header "Authorization: Bearer $BRIDGE_AUTH_TOKEN" http://127.0.0.1:3921/v1/sessions 2>&1 | head -c 600'
+          echo
+          echo '=== leases ==='
+          kubectl -n agentscale-dev-sandboxes exec "$P" -- sh -c 'wget -qO- --header "Authorization: Bearer $BRIDGE_AUTH_TOKEN" http://127.0.0.1:3921/v1/credentials 2>&1 | head -c 200'
+          echo
+          echo '=== pod log tail ==='
+          kubectl -n agentscale-dev-sandboxes logs "$P" --tail=30 2>&1 | tail -12
