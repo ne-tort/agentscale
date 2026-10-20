@@ -30,10 +30,11 @@ _TRACE_ID_RE = re.compile(r"^[A-Za-z0-9_.:\-]{1,128}$")
 
 # Deny-by-default for Bridge JWT (and any residual shared Bearer).
 # Real agent surface is /projects/{id}/agent/... (not /api/v1/agent/...).
-# `web-search` is the CLAW-WEB proxy the built-in web.search tool calls from the
-# sandbox pod (it must be reachable on the pod surface, like modules/infra).
+# `web-search`/`web-fetch` are the CLAW-WEB proxies the built-in web.search and
+# web.fetch tools call from the sandbox pod (they must be reachable on the pod
+# surface, like modules/infra).
 _POD_SURFACE_RE = re.compile(
-    r"^/api/v1/(?:internal/pods(?:/|$)|projects/[^/]+/(?:infra|modules|agent|web-search|documents)(?:/|$))"
+    r"^/api/v1/(?:internal/pods(?:/|$)|projects/[^/]+/(?:infra|modules|agent|web-search|web-fetch|documents)(?:/|$))"
 )
 
 # Explicit CORS methods/headers (audit API-P1b). Wildcards with

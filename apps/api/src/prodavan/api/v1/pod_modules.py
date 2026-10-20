@@ -267,3 +267,33 @@ async def web_search(
         query=body.query,
         limit=body.limit,
     )
+
+
+class WebFetchBody(BaseModel):
+    url: str = Field(min_length=1, max_length=4000)
+    max_bytes: int | None = Field(default=None, ge=1, le=5 * 1024 * 1024)
+    engine: str = Field(default="", max_length=32)
+    shop: str = Field(default="", max_length=64)
+
+
+@router.post("/projects/{project_id}/web-fetch")
+async def web_fetch(
+    project_id: str,
+    body: WebFetchBody,
+    bridge: PodBridgeDep,
+) -> dict[str, Any]:
+    """CLAW-WEB — `web.fetch` proxy: pod → API → searchnet `POST /fetch`.
+
+    Контракт совпадает с built-in `web.fetch` SDK (url/status/content_type/
+    bytes/truncated/content), но страницу рендерит браузерный движок searchnet:
+    anti-bot (Qrator/Cloudflare) обходится, применяется профиль магазина и его
+    cookies, а DOM приходит уже после JS (цены DNS и т.п.).
+    """
+    bridge.require_project(project_id)
+    return await WebSearchService().fetch(
+        bridge=bridge,
+        url=body.url,
+        max_bytes=body.max_bytes,
+        engine=body.engine,
+        shop=body.shop,
+    )

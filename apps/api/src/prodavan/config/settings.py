@@ -296,6 +296,12 @@ class Settings(BaseSettings):
         default=30.0,
         validation_alias=AliasChoices("WEB_SEARCH_TIMEOUT_SEC", "POD_WEB_SEARCH_TIMEOUT_SEC"),
     )
+    # web.fetch проксируется в searchnet и рендерится настоящим браузером
+    # (chromium/camoufox, обход Qrator) — это заметно дольше поиска.
+    web_fetch_timeout_sec: float = Field(
+        default=120.0,
+        validation_alias=AliasChoices("WEB_FETCH_TIMEOUT_SEC", "POD_WEB_FETCH_TIMEOUT_SEC"),
+    )
     # Documents module (DOCUM). GOTENBERG_URL empty -> local in-proc converter
     # fallback (office->pdf routes then answer 422 CONVERSION_UNAVAILABLE).
     # The rate limit is per project on the /documents/convert endpoint; 0 disables.

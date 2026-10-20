@@ -157,3 +157,82 @@ async def test_search_limits_clamped(monkeypatch, backend):
     client = _install(monkeypatch, resp)
     await WebSearchService().search(bridge=_claims(), query="q", limit=99)
     assert client.captured["body"]["max_results"] == 20
+
+
+# ---------------------------------------------------------------- web.fetch
+
+async def test_fetch_maps_rendered_dom(monkeypatch, backend):
+    html = "<html><body><span class='price'>12 990 ₽</span></body></html>"
+    resp = _FakeResp(
+        200,
+        {
+            "url": "https://www.dns-shop.ru/product/x/",
+            "final_url": "https://www.dns-shop.ru/product/x/",
+            "status": 200,
+            "block": "ok",
+            "html": html,
+            "warnings": [],
+        },
+    )
+    client = _install(monkeypatch, resp)
+    out = await WebSearchService().fetch(
+        bridge=_claims(), url="https://www.dns-shop.ru/product/x/"
+    )
+    assert client.captured["url"] == f"{backend}/fetch"
+    assert client.captured["body"] == {"url": "https://www.dns-shop.ru/product/x/"}
+    assert out["url"] == "https://www.dns-shop.ru/product/x/"
+    assert out["status"] == 200
+    assert out["content_type"].startswith("text/html")
+    assert out["content"] == html
+    assert out["bytes"] == len(html.encode("utf-8"))
+    assert out["truncated"] is False
+    assert out["block"] == "ok"
+
+
+async def test_fetch_truncates_to_max_bytes(monkeypatch, backend):
+    html = "я" * 100  # 200 байт в utf-8
+    resp = _FakeResp(200, {"url": "u", "status": 200, "block": "ok", "html": html})
+    _install(monkeypatch, resp)
+    out = await WebSearchService().fetch(bridge=_claims(), url="https://x/", max_bytes=50)
+    assert out["truncated"] is True
+    assert len(out["content"].encode("utf-8")) <= 50
+    assert out["bytes"] == 200
+
+
+async def test_fetch_surfaces_block_and_engine(monkeypatch, backend):
+    resp = _FakeResp(
+        200,
+        {"url": "u", "status": 403, "block": "challenge", "html": "<html></html>"},
+    )
+    client = _install(monkeypatch, resp)
+    out = await WebSearchService().fetch(
+        bridge=_claims(), url="https://www.dns-shop.ru/", engine="camoufox", shop="dns-shop"
+    )
+    assert out["block"] == "challenge"
+    assert client.captured["body"]["engine"] == "camoufox"
+    assert client.captured["body"]["shop"] == "dns-shop"
+
+
+async def test_fetch_requires_url_and_backend(monkeypatch, backend):
+    with pytest.raises(AppError) as ei:
+        await WebSearchService().fetch(bridge=_claims(), url="  ")
+    assert ei.value.status == 400
+
+    from prodavan.config.settings import settings
+
+    monkeypatch.setattr(settings, "web_search_backend_url", "")
+    with pytest.raises(AppError) as ei2:
+        await WebSearchService().fetch(bridge=_claims(), url="https://x/")
+    assert ei2.value.status == 503
+
+
+async def test_fetch_http_error_and_timeout(monkeypatch, backend):
+    _install(monkeypatch, _FakeResp(502, {}))
+    with pytest.raises(AppError) as ei:
+        await WebSearchService().fetch(bridge=_claims(), url="https://x/")
+    assert ei.value.status == 502
+
+    _install(monkeypatch, httpx.ReadTimeout("t"))
+    with pytest.raises(AppError) as ei2:
+        await WebSearchService().fetch(bridge=_claims(), url="https://x/")
+    assert ei2.value.status == 504

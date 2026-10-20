@@ -30,6 +30,9 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_LIMIT = 5
 _MAX_LIMIT = 20
+# web.fetch: тот же дефолт/кап, что у SDK-тула (1MB / 5MB).
+_MAX_FETCH_BYTES = 1 * 1024 * 1024
+_MAX_FETCH_BYTES_CAP = 5 * 1024 * 1024
 
 
 class WebSearchService:
@@ -163,3 +166,125 @@ class WebSearchService:
             for r in results[:resolved_limit]
         ]
         return {"results": items}
+
+    async def fetch(
+        self,
+        *,
+        bridge: PodBridgeClaims,
+        url: str,
+        max_bytes: int | None = None,
+        engine: str = "",
+        shop: str = "",
+    ) -> dict[str, Any]:
+        """CLAW-WEB — `web.fetch` proxy: agentscale API → searchnet `POST /fetch`.
+
+        The agent's built-in `web.fetch` used to do a raw `fetch(url)` from the
+        sandbox pod, which hit anti-bot walls (Qrator on DNS Shop etc.). Routing
+        it through searchnet means the page is rendered by a real browser engine
+        (chromium by default, camoufox escalation for Qrator/Cloudflare) with the
+        shop profile/cookies, and the agent gets the rendered DOM.
+
+        Returns the same shape as the SDK's raw fetch (`url/status/content_type/
+        bytes/truncated/content`) plus honest `block`/`warnings`/`error` so a
+        wall is surfaced instead of a silently empty page.
+        """
+        url = (url or "").strip()
+        if not url:
+            raise AppError(
+                code="WEB_FETCH_URL_REQUIRED",
+                title="Bad Request",
+                status=400,
+                detail="url is required",
+            )
+        if not self._backend_url:
+            raise AppError(
+                code="WEB_SEARCH_BACKEND_NOT_CONFIGURED",
+                title="Web search unavailable",
+                status=503,
+                detail="WEB_SEARCH_BACKEND_URL is not set on the API pod",
+            )
+
+        # Same per-pod web budget as web.search: one pod cannot burst searchnet
+        # (its SERP/fetch engines are anti-bot-sensitive and browser-heavy).
+        await enforce_rate_limit(
+            key=f"web_search:pod:{bridge.pod_id}",
+            limit=settings.web_search_rate_limit,
+            window_sec=settings.web_search_rate_window_sec,
+            detail="web rate limit exceeded for this pod",
+        )
+
+        body: dict[str, Any] = {"url": url}
+        if engine.strip():
+            body["engine"] = engine.strip()
+        if shop.strip():
+            body["shop"] = shop.strip()
+
+        headers = {"Accept": "application/json", "Content-Type": "application/json"}
+        key = (settings.web_search_backend_api_key or "").strip()
+        if key:
+            headers["Authorization"] = f"Bearer {key}"
+
+        endpoint = f"{self._backend_url}/fetch"
+        started = time.monotonic()
+        err: str | None = None
+        status_code = 0
+        data: dict[str, Any] | None = None
+        try:
+            async with httpx.AsyncClient(
+                timeout=settings.web_fetch_timeout_sec,
+                follow_redirects=True,
+            ) as client:
+                resp = await client.post(endpoint, json=body, headers=headers)
+            status_code = resp.status_code
+            if resp.status_code >= 400:
+                err = f"searchnet HTTP {resp.status_code}"
+                raise AppError(
+                    code="WEB_FETCH_BACKEND_ERROR",
+                    title="Web fetch backend error",
+                    status=502,
+                    detail=f"searchnet returned {resp.status_code}",
+                )
+            data = resp.json()
+        except httpx.TimeoutException:
+            err = "timeout"
+            raise AppError(
+                code="WEB_FETCH_TIMEOUT",
+                title="Web fetch timeout",
+                status=504,
+                detail="searchnet did not respond in time",
+            )
+        except httpx.HTTPError as exc:
+            err = f"fetch failed: {exc.__class__.__name__}"
+            raise AppError(
+                code="WEB_FETCH_BACKEND_UNREACHABLE",
+                title="Web fetch backend unreachable",
+                status=502,
+                detail=f"cannot reach searchnet backend: {exc.__class__.__name__}",
+            )
+        finally:
+            elapsed_ms = int((time.monotonic() - started) * 1000)
+            logger.info(
+                "web_fetch proxy pod=%s project=%s status=%s ms=%s err=%s",
+                bridge.pod_id,
+                bridge.project_id,
+                status_code,
+                elapsed_ms,
+                err or "-",
+            )
+
+        payload = data or {}
+        html = str(payload.get("html") or "")
+        raw = html.encode("utf-8")
+        limit = max_bytes if isinstance(max_bytes, int) and max_bytes > 0 else _MAX_FETCH_BYTES
+        limit = min(limit, _MAX_FETCH_BYTES_CAP)
+        return {
+            "url": str(payload.get("final_url") or payload.get("url") or url),
+            "status": int(payload.get("status") or 0),
+            "content_type": "text/html; charset=utf-8",
+            "bytes": len(raw),
+            "truncated": len(raw) > limit,
+            "content": raw[:limit].decode("utf-8", "replace"),
+            "block": str(payload.get("block") or "ok"),
+            "warnings": [str(w) for w in (payload.get("warnings") or [])],
+            "error": payload.get("error"),
+        }
