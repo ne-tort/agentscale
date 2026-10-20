@@ -494,3 +494,17 @@ jobs:
           kubectl -n agentscale-dev exec deploy/agentscale-api -c api -- sh -c 'cat /data/storage/projects/60023937403249dc/workspace/.prodavan/config.yaml 2>/dev/null | grep -A6 "^provider:" || echo NO_PROVIDER_API_SIDE; md5sum /data/storage/projects/60023937403249dc/workspace/.prodavan/config.yaml 2>/dev/null'
           echo '=== grepping fix code in image ==='
           kubectl -n agentscale-dev exec deploy/agentscale-api -c api -- sh -c 'grep -n "W17-фикс" /app/src/prodavan/application/projects/materialize.py 2>/dev/null | head -2 || echo FIX_NOT_IN_IMAGE'
+
+  mtime:
+    needs: diag
+    continue-on-error: true
+    runs-on: [self-hosted, linux, docker]
+    steps:
+      - name: Resolve kubeconfig
+        run: echo "KUBECONFIG=$HOME/.kube/prodavan-dev.yaml" >> "${GITHUB_ENV}"
+      - name: workspace mtime + rematerialize bus
+        run: |
+          set -euo pipefail
+          kubectl -n agentscale-dev exec deploy/agentscale-api -c api -- sh -c 'ls -la /data/storage/projects/60023937403249dc/workspace/.prodavan/ 2>/dev/null; stat -c "%y %n" /data/storage/projects/60023937403249dc/workspace/.prodavan/config.yaml 2>/dev/null'
+          echo '=== celery worker logs: rematerialize/materialize для проекта ==='
+          kubectl -n agentscale-dev logs deploy/agentscale-celery-worker --tail=500 2>&1 | grep -iE "60023937403249dc|materializ" | tail -10 || true
