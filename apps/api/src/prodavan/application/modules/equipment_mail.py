@@ -80,27 +80,6 @@ def build_message(
     return msg
 
 
-def _smtp_addresses(host: str) -> list[tuple]:
-    """Все адреса хоста в порядке getaddrinfo (IPv6 обычно первым).
-
-    Некоторые сети режут IPv4-SMTP на DPI, но пропускают IPv6 (и наоборот);
-    перебор адресов даёт отправке шанс там, где smtplib по одному адресу
-    падает с network unreachable.
-    """
-    import socket
-
-    try:
-        infos = socket.getaddrinfo(host, None)
-    except OSError:
-        return []
-    seen: list[tuple] = []
-    for info in infos:
-        addr = info[4]
-        if addr not in seen:
-            seen.append(addr)
-    return seen
-
-
 def send_smtp(
     *,
     host: str,
@@ -115,36 +94,44 @@ def send_smtp(
     """Отправить письмо; MailSendError при сбое.
 
     ``use_ssl`` — implicit TLS (SMTPS, обычно 465). Иначе при ``starttls``
-    выполняется апгрейд открытого соединения (587). Адреса хоста
-    перебираются все (IPv6-первый): сети бывают с асимметричным
-    SMTP-фильтром по протоколу.
+    выполняется апгрейд открытого соединения (587). ``smtplib.SMTP`` сам
+    перебирает адреса хоста через ``socket.create_connection`` (IPv6/IPv4),
+    поэтому отдельного цикла по ``getaddrinfo`` не нужно; ошибка несёт
+    host:port, режим шифрования и hint про вероятную блокировку SMTP.
     """
     if not host.strip():
         raise MailSendError("smtp host is empty")
     host = host.strip()
     port = int(port or (465 if use_ssl else 587))
+    mode = "implicit TLS (SMTPS)" if use_ssl else ("STARTTLS" if starttls else "plaintext")
     context = ssl.create_default_context()
-    errors: list[str] = []
-    for addr in _smtp_addresses(host) or [(host,)]:
-        try:
-            if use_ssl:
-                smtp: smtplib.SMTP = smtplib.SMTP_SSL(
-                    host, port, timeout=timeout, context=context
-                )
-            else:
-                smtp = smtplib.SMTP(host, port, timeout=timeout)
-            with smtp:
+    try:
+        if use_ssl:
+            smtp: smtplib.SMTP = smtplib.SMTP_SSL(
+                host, port, timeout=timeout, context=context
+            )
+        else:
+            smtp = smtplib.SMTP(host, port, timeout=timeout)
+        with smtp:
+            smtp.ehlo()
+            if not use_ssl and starttls:
+                smtp.starttls(context=context)
                 smtp.ehlo()
-                if not use_ssl and starttls:
-                    smtp.starttls(context=context)
-                    smtp.ehlo()
-                if user.strip():
-                    smtp.login(user.strip(), password)
-                smtp.send_message(msg)
-            return
-        except (OSError, smtplib.SMTPException) as exc:
-            errors.append(f"{type(exc).__name__}: {exc}")
-    raise MailSendError("; ".join(errors) or "no smtp addresses resolved")
+            if user.strip():
+                smtp.login(user.strip(), password)
+            smtp.send_message(msg)
+    except (OSError, smtplib.SMTPException) as exc:
+        hint = ""
+        if isinstance(exc, ssl.SSLCertVerificationError):
+            hint = " — проверка сертификата SMTP не прошла (MITM/перехват)"
+        elif isinstance(exc, ssl.SSLError):
+            hint = (
+                " — вероятна блокировка исходящего SMTP на сети/VPS "
+                "(TLS-рукопожатие оборвано)"
+            )
+        raise MailSendError(
+            f"smtp {host}:{port} [{mode}]: {type(exc).__name__}: {exc}{hint}"
+        ) from exc
 
 
 def resolve_sender(

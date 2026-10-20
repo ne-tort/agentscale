@@ -107,6 +107,21 @@ def test_send_smtp_ssl_uses_context() -> None:
     assert ctor.call_args.kwargs.get("context") is not None
 
 
+def test_send_smtp_error_includes_host_port_and_mode() -> None:
+    """Сбой отправки несёт host:port + режим шифрования, а не голой SSLEOFError."""
+    import ssl
+
+    msg = build_message(from_address="a@b.c", to_address="d@e.f", subject="s", body_text="b")
+    boom = ssl.SSLEOFError("EOF occurred in violation of protocol")
+    with patch("smtplib.SMTP_SSL", side_effect=boom):
+        with pytest.raises(MailSendError) as ei:
+            send_smtp(host="smtp.yandex.ru", port=465, use_ssl=True, msg=msg)
+    text = str(ei.value)
+    assert "smtp.yandex.ru:465" in text
+    assert "implicit TLS" in text
+    assert "блокировка" in text  # hint про вероятный фильтр исходящего SMTP
+
+
 def test_resolve_sender_by_name_price() -> None:
     rows = [
         {"row_id": "s1", "body": {"name": "sales", "from_address": "s@x.y", "enabled": True}},
