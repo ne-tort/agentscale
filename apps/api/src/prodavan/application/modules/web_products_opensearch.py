@@ -95,7 +95,7 @@ async def index_web_product(
     if not cabinet_id or not row_id:
         return False
     try:
-        from prodavan.application.search_index.service import get_search_index_service
+        from prodavan.core.infra.opensearch_manager import get_search_index_service
 
         svc = get_search_index_service()
         index = web_products_index_name(cabinet_id)
@@ -146,7 +146,7 @@ async def delete_web_product_doc(
     if not cabinet_id:
         return False
     try:
-        from prodavan.application.search_index.service import get_search_index_service
+        from prodavan.core.infra.opensearch_manager import get_search_index_service
 
         svc = get_search_index_service()
         index = web_products_index_name(cabinet_id)

@@ -107,3 +107,31 @@ def test_doc_without_part_number() -> None:
     doc = web_product_doc("row_1", {"title": "Кабель"})
     assert doc["part_number"] == ""
     assert doc["src_hash"] == ""
+
+
+def test_search_service_import_is_valid() -> None:
+    """Индексация обязана брать сервис поиска из core.infra.
+
+    Регрессия: первый заход импортировал `get_search_index_service` из
+    `application.search_index.service`, где его нет — индексация молча падала
+    в except (best-effort), и интернет-товары не попадали в подбор.
+    """
+    from prodavan.core.infra.opensearch_manager import get_search_index_service
+
+    assert callable(get_search_index_service)
+
+
+def test_index_module_imports_only() -> None:
+    """Модуль индексации импортируется без побочных эффектов."""
+    import importlib
+
+    mod = importlib.import_module(
+        "prodavan.application.modules.web_products_opensearch"
+    )
+    assert callable(mod.index_web_product)
+    assert callable(mod.delete_web_product_doc)
+    assert mod.OS_NAMESPACE == "equipment"
+    # маппинг объявляет поля, по которым матчит пайплайн подбора
+    props = mod._web_products_mappings()["properties"]
+    for key in ("part_number", "src_hash", "price_rub", "supplier"):
+        assert key in props
