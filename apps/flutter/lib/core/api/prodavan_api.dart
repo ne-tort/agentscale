@@ -732,6 +732,82 @@ class ProdavanApi {
     }
   }
 
+  // ---------------------------------------------------------------- webhooks
+  // Внешний API компании: подписки на события чата + app-ключи для интеграций.
+  // Источник истины — backend (WebhookService / ApiAppKeyService); UI только
+  // читает и вызывает операции. Секреты показываются ОДИН раз при создании.
+
+  Future<List<Map<String, dynamic>>> listWebhookSubscriptions() async {
+    final res = await AuthHttp.get(_uri('/external/webhooks'), extraHeaders: _workHeaders);
+    _throwIfError(res);
+    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    final items = body['items'];
+    if (items is List) return items.cast<Map<String, dynamic>>();
+    return const [];
+  }
+
+  Future<Map<String, dynamic>> createWebhookSubscription({
+    required String url,
+    required List<String> events,
+    String? projectId,
+  }) async {
+    final res = await AuthHttp.post(
+      _uri('/external/webhooks'),
+      extraHeaders: {
+        ..._workHeaders,
+        'Content-Type': 'application/json',
+      },
+      body: jsonEncode({
+        'url': url,
+        'events': events,
+        if (projectId != null && projectId.isNotEmpty) 'project_id': projectId,
+      }),
+    );
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<void> deleteWebhookSubscription(String subscriptionId) async {
+    final res = await AuthHttp.delete(
+      _uri('/external/webhooks/$subscriptionId'),
+      extraHeaders: _workHeaders,
+    );
+    _throwIfError(res);
+  }
+
+  Future<List<Map<String, dynamic>>> listAppKeys() async {
+    final res = await AuthHttp.get(_uri('/external/app-keys'), extraHeaders: _workHeaders);
+    _throwIfError(res);
+    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    final items = body['items'];
+    if (items is List) return items.cast<Map<String, dynamic>>();
+    return const [];
+  }
+
+  Future<Map<String, dynamic>> createAppKey({
+    required String label,
+    required List<String> scopes,
+  }) async {
+    final res = await AuthHttp.post(
+      _uri('/external/app-keys'),
+      extraHeaders: {
+        ..._workHeaders,
+        'Content-Type': 'application/json',
+      },
+      body: jsonEncode({'label': label, 'scopes': scopes}),
+    );
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<void> revokeAppKey(String keyId) async {
+    final res = await AuthHttp.delete(
+      _uri('/external/app-keys/$keyId'),
+      extraHeaders: _workHeaders,
+    );
+    _throwIfError(res);
+  }
+
   /// Keep Redis presence alive while the cabinet shell is open.
   Future<void> cabinetPresenceHeartbeat(String cabinetId) async {
     final prev = this.cabinetId;
