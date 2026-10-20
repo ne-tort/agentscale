@@ -603,7 +603,15 @@ def test_tools_list_contains_v2_tools() -> None:
         "tender_attach",
     ):
         assert name in names
-    assert len(names) == 29
+    # «Интернет магазины» / «Интернет товары» (web_shops + web_products, TTL 72ч)
+    for name in (
+        "web_shops_list",
+        "web_products_list",
+        "web_product_add",
+        "web_product_delete",
+    ):
+        assert name in names
+    assert len(names) == 33
     assert (
         mcp_server._handle({"jsonrpc": "2.0", "id": 2, "method": "initialize"})["result"][
             "serverInfo"

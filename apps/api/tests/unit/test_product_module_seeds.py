@@ -189,6 +189,8 @@ def test_equipment_meta_hub_on_data_placement() -> None:
         "equipment_builds",
         "trusted_sellers",
         "web_shops",
+        # «Интернет товары»: найденные агентом товары из web_shops (TTL 72ч)
+        "web_products",
         "templates",
         "equipment_mcp",
         "budget_lines",

@@ -877,6 +877,71 @@ TOOLS: list[dict[str, Any]] = [
             "additionalProperties": False,
         },
     },
+    {
+        "name": "web_shops_list",
+        "description": (
+            "List web_shops — интернет-магазины, по которым разрешено искать "
+            "товары (name, url, cookies). Ищи именно по этим магазинам."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {"module_id": {"type": "string", "default": DEFAULT_MODULE_ID}},
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "web_products_list",
+        "description": (
+            "List web_products — «Интернет товары» этого проекта: товары, "
+            "найденные агентом в интернет-магазинах (title, part_number, brand, "
+            "price, shop, url, qty, line_id). Живут 72 часа с момента "
+            "добавления/правки; участвуют в подборе наравне с каталогом."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {"module_id": {"type": "string", "default": DEFAULT_MODULE_ID}},
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "web_product_add",
+        "description": (
+            "Add a product found in an internet shop to «Интернет товары». "
+            "Required: title. Recommended: part_number (для сопоставления с "
+            "позицией), price (₽), shop (название из web_shops_list), brand, url, "
+            "qty, line_id. Автоматически индексируется и конкурирует с каталогом "
+            "по цене. TTL 72 часа; повторное добавление обновляет и продлевает."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "module_id": {"type": "string", "default": DEFAULT_MODULE_ID},
+                "title": {"type": "string"},
+                "part_number": {"type": ["string", "null"]},
+                "brand": {"type": ["string", "null"]},
+                "price": {"type": ["number", "null"]},
+                "shop": {"type": ["string", "null"]},
+                "url": {"type": ["string", "null"]},
+                "qty": {"type": ["string", "null"]},
+                "line_id": {"type": ["string", "null"]},
+            },
+            "required": ["title"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "web_product_delete",
+        "description": "Delete a web_products row by row_id.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "module_id": {"type": "string", "default": DEFAULT_MODULE_ID},
+                "row_id": {"type": "string"},
+            },
+            "required": ["row_id"],
+            "additionalProperties": False,
+        },
+    },
 ]
 
 
@@ -1916,6 +1981,49 @@ def _call_tool(name: str, arguments: dict[str, Any]) -> Any:
         )
     if name == "tender_positions_upsert":
         return _tender_positions_upsert(mid, arguments, sid)
+    if name == "web_shops_list":
+        return {"items": _list_rows(mid, "web_shops", session_id=sid)}
+    if name == "web_products_list":
+        return {"items": _list_rows(mid, "web_products", session_id=sid)}
+    if name == "web_product_add":
+        keys = ("title", "part_number", "brand", "price", "shop", "url", "qty", "line_id")
+        body = _pick_present(arguments, keys)
+        if not str(body.get("title") or "").strip():
+            raise RuntimeError("title is required for web_product_add")
+        # Дедуп: тот же партномер в том же магазине — обновляем существующую
+        # строку и продлеваем TTL, а не плодим копии на каждый поиск.
+        pn = str(body.get("part_number") or "").strip().casefold()
+        shop = str(body.get("shop") or "").strip().casefold()
+        if pn:
+            for row in _list_rows(mid, "web_products", session_id=sid):
+                rb = row.get("body") or {}
+                if (
+                    str(rb.get("part_number") or "").strip().casefold() == pn
+                    and str(rb.get("shop") or "").strip().casefold() == shop
+                ):
+                    merged = dict(rb)
+                    merged.update(body)
+                    return _http(
+                        "PATCH",
+                        _data_path(mid, "web_products", str(row.get("row_id") or "")),
+                        {"body": merged},
+                        session_id=sid,
+                    )
+        return _http(
+            "POST",
+            _data_path(mid, "web_products"),
+            {"body": body},
+            session_id=sid,
+        )
+    if name == "web_product_delete":
+        row_id = str(arguments.get("row_id") or "").strip()
+        if not row_id:
+            raise RuntimeError("row_id is required for web_product_delete")
+        return _http(
+            "DELETE",
+            _data_path(mid, "web_products", row_id),
+            session_id=sid,
+        )
     if name == "tender_attach":
         return _tender_attach(mid, arguments, sid)
 
