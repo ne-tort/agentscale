@@ -346,6 +346,24 @@ _TENDER_STATUSES_EXT = frozenset(
 )
 
 
+async def _find_tender_by_source_ref(io, source_ref: str) -> str:
+    """row_id тендера с этим source_ref в проекте ("" — нет).
+
+    Идемпотентность внешнего импорта: одинаковый source_ref = один тендер.
+    Сравнение точное (source_ref — интеграционный ключ, не текст пользователя).
+    """
+    if not source_ref:
+        return ""
+    rows = await io.list("tenders")
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        body = row.get("body") if isinstance(row.get("body"), dict) else row
+        if str(body.get("source_ref") or "").strip() == source_ref:
+            return str(row.get("row_id") or "")
+    return ""
+
+
 class ExternalTenderLine(BaseModel):
     model_config = {"extra": "forbid"}
     id: str | None = Field(default=None, max_length=64)
@@ -455,8 +473,18 @@ async def create_external_tender(
     }
     if deadline:
         tender_body["deadline_at"] = deadline
-    created = await io.create("tenders", tender_body)
-    tender_id = str(created.get("row_id") or "")
+    # Идемпотентность по source_ref: повторная отправка того же внешнего тендера
+    # (ретрай кравлера, повторный ingest, падение между push и подтверждением)
+    # не создаёт вторую строку — обновляем существующую. Без этого каждая
+    # повторная отправка плодила дубль тендера и отдельный чат.
+    source_ref = str(tender_body["source_ref"] or "")
+    existing_id = await _find_tender_by_source_ref(io, source_ref)
+    if existing_id:
+        await io.update("tenders", existing_id, tender_body)
+        tender_id = existing_id
+    else:
+        created = await io.create("tenders", tender_body)
+        tender_id = str(created.get("row_id") or "")
 
     result: dict[str, Any] = {"tender_id": tender_id, "attached": False}
     if not body.attach:
