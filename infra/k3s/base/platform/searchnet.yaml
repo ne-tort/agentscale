@@ -69,12 +69,36 @@ spec:
               value: '["camoufox","chromium","http"]'
             - name: SEARCHNET_ENGINES__DEFAULT
               value: "chromium"
+            # Прогрев: держим ОДИН тёплый контекст camoufox. Без него каждый
+            # fetch на защищённый сайт платит холодный спавн (~3-6с), а при
+            # нагрузке — очередь на спавн; агент видит это как «tool timeout».
             - name: SEARCHNET_ENGINES__WARM_ENGINES
-              value: "[]"
+              value: '["camoufox"]'
             - name: SEARCHNET_ENGINES__WARM_SHOPS
               value: "[]"
+            # ROUTES: Qrator на DNS Shop НЕ проходится chromium (отдаёт 401
+            # challenge после ~50с ожидания) — сразу camoufox. Без маршрута
+            # цепочка http → chromium → camoufox тратила 50с+ на заведомо
+            # провальную ступень и упиралась в клиентский таймаут 30с.
+            # ozon/wildberries/avito — тоже Qrator/антибот: camoufox первым.
             - name: SEARCHNET_ENGINES__ROUTES
-              value: "[]"
+              value: >-
+                [{"domain":"dns-shop.ru","chain":["camoufox"],"challenge_wait_sec":6,
+                "note":"Qrator: chromium отдаёт 401, нужен camoufox"},
+                {"domain":"ozon.ru","chain":["camoufox"],"challenge_wait_sec":6,
+                "note":"антибот: chromium не проходит"},
+                {"domain":"wildberries.ru","chain":["camoufox"],"challenge_wait_sec":6,
+                "note":"антибот: chromium не проходит"},
+                {"domain":"avito.ru","chain":["camoufox"],"challenge_wait_sec":6,
+                "note":"антибот: chromium не проходит"},
+                {"domain":"citilink.ru","chain":["camoufox"],"challenge_wait_sec":6,
+                "note":"антибот: chromium не проходит"},
+                {"domain":"mvideo.ru","chain":["camoufox"],"challenge_wait_sec":6,
+                "note":"антибот: chromium не проходит"},
+                {"domain":"regard.ru","chain":["camoufox"],"challenge_wait_sec":6,
+                "note":"антибот: chromium не проходит"},
+                {"domain":"nix.ru","chain":["camoufox"],"challenge_wait_sec":6,
+                "note":"антибот: chromium не проходит"}]
             - name: SEARCHNET_LOG_LEVEL
               value: "INFO"
             # REST-мост с кластером не ищет в K8s: k3s-нода должна уметь
