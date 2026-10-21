@@ -11,6 +11,15 @@ on:
       - ".gitmodules"
       - ".github/workflows/ci-images.yml"
   workflow_dispatch:
+    inputs:
+      build_searchnet:
+        description: >
+          Пересобрать образ searchnet. Включать ТОЛЬКО когда менялся исходник
+          ne-tort/searchnet или его пин. Обычный мердж в main searchnet НЕ
+          пересобирает: образ ~4.4 ГБ, сборка качает camoufox+chromium с
+          GitHub и занимает 20–45 мин на общем раннере.
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -217,13 +226,24 @@ jobs:
             ${{ steps.meta.outputs.web }}:${{ steps.meta.outputs.tag }}
             ${{ steps.meta.outputs.web }}:latest
 
-  # WAVE17 — searchnet (web-search gateway, сабмодуль ../searchnet). Образ
-  # тяжёлый (~4.4GB: camoufox+chromium бинари) и не зависит от кода apps/*,
-  # поэтому собирается ТОЛЬКО по workflow_dispatch (смена пина сабмодуля
-  # searchnet). Пин версий браузерных пакетов в Dockerfile.recovery обязан
-  # совпадать с poetry.lock, иначе кэш-слои расходятся с ревизиями chromium.
+  # WAVE17 — searchnet (web-search gateway). Образ тяжёлый (~4.4 ГБ:
+  # camoufox+chromium бинари) и не зависит от кода apps/*.
+  #
+  # Собирается ТОЛЬКО по явному согласию: workflow_dispatch с
+  # build_searchnet=true. Раньше условие пропускало ЛЮБОЙ dispatch — а
+  # auto-merge.yml диспатчит CI Images после каждого мерджа, поэтому
+  # searchnet пересобирался на каждый PR (20–45 мин на общем раннере),
+  # хотя исходник и пин не менялись. Теперь по умолчанию пропускается.
+  #
+  # Когда включать: изменился исходник ne-tort/searchnet или его пин в
+  # infra/k3s/base/platform/searchnet.yaml. Пин версий браузерных пакетов в
+  # Dockerfile обязан совпадать с poetry.lock, иначе кэш-слои расходятся с
+  # ревизиями chromium.
   build-searchnet:
-    if: github.event_name == 'workflow_dispatch' && needs.build-web.result == 'success'
+    if: >
+      github.event_name == 'workflow_dispatch' &&
+      github.event.inputs.build_searchnet == 'true' &&
+      needs.build-web.result == 'success'
     needs: [build-api, build-web]
     timeout-minutes: 45
     runs-on: [self-hosted, linux, docker]
