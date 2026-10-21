@@ -736,6 +736,7 @@ class ModuleActionExecutor:
                 qty = 1.0
             part_number = str(line.get("part_number") or "").strip()
             found = by_tender_line.get(tlid)
+            line_comment = str(line.get("comment") or "").strip()
             if found is None:
                 await io.create(
                     "request_lines",
@@ -743,6 +744,7 @@ class ModuleActionExecutor:
                         "title": title,
                         "part_number": part_number,
                         "qty": qty,
+                        "comment": line_comment,
                         "tender_id": tender_id,
                         "tender_line_id": tlid,
                     },
@@ -757,6 +759,8 @@ class ModuleActionExecutor:
                 patch["part_number"] = part_number
             if fbody.get("qty") != qty:
                 patch["qty"] = qty
+            if str(fbody.get("comment") or "") != line_comment:
+                patch["comment"] = line_comment
             if patch:
                 fbody.update(patch)
                 await io.update("request_lines", str(found.get("row_id") or ""), fbody)
@@ -1189,7 +1193,13 @@ class ModuleActionExecutor:
             employee=employee,
             session_id=session_id,
         )
-        to_address = resolve_recipient(contact_rows, contact_id=contact_id)
+        to_address = resolve_recipient(
+            contact_rows,
+            contact_id=contact_id,
+            # Фолбэк: страница может ещё не иметь выбранного контакта, но
+            # профиль-шаблон s4b в кабинете уже есть (сидируется при init).
+            contact_name=str(params.get("recipient_name") or "s4b"),
+        )
 
         sender_rows = await self._list_rows_for_scope(
             cabinet_id=cabinet_id,

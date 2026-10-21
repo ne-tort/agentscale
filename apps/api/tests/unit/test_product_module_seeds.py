@@ -570,9 +570,16 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     seed_items = meta["seed_rows"]["items"]
     # 17 типов (13 базовые + 4 устройства-комплекта) + 4 шаблона + 2 промпта
     # + 1 MCP + 1 ящик отправки «price» (WAVE16.3)
-    assert len(seed_items) == 25
+    # + 2 контакта-шаблона: manager (отчёты по тендерам) и s4b (мастер-прайс)
+    assert len(seed_items) == 27
     by_row = {s["row_id"]: s for s in seed_items}
     assert "tpl_budget_builtin" in by_row
+    # Профили-шаблоны: имена — контракт, email заполняется в кабинете.
+    assert by_row["mail_sender_price"]["body"]["name"] == "price"
+    assert by_row["mail_contact_manager"]["body"]["name"] == "manager"
+    assert by_row["mail_contact_s4b"]["body"]["name"] == "s4b"
+    assert by_row["mail_contact_manager"]["body"]["email"] == ""
+    assert by_row["mail_contact_s4b"]["body"]["email"] == ""
     etypes = [s for s in seed_items if s["table_slug"] == "equipment_types"]
     assert etypes and etypes[0]["body"]["sort_order"] == 10
     assert etypes[0]["body"]["build_scope"] == "all"
