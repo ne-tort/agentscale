@@ -396,6 +396,10 @@ class ExternalTenderLine(BaseModel):
     title: str = Field(min_length=1, max_length=1000)
     part_number: str | None = Field(default=None, max_length=200)
     qty: float | None = Field(default=None, gt=0)
+    # Доп. поля позиции от заказчика (код номенклатуры, грузополучатель,
+    # адрес доставки) — свободный текст площадки, помогает идентифицировать
+    # товар при подборе.
+    comment: str | None = Field(default=None, max_length=2000)
 
 
 class ExternalTenderBody(BaseModel):
@@ -410,6 +414,9 @@ class ExternalTenderBody(BaseModel):
     source_url: str | None = Field(default=None, max_length=2000)
     source_ref: str | None = Field(default=None, max_length=200)
     lines: list[ExternalTenderLine] = Field(default_factory=list, max_length=500)
+    # Метаданные площадки (номер, закон, организатор) — отдельно от условий
+    # заказчика в comment, чтобы агент не путал их с требованиями.
+    meta: str | None = Field(default=None, max_length=2000)
     # сразу взять в работу: создать чат и импортировать позиции
     attach: bool = False
     chat_title: str | None = Field(default=None, max_length=200)
@@ -435,6 +442,7 @@ def _ext_lines_json(lines: list[ExternalTenderLine]) -> list[dict[str, Any]]:
                 "title": line.title.strip(),
                 "part_number": (line.part_number or "").strip(),
                 "qty": line.qty if line.qty is not None else 1,
+                "comment": (line.comment or "").strip(),
             }
         )
     return out
@@ -497,6 +505,8 @@ async def create_external_tender(
         "source_ref": (body.source_ref or "").strip(),
         "lines_json": _ext_lines_json(body.lines),
     }
+    if body.meta:
+        tender_body["meta"] = body.meta.strip()
     if deadline:
         tender_body["deadline_at"] = deadline
     # Идемпотентность по source_ref: повторная отправка того же внешнего тендера
@@ -575,16 +585,28 @@ async def create_external_tender(
             meta.append(f"Источник: {body.source_url.strip()}")
         if body.source_ref:
             meta.append(f"Внешний ключ: {body.source_ref.strip()}")
+        if body.meta:
+            # Метаданные площадки (номер, закон, организатор) — отдельной
+            # строкой, чтобы не смешивать с условиями заказчика.
+            meta.append(f"Площадка: {body.meta.strip()}")
         positions_block = (
             "\n\nПозиции заказчика (уже импортированы в этот чат):\n"
             + "\n".join(lines_preview)
             if lines_preview
             else ""
         )
+        # Условия заказчика — то, что он пишет сам (требования к КП,
+        # сертификаты, сроки оплаты). Критично для решения об отправке.
+        conditions_block = (
+            "\n\nУСЛОВИЯ ЗАКАЗЧИКА (его собственный текст):\n" + body.comment.strip()
+            if body.comment and body.comment.strip()
+            else ""
+        )
         kickoff_text = (
             header
             + (("\n" + "\n".join(meta)) if meta else "")
             + positions_block
+            + conditions_block
             + "\n\nДанные тендера переданы целиком — читать тендер отдельно не нужно. "
             "Работай с позициями заказчика этого чата.\n\n"
             "1) Оцени релевантность: если это не компьютерная/электронная техника "
@@ -594,7 +616,9 @@ async def create_external_tender(
             "сначала каталоги (equipment_catalog_sources), затем интернет-магазины "
             "из «Интернет магазины» (web_shops_list) — товары из интернета "
             "добавляй через web_product_add и они конкурируют с каталогом наравне.\n"
-            "3) Результат — found_groups_upsert по каждой позиции."
+            "3) Результат — found_groups_upsert по каждой позиции.\n"
+            "4) Когда подбор готов — проверь готовность (tender_readiness) и, если "
+            "порог достигнут, отправь КП заказчику (tender_report_send)."
         )
         turn = await AgentSessionService(session).start_detached_turn(
             project_id=project_id,

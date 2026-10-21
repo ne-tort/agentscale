@@ -1671,6 +1671,15 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "required": False,
             },
             {
+                # Доп. поля позиции от заказчика (код номенклатуры,
+                # грузополучатель, адрес доставки) — свободный текст площадки.
+                "table_slug": "request_lines",
+                "name": "comment",
+                "label": {"ru": "Поля заказчика", "en": "Customer fields"},
+                "type": "text",
+                "required": False,
+            },
+            {
                 "table_slug": "request_lines",
                 "name": "qty",
                 "label": {"ru": "Кол-во", "en": "Qty"},
@@ -4049,6 +4058,16 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "table_slug": "tenders",
                 "name": "comment",
                 "label": {"ru": "Комментарий", "en": "Comment"},
+                "type": "text",
+                "required": False,
+            },
+            {
+                # Метаданные площадки (номер, закон, организатор, место) —
+                # отдельно от условий заказчика в comment, чтобы агент не
+                # путал требования заказчика с технической обвязкой.
+                "table_slug": "tenders",
+                "name": "meta",
+                "label": {"ru": "Метаданные площадки", "en": "Platform meta"},
                 "type": "text",
                 "required": False,
             },
@@ -8062,6 +8081,30 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                         "smtp_ssl": True,
                         "is_default": True,
                         "enabled": True,
+                    },
+                },
+                # Контакты-шаблоны: пустые заготовки, заполняются в кабинете.
+                # Имена (name) — контракт: по ним профиль ищет получателя.
+                # - manager: адресат отчётов по тендерам (КП уходит менеджеру);
+                # - s4b: контакт пула поставщиков, его использует мастер-прайс.
+                {
+                    "table_slug": "mail_contacts",
+                    "row_id": "mail_contact_manager",
+                    "body": {
+                        "name": "manager",
+                        "email": "",
+                        "comment": "Шаблон: получатель отчётов по тендерам",
+                        "tags": "template",
+                    },
+                },
+                {
+                    "table_slug": "mail_contacts",
+                    "row_id": "mail_contact_s4b",
+                    "body": {
+                        "name": "s4b",
+                        "email": "",
+                        "comment": "Шаблон: контакт пула поставщиков (мастер-прайс)",
+                        "tags": "template",
                     },
                 },
             ]

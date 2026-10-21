@@ -942,6 +942,68 @@ TOOLS: list[dict[str, Any]] = [
             "additionalProperties": False,
         },
     },
+    {
+        "name": "tender_readiness",
+        "description": (
+            "Проверить, готов ли тендер к отправке КП заказчику. Считает долю "
+            "позиций, по которым есть кандидаты, и сравнивает с порогом: 70% "
+            "обычно, 90% если в условиях заказчика есть требование подавать "
+            "предложение по ВСЕМ позициям. Возвращает coverage, threshold, "
+            "ready, lines_needed_to_pass и evidence (фрагмент условия). "
+            "Вызывай перед tender_report_send."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "module_id": {"type": "string", "default": DEFAULT_MODULE_ID},
+                "tender_id": {"type": "string"},
+            },
+            "required": ["tender_id"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "tender_report_send",
+        "description": (
+            "Отправить заказчику отчёт с результатами подбора по тендеру "
+            "(КП). Отправитель — профиль mail_senders с именем `price`, "
+            "получатель — контакт mail_contacts с именем `manager` (оба "
+            "сидируются как шаблоны и заполняются в кабинете). Перед отправкой "
+            "проверяется готовность (tender_readiness); при недоборе порога "
+            "отправка отклоняется, если force=false. Письмо пишется в "
+            "mail_outbox со статусом sent/failed."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "module_id": {"type": "string", "default": DEFAULT_MODULE_ID},
+                "tender_id": {"type": "string"},
+                "subject": {"type": ["string", "null"]},
+                "body_text": {"type": ["string", "null"]},
+                "force": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Отправить даже при недоборе порога.",
+                },
+            },
+            "required": ["tender_id"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "mail_profiles_list",
+        "description": (
+            "Список профилей почты: отправители (mail_senders: name, "
+            "from_address) и контакты (mail_contacts: name, email). "
+            "Шаблоны `price` (отправитель), `manager` и `s4b` (контакты) "
+            "сидируются пустыми — проверь, что они заполнены в кабинете."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {"module_id": {"type": "string", "default": DEFAULT_MODULE_ID}},
+            "additionalProperties": False,
+        },
+    },
 ]
 
 
@@ -1713,6 +1775,175 @@ def _tender_attach(mid: str, arguments: dict[str, Any], sid: str | None) -> Any:
     )
 
 
+def _tender_readiness(mid: str, arguments: dict[str, Any], sid: str | None) -> Any:
+    """Оценить готовность тендера к отправке КП (полнота подбора позиций).
+
+    Считается на стороне MCP: тендер + позиции заказчика этого чата +
+    found_groups. Порог 70% обычно и 90% при требовании «по всем позициям»
+    (ищется в текстах заказчика: comment/description/payment_terms).
+    """
+    from prodavan.application.modules.equipment_tender_readiness import assess_readiness
+
+    tender_id = str(arguments.get("tender_id") or "").strip()
+    if not tender_id:
+        raise RuntimeError("tender_id is required for tender_readiness")
+
+    tenders = _list_rows(mid, "tenders", session_id=sid)
+    tender = next((t for t in tenders if str(t.get("row_id") or "") == tender_id), None)
+    if tender is None:
+        raise RuntimeError(f"tender not found: {tender_id}")
+    tbody = tender.get("body") or {}
+
+    lines = [
+        r
+        for r in _list_rows(mid, "request_lines", session_id=sid)
+        if str((r.get("body") or {}).get("tender_id") or "") == tender_id
+    ]
+    groups = [
+        g
+        for g in _list_rows(mid, "found_groups", session_id=sid)
+        if str((g.get("body") or {}).get("tender_id") or "") == tender_id
+        or str((g.get("body") or {}).get("line_id") or "")
+        in {str(x.get("row_id") or "") for x in lines}
+    ]
+    covered_line_ids = {
+        str((g.get("body") or {}).get("line_id") or "") for g in groups
+    } - {""}
+    offers = [
+        o
+        for o in _list_rows(mid, "found_offers", session_id=sid)
+        if str((o.get("body") or {}).get("line_id") or "") in covered_line_ids
+    ]
+    offers_line_ids = {
+        str((o.get("body") or {}).get("line_id") or "") for o in offers
+    } - {""}
+
+    result = assess_readiness(
+        tbody,
+        lines_total=len(lines),
+        lines_with_candidates=len(covered_line_ids),
+        lines_with_offers=len(offers_line_ids),
+    )
+    result["tender_id"] = tender_id
+    result["title"] = str(tbody.get("title") or "")
+    return result
+
+
+def _tender_report_send(mid: str, arguments: dict[str, Any], sid: str | None) -> Any:
+    """Отправить заказчику отчёт с результатами подбора по тендеру.
+
+    Отправитель — профиль mail_senders `price`, получатель — контакт
+    mail_contacts `manager` (шаблоны сидируются при инициализации модуля).
+    Перед отправкой проверяется готовность; при недоборе порога отправка
+    отклоняется, если force не выставлен.
+    """
+    tender_id = str(arguments.get("tender_id") or "").strip()
+    if not tender_id:
+        raise RuntimeError("tender_id is required for tender_report_send")
+    force = bool(arguments.get("force"))
+
+    readiness = _tender_readiness(mid, {"tender_id": tender_id}, sid)
+    if not readiness.get("ready") and not force:
+        pct = readiness.get("coverage_percent")
+        thr = readiness.get("threshold_percent")
+        need = readiness.get("lines_needed_to_pass")
+        raise RuntimeError(
+            f"tender not ready for sending: coverage {pct}% < {thr}% "
+            f"(needs {need} more position(s)). "
+            f"requires_all_positions={readiness.get('requires_all_positions')}. "
+            "Pass force=true to send anyway."
+        )
+
+    tenders = _list_rows(mid, "tenders", session_id=sid)
+    tender = next((t for t in tenders if str(t.get("row_id") or "") == tender_id), None)
+    if tender is None:
+        raise RuntimeError(f"tender not found: {tender_id}")
+    tbody = tender.get("body") or {}
+    title = str(tbody.get("title") or "").strip() or f"Тендер {tender_id}"
+
+    subject = str(arguments.get("subject") or "").strip() or f"КП по тендеру: {title}"
+    body_text = str(arguments.get("body_text") or "").strip()
+    if not body_text:
+        lines = [
+            r
+            for r in _list_rows(mid, "request_lines", session_id=sid)
+            if str((r.get("body") or {}).get("tender_id") or "") == tender_id
+        ]
+        parts = [
+            f"Коммерческое предложение по тендеру: {title}",
+            "",
+            f"Позиций в тендере: {readiness.get('lines_total')}",
+            f"Подобрано: {readiness.get('lines_covered')} "
+            f"({readiness.get('coverage_percent')}%)",
+            "",
+            "Предложения по позициям:",
+        ]
+        for i, line in enumerate(lines, start=1):
+            lb = line.get("body") or {}
+            parts.append(
+                f"{i}. {lb.get('title') or ''}"
+                + (f" — {lb.get('qty')} шт." if lb.get("qty") else "")
+            )
+        if readiness.get("requires_all_positions"):
+            parts += [
+                "",
+                "Учтены требования заказчика к составу предложения "
+                "(предложение по всем позициям).",
+            ]
+        body_text = "\n".join(parts)
+
+    created = _http(
+        "POST",
+        _data_path(mid, "mail_outbox"),
+        {
+            "body": {
+                "sender_id": str(arguments.get("sender_id") or "price"),
+                "to_address": str(arguments.get("to_address") or "manager"),
+                "subject": subject,
+                "body_text": body_text,
+                "status": "queued",
+            }
+        },
+        session_id=sid,
+    )
+    row_id = str((created or {}).get("row_id") or "")
+    if not row_id:
+        raise RuntimeError("mail_outbox row was not created")
+    return _http(
+        "POST",
+        f"/projects/{_env()[2]}/modules/{mid}/actions/mail_send/invoke",
+        {"row_id": row_id, "params": {"sender_name": "price", "recipient_name": "manager"}},
+        session_id=sid,
+    )
+
+
+def _mail_profiles_list(mid: str, arguments: dict[str, Any], sid: str | None) -> Any:
+    """Профили почты кабинета: отправители и контакты (без секретов)."""
+    senders = []
+    for r in _list_rows(mid, "mail_senders", session_id=sid):
+        b = r.get("body") or {}
+        senders.append(
+            {
+                "row_id": r.get("row_id"),
+                "name": b.get("name"),
+                "from_address": b.get("from_address"),
+                "enabled": b.get("enabled"),
+                "is_default": b.get("is_default"),
+            }
+        )
+    contacts = []
+    for r in _list_rows(mid, "mail_contacts", session_id=sid):
+        b = r.get("body") or {}
+        contacts.append(
+            {
+                "row_id": r.get("row_id"),
+                "name": b.get("name"),
+                "email": b.get("email"),
+            }
+        )
+    return {"senders": senders, "contacts": contacts}
+
+
 def _tender_positions_upsert(mid: str, arguments: dict[str, Any], sid: str | None) -> Any:
     """Массовый upsert позиций тендера (lines_json), merge по id."""
     tender_id = str(arguments.get("tender_id") or "").strip()
@@ -1981,6 +2212,12 @@ def _call_tool(name: str, arguments: dict[str, Any]) -> Any:
         )
     if name == "tender_positions_upsert":
         return _tender_positions_upsert(mid, arguments, sid)
+    if name == "tender_readiness":
+        return _tender_readiness(mid, arguments, sid)
+    if name == "tender_report_send":
+        return _tender_report_send(mid, arguments, sid)
+    if name == "mail_profiles_list":
+        return _mail_profiles_list(mid, arguments, sid)
     if name == "web_shops_list":
         return {"items": _list_rows(mid, "web_shops", session_id=sid)}
     if name == "web_products_list":

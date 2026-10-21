@@ -611,7 +611,14 @@ def test_tools_list_contains_v2_tools() -> None:
         "web_product_delete",
     ):
         assert name in names
-    assert len(names) == 33
+    # Отчёты по тендерам: проверка готовности + отправка КП + профили почты
+    for name in (
+        "tender_readiness",
+        "tender_report_send",
+        "mail_profiles_list",
+    ):
+        assert name in names
+    assert len(names) == 36
     assert (
         mcp_server._handle({"jsonrpc": "2.0", "id": 2, "method": "initialize"})["result"][
             "serverInfo"

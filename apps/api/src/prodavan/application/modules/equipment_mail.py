@@ -192,8 +192,14 @@ def resolve_recipient(
     *,
     contact_id: str = "",
     address: str = "",
+    contact_name: str = "",
 ) -> str:
-    """Адрес получателя: профиль контакта по row_id, либо явный адрес."""
+    """Адрес получателя: профиль контакта по row_id, по имени, либо явный адрес.
+
+    ``contact_name`` — фолбэк по имени профиля (например ``s4b`` у мастер-прайса
+    и ``manager`` у отчётов по тендерам): страницы настроек могут ещё не иметь
+    выбранного контакта, а профиль-шаблон в кабинете уже есть.
+    """
     contact_id = (contact_id or "").strip()
     if contact_id:
         for row in rows:
@@ -214,6 +220,27 @@ def resolve_recipient(
             title="Not Found",
             status=404,
             detail=f"контакт {contact_id} не найден",
+        )
+    wanted = (contact_name or "").strip().casefold()
+    if wanted:
+        for row in rows:
+            body = row.get("body") if isinstance(row.get("body"), dict) else {}
+            if str(body.get("name") or "").strip().casefold() != wanted:
+                continue
+            email = str(body.get("email") or "").strip()
+            if email:
+                return email
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail=f"у контакта «{contact_name}» не заполнен email",
+            )
+        raise AppError(
+            code="NOT_FOUND",
+            title="Not Found",
+            status=404,
+            detail=f"контакт «{contact_name}» не найден",
         )
     address = (address or "").strip()
     if not address:
