@@ -28,8 +28,13 @@ permissions:
 
 # Every runner lives on ONE VM: stacking image builds (each ~2 GB of layers)
 # on top of each other is what pushed the CI disk to 84%. Newest push wins.
+#
+# НО: ручной прогон с build_searchnet=true идёт в СВОЮ группу. Иначе он
+# отменялся следующим же мерджем (auto-merge диспатчит CI Images на каждый
+# PR) — а searchnet собирается 20-45 минут, так что шансов дожить до конца
+# почти не было. Обычные прогоны по-прежнему вытесняют друг друга.
 concurrency:
-  group: ci-images-${{ github.ref }}
+  group: ci-images-${{ github.ref }}${{ github.event.inputs.build_searchnet == 'true' && '-searchnet' || '' }}
   cancel-in-progress: true
 
 env:
