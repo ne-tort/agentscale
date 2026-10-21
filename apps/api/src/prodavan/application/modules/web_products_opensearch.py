@@ -162,6 +162,10 @@ async def delete_web_product_doc(
             doc_id=doc_id,
             company_id=company_id or "platform",
             cabinet_id=cabinet_id,
+            # refresh=True: без него документ ещё виден поиску до ближайшего
+            # refresh-цикла (~1с), и товар, который уже удалили (или у которого
+            # истёк TTL), успевает попасть в подбор.
+            refresh=True,
             session=session,
         )
         return True
