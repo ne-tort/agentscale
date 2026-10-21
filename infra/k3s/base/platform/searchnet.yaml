@@ -83,21 +83,21 @@ spec:
             # ozon/wildberries/avito — тоже Qrator/антибот: camoufox первым.
             - name: SEARCHNET_ENGINES__ROUTES
               value: >-
-                [{"domain":"dns-shop.ru","chain":["camoufox"],"challenge_wait_sec":6,
-                "note":"Qrator: chromium отдаёт 401, нужен camoufox"},
-                {"domain":"ozon.ru","chain":["camoufox"],"challenge_wait_sec":6,
+                [{"domain":"dns-shop.ru","chain":["camoufox"],"challenge_wait_sec":6,"wait_until":"networkidle",
+                "note":"Qrator: chromium отдаёт 401; цены приходят XHR после load"},
+                {"domain":"ozon.ru","chain":["camoufox"],"challenge_wait_sec":6,"wait_until":"networkidle",
+                "note":"антибот: chromium не проходит; цены XHR"},
+                {"domain":"wildberries.ru","chain":["camoufox"],"challenge_wait_sec":6,"wait_until":"networkidle",
+                "note":"антибот: chromium не проходит; цены XHR"},
+                {"domain":"avito.ru","chain":["camoufox"],"challenge_wait_sec":6,"wait_until":"networkidle",
                 "note":"антибот: chromium не проходит"},
-                {"domain":"wildberries.ru","chain":["camoufox"],"challenge_wait_sec":6,
+                {"domain":"citilink.ru","chain":["camoufox"],"challenge_wait_sec":6,"wait_until":"networkidle",
+                "note":"антибот: chromium не проходит; цены XHR"},
+                {"domain":"mvideo.ru","chain":["camoufox"],"challenge_wait_sec":6,"wait_until":"networkidle",
+                "note":"антибот: chromium не проходит; цены XHR"},
+                {"domain":"regard.ru","chain":["camoufox"],"challenge_wait_sec":6,"wait_until":"networkidle",
                 "note":"антибот: chromium не проходит"},
-                {"domain":"avito.ru","chain":["camoufox"],"challenge_wait_sec":6,
-                "note":"антибот: chromium не проходит"},
-                {"domain":"citilink.ru","chain":["camoufox"],"challenge_wait_sec":6,
-                "note":"антибот: chromium не проходит"},
-                {"domain":"mvideo.ru","chain":["camoufox"],"challenge_wait_sec":6,
-                "note":"антибот: chromium не проходит"},
-                {"domain":"regard.ru","chain":["camoufox"],"challenge_wait_sec":6,
-                "note":"антибот: chromium не проходит"},
-                {"domain":"nix.ru","chain":["camoufox"],"challenge_wait_sec":6,
+                {"domain":"nix.ru","chain":["camoufox"],"challenge_wait_sec":6,"wait_until":"networkidle",
                 "note":"антибот: chromium не проходит"}]
             - name: SEARCHNET_LOG_LEVEL
               value: "INFO"
