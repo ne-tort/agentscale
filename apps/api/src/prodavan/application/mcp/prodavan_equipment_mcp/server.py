@@ -2293,22 +2293,118 @@ def _load_tool_overrides() -> dict[str, dict[str, str]]:
     return out
 
 
+#: Инструменты, которые только читают состояние. MCP-аннотация
+#: `readOnlyHint` нужна клиенту (SDK/UI), чтобы отличать безопасный вызов от
+#: записи: read-only инструменты можно звать без подтверждения и в циклах
+#: поиска, а пишущие — требуют явного решения. Список — явный (не по префиксу
+#: `_list`), потому что `tender_readiness` тоже ничего не пишет.
+_READ_ONLY_TOOLS = frozenset(
+    {
+        "equipment_catalog_sources",
+        "equipment_catalog_search",
+        "equipment_types_list",
+        "equipment_builds_list",
+        "equipment_builds_get",
+        "request_lines_list",
+        "request_lines_get",
+        "found_groups_list",
+        "found_groups_get",
+        "found_offers_list",
+        "part_cards_list",
+        "ready_builds_list",
+        "ready_build_get",
+        "trusted_sellers_list",
+        "web_shops_list",
+        "web_products_list",
+        "mail_profiles_list",
+        "tenders_list",
+        "tender_get",
+        "tender_readiness",
+        "budget_lines_list",
+        "procurement_list",
+        "mcp_tool_overrides_list",
+    }
+)
+
+#: Инструменты, которые пишут. Явно перечислены, чтобы аннотация
+#: `readOnlyHint=false` ставилась осознанно (и новые инструменты не
+#: наследовали «read-only» по умолчанию).
+_WRITE_TOOLS = frozenset(
+    {
+        "request_lines_upsert",
+        "request_lines_delete",
+        "found_groups_upsert",
+        "found_groups_delete",
+        "part_card_upsert",
+        "part_card_delete",
+        "equipment_builds_upsert",
+        "equipment_builds_delete",
+        "ready_build_upsert",
+        "ready_build_slot_upsert",
+        "ready_build_attach",
+        "tender_upsert",
+        "tender_delete",
+        "tender_positions_upsert",
+        "tender_attach",
+        "tender_report_send",
+        "web_product_add",
+        "web_product_delete",
+        "mail_send",
+    }
+)
+
+
+def _with_annotations(tool: dict[str, Any]) -> dict[str, Any]:
+    """Добавить MCP-аннотации (readOnlyHint/destructiveHint/idempotentHint).
+
+    Клиент по ним решает, спрашивать ли подтверждение и можно ли звать
+    инструмент в автономном цикле. Инструмент вне обоих списков считается
+    пишущим (безопасный дефолт: неизвестное — не read-only).
+    """
+    name = str(tool.get("name") or "")
+    if name in _READ_ONLY_TOOLS:
+        ann = {
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": False,
+        }
+    else:
+        # idempotent: повторный вызов не создаёт дубль. web_product_add
+        # дедуплицирует по (part_number, shop) и продлевает TTL — это upsert
+        # по смыслу, хотя имя не содержит "upsert".
+        ann = {
+            "readOnlyHint": False,
+            "destructiveHint": name.endswith("_delete"),
+            "idempotentHint": (
+                "upsert" in name
+                or "attach" in name
+                or name.endswith("_list")
+                or name == "web_product_add"
+            ),
+            "openWorldHint": name in {"web_product_add", "web_product_delete"},
+        }
+    return {**tool, "annotations": ann}
+
+
 def _tools_with_overrides() -> list[dict[str, Any]]:
-    """TOOLS + переопределения описаний из UI (description заменяет,
-    extra_instructions дописывается)."""
+    """TOOLS + переопределения описаний из UI + MCP-аннотации.
+
+    `description` из UI заменяет штатное описание, `extra_instructions`
+    дописывается. Аннотации (`readOnlyHint` и др.) ставятся последними —
+    их нельзя переопределить из UI: клиент должен видеть реальный класс
+    инструмента (чтение/запись), а не тот, что кто-то вписал в описание."""
     overrides = _load_tool_overrides()
-    if not overrides:
-        return TOOLS
     out: list[dict[str, Any]] = []
     for t in TOOLS:
-        ov = overrides.get(str(t.get("name") or ""))
-        if not ov:
-            out.append(t)
-            continue
-        desc = ov["description"] or str(t.get("description") or "")
-        if ov["extra"]:
-            desc = desc.rstrip() + "\n\n" + ov["extra"]
-        out.append({**t, "description": desc})
+        item = t
+        ov = overrides.get(str(t.get("name") or "")) if overrides else None
+        if ov:
+            desc = ov["description"] or str(t.get("description") or "")
+            if ov["extra"]:
+                desc = desc.rstrip() + "\n\n" + ov["extra"]
+            item = {**t, "description": desc}
+        out.append(_with_annotations(item))
     return out
 
 
