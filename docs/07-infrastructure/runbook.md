@@ -131,6 +131,68 @@ Day-2: merge в `main` + Argo. Не `kubectl apply -k infra/k3s/...` рукам�
 Не ставить **Docker Engine** в тот же OS, где k3s (маскировать docker).  
 Не оставлять незалогиненный Tailscale рядом с CNI.
 
+### 3.1 DNS кластера после ребута (инцидент 2026-10-22)
+
+**Симптом.** Агент из пода не может достучаться до провайдера ИИ. При этом
+всё остальное зелёное: поды `Running`, HTTP-пробы OK, TCP-egress работает
+(по IP провайдер отвечает). Выглядит как «сломался агент», а ломается DNS.
+
+**Что именно происходит.** CoreDNS форвардит на upstream из своего
+`/etc/resolv.conf`, который kubelet копирует с **хоста** (`dnsPolicy: Default`).
+Если после ребута хост поднялся с нерабочим nameserver (например, шлюз, на
+котором DNS-сервис не запустился), CoreDNS шлёт запросы в мёртвый адрес, и
+**ни одно внешнее имя из подов не резолвится**. Диагностика усложняется тем,
+что:
+
+- хост при этом резолвит нормально — у него свой резолвер;
+- `dig @10.43.0.10` **с хоста** даёт ложный таймаут (ClusterIP недоступен
+  с хоста по определению) — проверять надо **из пода**;
+- в логах CoreDNS виден поток `read udp ...->X:53: i/o timeout`.
+
+**Диагностика.**
+
+```bash
+# резолв ИЗ ПОДА (не с хоста!)
+kubectl -n agentscale exec <pod> -- python3 -c \
+  "import socket;print(socket.gethostbyname('github.com'))"
+
+# поток таймаутов CoreDNS = мёртвый upstream
+kubectl -n kube-system logs -l k8s-app=kube-dns --since=120s | grep -c 'i/o timeout'
+
+# жив ли upstream, который видит хост
+dig +short @<host-nameserver> github.com
+```
+
+Или одной командой (падает с готовым диагнозом и инструкцией):
+
+```bash
+prodavan-ops dns-check --namespace agentscale
+```
+
+**Фикс.** Не полагаться на единственный upstream из `/etc/resolv.conf` —
+задать CoreDNS явный список живых резолверов. Патчим ConfigMap `coredns`
+(k3s владеет им, `coredns-custom`/HelmChartConfig для этого не годятся:
+`*.override` с `forward` CoreDNS отклоняет как duplicate plugin, а HelmChart
+coredns в k3s нет):
+
+```bash
+kubectl -n kube-system get cm coredns -o yaml > /tmp/coredns-backup.yaml   # бэкап!
+# заменить:  forward . /etc/resolv.conf
+# на:        forward . <живой> <резерв> <резерв> { policy sequential  max_fails 1  health_check 5s }
+kubectl -n kube-system rollout restart deploy/coredns
+```
+
+Три upstream + `max_fails 1` + `health_check 5s` дают устойчивость: падение
+одного резолвера больше не выключает DNS всему кластеру. Проверено на prod
+2026-10-22: до фикса — непрерывный поток таймаутов и 0 резолвов из подов,
+после — 0 таймаутов за минуту и провайдер отвечает `HTTP/1.1 200 OK`.
+
+**Профилактика.** `prodavan-ops heal` (post-reboot recovery) теперь вызывает
+`dns-check` и печатает диагноз с инструкцией, а `prodavan-ops dns-check`
+можно ставить в CI/дежурный прогон. Проверка намеренно резолвит **из пода**:
+если DNS мёртв, новый под не скачает образ, и проба «не стартует» вместо
+«DNS мёртв» — диагностика теряется.
+
 ---
 
 ## 4. CI
