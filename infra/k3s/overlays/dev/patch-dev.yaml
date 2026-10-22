@@ -151,7 +151,7 @@ data:
   # приходят) и имеет собственный таймаут provider-ветки 110с — иначе его резал
   # общий tool-use таймаут 30с, пока camoufox ещё рендерил антибот-страницу.
   # До #55 web.fetch делал голый fetch(url) из пода и упирался в Qrator (401).
-  POD_AGENT_RUNTIME_IMAGE: ghcr.io/ne-tort/prodavan-agent-runtime:d59246f71573 # prodavan-claw@d59246f
+  POD_AGENT_RUNTIME_IMAGE: ghcr.io/ne-tort/prodavan-agent-runtime:9486384f477e # prodavan-claw@9486384
   POD_AGENT_RUNTIME_BOOTSTRAP_ENABLED: "true"
   # CLAW-WEB v2 — web.search provider config. The sandbox agent-runtime never
   # reaches searchnet directly: `provider=prodavan_api` (id провайдера в
