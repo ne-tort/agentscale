@@ -80,7 +80,11 @@ data:
   POD_AGENT_RUNTIME_ENABLED: "true"
   # Legacy k8s-mode project pod image (unused when POD_RUNTIME_MODE=sandbox).
   # Pinned to the same runtime build as SandboxTemplate — no floating :latest.
-  POD_AGENT_RUNTIME_IMAGE: ghcr.io/ne-tort/prodavan-agent-runtime:929b6768cba2
+  # d59246f71573 = prodavan-claw@d59246f: web.fetch проксируется через API →
+  # searchnet (обход Qrator) + собственный таймаут provider-ветки 110с. Пин
+  # 929b6768cba2 (образ от 9 окт) НЕ умел проксировать fetch вовсе — агент
+  # ходил на dns-shop.ru напрямую и получал 401 от Qrator.
+  POD_AGENT_RUNTIME_IMAGE: ghcr.io/ne-tort/prodavan-agent-runtime:d59246f71573
   POD_AGENT_RUNTIME_PORT: "3921"
   POD_AGENT_RUNTIME_API_BASE_URL: http://agentscale-api.agentscale.svc:8001/api/v1
   POD_AGENT_RUNTIME_BOOTSTRAP_ENABLED: "true"
