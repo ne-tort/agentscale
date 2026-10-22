@@ -1372,6 +1372,19 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "enabled": True,
                 "scope": {"projects": "all", "chats": "all"},
             },
+            # Ручные позиции мастер-прайса (кнопка «+» у пагинатора).
+            # Реальная таблица — в отличие от самой виртуальной master_price:
+            # именно сюда пишет форма, а бэкенд зеркалит строки в OS-индекс
+            # equipment__c_master_price_manual (master_price читается из OS).
+            # chats=all: прайс общий на кабинет, строка не должна привязываться
+            # к чату, иначе она выпадала бы из общего списка.
+            {
+                "slug": "master_price_manual",
+                "label": {"ru": "Позиции мастер-прайса (вручную)", "en": "Master price manual rows"},
+                "storage_kind": "json_document",
+                "enabled": True,
+                "scope": {"projects": "all", "chats": "all"},
+            },
             # WAVE7: «Закупка» — агрегат по поставщикам (материализуется пайплайном).
             # chats=all: общий проектный датасет (агрегатор между чатами), а не
             # per-chat зеркала — строки одни на проект, видны из любого чата.
