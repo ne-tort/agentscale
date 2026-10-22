@@ -167,6 +167,94 @@ class WebSearchService:
         ]
         return {"results": items}
 
+    @staticmethod
+    def _byte_limit(max_bytes: int | None) -> int:
+        limit = max_bytes if isinstance(max_bytes, int) and max_bytes > 0 else _MAX_FETCH_BYTES
+        return min(limit, _MAX_FETCH_BYTES_CAP)
+
+    async def _fetch_markdown(
+        self, *, url: str, engine: str = "", shop: str = ""
+    ) -> dict[str, Any] | None:
+        """searchnet `/extract?detail=full` → читаемый markdown страницы.
+
+        Почему extract, а не fetch: магазины (DNS, Citilink, Ozon) дорисовывают
+        цены/наличие/характеристики скриптами. `/fetch` отдаёт сырой DOM, где эти
+        данные размазаны по атрибутам и script-состоянию — модель их оттуда не
+        достаёт. `/extract` прогоняет DOM через readability/trafilatura и отдаёт
+        ТЕКСТ, в котором цены уже есть (проверено на живом DNS: 380 КБ HTML без
+        читаемых цен → 6.5 КБ markdown с 63 ценами вида «87 999 ₽»).
+
+        `mode=auto` оставляем searchnet: он сам эскалирует на браузер, если
+        http-слой упирается в стену (у доменов с anti-bot есть route).
+        Возвращает None, если текста нет (PDF/бинарь/пустая страница) — тогда
+        вызывающий падает в сырой HTML.
+        """
+        body: dict[str, Any] = {
+            "url": url,
+            "format": "markdown",
+            # size=l: нужен полный текст карточки/выдачи, а не триаж-превью
+            # (compact-режим отдаёт только content_preview, и цены в него не
+            # попадают при длинной странице).
+            "size": "l",
+            "mode": "auto",
+        }
+        if engine.strip():
+            body["engine"] = engine.strip()
+        if shop.strip():
+            body["shop"] = shop.strip()
+
+        headers = {"Accept": "application/json", "Content-Type": "application/json"}
+        key = (settings.web_search_backend_api_key or "").strip()
+        if key:
+            headers["Authorization"] = f"Bearer {key}"
+
+        endpoint = f"{self._backend_url}/extract?detail=full"
+        started = time.monotonic()
+        err: str | None = None
+        status_code = 0
+        data: dict[str, Any] | None = None
+        try:
+            async with httpx.AsyncClient(
+                timeout=settings.web_fetch_timeout_sec,
+                follow_redirects=True,
+            ) as client:
+                resp = await client.post(endpoint, json=body, headers=headers)
+            status_code = resp.status_code
+            if resp.status_code >= 400:
+                err = f"searchnet extract HTTP {resp.status_code}"
+                logger.warning("web_fetch markdown: %s (fallback to html)", err)
+                return None
+            data = resp.json()
+        except (httpx.TimeoutException, httpx.HTTPError) as exc:
+            # extract не критичен: сырой HTML всё ещё можно отдать.
+            logger.warning(
+                "web_fetch markdown failed (%s) — fallback to html", exc.__class__.__name__
+            )
+            return None
+        finally:
+            logger.info(
+                "web_fetch markdown status=%s ms=%s err=%s",
+                status_code,
+                int((time.monotonic() - started) * 1000),
+                err or "-",
+            )
+
+        results = (data or {}).get("results") or []
+        if not results:
+            return None
+        first = results[0] if isinstance(results[0], dict) else {}
+        content = str(first.get("content") or "")
+        if not content.strip():
+            return None
+        return {
+            "url": first.get("final_url") or first.get("url") or url,
+            "status": int(first.get("status") or 0),
+            "block": first.get("block") or "ok",
+            "content": content,
+            "warnings": first.get("warnings") or [],
+            "error": first.get("error"),
+        }
+
     async def fetch(
         self,
         *,
@@ -175,14 +263,25 @@ class WebSearchService:
         max_bytes: int | None = None,
         engine: str = "",
         shop: str = "",
+        format: str = "markdown",
     ) -> dict[str, Any]:
-        """CLAW-WEB — `web.fetch` proxy: agentscale API → searchnet `POST /fetch`.
+        """CLAW-WEB — `web.fetch` proxy: agentscale API → searchnet.
 
         The agent's built-in `web.fetch` used to do a raw `fetch(url)` from the
         sandbox pod, which hit anti-bot walls (Qrator on DNS Shop etc.). Routing
         it through searchnet means the page is rendered by a real browser engine
         (chromium by default, camoufox escalation for Qrator/Cloudflare) with the
         shop profile/cookies, and the agent gets the rendered DOM.
+
+        `format` — что отдать агенту:
+          * ``markdown`` (дефолт) — searchnet ``/extract``: читаемый текст, в
+            котором данные, дорисованные JS (цены/наличие/характеристики
+            магазина), уже присутствуют. Это и есть рабочий режим: сырой HTML
+            магазина — 300-400 КБ между тегами и script-состоянием, и модель на
+            практике цену в нём не находит (инцидент 2026-10-22: агент открыл
+            DNS, но «цена не видна»).
+          * ``html`` — searchnet ``/fetch``: сырой DOM, когда нужен конкретный
+            атрибут/разметка.
 
         Returns the same shape as the SDK's raw fetch (`url/status/content_type/
         bytes/truncated/content`) plus honest `block`/`warnings`/`error` so a
@@ -212,6 +311,27 @@ class WebSearchService:
             window_sec=settings.web_search_rate_window_sec,
             detail="web rate limit exceeded for this pod",
         )
+
+        want_markdown = (format or "").strip().lower() != "html"
+        if want_markdown:
+            payload = await self._fetch_markdown(url=url, engine=engine, shop=shop)
+            if payload is not None:
+                text = str(payload.get("content") or "")
+                raw = text.encode("utf-8")
+                limit = self._byte_limit(max_bytes)
+                return {
+                    "url": str(payload.get("url") or url),
+                    "status": int(payload.get("status") or 0),
+                    "content_type": "text/markdown; charset=utf-8",
+                    "bytes": len(raw),
+                    "truncated": len(raw) > limit,
+                    "content": raw[:limit].decode("utf-8", "replace"),
+                    "block": str(payload.get("block") or "ok"),
+                    "warnings": [str(w) for w in (payload.get("warnings") or [])],
+                    "error": payload.get("error"),
+                }
+            # extract не дал текста (PDF/бинарь/страница без основного контента) —
+            # падаем в сырой HTML, чтобы агент не получил пустоту.
 
         body: dict[str, Any] = {"url": url}
         if engine.strip():
