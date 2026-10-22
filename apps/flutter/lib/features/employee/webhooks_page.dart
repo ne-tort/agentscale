@@ -690,16 +690,22 @@ class _SectionHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return Padding(
       padding: const EdgeInsets.only(bottom: AppSpacing.md),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
+          // Wrap, а НЕ Row+Expanded: в Row заголовок сжимался в узкую щель
+          // между краем и кнопкой «Создать» и переносился по ОДНОМУ символу
+          // на строку («лесенка»). Wrap переносит кнопку под заголовок, если
+          // не хватает ширины, а сам заголовок всегда получает всю ширину.
+          Wrap(
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: AppSpacing.sm,
+            runSpacing: AppSpacing.xs,
             children: [
-              Expanded(
-                child: Text(title, style: Theme.of(context).textTheme.titleMedium),
-              ),
+              Text(title, style: theme.textTheme.titleMedium),
               FilledButton.tonalIcon(
                 onPressed: onAction,
                 icon: const Icon(Icons.add, size: 18),
@@ -708,7 +714,7 @@ class _SectionHeader extends StatelessWidget {
             ],
           ),
           const SizedBox(height: AppSpacing.xs),
-          Text(subtitle, style: Theme.of(context).textTheme.bodySmall),
+          Text(subtitle, style: theme.textTheme.bodySmall),
         ],
       ),
     );

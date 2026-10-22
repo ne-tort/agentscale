@@ -8107,6 +8107,86 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                         "tags": "template",
                     },
                 },
+                # ── «Интернет магазины»: магазины, по которым агенту разрешено
+                # искать товары. Сидятся основные российские магазины техники —
+                # именно они есть в маршрутах searchnet (camoufox первым: Qrator
+                # роняет chromium). Без строк в этой таблице web_shops_list пуст
+                # и агент физически не может искать в интернете (проверено на
+                # живом стенде: агент отчитался «DNS туда не заведён»).
+                # cookies пустые — заполняются в кабинете, если магазин требует
+                # авторизованную сессию.
+                {
+                    "table_slug": "web_shops",
+                    "row_id": "web_shop_dns",
+                    "body": {
+                        "name": "DNS",
+                        "url": "https://www.dns-shop.ru",
+                        "cookies": "",
+                    },
+                },
+                {
+                    "table_slug": "web_shops",
+                    "row_id": "web_shop_citilink",
+                    "body": {
+                        "name": "Citilink",
+                        "url": "https://www.citilink.ru",
+                        "cookies": "",
+                    },
+                },
+                {
+                    "table_slug": "web_shops",
+                    "row_id": "web_shop_regard",
+                    "body": {
+                        "name": "Regard",
+                        "url": "https://www.regard.ru",
+                        "cookies": "",
+                    },
+                },
+                {
+                    "table_slug": "web_shops",
+                    "row_id": "web_shop_nix",
+                    "body": {
+                        "name": "NIX",
+                        "url": "https://www.nix.ru",
+                        "cookies": "",
+                    },
+                },
+                {
+                    "table_slug": "web_shops",
+                    "row_id": "web_shop_mvideo",
+                    "body": {
+                        "name": "М.Видео",
+                        "url": "https://www.mvideo.ru",
+                        "cookies": "",
+                    },
+                },
+                {
+                    "table_slug": "web_shops",
+                    "row_id": "web_shop_ozon",
+                    "body": {
+                        "name": "Ozon",
+                        "url": "https://www.ozon.ru",
+                        "cookies": "",
+                    },
+                },
+                {
+                    "table_slug": "web_shops",
+                    "row_id": "web_shop_wildberries",
+                    "body": {
+                        "name": "Wildberries",
+                        "url": "https://www.wildberries.ru",
+                        "cookies": "",
+                    },
+                },
+                {
+                    "table_slug": "web_shops",
+                    "row_id": "web_shop_avito",
+                    "body": {
+                        "name": "Avito",
+                        "url": "https://www.avito.ru",
+                        "cookies": "",
+                    },
+                },
             ]
         },
     }

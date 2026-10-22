@@ -52,7 +52,13 @@ spec:
       containers:
         - name: searchnet
           image: ghcr.io/ne-tort/searchnet:latest
-          imagePullPolicy: IfNotPresent
+          # Always, а НЕ IfNotPresent: образ в GHCR перезаписывается под тем же
+          # тегом :latest (CI searchnet собирается вручную по флагу), и нода
+          # держала СТАРЫЙ локальный слой. Поймано на живом стенде 2026-10-22:
+          # в GHCR уже был образ с wait_until=load и фиксом дедлока, а в поде
+          # крутилась сборка 8-часовой давности с wait_until=domcontentloaded —
+          # из-за неё агент не видел цен. Always закрывает этот класс ошибок.
+          imagePullPolicy: Always
           ports:
             - name: http
               containerPort: 3950
