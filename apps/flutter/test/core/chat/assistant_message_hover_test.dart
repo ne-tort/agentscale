@@ -132,7 +132,7 @@ void main() {
     expect(find.textContaining('1\u00A0000\u00A0000'), findsNWidgets(2));
   });
 
-  testWidgets('streaming message shows cursor and no meta row', (tester) async {
+  testWidgets('streaming message has no cursor animation and no meta row', (tester) async {
     await tester.pumpWidget(
       _themed(
         const AssistantStreamBlock(
@@ -142,23 +142,29 @@ void main() {
         ),
       ),
     );
-    await tester.pump();
+    // pumpAndSettle проходит без таймаута: значит в дереве НЕТ бесконечно
+    // повторяющейся анимации. Раньше здесь жил _StreamingCursor с
+    // controller.repeat(reverse: true) — мигающая черта отдельной строкой под
+    // текстом; её убрали, и этот pumpAndSettle как раз это и стережёт.
+    await tester.pumpAndSettle();
 
-    // Streaming: blinking cursor present, metadata hidden even on hover.
+    // Текст стрима виден.
+    expect(find.text('Partial'), findsOneWidget);
+    // Курсора-черты больше нет.
     expect(
       find.descendant(
         of: find.byType(AssistantStreamBlock),
         matching: find.byType(FadeTransition),
       ),
-      findsOneWidget,
+      findsNothing,
     );
+    // Метаданные скрыты и при стриминге.
     final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
     await gesture.addPointer(location: Offset.zero);
     addTearDown(gesture.removePointer);
     await tester.pump();
     await gesture.moveTo(tester.getCenter(find.byType(AssistantStreamBlock)));
-    // No pumpAndSettle here: the cursor repeats forever by design.
-    await tester.pump(const Duration(milliseconds: 200));
+    await tester.pumpAndSettle();
     expect(find.textContaining('вход:'), findsNothing);
     expect(find.byIcon(Icons.copy_outlined), findsNothing);
   });
