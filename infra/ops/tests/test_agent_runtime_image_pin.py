@@ -110,3 +110,41 @@ def test_known_pin_sites_are_pinned(rel: str) -> None:
     assert path.is_file(), f"нет манифеста {rel}"
     tags = _PIN_RE.findall(path.read_text(encoding="utf-8", errors="replace"))
     assert tags, f"{rel}: нет пина prodavan-agent-runtime"
+
+
+# ── searchnet: тот же класс ошибки, что у agent-runtime ──────────────────────
+
+#: `ghcr.io/ne-tort/searchnet:<tag>`.
+_SEARCHNET_RE = re.compile(r"ghcr\.io/ne-tort/searchnet:([A-Za-z0-9._-]+)")
+
+
+def test_searchnet_is_pinned_not_floating() -> None:
+    """searchnet не должен ехать на `:latest`.
+
+    Инцидент 2026-10-22: образ пересобрали с фиксом маршрутов, но `:latest` в
+    GHCR обновился, а под продолжал работать на старом локальном слое — ничего
+    в манифесте не менялось, значит Argo не перекатывал Deployment. Снаружи это
+    выглядело как «фикс не работает».
+
+    Пин на immutable-тег делает перекат декларативным: обновили тег → Argo
+    увидел diff → новый под тянет ровно ту сборку. `imagePullPolicy: Always`
+    этого НЕ заменяет: он гарантирует свежесть тега, но не перезапуск.
+    """
+    pins = _SEARCHNET_RE.findall(
+        (_INFRA / "base/platform/searchnet.yaml").read_text(encoding="utf-8")
+    )
+    assert pins, "searchnet.yaml: нет пина образа searchnet"
+    floating = [t for t in pins if not _SHA12_RE.match(t)]
+    assert not floating, (
+        f"searchnet на плавающем теге {floating}: пересборка образа не приведёт к "
+        "перекату пода (нет diff в манифесте)"
+    )
+
+
+def test_searchnet_pin_has_provenance_comment() -> None:
+    """Рядом с пином — какой коммит searchnet в образе."""
+    text = (_INFRA / "base/platform/searchnet.yaml").read_text(encoding="utf-8")
+    assert "searchnet@" in text, (
+        "у пина searchnet нет комментария `searchnet@<sha>` — непонятно, какая "
+        "ревизия исходников внутри"
+    )

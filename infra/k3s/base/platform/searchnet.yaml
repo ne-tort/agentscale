@@ -59,13 +59,23 @@ spec:
       # и RAM: 2g/4g — как в docker-compose searchnet.
       containers:
         - name: searchnet
-          image: ghcr.io/ne-tort/searchnet:latest
-          # Always, а НЕ IfNotPresent: образ в GHCR перезаписывается под тем же
-          # тегом :latest (CI searchnet собирается вручную по флагу), и нода
-          # держала СТАРЫЙ локальный слой. Поймано на живом стенде 2026-10-22:
-          # в GHCR уже был образ с wait_until=load и фиксом дедлока, а в поде
-          # крутилась сборка 8-часовой давности с wait_until=domcontentloaded —
-          # из-за неё агент не видел цен. Always закрывает этот класс ошибок.
+          # Пин на immutable-тег, а НЕ :latest. searchnet@ba8f6af (per-domain
+          # render_timeout_sec + маршрут домена применяется к extract).
+          # Тег — sha коммита prodavan, на котором прогонялся
+          # workflow_dispatch ci-images build_searchnet=true (CI тегирует сборку
+          # именно так, GITHUB_SHA[:12]).
+          #
+          # Почему пин, а не :latest: 2026-10-22 образ пересобрали с фиксом
+          # маршрутов, :latest в GHCR обновился, но под продолжал работать на
+          # старом локальном слое — в манифесте ничего не изменилось, значит
+          # Argo не перекатывал Deployment. Симптом снаружи — «фикс не работает».
+          # С пином перекат декларативен: обновили тег → Argo увидел diff →
+          # новый под тянет ровно эту сборку. imagePullPolicy=Always сам по себе
+          # гарантирует свежесть тега, но НЕ перезапуск.
+          # Проверяется тестом test_agent_runtime_image_pin.test_searchnet_*.
+          image: ghcr.io/ne-tort/searchnet:5e007d19d49f
+          # Always дополнительно: пин мог быть пересобран под тем же тегом при
+          # отладке, а нода держит локальный слой.
           imagePullPolicy: Always
           ports:
             - name: http
