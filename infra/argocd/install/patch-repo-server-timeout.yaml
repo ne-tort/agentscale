@@ -1,4 +1,14 @@
-# Longer git fetch timeout for flaky TLS on local WSL/k3s.
+# Longer git fetch timeout for flaky TLS / slow GitHub link on the k3s VM.
+#
+# 300s НЕ хватало: 2026-10-23 на dev каждый `git fetch` из repo-server падал с
+# «failed timeout after 5m0s», и Argo не мог получить target state — приложение
+# висело в `Unknown`, то есть НИ ОДИН PR не доезжал до кластера. Замер: клон
+# репозитория (14 МиБ) с этой ноды занимает 30с при нормальной погоде, но канал
+# до GitHub узкий и периодически проседает; из пода overlay-сеть добавляет
+# задержку, и полный клон не укладывался в 5 минут.
+#
+# 900s: клон/фетч получает 15 минут. Это НЕ маскирует проблему — при быстром
+# канале операция завершается за секунды, таймаут лишь потолок для плохой сети.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -10,6 +20,6 @@ spec:
         - name: argocd-repo-server
           env:
             - name: ARGOCD_EXEC_TIMEOUT
-              value: "300s"
+              value: "900s"
             - name: ARGOCD_GIT_ATTEMPTS_COUNT
               value: "5"
