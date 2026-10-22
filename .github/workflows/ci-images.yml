@@ -306,15 +306,35 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GHCR_PUSH_TOKEN || secrets.GITHUB_TOKEN }}
 
-      # Recovery-путь: свежий camoufox fetch / playwright download с CI-VM
-      # стабильно падает (GitHub 403 rate-limit / CDN EOF). Браузерные кэши
-      # берём из предыдущего успешно собранного образа в GHCR; source-слои
-      # (pip install из pyproject+src) пересобираются как обычно.
-      - name: Pull previous searchnet image (browser caches)
+      # Recovery-путь для браузеров: свежий camoufox fetch / patchright download
+      # с CI-VM стабильно не доезжает (GitHub 403 rate-limit / CDN EOF).
+      # Живой случай 2026-10-22: шаг #8/8 висел 40 минут и job упал по
+      # timeout-minutes=45 — образ с фиксом маршрутов не собрался вообще.
+      #
+      # `docker pull` сам по себе НЕ подпитывает слой-кэш buildkit (ключ слоя
+      # сменился вместе с перестановкой порядка в Dockerfile), поэтому копируем
+      # браузерные кэши из предыдущего образа в контекст сборки, а Dockerfile
+      # монтирует их bind-mount'ом в /root/.cache (без удвоения размера образа).
+      # Каталог обязан существовать всегда — иначе bind-mount падает на первой
+      # сборке; в репозитории лежит browser-cache/.gitkeep.
+      - name: Seed browser caches from previous image
         run: |
           set -euo pipefail
-          docker pull ${{ steps.meta.outputs.searchnet }}:latest || \
+          IMAGE="${{ steps.meta.outputs.searchnet }}:latest"
+          mkdir -p searchnet/browser-cache
+          if ! docker pull "$IMAGE"; then
             echo "no previous image — first build will fetch browsers from upstream"
+            exit 0
+          fi
+          CID="$(docker create "$IMAGE")"
+          for path in /root/.cache/camoufox /root/.cache/ms-playwright; do
+            if docker cp "$CID:$path" "searchnet/browser-cache/$(basename "$path")" 2>/dev/null; then
+              echo "seeded $(basename "$path"): $(du -sh "searchnet/browser-cache/$(basename "$path")" | cut -f1)"
+            else
+              echo "no $path in previous image"
+            fi
+          done
+          docker rm "$CID" >/dev/null
 
       - name: Build searchnet image (recovery path)
         uses: docker/build-push-action@v6
@@ -324,6 +344,11 @@ jobs:
           push: true
           provenance: false
           sbom: false
+          # Токен поднимает лимит GitHub API, из которого camoufox качает
+          # бинарники и fpgen-модель: без него запрос анонимный и упирается в
+          # 403 rate-limit (тот самый «пустой /root/.cache/camoufox при exit 0»).
+          build-args: |
+            GITHUB_TOKEN=${{ secrets.GHCR_PUSH_TOKEN || secrets.GITHUB_TOKEN }}
           tags: |
             ${{ steps.meta.outputs.searchnet }}:${{ steps.meta.outputs.tag }}
             ${{ steps.meta.outputs.searchnet }}:latest
