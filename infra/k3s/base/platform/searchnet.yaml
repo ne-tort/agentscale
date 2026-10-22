@@ -47,6 +47,14 @@ spec:
         app.kubernetes.io/part-of: agentscale
         app.kubernetes.io/component: web-search
     spec:
+      # GHCR-пакет searchnet приватный: с imagePullPolicy=Always нода обязана
+      # авторизоваться при каждом старте, иначе ErrImagePull
+      # («failed to fetch anonymous token … 401 Unauthorized»). Поймано на
+      # живом стенде 2026-10-22 сразу после включения Always: старая реплика
+      # работала только потому, что образ уже лежал локально. Тот же секрет,
+      # что у API (ghcr-pull).
+      imagePullSecrets:
+        - name: ghcr-pull
       # Браузеры (chromium по умолчанию, camoufox эскалацией) требуют /dev/shm
       # и RAM: 2g/4g — как в docker-compose searchnet.
       containers:
