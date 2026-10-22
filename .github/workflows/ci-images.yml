@@ -250,7 +250,13 @@ jobs:
       github.event.inputs.build_searchnet == 'true' &&
       needs.build-web.result == 'success'
     needs: [build-api, build-web]
-    timeout-minutes: 45
+    # 45 минут НЕ хватало: замер 2026-10-22 — pip install зависимостей 36 мин
+    # (PyPI с этой VM отдаёт ReadTimeout и низкую скорость), браузерный слой
+    # 114с (после подпитки кэша), экспорт+push 4.4 ГБ ещё несколько минут.
+    # Сборка доходила до «exporting to image» и её снимал job-timeout. При этом
+    # слои зависимостей и браузеров теперь кэшируются по pyproject.toml, так что
+    # платим за это только при первом прогоне/смене зависимостей.
+    timeout-minutes: 90
     runs-on: [self-hosted, linux, docker]
     steps:
       # searchnet — отдельный публичный репозиторий (ne-tort/searchnet); в этой
