@@ -1891,6 +1891,105 @@ class ModuleActionExecutor:
             previous_body=previous_body,
         )
 
+    async def maybe_sync_master_price_manual(
+        self,
+        *,
+        cabinet_id: str,
+        module_id: str,
+        table_slug: str,
+        row_id: str,
+        principal: Principal,
+        employee: EmployeeRow | None,
+        project_id: str | None = None,
+        session_id: str | None = None,
+    ) -> None:
+        """Ручная позиция мастер-прайса → документ в OpenSearch.
+
+        Мастер-прайс — виртуальная таблица поверх OS, поэтому строка из формы
+        сама по себе нигде не появится: её надо положить в индекс. Заодно здесь
+        подставляется продавец, если форма его не прислала (форма сохраняет
+        поля по одному, и первым может уйти «Наименование» — без продавца
+        строка не прошла бы фильтр `terms.supplier` и молча выпала из прайса).
+        """
+        from prodavan.application.modules.equipment_master_price_manual import (
+            MANUAL_TABLE,
+            index_manual_row,
+        )
+
+        if table_slug != MANUAL_TABLE or not row_id:
+            return
+        rows = await self._list_module_rows(
+            cabinet_id=cabinet_id,
+            project_id=project_id,
+            module_id=module_id,
+            table_slug=table_slug,
+            principal=principal,
+            employee=employee,
+            session_id=session_id,
+        )
+        target = next((r for r in rows if str(r.get("row_id")) == row_id), None)
+        if target is None:
+            return
+        body = dict(target.get("body") or {})
+        if not str(body.get("supplier") or "").strip():
+            seller = await self._default_master_price_seller(cabinet_id)
+            if seller:
+                body["supplier"] = seller
+                from prodavan.application.modules.module_instance_service import (
+                    ModuleInstanceService,
+                )
+
+                inst = await ModuleInstanceService(self._session).ensure_cabinet_instance(
+                    cabinet_id=cabinet_id, module_id=module_id
+                )
+                await ModuleInstanceService(self._session).upsert_data_row(
+                    instance_id=inst.id,
+                    table_slug=table_slug,
+                    row_id=row_id,
+                    body=body,
+                    session_id=session_id,
+                )
+                await self._session.commit()
+        await index_manual_row(
+            self._session,
+            cabinet_id=cabinet_id,
+            body=body,
+            project_id=project_id,
+        )
+
+    async def _default_master_price_seller(self, cabinet_id: str) -> str:
+        """Продавец по умолчанию: «ИТ Взлёт», если он отмечен для мастер-прайса.
+
+        Иначе — первый по алфавиту из отмеченных (та же логика, что в форме:
+        `manual_sellers` сортирует «ИТ Взлёт» первым, остальных по алфавиту).
+
+        Читаем instance-строки напрямую, а не через `CabinetModuleService`:
+        там проверка доступа требует principal/employee, а этот код идёт из
+        системного хука записи (в т.ч. из MCP и внешнего API), где их может не
+        быть. Список продавцов — не секрет и не пользовательские данные.
+        """
+        from prodavan.application.modules.equipment_master_price_manual import (
+            manual_sellers,
+        )
+        from prodavan.application.modules.module_instance_service import (
+            ModuleInstanceService,
+        )
+
+        try:
+            inst = await ModuleInstanceService(self._session).ensure_cabinet_instance(
+                cabinet_id=cabinet_id, module_id="mod_equipment"
+            )
+            rows = await ModuleInstanceService(self._session).list_data_rows(
+                instance_id=inst.id, table_slug="trusted_sellers"
+            )
+        except Exception:  # noqa: BLE001 — нет инстанса/таблицы: остаёмся без дефолта
+            logger.debug(
+                "master_price default seller lookup failed cabinet=%s", cabinet_id
+            )
+            return ""
+        sellers = manual_sellers([r for r in rows if isinstance(r, dict)])
+        return sellers[0] if sellers else ""
+
     async def maybe_auto_index_opensearch(
         self,
         *,

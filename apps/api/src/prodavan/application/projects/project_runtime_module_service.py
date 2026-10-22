@@ -786,3 +786,13 @@ class ProjectRuntimeModuleService:
             employee=employee,
             session_id=session_id,
         )
+        await ModuleActionExecutor(self._session).maybe_sync_master_price_manual(
+            cabinet_id=cabinet_id,
+            project_id=project_id,
+            module_id=module_id,
+            table_slug=table_slug,
+            row_id=row_id,
+            principal=principal,
+            employee=employee,
+            session_id=session_id,
+        )

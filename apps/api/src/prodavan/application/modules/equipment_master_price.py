@@ -24,6 +24,7 @@ from prodavan.application.modules.equipment_catalog_opensearch import (
     OS_NAMESPACE,
     catalog_os_index_name,
 )
+from prodavan.application.modules.equipment_master_price_manual import MANUAL_INDEX
 from prodavan.domain.errors import AppError
 from prodavan.domain.search_index.types import MAX_SEARCH_SIZE
 
@@ -332,7 +333,26 @@ class MasterPriceService:
             if str(body.get("status") or "").strip().lower() != "ready":
                 continue
             out.append(catalog_os_index_name(str(row.get("row_id") or "")))
+        # Ручные позиции («+» на странице мастер-прайса): живут в собственном
+        # индексе, а не в индексе каталога, который затирается при
+        # переиндексации поставщика. Индекс подключаем ТОЛЬКО когда в таблице
+        # действительно есть строки: поиск по несуществующему индексу роняет
+        # весь запрос (index_not_found_exception), и мастер-прайс стал бы
+        # пустым у кабинетов, которые ручными позициями не пользуются.
+        if await self._has_manual_rows(cabinet_id):
+            out.append(MANUAL_INDEX)
         return out
+
+    async def _has_manual_rows(self, cabinet_id: str) -> bool:
+        from prodavan.application.modules.equipment_master_price_manual import (
+            MANUAL_TABLE,
+        )
+
+        try:
+            rows = await self._module_rows(cabinet_id, MANUAL_TABLE)
+        except Exception:  # noqa: BLE001 — таблица есть не в каждом инсталляторе
+            return False
+        return bool(rows)
 
     async def _sellers(self, cabinet_id: str) -> list[str]:
         rows = await self._module_rows(cabinet_id, "trusted_sellers")

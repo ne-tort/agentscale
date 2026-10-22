@@ -1372,6 +1372,19 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "enabled": True,
                 "scope": {"projects": "all", "chats": "all"},
             },
+            # Ручные позиции мастер-прайса (кнопка «+» у пагинатора).
+            # Реальная таблица — в отличие от самой виртуальной master_price:
+            # именно сюда пишет форма, а бэкенд зеркалит строки в OS-индекс
+            # equipment__c_master_price_manual (master_price читается из OS).
+            # chats=all: прайс общий на кабинет, строка не должна привязываться
+            # к чату, иначе она выпадала бы из общего списка.
+            {
+                "slug": "master_price_manual",
+                "label": {"ru": "Позиции мастер-прайса (вручную)", "en": "Master price manual rows"},
+                "storage_kind": "json_document",
+                "enabled": True,
+                "scope": {"projects": "all", "chats": "all"},
+            },
             # WAVE7: «Закупка» — агрегат по поставщикам (материализуется пайплайном).
             # chats=all: общий проектный датасет (агрегатор между чатами), а не
             # per-chat зеркала — строки одни на проект, видны из любого чата.
@@ -3602,6 +3615,84 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "name": "rrc",
                 "label": {"ru": "РРЦ", "en": "RRP"},
                 "type": "number",
+                "required": False,
+            },
+            # ── Ручные позиции мастер-прайса ───────────────────────────────
+            # Строки этой таблицы зеркалятся в отдельный OS-индекс
+            # (`equipment_master_price_manual.index_manual_row`), потому что сам
+            # мастер-прайс — виртуальная таблица поверх индексов каталогов.
+            # Продавец — ref на trusted_sellers (только отмеченные для
+            # мастер-прайса), по умолчанию «ИТ Взлёт».
+            {
+                "table_slug": "master_price_manual",
+                "name": "supplier",
+                "label": {"ru": "Продавец", "en": "Seller"},
+                "type": "ref",
+                "required": True,
+                "ref": {
+                    "table_slug": "trusted_sellers",
+                    # только поставщики с флагом master_price
+                    "filter": {"master_price": True},
+                    "sort": "name",
+                    "prefer": "ИТ Взлёт",
+                },
+            },
+            {
+                "table_slug": "master_price_manual",
+                "name": "title",
+                "label": {"ru": "Наименование", "en": "Title"},
+                "type": "text",
+                "required": True,
+            },
+            {
+                "table_slug": "master_price_manual",
+                "name": "part_number",
+                "label": {"ru": "PN", "en": "PN"},
+                "type": "text",
+                "required": False,
+            },
+            {
+                "table_slug": "master_price_manual",
+                "name": "brand",
+                "label": {"ru": "Бренд", "en": "Brand"},
+                "type": "text",
+                "required": False,
+            },
+            {
+                "table_slug": "master_price_manual",
+                "name": "price",
+                "label": {"ru": "Цена", "en": "Price"},
+                "type": "number",
+                "required": True,
+            },
+            {
+                "table_slug": "master_price_manual",
+                "name": "currency",
+                "label": {"ru": "Валюта", "en": "Currency"},
+                "type": "text",
+                "required": False,
+                "default": "RUB",
+            },
+            {
+                "table_slug": "master_price_manual",
+                "name": "rrc",
+                "label": {"ru": "РРЦ", "en": "RRP"},
+                "type": "number",
+                "required": False,
+            },
+            {
+                "table_slug": "master_price_manual",
+                "name": "in_stock",
+                "label": {"ru": "В наличии", "en": "In stock"},
+                "type": "bool",
+                "required": False,
+                "default": True,
+            },
+            {
+                "table_slug": "master_price_manual",
+                "name": "lead_time",
+                "label": {"ru": "Срок поставки", "en": "Lead time"},
+                "type": "text",
                 "required": False,
             },
             {
@@ -6795,6 +6886,10 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                         ],
                     },
                     "server_paged": True,
+                    # «+» справа от пагинатора: ручное добавление товара.
+                    # Строки живут в OpenSearch, поэтому inline-add («введи
+                    # название») не подходит — открываем полную форму.
+                    "add_view": "master_price_manual_form",
                     "search": {
                         "fields": ["title", "part_number", "brand", "supplier"]
                     },
@@ -6856,6 +6951,33 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                         "No master price rows",
                         icon="inventory_2",
                     ),
+                },
+            },
+            {
+                # Форма ручного добавления товара в мастер-прайс (кнопка «+»
+                # рядом с пагинатором). Пишет реальную таблицу
+                # master_price_manual; бэкенд зеркалит строку в OpenSearch
+                # (maybe_sync_master_price_manual), поэтому товар сразу
+                # появляется в прайсе, экспорте и в подборе.
+                "slug": "master_price_manual_form",
+                "table_slug": "master_price_manual",
+                "kind": "form",
+                "ui_json": {
+                    "version": 1,
+                    "kind": "form",
+                    "mode": "create",
+                    "title": {"ru": "Новый товар", "en": "New product"},
+                    "fields": [
+                        {"column": "supplier", "widget": "ref"},
+                        {"column": "title", "widget": "text"},
+                        {"column": "part_number", "widget": "text"},
+                        {"column": "brand", "widget": "text"},
+                        {"column": "price", "widget": "number"},
+                        {"column": "currency", "widget": "text"},
+                        {"column": "rrc", "widget": "number"},
+                        {"column": "in_stock", "widget": "switch"},
+                        {"column": "lead_time", "widget": "text"},
+                    ],
                 },
             },
             {
