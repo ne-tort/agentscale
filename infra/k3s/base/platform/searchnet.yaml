@@ -95,23 +95,32 @@ spec:
             # цепочка http → chromium → camoufox тратила 50с+ на заведомо
             # провальную ступень и упиралась в клиентский таймаут 30с.
             # ozon/wildberries/avito — тоже Qrator/антибот: camoufox первым.
+            # render_timeout_sec=40: глобальный дефолт 24с МАЛ для этих доменов.
+            # Замер: DNS через camoufox рендерится 22-30с, и на 24с запросы
+            # флапали — один отдавал 6.5К текста с ценами, следующий
+            # «timeout: рендер не уложился в общий дедлайн 24с». Агент видел это
+            # как «страница не открылась» и уходил в сырой HTML без цен.
+            # Почему 40, а не больше: API-прокси делает ОДИН ретрай на
+            # retryable-таймаут, худший случай 2×40=80с. Это должно оставаться
+            # ниже таймаута тула у агента (OPENCLAW_WEB_FETCH_TIMEOUT_MS=110с) и
+            # таймаута API (web_fetch_timeout_sec=120с).
             - name: SEARCHNET_ENGINES__ROUTES
               value: >-
-                [{"domain":"dns-shop.ru","chain":["camoufox"],"challenge_wait_sec":6,"wait_until":"networkidle",
+                [{"domain":"dns-shop.ru","chain":["camoufox"],"challenge_wait_sec":6,"render_timeout_sec":40,"wait_until":"networkidle",
                 "note":"Qrator: chromium отдаёт 401; цены приходят XHR после load"},
-                {"domain":"ozon.ru","chain":["camoufox"],"challenge_wait_sec":6,"wait_until":"networkidle",
+                {"domain":"ozon.ru","chain":["camoufox"],"challenge_wait_sec":6,"render_timeout_sec":40,"wait_until":"networkidle",
                 "note":"антибот: chromium не проходит; цены XHR"},
-                {"domain":"wildberries.ru","chain":["camoufox"],"challenge_wait_sec":6,"wait_until":"networkidle",
+                {"domain":"wildberries.ru","chain":["camoufox"],"challenge_wait_sec":6,"render_timeout_sec":40,"wait_until":"networkidle",
                 "note":"антибот: chromium не проходит; цены XHR"},
-                {"domain":"avito.ru","chain":["camoufox"],"challenge_wait_sec":6,"wait_until":"networkidle",
+                {"domain":"avito.ru","chain":["camoufox"],"challenge_wait_sec":6,"render_timeout_sec":40,"wait_until":"networkidle",
                 "note":"антибот: chromium не проходит"},
-                {"domain":"citilink.ru","chain":["camoufox"],"challenge_wait_sec":6,"wait_until":"networkidle",
+                {"domain":"citilink.ru","chain":["camoufox"],"challenge_wait_sec":6,"render_timeout_sec":40,"wait_until":"networkidle",
                 "note":"антибот: chromium не проходит; цены XHR"},
-                {"domain":"mvideo.ru","chain":["camoufox"],"challenge_wait_sec":6,"wait_until":"networkidle",
+                {"domain":"mvideo.ru","chain":["camoufox"],"challenge_wait_sec":6,"render_timeout_sec":40,"wait_until":"networkidle",
                 "note":"антибот: chromium не проходит; цены XHR"},
-                {"domain":"regard.ru","chain":["camoufox"],"challenge_wait_sec":6,"wait_until":"networkidle",
+                {"domain":"regard.ru","chain":["camoufox"],"challenge_wait_sec":6,"render_timeout_sec":40,"wait_until":"networkidle",
                 "note":"антибот: chromium не проходит"},
-                {"domain":"nix.ru","chain":["camoufox"],"challenge_wait_sec":6,"wait_until":"networkidle",
+                {"domain":"nix.ru","chain":["camoufox"],"challenge_wait_sec":6,"render_timeout_sec":40,"wait_until":"networkidle",
                 "note":"антибот: chromium не проходит"}]
             - name: SEARCHNET_LOG_LEVEL
               value: "INFO"
