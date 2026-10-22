@@ -35,8 +35,20 @@ _MAX_FETCH_BYTES = 1 * 1024 * 1024
 _MAX_FETCH_BYTES_CAP = 5 * 1024 * 1024
 
 
+def _retryable_failure(data: dict[str, Any] | None) -> bool:
+    """searchnet сообщил о ВРЕМЕННОМ отказе (`failed[].retryable`)?
+
+    Тяжёлые антибот-страницы (DNS через camoufox) иногда не укладываются в
+    дедлайн рендера — это флап, а не постоянная ошибка. Отличаем его от
+    «страница реально без текста» (PDF/бинарь/пустая), чтобы не ретраить
+    заведомо бесполезное.
+    """
+    failed = (data or {}).get("failed") or []
+    return any(isinstance(f, dict) and f.get("retryable") for f in failed)
+
+
 class WebSearchService:
-    """Proxy `web.search` queries from sandbox pods to the searchnet backend."""
+    """Proxy `web.search`/`web.fetch` from sandbox pods to the searchnet backend."""
 
     def __init__(self, *, backend_url: str | None = None) -> None:
         self._backend_url = (backend_url or settings.web_search_backend_url or "").strip().rstrip("/")
@@ -209,35 +221,56 @@ class WebSearchService:
             headers["Authorization"] = f"Bearer {key}"
 
         endpoint = f"{self._backend_url}/extract?detail=full"
-        started = time.monotonic()
-        err: str | None = None
-        status_code = 0
+        # Один ретрай на ВРЕМЕННЫЙ отказ рендера. Замер на живом DNS: из пяти
+        # подряд запросов два упали в «рендер не уложился в общий дедлайн» —
+        # это флап тяжёлой страницы, а не постоянная ошибка (`retryable: true`
+        # в ответе searchnet). Без ретрая агент в половине случаев получал
+        # сырой HTML без цен и считал, что магазин не отдал цену.
         data: dict[str, Any] | None = None
-        try:
-            async with httpx.AsyncClient(
-                timeout=settings.web_fetch_timeout_sec,
-                follow_redirects=True,
-            ) as client:
-                resp = await client.post(endpoint, json=body, headers=headers)
-            status_code = resp.status_code
-            if resp.status_code >= 400:
-                err = f"searchnet extract HTTP {resp.status_code}"
-                logger.warning("web_fetch markdown: %s (fallback to html)", err)
+        started = time.monotonic()
+        for attempt in (1, 2):
+            attempt_started = time.monotonic()
+            err: str | None = None
+            status_code = 0
+            try:
+                async with httpx.AsyncClient(
+                    timeout=settings.web_fetch_timeout_sec,
+                    follow_redirects=True,
+                ) as client:
+                    resp = await client.post(endpoint, json=body, headers=headers)
+                status_code = resp.status_code
+                if resp.status_code >= 400:
+                    err = f"searchnet extract HTTP {resp.status_code}"
+                    logger.warning("web_fetch markdown: %s (fallback to html)", err)
+                    return None
+                data = resp.json()
+            except (httpx.TimeoutException, httpx.HTTPError) as exc:
+                # extract не критичен: сырой HTML всё ещё можно отдать.
+                logger.warning(
+                    "web_fetch markdown failed (%s) — fallback to html",
+                    exc.__class__.__name__,
+                )
                 return None
-            data = resp.json()
-        except (httpx.TimeoutException, httpx.HTTPError) as exc:
-            # extract не критичен: сырой HTML всё ещё можно отдать.
-            logger.warning(
-                "web_fetch markdown failed (%s) — fallback to html", exc.__class__.__name__
-            )
-            return None
-        finally:
-            logger.info(
-                "web_fetch markdown status=%s ms=%s err=%s",
-                status_code,
-                int((time.monotonic() - started) * 1000),
-                err or "-",
-            )
+            finally:
+                logger.info(
+                    "web_fetch markdown attempt=%s status=%s ms=%s err=%s",
+                    attempt,
+                    status_code,
+                    int((time.monotonic() - attempt_started) * 1000),
+                    err or "-",
+                )
+
+            results = (data or {}).get("results") or []
+            first = results[0] if results and isinstance(results[0], dict) else {}
+            if str(first.get("content") or "").strip():
+                break
+            if attempt == 1 and _retryable_failure(data):
+                logger.warning("web_fetch markdown: временный отказ рендера — ретрай")
+                continue
+            break
+        logger.info(
+            "web_fetch markdown total_ms=%s", int((time.monotonic() - started) * 1000)
+        )
 
         results = (data or {}).get("results") or []
         if not results:
@@ -248,7 +281,12 @@ class WebSearchService:
             return None
         return {
             "url": first.get("final_url") or first.get("url") or url,
-            "status": int(first.get("status") or 0),
+            # `/extract` не отдаёт HTTP-статус страницы (он про извлечение, а не
+            # про загрузку). Подставляем 200, когда извлечение удалось: иначе
+            # агент видит status=0 и считает страницу битой, хотя текст с ценами
+            # у него в руках. Если извлечение не удалось — 0 честно сигнализирует
+            # «статуса нет».
+            "status": int(first.get("status") or (200 if first.get("ok") else 0)),
             "block": first.get("block") or "ok",
             "content": content,
             "warnings": first.get("warnings") or [],

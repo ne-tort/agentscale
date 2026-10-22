@@ -90,6 +90,9 @@ _MARKDOWN = (
 
 
 def _extract_ok(content: str = _MARKDOWN) -> _Resp:
+    # Форма РЕАЛЬНОГО ответа searchnet /extract: поля `status` в результате НЕТ
+    # (извлечение не про HTTP-загрузку), есть `ok`. Фикстура обязана это
+    # повторять, иначе тест не поймает status=0 у живого агента.
     return _Resp(
         200,
         {
@@ -99,7 +102,7 @@ def _extract_ok(content: str = _MARKDOWN) -> _Resp:
                 {
                     "url": "https://www.dns-shop.ru/search/?q=rtx",
                     "final_url": "https://www.dns-shop.ru/search/?q=rtx",
-                    "status": 200,
+                    "ok": True,
                     "block": "ok",
                     "content": content,
                     "warnings": [],
@@ -207,3 +210,86 @@ async def test_html_request_still_requires_backend(monkeypatch, backend):
     with pytest.raises(AppError) as ei:
         await WebSearchService().fetch(bridge=_claims(), url="https://x/", format="html")
     assert ei.value.status == 503
+
+
+# ------------------------------------------------- временный отказ рендера
+
+
+class _FlakyRouter(_Router):
+    """Первый /extract отдаёт retryable-таймаут, второй — нормальный текст.
+
+    Живой замер: из пяти подряд запросов к DNS два падали в «рендер не
+    уложился в общий дедлайн». Без ретрая агент в половине случаев получал
+    сырой HTML без цен и считал, что магазин цену не отдал.
+    """
+
+    def __init__(self, first: _Resp, then: _Resp, fetch: _Resp) -> None:
+        super().__init__(first, fetch)
+        self._first = first
+        self._then = then
+        self._n = 0
+
+    async def post(self, url: str, json: dict, headers: dict) -> _Resp:
+        self.calls.append({"url": url, "body": json})
+        if "/extract" in url:
+            self._n += 1
+            return self._first if self._n == 1 else self._then
+        return self._fetch
+
+
+def _extract_timeout() -> _Resp:
+    return _Resp(
+        200,
+        {
+            "ok": False,
+            "count": 0,
+            "results": [],
+            "failed": [
+                {
+                    "url": "https://www.dns-shop.ru/",
+                    "code": "timeout",
+                    "retryable": True,
+                    "error": "рендер не уложился в общий дедлайн",
+                }
+            ],
+        },
+    )
+
+
+async def test_retries_retryable_render_timeout(monkeypatch, backend):
+    """Временный таймаут рендера → одна повторная попытка, а не сразу HTML."""
+    router = _FlakyRouter(_extract_timeout(), _extract_ok(), _fetch_ok())
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: router)
+
+    out = await WebSearchService().fetch(bridge=_claims(), url="https://x/")
+
+    extract_calls = [c for c in router.calls if "/extract" in c["url"]]
+    assert len(extract_calls) == 2  # первый упал, второй дал текст
+    assert "87 999 ₽" in out["content"]
+    assert out["content_type"].startswith("text/markdown")
+
+
+async def test_does_not_retry_non_retryable_empty(monkeypatch, backend):
+    """PDF/пустая страница — не временная ошибка: ретраить бессмысленно."""
+    empty = _Resp(200, {"ok": True, "count": 1, "results": [{"content": "", "ok": True}]})
+    router = _Router(empty, _fetch_ok("%PDF-1.7"))
+    _install(monkeypatch, router)
+
+    out = await WebSearchService().fetch(bridge=_claims(), url="https://x/f.pdf")
+
+    extract_calls = [c for c in router.calls if "/extract" in c["url"]]
+    assert len(extract_calls) == 1
+    assert out["content"] == "%PDF-1.7"
+
+
+async def test_retry_exhausted_falls_back_to_html(monkeypatch, backend):
+    """Оба раза таймаут — отдаём HTML, но не бесконечно ретраим."""
+    router = _FlakyRouter(_extract_timeout(), _extract_timeout(), _fetch_ok("<p>x</p>"))
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: router)
+
+    out = await WebSearchService().fetch(bridge=_claims(), url="https://x/")
+
+    extract_calls = [c for c in router.calls if "/extract" in c["url"]]
+    assert len(extract_calls) == 2  # ровно один ретрай, не больше
+    assert out["content"] == "<p>x</p>"
+
