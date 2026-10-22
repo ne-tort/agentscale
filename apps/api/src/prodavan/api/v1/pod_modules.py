@@ -274,6 +274,10 @@ class WebFetchBody(BaseModel):
     max_bytes: int | None = Field(default=None, ge=1, le=5 * 1024 * 1024)
     engine: str = Field(default="", max_length=32)
     shop: str = Field(default="", max_length=64)
+    # markdown (дефолт) — читаемый текст через searchnet /extract: JS-данные
+    # (цены/наличие магазинов) в нём уже есть. html — сырой DOM, когда нужен
+    # конкретный атрибут/разметка.
+    format: str = Field(default="markdown", pattern="^(markdown|html)$")
 
 
 @router.post("/projects/{project_id}/web-fetch")
@@ -296,4 +300,5 @@ async def web_fetch(
         max_bytes=body.max_bytes,
         engine=body.engine,
         shop=body.shop,
+        format=body.format,
     )
