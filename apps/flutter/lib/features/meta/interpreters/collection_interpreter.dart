@@ -32,6 +32,7 @@ import 'package:prodavan/features/meta/widgets/editable_number_cell.dart';
 import 'package:prodavan/features/meta/widgets/file_upload_field.dart';
 import 'package:prodavan/features/meta/widgets/contact_picker_field.dart';
 import 'package:prodavan/features/meta/widgets/project_multiselect_field.dart';
+import 'package:prodavan/features/meta/widgets/server_paged_add_button.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 double? _doubleFromUi(Object? raw) {
@@ -216,6 +217,8 @@ class CollectionViewInterpreter extends StatelessWidget {
                 seeds as RuntimeDataAdapter,
                 tableSlug,
                 stockFilter: uiJson['stock_filter'] == true,
+                addView: uiJson['add_view']?.toString(),
+                onOpenForm: onOpenForm,
               )
             : null;
         if (!hasInline &&
@@ -311,6 +314,8 @@ class CollectionViewInterpreter extends StatelessWidget {
     RuntimeDataAdapter adapter,
     String tableSlug, {
     bool stockFilter = false,
+    String? addView,
+    void Function(String viewSlug, {String? rowId})? onOpenForm,
   }) {
     // stockFilter участвует только в шапке страницы (см. buildModuleScaffoldActions).
     final scheme = Theme.of(context).colorScheme;
@@ -372,6 +377,14 @@ class CollectionViewInterpreter extends StatelessWidget {
                 : null,
             icon: const Icon(Icons.chevron_right),
           ),
+          // «+» справа от пагинации: добавление строки вручную (мастер-прайс).
+          // Строки виртуальной таблицы живут в OpenSearch, поэтому обычный
+          // inline-add («введи название») неприменим — нужна полная форма:
+          // продавец, PN, бренд, цена, наличие.
+          if (addView != null && addView.isNotEmpty && onOpenForm != null) ...[
+            const SizedBox(width: AppSpacing.xs),
+            ServerPagedAddButton(onPressed: () => onOpenForm(addView)),
+          ],
         ],
       ),
         ),

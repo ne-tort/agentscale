@@ -844,25 +844,86 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
     if (widgetKind == 'ref' || type == 'ref') {
       final refMeta = column['ref'];
       final refTable = refMeta is Map ? refMeta['table_slug'] as String? : null;
+      // Фильтр/сортировка/приоритет кандидатов — из `ref` колонки или из
+      // настроек поля формы. Нужно для выбора продавца в мастер-прайсе:
+      // кандидаты — только поставщики с флагом master_price, «ИТ Взлёт» первым.
+      final filterSpec = (refMeta is Map ? refMeta['filter'] : null) ??
+          fieldCfg?['ref_filter'];
+      final sortField = (refMeta is Map ? refMeta['sort'] : null)?.toString() ??
+          fieldCfg?['ref_sort']?.toString();
+      final preferValue = (refMeta is Map ? refMeta['prefer'] : null)?.toString() ??
+          fieldCfg?['ref_prefer']?.toString();
       final choices = <String>[''];
       final labels = <String, String>{'': '—'};
       if (refTable != null && refTable.isNotEmpty) {
+        final candidates = <Map<String, dynamic>>[];
         for (final item in widget.seeds.itemsForTable(refTable)) {
           final id = item['row_id']?.toString() ?? '';
           if (id.isEmpty) continue;
           final body = item['body'];
-          final title = body is Map
-              ? (body['name'] ?? body['title'] ?? id).toString()
-              : id;
+          if (filterSpec is Map && filterSpec.isNotEmpty) {
+            var ok = true;
+            filterSpec.forEach((key, expected) {
+              final actual = body is Map ? body[key.toString()] : null;
+              if (actual != expected) ok = false;
+            });
+            if (!ok) continue;
+          }
+          candidates.add({
+            'id': id,
+            'body': body is Map ? Map<String, dynamic>.from(body) : <String, dynamic>{},
+          });
+        }
+        if (sortField != null && sortField.isNotEmpty) {
+          candidates.sort((a, b) {
+            final av = (a['body'] as Map)[sortField]?.toString() ?? '';
+            final bv = (b['body'] as Map)[sortField]?.toString() ?? '';
+            return av.toLowerCase().compareTo(bv.toLowerCase());
+          });
+        }
+        if (preferValue != null && preferValue.isNotEmpty) {
+          // Приоритетный кандидат — первым, остальные сохраняют порядок.
+          final preferred = candidates.where(
+            (c) => (c['body'] as Map)[sortField ?? 'name']?.toString() == preferValue,
+          ).toList();
+          if (preferred.isNotEmpty) {
+            candidates
+              ..removeWhere((c) => preferred.contains(c))
+              ..insertAll(0, preferred);
+          }
+        }
+        for (final c in candidates) {
+          final id = c['id'] as String;
+          final body = c['body'] as Map;
+          final title = (body['name'] ?? body['title'] ?? id).toString();
           choices.add(id);
           labels[id] = title;
         }
       }
       final current = value?.toString() ?? '';
+      // Дефолт: явный `default` (если он есть среди кандидатов), иначе
+      // приоритетный кандидат — но только пока пользователь ничего не выбрал.
+      // Иначе поле «Продавец» открывалось бы пустым и строка уходила бы в
+      // прайс без продавца.
+      final defaultValue = (column['default'] ?? fieldCfg?['default'])?.toString();
+      String idByLabel(String label) => labels.entries
+          .firstWhere(
+            (e) => e.value == label,
+            orElse: () => const MapEntry('', ''),
+          )
+          .key;
+      var initial = choices.contains(current) ? current : '';
+      if (initial.isEmpty && defaultValue != null && defaultValue.isNotEmpty) {
+        initial = idByLabel(defaultValue);
+      }
+      if (initial.isEmpty && preferValue != null && preferValue.isNotEmpty) {
+        initial = idByLabel(preferValue);
+      }
+      if (initial.isEmpty && choices.length > 1) initial = choices[1];
       return AppChoicePreference<String>(
         title: label,
         icon: fieldIcon,
-        value: choices.contains(current) ? current : '',
+        value: initial,
         choices: choices,
         keyFor: (v) => v,
         labelFor: (v) => labels[v] ?? v,
