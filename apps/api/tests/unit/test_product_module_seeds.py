@@ -571,9 +571,30 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     # 17 типов (13 базовые + 4 устройства-комплекта) + 4 шаблона + 2 промпта
     # + 1 MCP + 1 ящик отправки «price» (WAVE16.3)
     # + 2 контакта-шаблона: manager (отчёты по тендерам) и s4b (мастер-прайс)
-    assert len(seed_items) == 27
+    # + 8 интернет-магазинов («Интернет магазины»): DNS, Citilink, Regard, NIX,
+    #   М.Видео, Ozon, Wildberries, Avito — без них web_shops_list пуст и агент
+    #   физически не может искать в интернете.
+    assert len(seed_items) == 35
     by_row = {s["row_id"]: s for s in seed_items}
     assert "tpl_budget_builtin" in by_row
+    # Магазины-сиды: имя — контракт для агента, cookies пустые (заполняются
+    # в кабинете, если магазин требует авторизованную сессию).
+    assert by_row["web_shop_dns"]["body"]["name"] == "DNS"
+    assert by_row["web_shop_dns"]["body"]["url"] == "https://www.dns-shop.ru"
+    assert by_row["web_shop_dns"]["body"]["cookies"] == ""
+    for slug in (
+        "web_shop_dns",
+        "web_shop_citilink",
+        "web_shop_regard",
+        "web_shop_nix",
+        "web_shop_mvideo",
+        "web_shop_ozon",
+        "web_shop_wildberries",
+        "web_shop_avito",
+    ):
+        assert by_row[slug]["table_slug"] == "web_shops"
+        assert by_row[slug]["body"]["name"], slug
+        assert by_row[slug]["body"]["url"].startswith("https://"), slug
     # Профили-шаблоны: имена — контракт, email заполняется в кабинете.
     assert by_row["mail_sender_price"]["body"]["name"] == "price"
     assert by_row["mail_contact_manager"]["body"]["name"] == "manager"
