@@ -920,6 +920,21 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
         initial = idByLabel(preferValue);
       }
       if (initial.isEmpty && choices.length > 1) initial = choices[1];
+      // Пустой список кандидатов — не «сломанный селект», а незаполненная
+      // настройка: объясняем, что сделать. Иначе поле выглядит так, будто
+      // выбор не работает (в кабинете ни один поставщик не отмечен флагом
+      // «мастер-прайс» — фильтр отсекает всех).
+      final emptyHint = fieldCfg?['empty_hint']?.toString();
+      if (choices.length <= 1 && emptyHint != null && emptyHint.isNotEmpty) {
+        return ListTile(
+          leading: Icon(fieldIcon, color: context.appColors.warning),
+          title: Text(label, style: Theme.of(context).textTheme.titleMedium),
+          subtitle: Text(
+            emptyHint,
+            style: TextStyle(color: context.appColors.warning),
+          ),
+        );
+      }
       return AppChoicePreference<String>(
         title: label,
         icon: fieldIcon,

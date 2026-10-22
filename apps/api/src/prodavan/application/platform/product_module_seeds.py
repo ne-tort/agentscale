@@ -6968,7 +6968,16 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "mode": "create",
                     "title": {"ru": "Новый товар", "en": "New product"},
                     "fields": [
-                        {"column": "supplier", "widget": "ref"},
+                        {
+                            "column": "supplier",
+                            "widget": "ref",
+                            # Список ограничен отмеченными для мастер-прайса:
+                            # товар неотмеченного поставщика отфильтровался бы
+                            # из прайса и «пропал» бы сразу после сохранения.
+                            "empty_hint": "Ни один поставщик не отмечен для "
+                                "мастер-прайса. Отметьте его в разделе "
+                                "«Поставщики» (переключатель «Мастер прайс»).",
+                        },
                         {"column": "title", "widget": "text"},
                         {"column": "part_number", "widget": "text"},
                         {"column": "brand", "widget": "text"},
