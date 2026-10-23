@@ -82,6 +82,30 @@ def attach_workspace_sync(row: dict[str, Any], notification: WorkspaceSyncNotifi
     return out
 
 
+async def _project_turn_in_progress(session: AsyncSession, project_id: str) -> bool:
+    """True, если у проекта есть чат с активным ходом агента (WAVE16).
+
+    При сбое чтения (тестовые моки без сессий и т.п.) — False: лучше
+    рематериализовать, чем потерять sync.
+    """
+    try:
+        from sqlalchemy import select as sa_select
+
+        from prodavan.application.agent.session_service import AgentSessionService
+        from prodavan.infrastructure.persistence.models.agent import AgentSessionRow
+
+        q = await session.execute(
+            sa_select(AgentSessionRow.id).where(AgentSessionRow.project_id == project_id)
+        )
+        svc = AgentSessionService(session)
+        for sid in q.scalars().all():
+            if await svc.turn_in_progress(str(sid)):
+                return True
+    except Exception:  # noqa: BLE001 — fail-open: sync важнее отсрочки
+        logger.debug("turn-in-progress check failed project_id=%s", project_id, exc_info=True)
+    return False
+
+
 async def defer_or_schedule_project_sync(
     session: AsyncSession,
     *,
@@ -98,8 +122,32 @@ async def defer_or_schedule_project_sync(
     вопрос свежести файлов. Устаревший `.prodavan/config.yaml` — другое: под
     продолжает ходить на endpoint прежнего провайдера, и чат падает в 401
     немедленно, а не «когда пользователь соизволит обновить workspace».
+
+    WAVE16: если у проекта активный ход агента — sync откладывается
+    (workspace_sync_pending_*): сработает по окончании хода (turn-end hook
+    в session_service) или sweep'ом по таймауту. Сессия не прерывается.
     """
+    from prodavan.application.agent.detached_turn import detached_turns
+
     if force or settings.projects_auto_rematerialize_on_cabinet_change:
+        # WAVE16: активный ход — не прерываем, откладываем до конца хода.
+        busy = await _project_turn_in_progress(session, project_id)
+        if busy:
+            from prodavan.application.projects.workspace_outdated import (
+                mark_workspace_sync_pending,
+            )
+
+            marked = await mark_workspace_sync_pending(
+                session, project_id=project_id, source=source
+            )
+            return WorkspaceSyncNotification(
+                mode="deferred",
+                marked_outdated=0,
+                project_id=project_id,
+                source=source,
+                skipped=not marked,
+                reason="turn_in_progress",
+            )
         result = await request_rematerialize_project(project_id, source=source)
         if result.get("enqueued"):
             return WorkspaceSyncNotification(
@@ -159,7 +207,19 @@ async def defer_or_schedule_cabinet_sync(
             all_ids = [pid for pid in all_ids if pid in allow]
         enqueued: list[str] = []
         synced: list[str] = []
+        pending: list[str] = []
         for project_id in all_ids:
+            # WAVE16: активный ход — не прерываем, откладываем до конца хода.
+            if await _project_turn_in_progress(session, project_id):
+                from prodavan.application.projects.workspace_outdated import (
+                    mark_workspace_sync_pending,
+                )
+
+                if await mark_workspace_sync_pending(
+                    session, project_id=project_id, source=source
+                ):
+                    pending.append(project_id)
+                continue
             result = await request_rematerialize_project(
                 project_id,
                 cabinet_id=cabinet_id,
@@ -190,6 +250,7 @@ async def defer_or_schedule_cabinet_sync(
             source=source,
             enqueued=tuple(enqueued),
             sync=tuple(synced),
+            reason=(f"pending_turn:{len(pending)}" if pending else None),
         )
 
     outdated = await mark_workspace_outdated_for_cabinet(

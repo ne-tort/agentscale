@@ -24,6 +24,11 @@ FIRST_PARTY_DEPLOYMENTS = (
     # (например doc_id офферов) не доезжали до dev: под продолжал жить на
     # старом коде неделями, пока его не пересоздавали по другой причине.
     "agentscale-celery-indexer",
+    # WAVE17 — web-search gateway (searchnet вместо searxng). Образ :latest в
+    # GHCR; rollout перезапускает его вместе с приложением. Не «first-party
+    # приложение» семантически, но живёт в том же ns и рассинхрон образа с
+    # манифестом ломает поиск тише всего — держим в одном списке.
+    "searchnet",
 )
 
 # Deployment targets for rollout: (name, namespace) pairs. The probe pod
@@ -39,6 +44,10 @@ DEPLOYMENT_TARGETS: tuple[tuple[str, str], ...] = (
     ("agentscale-celery-beat", "agentscale-dev"),
     ("agentscale-celery-indexer", "agentscale-dev"),
     ("agentscale-probe-pod", "agentscale-dev-sandboxes"),
+    # WAVE17 — web-search gateway (заменил searxng). :latest + Always: новый
+    # образ в GHCR подхватывается rollout'ом; поиск деградирует, но не рвёт
+    # smoke ( readiness-проба /health).
+    ("searchnet", "agentscale-dev"),
 )
 
 _cached_kubeconfig: Path | None = None
@@ -263,6 +272,7 @@ def rollout_restart(
         targets: tuple[tuple[str, str], ...] = tuple((n, namespace) for n in deployments)
     else:
         targets = DEPLOYMENT_TARGETS
+    skipped: list[str] = []
     for name, ns in targets:
         body = {
             "spec": {
@@ -278,14 +288,29 @@ def rollout_restart(
         try:
             apps.patch_namespaced_deployment(name=name, namespace=ns, body=body)
         except ApiException as exc:
+            # 404 на rollout-цели — нормальная гонка GitOps: verify-dev
+            # перезапускает деплойменты ДО wait-argo, а новый деплоймент
+            # (напр. searchnet в WAVE17) существует только после синка Argo.
+            # Пропускаем: Argo применит манифест и поднимет под сам.
+            if exc.status == 404:
+                skipped.append(f"{ns}/{name}")
+                print(f"rollout skip (not found yet; Argo will create): {ns}/{name}")
+                continue
             _fail_unreachable(exc, streak=1, limit=1)
             raise
         except Exception as exc:
             _fail_unreachable(exc, streak=1, limit=1)
             raise
         print(f"rollout restart requested: {ns}/{name}")
+    if skipped:
+        print(
+            "rollout: skipped targets (404) will be created by Argo sync — "
+            "verify their health after `prodavan-ops wait`."
+        )
     deadline = time.time() + timeout_sec
     for name, ns in targets:
+        if f"{ns}/{name}" in skipped:
+            continue
         unreachable_streak = 0
         while time.time() < deadline:
             try:

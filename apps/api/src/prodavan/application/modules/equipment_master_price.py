@@ -24,7 +24,13 @@ from prodavan.application.modules.equipment_catalog_opensearch import (
     OS_NAMESPACE,
     catalog_os_index_name,
 )
+from prodavan.application.modules.equipment_master_price_manual import MANUAL_INDEX
+from prodavan.domain.errors import AppError
 from prodavan.domain.search_index.types import MAX_SEARCH_SIZE
+
+import logging
+
+logger = logging.getLogger(__name__)
 
 MASTER_PRICE_SHEET = "Прайс"
 
@@ -105,10 +111,27 @@ def build_master_price_query(suppliers: list[str], search: str) -> dict[str, Any
     return {"bool": {"filter": clauses}}
 
 
-def doc_to_master_row(doc: dict[str, Any]) -> dict[str, Any]:
+def master_row_id(doc: dict[str, Any], *, doc_id: str | None = None) -> str:
+    """Стабильный ключ строки виртуальной таблицы (WAVE16).
+
+    Предпочтительно OS _id документа (1:1 с предложением, уникален между
+    каталогами и поставщиками). Fallback — catalog_id:src_hash (старое
+    поведение, слипает одинаковые предложения разных каталогов).
+    """
+    if doc_id:
+        return f"os:{doc_id}"
+    return f"{doc.get('catalog_id') or ''}:{doc.get('src_hash') or ''}"
+
+
+def doc_to_master_row(doc: dict[str, Any], *, doc_id: str | None = None) -> dict[str, Any]:
     """OS-док → строка виртуальной таблицы (ключи = колонки мета-вьюхи)."""
     price = doc.get("price_num")
     rrc = doc.get("rrc_num")
+    # WAVE16: стабильный row_id строки виртуальной таблицы: catalog_id+src_hash
+    # уникальны по паре (индекс+документ); раньше ключом был src_hash — у
+    # разных каталогов совпадает, и строки «слипались» при выделении/удалении.
+    catalog_id = str(doc.get("catalog_id") or "")
+    src_hash = str(doc.get("src_hash") or "")
     return {
         "supplier": str(doc.get("supplier") or ""),
         "category": "",
@@ -120,8 +143,9 @@ def doc_to_master_row(doc: dict[str, Any]) -> dict[str, Any]:
         "price": float(price) if isinstance(price, (int, float)) else None,
         "rrc": float(rrc) if isinstance(rrc, (int, float)) else None,
         "currency": str(doc.get("currency") or ""),
-        "src_hash": str(doc.get("src_hash") or ""),
-        "catalog_id": str(doc.get("catalog_id") or ""),
+        "src_hash": src_hash,
+        "catalog_id": catalog_id,
+        "row_id": master_row_id(doc, doc_id=doc_id),
     }
 
 
@@ -215,6 +239,77 @@ def _apply_margin_to_row(row: dict, margins: dict) -> None:
     row["rrc"] = apply_margin(row.get("rrc"), pct)
 
 
+async def delete_virtual_row(
+    session: Any,
+    *,
+    cabinet_id: str,
+    row_id: str,
+    principal: Any = None,
+    employee: Any = None,
+) -> dict[str, Any]:
+    """Удалить строку виртуальной таблицы (equipment_search/master_price).
+
+    row_id формата ``os:{doc_id}``: документ удаляется из всех готовых
+    каталогов кабинета с таким doc_id (doc_id уникален внутри каталога; одно
+    предложение живёт в одном каталоге). При повторной индексации позиция
+    вернётся, если снова появилась у поставщика — это ожидаемая семантика
+    («сейчас нет в наличии»).
+    """
+    from prodavan.core.infra.opensearch_manager import get_search_index_service
+    from prodavan.infrastructure.persistence.models.cabinets import CabinetInstanceRow
+    from sqlalchemy import select as _select
+
+    company_id = None
+    q = await session.execute(
+        _select(CabinetInstanceRow.company_id).where(CabinetInstanceRow.id == cabinet_id)
+    )
+    company_id = q.scalar_one_or_none()
+
+    doc_id = (row_id or "").strip()
+    if not doc_id.startswith("os:"):
+        raise AppError(
+            code="VALIDATION_ERROR",
+            title="Validation Error",
+            status=422,
+            detail="virtual row id must be os:{doc_id}",
+        )
+    doc_id = doc_id[3:]
+    svc = get_search_index_service()
+    indexes = await MasterPriceService(
+        session, principal=principal, employee=employee
+    )._ready_indexes(cabinet_id)
+    # документы каталога могут лежать с company_id компании кабинета ИЛИ
+    # «platform» (platform SoT) — пробуем оба тенант-контекста.
+    company_ids = [cid for cid in (company_id, "platform") if cid]
+    deleted = 0
+    for index in indexes:
+        for cid in company_ids:
+            try:
+                ok = await svc.delete_document(
+                    namespace=OS_NAMESPACE,
+                    index=index,
+                    doc_id=doc_id,
+                    company_id=cid,
+                    cabinet_id=None,
+                    project_id=None,
+                    refresh=True,
+                    session=session,
+                )
+                if ok:
+                    deleted += 1
+                    break
+            except AppError:
+                raise
+            except Exception:  # noqa: BLE001 — один битый индекс не роняет остальные
+                logger.warning("virtual row delete failed index=%s doc=%s", index, doc_id)
+                break
+    if not deleted:
+        raise AppError(
+            code="NOT_FOUND", title="Not Found", status=404, detail="catalog row not found"
+        )
+    return {"ok": True, "deleted": deleted}
+
+
 class MasterPriceService:
     """Чтение мастер-прайса из OS-индексов готовых каталогов кабинета."""
 
@@ -238,7 +333,26 @@ class MasterPriceService:
             if str(body.get("status") or "").strip().lower() != "ready":
                 continue
             out.append(catalog_os_index_name(str(row.get("row_id") or "")))
+        # Ручные позиции («+» на странице мастер-прайса): живут в собственном
+        # индексе, а не в индексе каталога, который затирается при
+        # переиндексации поставщика. Индекс подключаем ТОЛЬКО когда в таблице
+        # действительно есть строки: поиск по несуществующему индексу роняет
+        # весь запрос (index_not_found_exception), и мастер-прайс стал бы
+        # пустым у кабинетов, которые ручными позициями не пользуются.
+        if await self._has_manual_rows(cabinet_id):
+            out.append(MANUAL_INDEX)
         return out
+
+    async def _has_manual_rows(self, cabinet_id: str) -> bool:
+        from prodavan.application.modules.equipment_master_price_manual import (
+            MANUAL_TABLE,
+        )
+
+        try:
+            rows = await self._module_rows(cabinet_id, MANUAL_TABLE)
+        except Exception:  # noqa: BLE001 — таблица есть не в каждом инсталляторе
+            return False
+        return bool(rows)
 
     async def _sellers(self, cabinet_id: str) -> list[str]:
         rows = await self._module_rows(cabinet_id, "trusted_sellers")
@@ -320,7 +434,7 @@ class MasterPriceService:
             )
             total += result.total
             for hit in result.hits:
-                row = doc_to_master_row(hit.source)
+                row = doc_to_master_row(hit.source, doc_id=getattr(hit, "doc_id", None))
                 _apply_margin_to_row(row, margins)
                 items.append(row)
         items.sort(key=lambda r: (r["supplier"], r["title"], r["src_hash"]))

@@ -30,7 +30,9 @@ import 'package:prodavan/features/meta/widgets/budget_summary_strip.dart';
 import 'package:prodavan/features/meta/widgets/document_fields_panel.dart';
 import 'package:prodavan/features/meta/widgets/editable_number_cell.dart';
 import 'package:prodavan/features/meta/widgets/file_upload_field.dart';
+import 'package:prodavan/features/meta/widgets/contact_picker_field.dart';
 import 'package:prodavan/features/meta/widgets/project_multiselect_field.dart';
+import 'package:prodavan/features/meta/widgets/server_paged_add_button.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 double? _doubleFromUi(Object? raw) {
@@ -215,6 +217,8 @@ class CollectionViewInterpreter extends StatelessWidget {
                 seeds as RuntimeDataAdapter,
                 tableSlug,
                 stockFilter: uiJson['stock_filter'] == true,
+                addView: uiJson['add_view']?.toString(),
+                onOpenForm: onOpenForm,
               )
             : null;
         if (!hasInline &&
@@ -310,6 +314,8 @@ class CollectionViewInterpreter extends StatelessWidget {
     RuntimeDataAdapter adapter,
     String tableSlug, {
     bool stockFilter = false,
+    String? addView,
+    void Function(String viewSlug, {String? rowId})? onOpenForm,
   }) {
     // stockFilter участвует только в шапке страницы (см. buildModuleScaffoldActions).
     final scheme = Theme.of(context).colorScheme;
@@ -371,6 +377,14 @@ class CollectionViewInterpreter extends StatelessWidget {
                 : null,
             icon: const Icon(Icons.chevron_right),
           ),
+          // «+» справа от пагинации: добавление строки вручную (мастер-прайс).
+          // Строки виртуальной таблицы живут в OpenSearch, поэтому обычный
+          // inline-add («введи название») неприменим — нужна полная форма:
+          // продавец, PN, бренд, цена, наличие.
+          if (addView != null && addView.isNotEmpty && onOpenForm != null) ...[
+            const SizedBox(width: AppSpacing.xs),
+            ServerPagedAddButton(onPressed: () => onOpenForm(addView)),
+          ],
         ],
       ),
         ),
@@ -883,6 +897,7 @@ class CollectionViewInterpreter extends StatelessWidget {
     final priceInFields = <String>[];
     final offerPriceFields = <String>[];
     final stockFields = <String>[];
+    final deadlineFields = <String>[];
     final matchWarn = <String, Set<String>>{};
     for (final c in columns.whereType<Map>()) {
       final field = c['field']?.toString() ?? '';
@@ -894,6 +909,8 @@ class CollectionViewInterpreter extends StatelessWidget {
           offerPriceFields.add(field);
         case 'stock_label':
           stockFields.add(field);
+        case 'deadline':
+          deadlineFields.add(field);
       }
       final when = c['warning_when_match'];
       if (when is List && when.isNotEmpty) {
@@ -903,10 +920,12 @@ class CollectionViewInterpreter extends StatelessWidget {
     if (priceInFields.isEmpty &&
         offerPriceFields.isEmpty &&
         stockFields.isEmpty &&
+        deadlineFields.isEmpty &&
         matchWarn.isEmpty) {
       return rows;
     }
     final warning = context.appColors.warning;
+    final danger = context.appColors.danger;
     return rows.map((row) {
       final item = seeds.itemById(row.id);
       final body = item is Map && item['body'] is Map
@@ -914,6 +933,22 @@ class CollectionViewInterpreter extends StatelessWidget {
           : const <String, dynamic>{};
       final widgets = Map<String, Widget>.from(row.cellWidgets);
       var changed = false;
+      if (deadlineFields.isNotEmpty) {
+        // «Срок подачи»: <1 дня — warning, просрочен — «Истёк» danger.
+        for (final field in deadlineFields) {
+          final state = deadlineStateOf(body[field]);
+          if (state == DeadlineState.soon) {
+            widgets[field] = Text(
+              row.cells[field] ?? '',
+              style: TextStyle(color: warning),
+            );
+            changed = true;
+          } else if (state == DeadlineState.expired) {
+            widgets[field] = Text('Истёк', style: TextStyle(color: danger));
+            changed = true;
+          }
+        }
+      }
       if (priceInFields.isNotEmpty) {
         final label = budgetPriceInLabel(body);
         if (label != null) {
@@ -1976,6 +2011,27 @@ class _CollectionListHeaderState extends State<_CollectionListHeader> {
         readOnly: widget.readOnly,
         subtitleMode: fieldCfg['subtitle']?.toString(),
         onChanged: (ids) => persist(ids),
+      );
+    }
+
+    // Выбор строки связанной таблицы (Получатель на Мастер-прайсе): контакты
+    // общие на кабинет, поэтому читаем их из общего списка таблиц адаптера,
+    // а не из сессионного itemsForTable.
+    if (widgetKind == 'contact_picker') {
+      final contactsTable =
+          fieldCfg['contacts_table']?.toString() ?? 'mail_contacts';
+      final rows = widget.seeds.itemsForTable(contactsTable) as List;
+      return ContactPickerField(
+        label: label.isNotEmpty ? label : columnName,
+        rows: [
+          for (final r in rows)
+            if (r is Map && (r['row_id'] as String?)?.isNotEmpty == true)
+              Map<String, dynamic>.from(r),
+        ],
+        value: value?.toString(),
+        readOnly: widget.readOnly,
+        emptyStyle: fieldCfg['empty_style']?.toString(),
+        onChanged: (rowId) => persist(rowId),
       );
     }
 

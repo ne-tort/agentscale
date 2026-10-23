@@ -148,6 +148,17 @@ def _canonical_mappings() -> dict[str, Any]:
     return {"properties": props}
 
 
+def canonical_doc_mappings() -> dict[str, Any]:
+    """Публичный доступ к каноническому маппингу каталожного документа.
+
+    Ручные позиции мастер-прайса (`equipment_master_price_manual`) живут в
+    отдельном индексе, но читаются ТЕМИ ЖЕ запросами мастер-прайса, поэтому
+    маппинг обязан совпадать поле-в-поле. Отдаём его наружу, а не копируем:
+    копия разъехалась бы с каталогом при следующей правке схемы.
+    """
+    return _canonical_mappings()
+
+
 def _iter_sqlite_source_rows(sqlite_bytes: bytes) -> Iterator[dict[str, Any]]:
     conn = sqlite3.connect(":memory:")
     try:

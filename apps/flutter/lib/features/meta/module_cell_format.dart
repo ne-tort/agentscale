@@ -139,6 +139,22 @@ String formatModuleCell({
     if (raw == null) return 'Нет цены';
     return raw.toString();
   }
+  if (format == 'money') {
+    // Деньги с группировкой разрядов: 1234567.8 → «1 234 567,80 ₽».
+    final v = _asDouble(raw);
+    if (v == null) return '';
+    return formatMoneyRub(v);
+  }
+  if (format == 'percent') {
+    final v = _asDouble(raw);
+    if (v == null) return '';
+    return '${v.toStringAsFixed(1).replaceAll('.', ',').replaceAll(RegExp(r',0$'), '')}%';
+  }
+  if (format == 'deadline') {
+    // «Срок подачи»: относительный остаток от deadline_at до сейчас.
+    // Warning/истёк — красит collection_interpreter (cellWidgets-проход).
+    return formatDeadlineLabel(raw);
+  }
 
   final enumMeta = col['enum'];
   if (enumMeta is Map && enumMeta['labels'] is Map) {
@@ -164,6 +180,26 @@ String formatModuleCell({
         break;
       }
     }
+  }
+
+  // lookup_table: связь без колонки ref (chat-scoped строка ссылается на
+  // chats=all таблицу — например request_lines.tender_id → tenders.title).
+  final lookup = col['lookup_table']?.toString();
+  if (lookup != null && lookup.isNotEmpty && raw != null && itemsForTable != null) {
+    final id = raw.toString().trim();
+    if (id.isEmpty) return '';
+    for (final related in itemsForTable(lookup)) {
+      if (related['row_id']?.toString() != id) continue;
+      final relatedBody = related['body'];
+      if (relatedBody is Map) {
+        final title = relatedBody['title'] ?? relatedBody['name'];
+        if (title != null && title.toString().trim().isNotEmpty) {
+          return title.toString();
+        }
+      }
+      break;
+    }
+    return '';
   }
 
   return raw?.toString() ?? '';
@@ -244,4 +280,57 @@ String _formatEnvelopeDate(dynamic raw) {
   final m = local.month.toString().padLeft(2, '0');
   final d = local.day.toString().padLeft(2, '0');
   return '$y-$m-$d';
+}
+
+/// Деньги ₽ с группировкой разрядов: 1234567.8 → «1 234 567,80 ₽».
+String formatMoneyRub(double v) {
+  final fixed = v.abs() < 0.005 ? '0.00' : v.toStringAsFixed(2);
+  final parts = fixed.split('.');
+  var intPart = parts[0];
+  final sign = intPart.startsWith('-') ? '-' : '';
+  if (sign.isNotEmpty) intPart = intPart.substring(1);
+  final buf = StringBuffer();
+  for (var i = 0; i < intPart.length; i++) {
+    final fromEnd = intPart.length - i;
+    buf.write(intPart[i]);
+    if (fromEnd > 1 && fromEnd % 3 == 1) buf.write(' ');
+  }
+  return '$sign$buf,${parts[1]} ₽';
+}
+
+/// Состояние срока подачи: ok — больше суток, soon — меньше суток,
+/// expired — дедлайн прошёл, none — дедлайн не задан/не распарсен.
+enum DeadlineState { none, ok, soon, expired }
+
+/// Разбор deadline_at (ISO) → состояние относительно [now].
+DeadlineState deadlineStateOf(dynamic raw, {DateTime? now}) {
+  final parsed = _parseDate(raw);
+  if (parsed == null) return DeadlineState.none;
+  final ref = now ?? DateTime.now();
+  final left = parsed.difference(ref);
+  if (left.isNegative) return DeadlineState.expired;
+  if (left < const Duration(days: 1)) return DeadlineState.soon;
+  return DeadlineState.ok;
+}
+
+/// «Срок подачи»: «2 д. 12 ч.» / «12 ч. 30 м.» / «Истёк» / «—».
+String formatDeadlineLabel(dynamic raw, {DateTime? now}) {
+  final parsed = _parseDate(raw);
+  if (parsed == null) return '—';
+  final ref = now ?? DateTime.now();
+  final left = parsed.difference(ref);
+  if (left.isNegative) return 'Истёк';
+  final days = left.inDays;
+  final hours = left.inHours % 24;
+  final minutes = left.inMinutes % 60;
+  if (days > 0) return '$days д. $hours ч.';
+  if (hours > 0) return '$hours ч. $minutes м.';
+  return '$minutes м.';
+}
+
+DateTime? _parseDate(dynamic raw) {
+  if (raw == null) return null;
+  final text = raw.toString().trim();
+  if (text.isEmpty) return null;
+  return DateTime.tryParse(text);
 }

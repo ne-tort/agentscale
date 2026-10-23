@@ -5,7 +5,7 @@
 # metasyntax actions (documents.convert). Non-pdf routes run in-proc
 # (openpyxl/python-docx) and never touch this service.
 # The `agentscale` namespace is set by the base kustomization (namespace:
-# agentscale), matching agentscale-api / searxng / minio placement.
+# agentscale), matching agentscale-api / searchnet / minio placement.
 apiVersion: v1
 kind: Service
 metadata:

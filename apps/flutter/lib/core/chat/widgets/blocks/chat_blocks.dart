@@ -127,13 +127,22 @@ class _ChatMutedLineState extends State<ChatMutedLine> {
           padding: EdgeInsets.symmetric(vertical: AppSpacing.xs / 2),
           child: Row(
             children: [
+              // overflow.ellipsis + maxLines:1 — строка активности должна
+              // занимать ОДНУ строку, как и было задумано («Поиск в интернете…»
+              // без переноса). Без maxLines длинный label вместе с бейджем/trailing
+              // переносился на следующую строку и читался как отдельный блок.
               Expanded(
                 child: Text(
                   widget.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: _mutedTextStyle(context).copyWith(color: widget.color),
                 ),
               ),
-              if (widget.trailing != null) widget.trailing!,
+              if (widget.trailing != null) ...[
+                const SizedBox(width: 6),
+                widget.trailing!,
+              ],
               if (widget.onTap != null && showChevron)
                 Padding(
                   padding: const EdgeInsets.only(left: 4),
@@ -291,43 +300,6 @@ class ChatMarkdownBody extends StatelessWidget {
         tableCellsPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
         tableColumnWidth: const IntrinsicColumnWidth(),
         tableScrollbarThumbVisibility: true,
-      ),
-    );
-  }
-}
-
-/// Blinking cursor shown while assistant text streams.
-class _StreamingCursor extends StatefulWidget {
-  const _StreamingCursor();
-
-  @override
-  State<_StreamingCursor> createState() => _StreamingCursorState();
-}
-
-class _StreamingCursorState extends State<_StreamingCursor>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _controller = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 600),
-  )..repeat(reverse: true);
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final fontSize = Theme.of(context).textTheme.bodyMedium?.fontSize ?? 14;
-    return FadeTransition(
-      opacity: _controller,
-      child: Container(
-        width: 2,
-        height: fontSize * 1.2,
-        margin: const EdgeInsets.only(top: 2),
-        color: scheme.primary,
       ),
     );
   }
@@ -583,8 +555,11 @@ class _AssistantStreamBlockState extends State<AssistantStreamBlock> {
           if (widget.streaming) ...[
             // Markdown while streaming too — no plain-text → markdown reflow
             // jump when the block completes.
-            ChatMarkdownBody(text: widget.text),
-            const _StreamingCursor(),
+            // Курсор-черта убран: он рисовался ОТДЕЛЬНОЙ строкой под текстом,
+            // и «Поиск в интернете…» с мигающей чертой на следующей строке
+            // выглядело как сломанная вёрстка. Пока идёт стриминг, работу
+            // агента показывает строка инструмента/индикатор ниже.
+            if (widget.text.isNotEmpty) ChatMarkdownBody(text: widget.text),
           ] else if (widget.text.isNotEmpty)
             ChatMarkdownBody(text: widget.text),
           if (widget.cancelled)

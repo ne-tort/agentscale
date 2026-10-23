@@ -530,6 +530,26 @@ class ProjectRuntimeModuleService:
             session_id=stamp_sid,
         )
         await self._session.commit()
+        # «Интернет товары»: каждая запись сразу индексируется в ОТДЕЛЬНЫЙ
+        # OpenSearch-индекс кабинета (не в общий каталог), чтобы найденный в
+        # интернете товар конкурировал с каталогом по цене в подборе.
+        # Best-effort: сбой индексации не отменяет запись строки.
+        if table_slug == "web_products" and module_id == "mod_equipment":
+            try:
+                from prodavan.application.modules.web_products_opensearch import (
+                    index_web_product,
+                )
+
+                await index_web_product(
+                    self._session,
+                    cabinet_id=project.cabinet_id,
+                    row_id=str(row.get("row_id") or row_id or ""),
+                    body=body,
+                )
+            except Exception:
+                logger.exception(
+                    "web_products indexing after write failed project=%s", project_id
+                )
         remat: dict[str, Any] | None = None
         try:
             from prodavan.application.projects.workspace_sync_policy import (
@@ -607,6 +627,20 @@ class ProjectRuntimeModuleService:
         project = await self._require_project(
             project_id=project_id, principal=principal, employee=employee, write=True
         )
+        # WAVE16: виртуальные таблицы (equipment_search/master_price) — строки
+        # живут в OpenSearch, удаление идёт напрямую по row_id = "os:{doc_id}".
+        if table_slug in ("equipment_search", "master_price") and row_id.startswith("os:"):
+            from prodavan.application.modules.equipment_master_price import (
+                delete_virtual_row,
+            )
+
+            return await delete_virtual_row(
+                self._session,
+                cabinet_id=str(project.cabinet_id or ""),
+                row_id=row_id,
+                principal=principal,
+                employee=employee,
+            )
         inst = await self._sot_for_project(
             project_id=project_id, module_id=module_id, write=True
         )
@@ -743,6 +777,16 @@ class ProjectRuntimeModuleService:
             session_id=session_id,
         )
         await ModuleActionExecutor(self._session).maybe_auto_budget_sync(
+            cabinet_id=cabinet_id,
+            project_id=project_id,
+            module_id=module_id,
+            table_slug=table_slug,
+            row_id=row_id,
+            principal=principal,
+            employee=employee,
+            session_id=session_id,
+        )
+        await ModuleActionExecutor(self._session).maybe_sync_master_price_manual(
             cabinet_id=cabinet_id,
             project_id=project_id,
             module_id=module_id,
