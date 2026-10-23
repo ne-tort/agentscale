@@ -98,6 +98,9 @@ resource "null_resource" "k3s_server" {
     preflight = filesha256("${path.module}/templates/k3s-preflight.sh.tpl")
     post_heal = filesha256("${path.module}/templates/post-k3s-heal.sh.tpl")
     tls_tpl   = filesha256("${path.module}/templates/agentscale-tls.sh.tpl")
+    # Изменение этих файлов должно пересоздавать provisioner'ы.
+    k3s_cfg = filesha256("${path.module}/templates/k3s-config.yaml.tpl")
+    guards  = filesha256("${path.module}/../../../k3s/node-manifests/platform-guards.yaml")
     # SSH coords in triggers so provisioners may only use self.*
     ssh_host     = var.ssh_host
     ssh_port     = tostring(var.ssh_port)
@@ -151,9 +154,42 @@ resource "null_resource" "k3s_server" {
 
   provisioner "file" {
     content = templatefile("${path.module}/templates/post-k3s-heal.sh.tpl", {
-      http_port = var.http_port
+      http_port     = var.http_port
+      dns_upstreams = var.dns_upstreams
     })
     destination = "/tmp/prodavan-post-k3s-heal.sh"
+    connection {
+      type        = "ssh"
+      host        = self.triggers.ssh_host
+      port        = tonumber(self.triggers.ssh_port)
+      user        = self.triggers.ssh_user
+      private_key = file(self.triggers.ssh_key_path)
+      timeout     = "10m"
+    }
+  }
+
+  # kubelet: резервы под систему и пороги выселения — чтобы узел выселял поды
+  # ДО того, как ядро уйдёт в глобальный OOM (инцидент 2026-10-23: свободно
+  # 62 МБ, apiserver перестал отвечать, нода «зависла»).
+  provisioner "file" {
+    content     = templatefile("${path.module}/templates/k3s-config.yaml.tpl", {})
+    destination = "/tmp/prodavan-k3s-config.yaml"
+    connection {
+      type        = "ssh"
+      host        = self.triggers.ssh_host
+      port        = tonumber(self.triggers.ssh_port)
+      user        = self.triggers.ssh_user
+      private_key = file(self.triggers.ssh_key_path)
+      timeout     = "10m"
+    }
+  }
+
+  # Бюджеты памяти для namespace'ов вне GitOps (argocd, kube-system,
+  # agent-sandbox-system): k3s применяет всё из server/manifests сам, поэтому
+  # объект переживает рестарт и не зависит от ручного kubectl.
+  provisioner "file" {
+    content     = file("${path.module}/../../../k3s/node-manifests/platform-guards.yaml")
+    destination = "/tmp/prodavan-platform-guards.yaml"
     connection {
       type        = "ssh"
       host        = self.triggers.ssh_host
@@ -200,6 +236,10 @@ resource "null_resource" "k3s_server" {
       "sudo -n sh -c 'printf \"net.ipv4.ip_unprivileged_port_start=79\\n\" > /etc/sysctl.d/99-agentscale-unprivileged-ports.conf && sysctl -w net.ipv4.ip_unprivileged_port_start=79 >/dev/null'",
       "sudo -n mkdir -p /var/lib/rancher/k3s/server/manifests /etc/rancher/k3s /etc/systemd/system/k3s.service.d /usr/local/lib/prodavan",
       "sudo -n cp /tmp/prodavan-traefik-port.yaml /var/lib/rancher/k3s/server/manifests/prodavan-traefik-port.yaml",
+      # Защита от OOM: пороги kubelet'а + бюджеты памяти кластерных namespace.
+      # config.yaml читается k3s ДО старта сервера, поэтому кладём его раньше.
+      "sudo -n cp /tmp/prodavan-k3s-config.yaml /etc/rancher/k3s/config.yaml",
+      "sudo -n cp /tmp/prodavan-platform-guards.yaml /var/lib/rancher/k3s/server/manifests/prodavan-platform-guards.yaml",
       "sudo -n cp /tmp/prodavan-boot-heal.conf /etc/systemd/system/k3s.service.d/prodavan-boot-heal.conf",
       "python3 -c \"from pathlib import Path; p=Path('/tmp/prodavan-k3s-preflight.sh'); Path('/tmp/prodavan-k3s-preflight.lf').write_bytes(p.read_bytes().replace(b'\\r', b''))\"",
       "python3 -c \"from pathlib import Path; p=Path('/tmp/prodavan-post-k3s-heal.sh'); Path('/tmp/prodavan-post-k3s-heal.lf').write_bytes(p.read_bytes().replace(b'\\r', b''))\"",

@@ -1,0 +1,53 @@
+# Бюджеты памяти для namespace приложения (agentscale / agentscale-dev).
+#
+# Namespace подставляется NamespaceTransformer'ом оверлея (поле namespace здесь
+# намеренно не задано), поэтому один и тот же манифест работает в dev и prod.
+#
+# Зачем: сумма лимитов контейнеров на проде — 17.8 ГиБ при allocatable 14.9 ГиБ
+# (перекоммит 119%), а нода уже дважды уходила в глобальный OOM (2026-10-21,
+# 2026-10-22, 2026-10-23). Само по себе это не авария: k8s умеет перекоммит, но
+# только пока одновременно не пикнули все. Ограничители ниже не дают одному
+# namespace уйти в бесконечный рост:
+#
+#   * LimitRange.default — поды без явных limits получают осмысленный потолок
+#     вместо BestEffort (именно BestEffort ядро убивает первым);
+#   * LimitRange.max — один контейнер не может занять больше 4 ГиБ
+#     (searchnet с браузерами объявляет ровно 4 ГиБ, поэтому 4 — не случайное);
+#   * ResourceQuota — потолок на namespace с запасом над текущим потреблением,
+#     чтобы ограничение ловило аномалию, а не мешало обычному деплою.
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: app-container-limits
+  labels:
+    app.kubernetes.io/part-of: agentscale
+    agentscale.io/component: oom-guard
+spec:
+  limits:
+    - type: Container
+      defaultRequest:
+        cpu: 50m
+        memory: 128Mi
+      default:
+        cpu: 500m
+        memory: 512Mi
+      max:
+        cpu: "2"
+        memory: 4Gi
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: app-budget
+  labels:
+    app.kubernetes.io/part-of: agentscale
+    agentscale.io/component: oom-guard
+spec:
+  hard:
+    # Замер на проде до включения: requests 5.9 ГиБ, limits 17.8 ГиБ, 14 подов.
+    # Потолки выше фактических — ограничивают аномалию, а не работу.
+    requests.memory: 12Gi
+    limits.memory: 26Gi
+    requests.cpu: "8"
+    limits.cpu: "14"
+    pods: "45"
