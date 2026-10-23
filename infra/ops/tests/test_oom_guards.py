@@ -169,3 +169,29 @@ def test_dns_fix_survives_k3s_restart() -> None:
     prod_env = (_TERRAFORM / "environments/prod/main.tf").read_text(encoding="utf-8")
     assert "dns_upstreams" in prod_env
     assert "172.19.0.2 8.8.8.8 1.1.1.1" in prod_env
+
+def test_prod_app_applies_only_drifted_resources() -> None:
+    """Синк прода не должен трогать уже связанные PVC.
+
+    Регресс 2026-10-23: Argo применял ВСЕ ресурсы на каждом синке. В live-спеке
+    PVC `agentscale-postgres-data` есть volumeName и storageClassName (их
+    проставил провижинер), в манифесте их нет — попытка их убрать даёт
+    `spec is immutable after creation except resources.requests`, и синк падает
+    целиком, блокируя выкатку образов и миграцию.
+
+    `ignoreDifferences` на эти поля уже есть, поэтому PVC считается
+    синхронным — достаточно не применять синхронные ресурсы повторно.
+    """
+    app = yaml.safe_load(
+        (_INFRA / "argocd/apps/agentscale-prod.yaml").read_text(encoding="utf-8")
+    )
+    opts = app["spec"]["syncPolicy"]["syncOptions"]
+    assert "ApplyOutOfSyncOnly=true" in opts
+
+    ignored = {
+        (item.get("kind"), pointer)
+        for item in app["spec"].get("ignoreDifferences", [])
+        for pointer in item.get("jsonPointers", [])
+    }
+    assert ("PersistentVolumeClaim", "/spec/volumeName") in ignored
+    assert ("PersistentVolumeClaim", "/spec/storageClassName") in ignored
