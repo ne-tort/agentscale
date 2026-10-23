@@ -433,6 +433,35 @@ def register_tasks(app) -> None:
         logger.info("celery task %s", job_names.SWEEP_READY_BUILDS)
         return run_async(_run())
 
+    @app.task(name=job_names.SWEEP_WEB_PRODUCTS_TTL, bind=False)
+    def sweep_web_products_ttl() -> dict[str, Any]:
+        """TTL 72ч для «Интернет товары»: удалить строки старше трёх суток.
+
+        Товар, найденный агентом в интернет-магазине, не должен жить в базе
+        вечно: цена устаревает, а подбор продолжает на неё ссылаться.
+        Правка строки (повторный `web_product_add`) обновляет `updated_at`
+        и продлевает срок.
+        """
+        from prodavan.application.modules.web_products_ttl_sweep import (
+            sweep_expired_web_products,
+        )
+        from prodavan.infrastructure.persistence.database import get_session_factory
+
+        async def _run() -> dict[str, Any]:
+            async def _work() -> dict[str, Any]:
+                factory = get_session_factory()
+                async with factory() as session:
+                    return await sweep_expired_web_products(session)
+
+            return await run_with_job_lock(
+                "sweep_web_products_ttl",
+                ttl_sec=1800,
+                fn=_work,
+            )
+
+        logger.info("celery task %s", job_names.SWEEP_WEB_PRODUCTS_TTL)
+        return run_async(_run())
+
     @app.task(name=job_names.WEBHOOK_DELIVER, bind=False)
     def webhook_deliver() -> dict[str, Any]:
         """Исходящие вебхуки: доставка outbox (подписанные POST + ретраи)."""

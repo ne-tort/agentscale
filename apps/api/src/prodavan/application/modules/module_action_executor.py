@@ -327,6 +327,40 @@ class ModuleActionExecutor:
                 session_id=session_id,
             )
 
+        if kind == "equipment.tender_attach":
+            return await self._tender_attach(
+                cabinet_id=cabinet_id,
+                module_id=module_id,
+                params=params,
+                row_id=row_id,
+                principal=principal,
+                employee=employee,
+                project_id=project_id,
+                session_id=session_id,
+            )
+
+        if kind == "equipment.mail_send":
+            return await self._mail_send(
+                cabinet_id=cabinet_id,
+                module_id=module_id,
+                row_id=row_id,
+                principal=principal,
+                employee=employee,
+                project_id=project_id,
+                session_id=session_id,
+            )
+
+        if kind == "equipment.master_price_mail":
+            return await self._master_price_mail(
+                cabinet_id=cabinet_id,
+                module_id=module_id,
+                params=params,
+                principal=principal,
+                employee=employee,
+                project_id=project_id,
+                session_id=session_id,
+            )
+
         if kind == "equipment.procurement_apply":
             return await self._procurement_apply(
                 cabinet_id=cabinet_id,
@@ -452,7 +486,9 @@ class ModuleActionExecutor:
             employee=employee,
             session_id=session_id,
         )
-        return await EquipmentPipelineService(self._session).run(io, materialize=materialize)
+        return await EquipmentPipelineService(
+            self._session, cabinet_id=cabinet_id
+        ).run(io, materialize=materialize)
 
     async def _ready_builds_pipeline(
         self,
@@ -584,7 +620,7 @@ class ModuleActionExecutor:
             EquipmentPipelineService,
         )
 
-        pipeline = await EquipmentPipelineService(self._session).run(io, materialize=True)
+        pipeline = await EquipmentPipelineService(self._session, cabinet_id=cabinet_id).run(io, materialize=True)
 
         # возвращаем агенту зеркальные группы: без них состав связанной сборки
         # не прочитать прицельно (found_groups_list фильтруется по build_id)
@@ -612,6 +648,215 @@ class ModuleActionExecutor:
                 for k in ("offers_created", "builds_updated", "budget_created", "budget_updated")
             },
         }
+
+    async def _tender_attach(
+        self,
+        *,
+        cabinet_id: str,
+        module_id: str,
+        params: dict[str, Any],
+        row_id: str | None,
+        principal: Principal,
+        employee: EmployeeRow | None,
+        project_id: str | None = None,
+        session_id: str | None = None,
+    ) -> dict[str, Any]:
+        """WAVE14: «взять тендер в работу» — позиции тендера → request_lines чата.
+
+        Каждая позиция tenders.lines_json копируется в request_lines АКТИВНОГО
+        чата со связкой tender_id (row_id тендера) + tender_line_id (id позиции
+        в lines_json). Идемпотентно: повторный вызов обновляет title/
+        part_number/qty уже импортированных позиций и добавляет новые, а не
+        дублирует. Удалённые из тендера позиции в чате не трогаем — по ним
+        мог быть прогресс (группы/офферы/бюджет). После импорта — штатный
+        прогон пайплайна (материализация офферов, бюджет, закупка, тендеры).
+        """
+        from prodavan.application.modules.equipment_offers_service import (
+            ModuleRowIO,
+            TENDERS_TABLE,
+        )
+
+        tender_id = (row_id or str(params.get("tender_id") or "")).strip()
+        if not tender_id:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="row_id (тендер) обязателен",
+            )
+
+        io = ModuleRowIO(
+            self._session,
+            cabinet_id=cabinet_id,
+            project_id=project_id,
+            principal=principal,
+            employee=employee,
+            session_id=session_id,
+        )
+
+        # Тендеры chats=all → io.list отдаёт строки независимо от чата.
+        tenders = await io.list(TENDERS_TABLE)
+        tender = next(
+            (t for t in tenders if str(t.get("row_id") or "") == tender_id),
+            None,
+        )
+        if tender is None:
+            raise AppError(
+                code="NOT_FOUND",
+                title="Not Found",
+                status=404,
+                detail=f"тендер не найден: {tender_id}",
+            )
+
+        tbody = tender.get("body") or {}
+        raw_lines = tbody.get("lines_json")
+        lines = [x for x in raw_lines if isinstance(x, dict)] if isinstance(raw_lines, list) else []
+
+        existing = await io.list("request_lines")
+        by_tender_line: dict[str, dict[str, Any]] = {}
+        for r in existing:
+            rbody = r.get("body") or {}
+            if str(rbody.get("tender_id") or "") != tender_id:
+                continue
+            tlid = str(rbody.get("tender_line_id") or "")
+            if tlid:
+                by_tender_line[tlid] = r
+
+        created = 0
+        updated = 0
+        for idx, line in enumerate(lines):
+            title = str(line.get("title") or "").strip()
+            if not title:
+                continue
+            tlid = str(line.get("id") or "").strip() or f"tl{idx + 1}"
+            qty_raw = line.get("qty")
+            try:
+                qty = float(qty_raw) if qty_raw not in (None, "") else 1.0
+            except (TypeError, ValueError):
+                qty = 1.0
+            part_number = str(line.get("part_number") or "").strip()
+            found = by_tender_line.get(tlid)
+            line_comment = str(line.get("comment") or "").strip()
+            if found is None:
+                await io.create(
+                    "request_lines",
+                    {
+                        "title": title,
+                        "part_number": part_number,
+                        "qty": qty,
+                        "comment": line_comment,
+                        "tender_id": tender_id,
+                        "tender_line_id": tlid,
+                    },
+                )
+                created += 1
+                continue
+            fbody = dict(found.get("body") or {})
+            patch: dict[str, Any] = {}
+            if str(fbody.get("title") or "") != title:
+                patch["title"] = title
+            if str(fbody.get("part_number") or "") != part_number:
+                patch["part_number"] = part_number
+            if fbody.get("qty") != qty:
+                patch["qty"] = qty
+            if str(fbody.get("comment") or "") != line_comment:
+                patch["comment"] = line_comment
+            if patch:
+                fbody.update(patch)
+                await io.update("request_lines", str(found.get("row_id") or ""), fbody)
+                updated += 1
+
+        # метка «в работе» на самом тендере (идемпотентно)
+        chat_id = (session_id or "").strip()
+        if chat_id:
+            imported = tbody.get("imported_chat_ids")
+            imported_list = [str(x) for x in imported] if isinstance(imported, list) else []
+            if chat_id not in imported_list:
+                imported_list.append(chat_id)
+                new_body = dict(tbody)
+                new_body["imported_chat_ids"] = imported_list
+                await io.update(TENDERS_TABLE, tender_id, new_body)
+
+        # Материализация офферов + бюджет + закупка + агрегаты тендера.
+        from prodavan.application.modules.equipment_offers_service import (
+            EquipmentPipelineService,
+        )
+
+        pipeline = await EquipmentPipelineService(self._session, cabinet_id=cabinet_id).run(io, materialize=True)
+
+        return {
+            "ok": True,
+            "tender_id": tender_id,
+            "lines_total": len(lines),
+            "created": created,
+            "updated": updated,
+            "session_id": chat_id or None,
+            "pipeline": {
+                k: pipeline.get(k)
+                for k in ("offers_created", "budget_created", "budget_updated", "tenders_updated")
+            },
+        }
+
+    async def _mail_send(
+        self,
+        *,
+        cabinet_id: str,
+        module_id: str,
+        row_id: str | None,
+        principal: Principal,
+        employee: EmployeeRow | None,
+        project_id: str | None = None,
+        session_id: str | None = None,
+    ) -> dict[str, Any]:
+        """WAVE16: отправить письмо из «Исходящих писем» (mail_outbox).
+
+        Строка queued → отправляем через профиль mail_senders; статус и ошибка
+        пишутся обратно (sent_at / error). Повторная отправка возможна
+        (status не блокирует).
+        """
+        from prodavan.application.modules.equipment_mail import MailSendError, send_mail_for_row
+        from prodavan.application.modules.equipment_offers_service import ModuleRowIO
+
+        if not row_id:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="row_id (письмо) обязателен",
+            )
+        io = ModuleRowIO(
+            self._session,
+            cabinet_id=cabinet_id,
+            project_id=project_id,
+            principal=principal,
+            employee=employee,
+            session_id=session_id,
+        )
+        rows = await io.list("mail_outbox")
+        row = next((r for r in rows if str(r.get("row_id") or "") == row_id), None)
+        if row is None:
+            raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="mail row not found")
+        body = dict(row.get("body") or {})
+        try:
+            await send_mail_for_row(
+                self._session,
+                cabinet_id=cabinet_id,
+                row_body=body,
+                principal=principal,
+                employee=employee,
+            )
+        except (MailSendError, AppError) as exc:
+            body["status"] = "failed"
+            body["error"] = str(exc)[:500]
+            await io.update("mail_outbox", row_id, body)
+            raise
+        from datetime import UTC, datetime as _dt
+
+        body["status"] = "sent"
+        body["error"] = ""
+        body["sent_at"] = _dt.now(UTC).isoformat(timespec="seconds")
+        await io.update("mail_outbox", row_id, body)
+        return {"ok": True, "status": "sent"}
 
     async def _equipment_match_to_line(
         self,
@@ -790,19 +1035,15 @@ class ModuleActionExecutor:
             "match_kind": match_kind,
         }
 
-    async def _master_price_export(
+    async def _build_master_price_bytes(
         self,
         *,
         cabinet_id: str,
-        module_id: str,
         params: dict[str, Any],
         principal: Principal,
         employee: EmployeeRow | None,
-        project_id: str | None = None,
-    ) -> dict[str, Any]:
-        """Мастер-прайс xlsx: строки батчами из OpenSearch (search_after),
-        заполнение шаблона «Прайс» (layout легаси-Commerce)."""
-        from prodavan.application.documents.service import DocumentsService
+    ) -> tuple[bytes, int]:
+        """Собрать xlsx мастер-прайса (общий путь для «Скачать» и «Отправить»)."""
         from prodavan.application.modules.equipment_budget import load_default_template
         from prodavan.application.modules.equipment_master_price import (
             MasterPriceService,
@@ -853,6 +1094,28 @@ class ModuleActionExecutor:
                 status=422,
                 detail="no master price rows (check supplier master_price flags)",
             )
+        return data, rows_count
+
+    async def _master_price_export(
+        self,
+        *,
+        cabinet_id: str,
+        module_id: str,
+        params: dict[str, Any],
+        principal: Principal,
+        employee: EmployeeRow | None,
+        project_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Мастер-прайс xlsx: строки батчами из OpenSearch (search_after),
+        заполнение шаблона «Прайс» (layout легаси-Commerce)."""
+        from prodavan.application.documents.service import DocumentsService
+
+        data, rows_count = await self._build_master_price_bytes(
+            cabinet_id=cabinet_id,
+            params=params,
+            principal=principal,
+            employee=employee,
+        )
         company_id = await self._resolve_documents_company_id(
             cabinet_id=cabinet_id, project_id=project_id
         )
@@ -874,6 +1137,194 @@ class ModuleActionExecutor:
             employee=employee,
         )
         return {"kind": "equipment.master_price", "file_ref": ref, "rows": rows_count}
+
+    async def _master_price_mail(
+        self,
+        *,
+        cabinet_id: str,
+        module_id: str,
+        params: dict[str, Any],
+        principal: Principal,
+        employee: EmployeeRow | None,
+        project_id: str | None = None,
+        session_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Отправить мастер-прайс письмом получателю со страницы.
+
+        Получатель — контакт из mail_contacts, выбранный в виджете «Получатель»
+        (master_price_mail.recipient_id). Отправитель — профиль mail_senders
+        с именем ``price``: письмо про прайс должно уходить из выделенного
+        ящика, а не из «ящика по умолчанию». Каждая отправка пишется в
+        mail_outbox, чтобы результат был виден в «Исходящих».
+        """
+        from prodavan.application.modules.equipment_mail import (
+            DEFAULT_MAX_ATTACHMENT_MB,
+            MailSendError,
+            list_sender_rows,
+            resolve_recipient,
+            resolve_sender,
+            send_via_profile,
+        )
+        from prodavan.application.modules.equipment_offers_service import ModuleRowIO
+
+        settings_table = str(params.get("mail_settings_table") or "master_price_mail")
+        sender_name = str(params.get("sender_name") or "price")
+
+        # Настройки страницы: recipient_id живёт в единственной строке таблицы
+        # (её создаёт list_header, если строки ещё нет).
+        settings_rows = await self._list_rows_for_scope(
+            cabinet_id=cabinet_id,
+            project_id=project_id,
+            module_id=module_id,
+            table_slug=settings_table,
+            principal=principal,
+            employee=employee,
+            session_id=session_id,
+        )
+        settings = (settings_rows[0].get("body") if settings_rows else {}) or {}
+        contact_id = str(settings.get("recipient_id") or "").strip()
+
+        contact_rows = await self._list_rows_for_scope(
+            cabinet_id=cabinet_id,
+            project_id=project_id,
+            module_id=module_id,
+            table_slug="mail_contacts",
+            principal=principal,
+            employee=employee,
+            session_id=session_id,
+        )
+        to_address = resolve_recipient(
+            contact_rows,
+            contact_id=contact_id,
+            # Фолбэк: страница может ещё не иметь выбранного контакта, но
+            # профиль-шаблон s4b в кабинете уже есть (сидируется при init).
+            contact_name=str(params.get("recipient_name") or "s4b"),
+        )
+
+        sender_rows = await self._list_rows_for_scope(
+            cabinet_id=cabinet_id,
+            project_id=project_id,
+            module_id=module_id,
+            table_slug="mail_senders",
+            principal=principal,
+            employee=employee,
+            session_id=session_id,
+        )
+        if not sender_rows:
+            # Профили общие на кабинет: в проектном контуре их может не быть,
+            # хотя в кабинете они настроены.
+            sender_rows = await list_sender_rows(
+                self._session,
+                cabinet_id=cabinet_id,
+                principal=principal,
+                employee=employee,
+            )
+        profile = resolve_sender(sender_rows, sender_name=sender_name)
+
+        data, rows_count = await self._build_master_price_bytes(
+            cabinet_id=cabinet_id,
+            params=params,
+            principal=principal,
+            employee=employee,
+        )
+        max_bytes = DEFAULT_MAX_ATTACHMENT_MB * 1024 * 1024
+        if len(data) > max_bytes:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail=(
+                    f"мастер-прайс {len(data) // (1024 * 1024)} МБ больше лимита "
+                    f"вложения {DEFAULT_MAX_ATTACHMENT_MB} МБ — скачайте файлом"
+                ),
+            )
+
+        subject = str(settings.get("subject") or "").strip() or "Мастер-прайс"
+        comment = str(settings.get("comment") or "").strip()
+        body_text = (
+            f"Мастер-прайс во вложении.\n\nПозиций: {rows_count}.\n"
+            f"Сформирован: {datetime.now(UTC).strftime('%d.%m.%Y %H:%M')} UTC."
+        )
+        if comment:
+            body_text += f"\n\n{comment}"
+
+        io = ModuleRowIO(
+            self._session,
+            cabinet_id=cabinet_id,
+            project_id=project_id,
+            principal=principal,
+            employee=employee,
+            session_id=session_id,
+        )
+        outbox = await io.create(
+            "mail_outbox",
+            {
+                "sender_id": profile.get("_row_id") or "",
+                "to_address": to_address,
+                "subject": subject,
+                "body_text": body_text,
+                "status": "queued",
+            },
+        )
+        outbox_id = str(outbox.get("row_id") or "")
+        try:
+            send_via_profile(
+                profile,
+                to_address=to_address,
+                subject=subject,
+                body_text=body_text,
+                attachments=[
+                    (
+                        "master-price.xlsx",
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        data,
+                    )
+                ],
+            )
+        except (MailSendError, AppError) as exc:
+            if outbox_id:
+                await io.update(
+                    "mail_outbox",
+                    outbox_id,
+                    {
+                        "sender_id": profile.get("_row_id") or "",
+                        "to_address": to_address,
+                        "subject": subject,
+                        "body_text": body_text,
+                        "status": "failed",
+                        "error": str(exc)[:500],
+                    },
+                )
+            raise AppError(
+                code="MAIL_SEND_FAILED",
+                title="Mail send failed",
+                status=502,
+                detail=f"письмо не отправлено: {exc}",
+            ) from exc
+        if outbox_id:
+            await io.update(
+                "mail_outbox",
+                outbox_id,
+                {
+                    "sender_id": profile.get("_row_id") or "",
+                    "to_address": to_address,
+                    "subject": subject,
+                    "body_text": body_text,
+                    "status": "sent",
+                    "error": "",
+                    "sent_at": datetime.now(UTC).isoformat(timespec="seconds"),
+                },
+            )
+        return {
+            "kind": "equipment.master_price_mail",
+            "ok": True,
+            "to": to_address,
+            "from": str(profile.get("from_address") or ""),
+            "sender": str(profile.get("name") or ""),
+            "rows": rows_count,
+            "bytes": len(data),
+            "outbox_id": outbox_id,
+        }
 
     async def _procurement_apply(
         self,
@@ -1439,6 +1890,105 @@ class ModuleActionExecutor:
             project_id=project_id,
             previous_body=previous_body,
         )
+
+    async def maybe_sync_master_price_manual(
+        self,
+        *,
+        cabinet_id: str,
+        module_id: str,
+        table_slug: str,
+        row_id: str,
+        principal: Principal,
+        employee: EmployeeRow | None,
+        project_id: str | None = None,
+        session_id: str | None = None,
+    ) -> None:
+        """Ручная позиция мастер-прайса → документ в OpenSearch.
+
+        Мастер-прайс — виртуальная таблица поверх OS, поэтому строка из формы
+        сама по себе нигде не появится: её надо положить в индекс. Заодно здесь
+        подставляется продавец, если форма его не прислала (форма сохраняет
+        поля по одному, и первым может уйти «Наименование» — без продавца
+        строка не прошла бы фильтр `terms.supplier` и молча выпала из прайса).
+        """
+        from prodavan.application.modules.equipment_master_price_manual import (
+            MANUAL_TABLE,
+            index_manual_row,
+        )
+
+        if table_slug != MANUAL_TABLE or not row_id:
+            return
+        rows = await self._list_module_rows(
+            cabinet_id=cabinet_id,
+            project_id=project_id,
+            module_id=module_id,
+            table_slug=table_slug,
+            principal=principal,
+            employee=employee,
+            session_id=session_id,
+        )
+        target = next((r for r in rows if str(r.get("row_id")) == row_id), None)
+        if target is None:
+            return
+        body = dict(target.get("body") or {})
+        if not str(body.get("supplier") or "").strip():
+            seller = await self._default_master_price_seller(cabinet_id)
+            if seller:
+                body["supplier"] = seller
+                from prodavan.application.modules.module_instance_service import (
+                    ModuleInstanceService,
+                )
+
+                inst = await ModuleInstanceService(self._session).ensure_cabinet_instance(
+                    cabinet_id=cabinet_id, module_id=module_id
+                )
+                await ModuleInstanceService(self._session).upsert_data_row(
+                    instance_id=inst.id,
+                    table_slug=table_slug,
+                    row_id=row_id,
+                    body=body,
+                    session_id=session_id,
+                )
+                await self._session.commit()
+        await index_manual_row(
+            self._session,
+            cabinet_id=cabinet_id,
+            body=body,
+            project_id=project_id,
+        )
+
+    async def _default_master_price_seller(self, cabinet_id: str) -> str:
+        """Продавец по умолчанию: «ИТ Взлёт», если он отмечен для мастер-прайса.
+
+        Иначе — первый по алфавиту из отмеченных (та же логика, что в форме:
+        `manual_sellers` сортирует «ИТ Взлёт» первым, остальных по алфавиту).
+
+        Читаем instance-строки напрямую, а не через `CabinetModuleService`:
+        там проверка доступа требует principal/employee, а этот код идёт из
+        системного хука записи (в т.ч. из MCP и внешнего API), где их может не
+        быть. Список продавцов — не секрет и не пользовательские данные.
+        """
+        from prodavan.application.modules.equipment_master_price_manual import (
+            manual_sellers,
+        )
+        from prodavan.application.modules.module_instance_service import (
+            ModuleInstanceService,
+        )
+
+        try:
+            inst = await ModuleInstanceService(self._session).ensure_cabinet_instance(
+                cabinet_id=cabinet_id, module_id="mod_equipment"
+            )
+            rows = await ModuleInstanceService(self._session).list_data_rows(
+                instance_id=inst.id, table_slug="trusted_sellers"
+            )
+        except Exception:  # noqa: BLE001 — нет инстанса/таблицы: остаёмся без дефолта
+            logger.debug(
+                "master_price default seller lookup failed cabinet=%s", cabinet_id
+            )
+            return ""
+        sellers = manual_sellers([r for r in rows if isinstance(r, dict)])
+        return sellers[0] if sellers else ""
 
     async def maybe_auto_index_opensearch(
         self,

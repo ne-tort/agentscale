@@ -270,8 +270,11 @@ def build_openclaw_config(
             mcp_block["allow_servers"] = list(policy.mcp_allowlist)
         cfg["mcp"] = mcp_block
 
-    if provider_key_id:
-        provider_block: dict[str, Any] = {"key_ref": provider_key_id}
+    if provider_key_id or provider_endpoint:
+        # W17: endpoint-блок пишется и БЕЗ pinned-ключа (key_ref) —
+        # сессия в поде несёт свой provider_key_id, а base_url нужен
+        # bridge'у, иначе lease-токен уходит на env-дефолт (openrouter).
+        provider_block: dict[str, Any] = {"key_ref": provider_key_id} if provider_key_id else {}
         dialect = api_kind_to_provider_dialect(api_kind)
         if dialect and runtime_adapter == "platform_openclaw":
             provider_block["dialect"] = dialect

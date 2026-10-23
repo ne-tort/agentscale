@@ -11,6 +11,15 @@ on:
       - ".gitmodules"
       - ".github/workflows/ci-images.yml"
   workflow_dispatch:
+    inputs:
+      build_searchnet:
+        description: >
+          Пересобрать образ searchnet. Включать ТОЛЬКО когда менялся исходник
+          ne-tort/searchnet или его пин. Обычный мердж в main searchnet НЕ
+          пересобирает: образ ~4.4 ГБ, сборка качает camoufox+chromium с
+          GitHub и занимает 20–45 мин на общем раннере.
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -19,8 +28,13 @@ permissions:
 
 # Every runner lives on ONE VM: stacking image builds (each ~2 GB of layers)
 # on top of each other is what pushed the CI disk to 84%. Newest push wins.
+#
+# НО: ручной прогон с build_searchnet=true идёт в СВОЮ группу. Иначе он
+# отменялся следующим же мерджем (auto-merge диспатчит CI Images на каждый
+# PR) — а searchnet собирается 20-45 минут, так что шансов дожить до конца
+# почти не было. Обычные прогоны по-прежнему вытесняют друг друга.
 concurrency:
-  group: ci-images-${{ github.ref }}
+  group: ci-images-${{ github.ref }}${{ github.event.inputs.build_searchnet == 'true' && '-searchnet' || '' }}
   cancel-in-progress: true
 
 env:
@@ -154,6 +168,7 @@ jobs:
           df -h /
 
   build-web:
+    needs: [build-api]
     runs-on: [self-hosted, linux, docker]
     steps:
       - uses: actions/checkout@v4
@@ -215,6 +230,147 @@ jobs:
           tags: |
             ${{ steps.meta.outputs.web }}:${{ steps.meta.outputs.tag }}
             ${{ steps.meta.outputs.web }}:latest
+
+  # WAVE17 — searchnet (web-search gateway). Образ тяжёлый (~4.4 ГБ:
+  # camoufox+chromium бинари) и не зависит от кода apps/*.
+  #
+  # Собирается ТОЛЬКО по явному согласию: workflow_dispatch с
+  # build_searchnet=true. Раньше условие пропускало ЛЮБОЙ dispatch — а
+  # auto-merge.yml диспатчит CI Images после каждого мерджа, поэтому
+  # searchnet пересобирался на каждый PR (20–45 мин на общем раннере),
+  # хотя исходник и пин не менялись. Теперь по умолчанию пропускается.
+  #
+  # Когда включать: изменился исходник ne-tort/searchnet или его пин в
+  # infra/k3s/base/platform/searchnet.yaml. Пин версий браузерных пакетов в
+  # Dockerfile обязан совпадать с poetry.lock, иначе кэш-слои расходятся с
+  # ревизиями chromium.
+  build-searchnet:
+    if: >
+      github.event_name == 'workflow_dispatch' &&
+      github.event.inputs.build_searchnet == 'true' &&
+      needs.build-web.result == 'success'
+    needs: [build-api, build-web]
+    # 45 минут НЕ хватало: замер 2026-10-22 — pip install зависимостей 36 мин
+    # (PyPI с этой VM отдаёт ReadTimeout и низкую скорость), браузерный слой
+    # 114с (после подпитки кэша), экспорт+push 4.4 ГБ ещё несколько минут.
+    # Сборка доходила до «exporting to image» и её снимал job-timeout. При этом
+    # слои зависимостей и браузеров теперь кэшируются по pyproject.toml, так что
+    # платим за это только при первом прогоне/смене зависимостей.
+    timeout-minutes: 90
+    runs-on: [self-hosted, linux, docker]
+    steps:
+      # searchnet — отдельный публичный репозиторий (ne-tort/searchnet); в этой
+      # репе сабмодуля нет (суперрепозиторий — локальная рабочая копия). Чекаутим
+      # исходник прямо из GitHub по коммиту пина из infra/k3s/base/platform/searchnet.yaml.
+      - name: Clone searchnet source (private — GHCR_PUSH_TOKEN)
+        env:
+          GH_TOKEN: ${{ secrets.GHCR_PUSH_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Самохостед-раннер переиспользует workspace между прогонами, а этот
+          # job НЕ делает actions/checkout (searchnet клонируется вручную) —
+          # без очистки повторный прогон падал на "целевой путь searchnet уже
+          # существует и не является пустым каталогом" (run 39409091214).
+          rm -rf searchnet
+          git clone --depth 1             "https://x-access-token:${GH_TOKEN}@github.com/ne-tort/searchnet.git" searchnet
+
+      - name: Image names
+        id: meta
+        run: |
+          python3 - <<'PY'
+          import os
+          owner = os.environ["GITHUB_REPOSITORY_OWNER"].lower()
+          registry = os.environ["REGISTRY"]
+          sha = os.environ["GITHUB_SHA"][:12]
+          out = os.environ["GITHUB_OUTPUT"]
+          lines = [
+              f"searchnet={registry}/{owner}/searchnet",
+              f"tag={sha}",
+              "push=true",
+          ]
+          with open(out, "a", encoding="utf-8") as f:
+              f.write("\n".join(lines) + "\n")
+          PY
+
+      - name: Use persistent buildx builder
+        run: |
+          set -euo pipefail
+          if ! docker buildx inspect agentscale-ci >/dev/null 2>&1; then
+            docker buildx create --name agentscale-ci \
+              --driver docker-container \
+              --driver-opt network=host \
+              --config /etc/buildkit/buildkitd.toml \
+              || docker buildx create --name agentscale-ci \
+                --driver docker-container --driver-opt network=host
+          fi
+          docker buildx use agentscale-ci
+          docker buildx inspect --bootstrap agentscale-ci >/dev/null
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GHCR_PUSH_TOKEN || secrets.GITHUB_TOKEN }}
+
+      # Recovery-путь для браузеров: свежий camoufox fetch / patchright download
+      # с CI-VM стабильно не доезжает (GitHub 403 rate-limit / CDN EOF).
+      # Живой случай 2026-10-22: шаг #8/8 висел 40 минут и job упал по
+      # timeout-minutes=45 — образ с фиксом маршрутов не собрался вообще.
+      #
+      # `docker pull` сам по себе НЕ подпитывает слой-кэш buildkit (ключ слоя
+      # сменился вместе с перестановкой порядка в Dockerfile), поэтому копируем
+      # браузерные кэши из предыдущего образа в контекст сборки, а Dockerfile
+      # монтирует их bind-mount'ом в /root/.cache (без удвоения размера образа).
+      # Каталог обязан существовать всегда — иначе bind-mount падает на первой
+      # сборке; в репозитории лежит browser-cache/.gitkeep.
+      - name: Seed browser caches from previous image
+        run: |
+          set -euo pipefail
+          IMAGE="${{ steps.meta.outputs.searchnet }}:latest"
+          mkdir -p searchnet/browser-cache
+          # Локальный образ валиден и БЕЗ обращения к реестру. `docker pull` на
+          # уже скачанном образе всё равно ходит в GHCR: при флапе он падал, шаг
+          # выходил с пустым кэшем, и сборка тянула 4 ГБ браузеров заново
+          # (проверено 2026-10-23 — кэш остался 4.0K при живом образе на ноде).
+          if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
+            docker pull "$IMAGE" || echo "pull failed — продолжаем без сида"
+          fi
+          if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
+            echo "no previous image locally — first build will fetch browsers upstream"
+            exit 0
+          fi
+          CID="$(docker create "$IMAGE")"
+          for path in /root/.cache/camoufox /root/.cache/ms-playwright; do
+            if docker cp "$CID:$path" "searchnet/browser-cache/$(basename "$path")" 2>/dev/null; then
+              echo "seeded $(basename "$path"): $(du -sh "searchnet/browser-cache/$(basename "$path")" | cut -f1)"
+            else
+              echo "no $path in previous image"
+            fi
+          done
+          docker rm "$CID" >/dev/null
+          # Пустой сид — не повод тянуть браузеры из upstream: падаем сразу и
+          # внятно, вместо 40 минут ожидания и таймаута.
+          if [ -z "$(ls -A searchnet/browser-cache 2>/dev/null | grep -v '^.gitkeep$' || true)" ]; then
+            echo "::error::browser cache seed пуст — образ $IMAGE не содержит /root/.cache/{camoufox,ms-playwright}"
+            exit 1
+          fi
+
+      - name: Build searchnet image (recovery path)
+        uses: docker/build-push-action@v6
+        with:
+          context: searchnet
+          file: searchnet/Dockerfile
+          push: true
+          provenance: false
+          sbom: false
+          # Токен поднимает лимит GitHub API, из которого camoufox качает
+          # бинарники и fpgen-модель: без него запрос анонимный и упирается в
+          # 403 rate-limit (тот самый «пустой /root/.cache/camoufox при exit 0»).
+          build-args: |
+            GITHUB_TOKEN=${{ secrets.GHCR_PUSH_TOKEN || secrets.GITHUB_TOKEN }}
+          tags: |
+            ${{ steps.meta.outputs.searchnet }}:${{ steps.meta.outputs.tag }}
+            ${{ steps.meta.outputs.searchnet }}:latest
 
   trigger-verify:
     name: trigger-verify

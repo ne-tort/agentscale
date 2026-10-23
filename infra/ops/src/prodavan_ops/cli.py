@@ -3,6 +3,7 @@ from __future__ import annotations
 import typer
 
 from prodavan_ops import __version__
+from prodavan_ops.dns_check import REQUIRED_HOSTS, check_dns
 from prodavan_ops.e2e import cleanup_e2e, run_e2e
 from prodavan_ops.heal import heal_cluster
 from prodavan_ops.k8s import assert_kubeconfig_docker_ready, rollout_restart, wait_argo_app
@@ -70,20 +71,48 @@ def smoke_cmd(
     smoke(addr=addr, port=port, host_header=host)
 
 
+@app.command("dns-check")
+def dns_check_cmd(
+    namespace: str = typer.Option("agentscale", "--namespace", help="Namespace с Running-подом"),
+    pod: str | None = typer.Option(None, "--pod", help="Pod[/container]; по умолчанию первый Running"),
+    host: list[str] = typer.Option(
+        None, "--host", help="Имя для проверки (можно несколько); по умолчанию github.com"
+    ),
+    max_coredns_timeouts: int = typer.Option(20, "--max-coredns-timeouts"),
+) -> None:
+    """Резолвит внешние имена ИЗ ПОДА и проверяет поток таймаутов CoreDNS.
+
+    Отдельная команда, потому что такой отказ не виден ни в одной другой пробе:
+    поды Running, HTTP-пробы зелёные, TCP-egress работает — а DNS мёртв.
+    Инцидент 2026-10-22 на prod: CoreDNS форвардил на нерабочий upstream из
+    /etc/resolv.conf, агент не мог достучаться до провайдера ИИ.
+    """
+    hosts = tuple(host) if host else REQUIRED_HOSTS
+    resolved = check_dns(
+        namespace=namespace,
+        pod=pod,
+        hosts=hosts,
+        max_coredns_timeouts=max_coredns_timeouts,
+    )
+    typer.echo(f"dns OK: {resolved}")
+
+
 @app.command("heal")
 def heal_cmd(
     wait_node: int = typer.Option(180, "--wait-node", help="Seconds to wait for node Ready"),
     smoke_attempts: int = typer.Option(24, "--smoke-attempts"),
     skip_traefik: bool = typer.Option(False, "--skip-traefik"),
     skip_smoke: bool = typer.Option(False, "--skip-smoke"),
+    skip_dns: bool = typer.Option(False, "--skip-dns"),
 ) -> None:
-    """Post-reboot recovery: delete stuck pods, recycle Traefik, smoke :8088."""
+    """Post-reboot recovery: delete stuck pods, recycle Traefik, check DNS, smoke :8088."""
     assert_kubeconfig_docker_ready()
     heal_cluster(
         wait_node_sec=wait_node,
         smoke_attempts=smoke_attempts,
         skip_traefik=skip_traefik,
         skip_smoke=skip_smoke,
+        skip_dns=skip_dns,
     )
 
 

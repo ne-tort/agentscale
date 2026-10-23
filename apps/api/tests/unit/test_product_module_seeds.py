@@ -1,5 +1,6 @@
 """Unit tests for product module seed definitions."""
 
+from prodavan.application.platform.equipment_prompt_content import EQUIPMENT_RULES_FILES
 from prodavan.application.platform.product_module_seeds import (
     EXAMPLE_MODULE_IDS,
     PRODUCT_MODULES,
@@ -189,6 +190,8 @@ def test_equipment_meta_hub_on_data_placement() -> None:
         "equipment_builds",
         "trusted_sellers",
         "web_shops",
+        # «Интернет товары»: найденные агентом товары из web_shops (TTL 72ч)
+        "web_products",
         "templates",
         "equipment_mcp",
         "budget_lines",
@@ -203,6 +206,18 @@ def test_equipment_meta_hub_on_data_placement() -> None:
         "part_cards",
         "ready_builds",
         "ready_build_slots",
+        # WAVE14: тендеры (глобальная группировка позиций заказчика)
+        "tenders",
+        # WAVE16: почта — ящики отправки, контакты, исходящие
+        "mail_senders",
+        "mail_contacts",
+        "mail_outbox",
+        # WAVE16.3: настройки отправки мастер-прайса (получатель на странице)
+        "master_price_mail",
+        # Ручные позиции мастер-прайса (кнопка «+» у пагинатора): реальная
+        # таблица, которую форма пишет в БД; бэкенд зеркалит строки в
+        # OS-индекс, откуда их читает виртуальная master_price.
+        "master_price_manual",
     }
     # Каталог сборок — глобальная библиотека: chats=all (строки общие на проект,
     # session_id NULL). Чат-скоп сломал бы переиспользование между заявками.
@@ -387,10 +402,16 @@ def test_equipment_meta_hub_on_data_placement() -> None:
         "Карточки комплектующих",
         "Готовые сборки",
         "Поставщики",
+        # WAVE14: тендеры — глобальная группировка позиций заказчика
+        "Тендеры",
         "Интернет магазины",
         "Шаблоны",
         "Промпты",
         "Инструкции MCP",
+        # WAVE16: почта — ящики отправки, адресная книга, исходящие
+        "Ящики отправки",
+        "Контакты",
+        "Исходящие письма",
     }
     # «Готовые сборки» ведут сразу в плоский список сборок (групп больше нет)
     ready_item = next(
@@ -552,10 +573,39 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     assert slot_card["pick_view"] == "part_cards_pick"
 
     seed_items = meta["seed_rows"]["items"]
-    # 17 типов (13 базовые + 4 устройства-комплекта) + 4 шаблона + 2 промпта + 1 MCP
-    assert len(seed_items) == 24
+    # 17 типов (13 базовые + 4 устройства-комплекта) + 4 шаблона + 2 промпта
+    # + 1 MCP + 1 ящик отправки «price» (WAVE16.3)
+    # + 2 контакта-шаблона: manager (отчёты по тендерам) и s4b (мастер-прайс)
+    # + 8 интернет-магазинов («Интернет магазины»): DNS, Citilink, Regard, NIX,
+    #   М.Видео, Ozon, Wildberries, Avito — без них web_shops_list пуст и агент
+    #   физически не может искать в интернете.
+    assert len(seed_items) == 35
     by_row = {s["row_id"]: s for s in seed_items}
     assert "tpl_budget_builtin" in by_row
+    # Магазины-сиды: имя — контракт для агента, cookies пустые (заполняются
+    # в кабинете, если магазин требует авторизованную сессию).
+    assert by_row["web_shop_dns"]["body"]["name"] == "DNS"
+    assert by_row["web_shop_dns"]["body"]["url"] == "https://www.dns-shop.ru"
+    assert by_row["web_shop_dns"]["body"]["cookies"] == ""
+    for slug in (
+        "web_shop_dns",
+        "web_shop_citilink",
+        "web_shop_regard",
+        "web_shop_nix",
+        "web_shop_mvideo",
+        "web_shop_ozon",
+        "web_shop_wildberries",
+        "web_shop_avito",
+    ):
+        assert by_row[slug]["table_slug"] == "web_shops"
+        assert by_row[slug]["body"]["name"], slug
+        assert by_row[slug]["body"]["url"].startswith("https://"), slug
+    # Профили-шаблоны: имена — контракт, email заполняется в кабинете.
+    assert by_row["mail_sender_price"]["body"]["name"] == "price"
+    assert by_row["mail_contact_manager"]["body"]["name"] == "manager"
+    assert by_row["mail_contact_s4b"]["body"]["name"] == "s4b"
+    assert by_row["mail_contact_manager"]["body"]["email"] == ""
+    assert by_row["mail_contact_s4b"]["body"]["email"] == ""
     etypes = [s for s in seed_items if s["table_slug"] == "equipment_types"]
     assert etypes and etypes[0]["body"]["sort_order"] == 10
     assert etypes[0]["body"]["build_scope"] == "all"
@@ -599,8 +649,14 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     assert mcp_seed["table_slug"] == "equipment_mcp"
     assert mcp_seed["body"]["enabled"] is True
     assert mcp_seed["body"]["name"] == "prodavan-equipment"
-    assert mcp_seed["body"]["version"] == "3.0.0"
-    assert seed_items[-1]["row_id"] == "equipment_mcp_default"
+    assert mcp_seed["body"]["version"] == "3.2.0"
+    # WAVE16.3: сид-ящик «price» для отправки мастер-прайса (без пароля —
+    # secret_ref проставляется в контуре)
+    price_seed = next(s for s in seed_items if s["row_id"] == "mail_sender_price")
+    assert price_seed["table_slug"] == "mail_senders"
+    assert price_seed["body"]["name"] == "price"
+    assert price_seed["body"]["smtp_ssl"] is True
+    assert not price_seed["body"].get("smtp_password")
 
     # Системные промпты подбора: AGENTS.md в корне + правила в prompts/equipment
     prompts_seed = [s for s in seed_items if s["table_slug"] == "equipment_prompts"]
@@ -620,15 +676,10 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     assert rules_seed["body"]["path"] == "prompts/equipment"
     assert rules_seed["body"]["enabled"] is True
     rule_names = [f["name"] for f in rules_seed["body"]["files_json"]]
-    assert rule_names == [
-        "10-request.md",
-        "20-search.md",
-        "30-identify.md",
-        "40-groups.md",
-        "50-rank.md",
-        "60-builds.md",
-        "70-ready-builds.md",
-    ]
+    # Перечень выводим из сида: набор правил расширяется (добавлен
+    # 05-tenders.md), а проверяемое свойство — «все правила сида попали в
+    # body, в порядке приоритета».
+    assert rule_names == [name for name, _, _ in EQUIPMENT_RULES_FILES]
     # WAVE12: правила учат новой модели (карточки + готовые сборки-ссылки).
     assert "equipment_builds" in agents_file["body"]
     assert "part_cards" in agents_file["body"]

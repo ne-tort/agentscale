@@ -732,6 +732,278 @@ TOOLS: list[dict[str, Any]] = [
             "additionalProperties": False,
         },
     },
+    {
+        "name": "tenders_list",
+        "description": (
+            "List tenders (тендеры) — global groups of customer positions with "
+            "aggregates: positions_count, linked_positions_count (already in chats), "
+            "found_pct, sum_rub, margin_pct, suppliers_count, deadline_at, status. "
+            "Aggregates are materialized by the platform pipeline — do not set them."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "module_id": {"type": "string", "default": DEFAULT_MODULE_ID},
+            },
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "tender_get",
+        "description": "Get one tenders row by row_id (including lines_json positions).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "module_id": {"type": "string", "default": DEFAULT_MODULE_ID},
+                "row_id": {"type": "string"},
+            },
+            "required": ["row_id"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "tender_upsert",
+        "description": (
+            "Create or update a tender (тендер). title required on create. "
+            "PATCH merges: omit a field to leave it unchanged; pass null to clear. "
+            "Optional: customer, deadline_at (ISO datetime), status "
+            "(draft|active|submitted|won|lost|cancelled), comment, lines (array of "
+            "{id?, title, part_number?, qty?} — replaces the whole positions list; "
+            "missing ids are generated). positions_count/found_pct/sum_rub/margin_pct/"
+            "suppliers_count/imported_chat_ids are computed by the platform — do not "
+            "set them."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "module_id": {"type": "string", "default": DEFAULT_MODULE_ID},
+                "row_id": {"type": "string"},
+                "title": {"type": "string"},
+                "customer": {"type": ["string", "null"]},
+                "deadline_at": {"type": ["string", "null"]},
+                "status": {
+                    "type": ["string", "null"],
+                    "enum": ["draft", "active", "submitted", "won", "lost", "cancelled", "irrelevant", None],
+                },
+                "comment": {"type": ["string", "null"]},
+                "source_url": {"type": ["string", "null"]},
+                "source_ref": {"type": ["string", "null"]},
+                "relevance_note": {"type": ["string", "null"]},
+                "lines": {
+                    "type": ["array", "null"],
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "id": {"type": "string"},
+                            "title": {"type": "string"},
+                            "part_number": {"type": ["string", "null"]},
+                            "qty": {"type": ["number", "integer", "null"]},
+                        },
+                        "required": ["title"],
+                        "additionalProperties": False,
+                    },
+                },
+                "project_ids": {"type": ["array", "null"], "items": {"type": "string"}},
+            },
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "tender_delete",
+        "description": (
+            "Delete a tender. Positions already imported into chats keep their "
+            "tender_id but stay in place (they may carry progress)."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "module_id": {"type": "string", "default": DEFAULT_MODULE_ID},
+                "row_id": {"type": "string"},
+            },
+            "required": ["row_id"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "tender_positions_upsert",
+        "description": (
+            "Create or update positions of a tender (lines_json) WITHOUT touching "
+            "the rest of the tender. Each item: {id?, title, part_number?, qty?}; "
+            "missing ids are generated. Pass replace=true to drop positions that "
+            "are not in the payload; default merges (update by id, append new)."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "module_id": {"type": "string", "default": DEFAULT_MODULE_ID},
+                "tender_id": {"type": "string"},
+                "lines": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "id": {"type": "string"},
+                            "title": {"type": "string"},
+                            "part_number": {"type": ["string", "null"]},
+                            "qty": {"type": ["number", "integer", "null"]},
+                        },
+                        "required": ["title"],
+                        "additionalProperties": False,
+                    },
+                },
+                "replace": {"type": "boolean", "default": False},
+            },
+            "required": ["tender_id", "lines"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "tender_attach",
+        "description": (
+            "Take a tender into work (взять в работу): copies tender positions "
+            "(lines_json) into the CURRENT chat's request_lines with tender_id + "
+            "tender_line_id links, then runs the equipment pipeline (offers, "
+            "budget, procurement, tender aggregates). Idempotent: re-running "
+            "updates titles/part_numbers/qty of already imported positions and "
+            "adds new ones — no duplicates."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "module_id": {"type": "string", "default": DEFAULT_MODULE_ID},
+                "tender_id": {"type": "string"},
+            },
+            "required": ["tender_id"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "web_shops_list",
+        "description": (
+            "List web_shops — интернет-магазины, по которым разрешено искать "
+            "товары (name, url, cookies). Ищи именно по этим магазинам."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {"module_id": {"type": "string", "default": DEFAULT_MODULE_ID}},
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "web_products_list",
+        "description": (
+            "List web_products — «Интернет товары» этого проекта: товары, "
+            "найденные агентом в интернет-магазинах (title, part_number, brand, "
+            "price, shop, url, qty, line_id). Живут 72 часа с момента "
+            "добавления/правки; участвуют в подборе наравне с каталогом."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {"module_id": {"type": "string", "default": DEFAULT_MODULE_ID}},
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "web_product_add",
+        "description": (
+            "Add a product found in an internet shop to «Интернет товары». "
+            "Required: title. Recommended: part_number (для сопоставления с "
+            "позицией), price (₽), shop (название из web_shops_list), brand, url, "
+            "qty, line_id. Автоматически индексируется и конкурирует с каталогом "
+            "по цене. TTL 72 часа; повторное добавление обновляет и продлевает."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "module_id": {"type": "string", "default": DEFAULT_MODULE_ID},
+                "title": {"type": "string"},
+                "part_number": {"type": ["string", "null"]},
+                "brand": {"type": ["string", "null"]},
+                "price": {"type": ["number", "null"]},
+                "shop": {"type": ["string", "null"]},
+                "url": {"type": ["string", "null"]},
+                "qty": {"type": ["string", "null"]},
+                "line_id": {"type": ["string", "null"]},
+            },
+            "required": ["title"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "web_product_delete",
+        "description": "Delete a web_products row by row_id.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "module_id": {"type": "string", "default": DEFAULT_MODULE_ID},
+                "row_id": {"type": "string"},
+            },
+            "required": ["row_id"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "tender_readiness",
+        "description": (
+            "Проверить, готов ли тендер к отправке КП заказчику. Считает долю "
+            "позиций, по которым есть кандидаты, и сравнивает с порогом: 70% "
+            "обычно, 90% если в условиях заказчика есть требование подавать "
+            "предложение по ВСЕМ позициям. Возвращает coverage, threshold, "
+            "ready, lines_needed_to_pass и evidence (фрагмент условия). "
+            "Вызывай перед tender_report_send."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "module_id": {"type": "string", "default": DEFAULT_MODULE_ID},
+                "tender_id": {"type": "string"},
+            },
+            "required": ["tender_id"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "tender_report_send",
+        "description": (
+            "Отправить заказчику отчёт с результатами подбора по тендеру "
+            "(КП). Отправитель — профиль mail_senders с именем `price`, "
+            "получатель — контакт mail_contacts с именем `manager` (оба "
+            "сидируются как шаблоны и заполняются в кабинете). Перед отправкой "
+            "проверяется готовность (tender_readiness); при недоборе порога "
+            "отправка отклоняется, если force=false. Письмо пишется в "
+            "mail_outbox со статусом sent/failed."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "module_id": {"type": "string", "default": DEFAULT_MODULE_ID},
+                "tender_id": {"type": "string"},
+                "subject": {"type": ["string", "null"]},
+                "body_text": {"type": ["string", "null"]},
+                "force": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Отправить даже при недоборе порога.",
+                },
+            },
+            "required": ["tender_id"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "mail_profiles_list",
+        "description": (
+            "Список профилей почты: отправители (mail_senders: name, "
+            "from_address) и контакты (mail_contacts: name, email). "
+            "Шаблоны `price` (отправитель), `manager` и `s4b` (контакты) "
+            "сидируются пустыми — проверь, что они заполнены в кабинете."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {"module_id": {"type": "string", "default": DEFAULT_MODULE_ID}},
+            "additionalProperties": False,
+        },
+    },
 ]
 
 
@@ -1428,6 +1700,280 @@ def _ready_build_attach(mid: str, arguments: dict[str, Any], sid: str | None) ->
     )
 
 
+_TENDER_STATUSES = frozenset(
+    {"draft", "active", "submitted", "won", "lost", "cancelled", "irrelevant"}
+)
+
+
+def _normalize_tender_lines(raw: Any) -> list[dict[str, Any]]:
+    """lines_json элементы: {id, title, part_number, qty}; id добиваем."""
+    if not isinstance(raw, list):
+        raise RuntimeError("lines must be an array of {id?, title, part_number?, qty?}")
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for idx, item in enumerate(raw):
+        if not isinstance(item, dict):
+            raise RuntimeError(f"lines[{idx}] must be an object")
+        title = str(item.get("title") or "").strip()
+        if not title:
+            raise RuntimeError(f"lines[{idx}].title is required")
+        tlid = str(item.get("id") or "").strip() or f"tl{idx + 1}"
+        if tlid in seen:
+            raise RuntimeError(f"duplicate line id: {tlid}")
+        seen.add(tlid)
+        qty_raw = item.get("qty")
+        qty: float | None
+        if qty_raw in (None, ""):
+            qty = None
+        else:
+            try:
+                qty = float(qty_raw)
+            except (TypeError, ValueError):
+                raise RuntimeError(f"lines[{idx}].qty must be a number") from None
+            if qty <= 0:
+                raise RuntimeError(f"lines[{idx}].qty must be > 0")
+        out.append(
+            {
+                "id": tlid,
+                "title": title,
+                "part_number": str(item.get("part_number") or "").strip(),
+                "qty": qty if qty is not None else 1,
+            }
+        )
+    return out
+
+
+def _tender_body_from_args(arguments: dict[str, Any], *, creating: bool) -> dict[str, Any]:
+    body = _pick_present(
+        arguments,
+        ("title", "customer", "deadline_at", "status", "comment",
+         "source_url", "source_ref", "relevance_note", "project_ids"),
+    )
+    if creating and not str(body.get("title") or "").strip():
+        raise RuntimeError("title is required when creating tenders")
+    if "status" in body and body["status"] is not None:
+        status = str(body["status"]).strip()
+        if status not in _TENDER_STATUSES:
+            raise RuntimeError(f"status must be one of {sorted(_TENDER_STATUSES)}")
+        body["status"] = status
+    if "lines" in arguments:
+        body["lines_json"] = _normalize_tender_lines(arguments.get("lines"))
+    return body
+
+
+def _tender_attach(mid: str, arguments: dict[str, Any], sid: str | None) -> Any:
+    """«Взять тендер в работу» (серверное действие tender_attach)."""
+    tender_id = str(arguments.get("tender_id") or "").strip()
+    if not tender_id:
+        raise RuntimeError("tender_id is required for tender_attach")
+    _, _, project_id = _env()
+    return _http(
+        "POST",
+        f"/projects/{project_id}/modules/{mid}/actions/tender_attach/invoke",
+        {"row_id": tender_id, "params": {}},
+        session_id=sid,
+    )
+
+
+def _tender_readiness(mid: str, arguments: dict[str, Any], sid: str | None) -> Any:
+    """Оценить готовность тендера к отправке КП (полнота подбора позиций).
+
+    Считается на стороне MCP: тендер + позиции заказчика этого чата +
+    found_groups. Порог 70% обычно и 90% при требовании «по всем позициям»
+    (ищется в текстах заказчика: comment/description/payment_terms).
+    """
+    from prodavan.application.modules.equipment_tender_readiness import assess_readiness
+
+    tender_id = str(arguments.get("tender_id") or "").strip()
+    if not tender_id:
+        raise RuntimeError("tender_id is required for tender_readiness")
+
+    tenders = _list_rows(mid, "tenders", session_id=sid)
+    tender = next((t for t in tenders if str(t.get("row_id") or "") == tender_id), None)
+    if tender is None:
+        raise RuntimeError(f"tender not found: {tender_id}")
+    tbody = tender.get("body") or {}
+
+    lines = [
+        r
+        for r in _list_rows(mid, "request_lines", session_id=sid)
+        if str((r.get("body") or {}).get("tender_id") or "") == tender_id
+    ]
+    groups = [
+        g
+        for g in _list_rows(mid, "found_groups", session_id=sid)
+        if str((g.get("body") or {}).get("tender_id") or "") == tender_id
+        or str((g.get("body") or {}).get("line_id") or "")
+        in {str(x.get("row_id") or "") for x in lines}
+    ]
+    covered_line_ids = {
+        str((g.get("body") or {}).get("line_id") or "") for g in groups
+    } - {""}
+    offers = [
+        o
+        for o in _list_rows(mid, "found_offers", session_id=sid)
+        if str((o.get("body") or {}).get("line_id") or "") in covered_line_ids
+    ]
+    offers_line_ids = {
+        str((o.get("body") or {}).get("line_id") or "") for o in offers
+    } - {""}
+
+    result = assess_readiness(
+        tbody,
+        lines_total=len(lines),
+        lines_with_candidates=len(covered_line_ids),
+        lines_with_offers=len(offers_line_ids),
+    )
+    result["tender_id"] = tender_id
+    result["title"] = str(tbody.get("title") or "")
+    return result
+
+
+def _tender_report_send(mid: str, arguments: dict[str, Any], sid: str | None) -> Any:
+    """Отправить заказчику отчёт с результатами подбора по тендеру.
+
+    Отправитель — профиль mail_senders `price`, получатель — контакт
+    mail_contacts `manager` (шаблоны сидируются при инициализации модуля).
+    Перед отправкой проверяется готовность; при недоборе порога отправка
+    отклоняется, если force не выставлен.
+    """
+    tender_id = str(arguments.get("tender_id") or "").strip()
+    if not tender_id:
+        raise RuntimeError("tender_id is required for tender_report_send")
+    force = bool(arguments.get("force"))
+
+    readiness = _tender_readiness(mid, {"tender_id": tender_id}, sid)
+    if not readiness.get("ready") and not force:
+        pct = readiness.get("coverage_percent")
+        thr = readiness.get("threshold_percent")
+        need = readiness.get("lines_needed_to_pass")
+        raise RuntimeError(
+            f"tender not ready for sending: coverage {pct}% < {thr}% "
+            f"(needs {need} more position(s)). "
+            f"requires_all_positions={readiness.get('requires_all_positions')}. "
+            "Pass force=true to send anyway."
+        )
+
+    tenders = _list_rows(mid, "tenders", session_id=sid)
+    tender = next((t for t in tenders if str(t.get("row_id") or "") == tender_id), None)
+    if tender is None:
+        raise RuntimeError(f"tender not found: {tender_id}")
+    tbody = tender.get("body") or {}
+    title = str(tbody.get("title") or "").strip() or f"Тендер {tender_id}"
+
+    subject = str(arguments.get("subject") or "").strip() or f"КП по тендеру: {title}"
+    body_text = str(arguments.get("body_text") or "").strip()
+    if not body_text:
+        lines = [
+            r
+            for r in _list_rows(mid, "request_lines", session_id=sid)
+            if str((r.get("body") or {}).get("tender_id") or "") == tender_id
+        ]
+        parts = [
+            f"Коммерческое предложение по тендеру: {title}",
+            "",
+            f"Позиций в тендере: {readiness.get('lines_total')}",
+            f"Подобрано: {readiness.get('lines_covered')} "
+            f"({readiness.get('coverage_percent')}%)",
+            "",
+            "Предложения по позициям:",
+        ]
+        for i, line in enumerate(lines, start=1):
+            lb = line.get("body") or {}
+            parts.append(
+                f"{i}. {lb.get('title') or ''}"
+                + (f" — {lb.get('qty')} шт." if lb.get("qty") else "")
+            )
+        if readiness.get("requires_all_positions"):
+            parts += [
+                "",
+                "Учтены требования заказчика к составу предложения "
+                "(предложение по всем позициям).",
+            ]
+        body_text = "\n".join(parts)
+
+    created = _http(
+        "POST",
+        _data_path(mid, "mail_outbox"),
+        {
+            "body": {
+                "sender_id": str(arguments.get("sender_id") or "price"),
+                "to_address": str(arguments.get("to_address") or "manager"),
+                "subject": subject,
+                "body_text": body_text,
+                "status": "queued",
+            }
+        },
+        session_id=sid,
+    )
+    row_id = str((created or {}).get("row_id") or "")
+    if not row_id:
+        raise RuntimeError("mail_outbox row was not created")
+    return _http(
+        "POST",
+        f"/projects/{_env()[2]}/modules/{mid}/actions/mail_send/invoke",
+        {"row_id": row_id, "params": {"sender_name": "price", "recipient_name": "manager"}},
+        session_id=sid,
+    )
+
+
+def _mail_profiles_list(mid: str, arguments: dict[str, Any], sid: str | None) -> Any:
+    """Профили почты кабинета: отправители и контакты (без секретов)."""
+    senders = []
+    for r in _list_rows(mid, "mail_senders", session_id=sid):
+        b = r.get("body") or {}
+        senders.append(
+            {
+                "row_id": r.get("row_id"),
+                "name": b.get("name"),
+                "from_address": b.get("from_address"),
+                "enabled": b.get("enabled"),
+                "is_default": b.get("is_default"),
+            }
+        )
+    contacts = []
+    for r in _list_rows(mid, "mail_contacts", session_id=sid):
+        b = r.get("body") or {}
+        contacts.append(
+            {
+                "row_id": r.get("row_id"),
+                "name": b.get("name"),
+                "email": b.get("email"),
+            }
+        )
+    return {"senders": senders, "contacts": contacts}
+
+
+def _tender_positions_upsert(mid: str, arguments: dict[str, Any], sid: str | None) -> Any:
+    """Массовый upsert позиций тендера (lines_json), merge по id."""
+    tender_id = str(arguments.get("tender_id") or "").strip()
+    if not tender_id:
+        raise RuntimeError("tender_id is required for tender_positions_upsert")
+    new_lines = _normalize_tender_lines(arguments.get("lines"))
+    replace = bool(arguments.get("replace"))
+    if replace:
+        merged = new_lines
+    else:
+        row = _get_row(mid, "tenders", tender_id, session_id=sid)
+        body = row.get("body") if isinstance(row.get("body"), dict) else row
+        existing = (body or {}).get("lines_json")
+        merged = [dict(x) for x in existing if isinstance(x, dict)] if isinstance(existing, list) else []
+        by_id = {str(x.get("id") or ""): i for i, x in enumerate(merged)}
+        for line in new_lines:
+            idx = by_id.get(str(line["id"]))
+            if idx is None:
+                by_id[str(line["id"])] = len(merged)
+                merged.append(line)
+            else:
+                merged[idx] = line
+    return _http(
+        "PATCH",
+        _data_path(mid, "tenders", tender_id),
+        {"body": {"lines_json": merged}},
+        session_id=sid,
+    )
+
+
 def _call_tool(name: str, arguments: dict[str, Any]) -> Any:
     if name == "equipment_catalog_sources":
         return _catalog_sources()
@@ -1634,6 +2180,90 @@ def _call_tool(name: str, arguments: dict[str, Any]) -> Any:
     if name == "ready_build_attach":
         return _ready_build_attach(mid, arguments, sid)
 
+    # WAVE14: тендеры (глобальная группировка позиций заказчика).
+    if name == "tenders_list":
+        return {"items": _list_rows(mid, "tenders", session_id=sid)}
+    if name == "tender_get":
+        return _get_row(mid, "tenders", str(arguments.get("row_id") or ""), session_id=sid)
+    if name == "tender_upsert":
+        body = _tender_body_from_args(arguments, creating=not str(arguments.get("row_id") or "").strip())
+        row_id = str(arguments.get("row_id") or "").strip() or None
+        if row_id:
+            return _http(
+                "PATCH",
+                _data_path(mid, "tenders", row_id),
+                {"body": body},
+                session_id=sid,
+            )
+        return _http(
+            "POST",
+            _data_path(mid, "tenders"),
+            {"body": body},
+            session_id=sid,
+        )
+    if name == "tender_delete":
+        row_id = str(arguments.get("row_id") or "").strip()
+        if not row_id:
+            raise RuntimeError("row_id is required for tender_delete")
+        return _http(
+            "DELETE",
+            _data_path(mid, "tenders", row_id),
+            session_id=sid,
+        )
+    if name == "tender_positions_upsert":
+        return _tender_positions_upsert(mid, arguments, sid)
+    if name == "tender_readiness":
+        return _tender_readiness(mid, arguments, sid)
+    if name == "tender_report_send":
+        return _tender_report_send(mid, arguments, sid)
+    if name == "mail_profiles_list":
+        return _mail_profiles_list(mid, arguments, sid)
+    if name == "web_shops_list":
+        return {"items": _list_rows(mid, "web_shops", session_id=sid)}
+    if name == "web_products_list":
+        return {"items": _list_rows(mid, "web_products", session_id=sid)}
+    if name == "web_product_add":
+        keys = ("title", "part_number", "brand", "price", "shop", "url", "qty", "line_id")
+        body = _pick_present(arguments, keys)
+        if not str(body.get("title") or "").strip():
+            raise RuntimeError("title is required for web_product_add")
+        # Дедуп: тот же партномер в том же магазине — обновляем существующую
+        # строку и продлеваем TTL, а не плодим копии на каждый поиск.
+        pn = str(body.get("part_number") or "").strip().casefold()
+        shop = str(body.get("shop") or "").strip().casefold()
+        if pn:
+            for row in _list_rows(mid, "web_products", session_id=sid):
+                rb = row.get("body") or {}
+                if (
+                    str(rb.get("part_number") or "").strip().casefold() == pn
+                    and str(rb.get("shop") or "").strip().casefold() == shop
+                ):
+                    merged = dict(rb)
+                    merged.update(body)
+                    return _http(
+                        "PATCH",
+                        _data_path(mid, "web_products", str(row.get("row_id") or "")),
+                        {"body": merged},
+                        session_id=sid,
+                    )
+        return _http(
+            "POST",
+            _data_path(mid, "web_products"),
+            {"body": body},
+            session_id=sid,
+        )
+    if name == "web_product_delete":
+        row_id = str(arguments.get("row_id") or "").strip()
+        if not row_id:
+            raise RuntimeError("row_id is required for web_product_delete")
+        return _http(
+            "DELETE",
+            _data_path(mid, "web_products", row_id),
+            session_id=sid,
+        )
+    if name == "tender_attach":
+        return _tender_attach(mid, arguments, sid)
+
     raise RuntimeError(f"unknown tool: {name}")
 
 
@@ -1663,22 +2293,118 @@ def _load_tool_overrides() -> dict[str, dict[str, str]]:
     return out
 
 
+#: Инструменты, которые только читают состояние. MCP-аннотация
+#: `readOnlyHint` нужна клиенту (SDK/UI), чтобы отличать безопасный вызов от
+#: записи: read-only инструменты можно звать без подтверждения и в циклах
+#: поиска, а пишущие — требуют явного решения. Список — явный (не по префиксу
+#: `_list`), потому что `tender_readiness` тоже ничего не пишет.
+_READ_ONLY_TOOLS = frozenset(
+    {
+        "equipment_catalog_sources",
+        "equipment_catalog_search",
+        "equipment_types_list",
+        "equipment_builds_list",
+        "equipment_builds_get",
+        "request_lines_list",
+        "request_lines_get",
+        "found_groups_list",
+        "found_groups_get",
+        "found_offers_list",
+        "part_cards_list",
+        "ready_builds_list",
+        "ready_build_get",
+        "trusted_sellers_list",
+        "web_shops_list",
+        "web_products_list",
+        "mail_profiles_list",
+        "tenders_list",
+        "tender_get",
+        "tender_readiness",
+        "budget_lines_list",
+        "procurement_list",
+        "mcp_tool_overrides_list",
+    }
+)
+
+#: Инструменты, которые пишут. Явно перечислены, чтобы аннотация
+#: `readOnlyHint=false` ставилась осознанно (и новые инструменты не
+#: наследовали «read-only» по умолчанию).
+_WRITE_TOOLS = frozenset(
+    {
+        "request_lines_upsert",
+        "request_lines_delete",
+        "found_groups_upsert",
+        "found_groups_delete",
+        "part_card_upsert",
+        "part_card_delete",
+        "equipment_builds_upsert",
+        "equipment_builds_delete",
+        "ready_build_upsert",
+        "ready_build_slot_upsert",
+        "ready_build_attach",
+        "tender_upsert",
+        "tender_delete",
+        "tender_positions_upsert",
+        "tender_attach",
+        "tender_report_send",
+        "web_product_add",
+        "web_product_delete",
+        "mail_send",
+    }
+)
+
+
+def _with_annotations(tool: dict[str, Any]) -> dict[str, Any]:
+    """Добавить MCP-аннотации (readOnlyHint/destructiveHint/idempotentHint).
+
+    Клиент по ним решает, спрашивать ли подтверждение и можно ли звать
+    инструмент в автономном цикле. Инструмент вне обоих списков считается
+    пишущим (безопасный дефолт: неизвестное — не read-only).
+    """
+    name = str(tool.get("name") or "")
+    if name in _READ_ONLY_TOOLS:
+        ann = {
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": False,
+        }
+    else:
+        # idempotent: повторный вызов не создаёт дубль. web_product_add
+        # дедуплицирует по (part_number, shop) и продлевает TTL — это upsert
+        # по смыслу, хотя имя не содержит "upsert".
+        ann = {
+            "readOnlyHint": False,
+            "destructiveHint": name.endswith("_delete"),
+            "idempotentHint": (
+                "upsert" in name
+                or "attach" in name
+                or name.endswith("_list")
+                or name == "web_product_add"
+            ),
+            "openWorldHint": name in {"web_product_add", "web_product_delete"},
+        }
+    return {**tool, "annotations": ann}
+
+
 def _tools_with_overrides() -> list[dict[str, Any]]:
-    """TOOLS + переопределения описаний из UI (description заменяет,
-    extra_instructions дописывается)."""
+    """TOOLS + переопределения описаний из UI + MCP-аннотации.
+
+    `description` из UI заменяет штатное описание, `extra_instructions`
+    дописывается. Аннотации (`readOnlyHint` и др.) ставятся последними —
+    их нельзя переопределить из UI: клиент должен видеть реальный класс
+    инструмента (чтение/запись), а не тот, что кто-то вписал в описание."""
     overrides = _load_tool_overrides()
-    if not overrides:
-        return TOOLS
     out: list[dict[str, Any]] = []
     for t in TOOLS:
-        ov = overrides.get(str(t.get("name") or ""))
-        if not ov:
-            out.append(t)
-            continue
-        desc = ov["description"] or str(t.get("description") or "")
-        if ov["extra"]:
-            desc = desc.rstrip() + "\n\n" + ov["extra"]
-        out.append({**t, "description": desc})
+        item = t
+        ov = overrides.get(str(t.get("name") or "")) if overrides else None
+        if ov:
+            desc = ov["description"] or str(t.get("description") or "")
+            if ov["extra"]:
+                desc = desc.rstrip() + "\n\n" + ov["extra"]
+            item = {**t, "description": desc}
+        out.append(_with_annotations(item))
     return out
 
 
@@ -1698,7 +2424,7 @@ def _handle(msg: dict[str, Any]) -> dict[str, Any] | None:
             "result": {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "prodavan-equipment", "version": "3.0.0"},
+                "serverInfo": {"name": "prodavan-equipment", "version": "3.2.0"},
             },
         }
     if method == "notifications/initialized":

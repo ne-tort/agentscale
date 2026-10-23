@@ -114,7 +114,7 @@ Day-2: merge в `main` + Argo. Не `kubectl apply -k infra/k3s/...` рукам�
 
 - **api initContainer `migrate.sh`** ждёт БД до 5 мин (alembic current в цикле) —
   под висит в `Init:0/N` вместо падения по коннекту.
-- **`startupProbe`** на keycloak/postgres/minio/mongodb/redis/searxng/gotenberg:
+- **`startupProbe`** на keycloak/postgres/minio/mongodb/redis/searchnet/gotenberg:
   liveness/readiness не срабатывают, пока старт не завершился (бюджет 5–10 мин).
 - **boot-heal** (`/usr/local/lib/prodavan/post-k3s-heal.sh`, ExecStartPost k3s):
   чистит Terminating/Unknown/Failed поды, перезапускает Traefik, ждёт smoke.
@@ -130,6 +130,109 @@ Day-2: merge в `main` + Argo. Не `kubectl apply -k infra/k3s/...` рукам�
 
 Не ставить **Docker Engine** в тот же OS, где k3s (маскировать docker).  
 Не оставлять незалогиненный Tailscale рядом с CNI.
+
+### 3.1 DNS кластера после ребута (инцидент 2026-10-22)
+
+**Симптом.** Агент из пода не может достучаться до провайдера ИИ. При этом
+всё остальное зелёное: поды `Running`, HTTP-пробы OK, TCP-egress работает
+(по IP провайдер отвечает). Выглядит как «сломался агент», а ломается DNS.
+
+**Что именно происходит.** CoreDNS форвардит на upstream из своего
+`/etc/resolv.conf`, который kubelet копирует с **хоста** (`dnsPolicy: Default`).
+Если после ребута хост поднялся с нерабочим nameserver (например, шлюз, на
+котором DNS-сервис не запустился), CoreDNS шлёт запросы в мёртвый адрес, и
+**ни одно внешнее имя из подов не резолвится**. Диагностика усложняется тем,
+что:
+
+- хост при этом резолвит нормально — у него свой резолвер;
+- `dig @10.43.0.10` **с хоста** даёт ложный таймаут (ClusterIP недоступен
+  с хоста по определению) — проверять надо **из пода**;
+- в логах CoreDNS виден поток `read udp ...->X:53: i/o timeout`.
+
+**Диагностика.**
+
+```bash
+# резолв ИЗ ПОДА (не с хоста!)
+kubectl -n agentscale exec <pod> -- python3 -c \
+  "import socket;print(socket.gethostbyname('github.com'))"
+
+# поток таймаутов CoreDNS = мёртвый upstream
+kubectl -n kube-system logs -l k8s-app=kube-dns --since=120s | grep -c 'i/o timeout'
+
+# жив ли upstream, который видит хост
+dig +short @<host-nameserver> github.com
+```
+
+Или одной командой (падает с готовым диагнозом и инструкцией):
+
+```bash
+prodavan-ops dns-check --namespace agentscale
+```
+
+**Фикс.** Не полагаться на единственный upstream из `/etc/resolv.conf` —
+задать CoreDNS явный список живых резолверов. Патчим ConfigMap `coredns`
+(k3s владеет им, `coredns-custom`/HelmChartConfig для этого не годятся:
+`*.override` с `forward` CoreDNS отклоняет как duplicate plugin, а HelmChart
+coredns в k3s нет):
+
+```bash
+kubectl -n kube-system get cm coredns -o yaml > /tmp/coredns-backup.yaml   # бэкап!
+# заменить:  forward . /etc/resolv.conf
+# на:        forward . <живой> <резерв> <резерв> { policy sequential  max_fails 1  health_check 5s }
+kubectl -n kube-system rollout restart deploy/coredns
+```
+
+Три upstream + `max_fails 1` + `health_check 5s` дают устойчивость: падение
+одного резолвера больше не выключает DNS всему кластеру. Проверено на prod
+2026-10-22: до фикса — непрерывный поток таймаутов и 0 резолвов из подов,
+после — 0 таймаутов за минуту и провайдер отвечает `HTTP/1.1 200 OK`.
+
+**Профилактика.** `prodavan-ops heal` (post-reboot recovery) теперь вызывает
+`dns-check` и печатает диагноз с инструкцией, а `prodavan-ops dns-check`
+можно ставить в CI/дежурный прогон. Проверка намеренно резолвит **из пода**:
+если DNS мёртв, новый под не скачает образ, и проба «не стартует» вместо
+«DNS мёртв» — диагностика теряется.
+
+### 3.2 Сеть подов наружу: PMTU и «медленный GitHub» (2026-10-23)
+
+**Симптом.** Argo не может получить target state: `git fetch` падает через
+~10 минут с `error: RPC failed; curl 92 HTTP/2 stream 5 was not closed
+cleanly: CANCEL (err 8)` или `fatal: early EOF`. Ни один PR не доезжает до
+кластера. Параллельно: `pip install` в CI ловит `ReadTimeout` от PyPI, а
+браузерные бинарники для образа searchnet качаются 40 минут и не докачиваются.
+
+**Замеры (это важно — симптомы выглядят как «нестабильный интернет»):**
+
+| откуда → куда | скорость |
+|---|---|
+| под → нода (CNI) | **155 МБ/с** — сеть пода здорова |
+| под → GitHub | **~20 КБ/с**, обрывы `IncompleteRead` |
+| нода → GitHub | **2.2 МБ/с** |
+
+**PMTU до интернета меньше 1500:**
+
+```bash
+ping -M do -s 1472 140.82.121.4   # → Frag needed
+ping -M do -s 1400 140.82.121.4   # → OK
+```
+
+MTU пода — 1450 (VXLAN 1500−50), и пакеты такого размера в этот путь не
+проходят: TCP уходит в ретрансмиты и деградирует в 100 раз. Хост этого не
+замечает, потому что его собственные сокеты делают PMTU-обнаружение.
+
+**Что сделано.** `argocd-repo-server` переведён на `hostNetwork: true` — он
+ходит тем же путём, что нода, и `git fetch` занимает ~1с вместо 10 минут
+(манифест: `infra/argocd/install/patch-repo-server-timeout.yaml`). Порт 8081
+при этом занимается на ноде — для однонодового кластера приемлемо.
+
+Дополнительно: `http.version=HTTP/1.1` и `http.postBuffer=512MB` через
+`GIT_CONFIG_*` (HTTP/2 на этом канале рвётся чаще), `ARGOCD_EXEC_TIMEOUT=900s`.
+
+**Постоянное лечение (не сделано, требует рестарта k3s):** `flannel-mtu: 1400`
+в `/etc/rancher/k3s/config.yaml` — тогда MSS пода = 1360 и клампинг не нужен.
+Рестарт k3s останавливает весь dev-кластер, поэтому вынесено отдельной задачей.
+MSS-клампинг на ноде (`iptables -t mangle FORWARD --set-mss 1360`) применён как
+страховка, но сам по себе проблему не решил.
 
 ---
 

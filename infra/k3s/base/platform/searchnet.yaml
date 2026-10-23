@@ -1,0 +1,174 @@
+# SearchNet — единый агентный шлюз веб-поиска (CLAW-WEB v2). Заменяет SearXNG:
+# собственный метапоиск (браузерные SERP-движки chromium/camoufox + чистые
+# JSON-API, RRF-слияние) + extract/fetch с anti-bot + remote MCP на /mcp.
+# Исходник — сабмодуль ../searchnet (github.com/ne-tort/searchnet); образ
+# ghcr.io/ne-tort/searchnet собирает CI (ci-images.yml, job build-searchnet).
+# Экспонирует REST+MCP на :3950, потребляется ТОЛЬКО приложением (API-прокси
+# /projects/{id}/web-search на :8001) — песочница хост не видит (NetworkPolicy
+# пропускает из sandboxes только :8001 в agentscale).
+# Метапоиск SearXNG в searchnet выключен по умолчанию (legacy-провайдер).
+apiVersion: v1
+kind: Service
+metadata:
+  name: searchnet
+  labels:
+    app.kubernetes.io/name: searchnet
+    app.kubernetes.io/part-of: agentscale
+    app.kubernetes.io/component: web-search
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  ports:
+    - name: http
+      port: 3950
+      targetPort: 3950
+  selector:
+    app.kubernetes.io/name: searchnet
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: searchnet
+  labels:
+    app.kubernetes.io/name: searchnet
+    app.kubernetes.io/part-of: agentscale
+    app.kubernetes.io/component: web-search
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: searchnet
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: searchnet
+        app.kubernetes.io/part-of: agentscale
+        app.kubernetes.io/component: web-search
+    spec:
+      # GHCR-пакет searchnet приватный: с imagePullPolicy=Always нода обязана
+      # авторизоваться при каждом старте, иначе ErrImagePull
+      # («failed to fetch anonymous token … 401 Unauthorized»). Поймано на
+      # живом стенде 2026-10-22 сразу после включения Always: старая реплика
+      # работала только потому, что образ уже лежал локально. Тот же секрет,
+      # что у API (ghcr-pull).
+      imagePullSecrets:
+        - name: ghcr-pull
+      # Браузеры (chromium по умолчанию, camoufox эскалацией) требуют /dev/shm
+      # и RAM: 2g/4g — как в docker-compose searchnet.
+      containers:
+        - name: searchnet
+          # Пин на immutable-тег, а НЕ :latest. searchnet@ba8f6af (per-domain
+          # render_timeout_sec + маршрут домена применяется к extract).
+          # Тег — sha коммита prodavan, на котором прогонялся
+          # workflow_dispatch ci-images build_searchnet=true (CI тегирует сборку
+          # именно так, GITHUB_SHA[:12]).
+          #
+          # Почему пин, а не :latest: 2026-10-22 образ пересобрали с фиксом
+          # маршрутов, :latest в GHCR обновился, но под продолжал работать на
+          # старом локальном слое — в манифесте ничего не изменилось, значит
+          # Argo не перекатывал Deployment. Симптом снаружи — «фикс не работает».
+          # С пином перекат декларативен: обновили тег → Argo увидел diff →
+          # новый под тянет ровно эту сборку. imagePullPolicy=Always сам по себе
+          # гарантирует свежесть тега, но НЕ перезапуск.
+          # Проверяется тестом test_agent_runtime_image_pin.test_searchnet_*.
+          image: ghcr.io/ne-tort/searchnet:71ca334445d6
+          # Always дополнительно: пин мог быть пересобран под тем же тегом при
+          # отладке, а нода держит локальный слой.
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 3950
+          env:
+            - name: SEARCHNET_API__HOST
+              value: "0.0.0.0"
+            - name: SEARCHNET_API__PORT
+              value: "3950"
+            - name: SEARCHNET_DATA_DIR
+              value: /app/data
+            # Холодный старт ленив: chromium спавнится ~0.3с по запросу;
+            # camoufox — эскалация per-domain (ROUTES) для защищённых сайтов.
+            - name: SEARCHNET_ENGINES__ENABLED
+              value: '["camoufox","chromium","http"]'
+            - name: SEARCHNET_ENGINES__DEFAULT
+              value: "chromium"
+            # Прогрев: держим ОДИН тёплый контекст camoufox. Без него каждый
+            # fetch на защищённый сайт платит холодный спавн (~3-6с), а при
+            # нагрузке — очередь на спавн; агент видит это как «tool timeout».
+            - name: SEARCHNET_ENGINES__WARM_ENGINES
+              value: '["camoufox"]'
+            - name: SEARCHNET_ENGINES__WARM_SHOPS
+              value: "[]"
+            # ROUTES: Qrator на DNS Shop НЕ проходится chromium (отдаёт 401
+            # challenge после ~50с ожидания) — сразу camoufox. Без маршрута
+            # цепочка http → chromium → camoufox тратила 50с+ на заведомо
+            # провальную ступень и упиралась в клиентский таймаут 30с.
+            # ozon/wildberries/avito — тоже Qrator/антибот: camoufox первым.
+            # render_timeout_sec=55: глобальный дефолт 24с МАЛ для этих доменов.
+            # Замер: DNS через camoufox рендерится 22-30с, и на 24с запросы
+            # флапали — один отдавал 6.5К текста с ценами, следующий
+            # «timeout: рендер не уложился в общий дедлайн 24с». Агент видел это
+            # как «страница не открылась» и уходил в сырой HTML без цен.
+            # Почему 55: замер — каталог DNS иногда рендерится 45-55с (было 40 и он не
+            # укладывался). API-прокси ретраит ТОЛЬКО быстрый отказ (<25с), поэтому
+            # худший случай 25+55=80с — ниже таймаута тула (120с) и API (120с).
+            
+            - name: SEARCHNET_ENGINES__ROUTES
+              value: >-
+                [{"domain":"dns-shop.ru","chain":["camoufox"],"challenge_wait_sec":6,"render_timeout_sec":55,"wait_until":"networkidle",
+                "note":"Qrator: chromium отдаёт 401; цены приходят XHR после load"},
+                {"domain":"ozon.ru","chain":["camoufox"],"challenge_wait_sec":6,"render_timeout_sec":55,"wait_until":"networkidle",
+                "note":"антибот: chromium не проходит; цены XHR"},
+                {"domain":"wildberries.ru","chain":["camoufox"],"challenge_wait_sec":6,"render_timeout_sec":55,"wait_until":"networkidle",
+                "note":"антибот: chromium не проходит; цены XHR"},
+                {"domain":"avito.ru","chain":["camoufox"],"challenge_wait_sec":6,"render_timeout_sec":55,"wait_until":"networkidle",
+                "note":"антибот: chromium не проходит"},
+                {"domain":"citilink.ru","chain":["camoufox"],"challenge_wait_sec":6,"render_timeout_sec":55,"wait_until":"networkidle",
+                "note":"антибот: chromium не проходит; цены XHR"},
+                {"domain":"mvideo.ru","chain":["camoufox"],"challenge_wait_sec":6,"render_timeout_sec":55,"wait_until":"networkidle",
+                "note":"антибот: chromium не проходит; цены XHR"},
+                {"domain":"regard.ru","chain":["camoufox"],"challenge_wait_sec":6,"render_timeout_sec":55,"wait_until":"networkidle",
+                "note":"антибот: chromium не проходит"},
+                {"domain":"nix.ru","chain":["camoufox"],"challenge_wait_sec":6,"render_timeout_sec":55,"wait_until":"networkidle",
+                "note":"антибот: chromium не проходит"}]
+            - name: SEARCHNET_LOG_LEVEL
+              value: "INFO"
+            # REST-мост с кластером не ищет в K8s: k3s-нода должна уметь
+            # резолвить публичные поисковые домены (node DNS, не coredns-фича).
+          resources:
+            requests:
+              cpu: 200m
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 4Gi
+          volumeMounts:
+            - name: data
+              mountPath: /app/data
+          # startupProbe щедрее compose-дефолта (start-period 60s): браузерные
+          # бинари на первой странице качаются/копятся при холодном старте.
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3950
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 3950
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3950
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+      volumes:
+        - name: data
+          emptyDir: {}

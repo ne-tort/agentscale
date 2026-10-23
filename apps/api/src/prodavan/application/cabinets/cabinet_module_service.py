@@ -370,6 +370,20 @@ class CabinetModuleService:
             cabinet_id=cabinet_id, principal=principal, employee=employee, write=True
         )
         await self._require_module_binding(cabinet_id=cabinet_id, module_id=module_id)
+        # WAVE16: виртуальные таблицы (equipment_search/master_price) — строки
+        # живут в OpenSearch, удаление напрямую по row_id = "os:{doc_id}".
+        if table_slug in ("equipment_search", "master_price") and row_id.startswith("os:"):
+            from prodavan.application.modules.equipment_master_price import (
+                delete_virtual_row,
+            )
+
+            return await delete_virtual_row(
+                self._session,
+                cabinet_id=cabinet_id,
+                row_id=row_id,
+                principal=principal,
+                employee=employee,
+            )
         inst = await self._cabinet_sot(cabinet_id=cabinet_id, module_id=module_id, write=True)
         delete_session = await self._chat_scope_session(
             inst=inst, module_id=module_id, table_slug=table_slug, session_id=session_id
@@ -389,6 +403,20 @@ class CabinetModuleService:
         if not ok:
             raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="row not found")
         if module_id == "mod_equipment" and existing is not None:
+            # Ручная позиция мастер-прайса удалена в UI: убираем и документ из
+            # индекса, иначе строка продолжит показываться в прайсе и в
+            # экспорте (она читается из OS, а не из БД).
+            from prodavan.application.modules.equipment_master_price_manual import (
+                MANUAL_TABLE,
+                delete_manual_doc,
+            )
+
+            if table_slug == MANUAL_TABLE:
+                await delete_manual_doc(
+                    self._session,
+                    cabinet_id=cabinet_id,
+                    body=existing.get("body") if isinstance(existing.get("body"), dict) else {},
+                )
             # Связанные данные удаляются вместе со строкой:
             # позиция → группы/офферы/бюджет/сборки; строка бюджета → вся
             # цепочка; сборка → её группы-кандидаты слотов и их офферы.
@@ -528,6 +556,15 @@ class CabinetModuleService:
             session_id=session_id,
         )
         await ModuleActionExecutor(self._session).maybe_auto_budget_sync(
+            cabinet_id=cabinet_id,
+            module_id=module_id,
+            table_slug=table_slug,
+            row_id=row_id,
+            principal=principal,
+            employee=employee,
+            session_id=session_id,
+        )
+        await ModuleActionExecutor(self._session).maybe_sync_master_price_manual(
             cabinet_id=cabinet_id,
             module_id=module_id,
             table_slug=table_slug,

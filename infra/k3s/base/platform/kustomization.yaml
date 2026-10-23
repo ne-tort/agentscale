@@ -8,7 +8,7 @@ resources:
   - kafka.yaml
   - celery.yaml
   - keycloak.yaml
-  - searxng.yaml
+  - searchnet.yaml
   - gotenberg.yaml
   - pdb.yaml
 generatorOptions:

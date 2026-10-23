@@ -336,6 +336,307 @@ async def latest_answer(
     }
 
 
+# ------------------------------------------------------------------ тендеры (WAVE15)
+# Внешний intake: создать тендер из внешнего источника (b2b-center и т.п.) и
+# при желании сразу взять в работу — чат создаётся, позиции копируются, агент
+# получает стартовое сообщение. Скоупы: tenders:write / chat:write.
+
+_TENDER_STATUSES_EXT = frozenset(
+    {"draft", "active", "submitted", "won", "lost", "cancelled", "irrelevant"}
+)
+
+
+async def _find_tender_by_source_ref(io, source_ref: str) -> str:
+    """row_id тендера с этим source_ref в проекте ("" — нет).
+
+    Идемпотентность внешнего импорта: одинаковый source_ref = один тендер.
+    Сравнение точное (source_ref — интеграционный ключ, не текст пользователя).
+    """
+    if not source_ref:
+        return ""
+    rows = await io.list("tenders")
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        body = row.get("body") if isinstance(row.get("body"), dict) else row
+        if str(body.get("source_ref") or "").strip() == source_ref:
+            return str(row.get("row_id") or "")
+    return ""
+
+
+async def _find_session_for_tender(
+    session: AsyncSession, *, tender_id: str, project_id: str
+) -> str:
+    """session_id чата, уже взявшего этот тендер в работу ("" — нет).
+
+    Связь «чат ↔ тендер» хранится в позициях чата (`request_lines.tender_id`).
+    Так повторный импорт переиспользует существующий чат вместо создания
+    нового — один тендер = один чат.
+    """
+    if not tender_id:
+        return ""
+    from sqlalchemy import text as _sql
+
+    rows = await session.execute(
+        _sql(
+            "SELECT DISTINCT l.session_id FROM module_instance_data_rows l "
+            "WHERE l.table_slug = 'request_lines' "
+            "AND l.body->>'tender_id' = :tid "
+            "AND l.session_id IS NOT NULL LIMIT 1"
+        ),
+        {"tid": tender_id},
+    )
+    row = rows.first()
+    return str(row[0]) if row and row[0] else ""
+
+
+class ExternalTenderLine(BaseModel):
+    model_config = {"extra": "forbid"}
+    id: str | None = Field(default=None, max_length=64)
+    title: str = Field(min_length=1, max_length=1000)
+    part_number: str | None = Field(default=None, max_length=200)
+    qty: float | None = Field(default=None, gt=0)
+    # Доп. поля позиции от заказчика (код номенклатуры, грузополучатель,
+    # адрес доставки) — свободный текст площадки, помогает идентифицировать
+    # товар при подборе.
+    comment: str | None = Field(default=None, max_length=2000)
+
+
+class ExternalTenderBody(BaseModel):
+    """Тендер из внешнего источника; обязательный title, позиции в lines."""
+
+    model_config = {"extra": "forbid"}
+    title: str = Field(min_length=1, max_length=500)
+    customer: str | None = Field(default=None, max_length=500)
+    deadline_at: str | None = Field(default=None, max_length=64)
+    status: str | None = Field(default=None, max_length=32)
+    comment: str | None = Field(default=None, max_length=8000)
+    source_url: str | None = Field(default=None, max_length=2000)
+    source_ref: str | None = Field(default=None, max_length=200)
+    lines: list[ExternalTenderLine] = Field(default_factory=list, max_length=500)
+    # Метаданные площадки (номер, закон, организатор) — отдельно от условий
+    # заказчика в comment, чтобы агент не путал их с требованиями.
+    meta: str | None = Field(default=None, max_length=2000)
+    # сразу взять в работу: создать чат и импортировать позиции
+    attach: bool = False
+    chat_title: str | None = Field(default=None, max_length=200)
+    kickoff: bool = True  # стартовое сообщение агенту после attach
+
+
+def _ext_lines_json(lines: list[ExternalTenderLine]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for idx, line in enumerate(lines):
+        lid = (line.id or "").strip() or f"tl{idx + 1}"
+        if lid in seen:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail=f"duplicate line id: {lid}",
+            )
+        seen.add(lid)
+        out.append(
+            {
+                "id": lid,
+                "title": line.title.strip(),
+                "part_number": (line.part_number or "").strip(),
+                "qty": line.qty if line.qty is not None else 1,
+                "comment": (line.comment or "").strip(),
+            }
+        )
+    return out
+
+
+@router.post("/projects/{project_id}/tenders", status_code=201)
+async def create_external_tender(
+    project_id: str,
+    body: ExternalTenderBody,
+    ctx: _ExternalCtx = ExternalDep,
+    session: AsyncSession = SessionDep,
+) -> dict[str, Any]:
+    """Создать тендер из внешнего источника (и опционально сразу взять в работу).
+
+    attach=true: создаётся чат (chat_title или «Тендер: {title}»), позиции
+    копируются в request_lines чата (tender_attach, идемпотентно), при
+    kickoff=true агенту уходит стартовое сообщение (detached turn).
+    """
+    _require_scope(ctx, "chat:write")
+    project = await _project_visible(ctx, session, project_id)
+    status = (body.status or "active").strip()
+    if status not in _TENDER_STATUSES_EXT:
+        raise AppError(
+            code="VALIDATION_ERROR",
+            title="Validation Error",
+            status=422,
+            detail=f"status must be one of {sorted(_TENDER_STATUSES_EXT)}",
+        )
+    deadline = (body.deadline_at or "").strip()
+    if deadline:
+        from datetime import datetime as _dt
+
+        try:
+            _dt.fromisoformat(deadline.replace("Z", "+00:00"))
+        except ValueError:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="deadline_at must be ISO-8601",
+            ) from None
+
+    from prodavan.application.modules.equipment_offers_service import ModuleRowIO
+    from prodavan.application.modules.module_action_executor import ModuleActionExecutor
+
+    io = ModuleRowIO(
+        session,
+        cabinet_id=project.cabinet_id,
+        project_id=project_id,
+        principal=ctx.principal,
+        employee=ctx.employee,
+        session_id=None,
+    )
+    tender_body: dict[str, Any] = {
+        "title": body.title.strip(),
+        "customer": (body.customer or "").strip(),
+        "status": status,
+        "comment": (body.comment or "").strip(),
+        "source_url": (body.source_url or "").strip(),
+        "source_ref": (body.source_ref or "").strip(),
+        "lines_json": _ext_lines_json(body.lines),
+    }
+    if body.meta:
+        tender_body["meta"] = body.meta.strip()
+    if deadline:
+        tender_body["deadline_at"] = deadline
+    # Идемпотентность по source_ref: повторная отправка того же внешнего тендера
+    # (ретрай кравлера, повторный ingest, падение между push и подтверждением)
+    # не создаёт вторую строку — обновляем существующую. Без этого каждая
+    # повторная отправка плодила дубль тендера и отдельный чат.
+    source_ref = str(tender_body["source_ref"] or "")
+    existing_id = await _find_tender_by_source_ref(io, source_ref)
+    if existing_id:
+        await io.update("tenders", existing_id, tender_body)
+        tender_id = existing_id
+    else:
+        created = await io.create("tenders", tender_body)
+        tender_id = str(created.get("row_id") or "")
+
+    result: dict[str, Any] = {"tender_id": tender_id, "attached": False, "created": not existing_id}
+    if not body.attach:
+        return result
+
+    # Один тендер = один чат: если у тендера уже есть рабочая сессия — берём в
+    # работу заново в НЕЙ, а не плодим чат на каждый повторный push. Это делает
+    # повторный POST (ретрай после сетевого сбоя, повторный ingest) полностью
+    # идемпотентным и не засоряет список чатов.
+    session_id = await _find_session_for_tender(session, tender_id=tender_id, project_id=project_id)
+    chat_reused = bool(session_id)
+    if not session_id:
+        chat_title = (body.chat_title or "").strip() or f"Тендер: {body.title.strip()[:120]}"
+        chat = await AgentSessionService(session).create_session(
+            project_id=project_id,
+            principal=ctx.principal,
+            employee=ctx.employee,
+            model=None,
+            title=chat_title,
+        )
+        session_id = str(chat.get("id") or chat.get("session_id") or "")
+    result["chat_reused"] = chat_reused
+    attach = await ModuleActionExecutor(session).invoke(
+        cabinet_id=project.cabinet_id,
+        module_id="mod_equipment",
+        action_id="tender_attach",
+        principal=ctx.principal,
+        employee=ctx.employee,
+        row_id=tender_id,
+        project_id=project_id,
+        session_id=session_id,
+    )
+    result.update(
+        {
+            "attached": True,
+            "session_id": session_id,
+            "attach": {k: attach.get(k) for k in ("created", "updated", "lines_total")},
+        }
+    )
+    if body.kickoff:
+        # Кикофф отдаёт ВСЕ данные тендера сразу: позиции уже скопированы в
+        # request_lines (attach), а контекст (заказчик, срок, ссылка, номер,
+        # закон) идёт прямо в сообщении. Агенту не нужно дополнительно читать
+        # тендер — он работает с позициями заказчика и найденными товарами.
+        lines_preview: list[str] = []
+        for i, ln in enumerate(body.lines, start=1):
+            t = (ln.title or "").strip()
+            if not t:
+                continue
+            qty = ln.qty if ln.qty is not None else 1
+            pn = (ln.part_number or "").strip()
+            lines_preview.append(
+                f"{i}. {t} — {qty:g} шт." + (f" (партномер: {pn})" if pn else "")
+            )
+        header = f"В работу взят тендер «{body.title.strip()}»."
+        meta: list[str] = []
+        if body.customer:
+            meta.append(f"Заказчик: {body.customer.strip()}")
+        if deadline:
+            meta.append(f"Срок: {deadline}")
+        if body.source_url:
+            meta.append(f"Источник: {body.source_url.strip()}")
+        if body.source_ref:
+            meta.append(f"Внешний ключ: {body.source_ref.strip()}")
+        if body.meta:
+            # Метаданные площадки (номер, закон, организатор) — отдельной
+            # строкой, чтобы не смешивать с условиями заказчика.
+            meta.append(f"Площадка: {body.meta.strip()}")
+        positions_block = (
+            "\n\nПозиции заказчика (уже импортированы в этот чат):\n"
+            + "\n".join(lines_preview)
+            if lines_preview
+            else ""
+        )
+        # Условия заказчика — то, что он пишет сам (требования к КП,
+        # сертификаты, сроки оплаты). Критично для решения об отправке.
+        conditions_block = (
+            "\n\nУСЛОВИЯ ЗАКАЗЧИКА (его собственный текст):\n" + body.comment.strip()
+            if body.comment and body.comment.strip()
+            else ""
+        )
+        kickoff_text = (
+            header
+            + (("\n" + "\n".join(meta)) if meta else "")
+            + positions_block
+            + conditions_block
+            + "\n\nДанные тендера переданы целиком — читать тендер отдельно не нужно. "
+            "Работай с позициями заказчика этого чата.\n\n"
+            "1) Оцени релевантность. Наш профиль — техника И ПО: компьютерная/"
+            "электронная техника, а также программное обеспечение (лицензии, "
+            "подписки, продления). ПО считается нашим профилем, если находится "
+            "в каталогах проекта, поэтому по позициям-ПО сначала проверь "
+            "equipment_catalog_search. Отбракуй тендер (tender_upsert: "
+            "status=irrelevant, relevance_note с причиной) только если это явно "
+            "чужое (строительство, металл, химия, услуги, спецтехника).\n"
+            "2) Иначе по КАЖДОЙ позиции подбери кандидатов по правилам модуля: "
+            "сначала каталоги (equipment_catalog_sources), затем интернет-магазины "
+            "из «Интернет магазины» (web_shops_list) — товары из интернета "
+            "добавляй через web_product_add и они конкурируют с каталогом наравне.\n"
+            "3) Результат — found_groups_upsert по каждой позиции.\n"
+            "4) Когда подбор готов — проверь готовность (tender_readiness) и, если "
+            "порог достигнут, отправь КП заказчику (tender_report_send)."
+        )
+        turn = await AgentSessionService(session).start_detached_turn(
+            project_id=project_id,
+            session_id=session_id,
+            text=kickoff_text,
+            attachment_refs=None,
+            principal=ctx.principal,
+            employee=ctx.employee,
+            model=None,
+        )
+        result["kickoff_turn_id"] = getattr(turn, "turn_id", None)
+    return result
+
+
 # ------------------------------------------------------------------ управление
 # Создание ключей и подписок вебхуков — от человека (OIDC), не от app key.
 # Компания-scope: участник компании (сотрудник) управляет своими ключами.

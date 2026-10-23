@@ -105,7 +105,7 @@ data:
   # (раньше ключ отсутствовал → web.search был выключен на prod).
   POD_AGENT_RUNTIME_WEB_SEARCH_PROVIDER: "prodavan_api"
   POD_AGENT_RUNTIME_WEB_SEARCH_URL: ""
-  WEB_SEARCH_BACKEND_URL: "http://searxng.agentscale.svc:8080/search"
+  WEB_SEARCH_BACKEND_URL: "http://searchnet.agentscale.svc:3950"
   POD_PROBE_ENABLED: "false"
 ---
 # Prod HTTP router: host-pinned (dev keeps the wildcard rule for punnel/VPN).

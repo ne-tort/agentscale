@@ -7,6 +7,7 @@ import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/features/employee/cabinet_module_host.dart';
 import 'package:prodavan/features/employee/cabinet_nav_loader.dart';
+import 'package:prodavan/features/employee/webhooks_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Hub listing module tabs for a shell placement (`management` or `data`).
@@ -24,6 +25,7 @@ class CabinetModuleHubPage extends StatelessWidget {
     this.sessionId,
     this.embedded = false,
     this.emptyIcon = Icons.apps_outlined,
+    this.showWebhooksEntry = false,
   });
 
   final String cabinetId;
@@ -33,6 +35,12 @@ class CabinetModuleHubPage extends StatelessWidget {
   final List<CabinetNavEntry> entries;
   final bool embedded;
   final IconData emptyIcon;
+
+  /// Показывать встроенный пункт «Вебхуки и токены» (только хаб Управления).
+  /// Это не meta-модуль: страница работает напрямую с внешним API компании
+  /// (`/external/webhooks`, `/external/app-keys`), поэтому не зависит от
+  /// привязки модулей к кабинету/проекту.
+  final bool showWebhooksEntry;
 
   Future<void> _openModule(BuildContext context, CabinetNavEntry entry) {
     // global bind → cabinet SoT (projectId null); local → project leaf required.
@@ -54,6 +62,12 @@ class CabinetModuleHubPage extends StatelessWidget {
     );
   }
 
+  void _openWebhooks(BuildContext context) {
+    Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(builder: (_) => const WebhooksPage()),
+    );
+  }
+
   Widget _listBody(BuildContext context, AppLocalizations l10n) {
     final activeSession = sessionId ?? workContext.selectedSessionId;
     final visibleEntries = [
@@ -62,7 +76,7 @@ class CabinetModuleHubPage extends StatelessWidget {
             (activeSession != null && activeSession.trim().isNotEmpty))
           e,
     ];
-    if (visibleEntries.isEmpty) {
+    if (visibleEntries.isEmpty && !showWebhooksEntry) {
       return EmptyPlaceholder(
         title: l10n.companyNoModules,
         icon: emptyIcon,
@@ -78,6 +92,15 @@ class CabinetModuleHubPage extends StatelessWidget {
             icon: entry.icon,
             subtitle: entry.subtitle == null ? null : Text(entry.subtitle!),
             onTap: () => _openModule(context, entry),
+          ),
+        if (showWebhooksEntry)
+          AppNavPreference(
+            title: 'Вебхуки и токены',
+            icon: Icons.webhook_outlined,
+            subtitle: const Text(
+              'Подписки на события, API-токены и документация',
+            ),
+            onTap: () => _openWebhooks(context),
           ),
       ],
     );
@@ -126,6 +149,7 @@ class CabinetManagementPage extends StatelessWidget {
       entries: entries,
       embedded: embedded,
       emptyIcon: Icons.apps_outlined,
+      showWebhooksEntry: true,
     );
   }
 }

@@ -4,6 +4,7 @@ import json
 import time
 from typing import Iterable
 
+from prodavan_ops.dns_check import DnsCheckError, check_dns
 from prodavan_ops.k8s import kubectl, require_k8s_api, wait_k3s_api_ready
 from prodavan_ops.smoke import smoke
 
@@ -138,8 +139,9 @@ def heal_cluster(
     smoke_sleep_sec: float = 5.0,
     skip_traefik: bool = False,
     skip_smoke: bool = False,
+    skip_dns: bool = False,
 ) -> None:
-    """Recover dev cluster after WSL reboot: API stuck pods, Traefik hostPort, smoke."""
+    """Recover dev cluster after reboot: API stuck pods, Traefik hostPort, DNS, smoke."""
     wait_k3s_api_ready(timeout_sec=min(60, wait_node_sec))
     require_k8s_api(timeout_sec=30)
     wait_node_ready(timeout_sec=wait_node_sec)
@@ -148,6 +150,21 @@ def heal_cluster(
     if not skip_traefik:
         recycle_traefik()
         time.sleep(5)
+    # DNS ПОСЛЕ подов, но ДО smoke: после рестарта хоста upstream-резолвер может
+    # не подняться, и тогда поды живые, HTTP-пробы зелёные, а внешние имена не
+    # резолвятся — агент «не может достучаться до провайдера». Ровно это и
+    # случилось на prod 2026-10-22. Падение здесь честнее молчаливого «OK».
+    if skip_dns:
+        print("heal: dns-check skipped")
+    else:
+        try:
+            resolved = check_dns()
+            print(f"heal: dns OK {resolved}")
+        except DnsCheckError as exc:
+            # Не роняем весь heal: остальные шаги (smoke) полезны и при мёртвом
+            # DNS — они показывают, что приложение живо. Но диагноз печатаем
+            # целиком, с инструкцией, что чинить.
+            print(f"heal: DNS ПРОБЛЕМА\n{exc}")
     if skip_smoke:
         print("heal: smoke skipped")
         return

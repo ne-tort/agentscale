@@ -1,5 +1,6 @@
 """Unit tests for MaterializePlanner helpers."""
 
+from prodavan.application.platform.equipment_prompt_content import EQUIPMENT_RULES_FILES
 from prodavan.application.projects.materialize_planner import (
     MaterializePlanner,
     _expand_prompt_path_ops,
@@ -373,16 +374,13 @@ def test_equipment_prompt_seed_rows_materialize_layout() -> None:
         module_id="mod_equipment",
     )
     by_path = {o.workspace_path: o for o in ops}
-    assert set(by_path) == {
-        "AGENTS.md",
-        "prompts/equipment/10-request.md",
-        "prompts/equipment/20-search.md",
-        "prompts/equipment/30-identify.md",
-        "prompts/equipment/40-groups.md",
-        "prompts/equipment/50-rank.md",
-        "prompts/equipment/60-builds.md",
-        "prompts/equipment/70-ready-builds.md",
+    # Состав выводим из сида: перечень файлов правил расширяется (добавлен
+    # 05-tenders.md), а смысл проверки — «каждое правило сида разложено в
+    # workspace по своему пути», а не фиксация конкретного списка имён.
+    expected = {"AGENTS.md"} | {
+        f"prompts/equipment/{name}" for name, _, _ in EQUIPMENT_RULES_FILES
     }
+    assert set(by_path) == expected
     agents_md = by_path["AGENTS.md"]
     assert agents_md.row_body["body_md"].lstrip().startswith("# Prodavan")
     assert "found_groups" in agents_md.row_body["body_md"]

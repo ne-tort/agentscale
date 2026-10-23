@@ -30,7 +30,7 @@ def test_tools_list_contains_catalog_and_sot_tools() -> None:
         mcp_server._handle({"jsonrpc": "2.0", "id": 9, "method": "initialize"})["result"][
             "serverInfo"
         ]["version"]
-        == "3.0.0"
+        == "3.2.0"
     )
 
 
@@ -593,12 +593,37 @@ def test_tools_list_contains_v2_tools() -> None:
     # прежние инструменты не потеряны
     assert "equipment_builds_delete" in names
     assert "found_groups_upsert" in names
-    assert len(names) == 23
+    # WAVE14: тендеры
+    for name in (
+        "tenders_list",
+        "tender_get",
+        "tender_upsert",
+        "tender_delete",
+        "tender_positions_upsert",
+        "tender_attach",
+    ):
+        assert name in names
+    # «Интернет магазины» / «Интернет товары» (web_shops + web_products, TTL 72ч)
+    for name in (
+        "web_shops_list",
+        "web_products_list",
+        "web_product_add",
+        "web_product_delete",
+    ):
+        assert name in names
+    # Отчёты по тендерам: проверка готовности + отправка КП + профили почты
+    for name in (
+        "tender_readiness",
+        "tender_report_send",
+        "mail_profiles_list",
+    ):
+        assert name in names
+    assert len(names) == 36
     assert (
         mcp_server._handle({"jsonrpc": "2.0", "id": 2, "method": "initialize"})["result"][
             "serverInfo"
         ]["version"]
-        == "3.0.0"
+        == "3.2.0"
     )
 
 

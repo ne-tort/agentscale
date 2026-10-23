@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -50,6 +51,8 @@ from prodavan.application.projects.attachment_delivery import AttachmentDelivery
 from prodavan.application.projects.attachment_service import ProjectAttachmentService
 from prodavan.application.projects.workspace_checkpoint import checkpoint_project_workspace
 from prodavan.config.settings import settings
+
+logger = logging.getLogger(__name__)
 from prodavan.domain.agent import (
     FROZEN_EVENT_TYPES,
     PLATFORM_EVENT_TOOL_APPROVAL_DECISION,
@@ -1595,6 +1598,55 @@ class AgentSessionService:
                 )
         return _event_public(ev_row)
 
+    async def _enrich_webhook_payload(
+        self, payload: dict, *, project_id: str, session_id: str
+    ) -> None:
+        """Дополнить payload вебхука source_ref тендера и текстом ответа агента.
+
+        Связь чат ↔ тендер идёт через request_lines этого чата: у каждой строки
+        есть `tender_id`; тендер знает свой `source_ref` (внешний ключ, напр.
+        `b2b-center:123456`). Текст — последний ассистентский блок сессии.
+
+        Всё best-effort: интеграционные поля не должны ломать запись события,
+        поэтому любые ошибки глушим и отдаём события без них.
+        """
+        try:
+            from sqlalchemy import text as _sql
+
+            # request_lines этого чата → tender_id (связь чат↔тендер), затем
+            # source_ref/title тендера. Прямой SQL: payload вебхука строится в
+            # фоне воркера, где ACL-контекста пользователя нет.
+            rows = await self._session.execute(
+                _sql(
+                    "SELECT DISTINCT body->>'tender_id' AS tender_id "
+                    "FROM module_instance_data_rows "
+                    "WHERE session_id = :sid AND table_slug = 'request_lines' "
+                    "AND body->>'tender_id' IS NOT NULL"
+                ),
+                {"sid": session_id},
+            )
+            tender_ids = {str(r[0]).strip() for r in rows.fetchall() if r[0]}
+            tender_ids.discard("")
+            if len(tender_ids) == 1:
+                tender_id = next(iter(tender_ids))
+                payload["tender_id"] = tender_id
+                trow = await self._session.execute(
+                    _sql(
+                        "SELECT body->>'source_ref', body->>'title' "
+                        "FROM module_instance_data_rows "
+                        "WHERE row_id = :tid AND table_slug = 'tenders'"
+                    ),
+                    {"tid": tender_id},
+                )
+                row = trow.first()
+                if row is not None:
+                    if row[0]:
+                        payload["source_ref"] = str(row[0]).strip()
+                    if row[1]:
+                        payload["tender_title"] = str(row[1]).strip()
+        except Exception:  # noqa: BLE001 - контекст необязателен
+            logger.debug("webhook payload enrich (tender) skipped", exc_info=True)
+
     async def _emit_webhook_on_turn_end(
         self, *, project_id: str, session_id: str, event_type: str, data: dict
     ) -> None:
@@ -1611,18 +1663,54 @@ class AgentSessionService:
         event_name = (
             EVENT_CHAT_MESSAGE_COMPLETED if event_type == AgentEventType.DONE else EVENT_CHAT_TURN_FAILED
         )
+        payload: dict = {
+            "project_id": project_id,
+            "session_id": session_id,
+            "at": datetime.now(UTC).isoformat(),
+        }
+        if isinstance(data, dict) and data.get("reason"):
+            payload["reason"] = str(data.get("reason"))
+        # Контекст для внешних интеграций (кравлер, ERP). Без source_ref
+        # получатель не сопоставит событие со своим тендером; без text не
+        # покажет результат автообработки. Оба поля — best-effort: любая
+        # ошибка здесь не должна ломать запись события.
+        await self._enrich_webhook_payload(payload, project_id=project_id, session_id=session_id)
         await WebhookService(self._session).emit(
             company_id=project.company_id,
             project_id=project_id,
             event_type=event_name,
-            payload={
-                "project_id": project_id,
-                "session_id": session_id,
-                "at": datetime.now(UTC).isoformat(),
-                **({"reason": str(data.get("reason") or "")} if isinstance(data, dict) else {}),
-            },
+            payload=payload,
         )
         await self._session.commit()
+        # WAVE16: отложенный sync — rematerialize по окончании хода (сессия не
+        # прерывалась). Снимаем метку и ставим задачу; если воркер недоступен,
+        # метку подберёт sweep (list_workspace_sync_pending по таймауту).
+        await self._run_pending_workspace_sync(project_id=project_id)
+
+    async def _run_pending_workspace_sync(self, *, project_id: str) -> None:
+        from prodavan.application.projects.workspace_outdated import (
+            take_workspace_sync_pending,
+        )
+        from prodavan.core.jobs.rematerialize_bus import request_rematerialize_project
+
+        source = await take_workspace_sync_pending(self._session, project_id=project_id)
+        if source is None:
+            return
+        await self._session.commit()
+        try:
+            result = await request_rematerialize_project(project_id, source=source)
+            if not result.get("enqueued"):
+                from prodavan.application.project_service.command import ProjectCommand
+
+                await ProjectCommand(self._session).rematerialize_background(
+                    project_id=project_id
+                )
+        except Exception:
+            logger.exception(
+                "pending workspace sync failed project_id=%s (source=%s)",
+                project_id,
+                source,
+            )
 
     async def get_transcript(
         self,

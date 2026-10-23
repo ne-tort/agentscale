@@ -19,6 +19,10 @@ FIRST_PARTY_LATEST = {
     # api/web; the prodavan-ops image-pin check otherwise treats it as third-party
     # and rejects :latest.
     "ghcr.io/ne-tort/prodavan-agent-runtime:latest",
+    # WAVE17 — web-search gateway (searchnet, сабмодуль ../searchnet). Образ
+    # собирается нашим CI (ci-images build-searchnet) по workflow_dispatch:
+    # движется вместе с пином сабмодуля, как api/web :latest.
+    "ghcr.io/ne-tort/searchnet:latest",
 }
 FORBIDDEN_INFRA_LATEST = re.compile(
     r"^(postgres:(16|latest)|redis:(7-alpine|7|latest)|mongo:(7|latest)|ne-tort/minio:latest|ne-tort/mc:latest|"

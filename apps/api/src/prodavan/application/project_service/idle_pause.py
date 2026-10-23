@@ -114,4 +114,37 @@ class ProjectIdlePauseService:
             if result.get("idle_pause_enabled"):
                 companies.append(result)
                 total += int(result.get("count") or 0)
-        return {"count": total, "companies": companies}
+        # WAVE16: зависшие отложенные sync (turn-end не дошёл — рестарт воркера
+        # и т.п.): подбираем по таймауту независимо от политики idle-pause.
+        pending = await self._sweep_pending_workspace_sync()
+        return {"count": total, "companies": companies, "workspace_sync_pending": pending}
+
+    async def _sweep_pending_workspace_sync(self) -> dict:
+        from prodavan.application.projects.workspace_outdated import (
+            list_workspace_sync_pending,
+        )
+        from prodavan.core.jobs.rematerialize_bus import request_rematerialize_project
+
+        ids = await list_workspace_sync_pending(self._session, older_than_minutes=30)
+        done: list[str] = []
+        for project_id in ids:
+            try:
+                result = await request_rematerialize_project(
+                    project_id, source="pending_sweep"
+                )
+                if result.get("enqueued") or result.get("reason") == "celery_disabled":
+                    if result.get("reason") == "celery_disabled":
+                        await self._commands.rematerialize_background(project_id=project_id)
+                    done.append(project_id)
+                    # снимаем метку только при реально запущенном sync
+                    from prodavan.infrastructure.persistence.models.projects import ProjectRow
+
+                    row = await self._session.get(ProjectRow, project_id)
+                    if row is not None:
+                        row.workspace_sync_pending_at = None
+                        row.workspace_sync_pending_source = None
+            except Exception:
+                logger.exception("pending sync sweep failed project_id=%s", project_id)
+        if done:
+            await self._session.commit()
+        return {"count": len(done), "project_ids": done}

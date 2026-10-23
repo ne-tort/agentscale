@@ -93,6 +93,9 @@ IconData metaIconFromName(String? name, {IconData fallback = Icons.extension_out
       return Icons.table_view;
     case 'refresh':
       return Icons.refresh;
+    // Mail sending (Мастер-прайс → письмо, исходящие)
+    case 'send':
+      return Icons.send_outlined;
     // Suppliers registry (fields + tiles)
     case 'local_shipping':
       return Icons.local_shipping;

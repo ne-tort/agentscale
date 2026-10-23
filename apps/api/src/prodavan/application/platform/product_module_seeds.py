@@ -34,7 +34,7 @@ def _equipment_mcp_list_header() -> dict[str, Any]:
         "table_slug": "equipment_mcp",
         "ensure_row": {
             "name": "prodavan-equipment",
-            "version": "3.0.0",
+            "version": "3.2.0",
             "enabled": True,
         },
         "fields": [
@@ -1247,6 +1247,21 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "scope": {"projects": "all", "chats": "all"},
             },
             {
+                # «Интернет товары»: товары, найденные агентом в магазинах из
+                # web_shops. Отдельная таблица (а не запись в общий каталог),
+                # чтобы не ломать автоподтягивание found_offers из каталогов.
+                # TTL 72 часа с момента добавления/правки — истёкшие строки
+                # удаляются sweep'ом и выпадают из индекса.
+                "slug": "web_products",
+                "label": {
+                    "ru": "Интернет товары",
+                    "en": "Web products",
+                },
+                "storage_kind": "json_document",
+                "enabled": True,
+                "scope": {"projects": "all", "chats": "all"},
+            },
+            {
                 "slug": "templates",
                 "label": "Шаблоны документов",
                 "storage_kind": "json_document",
@@ -1322,6 +1337,54 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "enabled": True,
                 "scope": {"projects": "all", "chats": "all"},
             },
+            # WAVE16: почта — профили отправителей (SMTP) и адресная книга.
+            # chats=all: общие на кабинет (как реквизиты компании). Пароль —
+            # secret_ref (secret store), в body только ссылка.
+            {
+                "slug": "mail_senders",
+                "label": {"ru": "Ящики отправки", "en": "Mail senders"},
+                "storage_kind": "json_document",
+                "enabled": True,
+                "scope": {"projects": "all", "chats": "all"},
+            },
+            {
+                "slug": "mail_contacts",
+                "label": {"ru": "Контакты", "en": "Mail contacts"},
+                "storage_kind": "json_document",
+                "enabled": True,
+                "scope": {"projects": "all", "chats": "all"},
+            },
+            {
+                "slug": "mail_outbox",
+                "label": {"ru": "Исходящие письма", "en": "Mail outbox"},
+                "storage_kind": "json_document",
+                "enabled": True,
+                "scope": {"projects": "all", "chats": "all"},
+            },
+            # Настройки отправки мастер-прайса: выбранный получатель живёт
+            # отдельной строкой, а не в самой виртуальной таблице master_price
+            # (её строки приходят из OpenSearch и писать в них некуда).
+            # chats=all — выбор общий на кабинет/проект, как и почтовые профили.
+            {
+                "slug": "master_price_mail",
+                "label": {"ru": "Отправка мастер-прайса", "en": "Master price mail"},
+                "storage_kind": "json_document",
+                "enabled": True,
+                "scope": {"projects": "all", "chats": "all"},
+            },
+            # Ручные позиции мастер-прайса (кнопка «+» у пагинатора).
+            # Реальная таблица — в отличие от самой виртуальной master_price:
+            # именно сюда пишет форма, а бэкенд зеркалит строки в OS-индекс
+            # equipment__c_master_price_manual (master_price читается из OS).
+            # chats=all: прайс общий на кабинет, строка не должна привязываться
+            # к чату, иначе она выпадала бы из общего списка.
+            {
+                "slug": "master_price_manual",
+                "label": {"ru": "Позиции мастер-прайса (вручную)", "en": "Master price manual rows"},
+                "storage_kind": "json_document",
+                "enabled": True,
+                "scope": {"projects": "all", "chats": "all"},
+            },
             # WAVE7: «Закупка» — агрегат по поставщикам (материализуется пайплайном).
             # chats=all: общий проектный датасет (агрегатор между чатами), а не
             # per-chat зеркала — строки одни на проект, видны из любого чата.
@@ -1357,6 +1420,19 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
             {
                 "slug": "ready_build_slots",
                 "label": {"ru": "Слоты готовой сборки", "en": "Ready build slots"},
+                "storage_kind": "json_document",
+                "enabled": True,
+                "scope": {"projects": "all", "chats": "all"},
+            },
+            # WAVE14: «Тендеры» — глобальная (chats=all) группировка позиций
+            # заказчика. Тендер хранит свой состав в lines_json; чат «берёт в
+            # работу» тендер (действие tender_attach) — позиции копируются в
+            # request_lines чата со ссылкой tender_id. Агрегаты (позиций,
+            # найдено %, сумма, маржа, поставщики) материализует пайплайн
+            # (_sync_tenders) по связанным позициям ВСЕХ чатов проекта.
+            {
+                "slug": "tenders",
+                "label": {"ru": "Тендеры", "en": "Tenders"},
                 "storage_kind": "json_document",
                 "enabled": True,
                 "scope": {"projects": "all", "chats": "all"},
@@ -1608,6 +1684,15 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "required": False,
             },
             {
+                # Доп. поля позиции от заказчика (код номенклатуры,
+                # грузополучатель, адрес доставки) — свободный текст площадки.
+                "table_slug": "request_lines",
+                "name": "comment",
+                "label": {"ru": "Поля заказчика", "en": "Customer fields"},
+                "type": "text",
+                "required": False,
+            },
+            {
                 "table_slug": "request_lines",
                 "name": "qty",
                 "label": {"ru": "Кол-во", "en": "Qty"},
@@ -1641,6 +1726,27 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "values": ["open", "matched", "selected"],
                     "labels": {"open": "Открыта", "matched": "Есть кандидаты", "selected": "Выбрано"},
                 },
+            },
+            # WAVE14: позиция может быть импортирована из тендера. tender_id —
+            # row_id строки tenders (текстом, не ref: позиция chat-scoped,
+            # тендер chats=all); tender_line_id — id позиции внутри
+            # lines_json тендера (ключ идемпотентного импорта tender_attach).
+            {
+                "table_slug": "request_lines",
+                "name": "tender_id",
+                "label": {"ru": "Тендер", "en": "Tender"},
+                "type": "text",
+                "required": False,
+                "read_only": True,
+            },
+            {
+                "table_slug": "request_lines",
+                "name": "tender_line_id",
+                "label": {"ru": "Позиция тендера", "en": "Tender line"},
+                "type": "text",
+                "required": False,
+                "read_only": True,
+                "hidden": True,
             },
             _project_ids_column("request_lines"),
             # WAVE10: снапшот сборок позиции (пишет пайплайн). Позиция может
@@ -2582,6 +2688,70 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "default": "",
             },
             _project_ids_column("web_shops"),
+            # ── web_products: товары, найденные агентом в интернет-магазинах ──
+            {
+                "table_slug": "web_products",
+                "name": "title",
+                "label": {"ru": "Название товара", "en": "Title"},
+                "type": "text",
+                "required": True,
+            },
+            {
+                "table_slug": "web_products",
+                "name": "part_number",
+                "label": {"ru": "Партномер", "en": "Part number"},
+                "type": "text",
+                "required": False,
+                "default": "",
+            },
+            {
+                "table_slug": "web_products",
+                "name": "brand",
+                "label": {"ru": "Бренд", "en": "Brand"},
+                "type": "text",
+                "required": False,
+                "default": "",
+            },
+            {
+                "table_slug": "web_products",
+                "name": "price",
+                "label": {"ru": "Цена, ₽", "en": "Price"},
+                "type": "number",
+                "required": False,
+            },
+            {
+                "table_slug": "web_products",
+                "name": "shop",
+                "label": {"ru": "Магазин", "en": "Shop"},
+                "type": "text",
+                "required": False,
+                "default": "",
+            },
+            {
+                "table_slug": "web_products",
+                "name": "url",
+                "label": {"ru": "Ссылка на товар", "en": "URL"},
+                "type": "text",
+                "required": False,
+                "default": "",
+            },
+            {
+                "table_slug": "web_products",
+                "name": "qty",
+                "label": {"ru": "Наличие", "en": "Qty"},
+                "type": "text",
+                "required": False,
+                "default": "",
+            },
+            {
+                "table_slug": "web_products",
+                "name": "line_id",
+                "label": {"ru": "Позиция заказчика", "en": "Request line"},
+                "type": "text",
+                "required": False,
+                "default": "",
+            },
+            _project_ids_column("web_products"),
             {
                 "table_slug": "equipment_mcp",
                 "name": "name",
@@ -3447,6 +3617,84 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "type": "number",
                 "required": False,
             },
+            # ── Ручные позиции мастер-прайса ───────────────────────────────
+            # Строки этой таблицы зеркалятся в отдельный OS-индекс
+            # (`equipment_master_price_manual.index_manual_row`), потому что сам
+            # мастер-прайс — виртуальная таблица поверх индексов каталогов.
+            # Продавец — ref на trusted_sellers (только отмеченные для
+            # мастер-прайса), по умолчанию «ИТ Взлёт».
+            {
+                "table_slug": "master_price_manual",
+                "name": "supplier",
+                "label": {"ru": "Продавец", "en": "Seller"},
+                "type": "ref",
+                "required": True,
+                "ref": {
+                    "table_slug": "trusted_sellers",
+                    # только поставщики с флагом master_price
+                    "filter": {"master_price": True},
+                    "sort": "name",
+                    "prefer": "ИТ Взлёт",
+                },
+            },
+            {
+                "table_slug": "master_price_manual",
+                "name": "title",
+                "label": {"ru": "Наименование", "en": "Title"},
+                "type": "text",
+                "required": True,
+            },
+            {
+                "table_slug": "master_price_manual",
+                "name": "part_number",
+                "label": {"ru": "PN", "en": "PN"},
+                "type": "text",
+                "required": False,
+            },
+            {
+                "table_slug": "master_price_manual",
+                "name": "brand",
+                "label": {"ru": "Бренд", "en": "Brand"},
+                "type": "text",
+                "required": False,
+            },
+            {
+                "table_slug": "master_price_manual",
+                "name": "price",
+                "label": {"ru": "Цена", "en": "Price"},
+                "type": "number",
+                "required": True,
+            },
+            {
+                "table_slug": "master_price_manual",
+                "name": "currency",
+                "label": {"ru": "Валюта", "en": "Currency"},
+                "type": "text",
+                "required": False,
+                "default": "RUB",
+            },
+            {
+                "table_slug": "master_price_manual",
+                "name": "rrc",
+                "label": {"ru": "РРЦ", "en": "RRP"},
+                "type": "number",
+                "required": False,
+            },
+            {
+                "table_slug": "master_price_manual",
+                "name": "in_stock",
+                "label": {"ru": "В наличии", "en": "In stock"},
+                "type": "bool",
+                "required": False,
+                "default": True,
+            },
+            {
+                "table_slug": "master_price_manual",
+                "name": "lead_time",
+                "label": {"ru": "Срок поставки", "en": "Lead time"},
+                "type": "text",
+                "required": False,
+            },
             {
                 "table_slug": "mcp_tool_overrides",
                 "name": "tool",
@@ -3479,6 +3727,203 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "default": True,
             },
             _project_ids_column("mcp_tool_overrides"),
+            # WAVE16: почта — профили отправителей и адресная книга.
+            {
+                "table_slug": "mail_senders",
+                "name": "name",
+                "label": {"ru": "Название", "en": "Name"},
+                "type": "text",
+                "required": True,
+            },
+            {
+                "table_slug": "mail_senders",
+                "name": "from_address",
+                "label": {"ru": "Адрес отправителя", "en": "From address"},
+                "type": "text",
+                "required": True,
+            },
+            {
+                "table_slug": "mail_senders",
+                "name": "from_name",
+                "label": {"ru": "Имя отправителя", "en": "From name"},
+                "type": "text",
+                "required": False,
+            },
+            {
+                "table_slug": "mail_senders",
+                "name": "smtp_host",
+                "label": {"ru": "SMTP хост", "en": "SMTP host"},
+                "type": "text",
+                "required": True,
+            },
+            {
+                "table_slug": "mail_senders",
+                "name": "smtp_port",
+                "label": {"ru": "SMTP порт", "en": "SMTP port"},
+                "type": "number",
+                "required": False,
+                "default": 587,
+            },
+            {
+                "table_slug": "mail_senders",
+                "name": "smtp_user",
+                "label": {"ru": "SMTP логин", "en": "SMTP user"},
+                "type": "text",
+                "required": False,
+            },
+            {
+                "table_slug": "mail_senders",
+                "name": "smtp_password",
+                "label": {"ru": "SMTP пароль", "en": "SMTP password"},
+                "type": "secret_ref",
+                "required": False,
+            },
+            {
+                "table_slug": "mail_senders",
+                "name": "smtp_tls",
+                "label": {"ru": "STARTTLS", "en": "STARTTLS"},
+                "type": "bool",
+                "required": False,
+                "default": True,
+            },
+            {
+                # Implicit TLS (SMTPS): Яндекс.Почта и часть корпоративных
+                # релеев слушают 465 с TLS с первого байта, STARTTLS там нет.
+                "table_slug": "mail_senders",
+                "name": "smtp_ssl",
+                "label": {"ru": "SSL (порт 465)", "en": "SSL (port 465)"},
+                "type": "bool",
+                "required": False,
+                "default": False,
+            },
+            {
+                "table_slug": "mail_senders",
+                "name": "is_default",
+                "label": {"ru": "По умолчанию", "en": "Default"},
+                "type": "bool",
+                "required": False,
+                "default": False,
+            },
+            {
+                "table_slug": "mail_senders",
+                "name": "enabled",
+                "label": {"ru": "Включён", "en": "Enabled"},
+                "type": "bool",
+                "required": False,
+                "default": True,
+            },
+            _project_ids_column("mail_senders"),
+            {
+                "table_slug": "mail_contacts",
+                "name": "name",
+                "label": {"ru": "Имя", "en": "Name"},
+                "type": "text",
+                "required": True,
+            },
+            {
+                "table_slug": "mail_contacts",
+                "name": "email",
+                "label": {"ru": "Email", "en": "Email"},
+                "type": "text",
+                "required": True,
+            },
+            {
+                "table_slug": "mail_contacts",
+                "name": "comment",
+                "label": {"ru": "Комментарий", "en": "Comment"},
+                "type": "text",
+                "required": False,
+            },
+            {
+                "table_slug": "mail_contacts",
+                "name": "tags",
+                "label": {"ru": "Теги", "en": "Tags"},
+                "type": "text",
+                "required": False,
+            },
+            _project_ids_column("mail_contacts"),
+            # Исходящие письма (лог отправки): кто/кому/что/когда/статус.
+            {
+                "table_slug": "mail_outbox",
+                "name": "sender_id",
+                "label": {"ru": "Ящик", "en": "Sender"},
+                "type": "text",
+                "required": True,
+            },
+            {
+                "table_slug": "mail_outbox",
+                "name": "to_address",
+                "label": {"ru": "Кому", "en": "To"},
+                "type": "text",
+                "required": True,
+            },
+            {
+                "table_slug": "mail_outbox",
+                "name": "subject",
+                "label": {"ru": "Тема", "en": "Subject"},
+                "type": "text",
+                "required": True,
+            },
+            {
+                "table_slug": "mail_outbox",
+                "name": "body_text",
+                "label": {"ru": "Текст", "en": "Body"},
+                "type": "text",
+                "required": False,
+            },
+            {
+                "table_slug": "mail_outbox",
+                "name": "status",
+                "label": {"ru": "Статус", "en": "Status"},
+                "type": "enum",
+                "required": True,
+                "default": "queued",
+                "enum": {
+                    "values": ["queued", "sent", "failed"],
+                    "labels": {"queued": "В очереди", "sent": "Отправлено", "failed": "Ошибка"},
+                },
+            },
+            {
+                "table_slug": "mail_outbox",
+                "name": "error",
+                "label": {"ru": "Ошибка", "en": "Error"},
+                "type": "text",
+                "required": False,
+            },
+            {
+                "table_slug": "mail_outbox",
+                "name": "sent_at",
+                "label": {"ru": "Отправлено", "en": "Sent at"},
+                "type": "datetime",
+                "required": False,
+            },
+            _project_ids_column("mail_outbox"),
+            # Получатель мастер-прайса: row_id контакта из mail_contacts.
+            # Храним ссылку, а не адрес — правка контакта не требует
+            # перенастройки страницы, а удалённый контакт даёт внятную ошибку.
+            {
+                "table_slug": "master_price_mail",
+                "name": "recipient_id",
+                "label": {"ru": "Получатель", "en": "Recipient"},
+                "type": "text",
+                "required": False,
+            },
+            {
+                "table_slug": "master_price_mail",
+                "name": "subject",
+                "label": {"ru": "Тема письма", "en": "Subject"},
+                "type": "text",
+                "required": False,
+                "default": "Мастер-прайс",
+            },
+            {
+                "table_slug": "master_price_mail",
+                "name": "comment",
+                "label": {"ru": "Комментарий", "en": "Comment"},
+                "type": "text",
+                "required": False,
+            },
+            _project_ids_column("master_price_mail"),
             {
                 "table_slug": "document_company_fields",
                 "name": "supplier_name",
@@ -3656,6 +4101,180 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "required": False,
                 "default": "10-12 недель",
             },
+            # WAVE14 «Тендеры»: редактируемые поля + агрегаты пайплайна.
+            {
+                "table_slug": "tenders",
+                "name": "title",
+                "label": {"ru": "Название", "en": "Title"},
+                "type": "text",
+                "required": True,
+            },
+            {
+                "table_slug": "tenders",
+                "name": "customer",
+                "label": {"ru": "Заказчик", "en": "Customer"},
+                "type": "text",
+                "required": False,
+            },
+            {
+                "table_slug": "tenders",
+                "name": "deadline_at",
+                "label": {"ru": "Срок подачи", "en": "Deadline"},
+                "type": "datetime",
+                "required": False,
+            },
+            {
+                "table_slug": "tenders",
+                "name": "status",
+                "label": {"ru": "Статус", "en": "Status"},
+                "type": "enum",
+                "required": True,
+                "default": "draft",
+                "enum": {
+                    # WAVE15: irrelevant — тендер не про технику/не наш профиль;
+                    # ставит агент (tender_upsert) при отбраковке, можно и вручную.
+                    "values": ["draft", "active", "submitted", "won", "lost", "cancelled", "irrelevant"],
+                    "labels": {
+                        "draft": "Черновик",
+                        "active": "В работе",
+                        "submitted": "Заявка подана",
+                        "won": "Выигран",
+                        "lost": "Проигран",
+                        "cancelled": "Отменён",
+                        "irrelevant": "Нерелевантен",
+                    },
+                },
+            },
+            {
+                "table_slug": "tenders",
+                "name": "comment",
+                "label": {"ru": "Комментарий", "en": "Comment"},
+                "type": "text",
+                "required": False,
+            },
+            {
+                # Метаданные площадки (номер, закон, организатор, место) —
+                # отдельно от условий заказчика в comment, чтобы агент не
+                # путал требования заказчика с технической обвязкой.
+                "table_slug": "tenders",
+                "name": "meta",
+                "label": {"ru": "Метаданные площадки", "en": "Platform meta"},
+                "type": "text",
+                "required": False,
+            },
+            # WAVE15: внешний источник тендера (b2b-center intake) + причина
+            # отбраковки. Пишет внешний API / агент, руками обычно не трогают.
+            {
+                "table_slug": "tenders",
+                "name": "source_url",
+                "label": {"ru": "Источник (URL)", "en": "Source URL"},
+                "type": "text",
+                "required": False,
+            },
+            {
+                "table_slug": "tenders",
+                "name": "source_ref",
+                "label": {"ru": "Внешний ID", "en": "External ID"},
+                "type": "text",
+                "required": False,
+            },
+            {
+                "table_slug": "tenders",
+                "name": "relevance_note",
+                "label": {"ru": "Причина отбраковки", "en": "Relevance note"},
+                "type": "text",
+                "required": False,
+            },
+            # Позиции тендера — SoT состава. Элемент: {id, title, part_number,
+            # qty}. Импорт в чат (tender_attach) копирует их в request_lines с
+            # tender_id + tender_line_id = lines_json[].id.
+            {
+                "table_slug": "tenders",
+                "name": "lines_json",
+                "label": {"ru": "Позиции тендера", "en": "Tender lines"},
+                "type": "json",
+                "required": False,
+                "default": [],
+                "ui": {"widget": "tender_lines_table"},
+            },
+            # Чаты, взявшие тендер в работу (session_id) — пишет tender_attach.
+            {
+                "table_slug": "tenders",
+                "name": "imported_chat_ids",
+                "label": {"ru": "В работе у чатов", "en": "Imported by chats"},
+                "type": "json",
+                "required": False,
+                "default": [],
+                "read_only": True,
+                "hidden": True,
+            },
+            # Агрегаты — пишет _sync_tenders (equipment pipeline), руками не
+            # редактируются. positions_count = max(len(lines_json), связанных
+            # позиций в чатах): до импорта виден плановый состав.
+            {
+                "table_slug": "tenders",
+                "name": "positions_count",
+                "label": {"ru": "Позиций", "en": "Positions"},
+                "type": "number",
+                "required": False,
+                "default": 0,
+                "read_only": True,
+            },
+            {
+                "table_slug": "tenders",
+                "name": "linked_positions_count",
+                "label": {"ru": "В чатах", "en": "Linked"},
+                "type": "number",
+                "required": False,
+                "default": 0,
+                "read_only": True,
+            },
+            {
+                "table_slug": "tenders",
+                "name": "found_pct",
+                "label": {"ru": "Найдено %", "en": "Found %"},
+                "type": "number",
+                "required": False,
+                "default": 0,
+                "read_only": True,
+            },
+            {
+                "table_slug": "tenders",
+                "name": "sum_rub",
+                "label": {"ru": "Сумма ₽", "en": "Sum RUB"},
+                "type": "number",
+                "required": False,
+                "default": 0,
+                "read_only": True,
+            },
+            {
+                "table_slug": "tenders",
+                "name": "margin_pct",
+                "label": {"ru": "Маржа %", "en": "Margin %"},
+                "type": "number",
+                "required": False,
+                "default": 0,
+                "read_only": True,
+            },
+            {
+                "table_slug": "tenders",
+                "name": "sum_margin_rub",
+                "label": {"ru": "Маржа ₽", "en": "Margin RUB"},
+                "type": "number",
+                "required": False,
+                "default": 0,
+                "read_only": True,
+            },
+            {
+                "table_slug": "tenders",
+                "name": "suppliers_count",
+                "label": {"ru": "Поставщиков", "en": "Suppliers"},
+                "type": "number",
+                "required": False,
+                "default": 0,
+                "read_only": True,
+            },
+            _project_ids_column("tenders"),
         ],
         "views": [
             {
@@ -4345,6 +4964,16 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "tone_field": "build_benefit_tone",
                             "align": "center",
                             "max_width": 130,
+                        },
+                        {
+                            # WAVE14: имя тендера по tender_id (резолв на
+                            # клиенте через lookup_table — позиция chat-scoped,
+                            # тендер chats=all, FK-ref не подходит).
+                            "field": "tender_id",
+                            "label": {"ru": "Тендер", "en": "Tender"},
+                            "lookup_table": "tenders",
+                            "max_lines": 2,
+                            "max_width": 160,
                         },
                     ],
                     "row_tap": {"kind": "open_view", "view": "groups_for_line"},
@@ -6226,10 +6855,41 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                                     "ru": "Скачать мастер-прайс",
                                     "en": "Download master price",
                                 },
+                            },
+                            {
+                                # Получатель берётся из виджета «Получатель»
+                                # (строка master_price_mail) — в шапке только
+                                # кнопка, чтобы не дублировать выбор.
+                                "kind": "invoke_action",
+                                "action": "master_price_send",
+                                "icon": "send",
+                                "label": {
+                                    "ru": "Отправить мастер-прайс",
+                                    "en": "Send master price",
+                                },
+                            },
+                        ],
+                    },
+                    # Виджет над inline-поиском: выбор получателя из адресной
+                    # книги (mail_contacts). Строка настроек создаётся сама.
+                    "list_header": {
+                        "table_slug": "master_price_mail",
+                        "ensure_row": {"subject": "Мастер-прайс"},
+                        "fields": [
+                            {
+                                "column": "recipient_id",
+                                "widget": "contact_picker",
+                                "label": {"ru": "Получатель", "en": "Recipient"},
+                                "contacts_table": "mail_contacts",
+                                "empty_style": "warning",
                             }
                         ],
                     },
                     "server_paged": True,
+                    # «+» справа от пагинатора: ручное добавление товара.
+                    # Строки живут в OpenSearch, поэтому inline-add («введи
+                    # название») не подходит — открываем полную форму.
+                    "add_view": "master_price_manual_form",
                     "search": {
                         "fields": ["title", "part_number", "brand", "supplier"]
                     },
@@ -6291,6 +6951,42 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                         "No master price rows",
                         icon="inventory_2",
                     ),
+                },
+            },
+            {
+                # Форма ручного добавления товара в мастер-прайс (кнопка «+»
+                # рядом с пагинатором). Пишет реальную таблицу
+                # master_price_manual; бэкенд зеркалит строку в OpenSearch
+                # (maybe_sync_master_price_manual), поэтому товар сразу
+                # появляется в прайсе, экспорте и в подборе.
+                "slug": "master_price_manual_form",
+                "table_slug": "master_price_manual",
+                "kind": "form",
+                "ui_json": {
+                    "version": 1,
+                    "kind": "form",
+                    "mode": "create",
+                    "title": {"ru": "Новый товар", "en": "New product"},
+                    "fields": [
+                        {
+                            "column": "supplier",
+                            "widget": "ref",
+                            # Список ограничен отмеченными для мастер-прайса:
+                            # товар неотмеченного поставщика отфильтровался бы
+                            # из прайса и «пропал» бы сразу после сохранения.
+                            "empty_hint": "Ни один поставщик не отмечен для "
+                                "мастер-прайса. Отметьте его в разделе "
+                                "«Поставщики» (переключатель «Мастер прайс»).",
+                        },
+                        {"column": "title", "widget": "text"},
+                        {"column": "part_number", "widget": "text"},
+                        {"column": "brand", "widget": "text"},
+                        {"column": "price", "widget": "number"},
+                        {"column": "currency", "widget": "text"},
+                        {"column": "rrc", "widget": "number"},
+                        {"column": "in_stock", "widget": "switch"},
+                        {"column": "lead_time", "widget": "text"},
+                    ],
                 },
             },
             {
@@ -6438,6 +7134,13 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "target": {"kind": "view", "view": "trusted_sellers_list"},
                         },
                         {
+                            # WAVE14: тендеры — глобальная группировка позиций
+                            # заказчика; активный чат не нужен (chats=all).
+                            "title": "Тендеры",
+                            "icon": "gavel",
+                            "target": {"kind": "view", "view": "tenders_list"},
+                        },
+                        {
                             "title": "Интернет магазины",
                             "icon": "language",
                             "target": {"kind": "view", "view": "web_shops_list"},
@@ -6457,6 +7160,247 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "icon": "tune",
                             "target": {"kind": "view", "view": "mcp_tool_overrides_list"},
                         },
+                        {
+                            # WAVE16: почта — ящики отправки, адресная книга, исходящие
+                            "title": "Ящики отправки",
+                            "icon": "outgoing_mail",
+                            "target": {"kind": "view", "view": "mail_senders_list"},
+                        },
+                        {
+                            "title": "Контакты",
+                            "icon": "contacts",
+                            "target": {"kind": "view", "view": "mail_contacts_list"},
+                        },
+                        {
+                            "title": "Исходящие письма",
+                            "icon": "send",
+                            "target": {"kind": "view", "view": "mail_outbox_list"},
+                        },
+                    ],
+                },
+            },
+            {
+                "slug": "mail_senders_list",
+                "table_slug": "mail_senders",
+                "kind": "collection",
+                "ui_json": {
+                    "version": 1,
+                    "kind": "collection",
+                    "scaffold": {"title": {"ru": "Ящики отправки", "en": "Mail senders"}},
+                    "title_field": "name",
+                    "subtitle_fields": ["from_address"],
+                    "columns": [
+                        {"field": "name", "label": {"ru": "Название", "en": "Name"}, "max_lines": 2, "width": 200},
+                        {"field": "from_address", "label": {"ru": "От", "en": "From"}, "max_lines": 2, "max_width": 220},
+                        {"field": "smtp_host", "label": {"ru": "SMTP", "en": "SMTP"}, "max_width": 160},
+                        {"field": "is_default", "label": {"ru": "Дефолт", "en": "Default"}, "format": "bool_yes_no", "max_width": 90},
+                        {"field": "enabled", "label": {"ru": "Вкл", "en": "On"}, "format": "bool_yes_no", "max_width": 80},
+                    ],
+                    "row_tap": {"kind": "open_form", "view": "mail_senders_form"},
+                    "inline_add": {"field": "name", "title": "Добавить ящик"},
+                    "row_style": [
+                        {"when": {"field": "enabled", "eq": False}, "accent": "warning"},
+                    ],
+                    "empty": _empty("Нет ящиков отправки", "No senders", icon="outgoing_mail"),
+                },
+            },
+            {
+                "slug": "mail_senders_form",
+                "table_slug": "mail_senders",
+                "kind": "form",
+                "ui_json": {
+                    "version": 1,
+                    "kind": "form",
+                    "mode": "edit",
+                    "title": {"ru": "Ящик отправки", "en": "Mail sender"},
+                    "fields": [
+                        {"column": "name", "widget": "value", "icon": "badge"},
+                        {"column": "from_address", "widget": "value", "icon": "alternate_email"},
+                        {"column": "from_name", "widget": "value", "icon": "person"},
+                        {"column": "smtp_host", "widget": "value", "icon": "dns"},
+                        {"column": "smtp_port", "widget": "value", "icon": "numbers"},
+                        {"column": "smtp_user", "widget": "value", "icon": "account_circle"},
+                        {"column": "smtp_password", "widget": "value", "icon": "key"},
+                        {"column": "smtp_tls", "widget": "switch"},
+                        {"column": "smtp_ssl", "widget": "switch"},
+                        {"column": "is_default", "widget": "switch"},
+                        {"column": "enabled", "widget": "switch"},
+                        {"column": "project_ids", "widget": "project_multiselect"},
+                    ],
+                },
+            },
+            {
+                "slug": "mail_contacts_list",
+                "table_slug": "mail_contacts",
+                "kind": "collection",
+                "ui_json": {
+                    "version": 1,
+                    "kind": "collection",
+                    "scaffold": {"title": {"ru": "Контакты", "en": "Mail contacts"}},
+                    "title_field": "name",
+                    "subtitle_fields": ["email"],
+                    "columns": [
+                        {"field": "name", "label": {"ru": "Имя", "en": "Name"}, "max_lines": 2, "width": 220},
+                        {"field": "email", "label": {"ru": "Email", "en": "Email"}, "max_lines": 2, "max_width": 220},
+                        {"field": "tags", "label": {"ru": "Теги", "en": "Tags"}, "max_width": 140},
+                        {"field": "comment", "label": {"ru": "Комментарий", "en": "Comment"}, "max_lines": 2, "max_width": 240},
+                    ],
+                    "row_tap": {"kind": "open_form", "view": "mail_contacts_form"},
+                    "inline_add": {"field": "name", "title": "Добавить контакт"},
+                    "empty": _empty("Нет контактов", "No contacts", icon="contacts"),
+                },
+            },
+            {
+                "slug": "mail_contacts_form",
+                "table_slug": "mail_contacts",
+                "kind": "form",
+                "ui_json": {
+                    "version": 1,
+                    "kind": "form",
+                    "mode": "edit",
+                    "title": {"ru": "Контакт", "en": "Contact"},
+                    "fields": [
+                        {"column": "name", "widget": "value", "icon": "person"},
+                        {"column": "email", "widget": "value", "icon": "alternate_email"},
+                        {"column": "tags", "widget": "value", "icon": "sell"},
+                        {"column": "comment", "widget": "value", "icon": "notes"},
+                        {"column": "project_ids", "widget": "project_multiselect"},
+                    ],
+                },
+            },
+            {
+                "slug": "mail_outbox_list",
+                "table_slug": "mail_outbox",
+                "kind": "collection",
+                "ui_json": {
+                    "version": 1,
+                    "kind": "collection",
+                    "scaffold": {"title": {"ru": "Исходящие письма", "en": "Mail outbox"}},
+                    "title_field": "subject",
+                    "subtitle_fields": ["to_address", "status"],
+                    "columns": [
+                        {"field": "subject", "label": {"ru": "Тема", "en": "Subject"}, "max_lines": 2, "width": 260},
+                        {"field": "to_address", "label": {"ru": "Кому", "en": "To"}, "max_lines": 2, "max_width": 220},
+                        {"field": "sender_id", "label": {"ru": "Ящик", "en": "Sender"}, "lookup_table": "mail_senders", "max_width": 140},
+                        {"field": "status", "label": {"ru": "Статус", "en": "Status"}, "max_width": 110},
+                        {"field": "sent_at", "label": {"ru": "Отправлено", "en": "Sent"}, "max_width": 130},
+                    ],
+                    "row_style": [
+                        {"when": {"field": "status", "eq": "failed"}, "accent": "error"},
+                        {"when": {"field": "status", "eq": "sent"}, "accent": "success"},
+                    ],
+                    "empty": _empty("Нет исходящих писем", "No outgoing mail", icon="send"),
+                },
+            },
+            {
+                "slug": "tenders_list",
+                "table_slug": "tenders",
+                "kind": "collection",
+                "ui_json": {
+                    "version": 1,
+                    "kind": "collection",
+                    "scaffold": {"title": {"ru": "Тендеры", "en": "Tenders"}},
+                    "title_field": "title",
+                    "subtitle_fields": ["customer", "status"],
+                    "on_load": {"action": "equipment_pipeline_sync"},
+                    "columns": [
+                        {
+                            "field": "title",
+                            "label": {"ru": "Название", "en": "Title"},
+                            "max_lines": 2,
+                            "width": 240,
+                        },
+                        {
+                            "field": "customer",
+                            "label": {"ru": "Заказчик", "en": "Customer"},
+                            "max_lines": 2,
+                            "max_width": 180,
+                        },
+                        {
+                            "field": "positions_count",
+                            "label": {"ru": "Позиций", "en": "Positions"},
+                            "align": "end",
+                            "max_width": 90,
+                        },
+                        {
+                            "field": "found_pct",
+                            "label": {"ru": "Найдено", "en": "Found"},
+                            "format": "percent",
+                            "align": "end",
+                            "max_width": 100,
+                        },
+                        {
+                            "field": "sum_rub",
+                            "label": {"ru": "Сумма ₽", "en": "Sum RUB"},
+                            "format": "money",
+                            "align": "end",
+                            "max_width": 130,
+                        },
+                        {
+                            "field": "sum_margin_rub",
+                            "label": {"ru": "Маржа", "en": "Margin"},
+                            "format": "margin_pair",
+                            "align": "end",
+                            "max_width": 150,
+                        },
+                        {
+                            "field": "suppliers_count",
+                            "label": {"ru": "Поставщиков", "en": "Suppliers"},
+                            "align": "end",
+                            "max_width": 110,
+                        },
+                        {
+                            "field": "deadline_at",
+                            "label": {"ru": "Срок подачи", "en": "Deadline"},
+                            "format": "deadline",
+                            "align": "end",
+                            "max_width": 120,
+                        },
+                        {
+                            "field": "status",
+                            "label": {"ru": "Статус", "en": "Status"},
+                            "max_width": 130,
+                        },
+                    ],
+                    "row_tap": {"kind": "open_form", "view": "tenders_form"},
+                    "inline_add": {"field": "title", "title": "Добавить тендер"},
+                    # отбракованные (агентом или вручную) — приглушены warning-ом
+                    "row_style": [
+                        {
+                            "when": {"field": "status", "eq": "irrelevant"},
+                            "accent": "warning",
+                        },
+                        {"when": {"field": "status", "eq": "won"}, "accent": "success"},
+                    ],
+                    "empty": _empty(
+                        "Нет тендеров",
+                        "No tenders",
+                        icon="gavel",
+                    ),
+                },
+            },
+            {
+                "slug": "tenders_form",
+                "table_slug": "tenders",
+                "kind": "form",
+                "ui_json": {
+                    "version": 1,
+                    "kind": "form",
+                    "mode": "edit",
+                    "title": {"ru": "Тендер", "en": "Tender"},
+                    "fields": [
+                        {"column": "title", "widget": "value", "icon": "gavel"},
+                        {"column": "customer", "widget": "value", "icon": "business"},
+                        {"column": "deadline_at", "widget": "value", "icon": "event"},
+                        {"column": "status", "widget": "choice", "icon": "flag"},
+                        {"column": "comment", "widget": "value", "icon": "notes"},
+                        # WAVE15: источник тендера (b2b-center и т.п.) — read-only,
+                        # заполняется внешним intake (external API), не пайплайном.
+                        {"column": "source_url", "widget": "value", "icon": "link"},
+                        {"column": "source_ref", "widget": "value", "icon": "tag"},
+                        {"column": "relevance_note", "widget": "value", "icon": "psychology"},
+                        {"column": "lines_json", "widget": "tender_lines_table"},
+                        {"column": "project_ids", "widget": "project_multiselect"},
                     ],
                 },
             },
@@ -6601,6 +7545,26 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "trigger": {"on": []},
                 "ui": {"placement": ["scaffold"], "icon": "download"},
             },
+            # WAVE16.3: мастер-прайс письмом — тот же xlsx, что и «Скачать»,
+            # вложением. Отправитель фиксирован профилем «price», получатель —
+            # выбранный контакт на странице (master_price_mail.recipient_id).
+            {
+                "id": "master_price_send",
+                "label": {
+                    "ru": "Отправить мастер-прайс",
+                    "en": "Send master price",
+                },
+                "kind": "equipment.master_price_mail",
+                "enabled": True,
+                "params": {
+                    "sellers_table": "trusted_sellers",
+                    "templates_type": "master_price",
+                    "mail_settings_table": "master_price_mail",
+                    "sender_name": "price",
+                },
+                "trigger": {"on": []},
+                "ui": {"placement": ["scaffold"], "icon": "send"},
+            },
             {
                 "id": "budget_sync_lines",
                 "label": {"ru": "Синхронизировать", "en": "Sync"},
@@ -6671,6 +7635,20 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "trigger": {"on": [], "async": False},
                     "ui": {"placement": ["row"], "icon": "add_shopping_cart"},
                 },
+                # WAVE14: «Взять в работу» — позиции тендера (lines_json)
+                # копируются в request_lines АКТИВНОГО чата со ссылкой
+                # tender_id + tender_line_id (идемпотентно: повторный вызов
+                # обновляет существующие позиции, а не дублирует). Вызывается
+                # из MCP (tender_attach) и кнопкой на карточке/строке тендера.
+                {
+                    "id": "tender_attach",
+                    "label": {"ru": "В чат", "en": "Take to chat"},
+                    "kind": "equipment.tender_attach",
+                    "enabled": True,
+                    "params": {},
+                    "trigger": {"on": [], "async": False},
+                    "ui": {"placement": ["row", "scaffold"], "icon": "playlist_add_check"},
+                },
                 # WAVE7: ручная правка строки «Закупка» (маржа % → реестр
                 # поставщиков и бюджетные строки, доставка → суммы).
                 {
@@ -6683,6 +7661,16 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     },
                     "trigger": {"on": ["row.updated"], "async": True},
                     "ui": {"placement": []},
+                },
+                # WAVE16: отправка письма из «Исходящих» (queued → sent/failed).
+                {
+                    "id": "mail_send",
+                    "label": {"ru": "Отправить письмо", "en": "Send mail"},
+                    "kind": "equipment.mail_send",
+                    "enabled": True,
+                    "params": {},
+                    "trigger": {"on": [], "async": False},
+                    "ui": {"placement": ["row"], "icon": "send"},
                 },
                 {
                     "id": "budget_export",
@@ -6913,6 +7901,42 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "label": "Слот готовой сборки",
                 "description": "Создание или правка одного слота сборки (не всех)",
             },
+            {
+                "server": "prodavan-equipment",
+                "tool": "tenders_list",
+                "label": "Тендеры",
+                "description": "Список тендеров с агрегатами (позиции, сумма, срок)",
+            },
+            {
+                "server": "prodavan-equipment",
+                "tool": "tender_get",
+                "label": "Тендер",
+                "description": "Тендер с позициями по идентификатору",
+            },
+            {
+                "server": "prodavan-equipment",
+                "tool": "tender_upsert",
+                "label": "Запись тендера",
+                "description": "Создание или обновление тендера (состав — tender_positions_upsert)",
+            },
+            {
+                "server": "prodavan-equipment",
+                "tool": "tender_delete",
+                "label": "Удаление тендера",
+                "description": "Удаление тендера (позиции в чатах остаются)",
+            },
+            {
+                "server": "prodavan-equipment",
+                "tool": "tender_positions_upsert",
+                "label": "Позиции тендера",
+                "description": "Создание или обновление позиций тендера (lines_json)",
+            },
+            {
+                "server": "prodavan-equipment",
+                "tool": "tender_attach",
+                "label": "Тендер в чат",
+                "description": "Взять тендер в работу: позиции копируются в чат",
+            },
         ],
         "mcp_tools": [
                     {
@@ -7025,6 +8049,53 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 },
             },
             {
+                "id": "web_products_list",
+                "name": "web_products_list",
+                "label": "List web products",
+                "description": (
+                    "«Интернет товары» этого проекта: товары, найденные агентом в "
+                    "магазинах из web_shops (title, part_number, brand, price, shop, "
+                    "url, qty, line_id). Строки живут 72 часа с момента добавления/"
+                    "правки. Участвуют в подборе found_offers наравне с каталогом."
+                ),
+                "enabled": True,
+                "kind": "rows_query",
+                "params_schema": {"type": "object", "properties": {}},
+                "implementation": {
+                    "table_slug": "web_products",
+                    "query": {"limit": 300},
+                },
+            },
+            {
+                "id": "web_product_add",
+                "name": "web_product_add",
+                "label": "Add web product",
+                "description": (
+                    "Добавить товар, найденный в интернет-магазине, в «Интернет товары». "
+                    "Обязательно: title. Желательно: part_number (для сопоставления с "
+                    "позицией), price (₽), shop (название магазина из web_shops_list), "
+                    "brand, url, line_id (если товар подобран под конкретную позицию). "
+                    "Товар автоматически индексируется и начинает конкурировать с "
+                    "каталогом по цене. TTL 72 часа: повторный add с тем же "
+                    "part_number+shop обновляет строку и продлевает срок."
+                ),
+                "enabled": True,
+                "kind": "rows_upsert",
+                "implementation": {
+                    "table_slug": "web_products",
+                    "upsert_key": ["part_number", "shop", "title"],
+                },
+            },
+            {
+                "id": "web_product_delete",
+                "name": "web_product_delete",
+                "label": "Delete web product",
+                "description": "Удалить запись из «Интернет товары» (web_products).",
+                "enabled": True,
+                "kind": "rows_delete",
+                "implementation": {"table_slug": "web_products"},
+            },
+            {
                 "id": "budget_lines_list",
                 "name": "budget_lines_list",
                 "label": "List budget lines",
@@ -7119,8 +8190,132 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "row_id": "equipment_mcp_default",
                     "body": {
                         "name": "prodavan-equipment",
-                        "version": "3.0.0",
+                        "version": "3.2.0",
                         "enabled": True,
+                    },
+                },
+                # WAVE16.3: профиль отправки «price» — им уходит мастер-прайс.
+                # Пароль НЕ в сидах: smtp_password остаётся пустым, secret_ref
+                # проставляется в контуре через upload secret (сиды общие для
+                # всех инсталляций, класть туда живой пароль нельзя).
+                {
+                    "table_slug": "mail_senders",
+                    "row_id": "mail_sender_price",
+                    "body": {
+                        "name": "price",
+                        "from_address": "price@itvzlet.ru",
+                        "from_name": "ИТ Взлёт — прайс",
+                        "smtp_host": "smtp.yandex.ru",
+                        "smtp_port": 465,
+                        "smtp_user": "price@itvzlet.ru",
+                        "smtp_tls": False,
+                        "smtp_ssl": True,
+                        "is_default": True,
+                        "enabled": True,
+                    },
+                },
+                # Контакты-шаблоны: пустые заготовки, заполняются в кабинете.
+                # Имена (name) — контракт: по ним профиль ищет получателя.
+                # - manager: адресат отчётов по тендерам (КП уходит менеджеру);
+                # - s4b: контакт пула поставщиков, его использует мастер-прайс.
+                {
+                    "table_slug": "mail_contacts",
+                    "row_id": "mail_contact_manager",
+                    "body": {
+                        "name": "manager",
+                        "email": "",
+                        "comment": "Шаблон: получатель отчётов по тендерам",
+                        "tags": "template",
+                    },
+                },
+                {
+                    "table_slug": "mail_contacts",
+                    "row_id": "mail_contact_s4b",
+                    "body": {
+                        "name": "s4b",
+                        "email": "",
+                        "comment": "Шаблон: контакт пула поставщиков (мастер-прайс)",
+                        "tags": "template",
+                    },
+                },
+                # ── «Интернет магазины»: магазины, по которым агенту разрешено
+                # искать товары. Сидятся основные российские магазины техники —
+                # именно они есть в маршрутах searchnet (camoufox первым: Qrator
+                # роняет chromium). Без строк в этой таблице web_shops_list пуст
+                # и агент физически не может искать в интернете (проверено на
+                # живом стенде: агент отчитался «DNS туда не заведён»).
+                # cookies пустые — заполняются в кабинете, если магазин требует
+                # авторизованную сессию.
+                {
+                    "table_slug": "web_shops",
+                    "row_id": "web_shop_dns",
+                    "body": {
+                        "name": "DNS",
+                        "url": "https://www.dns-shop.ru",
+                        "cookies": "",
+                    },
+                },
+                {
+                    "table_slug": "web_shops",
+                    "row_id": "web_shop_citilink",
+                    "body": {
+                        "name": "Citilink",
+                        "url": "https://www.citilink.ru",
+                        "cookies": "",
+                    },
+                },
+                {
+                    "table_slug": "web_shops",
+                    "row_id": "web_shop_regard",
+                    "body": {
+                        "name": "Regard",
+                        "url": "https://www.regard.ru",
+                        "cookies": "",
+                    },
+                },
+                {
+                    "table_slug": "web_shops",
+                    "row_id": "web_shop_nix",
+                    "body": {
+                        "name": "NIX",
+                        "url": "https://www.nix.ru",
+                        "cookies": "",
+                    },
+                },
+                {
+                    "table_slug": "web_shops",
+                    "row_id": "web_shop_mvideo",
+                    "body": {
+                        "name": "М.Видео",
+                        "url": "https://www.mvideo.ru",
+                        "cookies": "",
+                    },
+                },
+                {
+                    "table_slug": "web_shops",
+                    "row_id": "web_shop_ozon",
+                    "body": {
+                        "name": "Ozon",
+                        "url": "https://www.ozon.ru",
+                        "cookies": "",
+                    },
+                },
+                {
+                    "table_slug": "web_shops",
+                    "row_id": "web_shop_wildberries",
+                    "body": {
+                        "name": "Wildberries",
+                        "url": "https://www.wildberries.ru",
+                        "cookies": "",
+                    },
+                },
+                {
+                    "table_slug": "web_shops",
+                    "row_id": "web_shop_avito",
+                    "body": {
+                        "name": "Avito",
+                        "url": "https://www.avito.ru",
+                        "cookies": "",
                     },
                 },
             ]
