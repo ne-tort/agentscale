@@ -213,10 +213,9 @@ class ChatMessageListState extends State<ChatMessageList> {
   final _scroll = ScrollController();
   bool _pinnedToBottom = true;
 
-  // Кэш отрисованных записей. Чат рендерится eager-ListView'ом (см. build),
-  // поэтому раньше КАЖДЫЙ кадр перестраивал ВСЕ блоки — чем длиннее чат, тем
-  // сильнее подвисал UI. Финализированные (не стримящие) блоки иммутабельны:
-  // переиспользуем их виджет, и Flutter пропускает поддерево (identical widget).
+  // Кэш отрисованных записей. Финализированные (не стримящие) блоки
+  // иммутабельны: переиспользуем их виджет, и Flutter пропускает поддерево
+  // (identical widget).
   final Map<String, Widget> _entryCache = {};
   Object? _cacheApi;
   Object? _cacheCostResolver;
@@ -225,6 +224,31 @@ class ChatMessageListState extends State<ChatMessageList> {
   bool _didInitialBottom = false;
   int _lastFingerprint = 0;
   int _lastBlockCount = 0;
+
+  // ---- защита автоподгрузки от бесконечного цикла ----
+  //
+  // `_maybeAutoloadOlder` вызывается из build/didUpdateWidget и грузит историю,
+  // пока контент не заполнит вьюпорт. Верхней границы у этого цикла не было,
+  // и на чатах, где старые страницы состоят из не отрисовываемых событий
+  // (дельты стрима, usage, скрытые мета-события), maxScrollExtent не рос —
+  // приложение выкачивало историю страница за страницей, пока не замирало
+  // («открыл чат — через пару секунд страница висит»).
+  //
+  // Теперь: не больше [_kMaxAutoLoadRounds] подряд без реального прогресса
+  // курсора, и пауза до явного действия пользователя (скролл к началу).
+  static const _kMaxAutoLoadRounds = 3;
+  int _autoLoadBlocks = 0;
+  int _autoLoadRounds = 0;
+  bool _autoLoadInFlight = false;
+  bool _autoLoadPaused = false;
+
+  // Кэш группировки: см. [_entriesFor].
+  List<ChatDisplayEntry>? _entriesCache;
+  int? _entriesCacheKey;
+
+  /// Индекс верхнеуровневого ребёнка по его ключу — нужен `findChildIndexCallback`,
+  /// чтобы при подгрузке истории сверху существующие элементы не пересоздавались.
+  final Map<Key, int> _childIndexByKey = {};
 
   @override
   void initState() {
@@ -260,20 +284,33 @@ class ChatMessageListState extends State<ChatMessageList> {
 
   void _maybeAutoloadOlder() {
     if (!_scroll.hasClients) return;
+    if (_autoLoadPaused || _autoLoadInFlight) return;
     if (!widget.hasMoreHistory || widget.loadingHistory || widget.onLoadOlder == null) {
       return;
     }
     // Reverse list: maxScrollExtent is the visual top (older messages). When
     // the content does not fill the viewport the user has no scroll affordance
-    // to reach older history, so we eagerly fetch the next page until the
-    // viewport fills or there is nothing more to load. Using the viewport
-    // extent (not a fixed 48px threshold) is what keeps a short cached tail
-    // from rendering as a single truncated slice with no way up.
+    // to reach older history, so we eagerly fetch the next page — но только
+    // пока курсор истории реально двигается (см. [_kMaxAutoLoadRounds]).
     final pos = _scroll.position;
     final contentFillsViewport = pos.maxScrollExtent > pos.viewportDimension;
-    if (!contentFillsViewport) {
-      widget.onLoadOlder!();
+    if (contentFillsViewport) return;
+
+    final loaded = widget.blocks.length;
+    if (loaded == _autoLoadBlocks) {
+      // Страница не добавила ни одного блока: ещё одна такая же ничего не
+      // изменит, а цикл «загрузили → не выросло → загрузили» и вешал страницу.
+      _autoLoadRounds++;
+      if (_autoLoadRounds >= _kMaxAutoLoadRounds) {
+        _autoLoadPaused = true;
+        return;
+      }
+    } else {
+      _autoLoadRounds = 0;
+      _autoLoadBlocks = loaded;
     }
+    _autoLoadInFlight = true;
+    widget.onLoadOlder!();
   }
 
   void _onScroll() {
@@ -285,12 +322,35 @@ class ChatMessageListState extends State<ChatMessageList> {
         widget.hasMoreHistory &&
         !widget.loadingHistory &&
         widget.onLoadOlder != null) {
+      // Ручной скролл к началу — снимаем паузу автоподгрузки: это осознанное
+      // действие пользователя, а не цикл перестройки.
+      _autoLoadPaused = false;
+      _autoLoadRounds = 0;
       widget.onLoadOlder!();
     }
   }
 
-  Widget _renderPair(ChatDisplayPair item) {
-    final block = item.block;
+  /// Группировка блоков с кэшем по отпечатку.
+  ///
+  /// `groupDisplayEntries` проходит всю историю и строит новые объекты — на
+  /// длинном чате это заметная работа, а вызывалась она из build, то есть на
+  /// каждый кадр анимации/ховера. Ключ кэша — тот же отпечаток, что и для
+  /// скролла, плюс флаг стрима (он меняет состав групп «работает/отработал»).
+  List<ChatDisplayEntry> _entriesFor(
+    List<ChatBlock> blocks, {
+    required bool turnStreaming,
+  }) {
+    final key = Object.hash(_blocksScrollFingerprint(blocks), turnStreaming);
+    if (_entriesCacheKey == key && _entriesCache != null) {
+      return _entriesCache!;
+    }
+    final built = groupDisplayEntries(blocks, turnStreaming: turnStreaming);
+    _entriesCache = built;
+    _entriesCacheKey = key;
+    return built;
+  }
+
+  Widget _renderPair(ChatDisplayPair item) {    final block = item.block;
     return ChatBlockRenderer(
       key: ValueKey(block.key),
       block: block,
@@ -368,6 +428,9 @@ class ChatMessageListState extends State<ChatMessageList> {
       _lastFingerprint = fp;
       _lastBlockCount = widget.blocks.length;
       if (oldWidget.loadingHistory && !widget.loadingHistory) {
+        // Загрузка завершилась — снимаем блокировку и решаем, есть ли смысл
+        // тянуть следующую страницу (решает _maybeAutoloadOlder по курсору).
+        _autoLoadInFlight = false;
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted) _maybeAutoloadOlder();
         });
@@ -405,7 +468,10 @@ class ChatMessageListState extends State<ChatMessageList> {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final entries = groupDisplayEntries(widget.blocks, turnStreaming: widget.turnStreaming);
+    // Группировка блоков — O(n) по всей истории. Раньше она считалась на КАЖДОМ
+    // кадре, хотя зависит только от набора блоков и флага стрима. Кэшируем по
+    // отпечатку: при стриме отпечаток меняется, при скролле/ховере — нет.
+    final entries = _entriesFor(widget.blocks, turnStreaming: widget.turnStreaming);
 
     if (!_didInitialBottom && widget.blocks.isNotEmpty) {
       _didInitialBottom = true;
@@ -416,9 +482,6 @@ class ChatMessageListState extends State<ChatMessageList> {
       });
     }
 
-    // Eager children (not builder): markdown/tool panels have unbounded height;
-    // builder underestimates maxScrollExtent → hard scroll ceiling after 1–2 items.
-    //
     // reverse:true — first child is visual bottom (newest). The working
     // indicator is the newest thing in the list while it shows.
     if (!identical(_cacheApi, widget.api) ||
@@ -456,6 +519,16 @@ class ChatMessageListState extends State<ChatMessageList> {
       // Блоки исчезли (смена сессии/истории) — не держим их виджеты.
       _entryCache.removeWhere((k, _) => !liveKeys.contains(k));
     }
+    // Карта «ключ → индекс» для findChildIndexCallback: при подгрузке истории
+    // индексы всех существующих записей сдвигаются, и без этой карты Flutter
+    // пересоздал бы каждый элемент (теряя состояние схлопнутых блоков).
+    _childIndexByKey
+      ..clear()
+      ..addEntries(
+        children.indexed
+            .where((e) => e.$2.key != null)
+            .map((e) => MapEntry(e.$2.key!, e.$1)),
+      );
 
     return Stack(
       children: [
@@ -466,11 +539,27 @@ class ChatMessageListState extends State<ChatMessageList> {
             }
             return false;
           },
-          child: ListView(
+          // ВИРТУАЛИЗАЦИЯ. Раньше здесь был ListView(children: …) — Flutter
+          // монтировал элементы для ВСЕХ блоков истории, даже за пределами
+          // экрана. На длинном чате это давало квадратичный рост времени
+          // кадра при каждой подгрузке и было второй половиной зависания.
+          //
+          // `builder` строит элементы только для видимого окна. Раньше его не
+          // использовали из-за «потолка» maxScrollExtent, но при reverse:true
+          // низ списка — это pixels ≈ 0, и все наши переходы вниз идут в 0
+          // (см. [_ensureBottom]), так что оценка extent нам не мешает.
+          child: ListView.builder(
             controller: _scroll,
             reverse: true,
             padding: EdgeInsets.all(AppSpacing.md),
-            children: children,
+            itemCount: children.length,
+            // Элементы переиспользуются по ключу блока: при подгрузке истории
+            // сверху существующие не пересоздаются.
+            findChildIndexCallback: (Key key) {
+              final idx = _childIndexByKey[key];
+              return idx;
+            },
+            itemBuilder: (context, index) => children[index],
           ),
         ),
         if (widget.loadingHistory)
