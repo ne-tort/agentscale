@@ -33,6 +33,10 @@ _MAX_LIMIT = 20
 # web.fetch: тот же дефолт/кап, что у SDK-тула (1MB / 5MB).
 _MAX_FETCH_BYTES = 1 * 1024 * 1024
 _MAX_FETCH_BYTES_CAP = 5 * 1024 * 1024
+# Ретрай отказа рендера имеет смысл только для БЫСТРОГО отказа: медленный
+# означает, что страница не влезает в бюджет, и второй заход выйдет за лимит
+# тула. Порог с запасом ниже бюджета рендера (40с).
+_RETRY_FAST_FAILURE_SEC = 25.0
 
 
 def _retryable_failure(data: dict[str, Any] | None) -> bool:
@@ -264,9 +268,28 @@ class WebSearchService:
             first = results[0] if results and isinstance(results[0], dict) else {}
             if str(first.get("content") or "").strip():
                 break
-            if attempt == 1 and _retryable_failure(data):
-                logger.warning("web_fetch markdown: временный отказ рендера — ретрай")
+            # Ретрай — только если попытка провалилась БЫСТРО. Медленный отказ
+            # означает, что страница реально не влезает в бюджет рендера: второй
+            # заход съест ещё столько же и выйдет за общий лимит тула (агент
+            # получит обрыв вместо ответа). В этом случае лучше сразу отдать
+            # сырой HTML — в нём цены тоже есть.
+            elapsed_attempt = time.monotonic() - attempt_started
+            if (
+                attempt == 1
+                and _retryable_failure(data)
+                and elapsed_attempt < _RETRY_FAST_FAILURE_SEC
+            ):
+                logger.warning(
+                    "web_fetch markdown: быстрый отказ рендера (%.1fс) — ретрай",
+                    elapsed_attempt,
+                )
                 continue
+            if _retryable_failure(data):
+                logger.warning(
+                    "web_fetch markdown: отказ рендера после %.1fс — без ретрая "
+                    "(второй заход вышел бы за бюджет), отдаём HTML",
+                    elapsed_attempt,
+                )
             break
         logger.info(
             "web_fetch markdown total_ms=%s", int((time.monotonic() - started) * 1000)
