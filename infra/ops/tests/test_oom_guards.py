@@ -105,6 +105,37 @@ def test_oom_guards_are_installed_by_terraform() -> None:
     assert "server/manifests/prodavan-platform-guards.yaml" in main_tf
 
 
+def test_appproject_allows_guard_kinds() -> None:
+    """AppProject обязан разрешать LimitRange/ResourceQuota.
+
+    Регресс 2026-10-23: guards добавили в base, но whitelist проекта их не
+    разрешал. Argo считает такую задачу невалидной и роняет синк ЦЕЛИКОМ —
+    `one or more synchronization tasks are not valid`, ревизия остаётся
+    OutOfSync, и вместе с guard'ами не применяется ничего, включая обновление
+    образов. То есть защита от OOM заблокировала деплой.
+    """
+    project = (
+        _INFRA / "argocd/apps/00-project.yaml"
+    ).read_text(encoding="utf-8")
+    data = yaml.safe_load(project)
+    allowed = {
+        (item.get("group", ""), item["kind"])
+        for item in data["spec"]["namespaceResourceWhitelist"]
+    }
+
+    assert ("", "LimitRange") in allowed
+    assert ("", "ResourceQuota") in allowed
+
+    # Каждый guard-объект из base должен быть разрешён проектом — иначе синк
+    # снова упадёт на первом же непринятом kind.
+    guards = _K3S / "base/guards/app-budget.yaml"
+    for doc in yaml.safe_load_all(guards.read_text(encoding="utf-8")):
+        if not doc:
+            continue
+        key = (doc.get("apiVersion", "").split("/")[0] if "/" in doc.get("apiVersion", "") else "", doc["kind"])
+        assert key in allowed, f"{doc['kind']} не разрешён в AppProject agentscale"
+
+
 def test_dns_fix_survives_k3s_restart() -> None:
     """k3s перезаписывает CoreDNS при каждом старте — фикс должен навязываться.
 
