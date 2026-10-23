@@ -236,6 +236,79 @@ MSS-клампинг на ноде (`iptables -t mangle FORWARD --set-mss 1360`)
 
 ---
 
+### 3.3 Память узла: защита от глобального OOM (инцидент 2026-10-23)
+
+**Что случилось.** Прод-нода ушла в глобальный OOM: свободно 62 МБ,
+`active_anon` 7.9 ГиБ. Сразу после этого apiserver деградировал — запросы к
+`/apis/agents.x-k8s.io/v1beta1/sandboxes` висели **22 минуты**,
+`ListPodSandbox` отдавал `DeadlineExceeded`, client-side throttling доходил до
+5м50с. Снаружи это выглядело как «нода зависла по CPU», и настоящая причина
+(нехватка памяти) была не видна.
+
+**Замеры до включения защиты.**
+
+| | значение |
+|---|---|
+| allocatable | 14.88 ГиБ |
+| сумма requests | 7.4 ГиБ |
+| сумма **limits** | **23.6 ГиБ** (перекоммит 158%) |
+| подов Argo CD без requests/limits | **7 из 7** (BestEffort) |
+
+BestEffort ядро убивает первыми — в журнале дважды убит
+`argocd-application-controller`.
+
+**Что теперь задано (декларативно).**
+
+`infra/terraform/modules/k3s-dev-host/templates/k3s-config.yaml.tpl` →
+`/etc/rancher/k3s/config.yaml`:
+
+```yaml
+kubelet-arg:
+  - "system-reserved=memory=1024Mi,cpu=250m"
+  - "kube-reserved=memory=512Mi,cpu=250m"
+  - "eviction-hard=memory.available<1200Mi,nodefs.available<10%,imagefs.available<15%"
+  - "eviction-soft=memory.available<1800Mi"
+  - "eviction-soft-grace-period=memory.available=90s"
+  - "eviction-minimum-reclaim=memory.available=256Mi"
+```
+
+Эффект: allocatable **14.9 → 12.2 ГиБ** (резерв системы вычитается из
+продаваемого), выселение начинается на 1.2 ГиБ свободных, а не на 62 МБ.
+
+Бюджеты namespace'ов:
+
+| объект | где | что даёт |
+|---|---|---|
+| `LimitRange` argocd / kube-system / agent-sandbox-system | `infra/k3s/node-manifests/platform-guards.yaml` (k3s применяет сам) | непустые requests и потолок на контейнер вместо BestEffort |
+| `ResourceQuota` argocd | там же | 2Gi requests / 8Gi limits / 20 подов |
+| `LimitRange` + `ResourceQuota` app-ns | `infra/k3s/base/guards/app-budget.yaml` (через Argo) | max 4Gi на контейнер (столько объявляет searchnet), 12Gi/26Gi на namespace |
+
+`namespace` в app-guard не прописан — подставляет NamespaceTransformer
+оверлея, поэтому один файл работает и в dev, и в prod.
+
+**Проверка.**
+
+```bash
+sudo k3s kubectl get node pc-for-ai -o jsonpath='{.status.allocatable.memory}'
+# 12806844Ki  (было 15608508Ki)
+
+sudo k3s kubectl get --raw /api/v1/nodes/pc-for-ai/proxy/configz \
+  | python3 -c 'import json,sys; d=json.load(sys.stdin)["kubeletconfig"]; print(d["evictionHard"], d["systemReserved"])'
+
+sudo k3s kubectl get limitrange,resourcequota -n argocd
+```
+
+**Важно при рестарте k3s.** `config.yaml` читается только при старте — правка
+файла без `systemctl restart k3s` не действует. Поды при рестарте не
+перезапускаются (containerd держит контейнеры), но CoreDNS **сбрасывается** —
+см. §3.1.
+
+**Что осталось за рамками.** Нода 14.9 ГиБ при 33 подах (OpenSearch 1.5 ГиБ +
+Keycloak 1.5 + Kafka 2 + searchnet 4 + MongoDB) — запас есть, но не двойной.
+Если появится ещё один тяжёлый сервис, расширять RAM, а не поднимать лимиты.
+
+---
+
 ## 4. CI
 
 | Workflow | Роль |
