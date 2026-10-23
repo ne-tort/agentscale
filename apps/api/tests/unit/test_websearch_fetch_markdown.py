@@ -269,6 +269,28 @@ async def test_retries_retryable_render_timeout(monkeypatch, backend):
     assert out["content_type"].startswith("text/markdown")
 
 
+async def test_slow_failure_is_not_retried(monkeypatch, backend):
+    """Медленный отказ рендера не ретраится: второй заход вышел бы за бюджет.
+
+    Замер живого DNS: каталог процессоров иногда рендерится 45-55с. Ретрай
+    такого отказа — это ещё почти минута, суммарно за лимитом тула (агент
+    получил бы обрыв вместо ответа). Правильнее сразу отдать сырой HTML: цены
+    в нём тоже есть.
+    """
+    from prodavan.application.websearch import service as svc_mod
+
+    # Порог 0 → любой отказ считается «медленным», ветка ретрая не срабатывает.
+    monkeypatch.setattr(svc_mod, "_RETRY_FAST_FAILURE_SEC", 0.0)
+    router = _FlakyRouter(_extract_timeout(), _extract_ok(), _fetch_ok("<p>html</p>"))
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: router)
+
+    out = await WebSearchService().fetch(bridge=_claims(), url="https://x/")
+
+    extract_calls = [c for c in router.calls if "/extract" in c["url"]]
+    assert len(extract_calls) == 1  # ретрая не было
+    assert out["content"] == "<p>html</p>"
+
+
 async def test_does_not_retry_non_retryable_empty(monkeypatch, backend):
     """PDF/пустая страница — не временная ошибка: ретраить бессмысленно."""
     empty = _Resp(200, {"ok": True, "count": 1, "results": [{"content": "", "ok": True}]})
