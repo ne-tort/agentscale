@@ -639,6 +639,13 @@ class _ChatScaffoldState extends State<ChatScaffold> {
   /// True while an OS file drag hovers over the chat area.
   bool _dragOver = false;
 
+  // Чек-лист задач выводится из ВСЕЙ истории (deriveChecklistTasks проходит все
+  // блоки), а `visibleBlocks` каждый вызов ещё и копирует список. Считался он
+  // внутри LayoutBuilder, то есть на каждый проход layout — заметная
+  // постоянная работа на длинном чате. Кэшируем по состоянию истории.
+  List<ChatChecklistTask> _checklistTasks = const [];
+  int _checklistKey = 0;
+
   // Widget-field accessors keep the build body readable.
   ChatSessionController get controller => widget.controller;
   ProdavanApi get api => widget.api;
@@ -665,6 +672,26 @@ class _ChatScaffoldState extends State<ChatScaffold> {
     if (_dragOver != value) {
       setState(() => _dragOver = value);
     }
+  }
+
+  /// Чек-лист задач с кэшем по состоянию истории.
+  ///
+  /// Ключ — число блоков + ключ хвоста + флаг «ход в работе»: этого достаточно,
+  /// чтобы пересчитать только при реальном изменении истории, а не на каждый
+  /// проход layout.
+  List<ChatChecklistTask> _checklistFor(ChatSessionController controller) {
+    final blocks = controller.blocks;
+    final key = Object.hash(
+      blocks.length,
+      blocks.isEmpty ? '' : blocks.last.key,
+      blocks.isEmpty ? 0 : blocks.last.text.length,
+      controller.turnInProgress,
+      controller.streaming,
+    );
+    if (key == _checklistKey) return _checklistTasks;
+    _checklistTasks = deriveChecklistTasks(controller.visibleBlocks);
+    _checklistKey = key;
+    return _checklistTasks;
   }
 
   Future<void> _handleDroppedFiles(DropDoneDetails details) async {
@@ -713,7 +740,7 @@ class _ChatScaffoldState extends State<ChatScaffold> {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final checklistTasks = deriveChecklistTasks(controller.visibleBlocks);
+        final checklistTasks = _checklistFor(controller);
         final showChecklist =
             checklistTasks.isNotEmpty && constraints.maxWidth >= _kChecklistMinWidth;
         // The transcript keeps its readable width cap in BOTH cases — the
