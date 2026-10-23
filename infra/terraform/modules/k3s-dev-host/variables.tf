@@ -124,3 +124,9 @@ variable "export_docker_kubeconfig" {
   default     = false
   description = "CI-only: write Docker-ready kubeconfig to Windows home. Not part of SSH+Terraform bootstrap / UI access."
 }
+
+variable "dns_upstreams" {
+  type        = string
+  default     = ""
+  description = "Upstream DNS for CoreDNS, space-separated (prod: tunnel DNS + public). Empty keeps k3s default `forward . /etc/resolv.conf` (dev). post-k3s-heal.sh re-applies it after every k3s start, because k3s rewrites its CoreDNS addon manifest on boot."
+}

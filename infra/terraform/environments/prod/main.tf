@@ -111,6 +111,13 @@ module "k3s_prod" {
   remote_repo_path       = var.remote_repo_path
   bootstrap_gitops       = var.bootstrap_gitops
   gitops_apps            = "prod"
+  # CoreDNS на проде форвардит на DNS через туннель (знает приватную зону
+  # провайдера) + публичные резервные. Хостовый /etc/resolv.conf после
+  # перезагрузки поднимался с мёртвым nameserver: 2026-10-22 и 2026-10-23 из
+  # подов не резолвилось ни одно внешнее имя, и агент не мог дойти до
+  # провайдера ИИ. post-k3s-heal.sh навязывает этот список после каждого
+  # старта k3s (k3s перезаписывает свой CoreDNS-манифест при каждом старте).
+  dns_upstreams          = "172.19.0.2 8.8.8.8 1.1.1.1"
   ghcr_token             = var.ghcr_token
   ghcr_username          = var.ghcr_username
 }
