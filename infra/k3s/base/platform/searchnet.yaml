@@ -73,7 +73,7 @@ spec:
           # новый под тянет ровно эту сборку. imagePullPolicy=Always сам по себе
           # гарантирует свежесть тега, но НЕ перезапуск.
           # Проверяется тестом test_agent_runtime_image_pin.test_searchnet_*.
-          image: ghcr.io/ne-tort/searchnet:5e007d19d49f
+          image: ghcr.io/ne-tort/searchnet:71ca334445d6
           # Always дополнительно: пин мог быть пересобран под тем же тегом при
           # отладке, а нода держит локальный слой.
           imagePullPolicy: Always
