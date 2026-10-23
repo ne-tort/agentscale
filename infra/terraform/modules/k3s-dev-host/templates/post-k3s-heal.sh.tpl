@@ -25,14 +25,15 @@ ensure_coredns_forward() {
   esac
 
   # Один python-проход: собрать Corefile с явным forward и JSON-патч для kubectl.
-  if ! printf '%s' "$corefile" | DNS_UPSTREAMS="$DNS_UPSTREAMS" \
-      python3 - > /tmp/coredns-patch.json 2>/dev/null <<'PY'
+  # ВАЖНО: данные передаём ФАЙЛОМ, а не через stdin — `python3 - <<'PY'` уже
+  # занимает stdin программой, и pipe в него не доходит (sys.stdin.read() пуст).
+  printf '%s' "$corefile" > /tmp/coredns-corefile.txt
+  if ! python3 - "$DNS_UPSTREAMS" /tmp/coredns-corefile.txt > /tmp/coredns-patch.json 2>/dev/null <<'PY'
 import json
-import os
 import sys
 
-cf = sys.stdin.read()
-ups = os.environ["DNS_UPSTREAMS"]
+ups = sys.argv[1]
+cf = open(sys.argv[2], encoding="utf-8").read()
 old = "    forward . /etc/resolv.conf"
 if old not in cf:
     sys.exit(1)

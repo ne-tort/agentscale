@@ -122,6 +122,19 @@ def test_dns_fix_survives_k3s_restart() -> None:
     # и не трогать dev, где хостовый резолвер рабочий
     assert '[ -z "$DNS_UPSTREAMS" ] && return 0' in heal
 
+    # Регресс-страховка: данные в python-блок нельзя отдавать через stdin —
+    # `python3 - <<'PY'` уже занимает stdin программой, pipe в него не доходит,
+    # sys.stdin.read() возвращает пустоту и фикс молча не применяется
+    # (ровно так функция и не сработала в первом заходе). Проверяем код, а не
+    # комментарии: пояснение выше само упоминает stdin.
+    code_lines = [
+        line for line in heal.splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+    code = "\n".join(code_lines)
+    assert "sys.stdin.read()" not in code, "Corefile нельзя читать из stdin"
+    assert "open(sys.argv[2]" in code, "Corefile должен читаться из файла"
+
     prod_env = (_TERRAFORM / "environments/prod/main.tf").read_text(encoding="utf-8")
     assert "dns_upstreams" in prod_env
     assert "172.19.0.2 8.8.8.8 1.1.1.1" in prod_env
