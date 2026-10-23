@@ -52,7 +52,13 @@ def _seed_row(row_id: str) -> dict:
 
 
 def test_merge_rules_files_is_additive(migration: ModuleType) -> None:
-    """Старый инстанс (5 правил) догоняется до актуального сида (7 правил)."""
+    """Старый инстанс (5 правил) догоняется до актуального сида.
+
+    Проверяем СМЫСЛ миграции, а не замороженный перечень: добавляются ровно те
+    файлы сида, которых у инстанса нет, а правки пользователя не затираются.
+    Раньше здесь был жёсткий список из двух имён — он ломался от любого нового
+    правила (сейчас добавлен `05-tenders.md`), хотя поведение осталось верным.
+    """
     legacy_names = {
         "10-request.md",
         "20-search.md",
@@ -72,8 +78,9 @@ def test_merge_rules_files_is_additive(migration: ModuleType) -> None:
 
     merged, added = migration._merge_rules_files(legacy)
 
-    assert sorted(added) == ["60-builds.md", "70-ready-builds.md"]
-    assert [f["name"] for f in merged] == [n for n, _, _ in EQUIPMENT_RULES_FILES]
+    seed_names = [n for n, _, _ in EQUIPMENT_RULES_FILES]
+    assert sorted(added) == sorted(n for n in seed_names if n not in legacy_names)
+    assert [f["name"] for f in merged] == seed_names
     assert next(f for f in merged if f["name"] == "40-groups.md")["body"] == "МОЯ ПРАВКА"
     priorities = [f["priority"] for f in merged]
     assert priorities == sorted(priorities)

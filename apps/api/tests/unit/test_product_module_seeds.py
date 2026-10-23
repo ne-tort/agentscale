@@ -1,5 +1,6 @@
 """Unit tests for product module seed definitions."""
 
+from prodavan.application.platform.equipment_prompt_content import EQUIPMENT_RULES_FILES
 from prodavan.application.platform.product_module_seeds import (
     EXAMPLE_MODULE_IDS,
     PRODUCT_MODULES,
@@ -675,15 +676,10 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     assert rules_seed["body"]["path"] == "prompts/equipment"
     assert rules_seed["body"]["enabled"] is True
     rule_names = [f["name"] for f in rules_seed["body"]["files_json"]]
-    assert rule_names == [
-        "10-request.md",
-        "20-search.md",
-        "30-identify.md",
-        "40-groups.md",
-        "50-rank.md",
-        "60-builds.md",
-        "70-ready-builds.md",
-    ]
+    # Перечень выводим из сида: набор правил расширяется (добавлен
+    # 05-tenders.md), а проверяемое свойство — «все правила сида попали в
+    # body, в порядке приоритета».
+    assert rule_names == [name for name, _, _ in EQUIPMENT_RULES_FILES]
     # WAVE12: правила учат новой модели (карточки + готовые сборки-ссылки).
     assert "equipment_builds" in agents_file["body"]
     assert "part_cards" in agents_file["body"]
