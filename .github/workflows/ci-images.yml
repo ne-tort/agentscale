@@ -328,8 +328,15 @@ jobs:
           set -euo pipefail
           IMAGE="${{ steps.meta.outputs.searchnet }}:latest"
           mkdir -p searchnet/browser-cache
-          if ! docker pull "$IMAGE"; then
-            echo "no previous image — first build will fetch browsers from upstream"
+          # Локальный образ валиден и БЕЗ обращения к реестру. `docker pull` на
+          # уже скачанном образе всё равно ходит в GHCR: при флапе он падал, шаг
+          # выходил с пустым кэшем, и сборка тянула 4 ГБ браузеров заново
+          # (проверено 2026-10-23 — кэш остался 4.0K при живом образе на ноде).
+          if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
+            docker pull "$IMAGE" || echo "pull failed — продолжаем без сида"
+          fi
+          if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
+            echo "no previous image locally — first build will fetch browsers upstream"
             exit 0
           fi
           CID="$(docker create "$IMAGE")"
@@ -341,6 +348,12 @@ jobs:
             fi
           done
           docker rm "$CID" >/dev/null
+          # Пустой сид — не повод тянуть браузеры из upstream: падаем сразу и
+          # внятно, вместо 40 минут ожидания и таймаута.
+          if [ -z "$(ls -A searchnet/browser-cache 2>/dev/null | grep -v '^.gitkeep$' || true)" ]; then
+            echo "::error::browser cache seed пуст — образ $IMAGE не содержит /root/.cache/{camoufox,ms-playwright}"
+            exit 1
+          fi
 
       - name: Build searchnet image (recovery path)
         uses: docker/build-push-action@v6
