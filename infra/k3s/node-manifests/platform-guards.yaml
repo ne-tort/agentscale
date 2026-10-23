@@ -1,0 +1,104 @@
+# Защита узла от OOM: бюджеты памяти для namespace, которыми НЕ владеет Argo.
+#
+# Почему отдельным файлом в node-manifests, а не в GitOps-оверлее: `argocd` и
+# `kube-system` вне AppProject `agentscale` (whitelist namespace'ов), а k3s
+# автоматически применяет всё из /var/lib/rancher/k3s/server/manifests — это
+# тот же декларативный путь, что и у остальных bootstrap-объектов
+# (prodavan-traefik-port.yaml), и он переживает рестарт (в отличие от ручного
+# kubectl patch).
+#
+# Инцидент 2026-10-23: нода (14.9 ГиБ allocatable) ушла в глобальный OOM при
+# 62 МБ свободных. Сумма ЛИМИТОВ контейнеров была 23 ГиБ (перекоммит 158%),
+# а семь подов Argo CD шли вообще БЕЗ requests/limits — то есть BestEffort.
+# При нехватке памяти ядро убивает BestEffort первым: в журнале так и вышло —
+# дважды убит `argocd-application-controller`, затем завис apiserver, потому что
+# kubelet не мог получить ListPodSandbox.
+#
+# LimitRange здесь даёт двум самым уязвимым namespace'ам непустые requests и
+# потолок на контейнер. Важно: значения применяются при СОЗДАНИИ пода, текущие
+# поды не перезапускаются — правка безопасна для работающего кластера.
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: platform-container-limits
+  namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: agentscale
+    agentscale.io/component: oom-guard
+spec:
+  limits:
+    - type: Container
+      # Argo CD по факту потребляет 20-140 МиБ на под; 512 МиБ — потолок с
+      # запасом на git-операции repo-server (клон 14 МиБ репозитория).
+      defaultRequest:
+        cpu: 50m
+        memory: 128Mi
+      default:
+        cpu: 500m
+        memory: 512Mi
+      # Один контейнер не должен уметь занять половину ноды.
+      max:
+        cpu: "2"
+        memory: 2Gi
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: platform-container-limits
+  namespace: kube-system
+  labels:
+    app.kubernetes.io/part-of: agentscale
+    agentscale.io/component: oom-guard
+spec:
+  limits:
+    - type: Container
+      # traefik/coredns/metrics-server — сервисы с ровным потреблением.
+      defaultRequest:
+        cpu: 25m
+        memory: 64Mi
+      default:
+        cpu: 250m
+        memory: 256Mi
+      max:
+        cpu: "2"
+        memory: 1Gi
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: platform-container-limits
+  namespace: agent-sandbox-system
+  labels:
+    app.kubernetes.io/part-of: agentscale
+    agentscale.io/component: oom-guard
+spec:
+  limits:
+    - type: Container
+      # router/controller: служебные циклы, памяти мало (56 МиБ суммарно).
+      defaultRequest:
+        cpu: 25m
+        memory: 64Mi
+      default:
+        cpu: 250m
+        memory: 256Mi
+      max:
+        cpu: "2"
+        memory: 1Gi
+---
+# Потолок на namespace: даже если кто-то добавит много подов, argocd не съест
+# память, предназначенную приложению. Замер до quota: 7 подов, 0 запросов.
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: argocd-budget
+  namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: agentscale
+    agentscale.io/component: oom-guard
+spec:
+  hard:
+    requests.memory: 2Gi
+    limits.memory: 8Gi
+    requests.cpu: "2"
+    limits.cpu: "6"
+    pods: "20"
