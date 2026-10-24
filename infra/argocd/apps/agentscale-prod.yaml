@@ -26,6 +26,14 @@ spec:
       - CreateNamespace=true
       - RespectIgnoreDifferences=true
       - Wait=false
+      # Применять только расходящиеся ресурсы. Иначе Argo на каждом синке
+      # отдаёт на apply ВСЁ, включая уже связанный PVC: в его live-спеке есть
+      # volumeName и storageClassName (их проставил провижинер), а в манифесте
+      # их нет — попытка их убрать даёт `spec is immutable after creation` и
+      # роняет синк целиком (инцидент 2026-10-23, блокировал выкатку образов).
+      # ignoreDifferences уже считает PVC синхронным, поэтому он и не
+      # применяется повторно.
+      - ApplyOutOfSyncOnly=true
     retry:
       limit: 5
       backoff:

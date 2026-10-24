@@ -289,7 +289,11 @@ class ChatSessionController {
       } else {
         // Pagination may legitimately return zero new blocks near the head —
         // only short-circuit when there is nothing more to load.
-        blocks.insertAll(0, newBlocks);
+        // Дедуп по ключу: если бэкенд отдаст пересекающийся диапазон, дубли
+        // раздувают список и ломают сравнение «выросло ли» в автоподгрузке.
+        final known = {for (final b in blocks) b.key};
+        final fresh = newBlocks.where((b) => !known.contains(b.key)).toList();
+        blocks.insertAll(0, fresh);
       }
       hasMoreHistory = body['has_more'] == true;
       oldestSeq = body['oldest_seq'] as int?;
@@ -328,8 +332,21 @@ class ChatSessionController {
     if (!hasMoreHistory || loadingHistory || oldestSeq == null) return;
     loadingHistory = true;
     notifyImmediate();
+    final beforeBlocks = blocks.length;
+    final beforeOldest = oldestSeq;
     try {
       await loadTranscript(beforeSeq: oldestSeq);
+      // Защита от бесконечной подгрузки. Контракт бэкенда: страница строго
+      // старше before_seq, поэтому либо добавляются блоки, либо курсор
+      // двигается. Если не произошло ни того, ни другого — дальше листать
+      // нечего, иначе клиент будет запрашивать одну и ту же страницу вечно
+      // (это и вешало чат: «открыл — через пару секунд страница замерла»).
+      final noNewBlocks = blocks.length == beforeBlocks;
+      final cursorStuck = oldestSeq != null && oldestSeq == beforeOldest;
+      if (noNewBlocks && cursorStuck) {
+        hasMoreHistory = false;
+        oldestSeq = null;
+      }
     } catch (e) {
       // loadTranscript already recorded the error; keep loadingHistory gating sane.
       error = e;
@@ -682,13 +699,24 @@ class ChatSessionController {
       _pollFailures = 0;
       final resolved = body['session_id'] as String?;
       if (resolved != null && resolved.isNotEmpty) sessionId = resolved;
+      final blocksBefore = blocks.length;
+      final tailBefore = blocks.isEmpty ? null : blocks.last;
+      final turnBefore = turnInProgress;
       _mergeIncrementalBlocks(chatBlocksFromTranscript(body['blocks'] as List?));
       newestSeq = body['newest_seq'] as int? ?? newestSeq;
       turnInProgress = body['turn_in_progress'] == true;
       _syncReconnectFromBlocks();
       _saveToCache();
       _syncLivePolling();
-      notifyImmediate();
+      // Не будим UI, если хвост не изменился: поллер тикает каждые 2.5 с и
+      // раньше перестраивал экран даже на пустых ответах.
+      if (_liveStateChanged(
+        blocksBefore: blocksBefore,
+        tailBefore: tailBefore,
+        turnBefore: turnBefore,
+      )) {
+        notifyImmediate();
+      }
     } catch (_) {
       // Best-effort tail: stop after repeated failures instead of hammering.
       _pollFailures++;
@@ -766,6 +794,27 @@ class ChatSessionController {
         blocks.add(b);
       }
     }
+  }
+
+  /// Есть ли реальная разница между текущим состоянием и ответом поллера.
+  ///
+  /// Поллер ходит каждые 2.5 с, пока ход в работе, и раньше слал
+  /// `notifyImmediate()` безусловно: даже если новых событий нет, экран
+  /// перестраивался целиком. На длинном чате это давало постоянную нагрузку на
+  /// UI-поток и мешало плавности. Достаточно сравнить длину/хвост и флаг хода.
+  bool _liveStateChanged({
+    required int blocksBefore,
+    required ChatBlock? tailBefore,
+    required bool turnBefore,
+  }) {
+    if (blocks.length != blocksBefore) return true;
+    if (turnInProgress != turnBefore) return true;
+    if (blocks.isEmpty) return false;
+    final tail = blocks.last;
+    if (tailBefore == null) return true;
+    // Стримящийся хвост дописывается конкатенацией текста — сравниваем по
+    // длине, чтобы не перестраивать экран на одинаковых кадрах.
+    return tail.key != tailBefore.key || tail.text.length != tailBefore.text.length;
   }
 
   void dispose() {

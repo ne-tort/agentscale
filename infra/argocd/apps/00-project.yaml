@@ -58,6 +58,15 @@ spec:
       kind: CronJob
     - group: policy
       kind: PodDisruptionBudget
+    # Бюджеты памяти namespace'а (защита узла от OOM, инцидент 2026-10-23):
+    # LimitRange задаёт requests/limits контейнерам без них, ResourceQuota
+    # ограничивает суммарный рост. Без этих двух строк синк падает целиком —
+    # Argo считает задачу невалидной и не применяет НИЧЕГО (в том числе
+    # обновление образов).
+    - group: ""
+      kind: LimitRange
+    - group: ""
+      kind: ResourceQuota
     - group: rbac.authorization.k8s.io
       kind: Role
     - group: rbac.authorization.k8s.io

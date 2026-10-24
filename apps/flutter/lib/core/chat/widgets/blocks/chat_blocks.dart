@@ -267,40 +267,67 @@ class ChatMarkdownBody extends StatelessWidget {
 
   final String text;
 
+  // Кэши уровня модуля. ChatMarkdownBody перестраивается на каждой дельте
+  // стрима (~40 раз в секунду), а внутри — нормализация таблиц регулярками по
+  // всему тексту и сборка MarkdownStyleSheet из темы. Оба шага не зависят от
+  // того, какой фрагмент ответа пришёл, поэтому кэшируем:
+  //   * нормализованный текст — по исходному тексту;
+  //   * style sheet — по объекту темы (тема меняется несравнимо реже текста).
+  static final Map<String, String> _normalized = <String, String>{};
+  static MarkdownStyleSheet? _sheet;
+  static ThemeData? _sheetTheme;
+
+  static String _normalize(String source) {
+    final hit = _normalized[source];
+    if (hit != null) return hit;
+    final value = normalizeChatMarkdownTables(source);
+    if (_normalized.length > 24) _normalized.clear();
+    _normalized[source] = value;
+    return value;
+  }
+
+  static MarkdownStyleSheet _styleFor(ThemeData theme, ColorScheme scheme) {
+    if (identical(_sheetTheme, theme) && _sheet != null) return _sheet!;
+    final base = MarkdownStyleSheet.fromTheme(theme);
+    final sheet = base.copyWith(
+      p: theme.textTheme.bodyMedium,
+      // Semi-transparent: inline-code background must not fully cover
+      // the selection tint (RenderParagraph paints selection UNDER the
+      // per-span background paints).
+      code: TextStyle(
+        fontFamily: 'monospace',
+        backgroundColor: scheme.surfaceContainerHighest.withValues(alpha: 0.55),
+      ),
+      codeblockDecoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      tableHead: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+      tableBody: theme.textTheme.bodyMedium,
+      tableBorder: TableBorder.all(
+        color: scheme.outlineVariant.withValues(alpha: 0.55),
+        width: 1,
+      ),
+      tableHeadAlign: TextAlign.start,
+      tableCellsPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      tableColumnWidth: const IntrinsicColumnWidth(),
+      tableScrollbarThumbVisibility: true,
+    );
+    _sheet = sheet;
+    _sheetTheme = theme;
+    return sheet;
+  }
+
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
     if (text.isEmpty) return const SizedBox.shrink();
-    final data = normalizeChatMarkdownTables(text);
-    final base = MarkdownStyleSheet.fromTheme(Theme.of(context));
     return MarkdownBody(
-      data: data,
+      data: _normalize(text),
       selectable: false,
       extensionSet: md.ExtensionSet.gitHubWeb,
-      styleSheet: base.copyWith(
-        p: Theme.of(context).textTheme.bodyMedium,
-        // Semi-transparent: inline-code background must not fully cover
-        // the selection tint (RenderParagraph paints selection UNDER the
-        // per-span background paints).
-        code: TextStyle(
-          fontFamily: 'monospace',
-          backgroundColor: scheme.surfaceContainerHighest.withValues(alpha: 0.55),
-        ),
-        codeblockDecoration: BoxDecoration(
-          color: scheme.surfaceContainerHighest,
-          borderRadius: BorderRadius.circular(8),
-        ),
-        tableHead: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
-        tableBody: Theme.of(context).textTheme.bodyMedium,
-        tableBorder: TableBorder.all(
-          color: scheme.outlineVariant.withValues(alpha: 0.55),
-          width: 1,
-        ),
-        tableHeadAlign: TextAlign.start,
-        tableCellsPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-        tableColumnWidth: const IntrinsicColumnWidth(),
-        tableScrollbarThumbVisibility: true,
-      ),
+      styleSheet: _styleFor(theme, scheme),
     );
   }
 }
