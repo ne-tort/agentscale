@@ -38,6 +38,7 @@ class ChatDisplayActivity extends ChatDisplayEntry {
     required this.items,
     required this.streaming,
     required this.actionCount,
+    required this.contentHash,
     this.diffStats,
   });
 
@@ -48,6 +49,11 @@ class ChatDisplayActivity extends ChatDisplayEntry {
 
   /// Thinking + tool actions (blank/soft assistant blocks are not counted).
   final int actionCount;
+
+  /// Hash of every item's raw map (identity). A tool-call placeholder can be
+  /// replaced in the middle of the run without changing the item count or the
+  /// last item — widget caching must still notice it.
+  final int contentHash;
 
   /// Aggregated `+/-` badge, computed once per grouping (not per frame).
   final ({int added, int removed})? diffStats;
@@ -275,11 +281,20 @@ List<ChatDisplayEntry> groupDisplayEntries(
     final belongsToCurrentTurn = activityStart > lastUserIndex;
     final streaming =
         turnStreaming && belongsToCurrentTurn && !currentTurnHasAnswer;
+    var contentHash = 0;
+    for (final item in activity) {
+      contentHash = Object.hash(
+        contentHash,
+        identityHashCode(item.block.raw),
+        identityHashCode(item.paired?.raw),
+      );
+    }
     out.add(
       ChatDisplayActivity(
         items: List<ChatDisplayPair>.unmodifiable(activity),
         streaming: streaming,
         actionCount: workActionCount(activity),
+        contentHash: contentHash,
         diffStats: aggregateDiffStats(activity),
       ),
     );

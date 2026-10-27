@@ -56,9 +56,9 @@ String _entrySignature(ChatDisplayEntry entry) {
     case ChatDisplayGroup(:final kind, :final items):
       return 'g:${kind.name}:${items.length}:${items.first.block.key}:'
           '${items.last.block.key}:${identityHashCode(items.last.block.raw)}';
-    case ChatDisplayActivity(:final items, :final streaming):
+    case ChatDisplayActivity(:final items, :final streaming, :final contentHash):
       return 'a:${items.first.block.key}:${items.length}:${streaming ? 1 : 0}:'
-          '${identityHashCode(items.last.block.raw)}';
+          '$contentHash';
   }
 }
 

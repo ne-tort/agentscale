@@ -321,11 +321,13 @@ List<ChatBlock> applyStreamEvent(
       final callIdx = callId.isEmpty
           ? -1
           : next.indexWhere((b) => b.kind == 'tool_call' && b.id == callId);
-      final callRaw = {
+      final callRaw = <String, dynamic>{
         'id': payload['id'],
         'name': payload['name'],
         'input': payload['input'] ?? {},
-        '_key': _KeyGen.next('tool_call'),
+        // Keep the placeholder's widget identity across the replacement — a
+        // new key here would reset the collapsed activity that contains it.
+        '_key': callIdx >= 0 ? next[callIdx].key : _KeyGen.next('tool_call'),
       };
       if (callIdx >= 0) {
         next[callIdx] = ChatBlock(kind: 'tool_call', raw: callRaw);

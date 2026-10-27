@@ -288,6 +288,28 @@ void main() {
     expect(stats?.removed, 1);
   });
 
+  test('activity content hash notices a middle tool-call replacement', () {
+    final first = _toolCall('read', id: 'a', input: {'path': 'one'});
+    final second = _toolCall('glob', id: 'b', input: {'globPattern': '*.dart'});
+    final blocks = [
+      ChatBlock(kind: 'user', raw: {'text': 'hi'}),
+      first,
+      second,
+    ];
+    final before = groupDisplayEntries(blocks)[1] as ChatDisplayActivity;
+    // Same keys/count/last item, only an earlier item's payload changed (a
+    // tool-call delta placeholder being replaced by the full call).
+    final replaced = first.copyWithRaw({'input': {'path': 'two'}});
+    final after = groupDisplayEntries([
+      ChatBlock(kind: 'user', raw: {'text': 'hi'}),
+      replaced,
+      second,
+    ])[1] as ChatDisplayActivity;
+    expect(before.items.length, after.items.length);
+    expect(before.items.first.block.key, after.items.first.block.key);
+    expect(before.contentHash, isNot(after.contentHash));
+  });
+
   test('an empty streaming shell does not create an activity row', () {
     final blocks = [
       ChatBlock(kind: 'user', raw: {'text': 'hi'}),
