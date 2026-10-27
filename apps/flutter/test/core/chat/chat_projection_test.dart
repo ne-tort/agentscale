@@ -212,7 +212,7 @@ void main() {
       expect(usage['output_tokens'], 2);
       expect(usage['cost_usd'], 0.05);
       expect(usage['model'], 'm');
-      expect(blocks[1].key, 'h1');
+      expect(blocks[1].key, startsWith('h1@'));
     });
   });
 
@@ -341,8 +341,10 @@ void main() {
       ]);
       final keys = blocks.map((b) => b.key).toList();
       expect(keys.toSet().length, keys.length);
-      expect(keys[0], 'h0');
-      expect(keys[1], 'h1');
+      // Page-scoped prefix: two transcript fetches must never reuse positional
+      // keys — that is what corrupted the reverse ListView on live polling.
+      expect(keys[0], startsWith('h0@'));
+      expect(keys[1], startsWith('h1@'));
     });
 
     test('user_message echo preserves the local block identity', () {
@@ -399,5 +401,43 @@ void main() {
       'data': {'id': 'call_9', 'name': 'mcp.openclaw.fs.list', 'input': {'path': '/tmp'}},
     });
     expect(blocks.where((b) => b.kind == 'tool_call'), hasLength(1));
+  });
+
+  test('task_progress snapshots update the current plan instead of appending', () {
+    var blocks = applyStreamEvent([], {
+      'type': 'task_progress',
+      'data': {
+        'tasks': [
+          {'id': '1', 'title': 'Step', 'status': 'pending'},
+        ],
+      },
+    });
+    final key = blocks.single.key;
+    blocks = applyStreamEvent(blocks, {
+      'type': 'task_progress',
+      'data': {
+        'tasks': [
+          {'id': '1', 'title': 'Step', 'status': 'done'},
+        ],
+      },
+    });
+    expect(blocks.where((b) => b.kind == 'plan'), hasLength(1));
+    expect(blocks.single.key, key);
+    expect((blocks.single.raw['tasks'] as List).first['status'], 'done');
+
+    // Activity in between starts a new stage — a new plan block.
+    blocks = applyStreamEvent(blocks, {
+      'type': 'tool_call',
+      'data': {'id': 'tc', 'name': 'Read', 'input': {}},
+    });
+    blocks = applyStreamEvent(blocks, {
+      'type': 'task_progress',
+      'data': {
+        'tasks': [
+          {'id': '2', 'title': 'Next', 'status': 'pending'},
+        ],
+      },
+    });
+    expect(blocks.where((b) => b.kind == 'plan'), hasLength(2));
   });
 }

@@ -21,14 +21,16 @@ import 'package:prodavan/l10n/app_localizations.dart';
 TextStyle _mutedTextStyle(BuildContext context) {
   final base = Theme.of(context).textTheme.bodyMedium ?? const TextStyle();
   return base.copyWith(
-    color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.72),
+    color: Theme.of(context).colorScheme.onSurfaceVariant
+        .withValues(alpha: 0.72),
   );
 }
 
 TextStyle _mutedBodyStyle(BuildContext context) {
   final base = Theme.of(context).textTheme.bodyMedium ?? const TextStyle();
   return base.copyWith(
-    color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.72),
+    color: Theme.of(context).colorScheme.onSurfaceVariant
+        .withValues(alpha: 0.72),
   );
 }
 
@@ -146,7 +148,11 @@ class _ChatMutedLineState extends State<ChatMutedLine> {
               if (widget.onTap != null && showChevron)
                 Padding(
                   padding: const EdgeInsets.only(left: 4),
-                  child: Icon(chevron, size: 16, color: scheme.onSurfaceVariant.withValues(alpha: 0.72)),
+                  child: Icon(
+                    chevron,
+                    size: 16,
+                    color: scheme.onSurfaceVariant.withValues(alpha: 0.72),
+                  ),
                 ),
             ],
           ),
@@ -198,16 +204,12 @@ class ChatCodePanel extends StatelessWidget {
             child: Text(
               text,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    fontFamily: 'monospace',
-                    color: scheme.onSurface.withValues(alpha: 0.88),
-                  ),
+                fontFamily: 'monospace',
+                color: scheme.onSurface.withValues(alpha: 0.88),
+              ),
             ),
           ),
-          Positioned(
-            right: 0,
-            bottom: 0,
-            child: _CopyPanelButton(text: text),
-          ),
+          Positioned(right: 0, bottom: 0, child: _CopyPanelButton(text: text)),
         ],
       ),
     );
@@ -278,10 +280,14 @@ class ChatMarkdownBody extends StatelessWidget {
   static ThemeData? _sheetTheme;
 
   static String _normalize(String source) {
+    // Streaming texts are unique on every flush; keeping full copies in the
+    // cache would pin megabytes for nothing. Very large answers skip the cache
+    // (normalization is linear and this is the one full render at the end).
+    if (source.length > 262144) return normalizeChatMarkdownTables(source);
     final hit = _normalized[source];
     if (hit != null) return hit;
     final value = normalizeChatMarkdownTables(source);
-    if (_normalized.length > 24) _normalized.clear();
+    if (_normalized.length > 8) _normalized.clear();
     _normalized[source] = value;
     return value;
   }
@@ -302,7 +308,9 @@ class ChatMarkdownBody extends StatelessWidget {
         color: scheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(8),
       ),
-      tableHead: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+      tableHead: theme.textTheme.bodyMedium?.copyWith(
+        fontWeight: FontWeight.w600,
+      ),
       tableBody: theme.textTheme.bodyMedium,
       tableBorder: TableBorder.all(
         color: scheme.outlineVariant.withValues(alpha: 0.55),
@@ -332,6 +340,124 @@ class ChatMarkdownBody extends StatelessWidget {
   }
 }
 
+/// Incremental markdown for a streaming answer.
+///
+/// Re-parsing the WHOLE answer on every delta made long replies freeze the UI
+/// (flutter_markdown parses the full string, plus layout of every block). Here
+/// the text is split into completed markdown blocks (blank line outside a
+/// fenced code block). Each completed block is rendered once and kept as an
+/// identical widget instance, so subsequent frames only rebuild the small
+/// in-progress tail. 3–5× larger answers stream smoothly.
+class _StreamingMarkdownBody extends StatefulWidget {
+  const _StreamingMarkdownBody({required this.text});
+
+  final String text;
+
+  @override
+  State<_StreamingMarkdownBody> createState() => _StreamingMarkdownBodyState();
+}
+
+class _StreamingMarkdownBodyState extends State<_StreamingMarkdownBody> {
+  /// Completed blocks — each widget is built once and reused verbatim.
+  final List<Widget> _chunks = <Widget>[];
+  String _text = '';
+  String _tail = '';
+  int _scan = 0;
+  int _chunkStart = 0;
+  bool _fence = false;
+
+  /// Above this size a partial paragraph/code block is rendered as plain text:
+  /// markdown parsing the tail must stay bounded even for huge streamed code.
+  static const _kMarkdownTailLimit = 12000;
+
+  @override
+  void initState() {
+    super.initState();
+    _consume();
+  }
+
+  @override
+  void didUpdateWidget(covariant _StreamingMarkdownBody oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.text == oldWidget.text) return;
+    if (!widget.text.startsWith(_text)) {
+      _reset();
+    }
+    _consume();
+  }
+
+  void _reset() {
+    _chunks.clear();
+    _text = '';
+    _tail = '';
+    _scan = 0;
+    _chunkStart = 0;
+    _fence = false;
+  }
+
+  void _consume() {
+    final text = widget.text;
+    var lineStart = _scan;
+    while (lineStart <= text.length) {
+      final nl = text.indexOf('\n', lineStart);
+      if (nl < 0) break;
+      final line = text.substring(lineStart, nl).trim();
+      if (line.startsWith('```') || line.startsWith('~~~')) {
+        _fence = !_fence;
+      } else if (!_fence && line.isEmpty) {
+        // Blank line = natural markdown block boundary (the blank line itself
+        // is not part of the chunk).
+        final chunk = text.substring(_chunkStart, lineStart);
+        if (chunk.trim().isNotEmpty) {
+          _chunks.add(_StreamingChunk(text: chunk));
+        }
+        _chunkStart = nl + 1;
+      } else if (!_fence && lineStart - _chunkStart >= 6000) {
+        // A long paragraph/list without blank lines is flushed at a line
+        // boundary too, so the tail (the only part re-rendered per frame)
+        // stays bounded. The current line belongs to this chunk.
+        final chunk = text.substring(_chunkStart, nl + 1);
+        if (chunk.trim().isNotEmpty) {
+          _chunks.add(_StreamingChunk(text: chunk));
+        }
+        _chunkStart = nl + 1;
+      }
+      lineStart = nl + 1;
+    }
+    _scan = lineStart;
+    _text = text;
+    _tail = text.substring(_chunkStart);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_chunks.isEmpty) {
+      return widget.text.isEmpty
+          ? const SizedBox.shrink()
+          : ChatMarkdownBody(text: widget.text);
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        ..._chunks,
+        if (_tail.trim().isNotEmpty)
+          _tail.length <= _kMarkdownTailLimit
+              ? ChatMarkdownBody(text: _tail)
+              : Text(_tail, style: Theme.of(context).textTheme.bodyMedium),
+      ],
+    );
+  }
+}
+
+class _StreamingChunk extends StatelessWidget {
+  const _StreamingChunk({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) => ChatMarkdownBody(text: text);
+}
+
 class AssistantStreamBlock extends StatefulWidget {
   const AssistantStreamBlock({
     super.key,
@@ -357,7 +483,8 @@ class AssistantStreamBlock extends StatefulWidget {
   final Map<String, dynamic>? usageRaw;
 
   /// UI-side cost estimate from the models catalog; runtime `cost_usd` wins.
-  final double? Function(String? model, int? inputTokens, int? outputTokens)? costResolver;
+  final double? Function(String? model, int? inputTokens, int? outputTokens)?
+  costResolver;
 
   /// Wall-clock moment the answer completed — always-visible `HH:MM` cell on
   /// the left of the metadata row.
@@ -420,15 +547,16 @@ class _AssistantStreamBlockState extends State<AssistantStreamBlock> {
     // differs by dialect: [OI] input_tokens ALREADY includes the cached
     // subset (so it is the full context); Anthropic input_tokens is
     // cache-exclusive (so the context is input + read + creation).
-    final cacheExclusiveInput =
-        (_stringOrNull(usage?['provider']) ?? '').startsWith('anthropic');
+    final cacheExclusiveInput = (_stringOrNull(usage?['provider']) ?? '')
+        .startsWith('anthropic');
     final promptContext = cacheExclusiveInput
         ? (input ?? 0) + (cacheRead ?? 0) + (cacheCreation ?? 0)
         : (input ?? 0);
     final cachePct = (cacheRead != null && cacheRead > 0 && promptContext > 0)
         ? ((cacheRead * 100) / promptContext).round()
         : null;
-    final hasAny = model != null ||
+    final hasAny =
+        model != null ||
         input != null ||
         output != null ||
         (cacheRead != null && cacheRead > 0) ||
@@ -474,7 +602,10 @@ class _AssistantStreamBlockState extends State<AssistantStreamBlock> {
                                 turnMs: turnMs,
                               ),
                             )
-                          : const SizedBox(height: 28, key: ValueKey<bool>(false)),
+                          : const SizedBox(
+                              height: 28,
+                              key: ValueKey<bool>(false),
+                            ),
                     ),
                     const Spacer(),
                     AnimatedSwitcher(
@@ -524,9 +655,15 @@ class _AssistantStreamBlockState extends State<AssistantStreamBlock> {
           ),
         ),
       if (input != null)
-        Text('${l10n.chatUsageInputLabel} ${_formatTokens(input)}', style: style),
+        Text(
+          '${l10n.chatUsageInputLabel} ${_formatTokens(input)}',
+          style: style,
+        ),
       if (output != null)
-        Text('${l10n.chatUsageOutputLabel} ${_formatTokens(output)}', style: style),
+        Text(
+          '${l10n.chatUsageOutputLabel} ${_formatTokens(output)}',
+          style: style,
+        ),
       // Prompt-cache hit: read tokens + share of the prompt context.
       if (cacheRead != null && cacheRead > 0)
         Text(
@@ -581,23 +718,28 @@ class _AssistantStreamBlockState extends State<AssistantStreamBlock> {
         children: [
           if (widget.streaming) ...[
             // Markdown while streaming too — no plain-text → markdown reflow
-            // jump when the block completes.
-            // Курсор-черта убран: он рисовался ОТДЕЛЬНОЙ строкой под текстом,
-            // и «Поиск в интернете…» с мигающей чертой на следующей строке
-            // выглядело как сломанная вёрстка. Пока идёт стриминг, работу
-            // агента показывает строка инструмента/индикатор ниже.
-            if (widget.text.isNotEmpty) ChatMarkdownBody(text: widget.text),
+            // jump when the block completes. Incremental chunks keep the
+            // per-frame work proportional to the paragraph being written,
+            // not to the whole answer.
+            if (widget.text.isNotEmpty)
+              _StreamingMarkdownBody(text: widget.text),
           ] else if (widget.text.isNotEmpty)
             ChatMarkdownBody(text: widget.text),
           if (widget.cancelled)
             Padding(
               padding: EdgeInsets.only(top: AppSpacing.xs),
-              child: Text(l10n.projectChatCancelled, style: Theme.of(context).textTheme.labelSmall),
+              child: Text(
+                l10n.projectChatCancelled,
+                style: Theme.of(context).textTheme.labelSmall,
+              ),
             ),
           if (widget.interrupted)
             Padding(
               padding: EdgeInsets.only(top: AppSpacing.xs),
-              child: Text(l10n.projectChatInterrupted, style: Theme.of(context).textTheme.labelSmall),
+              child: Text(
+                l10n.projectChatInterrupted,
+                style: Theme.of(context).textTheme.labelSmall,
+              ),
             ),
           _metaRow(context),
         ],
@@ -622,7 +764,11 @@ class AgentWorkingIndicator extends StatefulWidget {
 
 /// Provider-error reconnect status (chat error policy) for [AgentWorkingIndicator].
 class ReconnectIndicatorData {
-  const ReconnectIndicatorData({this.attempt, this.maxAttempts, this.nextModel});
+  const ReconnectIndicatorData({
+    this.attempt,
+    this.maxAttempts,
+    this.nextModel,
+  });
 
   final int? attempt;
   final int? maxAttempts;
@@ -675,10 +821,7 @@ class _AgentWorkingIndicatorState extends State<AgentWorkingIndicator>
       builder: (context, _) => Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(
-            label,
-            style: _mutedTextStyle(context).copyWith(fontSize: 12.5),
-          ),
+          Text(label, style: _mutedTextStyle(context).copyWith(fontSize: 12.5)),
           const SizedBox(width: 4),
           for (var i = 0; i < 3; i++)
             Padding(
@@ -688,7 +831,9 @@ class _AgentWorkingIndicatorState extends State<AgentWorkingIndicator>
                 height: 3,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: scheme.onSurfaceVariant.withValues(alpha: _dotOpacity(i)),
+                  color: scheme.onSurfaceVariant.withValues(
+                    alpha: _dotOpacity(i),
+                  ),
                 ),
               ),
             ),
@@ -755,9 +900,17 @@ class _UserMessageBlockState extends State<UserMessageBlock> {
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
           Container(
-            margin: EdgeInsets.only(top: AppSpacing.md, bottom: timeText != null ? 0 : AppSpacing.sm),
-            padding: EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: AppSpacing.sm),
-            constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * 0.85),
+            margin: EdgeInsets.only(
+              top: AppSpacing.md,
+              bottom: timeText != null ? 0 : AppSpacing.sm,
+            ),
+            padding: EdgeInsets.symmetric(
+              horizontal: AppSpacing.md,
+              vertical: AppSpacing.sm,
+            ),
+            constraints: BoxConstraints(
+              maxWidth: MediaQuery.sizeOf(context).width * 0.85,
+            ),
             decoration: BoxDecoration(
               color: scheme.primaryContainer,
               borderRadius: BorderRadius.circular(12),
@@ -768,63 +921,81 @@ class _UserMessageBlockState extends State<UserMessageBlock> {
                 if (widget.text.isNotEmpty) Text(widget.text),
                 if (attachments.isNotEmpty)
                   for (var i = 0; i < attachments.length; i++) ...[
-                    Builder(builder: (context) {
-                      final att = attachments[i];
-                      final kind = att['kind'] as String? ?? '';
-                      if (kind == 'image') {
-                        final ref = i < refs.length ? refs[i] : null;
-                        if (ref != null && ref.isNotEmpty && widget.imageLoader != null) {
-                          return _ImageAttachmentThumb(
-                            loader: widget.imageLoader!,
-                            attachmentId: ref,
-                            name: att['filename'] as String? ?? 'image',
-                          );
+                    Builder(
+                      builder: (context) {
+                        final att = attachments[i];
+                        final kind = att['kind'] as String? ?? '';
+                        if (kind == 'image') {
+                          final ref = i < refs.length ? refs[i] : null;
+                          if (ref != null &&
+                              ref.isNotEmpty &&
+                              widget.imageLoader != null) {
+                            return _ImageAttachmentThumb(
+                              loader: widget.imageLoader!,
+                              attachmentId: ref,
+                              name: att['filename'] as String? ?? 'image',
+                            );
+                          }
                         }
-                      }
-                      final inlineJson =
-                          kind == 'inline_json' ? att['inline_json'] : null;
-                      // Tabular attachments carry a GFM markdown table —
-                      // rendered as a real table instead of a JSON dump.
-                      final inlineMarkdown =
-                          kind == 'inline_table' ? att['inline_markdown'] as String? : null;
-                      final expandable = inlineJson != null || inlineMarkdown != null;
-                      return Padding(
-                        padding: const EdgeInsets.only(top: AppSpacing.xs),
-                        child: _AttachmentSpoiler(
-                          label: _attachmentLabel(l10n, att),
-                          expanded: _openSpoilers.contains(i),
-                          onTap: expandable
-                              ? () => setState(() {
+                        final inlineJson = kind == 'inline_json'
+                            ? att['inline_json']
+                            : null;
+                        // Tabular attachments carry a GFM markdown table —
+                        // rendered as a real table instead of a JSON dump.
+                        final inlineMarkdown = kind == 'inline_table'
+                            ? att['inline_markdown'] as String?
+                            : null;
+                        final expandable =
+                            inlineJson != null || inlineMarkdown != null;
+                        return Padding(
+                          padding: const EdgeInsets.only(top: AppSpacing.xs),
+                          child: _AttachmentSpoiler(
+                            label: _attachmentLabel(l10n, att),
+                            expanded: _openSpoilers.contains(i),
+                            onTap: expandable
+                                ? () => setState(() {
                                     if (_openSpoilers.contains(i)) {
                                       _openSpoilers.remove(i);
                                     } else {
                                       _openSpoilers.add(i);
                                     }
                                   })
-                              : null,
-                          body: inlineJson != null && _openSpoilers.contains(i)
-                              ? JsonEncoder.withIndent('  ').convert(inlineJson)
-                              : null,
-                          bodyWidget:
-                              inlineMarkdown != null && _openSpoilers.contains(i)
-                                  ? ChatMarkdownBody(text: inlineMarkdown)
-                                  : null,
-                        ),
-                      );
-                    }),
+                                : null,
+                            body:
+                                inlineJson != null && _openSpoilers.contains(i)
+                                ? JsonEncoder.withIndent('  ')
+                                      .convert(inlineJson)
+                                : null,
+                            bodyWidget:
+                                inlineMarkdown != null &&
+                                    _openSpoilers.contains(i)
+                                ? ChatMarkdownBody(text: inlineMarkdown)
+                                : null,
+                          ),
+                        );
+                      },
+                    ),
                   ]
                 else
                   for (final ref in refs)
                     Padding(
                       padding: EdgeInsets.only(top: AppSpacing.xs),
-                      child: Chip(label: Text(ref.split('/').last, overflow: TextOverflow.ellipsis)),
+                      child: Chip(
+                        label: Text(
+                          ref.split('/').last,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
                     ),
               ],
             ),
           ),
           if (timeText != null)
             Padding(
-              padding: EdgeInsets.only(top: AppSpacing.xs / 2, bottom: AppSpacing.sm),
+              padding: EdgeInsets.only(
+                top: AppSpacing.xs / 2,
+                bottom: AppSpacing.sm,
+              ),
               child: Text(
                 timeText,
                 style: _mutedTextStyle(context).copyWith(
@@ -861,18 +1032,11 @@ class _AttachmentSpoiler extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.end,
       children: [
-        ChatMutedLine(
-          label: label,
-          expanded: expanded,
-          onTap: onTap,
-        ),
+        ChatMutedLine(label: label, expanded: expanded, onTap: onTap),
         if (expanded && bodyWidget != null)
           Padding(
             padding: const EdgeInsets.only(top: AppSpacing.xs),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: bodyWidget,
-            ),
+            child: Align(alignment: Alignment.centerLeft, child: bodyWidget),
           )
         else if (expanded && body != null && body!.isNotEmpty)
           Padding(
@@ -911,6 +1075,48 @@ class ToolActivityBlock extends StatefulWidget {
 class _ToolActivityBlockState extends State<ToolActivityBlock> {
   bool _open = false;
 
+  // Cached derivations. `parseDiffStats` scans the whole output text and
+  // `formatToolPanelBody` may pretty-print megabytes — doing that on every
+  // frame (even while COLLAPSED) made tool-heavy chats stutter. Both are
+  // computed once per output object, and the panel body only when opened.
+  Object? _statsOutput;
+  ({int added, int removed})? _stats;
+  String? _panelBody;
+  Object? _panelOutput;
+  Object? _panelInput;
+  ToolKind? _panelKind;
+  Locale? _panelLocale;
+
+  ({int added, int removed})? _diffStats() {
+    if (!identical(_statsOutput, widget.output)) {
+      _statsOutput = widget.output;
+      _stats = parseDiffStatsCached(widget.output);
+    }
+    return _stats;
+  }
+
+  String _panelBodyFor(BuildContext context, ToolKind kind) {
+    final locale = Localizations.localeOf(context);
+    if (_panelBody != null &&
+        identical(_panelOutput, widget.output) &&
+        identical(_panelInput, widget.input) &&
+        _panelKind == kind &&
+        _panelLocale == locale) {
+      return _panelBody!;
+    }
+    final body = formatToolPanelBody(
+      kind: kind,
+      input: widget.input,
+      output: widget.output,
+    );
+    _panelBody = body;
+    _panelOutput = widget.output;
+    _panelInput = widget.input;
+    _panelKind = kind;
+    _panelLocale = locale;
+    return body;
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
@@ -924,18 +1130,12 @@ class _ToolActivityBlockState extends State<ToolActivityBlock> {
       pending: widget.pending,
       mcpAliases: widget.mcpAliases,
     );
-    final stats = parseDiffStats(widget.output);
-    final panelBody = formatToolPanelBody(
-      kind: kind,
-      input: widget.input,
-      output: widget.output,
-    );
-    // Shell: show command as panel fallback when no stdout yet.
-    final body = panelBody.isNotEmpty
-        ? panelBody
-        : (kind == ToolKind.shell && (presentation.detail?.isNotEmpty ?? false)
-            ? presentation.detail!
-            : '');
+    final stats = _diffStats();
+    final detail = presentation.detail;
+    final canExpand =
+        widget.output != null ||
+        widget.input.isNotEmpty ||
+        (kind == ToolKind.shell && (detail?.isNotEmpty ?? false));
 
     Widget? badge;
     if (stats != null && (stats.added > 0 || stats.removed > 0)) {
@@ -957,8 +1157,6 @@ class _ToolActivityBlockState extends State<ToolActivityBlock> {
       );
     }
 
-    final hasPanel = body.trim().isNotEmpty;
-
     // Failed call: MCP servers answer {content, isError} without throwing —
     // the event carries no is_error flag, so detect the envelope too. The
     // label renders red (the alias text itself), the panel shows
@@ -972,9 +1170,23 @@ class _ToolActivityBlockState extends State<ToolActivityBlock> {
           color: failed ? scheme.error : null,
           trailing: badge,
           expanded: _open,
-          onTap: hasPanel ? () => setState(() => _open = !_open) : null,
+          onTap: canExpand ? () => setState(() => _open = !_open) : null,
         ),
-        if (_open && hasPanel) ChatCodePanel(text: body),
+        if (_open && canExpand)
+          Builder(
+            builder: (context) {
+              final raw = _panelBodyFor(context, kind);
+              // Shell: show the command when there is no stdout yet.
+              final body = raw.trim().isNotEmpty
+                  ? raw
+                  : (kind == ToolKind.shell && (detail?.isNotEmpty ?? false)
+                        ? detail!
+                        : '');
+              return body.trim().isEmpty
+                  ? const SizedBox.shrink()
+                  : ChatCodePanel(text: body);
+            },
+          ),
       ],
     );
   }
@@ -1071,13 +1283,19 @@ class ApprovalBlock extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(presentation.label, style: Theme.of(context).textTheme.titleSmall),
+          Text(
+            presentation.label,
+            style: Theme.of(context).textTheme.titleSmall,
+          ),
           SizedBox(height: AppSpacing.xs),
           ChatInsetPanel(child: Text(_prettyApprovalInput(input))),
           SizedBox(height: AppSpacing.sm),
           Row(
             children: [
-              FilledButton(onPressed: onAllow, child: Text(l10n.projectApproveAndContinue)),
+              FilledButton(
+                onPressed: onAllow,
+                child: Text(l10n.projectApproveAndContinue),
+              ),
               SizedBox(width: AppSpacing.sm),
               OutlinedButton(onPressed: onDeny, child: Text(l10n.projectDeny)),
             ],
@@ -1201,12 +1419,17 @@ class _SubagentBlockState extends State<SubagentBlock> {
   void _schedulePoll() {
     _pollTimer?.cancel();
     _pollTimer = null;
-    if (!mounted || !widget.running || !_open || widget.onFetchSidechain == null) return;
+    if (!mounted ||
+        !widget.running ||
+        !_open ||
+        widget.onFetchSidechain == null)
+      return;
     _pollTimer = Timer(_pollInterval, _load);
   }
 
   Widget? _headerTrailing(BuildContext context) {
-    final muted = Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.72);
+    final muted = Theme.of(context).colorScheme.onSurfaceVariant
+        .withValues(alpha: 0.72);
     if (widget.running) {
       return SizedBox(
         width: 12,
@@ -1331,7 +1554,10 @@ class _SubagentBlockState extends State<SubagentBlock> {
             if (showFirstLoadBar) const LinearProgressIndicator(),
             if (_offline) ...[
               ChatInsetPanel(
-                child: Text(l10n.projectChatSidechainOffline, style: _mutedBodyStyle(context)),
+                child: Text(
+                  l10n.projectChatSidechainOffline,
+                  style: _mutedBodyStyle(context),
+                ),
               ),
               if (eventLines.isNotEmpty)
                 ChatInsetPanel(
@@ -1365,14 +1591,23 @@ class _SubagentBlockState extends State<SubagentBlock> {
     final input = _intOrNull(usage?['input_tokens']);
     final output = _intOrNull(usage?['output_tokens']);
     final turnMs = _intOrNull(widget.turnMs);
-    final hasAny = model != null || input != null || output != null || turnMs != null;
+    final hasAny =
+        model != null || input != null || output != null || turnMs != null;
     final timeText = _formatClockTime(widget.completedAt);
     if (!hasAny && timeText == null) return const SizedBox.shrink();
     final style = _mutedBodyStyle(context).copyWith(fontSize: 11.5);
     final cells = <Widget>[
       if (model != null) Text(model, style: style),
-      if (input != null) Text('${AppLocalizations.of(context).chatUsageInputLabel} ${_formatTokens(input)}', style: style),
-      if (output != null) Text('${AppLocalizations.of(context).chatUsageOutputLabel} ${_formatTokens(output)}', style: style),
+      if (input != null)
+        Text(
+          '${AppLocalizations.of(context).chatUsageInputLabel} ${_formatTokens(input)}',
+          style: style,
+        ),
+      if (output != null)
+        Text(
+          '${AppLocalizations.of(context).chatUsageOutputLabel} ${_formatTokens(output)}',
+          style: style,
+        ),
       if (turnMs != null) Text(_formatDurationLabel(turnMs), style: style),
     ];
     final items = <Widget>[];
@@ -1386,7 +1621,9 @@ class _SubagentBlockState extends State<SubagentBlock> {
         children: [
           if (timeText != null) Text(timeText, style: style),
           if (timeText != null && items.isNotEmpty) const SizedBox(width: 8),
-          Flexible(child: Row(mainAxisSize: MainAxisSize.min, children: items)),
+          Flexible(
+            child: Row(mainAxisSize: MainAxisSize.min, children: items),
+          ),
         ],
       ),
     );
@@ -1429,7 +1666,12 @@ class PlanProgressBlock extends StatelessWidget {
 }
 
 class ThinkingBlock extends StatefulWidget {
-  const ThinkingBlock({super.key, required this.text, this.durationMs, this.streaming = false});
+  const ThinkingBlock({
+    super.key,
+    required this.text,
+    this.durationMs,
+    this.streaming = false,
+  });
 
   final String text;
   final int? durationMs;
@@ -1454,7 +1696,10 @@ class _ThinkingBlockState extends State<ThinkingBlock> {
     super.didUpdateWidget(oldWidget);
     if (widget.streaming && !_open) {
       setState(() => _open = true);
-    } else if (oldWidget.streaming && !widget.streaming && !_userToggled && _open) {
+    } else if (oldWidget.streaming &&
+        !widget.streaming &&
+        !_userToggled &&
+        _open) {
       // Stream finished and the user never touched the spoiler — collapse.
       setState(() => _open = false);
     }
@@ -1477,9 +1722,9 @@ class _ThinkingBlockState extends State<ThinkingBlock> {
           onTap: widget.text.isEmpty
               ? null
               : () => setState(() {
-                    _userToggled = true;
-                    _open = !_open;
-                  }),
+                  _userToggled = true;
+                  _open = !_open;
+                }),
         ),
         if (_open && widget.text.isNotEmpty)
           ChatInsetPanel(
@@ -1518,7 +1763,8 @@ class GroupedActivityBlock extends StatefulWidget {
   final List<({ChatBlock block, ChatBlock? paired})> items;
   final String label;
   final ({int added, int removed})? diffStats;
-  final Widget Function(({ChatBlock block, ChatBlock? paired}) item) childBuilder;
+  final Widget Function(({ChatBlock block, ChatBlock? paired}) item)
+  childBuilder;
 
   @override
   State<GroupedActivityBlock> createState() => _GroupedActivityBlockState();
@@ -1537,10 +1783,16 @@ class _GroupedActivityBlockState extends State<GroupedActivityBlock> {
         mainAxisSize: MainAxisSize.min,
         children: [
           if (stats.added > 0)
-            Text('+${stats.added}', style: TextStyle(color: scheme.primary, fontSize: 12)),
+            Text(
+              '+${stats.added}',
+              style: TextStyle(color: scheme.primary, fontSize: 12),
+            ),
           if (stats.added > 0 && stats.removed > 0) const SizedBox(width: 4),
           if (stats.removed > 0)
-            Text('-${stats.removed}', style: TextStyle(color: scheme.error, fontSize: 12)),
+            Text(
+              '-${stats.removed}',
+              style: TextStyle(color: scheme.error, fontSize: 12),
+            ),
         ],
       );
     }
@@ -1567,7 +1819,6 @@ class _GroupedActivityBlockState extends State<GroupedActivityBlock> {
     );
   }
 }
-
 
 /// Compact preview of an image attachment inside a user bubble: bounded
 /// thumbnail fetched once by attachment id, falling back to a muted line

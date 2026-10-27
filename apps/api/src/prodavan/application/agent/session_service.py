@@ -1790,6 +1790,30 @@ class AgentSessionService:
             include_total_count=before_seq is None,
         )
 
+        # A long turn can exceed the tail page: the page then starts in the
+        # middle of the turn. A client that reloads while the agent is still
+        # working must still see WHICH prompt this work belongs to (and must not
+        # merge the partial answer into the previous turn) — prepend the turn's
+        # user message. Bounded: exactly one extra indexed lookup.
+        if before_seq is None and turn_in_progress and events:
+            has_user_message = any(
+                e.get("type") == PLATFORM_EVENT_USER_MESSAGE for e in events
+            )
+            if not has_user_message:
+                oldest = meta.get("oldest_seq")
+                user_q = await self._session.execute(
+                    select(AgentEventRow)
+                    .where(AgentEventRow.session_id == sid)
+                    .where(AgentEventRow.event_type == PLATFORM_EVENT_USER_MESSAGE)
+                    .where(AgentEventRow.seq < (oldest or 0))
+                    .order_by(AgentEventRow.seq.desc())
+                    .limit(1)
+                )
+                user_row = user_q.scalars().first()
+                if user_row is not None:
+                    events = [_event_public(user_row), *events]
+                    meta = {**meta, "oldest_seq": user_row.seq}
+
         pending_approvals: list[dict] = []
         if before_seq is None:
             pending_approvals = _pending_approvals_from_events(events)

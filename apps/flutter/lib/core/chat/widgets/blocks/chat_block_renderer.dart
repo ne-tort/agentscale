@@ -33,6 +33,17 @@ int? _intOrNull(Object? value) {
   return null;
 }
 
+/// Reuse the block's map when it is already typed.
+///
+/// Tool panels cache expensive derivations (diff stats, panel body) by map
+/// identity; copying the map on every build defeated that cache in tool-heavy
+/// chats. JSON-decoded nested maps are already `Map<String, dynamic>`.
+Map<String, dynamic> _mapOrEmpty(Object? raw) {
+  if (raw is Map<String, dynamic>) return raw;
+  if (raw is Map) return Map<String, dynamic>.from(raw);
+  return const <String, dynamic>{};
+}
+
 class ChatBlockRenderer extends StatelessWidget {
   const ChatBlockRenderer({
     super.key,
@@ -116,9 +127,7 @@ class ChatBlockRenderer extends StatelessWidget {
           return const SizedBox.shrink();
         }
         if (pairedToolResult != null && pairedToolResult!.kind == 'tool_result') {
-          final input = block.raw['input'] is Map
-              ? Map<String, dynamic>.from(block.raw['input'] as Map)
-              : const <String, dynamic>{};
+          final input = _mapOrEmpty(block.raw['input']);
           final pairedOutput = pairedToolResult!.raw['output'];
           return ToolActivityBlock(
             name: block.raw['name'] as String? ?? pairedToolResult!.raw['name'] as String? ?? 'tool',
@@ -130,7 +139,7 @@ class ChatBlockRenderer extends StatelessWidget {
         }
         return ToolCallBlock(
           name: block.raw['name'] as String? ?? 'tool',
-          input: block.raw['input'] is Map ? Map<String, dynamic>.from(block.raw['input'] as Map) : const {},
+          input: _mapOrEmpty(block.raw['input']),
           mcpAliases: mcpAliases,
         );
       case 'tool_result':
@@ -146,7 +155,7 @@ class ChatBlockRenderer extends StatelessWidget {
         return ApprovalBlock(
           name: block.raw['name'] as String? ?? 'tool',
           approvalId: id,
-          input: block.raw['input'] is Map ? Map<String, dynamic>.from(block.raw['input'] as Map) : const {},
+          input: _mapOrEmpty(block.raw['input']),
           mcpAliases: mcpAliases,
           onAllow: onResolveApproval == null ? null : () => onResolveApproval!(id, 'allow'),
           onDeny: onResolveApproval == null ? null : () => onResolveApproval!(id, 'deny'),

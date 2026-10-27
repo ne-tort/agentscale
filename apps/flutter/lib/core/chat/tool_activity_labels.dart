@@ -179,7 +179,13 @@ Map<String, dynamic> normalizeToolInput(Map<String, dynamic> input) {
 
 String? extractToolContextPath(Map<String, dynamic> input, [Object? output]) {
   final inMap = normalizeToolInput(input);
-  for (final key in ['path', 'file_path', 'target_file', 'relative_path', 'target']) {
+  for (final key in [
+    'path',
+    'file_path',
+    'target_file',
+    'relative_path',
+    'target',
+  ]) {
     final v = _stringFrom(inMap[key]);
     if (v != null) return v;
   }
@@ -194,9 +200,18 @@ String? extractToolContextPath(Map<String, dynamic> input, [Object? output]) {
   return null;
 }
 
-String? extractToolContextPattern(Map<String, dynamic> input, [Object? output]) {
+String? extractToolContextPattern(
+  Map<String, dynamic> input, [
+  Object? output,
+]) {
   final inMap = normalizeToolInput(input);
-  for (final key in ['globPattern', 'glob_pattern', 'pattern', 'query', 'glob']) {
+  for (final key in [
+    'globPattern',
+    'glob_pattern',
+    'pattern',
+    'query',
+    'glob',
+  ]) {
     final v = _stringFrom(inMap[key]);
     if (v != null) return v;
   }
@@ -248,10 +263,19 @@ String? _listPathsFrom(Object? value) {
   if (output == null) return null;
   final unwrapped = unwrapToolPayload(output);
   if (unwrapped is Map) {
-    final add = unwrapped['lines_added'] ?? unwrapped['added_lines'] ?? unwrapped['additions'];
-    final rem = unwrapped['lines_removed'] ?? unwrapped['removed_lines'] ?? unwrapped['deletions'];
+    final add =
+        unwrapped['lines_added'] ??
+        unwrapped['added_lines'] ??
+        unwrapped['additions'];
+    final rem =
+        unwrapped['lines_removed'] ??
+        unwrapped['removed_lines'] ??
+        unwrapped['deletions'];
     if (add is num || rem is num) {
-      return (added: (add as num?)?.toInt() ?? 0, removed: (rem as num?)?.toInt() ?? 0);
+      return (
+        added: (add as num?)?.toInt() ?? 0,
+        removed: (rem as num?)?.toInt() ?? 0,
+      );
     }
   }
   final text = (unwrapped ?? output).toString();
@@ -262,7 +286,10 @@ String? _listPathsFrom(Object? value) {
   var hasDiffStructure = false;
   for (final line in text.split('\n')) {
     final t = line.trimLeft();
-    if (t.startsWith('@@') || t.startsWith('diff --git') || t.startsWith('+++') || t.startsWith('---')) {
+    if (t.startsWith('@@') ||
+        t.startsWith('diff --git') ||
+        t.startsWith('+++') ||
+        t.startsWith('---')) {
       hasDiffStructure = true;
       break;
     }
@@ -271,7 +298,10 @@ String? _listPathsFrom(Object? value) {
   var added = 0;
   var removed = 0;
   for (final line in text.split('\n')) {
-    if (line.startsWith('+++') || line.startsWith('---') || line.startsWith('@@')) continue;
+    if (line.startsWith('+++') ||
+        line.startsWith('---') ||
+        line.startsWith('@@'))
+      continue;
     if (line.startsWith('+')) added++;
     if (line.startsWith('-')) removed++;
   }
@@ -279,8 +309,49 @@ String? _listPathsFrom(Object? value) {
   return (added: added, removed: removed);
 }
 
+/// Cached diff-stat extraction.
+///
+/// "Did this output contain a diff?" scans the whole text. The timeline asks
+/// for the badge of every activity on every regroup; a tool-heavy turn can
+/// easily hold hundreds of multi-KB outputs. Memoize by output (identity for
+/// maps, content for strings) with a bounded cache.
+const _noDiffStats = (added: -1, removed: -1);
+final Map<Object, ({int added, int removed})> _diffStatsMemo = {};
+
+({int added, int removed})? parseDiffStatsCached(Object? output) {
+  if (output == null) return null;
+  final hit = _diffStatsMemo[output];
+  if (hit != null) return hit == _noDiffStats ? null : hit;
+  if (_diffStatsMemo.length > 256) _diffStatsMemo.clear();
+  final stats = parseDiffStats(output);
+  _diffStatsMemo[output] = stats ?? _noDiffStats;
+  return stats;
+}
+
 /// Human-readable panel body for tool expand (not raw Map.toString()).
 String formatToolPanelBody({
+  required ToolKind kind,
+  Map<String, dynamic> input = const {},
+  Object? output,
+}) {
+  return _capToolPanel(
+    _formatToolPanelBodyRaw(kind: kind, input: input, output: output),
+  );
+}
+
+/// A single tool result can be several megabytes (file reads, grep, command
+/// output). Rendering all of it as one Text widget freezes layout; the UI only
+/// needs enough for a human to understand the call. The rest stays available in
+/// the agent transcript/workspace.
+const _kToolPanelMaxChars = 120000;
+
+String _capToolPanel(String text) {
+  if (text.length <= _kToolPanelMaxChars) return text;
+  return '${text.substring(0, _kToolPanelMaxChars)}\n\n'
+      '… показаны первые $_kToolPanelMaxChars из ${text.length} символов';
+}
+
+String _formatToolPanelBodyRaw({
   required ToolKind kind,
   Map<String, dynamic> input = const {},
   Object? output,
@@ -315,7 +386,8 @@ String formatToolPanelBody({
         buf.writeln('+${stats.added} −${stats.removed}');
       }
       if (unwrapped is Map) {
-        final content = unwrapped['content'] ?? unwrapped['diff'] ?? unwrapped['patch'];
+        final content =
+            unwrapped['content'] ?? unwrapped['diff'] ?? unwrapped['patch'];
         if (content != null && content.toString().trim().isNotEmpty) {
           buf.writeln(content.toString().trimRight());
         }
@@ -329,13 +401,17 @@ String formatToolPanelBody({
       final paths = _listPathsFrom(unwrapped);
       if (paths != null) return paths;
       if (unwrapped is Map) {
-        final total = unwrapped['totalFiles'] ?? unwrapped['total_files'] ?? unwrapped['count'];
+        final total =
+            unwrapped['totalFiles'] ??
+            unwrapped['total_files'] ??
+            unwrapped['count'];
         if (total != null) return '$total files';
       }
       return unwrapped == null ? '' : _prettyJson(unwrapped);
     case ToolKind.searchGrep:
       if (unwrapped is Map) {
-        final workspace = unwrapped['workspaceResults'] ?? unwrapped['workspace_results'];
+        final workspace =
+            unwrapped['workspaceResults'] ?? unwrapped['workspace_results'];
         if (workspace is Map) {
           final buf = StringBuffer();
           for (final entry in workspace.entries) {
@@ -344,7 +420,8 @@ String formatToolPanelBody({
             if (content is Map) {
               final inner = content['content'] ?? content;
               if (inner is Map) {
-                final lines = inner['matchedLines'] ??
+                final lines =
+                    inner['matchedLines'] ??
                     inner['matched_lines'] ??
                     inner['totalMatchedLines'] ??
                     inner['total_matched_lines'];
@@ -405,7 +482,9 @@ String formatToolPanelBody({
         }
         final errorText = mcpToolErrorText(output).trim();
         buf.writeln('Ответ:');
-        buf.writeln(errorText.isEmpty ? 'ошибка вызова инструмента' : errorText);
+        buf.writeln(
+          errorText.isEmpty ? 'ошибка вызова инструмента' : errorText,
+        );
         return buf.toString().trimRight();
       }
       if (unwrapped == null) return '';
@@ -525,19 +604,33 @@ String? resolveMcpAlias(Map<String, String> aliases, String wireName) {
   String? detail;
   switch (kind) {
     case ToolKind.fileRead:
-      label = path != null ? l10n.projectChatToolReadPath(path) : l10n.projectChatToolReadFile;
+      label = path != null
+          ? l10n.projectChatToolReadPath(path)
+          : l10n.projectChatToolReadFile;
     case ToolKind.fileWrite:
-      label = path != null ? l10n.projectChatToolWritePath(path) : l10n.projectChatToolWriteFile;
+      label = path != null
+          ? l10n.projectChatToolWritePath(path)
+          : l10n.projectChatToolWriteFile;
     case ToolKind.fileEdit:
-      label = path != null ? l10n.projectChatToolEditPath(path) : l10n.projectChatToolEditFile;
+      label = path != null
+          ? l10n.projectChatToolEditPath(path)
+          : l10n.projectChatToolEditFile;
     case ToolKind.fileDelete:
-      label = path != null ? l10n.projectChatToolDeletePath(path) : l10n.projectChatToolDeleteFile;
+      label = path != null
+          ? l10n.projectChatToolDeletePath(path)
+          : l10n.projectChatToolDeleteFile;
     case ToolKind.searchGlob:
-      label = pattern != null ? l10n.projectChatToolGlobPattern(pattern) : l10n.projectChatToolGlob;
+      label = pattern != null
+          ? l10n.projectChatToolGlobPattern(pattern)
+          : l10n.projectChatToolGlob;
     case ToolKind.searchGrep:
-      label = pattern != null ? l10n.projectChatToolGrepPattern(pattern) : l10n.projectChatToolGrep;
+      label = pattern != null
+          ? l10n.projectChatToolGrepPattern(pattern)
+          : l10n.projectChatToolGrep;
     case ToolKind.listDir:
-      label = path != null ? l10n.projectChatToolListDirPath(path) : l10n.projectChatToolListDir;
+      label = path != null
+          ? l10n.projectChatToolListDirPath(path)
+          : l10n.projectChatToolListDir;
     case ToolKind.shell:
       label = l10n.projectChatToolShell;
       detail = command;
@@ -577,4 +670,5 @@ String? resolveMcpAlias(Map<String, String> aliases, String wireName) {
 }
 
 /// Backward-compatible helper for grouping heuristics without l10n.
-ToolKind toolKindFromPair(String name, Map<String, dynamic> input) => normalizeToolKind(name);
+ToolKind toolKindFromPair(String name, Map<String, dynamic> input) =>
+    normalizeToolKind(name);

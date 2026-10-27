@@ -1,15 +1,17 @@
 import 'package:desktop_drop/desktop_drop.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 
 import 'package:prodavan/core/api/prodavan_api.dart';
 import 'package:prodavan/core/chat/controller/chat_session_controller.dart';
 import 'package:prodavan/core/chat/models/chat_checklist.dart';
-import 'package:prodavan/core/chat/widgets/chat_checklist_panel.dart';
-import 'package:prodavan/core/chat/widgets/chat_empty_placeholder.dart';
 import 'package:prodavan/core/chat/models/chat_block.dart';
 import 'package:prodavan/core/chat/widgets/blocks/chat_block_renderer.dart';
 import 'package:prodavan/core/chat/widgets/blocks/chat_blocks.dart';
+import 'package:prodavan/core/chat/widgets/chat_checklist_panel.dart';
 import 'package:prodavan/core/chat/widgets/chat_display_grouping.dart';
+import 'package:prodavan/core/chat/widgets/chat_empty_placeholder.dart';
+import 'package:prodavan/core/chat/widgets/chat_nav_rail.dart';
 import 'package:prodavan/core/chat/widgets/chat_transcript_skeleton.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/features/employee/widgets/chat_composer.dart';
@@ -20,51 +22,62 @@ const _kStickThreshold = 48.0;
 int _blocksScrollFingerprint(List<ChatBlock> blocks) {
   if (blocks.isEmpty) return 0;
   final last = blocks.last;
-  return Object.hash(blocks.length, last.kind, last.text.length, last.isStreaming);
+  return Object.hash(
+    blocks.length,
+    last.key,
+    last.text.length,
+    last.isStreaming,
+  );
 }
 
-/// Entry identity for the top-level ListView child.
-///
-/// The key MUST sit on the direct ListView child (the SelectionArea subtree):
-/// a reverse list prepends new blocks, and index-matched children destroy the
-/// element subtree (with every collapsible State) on each prepend. Keyed
-/// matching keeps the state alive — this is the collapse-bug fix.
+/// Stable identity of a visual entry. The key must sit on the direct ListView
+/// child: a reverse list prepends blocks, and index-matched children would
+/// destroy the element subtree (with every collapsible state) on each prepend.
 String _displayEntryKey(ChatDisplayEntry entry) {
   return switch (entry) {
     ChatDisplaySingle(:final item) => 'single:${item.block.key}',
     ChatDisplayGroup(:final kind, :final items) =>
-      'group:${kind.name}:${items.first.block.key}:${items.last.block.key}',
-    ChatDisplayWorkSession(:final items) =>
-      'work:${items.first.block.key}:${items.last.block.key}',
+      'group:${kind.name}:${items.first.block.key}',
+    ChatDisplayActivity(:final items) => 'activity:${items.first.block.key}',
   };
 }
 
 /// Signature of a rendered entry for the widget cache.
 ///
-/// Includes everything that can change the rendered subtree: block/paired keys,
-/// text lengths (markdown growth), streaming flags and item counts — a group may
-/// absorb a new tool call without changing its first/last keys, and a tool_call
-/// may gain its `paired` result later.
-({String key, bool streaming}) _entrySignature(ChatDisplayEntry entry) {
-  bool pairStreaming(ChatDisplayPair p) =>
-      p.block.isStreaming || (p.paired?.isStreaming ?? false);
-  String pairSig(ChatDisplayPair p) =>
-      '${p.block.key}|${p.paired?.key ?? ''}|${p.block.text.length}|'
-      '${p.paired?.text.length ?? 0}|${pairStreaming(p) ? 1 : 0}';
+/// Identity hash of the block's raw map is O(1) and changes exactly when the
+/// block is replaced (streaming text growth, usage attach, finalize) — no giant
+/// key strings built per frame, and no stale content.
+String _entrySignature(ChatDisplayEntry entry) {
   switch (entry) {
     case ChatDisplaySingle(:final item):
-      return (key: 's:${pairSig(item)}', streaming: pairStreaming(item));
+      return 's:${item.block.key}:${identityHashCode(item.block.raw)}:'
+          '${item.paired?.key ?? ''}:'
+          '${item.paired == null ? 0 : identityHashCode(item.paired!.raw)}';
     case ChatDisplayGroup(:final kind, :final items):
-      return (
-        key: 'g:${kind.name}:${items.length}:${items.map(pairSig).join(',')}',
-        streaming: items.any(pairStreaming),
-      );
-    case ChatDisplayWorkSession(:final items, :final streaming):
-      return (
-        key: 'w:$streaming:${items.length}:${items.map(pairSig).join(',')}',
-        streaming: streaming || items.any(pairStreaming),
-      );
+      return 'g:${kind.name}:${items.length}:${items.first.block.key}:'
+          '${items.last.block.key}:${identityHashCode(items.last.block.raw)}';
+    case ChatDisplayActivity(:final items, :final streaming):
+      return 'a:${items.first.block.key}:${items.length}:${streaming ? 1 : 0}:'
+          '${identityHashCode(items.last.block.raw)}';
   }
+}
+
+/// Unique display keys for the whole timeline.
+///
+/// Block keys are unique for transcript/live blocks, but a caller can build
+/// blocks ad-hoc (tests, future projections). Two children with the same key
+/// corrupt a virtualized list's element reuse — the exact failure mode that
+/// made the chat "go insane" — so collisions get an occurrence suffix.
+List<String> _uniqueEntryKeys(List<ChatDisplayEntry> entries) {
+  final used = <String, int>{};
+  final out = <String>[];
+  for (final entry in entries) {
+    final base = _displayEntryKey(entry);
+    final n = used[base] ?? 0;
+    used[base] = n + 1;
+    out.add(n == 0 ? base : '$base#$n');
+  }
+  return out;
 }
 
 String _groupLabel(AppLocalizations l10n, ActivityGroupKind kind, int count) {
@@ -82,26 +95,31 @@ String _groupLabel(AppLocalizations l10n, ActivityGroupKind kind, int count) {
   };
 }
 
-class _WorkSessionBlock extends StatefulWidget {
-  const _WorkSessionBlock({
+/// Collapsed aggregation of everything the agent did on the way to its answer.
+///
+/// One entry per contiguous run; the final answer always stays open. The State
+/// is preserved across rebuilds (stable entry key), so an expanded activity does
+/// not snap shut when a new tool call arrives.
+class _ActivityBlock extends StatefulWidget {
+  const _ActivityBlock({
     required this.label,
     required this.items,
-    required this.innerEntries,
     required this.childBuilder,
+    this.streaming = false,
     this.diffStats,
   });
 
   final String label;
   final List<ChatDisplayPair> items;
-  final List<ChatDisplayEntry> innerEntries;
   final Widget Function(ChatDisplayPair item) childBuilder;
+  final bool streaming;
   final ({int added, int removed})? diffStats;
 
   @override
-  State<_WorkSessionBlock> createState() => _WorkSessionBlockState();
+  State<_ActivityBlock> createState() => _ActivityBlockState();
 }
 
-class _WorkSessionBlockState extends State<_WorkSessionBlock> {
+class _ActivityBlockState extends State<_ActivityBlock> {
   bool _open = false;
 
   @override
@@ -115,20 +133,39 @@ class _WorkSessionBlockState extends State<_WorkSessionBlock> {
         mainAxisSize: MainAxisSize.min,
         children: [
           if (stats.added > 0)
-            Text('+${stats.added}', style: TextStyle(color: scheme.primary, fontSize: 12)),
+            Text(
+              '+${stats.added}',
+              style: TextStyle(color: scheme.primary, fontSize: 12),
+            ),
           if (stats.added > 0 && stats.removed > 0) const SizedBox(width: 4),
           if (stats.removed > 0)
-            Text('-${stats.removed}', style: TextStyle(color: scheme.error, fontSize: 12)),
+            Text(
+              '-${stats.removed}',
+              style: TextStyle(color: scheme.error, fontSize: 12),
+            ),
         ],
       );
     }
+
+    // Inner grouping is only needed while expanded. A collapsed activity can
+    // hold hundreds of tool rows; computing their sub-groups on every frame
+    // made a long transcript needlessly expensive.
+    final innerEntries = _open
+        ? groupInnerWorkItems(widget.items)
+        : const <ChatDisplayEntry>[];
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         ChatMutedLine(
           label: widget.label,
-          trailing: badge,
+          trailing: widget.streaming
+              ? const SizedBox(
+                  width: 12,
+                  height: 12,
+                  child: CircularProgressIndicator(strokeWidth: 1.6),
+                )
+              : badge,
           expanded: _open,
           onTap: () => setState(() => _open = !_open),
         ),
@@ -137,17 +174,18 @@ class _WorkSessionBlockState extends State<_WorkSessionBlock> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                for (final inner in widget.innerEntries)
+                for (final inner in innerEntries)
                   switch (inner) {
                     ChatDisplaySingle(:final item) => widget.childBuilder(item),
-                    ChatDisplayGroup(:final kind, :final items) => GroupedActivityBlock(
+                    ChatDisplayGroup(:final kind, :final items) =>
+                      GroupedActivityBlock(
                         kind: kind,
                         items: items,
                         label: _groupLabel(l10n, kind, items.length),
                         diffStats: aggregateDiffStats(items),
                         childBuilder: widget.childBuilder,
                       ),
-                    ChatDisplayWorkSession() => const SizedBox.shrink(),
+                    ChatDisplayActivity() => const SizedBox.shrink(),
                   },
               ],
             ),
@@ -176,6 +214,7 @@ class ChatMessageList extends StatefulWidget {
     this.reconnectNextModel,
     this.mcpAliases = const {},
     this.costResolver,
+    this.structureRevision,
   });
 
   final List<ChatBlock> blocks;
@@ -199,11 +238,17 @@ class ChatMessageList extends StatefulWidget {
   final String? reconnectNextModel;
 
   /// Cost estimate for assistant usage metadata (runtime cost wins).
-  final double? Function(String? model, int? inputTokens, int? outputTokens)? costResolver;
+  final double? Function(String? model, int? inputTokens, int? outputTokens)?
+  costResolver;
 
   /// MCP tool display aliases (mcp_aliases module meta) — friendly tool
   /// labels in tool activity/approval blocks.
   final Map<String, String> mcpAliases;
+
+  /// Controller-owned structural revision: the timeline never changes while it
+  /// stays the same (text growth is handled per-entry), so grouping is not
+  /// recomputed on hover/scroll.
+  final int? structureRevision;
 
   @override
   State<ChatMessageList> createState() => ChatMessageListState();
@@ -221,21 +266,12 @@ class ChatMessageListState extends State<ChatMessageList> {
   Object? _cacheCostResolver;
   Object? _cacheAliases;
   Object? _cacheResolveApproval;
+  Locale? _cacheLocale;
   bool _didInitialBottom = false;
   int _lastFingerprint = 0;
   int _lastBlockCount = 0;
 
   // ---- защита автоподгрузки от бесконечного цикла ----
-  //
-  // `_maybeAutoloadOlder` вызывается из build/didUpdateWidget и грузит историю,
-  // пока контент не заполнит вьюпорт. Верхней границы у этого цикла не было,
-  // и на чатах, где старые страницы состоят из не отрисовываемых событий
-  // (дельты стрима, usage, скрытые мета-события), maxScrollExtent не рос —
-  // приложение выкачивало историю страница за страницей, пока не замирало
-  // («открыл чат — через пару секунд страница висит»).
-  //
-  // Теперь: не больше [_kMaxAutoLoadRounds] подряд без реального прогресса
-  // курсора, и пауза до явного действия пользователя (скролл к началу).
   static const _kMaxAutoLoadRounds = 3;
   int _autoLoadBlocks = 0;
   int _autoLoadRounds = 0;
@@ -246,9 +282,16 @@ class ChatMessageListState extends State<ChatMessageList> {
   List<ChatDisplayEntry>? _entriesCache;
   int? _entriesCacheKey;
 
-  /// Индекс верхнеуровневого ребёнка по его ключу — нужен `findChildIndexCallback`,
-  /// чтобы при подгрузке истории сверху существующие элементы не пересоздавались.
+  /// Индекс верхнеуровневого ребёнка по его ключу — нужен
+  /// `findChildIndexCallback`, чтобы при подгрузке истории сверху
+  /// существующие элементы не пересоздавались.
   final Map<Key, int> _childIndexByKey = {};
+
+  /// Anchor keys for jump-to-prompt navigation (visual index → context).
+  final Map<String, GlobalKey> _jumpKeys = {};
+
+  /// True while the pointer is in the transcript — reveals the nav rail.
+  bool _navRevealed = false;
 
   @override
   void initState() {
@@ -285,21 +328,17 @@ class ChatMessageListState extends State<ChatMessageList> {
   void _maybeAutoloadOlder() {
     if (!_scroll.hasClients) return;
     if (_autoLoadPaused || _autoLoadInFlight) return;
-    if (!widget.hasMoreHistory || widget.loadingHistory || widget.onLoadOlder == null) {
+    if (!widget.hasMoreHistory ||
+        widget.loadingHistory ||
+        widget.onLoadOlder == null) {
       return;
     }
-    // Reverse list: maxScrollExtent is the visual top (older messages). When
-    // the content does not fill the viewport the user has no scroll affordance
-    // to reach older history, so we eagerly fetch the next page — но только
-    // пока курсор истории реально двигается (см. [_kMaxAutoLoadRounds]).
     final pos = _scroll.position;
     final contentFillsViewport = pos.maxScrollExtent > pos.viewportDimension;
     if (contentFillsViewport) return;
 
     final loaded = widget.blocks.length;
     if (loaded == _autoLoadBlocks) {
-      // Страница не добавила ни одного блока: ещё одна такая же ничего не
-      // изменит, а цикл «загрузили → не выросло → загрузили» и вешал страницу.
       _autoLoadRounds++;
       if (_autoLoadRounds >= _kMaxAutoLoadRounds) {
         _autoLoadPaused = true;
@@ -317,30 +356,29 @@ class ChatMessageListState extends State<ChatMessageList> {
     if (!_scroll.hasClients) return;
     final pos = _scroll.position;
     _pinnedToBottom = _isPinnedToBottom(pos);
-    // Visual top = maxScrollExtent in a reverse list.
     if (pos.pixels >= pos.maxScrollExtent - _kStickThreshold &&
         widget.hasMoreHistory &&
         !widget.loadingHistory &&
         widget.onLoadOlder != null) {
-      // Ручной скролл к началу — снимаем паузу автоподгрузки: это осознанное
-      // действие пользователя, а не цикл перестройки.
       _autoLoadPaused = false;
       _autoLoadRounds = 0;
       widget.onLoadOlder!();
     }
   }
 
-  /// Группировка блоков с кэшем по отпечатку.
-  ///
-  /// `groupDisplayEntries` проходит всю историю и строит новые объекты — на
-  /// длинном чате это заметная работа, а вызывалась она из build, то есть на
-  /// каждый кадр анимации/ховера. Ключ кэша — тот же отпечаток, что и для
-  /// скролла, плюс флаг стрима (он меняет состав групп «работает/отработал»).
+  int _groupingKey(int fingerprint) => Object.hash(
+    widget.structureRevision ?? fingerprint,
+    widget.turnStreaming,
+  );
+
+  /// Grouping is O(n) over the whole history; cache it by structural revision
+  /// (or a cheap fingerprint when the widget is used standalone).
   List<ChatDisplayEntry> _entriesFor(
     List<ChatBlock> blocks, {
     required bool turnStreaming,
+    required int fingerprint,
   }) {
-    final key = Object.hash(_blocksScrollFingerprint(blocks), turnStreaming);
+    final key = _groupingKey(fingerprint);
     if (_entriesCacheKey == key && _entriesCache != null) {
       return _entriesCache!;
     }
@@ -350,7 +388,8 @@ class ChatMessageListState extends State<ChatMessageList> {
     return built;
   }
 
-  Widget _renderPair(ChatDisplayPair item) {    final block = item.block;
+  Widget _renderPair(ChatDisplayPair item) {
+    final block = item.block;
     return ChatBlockRenderer(
       key: ValueKey(block.key),
       block: block,
@@ -368,45 +407,64 @@ class ChatMessageListState extends State<ChatMessageList> {
   Widget _cachedEntry(
     AppLocalizations l10n,
     ChatDisplayEntry entry,
+    String entryKey,
     Set<String> liveKeys,
   ) {
-    final sig = _entrySignature(entry);
-    liveKeys.add(sig.key);
-    // Стримящие записи меняются на каждой дельте — кэшировать нельзя.
-    if (sig.streaming) return _renderEntry(l10n, entry);
-    final cached = _entryCache[sig.key];
+    final sig = '${_entrySignature(entry)}|$entryKey';
+    liveKeys.add(sig);
+    final streaming = switch (entry) {
+      ChatDisplaySingle(:final item) => item.block.isStreaming,
+      ChatDisplayGroup(:final items) => items.any((i) => i.block.isStreaming),
+      ChatDisplayActivity(:final streaming) => streaming,
+    };
+    if (streaming) return _renderEntry(l10n, entry, entryKey);
+    final cached = _entryCache[sig];
     if (cached != null) return cached;
-    final built = _renderEntry(l10n, entry);
-    _entryCache[sig.key] = built;
+    final built = _renderEntry(l10n, entry, entryKey);
+    _entryCache[sig] = built;
     return built;
   }
 
-  Widget _renderEntry(AppLocalizations l10n, ChatDisplayEntry entry) {
-    // Keyed TOP-LEVEL child (see [_displayEntryKey]) + per-item SelectionArea:
-    // a single wrap around the ListView eats drag gestures.
+  Widget _renderEntry(
+    AppLocalizations l10n,
+    ChatDisplayEntry entry,
+    String entryKey,
+  ) {
+    // Anchor only user prompts: they are the navigation targets. Anchor keys
+    // on every row would re-parent thousands of GlobalKeys while the
+    // virtualized list jumps, which is both wasteful and fragile.
+    final isUserPrompt =
+        entry is ChatDisplaySingle && entry.item.block.kind == 'user';
+    final jumpKey = isUserPrompt
+        ? _jumpKeys.putIfAbsent(entryKey, GlobalKey.new)
+        : null;
+    final body = SelectionArea(
+      child: switch (entry) {
+        ChatDisplaySingle(:final item) => _renderPair(item),
+        ChatDisplayGroup(:final kind, :final items) => GroupedActivityBlock(
+          kind: kind,
+          items: items,
+          label: _groupLabel(l10n, kind, items.length),
+          diffStats: aggregateDiffStats(items),
+          childBuilder: _renderPair,
+        ),
+        ChatDisplayActivity(:final items, :final streaming, :final diffStats) =>
+          _ActivityBlock(
+            label: streaming
+                ? l10n.projectChatWorking
+                : l10n.projectChatWorked(
+                    workActionCount(items).clamp(1, 1 << 30),
+                  ),
+            items: items,
+            streaming: streaming,
+            diffStats: diffStats,
+            childBuilder: _renderPair,
+          ),
+      },
+    );
     return KeyedSubtree(
-      key: ValueKey(_displayEntryKey(entry)),
-      child: SelectionArea(
-        child: switch (entry) {
-          ChatDisplaySingle(:final item) => _renderPair(item),
-          ChatDisplayGroup(:final kind, :final items) => GroupedActivityBlock(
-              kind: kind,
-              items: items,
-              label: _groupLabel(l10n, kind, items.length),
-              diffStats: aggregateDiffStats(items),
-              childBuilder: _renderPair,
-            ),
-          ChatDisplayWorkSession(:final items, :final streaming) => _WorkSessionBlock(
-              label: streaming
-                  ? l10n.projectChatWorking
-                  : l10n.projectChatWorked(workActionCount(items)),
-              items: items,
-              innerEntries: groupInnerWorkItems(items),
-              diffStats: aggregateDiffStats(items),
-              childBuilder: _renderPair,
-            ),
-        },
-      ),
+      key: ValueKey(entryKey),
+      child: jumpKey == null ? body : Container(key: jumpKey, child: body),
     );
   }
 
@@ -415,7 +473,8 @@ class ChatMessageListState extends State<ChatMessageList> {
     super.didUpdateWidget(oldWidget);
     final fp = _blocksScrollFingerprint(widget.blocks);
     final countGrew = widget.blocks.length > _lastBlockCount;
-    final prepended = countGrew &&
+    final prepended =
+        countGrew &&
         (widget.loadingHistory ||
             oldWidget.loadingHistory ||
             (widget.blocks.isNotEmpty &&
@@ -424,12 +483,9 @@ class ChatMessageListState extends State<ChatMessageList> {
                 widget.blocks.last.id == oldWidget.blocks.last.id));
 
     if (prepended || widget.loadingHistory || oldWidget.loadingHistory) {
-      // Prepend in reverse list grows maxScrollExtent; offset-from-bottom stays stable.
       _lastFingerprint = fp;
       _lastBlockCount = widget.blocks.length;
       if (oldWidget.loadingHistory && !widget.loadingHistory) {
-        // Загрузка завершилась — снимаем блокировку и решаем, есть ли смысл
-        // тянуть следующую страницу (решает _maybeAutoloadOlder по курсору).
         _autoLoadInFlight = false;
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted) _maybeAutoloadOlder();
@@ -439,16 +495,15 @@ class ChatMessageListState extends State<ChatMessageList> {
     }
 
     if (fp != _lastFingerprint) {
-      final wasPinned = _scroll.hasClients ? _isPinnedToBottom() : _pinnedToBottom;
+      final wasPinned = _scroll.hasClients
+          ? _isPinnedToBottom()
+          : _pinnedToBottom;
       _lastFingerprint = fp;
       _lastBlockCount = widget.blocks.length;
       _pinnedToBottom = wasPinned;
       if (wasPinned) {
         _ensureBottom(animate: _didInitialBottom);
       }
-      // After a background transcript refresh the block set may have grown; if
-      // the viewport still is not filled, keep fetching older pages so a short
-      // cached tail does not render as a single truncated slice.
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _maybeAutoloadOlder();
       });
@@ -465,13 +520,135 @@ class ChatMessageListState extends State<ChatMessageList> {
     super.dispose();
   }
 
+  /// Build the prompt markers for the hover navigation rail.
+  List<ChatNavPrompt> _navPrompts(List<ChatDisplayEntry> visual) {
+    final out = <ChatNavPrompt>[];
+    for (var i = 0; i < visual.length; i++) {
+      final entry = visual[i];
+      if (entry is ChatDisplaySingle && entry.item.block.kind == 'user') {
+        final text = entry.item.block.text.trim();
+        if (text.isEmpty) continue;
+        out.add(ChatNavPrompt(visualIndex: i, text: text));
+      }
+    }
+    return out;
+  }
+
+  List<ChatDisplayEntry> _currentVisualEntries() => _entriesFor(
+    widget.blocks,
+    turnStreaming: widget.turnStreaming,
+    fingerprint: _blocksScrollFingerprint(widget.blocks),
+  ).reversed.toList(growable: false);
+
+  /// Jump to a visual entry (0 = newest, bottom of the reverse list).
+  ///
+  /// The list is virtualized, so a far target is not built and
+  /// `ensureVisible` cannot find it. We jump to the proportional offset, then
+  /// correct using the window of entries that actually built, until the target
+  /// is on screen (bounded — the user never waits on a long loop).
+  ///
+  /// Target identity is the entry key, not the index: the agent may append
+  /// rows between frames, which shifts indices while the jump is in flight.
+  Future<void> jumpToVisualIndex(int index) async {
+    if (!_scroll.hasClients) return;
+    var visual = _currentVisualEntries();
+    if (visual.isEmpty) return;
+    var visualKeys = _uniqueEntryKeys(visual);
+    final targetKey = visualKeys[index.clamp(0, visual.length - 1)];
+    var target = visualKeys.indexOf(targetKey);
+    if (target < 0) return;
+
+    bool refreshTarget() {
+      final next = _currentVisualEntries();
+      final nextKeys = _uniqueEntryKeys(next);
+      final nextTarget = nextKeys.indexOf(targetKey);
+      if (nextTarget < 0) return false;
+      visual = next;
+      visualKeys = nextKeys;
+      target = nextTarget;
+      return true;
+    }
+
+    if (_tryEnsureVisible(target, visualKeys)) return;
+
+    final max = _scroll.position.maxScrollExtent;
+    if (max <= 0) return;
+    final denom = visual.length > 1 ? visual.length - 1 : 1;
+    var offset = (target / denom) * max;
+
+    for (var attempt = 0; attempt < 7; attempt++) {
+      _scroll.jumpTo(offset.clamp(0.0, max).toDouble());
+      await SchedulerBinding.instance.endOfFrame;
+      if (!mounted || !_scroll.hasClients) return;
+      if (!refreshTarget()) return;
+      final currentMax = _scroll.position.maxScrollExtent;
+      if (currentMax > 0) {
+        offset = offset.clamp(0.0, currentMax).toDouble();
+      }
+      if (_tryEnsureVisible(target, visualKeys)) return;
+
+      var minBuilt = visual.length;
+      var maxBuilt = -1;
+      for (var i = 0; i < visualKeys.length; i++) {
+        if (_anchorContext(visualKeys[i]) != null) {
+          if (i < minBuilt) minBuilt = i;
+          if (i > maxBuilt) maxBuilt = i;
+        }
+      }
+      if (maxBuilt < 0) return;
+      // Anchor keys exist only on user prompts, so minBuilt/maxBuilt are rows
+      // of visible prompts. The visible window spans that row distance, which
+      // gives a good per-row height estimate even for variable message sizes.
+      final span = maxBuilt - minBuilt;
+      final avgHeight = span >= 2
+          ? _scroll.position.viewportDimension / span
+          : _scroll.position.viewportDimension / 8;
+      if (target < minBuilt) {
+        offset -= (minBuilt - target) * avgHeight;
+      } else if (target > maxBuilt) {
+        offset += (target - maxBuilt) * avgHeight;
+      } else {
+        return;
+      }
+      offset = offset.clamp(0.0, currentMax > 0 ? currentMax : max).toDouble();
+    }
+  }
+
+  /// A GlobalKey can briefly outlive its element (list virtualization keeps the
+  /// key around while the row is deactivated). Using such a context crashes in
+  /// `findRenderObject`; only attached, mounted anchors count.
+  BuildContext? _anchorContext(String entryKey) {
+    final ctx = _jumpKeys[entryKey]?.currentContext;
+    if (ctx == null || !ctx.mounted) return null;
+    try {
+      final ro = ctx.findRenderObject();
+      if (ro == null || !ro.attached) return null;
+    } catch (_) {
+      return null;
+    }
+    return ctx;
+  }
+
+  bool _tryEnsureVisible(int index, List<String> visualKeys) {
+    final ctx = _anchorContext(visualKeys[index]);
+    if (ctx == null) return false;
+    // Zero-duration jump: an animation started from an async jump loop races
+    // layout/semantics and can assert in debug builds. The target row is
+    // already built here, so a direct reposition is instant and safe.
+    Scrollable.ensureVisible(ctx, alignment: 0.08);
+    return true;
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    // Группировка блоков — O(n) по всей истории. Раньше она считалась на КАЖДОМ
-    // кадре, хотя зависит только от набора блоков и флага стрима. Кэшируем по
-    // отпечатку: при стриме отпечаток меняется, при скролле/ховере — нет.
-    final entries = _entriesFor(widget.blocks, turnStreaming: widget.turnStreaming);
+    final locale = Localizations.localeOf(context);
+    final fp = _blocksScrollFingerprint(widget.blocks);
+    final entries = _entriesFor(
+      widget.blocks,
+      turnStreaming: widget.turnStreaming,
+      fingerprint: fp,
+    );
 
     if (!_didInitialBottom && widget.blocks.isNotEmpty) {
       _didInitialBottom = true;
@@ -482,19 +659,23 @@ class ChatMessageListState extends State<ChatMessageList> {
       });
     }
 
-    // reverse:true — first child is visual bottom (newest). The working
-    // indicator is the newest thing in the list while it shows.
     if (!identical(_cacheApi, widget.api) ||
         !identical(_cacheCostResolver, widget.costResolver) ||
         !identical(_cacheAliases, widget.mcpAliases) ||
-        !identical(_cacheResolveApproval, widget.onResolveApproval)) {
+        !identical(_cacheResolveApproval, widget.onResolveApproval) ||
+        _cacheLocale != locale) {
       // Пропсы, от которых зависит отрисовка блоков, сменились — кэш невалиден.
       _entryCache.clear();
       _cacheApi = widget.api;
       _cacheCostResolver = widget.costResolver;
       _cacheAliases = widget.mcpAliases;
       _cacheResolveApproval = widget.onResolveApproval;
+      _cacheLocale = locale;
     }
+
+    // The working indicator is the newest thing in the list while it shows.
+    final visual = entries.reversed.toList(growable: false);
+    final visualKeys = _uniqueEntryKeys(visual);
     final liveKeys = <String>{};
     final children = <Widget>[
       if (widget.showReconnectIndicator)
@@ -513,10 +694,10 @@ class ChatMessageListState extends State<ChatMessageList> {
           key: ValueKey('agent-working-indicator'),
           child: AgentWorkingIndicator(),
         ),
-        for (final e in entries.reversed) _cachedEntry(l10n, e, liveKeys),
+      for (var i = 0; i < visual.length; i++)
+        _cachedEntry(l10n, visual[i], visualKeys[i], liveKeys),
     ];
-    if (_entryCache.length > liveKeys.length) {
-      // Блоки исчезли (смена сессии/истории) — не держим их виджеты.
+    if (_entryCache.isNotEmpty) {
       _entryCache.removeWhere((k, _) => !liveKeys.contains(k));
     }
     // Карта «ключ → индекс» для findChildIndexCallback: при подгрузке истории
@@ -530,52 +711,75 @@ class ChatMessageListState extends State<ChatMessageList> {
             .map((e) => MapEntry(e.$2.key!, e.$1)),
       );
 
-    return Stack(
-      children: [
-        NotificationListener<ScrollNotification>(
-          onNotification: (n) {
-            if (n is ScrollUpdateNotification || n is UserScrollNotification) {
-              _pinnedToBottom = _isPinnedToBottom(n.metrics);
-            }
-            return false;
-          },
-          // ВИРТУАЛИЗАЦИЯ. Раньше здесь был ListView(children: …) — Flutter
-          // монтировал элементы для ВСЕХ блоков истории, даже за пределами
-          // экрана. На длинном чате это давало квадратичный рост времени
-          // кадра при каждой подгрузке и было второй половиной зависания.
-          //
-          // `builder` строит элементы только для видимого окна. Раньше его не
-          // использовали из-за «потолка» maxScrollExtent, но при reverse:true
-          // низ списка — это pixels ≈ 0, и все наши переходы вниз идут в 0
-          // (см. [_ensureBottom]), так что оценка extent нам не мешает.
-          child: ListView.builder(
-            controller: _scroll,
-            reverse: true,
-            padding: EdgeInsets.all(AppSpacing.md),
-            itemCount: children.length,
-            // Элементы переиспользуются по ключу блока: при подгрузке истории
-            // сверху существующие не пересоздаются.
-            findChildIndexCallback: (Key key) {
-              final idx = _childIndexByKey[key];
-              return idx;
+    final prompts = _navPrompts(visual);
+    // Prune anchor keys of entries that no longer exist.
+    if (_jumpKeys.length > visualKeys.length * 2 + 16) {
+      final live = visualKeys.toSet();
+      _jumpKeys.removeWhere((k, _) => !live.contains(k));
+    }
+
+    return MouseRegion(
+      onEnter: (_) => setState(() => _navRevealed = true),
+      onExit: (_) => setState(() => _navRevealed = false),
+      child: Stack(
+        children: [
+          NotificationListener<ScrollNotification>(
+            onNotification: (n) {
+              if (n is ScrollUpdateNotification ||
+                  n is UserScrollNotification) {
+                _pinnedToBottom = _isPinnedToBottom(n.metrics);
+              }
+              return false;
             },
-            itemBuilder: (context, index) => children[index],
-          ),
-        ),
-        if (widget.loadingHistory)
-          const Positioned(
-            top: 8,
-            left: 0,
-            right: 0,
-            child: Center(
-              child: SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(strokeWidth: 2),
+            // Per-item SelectionArea keeps drag-to-select working inside the scrollable
+            // (a single wrap around the ListView eats drag gestures). Entry keys are
+            // globally unique (see _uniqueEntryKeys), so recycled rows never duplicate
+            // keys — the failure that previously corrupted the element tree.
+            child: ListView.builder(
+              controller: _scroll,
+              reverse: true,
+              padding: EdgeInsets.fromLTRB(
+                AppSpacing.md,
+                AppSpacing.md,
+                AppSpacing.md + 18,
+                AppSpacing.md,
               ),
+              itemCount: children.length,
+              findChildIndexCallback: (Key key) {
+                final idx = _childIndexByKey[key];
+                return idx;
+              },
+              itemBuilder: (context, index) => children[index],
             ),
           ),
-      ],
+          if (prompts.isNotEmpty)
+            Positioned(
+              top: 0,
+              bottom: 0,
+              right: 0,
+              width: 40,
+              child: ChatNavRail(
+                prompts: prompts,
+                entryCount: visual.length,
+                revealed: _navRevealed,
+                onJump: jumpToVisualIndex,
+              ),
+            ),
+          if (widget.loadingHistory)
+            const Positioned(
+              top: 8,
+              left: 0,
+              right: 0,
+              child: Center(
+                child: SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              ),
+            ),
+        ],
+      ),
     );
   }
 }
@@ -634,17 +838,17 @@ class _ChatScaffoldState extends State<ChatScaffold> {
   /// Stable key into the composer: dropped files are routed through the
   /// composer's public attach pipeline (same limits/upload/chips as the
   /// attach button).
-  final GlobalKey<ChatComposerState> _composerKey = GlobalKey<ChatComposerState>();
+  final GlobalKey<ChatComposerState> _composerKey =
+      GlobalKey<ChatComposerState>();
 
   /// True while an OS file drag hovers over the chat area.
   bool _dragOver = false;
 
-  // Чек-лист задач выводится из ВСЕЙ истории (deriveChecklistTasks проходит все
-  // блоки), а `visibleBlocks` каждый вызов ещё и копирует список. Считался он
-  // внутри LayoutBuilder, то есть на каждый проход layout — заметная
-  // постоянная работа на длинном чате. Кэшируем по состоянию истории.
+  // Чек-лист задач выводится из ВСЕЙ истории, а `visibleBlocks` — снимок
+  // списка. Считаем только при реальном изменении структуры истории.
   List<ChatChecklistTask> _checklistTasks = const [];
-  int _checklistKey = 0;
+  int? _checklistKey;
+  ChatSessionController? _checklistController;
 
   // Widget-field accessors keep the build body readable.
   ChatSessionController get controller => widget.controller;
@@ -652,7 +856,8 @@ class _ChatScaffoldState extends State<ChatScaffold> {
   bool get chatSendable => widget.chatSendable;
   bool get loading => widget.loading;
   VoidCallback? get onOpenChatSettings => widget.onOpenChatSettings;
-  void Function(String sessionId)? get onSessionMaterialized => widget.onSessionMaterialized;
+  void Function(String sessionId)? get onSessionMaterialized =>
+      widget.onSessionMaterialized;
   VoidCallback? get onDraftPresenceChanged => widget.onDraftPresenceChanged;
   String? get modelLabel => widget.modelLabel;
   VoidCallback? get onPickModel => widget.onPickModel;
@@ -674,34 +879,26 @@ class _ChatScaffoldState extends State<ChatScaffold> {
     }
   }
 
-  /// Чек-лист задач с кэшем по состоянию истории.
-  ///
-  /// Ключ — число блоков + ключ хвоста + флаг «ход в работе»: этого достаточно,
-  /// чтобы пересчитать только при реальном изменении истории, а не на каждый
-  /// проход layout.
+  /// Чек-лист задач с кэшем по структурной ревизии истории.
   List<ChatChecklistTask> _checklistFor(ChatSessionController controller) {
-    final blocks = controller.blocks;
     final key = Object.hash(
-      blocks.length,
-      blocks.isEmpty ? '' : blocks.last.key,
-      blocks.isEmpty ? 0 : blocks.last.text.length,
+      controller.structureRevision,
       controller.turnInProgress,
       controller.streaming,
     );
-    if (key == _checklistKey) return _checklistTasks;
+    if (key == _checklistKey && identical(controller, _checklistController)) {
+      return _checklistTasks;
+    }
     _checklistTasks = deriveChecklistTasks(controller.visibleBlocks);
     _checklistKey = key;
+    _checklistController = controller;
     return _checklistTasks;
   }
 
   Future<void> _handleDroppedFiles(DropDoneDetails details) async {
-    if (!_canAttachDrops) {
-      return;
-    }
+    if (!_canAttachDrops) return;
     final composer = _composerKey.currentState;
-    if (composer == null) {
-      return;
-    }
+    if (composer == null) return;
     final files = <DroppedChatFile>[];
     for (final dropped in details.files) {
       try {
@@ -714,9 +911,7 @@ class _ChatScaffoldState extends State<ChatScaffold> {
         // reliable path.
       }
     }
-    if (files.isEmpty) {
-      return;
-    }
+    if (files.isEmpty) return;
     await composer.attachDroppedFiles(files);
   }
 
@@ -726,14 +921,7 @@ class _ChatScaffoldState extends State<ChatScaffold> {
     return 900;
   }
 
-  /// Minimum chat-area width at which the checklist side panel is shown
-  /// (below this it would squeeze the transcript — the panel stays hidden).
   static const double _kChecklistMinWidth = 840;
-
-  /// Uniform horizontal gutter for the chat area: the average of the two
-  /// previously-asymmetric insets (sm on the left, md on the right), so the
-  /// left and right margins are equal — and identical whether or not the
-  /// checklist is shown. The transcript keeps its readable width cap.
   static const double _kChatGutter = (AppSpacing.sm + AppSpacing.md) / 2;
 
   @override
@@ -742,19 +930,16 @@ class _ChatScaffoldState extends State<ChatScaffold> {
       builder: (context, constraints) {
         final checklistTasks = _checklistFor(controller);
         final showChecklist =
-            checklistTasks.isNotEmpty && constraints.maxWidth >= _kChecklistMinWidth;
-        // The transcript keeps its readable width cap in BOTH cases — the
-        // checklist sits BESIDE it and never widens the chat.
+            checklistTasks.isNotEmpty &&
+            constraints.maxWidth >= _kChecklistMinWidth;
         final maxW = _columnMaxWidth(constraints.maxWidth);
+        final blocks = controller.visibleBlocks;
 
         final column = ConstrainedBox(
           constraints: BoxConstraints(maxWidth: maxW),
           child: Column(
             children: [
               Expanded(
-                // OS drag & drop: the transcript region accepts files and
-                // routes them into the composer's attach pipeline. The
-                // composer field itself never changes.
                 child: DropTarget(
                   onDragDone: _handleDroppedFiles,
                   onDragEntered: (_) => _setDrag(true),
@@ -764,32 +949,39 @@ class _ChatScaffoldState extends State<ChatScaffold> {
                       Positioned.fill(
                         child: (loading && !controller.hasCachedTranscript)
                             ? const ChatTranscriptSkeleton()
-                            // Render the (possibly empty) list while streaming so
-                            // the working indicator shows right after the first
-                            // send — the list shows just the indicator.
-                            : (controller.visibleBlocks.isEmpty && !controller.streaming)
-                                ? ChatEmptyPlaceholder(highlighted: _dragOver)
-                                : ChatMessageList(
-                                    blocks: controller.visibleBlocks,
-                                    projectId: controller.projectId,
-                                    sessionId: controller.sessionId,
-                                    api: api,
-                                    hasMoreHistory: controller.hasMoreHistory,
-                                    loadingHistory: controller.loadingHistory,
-                                    onLoadOlder: controller.hasMoreHistory
-                                        ? controller.loadOlderTranscript
-                                        : null,
-                                    turnStreaming: controller.agentWorking,
-                                    showWorkingIndicator: controller.showWorkingIndicator,
-                                    showReconnectIndicator: controller.showReconnectIndicator,
-                                    reconnectAttempt: controller.reconnectAttempt,
-                                    reconnectMaxAttempts: controller.reconnectMaxAttempts,
-                                    reconnectNextModel: controller.reconnectNextModel,
-                                    mcpAliases: controller.mcpAliases,
-                                    costResolver: controller.usageCostUsd,
-                                    onResolveApproval: (id, decision) =>
-                                        controller.resolveApproval(id, decision),
-                                  ),
+                            : (blocks.isEmpty && !controller.streaming)
+                            ? ChatEmptyPlaceholder(highlighted: _dragOver)
+                            : ChatMessageList(
+                                // Same controller → keep scroll/collapse
+                                // state even when the session id is
+                                // materialized on first send. A different
+                                // controller (chat switch) gets fresh state.
+                                key: ValueKey(controller),
+                                blocks: blocks,
+                                projectId: controller.projectId,
+                                sessionId: controller.sessionId,
+                                api: api,
+                                hasMoreHistory: controller.hasMoreHistory,
+                                loadingHistory: controller.loadingHistory,
+                                onLoadOlder: controller.hasMoreHistory
+                                    ? controller.loadOlderTranscript
+                                    : null,
+                                turnStreaming: controller.agentWorking,
+                                showWorkingIndicator:
+                                    controller.showWorkingIndicator,
+                                showReconnectIndicator:
+                                    controller.showReconnectIndicator,
+                                reconnectAttempt: controller.reconnectAttempt,
+                                reconnectMaxAttempts:
+                                    controller.reconnectMaxAttempts,
+                                reconnectNextModel:
+                                    controller.reconnectNextModel,
+                                mcpAliases: controller.mcpAliases,
+                                costResolver: controller.usageCostUsd,
+                                structureRevision: controller.structureRevision,
+                                onResolveApproval: (id, decision) =>
+                                    controller.resolveApproval(id, decision),
+                              ),
                       ),
                       if (_dragOver && _canAttachDrops)
                         const Positioned.fill(
@@ -802,7 +994,9 @@ class _ChatScaffoldState extends State<ChatScaffold> {
               ChatComposer(
                 key: _composerKey,
                 projectId: controller.projectId,
-                sessionId: controller.sessionId.isEmpty ? null : controller.sessionId,
+                sessionId: controller.sessionId.isEmpty
+                    ? null
+                    : controller.sessionId,
                 api: api,
                 draftRestore: controller.interruptedDraft,
                 enabled: chatSendable && !updateMode,
@@ -815,8 +1009,11 @@ class _ChatScaffoldState extends State<ChatScaffold> {
                 updating: updating,
                 onUpdate: onUpdate,
                 onDismissUpdate: onDismissUpdate,
-                onSend: (text, refs) => controller.send(text, attachmentRefs: refs),
-                onCancel: controller.agentWorking ? () => controller.cancelStream() : null,
+                onSend: (text, refs) =>
+                    controller.send(text, attachmentRefs: refs),
+                onCancel: controller.agentWorking
+                    ? () => controller.cancelStream()
+                    : null,
                 onOpenSettings: onOpenChatSettings,
                 modelLabel: modelLabel,
                 onPickModel: onPickModel,
@@ -831,14 +1028,8 @@ class _ChatScaffoldState extends State<ChatScaffold> {
         );
 
         if (!showChecklist) {
-          // Centred column: equal left and right margins (same gutter value as
-          // the checklist case), transcript width unchanged.
           return Center(child: column);
         }
-        // Chat + gutter + panel as ONE centred group. The panel slot is a FIXED
-        // width so the chat column is always exactly `maxW` with a constant gap
-        // to the checklist — the compact pill sits inside the slot and never
-        // lets the transcript grow.
         final groupMaxW = maxW + _kChatGutter + kChatChecklistWidth;
         return Center(
           child: ConstrainedBox(
