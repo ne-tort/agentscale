@@ -164,6 +164,39 @@ void main() {
       controller.dispose();
     });
 
+    test('interleaved text/thinking deltas keep their segment order when coalesced',
+        () async {
+      final events = StreamController<Map<String, dynamic>>();
+      final api = _FakeApi(stream: events);
+      final controller = ChatSessionController(
+        api: api,
+        projectId: 'prj_order',
+        sessionId: 'sess_order_1',
+      );
+
+      final sendFuture = controller.send('go');
+      await pumpEventQueue();
+      events.add({'type': 'text_delta', 'data': {'text': 'A'}});
+      events.add({'type': 'thinking_delta', 'data': {'text': 'T'}});
+      events.add({'type': 'text_delta', 'data': {'text': 'B'}});
+      events.add({'type': 'done', 'data': {'reason': 'completed'}});
+      await events.close();
+      await sendFuture;
+      await pumpEventQueue();
+
+      // A thinking block closes the assistant segment: batched chunks must not
+      // merge "A" and "B" into one block across it.
+      expect(
+        controller.visibleBlocks.map((b) => b.kind).toList(),
+        ['user', 'assistant_markdown', 'thinking', 'assistant_markdown'],
+      );
+      expect(
+        controller.visibleBlocks.map((b) => b.text).toList(),
+        ['go', 'A', 'T', 'B'],
+      );
+      controller.dispose();
+    });
+
     test('usage events attach to the finished assistant block in visibleBlocks', () async {
       final events = StreamController<Map<String, dynamic>>();
       final api = _FakeApi(stream: events);

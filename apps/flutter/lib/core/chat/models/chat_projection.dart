@@ -14,8 +14,29 @@ class _KeyGen {
   static String next(String kind) => '$kind#${++_seq}';
 }
 
-List<ChatBlock> chatBlocksFromTranscript(List<dynamic>? raw) {
+/// Page-scoped prefix for transcript-loaded blocks.
+///
+/// The first implementation used plain positional keys (`h0`, `h1`, …) for
+/// every page. A live-tail poll (reopening the chat while the agent is still
+/// working) therefore produced blocks whose keys already existed in the
+/// transcript: the reverse `ListView` then received two children with the same
+/// key, which corrupts element reuse (and asserts in debug) and made the chat
+/// «сходить с ума» exactly on reload-mid-turn. Prefixing each fetch keeps keys
+/// globally unique while leaving explicit wire ids untouched.
+class _PageKeyGen {
+  _PageKeyGen._();
+
+  static int _seq = 0;
+
+  static String next() => 'pg${++_seq}';
+}
+
+List<ChatBlock> chatBlocksFromTranscript(
+  List<dynamic>? raw, {
+  String? keyPrefix,
+}) {
   if (raw == null) return const [];
+  final prefix = keyPrefix ?? _PageKeyGen.next();
   final out = <ChatBlock>[];
   final usedKeys = <String>{};
   var i = 0;
@@ -23,12 +44,48 @@ List<ChatBlock> chatBlocksFromTranscript(List<dynamic>? raw) {
     final idx = i++;
     if (e is! Map) continue;
     final block = ChatBlock.fromJson(Map<String, dynamic>.from(e));
-    // Explicit wire id when present, else positional — deduped defensively.
-    var key = block.id.isNotEmpty ? block.id : 'h$idx';
+    // Explicit wire id when present (stable across page refetches), else a
+    // per-fetch positional key — deduped defensively inside the page.
+    var key = block.id.isNotEmpty ? block.id : 'h$idx@$prefix';
     if (!usedKeys.add(key)) key = '$key#$idx';
     out.add(block.copyWithRaw({'_key': key}));
   }
   return attachUsageToAssistant(out);
+}
+
+String _valueKey(Object? value) {
+  if (value == null) return '';
+  final text = value is String ? value : value.toString();
+  // Full text for short payloads, (length, hash, head) for huge tool outputs —
+  // dedupe must stay O(1)-ish even when a single result is megabytes.
+  if (text.length <= 200) return text;
+  return '${text.length}:${text.hashCode}:${text.substring(0, 200)}';
+}
+
+/// Content identity of a block — used only to drop blocks duplicated by an
+/// overlapping pagination/poll response, never for widget keys.
+String chatBlockContentKey(ChatBlock block) {
+  final id = block.id;
+  return '${block.kind}|$id|${block.text.length}:${block.text.hashCode}'
+      '|${block.raw['name'] ?? ''}'
+      '|${_valueKey(block.raw['input'])}'
+      '|${_valueKey(block.raw['output'])}';
+}
+
+/// Merge a polled text run into the already-rendered tail.
+///
+/// The incremental transcript endpoint projects a slice of events into blocks;
+/// a run of assistant text can therefore arrive split across polls. Guard
+/// against replay/duplicate frames too: reapplying the same chunk (or a
+/// cumulative chunk that already ends the tail) must be a no-op instead of
+/// duplicating the answer.
+String mergeStreamingText(String previous, String incoming) {
+  if (incoming.isEmpty) return previous;
+  if (previous.isEmpty) return incoming;
+  if (incoming == previous) return previous;
+  if (incoming.startsWith(previous)) return incoming;
+  if (previous.endsWith(incoming)) return previous;
+  return previous + incoming;
 }
 
 /// Cumulative SDK delta → incremental append (API / transcript rebuild only).
@@ -36,7 +93,10 @@ List<ChatBlock> chatBlocksFromTranscript(List<dynamic>? raw) {
 /// Live SSE uses append-only ([_applyIncrementalDelta]). This helper mirrors
 /// API [normalize_text_delta]: cumulative prefix OR verbatim append — **no**
 /// suffix/prefix overlap merge (that swallowed syllables on incremental streams).
-({String incremental, String cumulative}) normalizeTextDelta(String previous, String chunk) {
+({String incremental, String cumulative}) normalizeTextDelta(
+  String previous,
+  String chunk,
+) {
   if (chunk.isEmpty) return (incremental: '', cumulative: previous);
   if (chunk.startsWith(previous)) {
     return (incremental: chunk.substring(previous.length), cumulative: chunk);
@@ -74,18 +134,21 @@ void _applyIncrementalDelta({
     });
     return;
   }
-  next.add(ChatBlock(
-    kind: kind,
-    raw: {
-      'text': chunk,
-      baseKey: chunk,
-      '_streaming': true,
-      '_key': _KeyGen.next(kind),
-    },
-  ));
+  next.add(
+    ChatBlock(
+      kind: kind,
+      raw: {
+        'text': chunk,
+        baseKey: chunk,
+        '_streaming': true,
+        '_key': _KeyGen.next(kind),
+      },
+    ),
+  );
 }
 
-String? _nonEmptyId(Object? value) => value is String && value.isNotEmpty ? value : null;
+String? _nonEmptyId(Object? value) =>
+    value is String && value.isNotEmpty ? value : null;
 
 /// Subagent block ↔ event matching by any shared identifier.
 ///
@@ -118,7 +181,10 @@ const _usageSumIntFields = [
 ///
 /// Token counters sum across the turn's LLM requests, cost sums when the
 /// runtime reports it, model/provider take the latest non-null value.
-Map<String, dynamic> mergeUsagePayload(Map<String, dynamic> current, Map<String, dynamic> payload) {
+Map<String, dynamic> mergeUsagePayload(
+  Map<String, dynamic> current,
+  Map<String, dynamic> payload,
+) {
   final out = Map<String, dynamic>.from(current);
   for (final f in _usageSumIntFields) {
     final v = payload[f];
@@ -181,10 +247,15 @@ List<ChatBlock> attachUsageToAssistant(List<ChatBlock> blocks) {
 }
 
 /// Apply a single SSE agent event to turn blocks (live streaming).
-List<ChatBlock> applyStreamEvent(List<ChatBlock> blocks, Map<String, dynamic> event) {
+List<ChatBlock> applyStreamEvent(
+  List<ChatBlock> blocks,
+  Map<String, dynamic> event,
+) {
   final type = event['type'] as String?;
   final data = event['data'];
-  final payload = data is Map ? Map<String, dynamic>.from(data) : <String, dynamic>{};
+  final payload = data is Map
+      ? Map<String, dynamic>.from(data)
+      : <String, dynamic>{};
   if (type == null) return blocks;
 
   final next = List<ChatBlock>.from(blocks);
@@ -235,7 +306,8 @@ List<ChatBlock> applyStreamEvent(List<ChatBlock> blocks, Map<String, dynamic> ev
         final prev = next[idx];
         next[idx] = prev.copyWithRaw({
           '_streaming': false,
-          if (payload['duration_ms'] != null) 'duration_ms': payload['duration_ms'],
+          if (payload['duration_ms'] != null)
+            'duration_ms': payload['duration_ms'],
         });
       }
       break;
@@ -249,11 +321,13 @@ List<ChatBlock> applyStreamEvent(List<ChatBlock> blocks, Map<String, dynamic> ev
       final callIdx = callId.isEmpty
           ? -1
           : next.indexWhere((b) => b.kind == 'tool_call' && b.id == callId);
-      final callRaw = {
+      final callRaw = <String, dynamic>{
         'id': payload['id'],
         'name': payload['name'],
         'input': payload['input'] ?? {},
-        '_key': _KeyGen.next('tool_call'),
+        // Keep the placeholder's widget identity across the replacement — a
+        // new key here would reset the collapsed activity that contains it.
+        '_key': callIdx >= 0 ? next[callIdx].key : _KeyGen.next('tool_call'),
       };
       if (callIdx >= 0) {
         next[callIdx] = ChatBlock(kind: 'tool_call', raw: callRaw);
@@ -262,48 +336,70 @@ List<ChatBlock> applyStreamEvent(List<ChatBlock> blocks, Map<String, dynamic> ev
       }
       break;
     case 'tool_result':
-      next.add(ChatBlock(kind: 'tool_result', raw: {
-        'id': payload['id'],
-        'name': payload['name'],
-        'output': payload['output'],
-        'is_error': payload['is_error'] == true,
-        '_key': _KeyGen.next('tool_result'),
-      }));
+      next.add(
+        ChatBlock(
+          kind: 'tool_result',
+          raw: {
+            'id': payload['id'],
+            'name': payload['name'],
+            'output': payload['output'],
+            'is_error': payload['is_error'] == true,
+            '_key': _KeyGen.next('tool_result'),
+          },
+        ),
+      );
       break;
     case 'tool_approval_request':
-      next.add(ChatBlock(kind: 'approval', raw: {
-        'id': payload['id'] ?? '',
-        'name': payload['name'] ?? 'tool',
-        'input': payload['input'] ?? {},
-        'reason': payload['reason'],
-        '_key': _KeyGen.next('approval'),
-      }));
+      next.add(
+        ChatBlock(
+          kind: 'approval',
+          raw: {
+            'id': payload['id'] ?? '',
+            'name': payload['name'] ?? 'tool',
+            'input': payload['input'] ?? {},
+            'reason': payload['reason'],
+            '_key': _KeyGen.next('approval'),
+          },
+        ),
+      );
       break;
     case 'subagent_start':
-      next.add(ChatBlock(kind: 'subagent', raw: {
-        'id': payload['agent_id'] ?? payload['parent_tool_use_id'] ?? '',
-        'agent_id': payload['agent_id'],
-        'agent_type': payload['type'] ?? payload['agent_type'],
-        'model': payload['model'],
-        'task': payload['task'],
-        'description': payload['description'],
-        'parent_tool_use_id': payload['parent_tool_use_id'],
-        'events': <dynamic>[],
-        '_key': _KeyGen.next('subagent'),
-      }));
+      next.add(
+        ChatBlock(
+          kind: 'subagent',
+          raw: {
+            'id': payload['agent_id'] ?? payload['parent_tool_use_id'] ?? '',
+            'agent_id': payload['agent_id'],
+            'agent_type': payload['type'] ?? payload['agent_type'],
+            'model': payload['model'],
+            'task': payload['task'],
+            'description': payload['description'],
+            'parent_tool_use_id': payload['parent_tool_use_id'],
+            'events': <dynamic>[],
+            '_key': _KeyGen.next('subagent'),
+          },
+        ),
+      );
       break;
     case 'subagent_event':
       final child = payload['child_event'] ?? payload['event'];
-      final idx = next.indexWhere((b) => b.kind == 'subagent' && _subagentMatches(b, payload));
+      final idx = next.indexWhere(
+        (b) => b.kind == 'subagent' && _subagentMatches(b, payload),
+      );
       if (idx >= 0 && child is Map) {
         final prev = next[idx];
         final events = List<dynamic>.from(prev.raw['events'] as List? ?? []);
         events.add(child);
+        // Bound the live buffer: the sidechain endpoint is the full source;
+        // keeping thousands of child events only grows the block map.
+        if (events.length > 500) events.removeRange(0, events.length - 500);
         next[idx] = prev.copyWithRaw({'events': events});
       }
       break;
     case 'subagent_stop':
-      final idx = next.indexWhere((b) => b.kind == 'subagent' && _subagentMatches(b, payload));
+      final idx = next.indexWhere(
+        (b) => b.kind == 'subagent' && _subagentMatches(b, payload),
+      );
       if (idx >= 0) {
         next[idx] = next[idx].copyWithRaw({
           'result_summary': payload['result_summary'],
@@ -313,11 +409,23 @@ List<ChatBlock> applyStreamEvent(List<ChatBlock> blocks, Map<String, dynamic> ev
     case 'task_progress':
       final tasks = payload['tasks'] ?? payload['items'] ?? [];
       if (tasks is List && tasks.isNotEmpty) {
-        next.add(ChatBlock(kind: 'plan', raw: {
+        // task_progress is a full snapshot, emitted on every task change.
+        // Appending a new plan block per snapshot made long runs explode into
+        // hundreds of duplicate checklists (and thousands of widgets). Update
+        // the current stage's plan in place; a plan after other activity starts
+        // a new stage.
+        final lastPlan = next.lastIndexWhere((b) => b.kind == 'plan');
+        final reusable = lastPlan >= 0 && lastPlan == next.length - 1;
+        final raw = {
           'tasks': tasks,
           'message': payload['message'],
-          '_key': _KeyGen.next('plan'),
-        }));
+          '_key': reusable ? next[lastPlan].key : _KeyGen.next('plan'),
+        };
+        if (reusable) {
+          next[lastPlan] = ChatBlock(kind: 'plan', raw: raw);
+        } else {
+          next.add(ChatBlock(kind: 'plan', raw: raw));
+        }
       }
       break;
     case 'usage':
@@ -326,11 +434,16 @@ List<ChatBlock> applyStreamEvent(List<ChatBlock> blocks, Map<String, dynamic> ev
       _attachUsageInPlace(next, Map<String, dynamic>.from(payload));
       break;
     case 'permission_denial':
-      next.add(ChatBlock(kind: 'permission_denial', raw: {
-        'name': payload['name'] ?? payload['tool'],
-        'reason': payload['reason'],
-        '_key': _KeyGen.next('permission_denial'),
-      }));
+      next.add(
+        ChatBlock(
+          kind: 'permission_denial',
+          raw: {
+            'name': payload['name'] ?? payload['tool'],
+            'reason': payload['reason'],
+            '_key': _KeyGen.next('permission_denial'),
+          },
+        ),
+      );
       break;
     case 'status':
     case 'tool_progress':
@@ -345,35 +458,48 @@ List<ChatBlock> applyStreamEvent(List<ChatBlock> blocks, Map<String, dynamic> ev
       if (deltaId.isEmpty || deltaNameRaw.isEmpty) break;
       // wire-имя провайдера заменяет точки подчёркиваниями (agent.spawn →
       // agent_spawn) — вернем каноническое имя для лейблов
-      final deltaName = deltaNameRaw == 'agent_spawn' ? 'agent.spawn' : deltaNameRaw;
+      final deltaName = deltaNameRaw == 'agent_spawn'
+          ? 'agent.spawn'
+          : deltaNameRaw;
       final idx = next.indexWhere(
         (b) => b.kind == 'tool_call' && b.id == deltaId,
       );
       if (idx >= 0) {
         // placeholder уже есть — обновляем имя (первый дельта-чанк мог
         // приехать без имени), не плодим блоки
-        if (next[idx].raw['name'] == null || (next[idx].raw['name'] as String).isEmpty) {
+        if (next[idx].raw['name'] == null ||
+            (next[idx].raw['name'] as String).isEmpty) {
           next[idx] = next[idx].copyWithRaw({'name': deltaName});
         }
         break;
       }
-      next.add(ChatBlock(kind: 'tool_call', raw: {
-        'id': deltaId,
-        'name': deltaName,
-        'input': const <String, dynamic>{},
-        '_key': _KeyGen.next('tool_call'),
-      }));
+      next.add(
+        ChatBlock(
+          kind: 'tool_call',
+          raw: {
+            'id': deltaId,
+            'name': deltaName,
+            'input': const <String, dynamic>{},
+            '_key': _KeyGen.next('tool_call'),
+          },
+        ),
+      );
       break;
     case 'error':
       // Легаси-маркер старой версии run-stall сторожа: stall обрабатывается
       // reconnect-системой (status-кадры), такие error-события не рендерим.
       if (payload['code'] == 'CHAT_RUN_STALLED') break;
-      next.add(ChatBlock(kind: 'error', raw: {
-        'code': payload['code'],
-        'message': payload['message'] ?? 'Agent error',
-        'retryable': payload['retryable'] == true,
-        '_key': _KeyGen.next('error'),
-      }));
+      next.add(
+        ChatBlock(
+          kind: 'error',
+          raw: {
+            'code': payload['code'],
+            'message': payload['message'] ?? 'Agent error',
+            'retryable': payload['retryable'] == true,
+            '_key': _KeyGen.next('error'),
+          },
+        ),
+      );
       break;
     case 'done':
       for (var i = 0; i < next.length; i++) {
@@ -386,10 +512,12 @@ List<ChatBlock> applyStreamEvent(List<ChatBlock> blocks, Map<String, dynamic> ev
       // Серверная проекция транскрипта добавляет такой же блок, поэтому
       // сообщение видно сразу, а не только после перезагрузки.
       if (payload['reason'] == 'max_turns') {
-        next.add(ChatBlock(kind: 'system_notice', raw: {
-          'reason': 'max_turns',
-          '_key': _KeyGen.next('system_notice'),
-        }));
+        next.add(
+          ChatBlock(
+            kind: 'system_notice',
+            raw: {'reason': 'max_turns', '_key': _KeyGen.next('system_notice')},
+          ),
+        );
       }
       break;
   }
@@ -407,14 +535,11 @@ List<ChatBlock> finalizeTurnBlocks(
   final marker = cancelled
       ? '_cancelled'
       : interrupted
-          ? '_interrupted'
-          : null;
+      ? '_interrupted'
+      : null;
   return blocks.map((b) {
     if (b.isStreaming) {
-      return b.copyWithRaw({
-        '_streaming': false,
-        ?marker: true,
-      });
+      return b.copyWithRaw({'_streaming': false, ?marker: true});
     }
     if (marker != null && b.kind == 'assistant_markdown') {
       return b.copyWithRaw({marker: true});
