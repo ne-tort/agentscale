@@ -1,9 +1,16 @@
 import 'package:prodavan/core/chat/models/chat_block.dart';
 import 'package:prodavan/core/chat/tool_activity_labels.dart';
-import 'package:prodavan/core/chat/widgets/blocks/chat_blocks.dart' show ActivityGroupKind;
+import 'package:prodavan/core/chat/widgets/blocks/chat_blocks.dart'
+    show ActivityGroupKind;
 
 typedef ChatDisplayPair = ({ChatBlock block, ChatBlock? paired});
 
+/// One visual row in the chat transcript.
+///
+/// The timeline is intentionally small: a turn contributes at most ONE
+/// collapsed activity aggregation plus its final answer. Everything the agent
+/// did on the way to the answer (thinking, tool calls/results, intermediate
+/// commentary) lives inside [ChatDisplayActivity].
 sealed class ChatDisplayEntry {
   const ChatDisplayEntry();
 }
@@ -21,14 +28,29 @@ class ChatDisplayGroup extends ChatDisplayEntry {
   final List<ChatDisplayPair> items;
 }
 
-class ChatDisplayWorkSession extends ChatDisplayEntry {
-  const ChatDisplayWorkSession({
+/// Collapsed "agent worked" aggregation for one contiguous run inside a turn.
+///
+/// Unlike the old per-run group, ALL activity of a turn collapses into this
+/// one entry (even a single tool call): the transcript keeps user prompts and
+/// final answers open, and everything else behind a single expandable line.
+class ChatDisplayActivity extends ChatDisplayEntry {
+  const ChatDisplayActivity({
     required this.items,
     required this.streaming,
+    required this.actionCount,
+    this.diffStats,
   });
 
   final List<ChatDisplayPair> items;
+
+  /// The turn is still running — header shows «Работаю…» instead of the count.
   final bool streaming;
+
+  /// Thinking + tool actions (blank/soft assistant blocks are not counted).
+  final int actionCount;
+
+  /// Aggregated `+/-` badge, computed once per grouping (not per frame).
+  final ({int added, int removed})? diffStats;
 }
 
 ActivityGroupKind? activityGroupKind(ChatDisplayPair item) {
@@ -36,7 +58,10 @@ ActivityGroupKind? activityGroupKind(ChatDisplayPair item) {
   if (block.kind == 'thinking') return ActivityGroupKind.thinking;
   if (block.kind != 'tool_call' && block.kind != 'tool_result') return null;
 
-  return switch (toolKindFromPair(_toolName(block, item.paired), _toolInput(block, item.paired))) {
+  return switch (toolKindFromPair(
+    _toolName(block, item.paired),
+    _toolInput(block, item.paired),
+  )) {
     ToolKind.fileRead => ActivityGroupKind.fileRead,
     ToolKind.fileWrite || ToolKind.fileEdit => ActivityGroupKind.fileEdit,
     ToolKind.fileDelete => ActivityGroupKind.fileDelete,
@@ -50,7 +75,9 @@ ActivityGroupKind? activityGroupKind(ChatDisplayPair item) {
 }
 
 String _toolName(ChatBlock block, ChatBlock? paired) {
-  return block.raw['name'] as String? ?? paired?.raw['name'] as String? ?? 'tool';
+  return block.raw['name'] as String? ??
+      paired?.raw['name'] as String? ??
+      'tool';
 }
 
 Map<String, dynamic> _toolInput(ChatBlock block, ChatBlock? paired) {
@@ -64,76 +91,46 @@ bool _isActivityPair(ChatDisplayPair item) {
   return k == 'tool_call' || k == 'tool_result';
 }
 
-bool _isThinkingBlock(ChatBlock block) => block.kind == 'thinking';
-
 bool _isWorkSegmentItem(ChatDisplayPair item) =>
-    _isThinkingBlock(item.block) || _isActivityPair(item);
+    item.block.kind == 'thinking' || _isActivityPair(item);
 
-/// Streaming / empty assistant must not split a WorkSession mid-turn.
-bool _isSoftPassthrough(ChatBlock block) {
-  if (block.kind != 'assistant_markdown') return false;
-  return block.isStreaming || block.text.trim().isEmpty;
-}
+bool _pairIsPending(ChatDisplayPair item) =>
+    item.block.kind == 'tool_call' && item.paired == null;
 
-bool _continuesWorkRun(ChatDisplayPair item) =>
-    _isWorkSegmentItem(item) || _isSoftPassthrough(item.block);
-
-bool _isHardBoundary(ChatBlock block) {
-  return switch (block.kind) {
-    'user' || 'approval' || 'plan' || 'usage' || 'error' || 'subagent' || 'permission_denial' => true,
-    'assistant_markdown' => block.text.trim().isNotEmpty && !block.isStreaming,
-    _ => false,
-  };
-}
-
-bool _pairIsPending(ChatDisplayPair item) {
-  if (item.block.kind == 'tool_call' && item.paired == null) return true;
-  return false;
-}
-
-bool _thinkingIsStreaming(ChatDisplayPair item) =>
-    item.block.kind == 'thinking' && item.block.isStreaming;
-
-bool _workSessionStreaming(List<ChatDisplayPair> items, bool turnStreaming) {
-  if (!turnStreaming) return false;
-  return items.any(_pairIsPending) || items.any(_thinkingIsStreaming);
-}
-
-int? _findToolResultIndex(List<ChatBlock> blocks, int callIndex, Set<int> usedResults) {
-  final call = blocks[callIndex];
-  if (call.kind != 'tool_call') return null;
-  final callId = call.raw['id'];
-
-  if (callIndex + 1 < blocks.length && !usedResults.contains(callIndex + 1)) {
-    final next = blocks[callIndex + 1];
-    if (next.kind == 'tool_result') {
-      final resultId = next.raw['id'];
-      if (callId != null && resultId != null && callId == resultId) return callIndex + 1;
-      if (callId == null && resultId == null) return callIndex + 1;
+/// Pair tool calls with their results in ONE pass.
+///
+/// The old implementation looked ahead 25 blocks for every call — O(25·n) on
+/// every regroup, which is noticeable on tool-heavy turns with hundreds of
+/// actions. Wire ids are unique, so an id → first-result index map gives exact
+/// pairing in O(n).
+List<ChatDisplayPair> mergeToolPairs(List<ChatBlock> blocks) {
+  final resultIndexById = <String, int>{};
+  for (var i = 0; i < blocks.length; i++) {
+    final b = blocks[i];
+    if (b.kind == 'tool_result' && b.id.isNotEmpty) {
+      resultIndexById.putIfAbsent(b.id, () => i);
     }
   }
-
-  if (callId == null) return null;
-  final limit = blocks.length < callIndex + 25 ? blocks.length : callIndex + 25;
-  for (var j = callIndex + 1; j < limit; j++) {
-    if (usedResults.contains(j)) continue;
-    final b = blocks[j];
-    if (b.kind == 'tool_result' && b.raw['id'] == callId) return j;
-  }
-  return null;
-}
-
-List<ChatDisplayPair> mergeToolPairs(List<ChatBlock> blocks) {
   final usedResults = <int>{};
   final out = <ChatDisplayPair>[];
   for (var i = 0; i < blocks.length; i++) {
     if (usedResults.contains(i)) continue;
     final block = blocks[i];
     if (block.kind == 'tool_call') {
-      final j = _findToolResultIndex(blocks, i, usedResults);
-      if (j != null) {
-        usedResults.add(j);
-        out.add((block: block, paired: blocks[j]));
+      final callId = block.id;
+      if (callId.isNotEmpty) {
+        final j = resultIndexById[callId];
+        if (j != null && j > i && !usedResults.contains(j)) {
+          usedResults.add(j);
+          out.add((block: block, paired: blocks[j]));
+          continue;
+        }
+      } else if (i + 1 < blocks.length &&
+          !usedResults.contains(i + 1) &&
+          blocks[i + 1].kind == 'tool_result' &&
+          blocks[i + 1].id.isEmpty) {
+        usedResults.add(i + 1);
+        out.add((block: block, paired: blocks[i + 1]));
         continue;
       }
     }
@@ -145,7 +142,10 @@ List<ChatDisplayPair> mergeToolPairs(List<ChatBlock> blocks) {
 /// Merge consecutive thinking blocks into one spoiler (single text + duration).
 ChatDisplayPair mergeThinkingPairs(List<ChatDisplayPair> items) {
   if (items.isEmpty) {
-    return (block: ChatBlock(kind: 'thinking', raw: const {'text': ''}), paired: null);
+    return (
+      block: ChatBlock(kind: 'thinking', raw: const {'text': ''}),
+      paired: null,
+    );
   }
   if (items.length == 1) return items.first;
 
@@ -168,15 +168,20 @@ ChatDisplayPair mergeThinkingPairs(List<ChatDisplayPair> items) {
       raw: {
         'text': buf.toString(),
         if (duration > 0) 'duration_ms': duration,
-        if (streaming) '_streaming': true, '_key': items.first.block.key,
+        if (streaming) '_streaming': true,
+        '_key': items.first.block.key,
       },
     ),
     paired: null,
   );
 }
 
-List<ChatDisplayEntry> _groupThinkingRun(List<ChatDisplayPair> merged, int start, int end) {
-  final slice = merged.sublist(start, end);
+List<ChatDisplayEntry> _groupThinkingRun(
+  List<ChatDisplayPair> items,
+  int start,
+  int end,
+) {
+  final slice = items.sublist(start, end);
   return [ChatDisplaySingle(item: mergeThinkingPairs(slice))];
 }
 
@@ -199,51 +204,149 @@ List<ChatDisplayEntry> _groupSameKindRun(List<ChatDisplayPair> items) {
   return items.map((i) => ChatDisplaySingle(item: i)).toList();
 }
 
-List<ChatDisplayEntry> _emitWorkSegmentRun(List<ChatDisplayPair> run, bool turnStreaming) {
-  final workItems = run.where(_isWorkSegmentItem).toList();
-  if (workItems.length >= 2) {
-    return [
-      ChatDisplayWorkSession(
-        items: run,
-        streaming: _workSessionStreaming(workItems, turnStreaming),
-      ),
-    ];
+/// Final-answer detection — per turn.
+///
+/// The final answer is the LAST non-empty assistant message of a turn,
+/// provided nothing the agent *did* follows it. A streaming text followed by a
+/// tool call is intermediate commentary: it collapses into the activity block,
+/// and only the post-tool answer stays open. This is the
+/// "все действия, кроме конечного ответа" rule — and it keeps live streaming
+/// honest (the growing text is open while it is still the tail of the turn).
+Set<int> _finalAnswerIndexes(List<ChatDisplayPair> merged) {
+  final answers = <int>{};
+
+  void closeTurn(int start, int endExclusive) {
+    var candidate = -1;
+    for (var i = endExclusive - 1; i >= start; i--) {
+      final b = merged[i].block;
+      if (b.kind == 'assistant_markdown' && b.text.trim().isNotEmpty) {
+        candidate = i;
+        break;
+      }
+    }
+    if (candidate < 0) return;
+    for (var i = candidate + 1; i < endExclusive; i++) {
+      if (_isWorkSegmentItem(merged[i])) return;
+    }
+    answers.add(candidate);
   }
-  if (run.isEmpty) return const [];
-  if (run.length == 1) return [ChatDisplaySingle(item: run.first)];
-  return run.map((i) => ChatDisplaySingle(item: i)).toList();
+
+  var turnStart = 0;
+  for (var i = 0; i < merged.length; i++) {
+    if (merged[i].block.kind == 'user') {
+      closeTurn(turnStart, i);
+      turnStart = i + 1;
+    }
+  }
+  closeTurn(turnStart, merged.length);
+  return answers;
 }
 
-List<ChatDisplayEntry> groupDisplayEntries(List<ChatBlock> blocks, {bool turnStreaming = false}) {
+/// Group a flat block list into the chat timeline.
+///
+/// * user / approval / plan / subagent / error / system notice — visible rows;
+/// * the final assistant answer of EACH turn — visible row;
+/// * everything else — one [ChatDisplayActivity] per contiguous run, collapsed.
+List<ChatDisplayEntry> groupDisplayEntries(
+  List<ChatBlock> blocks, {
+  bool turnStreaming = false,
+}) {
   final merged = mergeToolPairs(blocks);
-  final out = <ChatDisplayEntry>[];
-  var i = 0;
-  while (i < merged.length) {
-    final block = merged[i].block;
+  if (merged.isEmpty) return const [];
+  final answerIndexes = _finalAnswerIndexes(merged);
 
-    if (_isHardBoundary(block)) {
-      out.add(ChatDisplaySingle(item: merged[i]));
-      i++;
-      continue;
-    }
-
-    if (_continuesWorkRun(merged[i])) {
-      var j = i;
-      while (j < merged.length && _continuesWorkRun(merged[j])) {
-        j++;
-      }
-      out.addAll(_emitWorkSegmentRun(merged.sublist(i, j), turnStreaming));
-      i = j;
-      continue;
-    }
-
-    out.add(ChatDisplaySingle(item: merged[i]));
-    i++;
+  var lastUserIndex = -1;
+  for (var i = 0; i < merged.length; i++) {
+    if (merged[i].block.kind == 'user') lastUserIndex = i;
   }
+  final currentTurnHasAnswer = answerIndexes.any((i) => i > lastUserIndex);
+
+  final out = <ChatDisplayEntry>[];
+  var activity = <ChatDisplayPair>[];
+  var activityStart = -1;
+
+  void flushActivity() {
+    if (activity.isEmpty) return;
+    if (!activity.any(_rendersInActivity)) {
+      activity = <ChatDisplayPair>[];
+      activityStart = -1;
+      return;
+    }
+    final belongsToCurrentTurn = activityStart > lastUserIndex;
+    final streaming =
+        turnStreaming && belongsToCurrentTurn && !currentTurnHasAnswer;
+    out.add(
+      ChatDisplayActivity(
+        items: List<ChatDisplayPair>.unmodifiable(activity),
+        streaming: streaming,
+        actionCount: workActionCount(activity),
+        diffStats: aggregateDiffStats(activity),
+      ),
+    );
+    activity = <ChatDisplayPair>[];
+    activityStart = -1;
+  }
+
+  void addToActivity(int index, ChatDisplayPair item) {
+    if (activity.isEmpty) activityStart = index;
+    activity.add(item);
+  }
+
+  for (var i = 0; i < merged.length; i++) {
+    final item = merged[i];
+    final block = item.block;
+
+    if (answerIndexes.contains(i)) {
+      flushActivity();
+      out.add(ChatDisplaySingle(item: item));
+      continue;
+    }
+
+    switch (block.kind) {
+      case 'user' ||
+          'approval' ||
+          'plan' ||
+          'subagent' ||
+          'error' ||
+          'system_notice':
+        flushActivity();
+        out.add(ChatDisplaySingle(item: item));
+        break;
+      case 'usage':
+      case 'status':
+      case 'tool_progress':
+      case 'permission_denial':
+        // Invisible/auxiliary blocks never create their own row.
+        addToActivity(i, item);
+        break;
+      case 'assistant_markdown':
+        // Intermediate commentary or a still-empty streaming shell.
+        addToActivity(i, item);
+        break;
+      default:
+        addToActivity(i, item);
+        break;
+    }
+  }
+  flushActivity();
   return out;
 }
 
-/// Inner grouping for expanded work session (same-kind sub-headers).
+/// Blocks that never render a row of their own.
+bool _rendersInActivity(ChatDisplayPair item) {
+  final block = item.block;
+  if (block.kind == 'assistant_markdown' && block.text.trim().isEmpty) {
+    // An empty streaming shell is not a visible row; the working indicator
+    // already communicates "still running".
+    return false;
+  }
+  return switch (block.kind) {
+    'usage' || 'status' || 'tool_progress' || 'tool_call_delta' => false,
+    _ => true,
+  };
+}
+
+/// Inner grouping for an expanded activity block (same-kind sub-headers).
 List<ChatDisplayEntry> groupInnerWorkItems(List<ChatDisplayPair> items) {
   final out = <ChatDisplayEntry>[];
   var i = 0;
@@ -251,7 +354,8 @@ List<ChatDisplayEntry> groupInnerWorkItems(List<ChatDisplayPair> items) {
     final kind = activityGroupKind(items[i]);
     if (kind == ActivityGroupKind.thinking) {
       var j = i + 1;
-      while (j < items.length && activityGroupKind(items[j]) == ActivityGroupKind.thinking) {
+      while (j < items.length &&
+          activityGroupKind(items[j]) == ActivityGroupKind.thinking) {
         j++;
       }
       out.addAll(_groupThinkingRun(items, i, j));
@@ -284,7 +388,7 @@ List<ChatDisplayEntry> groupInnerWorkItems(List<ChatDisplayPair> items) {
     } else if (item.block.kind == 'tool_result') {
       output = item.block.raw['output'];
     }
-    final stats = parseDiffStats(output);
+    final stats = parseDiffStatsCached(output);
     if (stats == null) continue;
     found = true;
     added += stats.added;

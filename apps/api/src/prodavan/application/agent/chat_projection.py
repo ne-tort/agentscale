@@ -287,6 +287,11 @@ def events_to_chat_blocks(events: list[dict]) -> list[dict]:
             target = open_subagents.get(sub_id)
             if target is not None and isinstance(child, dict):
                 target.setdefault("events", []).append(child)
+                # Bound the inline live buffer; the sidechain endpoint is the
+                # full source. Hundreds of child events in one block map make
+                # the transcript payload (and the UI block) needlessly heavy.
+                if len(target["events"]) > 500:
+                    target["events"] = target["events"][-500:]
             else:
                 blocks.append(
                     {
@@ -312,13 +317,17 @@ def events_to_chat_blocks(events: list[dict]) -> list[dict]:
                     }
                 )
         elif etype == AgentEventType.TASK_PROGRESS:
-            blocks.append(
-                {
-                    "kind": "plan",
-                    "tasks": data.get("tasks") or data.get("items") or [],
-                    "message": data.get("message"),
-                }
-            )
+            plan = {
+                "kind": "plan",
+                "tasks": data.get("tasks") or data.get("items") or [],
+                "message": data.get("message"),
+            }
+            # Full snapshot, emitted on each task change: replace the current
+            # stage's plan instead of appending hundreds of duplicate lists.
+            if blocks and blocks[-1].get("kind") == "plan":
+                blocks[-1] = plan
+            else:
+                blocks.append(plan)
         elif etype == AgentEventType.STATUS:
             blocks.append(
                 {

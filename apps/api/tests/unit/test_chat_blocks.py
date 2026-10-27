@@ -118,6 +118,34 @@ def test_events_to_chat_blocks_plan_progress() -> None:
     assert blocks[0]["tasks"][0]["status"] == "done"
 
 
+def test_events_to_chat_blocks_plan_progress_updates_current_stage() -> None:
+    events = [
+        {
+            "type": AgentEventType.TASK_PROGRESS,
+            "data": {"tasks": [{"id": "1", "title": "Step", "status": "pending"}]},
+        },
+        {
+            "type": AgentEventType.TASK_PROGRESS,
+            "data": {"tasks": [{"id": "1", "title": "Step", "status": "done"}]},
+        },
+        {
+            "type": AgentEventType.TOOL_CALL,
+            "data": {"id": "tc", "name": "Read", "input": {}},
+        },
+        {
+            "type": AgentEventType.TASK_PROGRESS,
+            "data": {"tasks": [{"id": "2", "title": "Next", "status": "pending"}]},
+        },
+    ]
+    blocks = events_to_chat_blocks(events)
+    plans = [b for b in blocks if b["kind"] == "plan"]
+    # The first two snapshots collapse to one block; activity in between starts
+    # a new stage.
+    assert len(plans) == 2
+    assert plans[0]["tasks"][0]["status"] == "done"
+    assert plans[1]["tasks"][0]["id"] == "2"
+
+
 def test_events_to_chat_blocks_user_and_assistant_timestamps() -> None:
     events = [
         {"type": PLATFORM_EVENT_USER_MESSAGE, "data": {"text": "hi"}, "created_at": "2026-09-29T10:00:00+00:00"},
