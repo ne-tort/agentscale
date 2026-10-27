@@ -30,10 +30,10 @@ commonAnnotations:
 images:
   - name: ghcr.io/ne-tort/agentscale-api
     newName: ghcr.io/ne-tort/agentscale-api
-    newTag: d42389c8c809
+    newTag: ca6a669c7173
   - name: ghcr.io/ne-tort/agentscale-web
     newName: ghcr.io/ne-tort/agentscale-web
-    newTag: d42389c8c809
+    newTag: ca6a669c7173
 
 # Sandbox-образы в проде НЕ могут быть :latest.
 #
