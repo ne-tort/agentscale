@@ -391,6 +391,9 @@ void main() {
     });
     final calls = blocks.where((b) => b.kind == 'tool_call').toList();
     expect(calls, hasLength(1));
+    // Replacing a placeholder must keep its widget identity: a new key would
+    // reset the collapsed activity that contains it.
+    expect(calls.first.key, placeholder.key);
     expect(calls.first.raw['name'], 'agent.spawn');
     expect(calls.first.raw['input'], isNotEmpty);
   });
