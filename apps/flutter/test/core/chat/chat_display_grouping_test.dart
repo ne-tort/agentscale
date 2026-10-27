@@ -288,6 +288,16 @@ void main() {
     expect(stats?.removed, 1);
   });
 
+  test('an empty streaming shell does not create an activity row', () {
+    final blocks = [
+      ChatBlock(kind: 'user', raw: {'text': 'hi'}),
+      _assistant('', streaming: true),
+    ];
+    final entries = groupDisplayEntries(blocks, turnStreaming: true);
+    expect(entries.length, 1);
+    expect(entries.single, isA<ChatDisplaySingle>());
+  });
+
   test('usage blocks are absent after attach — no standalone usage entry', () {
     final blocks = attachUsageToAssistant([
       ChatBlock(kind: 'user', raw: {'text': 'hi'}),

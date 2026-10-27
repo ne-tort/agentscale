@@ -333,10 +333,18 @@ List<ChatDisplayEntry> groupDisplayEntries(
 }
 
 /// Blocks that never render a row of their own.
-bool _rendersInActivity(ChatDisplayPair item) => switch (item.block.kind) {
-  'usage' || 'status' || 'tool_progress' || 'tool_call_delta' => false,
-  _ => true,
-};
+bool _rendersInActivity(ChatDisplayPair item) {
+  final block = item.block;
+  if (block.kind == 'assistant_markdown' && block.text.trim().isEmpty) {
+    // An empty streaming shell is not a visible row; the working indicator
+    // already communicates "still running".
+    return false;
+  }
+  return switch (block.kind) {
+    'usage' || 'status' || 'tool_progress' || 'tool_call_delta' => false,
+    _ => true,
+  };
+}
 
 /// Inner grouping for an expanded activity block (same-kind sub-headers).
 List<ChatDisplayEntry> groupInnerWorkItems(List<ChatDisplayPair> items) {
