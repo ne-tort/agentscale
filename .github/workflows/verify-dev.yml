@@ -112,6 +112,13 @@ jobs:
         working-directory: infra/ops
         run: poetry run prodavan-ops wait --app agentscale-dev --timeout 900
 
+      - name: DNS check (pods resolve external names)
+        timeout-minutes: 2
+        working-directory: infra/ops
+        # auth.x.ai is the Grok OAuth/token endpoint: a dead resolver upstream
+        # must fail the deploy, not surface later as "Сервер временно недоступен".
+        run: poetry run prodavan-ops dns-check --namespace agentscale-dev
+
       - name: Smoke HTTP
         timeout-minutes: 2
         working-directory: infra/ops

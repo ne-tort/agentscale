@@ -12,6 +12,7 @@ DNS-сервиса).
 
 from __future__ import annotations
 
+import json
 import subprocess
 
 import pytest
@@ -130,3 +131,25 @@ def test_timeout_flood_alone_fails_even_if_resolve_ok(fake_kubectl) -> None:
     fake_kubectl["coredns_log"] = "[ERROR] a: read udp 1:1->2:53: i/o timeout\n" * 30
     with pytest.raises(DnsCheckError):
         check_dns(hosts=("github.com",), namespace="agentscale", max_coredns_timeouts=5)
+
+
+def test_pod_in_prefers_api_pod_with_python(monkeypatch) -> None:
+    payload = {
+        "items": [
+            {
+                "metadata": {"name": "agentscale-kafka-0"},
+                "spec": {"containers": [{"name": "kafka"}]},
+                "status": {"phase": "Running"},
+            },
+            {
+                "metadata": {"name": "agentscale-api-abc"},
+                "spec": {"containers": [{"name": "api"}]},
+                "status": {"phase": "Running"},
+            },
+        ]
+    }
+    monkeypatch.setattr(dns_check, "kubectl", lambda *_a, **_k: _ok(json.dumps(payload)))
+    assert dns_check._pod_in("agentscale-dev") == "agentscale-api-abc/api"
+
+def test_default_hosts_cover_grok_oauth() -> None:
+    assert "auth.x.ai" in dns_check.REQUIRED_HOSTS
