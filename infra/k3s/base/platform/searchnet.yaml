@@ -87,19 +87,25 @@ spec:
               value: "3950"
             - name: SEARCHNET_DATA_DIR
               value: /app/data
-            # Холодный старт ленив: chromium спавнится ~0.3с по запросу;
-            # camoufox — эскалация per-domain (ROUTES) для защищённых сайтов.
+            # Холодный старт: engine object ≠ browser context. Первый /search
+            # после старта пода платит спавн chromium + context + UA-probe
+            # (~15с), а provider budget searchnet — 12+20=32с; API-прокси резал
+            # на 30с и отдавал таймаут, хотя searchnet успевал и кэшировал
+            # ответ (второй тот же запрос — 24-63мс). Греем ОБА браузерных
+            # контекста на старте, а не только объект camoufox.
             - name: SEARCHNET_ENGINES__ENABLED
               value: '["camoufox","chromium","http"]'
             - name: SEARCHNET_ENGINES__DEFAULT
               value: "chromium"
-            # Прогрев: держим ОДИН тёплый контекст camoufox. Без него каждый
-            # fetch на защищённый сайт платит холодный спавн (~3-6с), а при
-            # нагрузке — очередь на спавн; агент видит это как «tool timeout».
             - name: SEARCHNET_ENGINES__WARM_ENGINES
-              value: '["camoufox"]'
+              value: '["camoufox","chromium"]'
+            # "default" — дефолтный shop-профиль; warm() создаёт контекст
+            # синхронно в lifespan, поэтому readiness не врёт.
             - name: SEARCHNET_ENGINES__WARM_SHOPS
-              value: "[]"
+              value: '["default"]'
+            # Держим один default-контекст на движок и после idle-эвикции.
+            - name: SEARCHNET_POOL__POOL_MIN_WARM
+              value: "1"
             # ROUTES: Qrator на DNS Shop НЕ проходится chromium (отдаёт 401
             # challenge после ~50с ожидания) — сразу camoufox. Без маршрута
             # цепочка http → chromium → camoufox тратила 50с+ на заведомо
