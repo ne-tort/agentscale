@@ -170,6 +170,11 @@ data:
   # (agentscale ns), never from the sandbox namespace (NetworkPolicy denies
   # it; only :8001 to agentscale is allowed).
   WEB_SEARCH_BACKEND_URL: "http://searchnet.agentscale-dev.svc:3950"
+  # searchnet provider budget = provider_timeout_sec (12) + 20 = 32с. Старый
+  # 30с-таймаут API обрывал первый холодный поиск за 0.1с до ответа (searchnet
+  # успевал и кэшировал, поэтому второй запрос был мгновенным). 45с — выше
+  # внутреннего бюджета, но ниже таймаута tool'а.
+  WEB_SEARCH_TIMEOUT_SEC: "45"
   # Platform probe pod — verify AI keys & fetch their model list via agent-runtime.
   # The probe pod runs in agentscale-dev-sandboxes (see sandboxes/probe-pod.yaml).
   POD_PROBE_ENABLED: "true"
