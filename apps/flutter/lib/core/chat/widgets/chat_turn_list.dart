@@ -91,8 +91,21 @@ class _ChatTurnListState extends State<ChatTurnList> {
     final newLast = widget.turns.isEmpty ? null : widget.turns.last;
     // A genuinely new user prompt (not an older page prepend, not a poll
     // replacing the open turn) always brings the user back to the bottom.
-    if (newLast != null && newLast.user != null && newLast.id != oldLast?.id) {
+    final newUser = newLast != null &&
+        newLast.user != null &&
+        newLast.id != oldLast?.id;
+    // The streamed answer grows first and then shrinks when the turn is
+    // finalized (work collapses into one line). A shrinking viewport can clamp
+    // an intermediate offset to maxScrollExtent (the top), leaving a short
+    // final answer above empty space. Snap back to the bottom on completion.
+    final completed = oldLast != null &&
+        newLast != null &&
+        oldLast.running &&
+        !newLast.running;
+    if (newUser || completed) {
       _pinnedToBottom = true;
+      _ensureBottom();
+    } else if (_pinnedToBottom) {
       _ensureBottom();
     }
   }
@@ -118,6 +131,13 @@ class _ChatTurnListState extends State<ChatTurnList> {
   void _jumpTo(int visualIndex) {
     final visual = _visual;
     if (visual.isEmpty || visualIndex < 0 || visualIndex >= visual.length) {
+      return;
+    }
+    // The newest prompt is the bottom of a reverse list. ensureVisible with an
+    // alignment would scroll it to the top and leave empty space below.
+    if (visualIndex == 0) {
+      _pinnedToBottom = true;
+      if (_scroll.hasClients) _scroll.jumpTo(0);
       return;
     }
     if (_scroll.hasClients) {
@@ -187,64 +207,79 @@ class _ChatTurnListState extends State<ChatTurnList> {
               }
               return false;
             },
-            child: ListView.builder(
+            child: CustomScrollView(
               controller: _scroll,
               reverse: true,
-              padding: EdgeInsets.fromLTRB(
-                AppSpacing.md,
-                AppSpacing.md,
-                AppSpacing.md + 18,
-                AppSpacing.md,
-              ),
-              itemCount: visual.length + extra + loadMore,
-              itemBuilder: (context, index) {
-                if (showIndicator && index == 0) {
-                  final reconnect = widget.showReconnectIndicator;
-                  return SizedBox(
-                    key: ValueKey(
-                      reconnect
-                          ? 'agent-reconnect-indicator'
-                          : 'agent-working-indicator',
-                    ),
-                    child: AgentWorkingIndicator(
-                      reconnect: reconnect
-                          ? ReconnectIndicatorData(
-                              attempt: widget.reconnectAttempt,
-                              maxAttempts: widget.reconnectMaxAttempts,
-                              nextModel: widget.reconnectNextModel,
-                            )
-                          : null,
-                    ),
-                  );
-                }
-                final vi = index - extra;
-                if (vi >= visual.length) {
-                  return _LoadOlderTile(
-                    loading: widget.loadingHistory,
-                    onLoadOlder: widget.onLoadOlder,
-                  );
-                }
-                final turn = visual[vi];
-                final autoExpanded =
-                    turn.hasPendingApproval && !_collapsed.contains(turn.id);
-                final expanded = _expanded.contains(turn.id) || autoExpanded;
-                return SelectionArea(
-                  key: ValueKey('turn-${turn.id}'),
-                  child: _TurnView(
-                    key: _keyFor(turn.id),
-                    turn: turn,
-                    expanded: expanded,
-                    onToggle: () => _toggle(turn.id, !expanded),
-                    projectId: widget.projectId,
-                    sessionId: widget.sessionId,
-                    api: widget.api,
-                    onResolveApproval: widget.onResolveApproval,
-                    mcpAliases: widget.mcpAliases,
-                    costResolver: widget.costResolver,
-                    turnStreaming: widget.turnStreaming || turn.running,
+              slivers: [
+                SliverPadding(
+                  padding: EdgeInsets.fromLTRB(
+                    AppSpacing.md,
+                    AppSpacing.md,
+                    AppSpacing.md + 18,
+                    AppSpacing.md,
                   ),
-                );
-              },
+                  sliver: SliverList.builder(
+                    itemCount: visual.length + extra + loadMore,
+                    itemBuilder: (context, index) {
+                      if (showIndicator && index == 0) {
+                        final reconnect = widget.showReconnectIndicator;
+                        return SizedBox(
+                          key: ValueKey(
+                            reconnect
+                                ? 'agent-reconnect-indicator'
+                                : 'agent-working-indicator',
+                          ),
+                          child: AgentWorkingIndicator(
+                            reconnect: reconnect
+                                ? ReconnectIndicatorData(
+                                    attempt: widget.reconnectAttempt,
+                                    maxAttempts: widget.reconnectMaxAttempts,
+                                    nextModel: widget.reconnectNextModel,
+                                  )
+                                : null,
+                          ),
+                        );
+                      }
+                      final vi = index - extra;
+                      if (vi >= visual.length) {
+                        return _LoadOlderTile(
+                          loading: widget.loadingHistory,
+                          onLoadOlder: widget.onLoadOlder,
+                        );
+                      }
+                      final turn = visual[vi];
+                      final autoExpanded =
+                          turn.hasPendingApproval &&
+                          !_collapsed.contains(turn.id);
+                      final expanded =
+                          _expanded.contains(turn.id) || autoExpanded;
+                      return SelectionArea(
+                        key: ValueKey('turn-${turn.id}'),
+                        child: _TurnView(
+                          key: _keyFor(turn.id),
+                          turn: turn,
+                          expanded: expanded,
+                          onToggle: () => _toggle(turn.id, !expanded),
+                          projectId: widget.projectId,
+                          sessionId: widget.sessionId,
+                          api: widget.api,
+                          onResolveApproval: widget.onResolveApproval,
+                          mcpAliases: widget.mcpAliases,
+                          costResolver: widget.costResolver,
+                          turnStreaming: widget.turnStreaming || turn.running,
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                // In a reverse viewport this fills the unused height ABOVE the
+                // conversation, so even a one-line answer sits on the bottom
+                // instead of floating with empty space underneath.
+                const SliverFillRemaining(
+                  hasScrollBody: false,
+                  child: SizedBox.shrink(),
+                ),
+              ],
             ),
           ),
           if (prompts.isNotEmpty)
@@ -526,13 +561,9 @@ class _LoadOlderTile extends StatelessWidget {
     return Center(
       child: TextButton.icon(
         onPressed: loading ? null : onLoadOlder,
-        icon: loading
-            ? const SizedBox(
-                width: 14,
-                height: 14,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              )
-            : const Icon(Icons.history, size: 16),
+        // The loading indicator lives in the list's single top-center
+        // overlay; a spinner here duplicated it right next to the label.
+        icon: const Icon(Icons.history, size: 16),
         label: const Text('Загрузить ещё'),
       ),
     );
