@@ -85,8 +85,15 @@ def resolve_from_pod(
         )
     # python есть в api-образе; shell-однострочник без кавычек-ловушек.
     code = f"import socket;print(socket.gethostbyname({host!r}))"
+    # `_pod_in` returns pod[/container]; kubectl exec takes them as separate
+    # args (it does not accept the pod/container form used by kubectl logs).
+    pod_name, _, container = target.partition("/")
+    exec_args = ["-n", namespace, "exec", pod_name]
+    if container:
+        exec_args += ["-c", container]
+    exec_args += ["--", "python3", "-c", code]
     proc = kubectl(
-        ["-n", namespace, "exec", target, "--", "python3", "-c", code],
+        exec_args,
         subprocess_timeout=timeout_sec,
         retries=1,
     )

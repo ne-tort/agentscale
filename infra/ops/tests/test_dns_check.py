@@ -153,3 +153,18 @@ def test_pod_in_prefers_api_pod_with_python(monkeypatch) -> None:
 
 def test_default_hosts_cover_grok_oauth() -> None:
     assert "auth.x.ai" in dns_check.REQUIRED_HOSTS
+
+def test_resolve_passes_container_as_separate_kubectl_arg(monkeypatch) -> None:
+    seen: list[list[str]] = []
+
+    def _fake(args, **_kw):
+        seen.append(list(args))
+        return _ok("8.6.112.0\n")
+
+    monkeypatch.setattr(dns_check, "kubectl", _fake)
+    ip = dns_check.resolve_from_pod(
+        "auth.x.ai", namespace="agentscale-dev", pod="agentscale-api-abc/api"
+    )
+    assert ip == "8.6.112.0"
+    assert seen and seen[0][:4] == ["-n", "agentscale-dev", "exec", "agentscale-api-abc"]
+    assert seen[0][4:6] == ["-c", "api"]
