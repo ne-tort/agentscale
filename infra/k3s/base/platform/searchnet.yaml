@@ -111,6 +111,18 @@ spec:
             # Держим один default-контекст на движок и после idle-эвикции.
             - name: SEARCHNET_POOL__POOL_MIN_WARM
               value: "1"
+            # Провайдер metasearch ждёт САМЫЙ МЕДЛЕННЫЙ движок: bing (парсер
+            # устарел, 30с и 0 результатов), yandex (25с), wikipedia (15с),
+            # ddg_answers (15с). В итоге первый новый запрос — 24-32с, ровно
+            # на границе 30с-таймаута API; повтор брал кэш (24мс). Ограничиваем
+            # медленные и отключаем заведомо мёртвые; замер: первый новый
+            # запрос 8.0с вместо 30с, выдача 5 результатов.
+            - name: SEARCHNET_PROVIDERS__METASEARCH__ENGINE_OVERRIDES
+              value: >-
+                {"google":{"timeout_sec":8},"duckduckgo":{"timeout_sec":8},
+                 "yandex":{"timeout_sec":8},"wikipedia":{"timeout_sec":6},
+                 "bing":{"disabled":true},"qwant":{"disabled":true},
+                 "ddg_answers":{"disabled":true}}
             # ROUTES: Qrator на DNS Shop НЕ проходится chromium (отдаёт 401
             # challenge после ~50с ожидания) — сразу camoufox. Без маршрута
             # цепочка http → chromium → camoufox тратила 50с+ на заведомо
