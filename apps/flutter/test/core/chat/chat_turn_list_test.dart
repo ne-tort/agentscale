@@ -195,6 +195,25 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(Table), findsOneWidget);
   });
+
+  testWidgets('loading history shows a single spinner', (tester) async {
+    final turns = buildChatTurns([
+      _user('привет'),
+      _assistant('<final_answer>ок</final_answer>'),
+    ]);
+    await tester.pumpWidget(
+      _themed(
+        ChatTurnList(
+          turns: turns,
+          hasMoreHistory: true,
+          loadingHistory: true,
+          onLoadOlder: () {},
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+  });
 }
 
 
