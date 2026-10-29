@@ -167,7 +167,12 @@ spec:
       restartPolicy: OnFailure
       containers:
         - name: curl
-          image: curlimages/curl:8.10.1
+          # Docker Hub (curlimages/curl) недоступен с ноды: hook висел в
+          # ImagePullBackOff и блокировал КАЖДЫЙ Argo sync (app OutOfSync/
+          # Missing). Берём образ, который и так обязателен для StatefulSet
+          # OpenSearch; в нём есть /usr/bin/curl, и он уже на ноде.
+          image: opensearchproject/opensearch:2.17.1
+          imagePullPolicy: IfNotPresent
           command:
             - /bin/sh
             - -c
