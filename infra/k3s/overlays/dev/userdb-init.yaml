@@ -9,9 +9,14 @@ metadata:
     app.kubernetes.io/part-of: agentscale
     app.kubernetes.io/component: userdb-init
   annotations:
+    # Обычный Job с ttlSecondsAfterFinished Argo считает отслеживаемым
+    # ресурсом: после TTL он удаляется, app навсегда становится OutOfSync/
+    # Missing. Hook запускается на каждом sync, удаляется после успеха и не
+    # участвует в health.
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
     argocd.argoproj.io/sync-wave: "1"
 spec:
-  ttlSecondsAfterFinished: 600
   template:
     metadata:
       labels:
