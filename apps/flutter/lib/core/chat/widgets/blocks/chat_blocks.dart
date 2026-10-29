@@ -348,6 +348,15 @@ class ChatMarkdownBody extends StatelessWidget {
 /// fenced code block). Each completed block is rendered once and kept as an
 /// identical widget instance, so subsequent frames only rebuild the small
 /// in-progress tail. 3–5× larger answers stream smoothly.
+class ChatStreamingMarkdown extends StatelessWidget {
+  const ChatStreamingMarkdown({super.key, required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) => _StreamingMarkdownBody(text: text);
+}
+
 class _StreamingMarkdownBody extends StatefulWidget {
   const _StreamingMarkdownBody({required this.text});
 
@@ -412,10 +421,14 @@ class _StreamingMarkdownBodyState extends State<_StreamingMarkdownBody> {
           _chunks.add(_StreamingChunk(text: chunk));
         }
         _chunkStart = nl + 1;
-      } else if (!_fence && lineStart - _chunkStart >= 6000) {
+      } else if (!_fence &&
+          !line.startsWith('|') &&
+          lineStart - _chunkStart >= 6000) {
         // A long paragraph/list without blank lines is flushed at a line
         // boundary too, so the tail (the only part re-rendered per frame)
         // stays bounded. The current line belongs to this chunk.
+        // Table rows are never split here: a flushed fragment would lose the
+        // header/separator and render as two broken tables mid-stream.
         final chunk = text.substring(_chunkStart, nl + 1);
         if (chunk.trim().isNotEmpty) {
           _chunks.add(_StreamingChunk(text: chunk));
@@ -1292,12 +1305,22 @@ class ApprovalBlock extends StatelessWidget {
           SizedBox(height: AppSpacing.sm),
           Row(
             children: [
-              FilledButton(
-                onPressed: onAllow,
-                child: Text(l10n.projectApproveAndContinue),
+              // The theme gives buttons `minimumSize: Size.fromHeight(48)`
+              // (infinite width); a bare Row child would receive unbounded
+              // main-axis constraints and crash. Expanded bounds both buttons.
+              Expanded(
+                child: FilledButton(
+                  onPressed: onAllow,
+                  child: Text(l10n.projectApproveAndContinue),
+                ),
               ),
               SizedBox(width: AppSpacing.sm),
-              OutlinedButton(onPressed: onDeny, child: Text(l10n.projectDeny)),
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: onDeny,
+                  child: Text(l10n.projectDeny),
+                ),
+              ),
             ],
           ),
         ],

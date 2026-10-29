@@ -76,7 +76,7 @@ def dns_check_cmd(
     namespace: str = typer.Option("agentscale", "--namespace", help="Namespace с Running-подом"),
     pod: str | None = typer.Option(None, "--pod", help="Pod[/container]; по умолчанию первый Running"),
     host: list[str] = typer.Option(
-        None, "--host", help="Имя для проверки (можно несколько); по умолчанию github.com"
+        None, "--host", help="Имя для проверки (можно несколько); по умолчанию github.com, auth.x.ai"
     ),
     max_coredns_timeouts: int = typer.Option(20, "--max-coredns-timeouts"),
 ) -> None:

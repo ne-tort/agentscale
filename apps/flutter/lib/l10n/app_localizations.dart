@@ -3665,8 +3665,14 @@ abstract class AppLocalizations {
   /// No description provided for @projectChatWorked.
   ///
   /// In en, this message translates to:
-  /// **'Worked · {count} actions'**
+  /// **'{count, plural, one{Worked · {count} action} other{Worked · {count} actions}}'**
   String projectChatWorked(int count);
+
+  /// No description provided for @projectChatWorkedFor.
+  ///
+  /// In en, this message translates to:
+  /// **'Worked for {duration} · {count, plural, one{{count} action} other{{count} actions}}'**
+  String projectChatWorkedFor(String duration, int count);
 
   /// No description provided for @projectChatAgentWorking.
   ///

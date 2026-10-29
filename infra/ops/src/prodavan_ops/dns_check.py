@@ -24,10 +24,11 @@ import json
 
 from prodavan_ops.k8s import kubectl
 
-#: Имена, которые обязаны резолвиться: провайдер ИИ — не гипотетика, а тот
-#: самый случай, из-за которого инцидент и заметили. `github.com` — публичный
-#: контроль (не зависит от приватных зон).
-REQUIRED_HOSTS = ("github.com",)
+#: Имена, которые обязаны резолвиться: провайдеры AI — не гипотетика, а те
+#: самые случаи, из-за которых инцидент и заметили. `github.com` — публичный
+#: контроль (не зависит от приватных зон), `auth.x.ai` — OAuth/refresh Grok
+#: (инцидент 2026-10-29: DoT-резолвер хоста умер, xAI device-flow отдавал 502).
+REQUIRED_HOSTS = ("github.com", "auth.x.ai")
 
 #: Сколько последних секунд логов CoreDNS считать «свежими».
 _COREDNS_LOG_WINDOW_SEC = "120s"
@@ -38,7 +39,11 @@ class DnsCheckError(RuntimeError):
 
 
 def _pod_in(namespace: str) -> str | None:
-    """Первый Running-под namespace (не через shell — только kubectl json)."""
+    """Running-под с python3; предпочитаем API-под (там он точно есть).
+
+    Не через shell — только kubectl json. Первый попавшийся pod может быть
+    kafka/gotenberg без python3, и dns-check падал бы не из-за DNS.
+    """
     proc = kubectl(["-n", namespace, "get", "pods", "-o", "json"])
     if proc.returncode != 0:
         return None
@@ -46,6 +51,7 @@ def _pod_in(namespace: str) -> str | None:
         items = json.loads(proc.stdout).get("items") or []
     except json.JSONDecodeError:
         return None
+    candidates: list[tuple[str, str]] = []
     for item in items:
         status = item.get("status") or {}
         if status.get("phase") != "Running":
@@ -53,7 +59,14 @@ def _pod_in(namespace: str) -> str | None:
         containers = (item.get("spec") or {}).get("containers") or []
         if not containers:
             continue
-        return f"{item['metadata']['name']}/{(containers[0].get('name') or '')}"
+        name = str(item.get("metadata", {}).get("name") or "")
+        candidates.append((name, str(containers[0].get("name") or "")))
+    for name, container in candidates:
+        if "agentscale-api" in name:
+            return f"{name}/{container}" if container else name
+    if candidates:
+        name, container = candidates[0]
+        return f"{name}/{container}" if container else name
     return None
 
 
@@ -72,8 +85,15 @@ def resolve_from_pod(
         )
     # python есть в api-образе; shell-однострочник без кавычек-ловушек.
     code = f"import socket;print(socket.gethostbyname({host!r}))"
+    # `_pod_in` returns pod[/container]; kubectl exec takes them as separate
+    # args (it does not accept the pod/container form used by kubectl logs).
+    pod_name, _, container = target.partition("/")
+    exec_args = ["-n", namespace, "exec", pod_name]
+    if container:
+        exec_args += ["-c", container]
+    exec_args += ["--", "python3", "-c", code]
     proc = kubectl(
-        ["-n", namespace, "exec", target, "--", "python3", "-c", code],
+        exec_args,
         subprocess_timeout=timeout_sec,
         retries=1,
     )
