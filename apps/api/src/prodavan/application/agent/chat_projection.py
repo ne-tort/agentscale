@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from prodavan.application.agent.answer_protocol import strip_final_answer_tags
 from prodavan.application.agent.text_delta import normalize_text_delta
 from prodavan.application.agent.tool_result import tool_result_is_error
 from prodavan.domain.agent import PLATFORM_EVENT_USER_MESSAGE, AgentEventType
@@ -41,7 +42,7 @@ def assistant_text_from_events(events: list[dict]) -> str:
         chunk = data.get("text")
         if chunk:
             _, cumulative = normalize_text_delta(cumulative, str(chunk))
-    return cumulative
+    return strip_final_answer_tags(cumulative)
 
 
 def events_to_transcript(events: list[dict]) -> list[dict]:
@@ -53,7 +54,9 @@ def events_to_transcript(events: list[dict]) -> list[dict]:
         nonlocal assistant_cumulative
         if not assistant_cumulative:
             return
-        messages.append({"role": "assistant", "text": assistant_cumulative})
+        messages.append(
+            {"role": "assistant", "text": strip_final_answer_tags(assistant_cumulative)}
+        )
         assistant_cumulative = ""
 
     for event in events:

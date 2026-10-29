@@ -1248,9 +1248,20 @@
     }
   },
   "projectChatWorking": "Работаю…",
-  "projectChatWorked": "Работал · {count} действий",
+  "projectChatWorked": "{count, plural, one{Работал · {count} действие} few{Работал · {count} действия} many{Работал · {count} действий} other{Работал · {count} действия}}",
   "@projectChatWorked": {
     "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "projectChatWorkedFor": "Работал {duration} · {count, plural, one{{count} действие} few{{count} действия} many{{count} действий} other{{count} действия}}",
+  "@projectChatWorkedFor": {
+    "placeholders": {
+      "duration": {
+        "type": "String"
+      },
       "count": {
         "type": "int"
       }

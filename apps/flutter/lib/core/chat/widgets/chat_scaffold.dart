@@ -13,6 +13,7 @@ import 'package:prodavan/core/chat/widgets/chat_display_grouping.dart';
 import 'package:prodavan/core/chat/widgets/chat_empty_placeholder.dart';
 import 'package:prodavan/core/chat/widgets/chat_nav_rail.dart';
 import 'package:prodavan/core/chat/widgets/chat_transcript_skeleton.dart';
+import 'package:prodavan/core/chat/widgets/chat_turn_list.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/features/employee/widgets/chat_composer.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
@@ -934,6 +935,7 @@ class _ChatScaffoldState extends State<ChatScaffold> {
             constraints.maxWidth >= _kChecklistMinWidth;
         final maxW = _columnMaxWidth(constraints.maxWidth);
         final blocks = controller.visibleBlocks;
+        final turns = controller.visibleTurns;
 
         final column = ConstrainedBox(
           constraints: BoxConstraints(maxWidth: maxW),
@@ -951,13 +953,13 @@ class _ChatScaffoldState extends State<ChatScaffold> {
                             ? const ChatTranscriptSkeleton()
                             : (blocks.isEmpty && !controller.streaming)
                             ? ChatEmptyPlaceholder(highlighted: _dragOver)
-                            : ChatMessageList(
+                            : ChatTurnList(
                                 // Same controller → keep scroll/collapse
                                 // state even when the session id is
                                 // materialized on first send. A different
                                 // controller (chat switch) gets fresh state.
                                 key: ValueKey(controller),
-                                blocks: blocks,
+                                turns: turns,
                                 projectId: controller.projectId,
                                 sessionId: controller.sessionId,
                                 api: api,
@@ -978,7 +980,6 @@ class _ChatScaffoldState extends State<ChatScaffold> {
                                     controller.reconnectNextModel,
                                 mcpAliases: controller.mcpAliases,
                                 costResolver: controller.usageCostUsd,
-                                structureRevision: controller.structureRevision,
                                 onResolveApproval: (id, decision) =>
                                     controller.resolveApproval(id, decision),
                               ),
