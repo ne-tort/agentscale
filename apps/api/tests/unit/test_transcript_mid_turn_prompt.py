@@ -53,9 +53,21 @@ async def test_mid_turn_tail_prepends_the_current_turn_user_prompt() -> None:
         payload={"text": "исходный запрос"},
         at=datetime.now(tz=UTC),
     )
-    user_result = MagicMock()
-    user_result.scalars.return_value.first.return_value = user_row
-    session.execute = AsyncMock(return_value=user_result)
+    tool_row = AgentEventRow(
+        id="aev_500",
+        session_id="ags_1",
+        seq=500,
+        event_type="tool_result",
+        payload={"id": "t1", "name": "edit", "output": "ok"},
+        at=datetime.now(tz=UTC),
+    )
+    latest_seq = MagicMock()
+    latest_seq.scalar_one_or_none.return_value = 499
+    turn_rows = MagicMock()
+    turn_rows.scalars.return_value.all.return_value = [tool_row, user_row]
+    older_exists = MagicMock()
+    older_exists.first.return_value = object()
+    session.execute = AsyncMock(side_effect=[latest_seq, turn_rows, older_exists])
 
     out = await svc.get_transcript(
         project_id="proj_1",
@@ -65,12 +77,13 @@ async def test_mid_turn_tail_prepends_the_current_turn_user_prompt() -> None:
         limit=500,
     )
 
-    assert out["blocks"][0]["kind"] == "user"
+    assert out["blocks"][0]["kind"] == "user", out["blocks"]
     assert out["blocks"][0]["text"] == "исходный запрос"
-    # Pagination cursor moves to the prepended event, so «load older» never
-    # returns the same user message twice.
+    # The whole open turn is re-fetched, not just the prompt: the UI must show
+    # every action after a reload, even when the turn exceeds the page limit.
+    assert out["blocks"][1]["kind"] == "tool_result"
     assert out["oldest_seq"] == 499
-    session.execute.assert_awaited_once()
+    assert session.execute.await_count == 3
 
 
 @pytest.mark.asyncio

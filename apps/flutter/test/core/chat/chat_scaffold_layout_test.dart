@@ -7,6 +7,7 @@ import 'package:prodavan/core/chat/controller/chat_session_controller.dart';
 import 'package:prodavan/core/chat/models/chat_block.dart';
 import 'package:prodavan/core/chat/widgets/chat_checklist_panel.dart';
 import 'package:prodavan/core/chat/widgets/chat_scaffold.dart';
+import 'package:prodavan/core/chat/widgets/chat_turn_list.dart';
 import 'package:prodavan/core/theme/app_theme.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
@@ -84,12 +85,12 @@ void main() {
     // Without a checklist.
     await _pumpScaffold(tester, withChecklist: false);
     expect(find.byType(ChatChecklistPanel), findsNothing);
-    final noChecklist = tester.getSize(find.byType(ChatMessageList));
+    final noChecklist = tester.getSize(find.byType(ChatTurnList));
 
     // With a checklist: the panel appears, but the chat does NOT widen.
     await _pumpScaffold(tester, withChecklist: true);
     expect(find.byType(ChatChecklistPanel), findsOneWidget);
-    final withChecklist = tester.getSize(find.byType(ChatMessageList));
+    final withChecklist = tester.getSize(find.byType(ChatTurnList));
 
     // Same transcript width in both cases (previously it stretched to full).
     expect(withChecklist.width, noChecklist.width);

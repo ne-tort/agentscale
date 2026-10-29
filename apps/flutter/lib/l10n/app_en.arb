@@ -1253,9 +1253,20 @@
     }
   },
   "projectChatWorking": "Working…",
-  "projectChatWorked": "Worked · {count} actions",
+  "projectChatWorked": "{count, plural, one{Worked · {count} action} other{Worked · {count} actions}}",
   "@projectChatWorked": {
     "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "projectChatWorkedFor": "Worked for {duration} · {count, plural, one{{count} action} other{{count} actions}}",
+  "@projectChatWorkedFor": {
+    "placeholders": {
+      "duration": {
+        "type": "String"
+      },
       "count": {
         "type": "int"
       }
