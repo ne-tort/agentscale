@@ -37,6 +37,11 @@ metadata:
     argocd.argoproj.io/sync-wave: "2"
 spec:
   replicas: 1
+  # Один под с двумя браузерными контекстами занимает ~2.5GiB; RollingUpdate
+  # поднимал второй под рядом и упирался в память ноды (Pending). Recreate:
+  # старый под умирает до старта нового (короткий простой searchnet).
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app.kubernetes.io/name: searchnet
