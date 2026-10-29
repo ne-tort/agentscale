@@ -100,11 +100,10 @@ resource "null_resource" "k3s_server" {
     preflight = filesha256("${path.module}/templates/k3s-preflight.sh.tpl")
     post_heal = filesha256("${path.module}/templates/post-k3s-heal.sh.tpl")
     tls_tpl   = filesha256("${path.module}/templates/agentscale-tls.sh.tpl")
-    # DNS values are rendered into post-k3s-heal.sh; changing them must recreate
-    # the provisioners even though the template hash stays the same.
+    # DNS upstreams are rendered into post-k3s-heal.sh; changing them must
+    # recreate the provisioners even though the template hash stays the same.
+    # (The host resolver is a separate null_resource.host_dns.)
     dns_upstreams = var.dns_upstreams
-    host_dns      = var.host_dns_servers
-    host_dns_dot  = var.host_dns_over_tls
     # Изменение этих файлов должно пересоздавать provisioner'ы.
     k3s_cfg = filesha256("${path.module}/templates/k3s-config.yaml.tpl")
     guards  = filesha256("${path.module}/../../../k3s/node-manifests/platform-guards.yaml")
