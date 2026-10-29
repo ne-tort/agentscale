@@ -2086,7 +2086,28 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String projectChatWorked(int count) {
-    return 'Работал · $count действий';
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Работал · $count действия',
+      many: 'Работал · $count действий',
+      few: 'Работал · $count действия',
+      one: 'Работал · $count действие',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String projectChatWorkedFor(String duration, int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count действия',
+      many: '$count действий',
+      few: '$count действия',
+      one: '$count действие',
+    );
+    return 'Работал $duration · $_temp0';
   }
 
   @override

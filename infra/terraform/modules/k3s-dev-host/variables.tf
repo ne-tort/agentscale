@@ -130,3 +130,21 @@ variable "dns_upstreams" {
   default     = ""
   description = "Upstream DNS for CoreDNS, space-separated (prod: tunnel DNS + public). Empty keeps k3s default `forward . /etc/resolv.conf` (dev). post-k3s-heal.sh re-applies it after every k3s start, because k3s rewrites its CoreDNS addon manifest on boot."
 }
+
+variable "host_dns_servers" {
+  type        = string
+  default     = ""
+  description = "Optional: manage the host systemd-resolved drop-in with these space-separated plain DNS servers and restart resolved. Empty leaves the host resolver untouched. Set for dev so k3s/containerd/Docker builds never depend on a broken DoT upstream."
+}
+
+variable "host_dns_over_tls" {
+  type        = string
+  default     = "no"
+  description = "systemd-resolved DNSOverTLS mode for the managed host drop-in (no|opportunistic|yes). Plain 'no' is intentional: port 853 can be blocked while UDP/53 works."
+}
+
+variable "host_dns_stub_listener_extra" {
+  type        = string
+  default     = ""
+  description = "Extra address for systemd-resolved DNSStubListenerExtra (usually the node IP reachable from k3s). Required when pods/CoreDNS resolve through the host resolver."
+}

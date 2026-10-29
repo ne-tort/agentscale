@@ -7,6 +7,7 @@ import 'package:prodavan/core/api/agent_stream_error.dart';
 import 'package:prodavan/core/api/prodavan_api.dart';
 import 'package:prodavan/core/chat/models/chat_block.dart';
 import 'package:prodavan/core/chat/models/chat_projection.dart';
+import 'package:prodavan/core/chat/models/chat_turn.dart';
 import 'package:prodavan/core/chat/transcript_cache.dart';
 
 /// Live SSE chat session — blocks projection with optimistic user + streaming assistant.
@@ -106,6 +107,10 @@ class ChatSessionController {
   /// Cached concatenation of history + live turn. Rebuild views consult this
   /// instead of copying thousands of block references on every hover/frame.
   List<ChatBlock>? _visibleCache;
+  List<ChatTurn>? _turnsCache;
+  int _turnsRevision = -1;
+  bool _turnsWorking = false;
+  int _turnsPendingKey = 0;
 
   /// Keys of blocks currently in [blocks] — O(1) collision guard when
   /// appending polled/paginated pages (a duplicate key corrupts the reverse
@@ -238,6 +243,7 @@ class ChatSessionController {
 
   void _invalidateVisible() {
     _visibleCache = null;
+    _turnsCache = null;
   }
 
   void _bumpStructure() {
@@ -416,6 +422,7 @@ class ChatSessionController {
     int? beforeSeq,
     bool background = false,
     bool silent = false,
+    bool loadAll = true,
   }) async {
     if (sessionId.isEmpty) {
       blocks.clear();
@@ -429,55 +436,78 @@ class ChatSessionController {
       refreshingTranscript = true;
       notifyImmediate();
     }
+    final full = beforeSeq == null;
     try {
-      final body = await api.projectChatTranscript(
-        projectId: projectId,
-        sessionId: sessionId,
-        beforeSeq: beforeSeq,
-      );
-      final resolved = body['session_id'] as String?;
+      // Bulk load: the transcript is fetched in large pages and committed to
+      // the UI exactly once. No per-page spinner, no incremental rebuild —
+      // chats here are small enough that opening one is a single paint.
+      var accumulated = <ChatBlock>[];
+      int? cursor = beforeSeq;
+      int? pageOldest;
+      int? oldestCursor;
+      int? newest;
+      int? total;
+      Map<String, dynamic>? firstBody;
+      var hasMore = false;
+      var pages = 0;
+      const maxPages = 20; // hard cap ≈ 10k events per open
+      while (true) {
+        final body = await api.projectChatTranscript(
+          projectId: projectId,
+          sessionId: sessionId,
+          limit: 500,
+          beforeSeq: cursor,
+        );
+        firstBody ??= body;
+        final parsed = chatBlocksFromTranscript(body['blocks'] as List?);
+        accumulated = _prependTranscriptPage(parsed, accumulated);
+        pageOldest = body['oldest_seq'] as int?;
+        if (parsed.isNotEmpty || pageOldest != null) oldestCursor = pageOldest;
+        if (full && pages == 0) newest = body['newest_seq'] as int?;
+        total = body['total_events'] as int? ?? total;
+        hasMore = body['has_more'] == true;
+        pages++;
+        if (!loadAll ||
+            !hasMore ||
+            pageOldest == null ||
+            pageOldest == cursor ||
+            pages >= maxPages) {
+          break;
+        }
+        // A page that brought nothing must not keep the loop alive.
+        if (parsed.isEmpty) break;
+        cursor = pageOldest;
+      }
+
+      final resolved = firstBody['session_id'] as String?;
       if (resolved != null && resolved.isNotEmpty) sessionId = resolved;
-      final parsed = chatBlocksFromTranscript(body['blocks'] as List?);
-      if (beforeSeq == null) {
+      if (!full) {
+        final fresh = _dropOverlap(accumulated, atHead: true);
+        if (fresh.isNotEmpty) {
+          blocks.insertAll(0, fresh);
+          _blockKeys.addAll(fresh.map((b) => b.key));
+          _bumpStructure();
+        }
+        oldestSeq = oldestCursor;
+        hasMoreHistory = hasMore;
+      } else {
+        // Never clobber a live turn that started while the fetch was in flight.
+        if (background && streaming) return;
         blocks
           ..clear()
-          ..addAll(parsed);
+          ..addAll(accumulated);
         _liveTurnBlocks = const [];
         _rebuildBlockKeySet();
-        final pending = body['pending_approvals'];
+        final pending = firstBody['pending_approvals'];
         pendingApprovals = pending is List
             ? pending.cast<Map<String, dynamic>>()
             : const [];
-        turnInProgress = body['turn_in_progress'] == true;
-      } else {
-        // Pagination may legitimately return zero new blocks near the head.
-        // A broken/overlapping page must not duplicate blocks: match the
-        // incoming page against the current *head* by content, and drop any
-        // key that already exists (keys are page-scoped, so id-less blocks
-        // never collide, but explicit wire ids can repeat).
-        final fresh = _dropOverlap(parsed, atHead: true);
-        blocks.insertAll(0, fresh);
-        _blockKeys.addAll(fresh.map((b) => b.key));
-      }
-      _bumpStructure();
-      hasMoreHistory = body['has_more'] == true;
-      oldestSeq = body['oldest_seq'] as int?;
-      // Only a full tail load defines the live cursor. An older page's
-      // `newest_seq` belongs to that page — adopting it would rewind the
-      // poller and re-fetch events the client already has.
-      if (beforeSeq == null) {
-        newestSeq = body['newest_seq'] as int?;
-      }
-      final total = body['total_events'];
-      if (total is int) {
-        totalEvents = total;
-      }
-      // A page that returned blocks but reports has_more=false means we reached
-      // the head — clear the stale oldestSeq so loadOlderTranscript gates out.
-      if (!hasMoreHistory) {
-        oldestSeq = null;
-      }
-      if (beforeSeq == null) {
+        turnInProgress = firstBody['turn_in_progress'] == true;
+        newestSeq = newest;
+        oldestSeq = hasMore ? oldestCursor : null;
+        hasMoreHistory = hasMore;
+        if (total != null) totalEvents = total;
+        _bumpStructure();
         _saveToCache();
         _syncReconnectFromBlocks();
         _syncLivePolling();
@@ -496,6 +526,53 @@ class ChatSessionController {
         notifyImmediate();
       }
     }
+  }
+
+  /// Prepend an older transcript page, joining a text run that the page
+  /// boundary cut in half and dropping duplicated wire ids.
+  List<ChatBlock> _prependTranscriptPage(
+    List<ChatBlock> page,
+    List<ChatBlock> current,
+  ) {
+    if (page.isEmpty) return current;
+    if (current.isEmpty) return page;
+    final out = <ChatBlock>[...page];
+    final olderTail = out.last;
+    final newerHead = current.first;
+    final joinable =
+        (olderTail.kind == 'assistant_markdown' &&
+            newerHead.kind == 'assistant_markdown') ||
+        (olderTail.kind == 'thinking' && newerHead.kind == 'thinking');
+    var rest = current;
+    if (joinable) {
+      out[out.length - 1] = olderTail.copyWithRaw({
+        'text': _joinTranscriptText(olderTail.text, newerHead.text),
+        '_key': newerHead.key,
+      });
+      rest = current.sublist(1);
+    }
+    final seen = <String>{for (final block in out) _wireIdentity(block)};
+    for (final block in rest) {
+      final id = _wireIdentity(block);
+      if (id.isNotEmpty && !seen.add(id)) continue;
+      out.add(block);
+    }
+    return out;
+  }
+
+  static String _wireIdentity(ChatBlock block) {
+    if (block.id.isEmpty) return '';
+    // Page overlap can repeat any wire block (assistant text included), so the
+    // identity is kind+id for every id-bearing block — not only tools.
+    return '${block.kind}:${block.id}';
+  }
+
+  static String _joinTranscriptText(String older, String newer) {
+    if (older.isEmpty) return newer;
+    if (newer.isEmpty) return older;
+    if (newer.startsWith(older)) return newer;
+    if (older.endsWith(newer)) return older;
+    return older + newer;
   }
 
   Future<void> loadOlderTranscript() async {
@@ -722,6 +799,19 @@ class ChatSessionController {
           // matches the wire.
           _flushPendingDeltas();
           _liveTurnBlocks = applyStreamEvent(_liveTurnBlocks, event);
+          if (type == 'tool_approval_request' && data is Map) {
+            // Live approvals must expand their turn immediately: the
+            // transcript `pending_approvals` list is only refreshed on a
+            // reload/poll, which may be seconds away.
+            final approval = Map<String, dynamic>.from(data);
+            final id = approval['id']?.toString() ?? '';
+            if (id.isNotEmpty &&
+                !pendingApprovals.any(
+                  (a) => a['id']?.toString() == id,
+                )) {
+              pendingApprovals = [...pendingApprovals, approval];
+            }
+          }
           _bumpStructure();
           notify();
           continue;
@@ -832,6 +922,40 @@ class ChatSessionController {
   List<ChatBlock> get visibleBlocks => _visibleCache ??=
       List<ChatBlock>.unmodifiable([...blocks, ..._liveTurnBlocks]);
 
+  /// Turn snapshots for the chat list, cached by content revision.
+  ///
+  /// The list is rebuilt only when blocks/turn state actually changed, not on
+  /// hover/scroll setState or unrelated notifications.
+  List<ChatTurn> get visibleTurns {
+    final revision = _contentRevision;
+    final working = agentWorking;
+    final pendingIds = <String>{
+      for (final approval in pendingApprovals)
+        if ((approval['id']?.toString() ?? '').isNotEmpty)
+          approval['id'].toString(),
+    };
+    final pendingKey = Object.hashAll(pendingIds.toList()..sort());
+    final cached = _turnsCache;
+    if (cached != null &&
+        _turnsRevision == revision &&
+        _turnsWorking == working &&
+        _turnsPendingKey == pendingKey) {
+      return cached;
+    }
+    final built = List<ChatTurn>.unmodifiable(
+      buildChatTurns(
+        visibleBlocks,
+        turnInProgress: working,
+        pendingApprovalIds: pendingIds,
+      ),
+    );
+    _turnsCache = built;
+    _turnsRevision = revision;
+    _turnsWorking = working;
+    _turnsPendingKey = pendingKey;
+    return built;
+  }
+
   Future<void> cancelStream() async {
     _handle?.abort();
     _flushPendingDeltas();
@@ -875,6 +999,13 @@ class ChatSessionController {
   }
 
   Future<void> resolveApproval(String approvalId, String decision) async {
+    // Collapse the work log immediately; the transcript reload below is the
+    // authoritative confirmation.
+    pendingApprovals = [
+      for (final approval in pendingApprovals)
+        if (approval['id']?.toString() != approvalId) approval,
+    ];
+    notifyImmediate();
     await api.resolveToolApproval(
       projectId: projectId,
       sessionId: sessionId,
@@ -904,44 +1035,36 @@ class ChatSessionController {
     _livePollTimer = null;
   }
 
-  /// One incremental fetch of events newer than [newestSeq]; appends them so
-  /// a reloaded/navigated-back client catches up on the in-progress turn.
+  /// One authoritative refresh of the open turn.
+  ///
+  /// The server transcript tail is the same projection a page reload uses, so
+  /// replacing the whole tail (instead of merging deltas) makes the reloaded
+  /// and live views identical by construction.
   Future<void> _pollLiveOnce() async {
     if (_polling || streaming || sessionId.isEmpty) return;
-    final cursor = newestSeq;
-    if (cursor == null) return;
     _polling = true;
     try {
       final body = await api.projectChatTranscript(
         projectId: projectId,
         sessionId: sessionId,
-        afterSeq: cursor,
       );
       _pollFailures = 0;
       final resolved = body['session_id'] as String?;
       if (resolved != null && resolved.isNotEmpty) sessionId = resolved;
-      final blocksBefore = blocks.length;
-      final revisionBefore = _structureRevision;
+      final page = chatBlocksFromTranscript(body['blocks'] as List?);
       final turnBefore = turnInProgress;
-      final incoming = _dropOverlap(
-        chatBlocksFromTranscript(body['blocks'] as List?),
-        atHead: false,
-      );
-      _mergeIncrementalBlocks(incoming);
+      final changed = _replaceLiveTail(page);
       newestSeq = body['newest_seq'] as int? ?? newestSeq;
       turnInProgress = body['turn_in_progress'] == true;
-      // A terminal tail is authoritative: never keep polling a turn the server
-      // no longer considers running (e.g. it finished between two polls).
-      if (!turnInProgress) {
-        _finalizePolledTail();
+      final pending = body['pending_approvals'];
+      if (pending is List) {
+        pendingApprovals = pending.cast<Map<String, dynamic>>();
       }
+      if (!turnInProgress) _finalizePolledTail();
       _syncReconnectFromBlocks();
       _syncLivePolling();
-      // Не будим UI, если хвост не изменился: поллер тикает каждые 2.5 с и
-      // раньше перестраивал экран даже на пустых ответах.
-      if (blocks.length != blocksBefore ||
-          _structureRevision != revisionBefore ||
-          turnInProgress != turnBefore) {
+      // Не будим UI, если хвост не изменился: поллер тикает каждые 2.5 с.
+      if (changed || turnInProgress != turnBefore) {
         _saveToCache();
         notifyImmediate();
       }
@@ -1026,37 +1149,100 @@ class ChatSessionController {
     return null;
   }
 
-  /// Append incrementally-fetched blocks.
+  /// Replace the whole open turn with its server projection.
   ///
-  /// A polled page is an independent projection, so an assistant/thinking run
-  /// split by the cursor arrives as a second block: merge it into the existing
-  /// tail instead of duplicating the message. [mergeStreamingText] also makes
-  /// replaying the same chunk a no-op, so a duplicated poll frame can never
-  /// grow the answer.
-  void _mergeIncrementalBlocks(List<ChatBlock> incoming) {
-    if (incoming.isEmpty) return;
-    for (final b in incoming) {
-      final tail = blocks.isEmpty ? null : blocks.last;
-      final mergeable =
-          tail != null &&
-          ((b.kind == 'assistant_markdown' &&
-                  tail.kind == 'assistant_markdown') ||
-              (b.kind == 'thinking' && tail.kind == 'thinking'));
-      if (mergeable) {
-        final merged = mergeStreamingText(tail.text, b.text);
-        if (merged == tail.text) continue;
-        blocks[blocks.length - 1] = tail.copyWithRaw({
-          'text': merged,
-          if (b.raw['duration_ms'] != null) 'duration_ms': b.raw['duration_ms'],
-        });
-        continue;
-      }
-      blocks.add(b);
-      _blockKeys.add(b.key);
-    }
-    if (blocks.isNotEmpty) {
+  /// Returns true when the visible tail actually changed. The previous
+  /// incremental merge kept a second, delta-shaped copy of the turn and could
+  /// glue partial answers together after a reload — the exact failure mode
+  /// that turned reloaded chats into mush.
+  bool _replaceLiveTail(List<ChatBlock> page) {
+    if (page.isEmpty) return false;
+    final pageStart = _lastUserIndex(page);
+    final currentStart = _lastUserIndex(blocks);
+    if (pageStart < 0) {
+      // Legacy tail without a prompt: append only genuinely new blocks.
+      final fresh = _dropOverlap(page, atHead: false);
+      if (fresh.isEmpty) return false;
+      blocks.addAll(fresh);
+      _rebuildBlockKeySet();
       _bumpStructure();
+      return true;
     }
+    final tail = page.sublist(pageStart);
+    if (currentStart < 0) {
+      final fresh = _dropOverlap(tail, atHead: false);
+      if (fresh.isEmpty) return false;
+      blocks.addAll(fresh);
+      _rebuildBlockKeySet();
+      _bumpStructure();
+      return true;
+    }
+    final currentUser = blocks[currentStart];
+    final pageUser = page[pageStart];
+    // The optimistic send time and the persisted event time can differ by a
+    // few seconds; only a genuinely newer prompt (or a different text) starts
+    // a new turn. Comparing raw ISO strings here used to duplicate the turn
+    // after an SSE drop.
+    final currentAt = _timestampOf(currentUser);
+    final pageAt = _timestampOf(pageUser);
+    final closeInTime =
+        currentAt == null ||
+        pageAt == null ||
+        currentAt.difference(pageAt).abs() <= const Duration(minutes: 5);
+    final sameTurn = currentUser.text == pageUser.text && closeInTime;
+    if (!sameTurn) {
+      // A newer prompt appeared (another client / reconnect): append its turn.
+      final fresh = _dropOverlap(tail, atHead: false);
+      if (fresh.isEmpty) return false;
+      blocks.addAll(fresh);
+      _rebuildBlockKeySet();
+      _bumpStructure();
+      return true;
+    }
+    final next = <ChatBlock>[...blocks.take(currentStart), ...tail];
+    if (_sameTailContent(next, blocks)) return false;
+    blocks
+      ..clear()
+      ..addAll(next);
+    _rebuildBlockKeySet();
+    _bumpStructure();
+    return true;
+  }
+
+  int _lastUserIndex(List<ChatBlock> list) {
+    for (var i = list.length - 1; i >= 0; i--) {
+      if (list[i].kind == 'user') return i;
+    }
+    return -1;
+  }
+
+  static DateTime? _timestampOf(ChatBlock block) {
+    final raw = block.raw['created_at'];
+    if (raw is DateTime) return raw;
+    if (raw is String) return DateTime.tryParse(raw);
+    return null;
+  }
+
+  bool _sameTailContent(List<ChatBlock> a, List<ChatBlock> b) {
+    final aStart = _lastUserIndex(a);
+    final bStart = _lastUserIndex(b);
+    final aFrom = aStart < 0 ? 0 : aStart;
+    final bFrom = bStart < 0 ? 0 : bStart;
+    if (a.length - aFrom != b.length - bFrom) return false;
+    for (var i = 0; i < a.length - aFrom; i++) {
+      final x = a[aFrom + i];
+      final y = b[bFrom + i];
+      if (x.kind != y.kind || x.text != y.text || x.id != y.id) return false;
+      if (x.raw['output']?.toString() != y.raw['output']?.toString()) {
+        return false;
+      }
+      if (x.raw['status'] != y.raw['status']) return false;
+      if (x.raw['_streaming'] != y.raw['_streaming']) return false;
+      if (x.raw['tasks']?.toString() != y.raw['tasks']?.toString()) {
+        return false;
+      }
+    }
+    return true;
   }
 
   void dispose() {

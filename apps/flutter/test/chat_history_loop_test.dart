@@ -108,12 +108,12 @@ void main() {
     expect(api.beforeCalls.length, callsAfterFirst);
   });
 
-  test('страница с новыми блоками продолжает подгрузку', () async {
+  test('bulk load pulls the whole history in one open', () async {
     final api = _FakeApi({
       null: _page(blocks: [_block('c')], hasMore: true, oldestSeq: 8, newestSeq: 10),
       8: _page(
         blocks: [_block('a'), _block('b')],
-        hasMore: true,
+        hasMore: false,
         oldestSeq: 2,
         newestSeq: 10,
       ),
@@ -125,11 +125,17 @@ void main() {
     );
 
     await controller.loadTranscript();
-    await controller.loadOlderTranscript();
 
-    expect(controller.hasMoreHistory, isTrue);
-    expect(controller.oldestSeq, 2);
+    // The controller walks the older pages before notifying the UI once.
     expect(controller.blocks.length, 3);
+    expect(controller.blocks.map((b) => b.text).toList(), ['x', 'x', 'x']);
+    expect(controller.hasMoreHistory, isFalse);
+    expect(controller.oldestSeq, isNull);
+
+    // Nothing left to request.
+    final calls = api.beforeCalls.length;
+    await controller.loadOlderTranscript();
+    expect(api.beforeCalls.length, calls);
   });
 
   test('пересекающийся диапазон не создаёт дублей', () async {

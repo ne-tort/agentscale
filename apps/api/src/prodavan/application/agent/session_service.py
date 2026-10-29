@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from prodavan.application.admin.company_service import AdminCompanyService
 from prodavan.application.admin.subscription_gate import CompanySubscriptionGate
 from prodavan.application.agent.adapter_registry import get_agent_adapter
+from prodavan.application.agent.answer_protocol import with_final_answer_protocol
 from prodavan.application.agent.budget_service import AgentBudgetService
 from prodavan.application.agent.chat_projection import (
     assistant_text_from_events,
@@ -876,7 +877,7 @@ class AgentSessionService:
             agent_text = user_text
             display_text = user_text
 
-        message = ChatMessage(text=agent_text, attachment_refs=refs)
+        message = ChatMessage(text=with_final_answer_protocol(agent_text), attachment_refs=refs)
 
         hydrate_gen = await self._project_hydrate_generation(project_id)
         bridge_message = agent_text
@@ -888,6 +889,10 @@ class AgentSessionService:
             rebuilt = format_rehydrate_bridge_message(history=prior, new_message=agent_text)
             if rebuilt:
                 bridge_message = rebuilt
+        # The final-answer contract is a platform prompt layer: the runtime
+        # sees it on every turn (including rehydrated history), while the DB and
+        # the UI keep the raw user text.
+        bridge_message = with_final_answer_protocol(bridge_message)
 
         seq_q = await self._session.execute(
             select(func.coalesce(func.max(AgentEventRow.seq), 0)).where(AgentEventRow.session_id == session_id)
@@ -1712,6 +1717,25 @@ class AgentSessionService:
                 source,
             )
 
+    async def _last_user_message_seq(self, session_id: str) -> int | None:
+        q = await self._session.execute(
+            select(AgentEventRow.seq)
+            .where(AgentEventRow.session_id == session_id)
+            .where(AgentEventRow.event_type == PLATFORM_EVENT_USER_MESSAGE)
+            .order_by(AgentEventRow.seq.desc())
+            .limit(1)
+        )
+        return q.scalar_one_or_none()
+
+    async def _has_events_before(self, session_id: str, seq: int) -> bool:
+        q = await self._session.execute(
+            select(AgentEventRow.seq)
+            .where(AgentEventRow.session_id == session_id)
+            .where(AgentEventRow.seq < seq)
+            .limit(1)
+        )
+        return q.first() is not None
+
     async def get_transcript(
         self,
         *,
@@ -1792,27 +1816,36 @@ class AgentSessionService:
 
         # A long turn can exceed the tail page: the page then starts in the
         # middle of the turn. A client that reloads while the agent is still
-        # working must still see WHICH prompt this work belongs to (and must not
-        # merge the partial answer into the previous turn) — prepend the turn's
-        # user message. Bounded: exactly one extra indexed lookup.
+        # working must see the WHOLE turn (all actions, not just the last 500
+        # events) and must not merge the partial answer into the previous turn.
+        # Re-fetch from the turn's user message, bounded by a generous cap.
         if before_seq is None and turn_in_progress and events:
             has_user_message = any(
                 e.get("type") == PLATFORM_EVENT_USER_MESSAGE for e in events
             )
             if not has_user_message:
-                oldest = meta.get("oldest_seq")
-                user_q = await self._session.execute(
-                    select(AgentEventRow)
-                    .where(AgentEventRow.session_id == sid)
-                    .where(AgentEventRow.event_type == PLATFORM_EVENT_USER_MESSAGE)
-                    .where(AgentEventRow.seq < (oldest or 0))
-                    .order_by(AgentEventRow.seq.desc())
-                    .limit(1)
-                )
-                user_row = user_q.scalars().first()
-                if user_row is not None:
-                    events = [_event_public(user_row), *events]
-                    meta = {**meta, "oldest_seq": user_row.seq}
+                user_seq = await self._last_user_message_seq(sid)
+                if user_seq is not None:
+                    turn_q = await self._session.execute(
+                        select(AgentEventRow)
+                        .where(AgentEventRow.session_id == sid)
+                        .where(AgentEventRow.seq >= user_seq)
+                        .order_by(AgentEventRow.seq.desc())
+                        .limit(5000)
+                    )
+                    # Newest 5000 events of the turn, back to chronological
+                    # order: the final answer is more important than the first
+                    # action if a pathological turn exceeds the cap.
+                    turn_rows = list(reversed(turn_q.scalars().all()))
+                    if turn_rows:
+                        events = [_event_public(r) for r in turn_rows]
+                        meta = {
+                            **meta,
+                            "oldest_seq": turn_rows[0].seq,
+                            "has_more": await self._has_events_before(
+                                sid, turn_rows[0].seq
+                            ),
+                        }
 
         pending_approvals: list[dict] = []
         if before_seq is None:

@@ -105,6 +105,13 @@ module "k3s_dev" {
   bootstrap_gitops       = var.bootstrap_gitops
   ghcr_token             = var.ghcr_token
   ghcr_username          = var.ghcr_username
+  # Dev DNS: explicit public upstreams for CoreDNS and a plain-DNS host
+  # drop-in. DoT/:853 is blocked here, and 1.1.1.1:53 is rate-limited from the
+  # CoreDNS pod (timeouts under searchnet load) — use Quad9 + Google.
+  dns_upstreams                = "9.9.9.9 8.8.8.8"
+  host_dns_servers             = "9.9.9.9 8.8.8.8"
+  host_dns_over_tls            = "no"
+  host_dns_stub_listener_extra = var.ssh_host
 }
 
 locals {

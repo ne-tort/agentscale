@@ -89,7 +89,9 @@ resource "null_resource" "k3s_server" {
     # v10: https_tls_sans — local CA + leaf as Traefik default cert (websecure).
     # v11: host sysctl unprivileged_port_start; v12: two contours (agentscale ns)
     # (hostNetwork + NET_BIND_SERVICE cap alone is not enough for userns reasons).
-    rev       = "v12-contours"
+    # v13: DNS is declarative — CoreDNS explicit upstreams + host resolved
+    # drop-in; both are re-applied after every k3s start (post-k3s-heal).
+    rev       = "v13-dns"
     http_port = tostring(var.http_port)
     https_port = tostring(var.https_port)
     cluster   = var.cluster_name
@@ -98,6 +100,10 @@ resource "null_resource" "k3s_server" {
     preflight = filesha256("${path.module}/templates/k3s-preflight.sh.tpl")
     post_heal = filesha256("${path.module}/templates/post-k3s-heal.sh.tpl")
     tls_tpl   = filesha256("${path.module}/templates/agentscale-tls.sh.tpl")
+    # DNS upstreams are rendered into post-k3s-heal.sh; changing them must
+    # recreate the provisioners even though the template hash stays the same.
+    # (The host resolver is a separate null_resource.host_dns.)
+    dns_upstreams = var.dns_upstreams
     # Изменение этих файлов должно пересоздавать provisioner'ы.
     k3s_cfg = filesha256("${path.module}/templates/k3s-config.yaml.tpl")
     guards  = filesha256("${path.module}/../../../k3s/node-manifests/platform-guards.yaml")
@@ -390,6 +396,61 @@ resource "null_resource" "gitops_bootstrap" {
       "tr -d '\\r' < /tmp/prodavan-gitops.sh > /tmp/agentscale-gitops.lf && mv /tmp/agentscale-gitops.lf /tmp/prodavan-gitops.sh",
       "chmod 700 /tmp/prodavan-gitops.sh",
       "bash /tmp/prodavan-gitops.sh",
+    ]
+  }
+}
+
+# Host resolver is part of the same declarative contract: a dead DoT upstream
+# brought down pod DNS twice (2026-10-22/23 and 2026-10-29). When configured,
+# write a drop-in that overrides any older DoT file and restart resolved.
+# Kept in a separate resource so environments that use tunnel DNS (prod) don't
+# touch the host resolver at all.
+resource "null_resource" "host_dns" {
+  count = var.host_dns_servers != "" ? 1 : 0
+
+  triggers = {
+    servers      = var.host_dns_servers
+    over_tls     = var.host_dns_over_tls
+    stub_extra   = var.host_dns_stub_listener_extra
+    ssh_host     = var.ssh_host
+    ssh_port     = tostring(var.ssh_port)
+    ssh_user     = var.ssh_user
+    ssh_key_path = var.ssh_private_key_path
+  }
+
+  provisioner "file" {
+    content = templatefile("${path.module}/templates/host-dns.conf.tpl", {
+      dns_servers  = var.host_dns_servers
+      dns_over_tls = var.host_dns_over_tls
+      stub_extra   = var.host_dns_stub_listener_extra
+    })
+    destination = "/tmp/prodavan-host-dns.conf"
+    connection {
+      type        = "ssh"
+      host        = self.triggers.ssh_host
+      port        = tonumber(self.triggers.ssh_port)
+      user        = self.triggers.ssh_user
+      private_key = file(self.triggers.ssh_key_path)
+      timeout     = "5m"
+    }
+  }
+
+  provisioner "remote-exec" {
+    connection {
+      type        = "ssh"
+      host        = self.triggers.ssh_host
+      port        = tonumber(self.triggers.ssh_port)
+      user        = self.triggers.ssh_user
+      private_key = file(self.triggers.ssh_key_path)
+      timeout     = "5m"
+    }
+    inline = [
+      "set -eu",
+      "sudo -n install -d /etc/systemd/resolved.conf.d",
+      # 99-zz sorts after any older 99-dot file: our values win.
+      "sudo -n cp /tmp/prodavan-host-dns.conf /etc/systemd/resolved.conf.d/99-zz-agentscale-dns.conf",
+      "sudo -n systemctl restart systemd-resolved",
+      "ok=0; for i in $(seq 1 20); do if getent hosts github.com >/dev/null 2>&1; then ok=1; break; fi; sleep 1; done; [ \"$ok\" = 1 ]",
     ]
   }
 }

@@ -131,11 +131,13 @@ Day-2: merge в `main` + Argo. Не `kubectl apply -k infra/k3s/...` рукам�
 Не ставить **Docker Engine** в тот же OS, где k3s (маскировать docker).  
 Не оставлять незалогиненный Tailscale рядом с CNI.
 
-### 3.1 DNS кластера после ребута (инцидент 2026-10-22)
+### 3.1 DNS кластера после ребута (инциденты 2026-10-22, 2026-10-23, 2026-10-29)
 
 **Симптом.** Агент из пода не может достучаться до провайдера ИИ. При этом
 всё остальное зелёное: поды `Running`, HTTP-пробы OK, TCP-egress работает
 (по IP провайдер отвечает). Выглядит как «сломался агент», а ломается DNS.
+2026-10-29 на dev: `auth.x.ai` перестал резолвиться, Grok OAuth (device-flow и
+refresh) отдавал 502 «Сервер временно недоступен».
 
 **Что именно происходит.** CoreDNS форвардит на upstream из своего
 `/etc/resolv.conf`, который kubelet копирует с **хоста** (`dnsPolicy: Default`).
@@ -169,27 +171,38 @@ dig +short @<host-nameserver> github.com
 prodavan-ops dns-check --namespace agentscale
 ```
 
-**Фикс.** Не полагаться на единственный upstream из `/etc/resolv.conf` —
-задать CoreDNS явный список живых резолверов. Патчим ConfigMap `coredns`
-(k3s владеет им, `coredns-custom`/HelmChartConfig для этого не годятся:
-`*.override` с `forward` CoreDNS отклоняет как duplicate plugin, а HelmChart
-coredns в k3s нет):
+**Фикс (декларативный).** Не полагаться на единственный upstream из
+`/etc/resolv.conf` и не полагаться на DoT, который может быть закрыт сетью
+(инцидент 2026-10-29: `DNSOverTLS=yes` на `1.1.1.1:853`, порт заблокирован →
+pod'ы перестали резолвить `auth.x.ai`, Grok OAuth отдавал 502).
+
+Всё задаётся в Terraform-модуле `infra/terraform/modules/k3s-dev-host`:
+
+- `dns_upstreams` — явный `forward . <живой> <резерв> { policy sequential; max_fails 1; health_check 5s }`
+  для CoreDNS. Для dev: `9.9.9.9 8.8.8.8` (1.1.1.1:53 из CoreDNS-пода
+  ловит таймауты под нагрузкой searchnet — проверено 2026-10-29).
+- `host_dns_servers` / `host_dns_over_tls` — managed drop-in
+  `/etc/systemd/resolved.conf.d/99-zz-agentscale-dns.conf` (plain DNS, без DoT)
+  и рестарт `systemd-resolved`. Для dev: `9.9.9.9 8.8.8.8`, `no`.
+- `post-k3s-heal.sh` (systemd `ExecStartPost` k3s) **переприменяет** CoreDNS
+  upstreams после каждого старта k3s, потому что k3s перезаписывает addon
+  ConfigMap. Значения upstream'ов входят в triggers `null_resource`, так что
+  `terraform apply` переустанавливает скрипт при их изменении.
+- `Verify Dev` прогоняет `prodavan-ops dns-check --namespace agentscale-dev`;
+  `REQUIRED_HOSTS` включает `auth.x.ai`, поэтому битый DNS валит деплой, а не
+  всплывает позже как «Сервер временно недоступен».
+
+**Break-glass (только если Terraform/boot-heal ещё не применён).** Патч
+ConfigMap руками; после этого всё равно привести состояние к Terraform:
 
 ```bash
-kubectl -n kube-system get cm coredns -o yaml > /tmp/coredns-backup.yaml   # бэкап!
+kubectl -n kube-system get cm coredns -o yaml > /tmp/coredns-backup.yaml
 # заменить:  forward . /etc/resolv.conf
-# на:        forward . <живой> <резерв> <резерв> { policy sequential  max_fails 1  health_check 5s }
+# на:        forward . 9.9.9.9 8.8.8.8 { policy sequential  max_fails 1  health_check 5s }
 kubectl -n kube-system rollout restart deploy/coredns
 ```
 
-Три upstream + `max_fails 1` + `health_check 5s` дают устойчивость: падение
-одного резолвера больше не выключает DNS всему кластеру. Проверено на prod
-2026-10-22: до фикса — непрерывный поток таймаутов и 0 резолвов из подов,
-после — 0 таймаутов за минуту и провайдер отвечает `HTTP/1.1 200 OK`.
-
-**Профилактика.** `prodavan-ops heal` (post-reboot recovery) теперь вызывает
-`dns-check` и печатает диагноз с инструкцией, а `prodavan-ops dns-check`
-можно ставить в CI/дежурный прогон. Проверка намеренно резолвит **из пода**:
+Проверка: `dns-check` резолвит **из пода** (с хоста ClusterIP недоступен);
 если DNS мёртв, новый под не скачает образ, и проба «не стартует» вместо
 «DNS мёртв» — диагностика теряется.
 
@@ -315,7 +328,7 @@ Keycloak 1.5 + Kafka 2 + searchnet 4 + MongoDB) — запас есть, но н
 |----------|------|
 | CI Gate | `prodavan-ops validate` (+ pytest ops) + api/flutter/schemas |
 | CI Images | buildx → GHCR |
-| Verify Dev | `rollout` + `wait` + `smoke` |
+| Verify Dev | `rollout` + `wait` + `dns-check` (github.com, auth.x.ai) + `smoke` |
 | Auto-merge | squash после Gate |
 
 Self-hosted runners и kubeconfig для Verify — только [`infra/github-runner/`](../../infra/github-runner/README.md) (не bootstrap UI).
