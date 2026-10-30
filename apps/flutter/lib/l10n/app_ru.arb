@@ -1299,6 +1299,14 @@
       }
     }
   },
+  "chatCustomerPositionsTitle": "Позиции заказчика",
+  "chatCustomerPositionsEmpty": "Нет позиций заказчика",
+  "chatCustomerOffersEmpty": "Нет найденных товаров",
+  "chatCustomerOfferPartNumber": "Партномер",
+  "chatCustomerOfferSeller": "Продавец",
+  "chatCustomerOfferExact": "Точное",
+  "chatCustomerOfferAnalog": "Аналог",
+  "chatCustomerOfferDoubt": "Сомнения",
   "chatModelPricePerMtok": "{priceIn} / {priceOut} $ · 1M токенов",
   "@chatModelPricePerMtok": {
     "placeholders": {

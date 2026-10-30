@@ -19,6 +19,7 @@ import 'package:prodavan/features/employee/cabinet_nav_loader.dart';
 import 'package:prodavan/features/employee/project_chat_model_select_page.dart';
 import 'package:prodavan/features/employee/project_chat_settings_page.dart';
 import 'package:prodavan/features/meta/chat_header.dart';
+import 'package:prodavan/features/meta/widgets/customer_positions_panel.dart';
 import 'package:prodavan/features/meta/meta_icon.dart';
 import 'package:prodavan/features/meta/meta_label.dart';
 import 'package:prodavan/features/meta/module_meta_manifest.dart';
@@ -80,6 +81,7 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
   /// Session the header-button load was attempted for (cache guard).
   String? _chatHeaderButtonsSession;
   bool _chatHeaderButtonsLoading = false;
+  bool _hasEquipmentModule = false;
 
   /// Set when the user picked a model explicitly — the session model restore
   /// (first load) must not override an explicit choice.
@@ -407,6 +409,10 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
     try {
       final modules =
           await workContext.api.listProjectModules(widget.projectId);
+      final hasEquipment = modules.any((m) {
+        final mid = m['module_id'] ?? m['id'];
+        return mid?.toString() == 'mod_equipment';
+      });
       final buttons = await loadProjectChatHeaderButtons(
         modules: modules,
         fetchViews: (moduleId) => workContext.api.getProjectRuntimeModuleMeta(
@@ -416,7 +422,10 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
         ),
       );
       if (!mounted) return;
-      setState(() => _chatHeaderButtons = buttons);
+      setState(() {
+        _chatHeaderButtons = buttons;
+        _hasEquipmentModule = hasEquipment;
+      });
     } catch (_) {
       // Silent: header buttons are optional chrome.
     } finally {
@@ -570,6 +579,17 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
                   (_chatSendable && !needsUpdate) ? _pickModelQuick : null,
               onSessionMaterialized: _onSessionMaterialized,
               onDraftPresenceChanged: widget.onDraftPresenceChanged,
+              rightPanel: (_sessionId != null &&
+                      _sessionId!.isNotEmpty &&
+                      _hasEquipmentModule)
+                  ? CustomerPositionsPanel(
+                      key: ValueKey(_sessionId),
+                      api: workContext.api,
+                      cabinetId: widget.cabinetId,
+                      projectId: widget.projectId,
+                      sessionId: _sessionId!,
+                    )
+                  : null,
             ),
     );
   }

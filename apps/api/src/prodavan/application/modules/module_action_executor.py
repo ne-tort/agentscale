@@ -327,6 +327,18 @@ class ModuleActionExecutor:
                 session_id=session_id,
             )
 
+        if kind == "equipment.tender_take_to_work":
+            return await self._tender_take_to_work(
+                cabinet_id=cabinet_id,
+                module_id=module_id,
+                params=params,
+                row_id=row_id,
+                principal=principal,
+                employee=employee,
+                project_id=project_id,
+                session_id=session_id,
+            )
+
         if kind == "equipment.tender_attach":
             return await self._tender_attach(
                 cabinet_id=cabinet_id,
@@ -649,6 +661,49 @@ class ModuleActionExecutor:
             },
         }
 
+    async def _tender_take_to_work(
+        self,
+        *,
+        cabinet_id: str,
+        module_id: str,
+        params: dict[str, Any],
+        row_id: str | None,
+        principal: Principal,
+        employee: EmployeeRow | None,
+        project_id: str | None = None,
+        session_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Создать/найти проект «Тендеры», сессию и взять тендер в работу.
+
+        В отличие от legacy `tender_attach` не зависит от активного чата:
+        позиции копируются в новую/переиспользованную сессию проекта «Тендеры»,
+        тендер получает work_status=in_progress, а агент — kickoff-сообщение
+        с полными данными тендера.
+        """
+        tender_id = (row_id or str(params.get("tender_id") or "")).strip()
+        if not tender_id:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="row_id (тендер) обязателен",
+            )
+        if not project_id:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="project_id обязателен для взятия тендера в работу",
+            )
+        from prodavan.application.tenders.workflow import TenderWorkflowService
+
+        return await TenderWorkflowService(self._session).take_to_work(
+            project_id=project_id,
+            tender_id=tender_id,
+            principal=principal,
+            employee=employee,
+        )
+
     async def _tender_attach(
         self,
         *,
@@ -672,8 +727,8 @@ class ModuleActionExecutor:
         прогон пайплайна (материализация офферов, бюджет, закупка, тендеры).
         """
         from prodavan.application.modules.equipment_offers_service import (
-            ModuleRowIO,
             TENDERS_TABLE,
+            ModuleRowIO,
         )
 
         tender_id = (row_id or str(params.get("tender_id") or "")).strip()
@@ -850,7 +905,8 @@ class ModuleActionExecutor:
             body["error"] = str(exc)[:500]
             await io.update("mail_outbox", row_id, body)
             raise
-        from datetime import UTC, datetime as _dt
+        from datetime import UTC
+        from datetime import datetime as _dt
 
         body["status"] = "sent"
         body["error"] = ""

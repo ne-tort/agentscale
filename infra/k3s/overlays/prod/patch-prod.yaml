@@ -108,6 +108,12 @@ data:
   WEB_SEARCH_BACKEND_URL: "http://searchnet.agentscale.svc:3950"
   # См. dev: внутренний бюджет searchnet 32с; 30с обрывал первый поиск.
   WEB_SEARCH_TIMEOUT_SEC: "45"
+  # B2B-Center: prod project «Тендеры» (existing intake target).
+  B2B_CENTER_ENABLED: "true"
+  B2B_CENTER_PROJECT_ID: "proj_4cd777cfaeec4169"
+  B2B_CENTER_CATEGORIES: '["it","power","office"]'
+  B2B_CENTER_INTERVAL_SEC: "14400"
+  B2B_CENTER_MAX_CARDS_PER_RUN: "40"
   POD_PROBE_ENABLED: "false"
 ---
 # Prod HTTP router: host-pinned (dev keeps the wildcard rule for punnel/VPN).

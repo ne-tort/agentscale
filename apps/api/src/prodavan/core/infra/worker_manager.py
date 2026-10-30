@@ -245,6 +245,16 @@ class WorkerManager(LifespanResource):
             "task": job_names.SWEEP_WEB_PRODUCTS_TTL,
             "schedule": schedule(run_every=900.0),
         }
+        # B2B-Center tender import: no-op when B2B_CENTER_ENABLED=false. The
+        # cadence is owned by settings; a lock coalesces replicas.
+        from prodavan.config.settings import settings as app_settings
+
+        beat["prodavan-b2b-tender-import"] = {
+            "task": job_names.B2B_TENDER_IMPORT,
+            "schedule": schedule(
+                run_every=max(900.0, float(app_settings.b2b_center_interval_sec))
+            ),
+        }
         app.conf.beat_schedule = beat
         job_tasks.register_tasks(app)
         return app

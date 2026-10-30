@@ -114,6 +114,7 @@ class CollectionViewInterpreter extends StatelessWidget {
         styled = _withWarningCells(context, uiJson, styled);
         var rows = _withSelection(context, uiJson, styled);
         rows = _withEditableCells(context, uiJson, tableSlug, rows);
+        rows = _withRowActions(context, uiJson, l10n, locale, rows);
         rows = _withBenefitBadges(context, uiJson, l10n, rows);
         final hasInline = _hasInlineAdd(uiJson);
         final hasPoll = _hasActivePoll(uiJson, rawRows, seeds);
@@ -687,7 +688,7 @@ class CollectionViewInterpreter extends StatelessWidget {
   ) {
     final raw = uiJson['columns'];
     if (raw is! List) return const [];
-    return raw.whereType<Map>().map((c) {
+    final out = raw.whereType<Map>().map((c) {
       final labelRaw = c['label'] ?? c['field'];
       final alignRaw = c['align']?.toString() ?? '';
       final formatRaw = c['format']?.toString() ?? '';
@@ -709,6 +710,82 @@ class CollectionViewInterpreter extends StatelessWidget {
         },
       );
     }).where((c) => c.id.isNotEmpty).toList();
+    // Row-level icon actions (e.g. «Взять в работу» in tenders). Rendered as
+    // the last table column; see _withRowActions.
+    final rowActions = uiJson['row_actions'];
+    if (rowActions is List && rowActions.whereType<Map>().isNotEmpty) {
+      out.add(
+        const AppEntityColumn(
+          id: '__row_actions',
+          label: '',
+          width: 52,
+          align: AppEntityColumnAlign.center,
+        ),
+      );
+    }
+    return out;
+  }
+
+  /// `ui_json.row_actions: [{action, icon, label, tooltip, when}]` — icon
+  /// buttons in a synthetic right column. The row tap still opens the form.
+  List<AppEntityRow> _withRowActions(
+    BuildContext context,
+    Map<String, dynamic> uiJson,
+    AppLocalizations l10n,
+    Locale locale,
+    List<AppEntityRow> rows,
+  ) {
+    final raw = uiJson['row_actions'];
+    if (raw is! List || readOnly) return rows;
+    final actions = raw.whereType<Map>().toList();
+    if (actions.isEmpty) return rows;
+    return rows.map((row) {
+      final item = seeds.itemById(row.id);
+      final body = item is Map && item['body'] is Map
+          ? Map<String, dynamic>.from(item['body'] as Map)
+          : <String, dynamic>{};
+      final buttons = <Widget>[];
+      for (final action in actions) {
+        final actionId = action['action']?.toString() ?? '';
+        if (actionId.isEmpty) continue;
+        final when = action['when'];
+        if (when is Map &&
+            !_bodyMatchesWhen(body, Map<String, dynamic>.from(when))) {
+          continue;
+        }
+        final label = resolveMetaLabel(
+          action['label'] ?? actionId,
+          l10n,
+          locale: locale,
+        );
+        final iconName = action['icon']?.toString() ?? 'bolt';
+        buttons.add(
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 2),
+            child: IconButton(
+              visualDensity: VisualDensity.compact,
+              tooltip: label.isEmpty ? actionId : label,
+              iconSize: 18,
+              icon: Icon(metaIconFromName(iconName, fallback: Icons.bolt)),
+              onPressed: () => _invokeAction(context, actionId, rowId: row.id),
+            ),
+          ),
+        );
+      }
+      if (buttons.isEmpty) return row;
+      return AppEntityRow(
+        id: row.id,
+        title: row.title,
+        subtitle: row.subtitle,
+        cells: row.cells,
+        cellWidgets: {...row.cellWidgets, '__row_actions': Row(mainAxisSize: MainAxisSize.min, children: buttons)},
+        leading: row.leading,
+        trailing: row.trailing,
+        titleColor: row.titleColor,
+        rowColor: row.rowColor,
+        titleBold: row.titleBold,
+      );
+    }).toList();
   }
 
   /// `editable: true` columns render tap-to-edit cells (numeric).

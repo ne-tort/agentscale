@@ -67,6 +67,7 @@ Future<void> _pumpScaffold(WidgetTester tester, {required bool withChecklist}) a
           chatSendable: true,
           loading: false,
           title: const Text('chat'),
+          showChecklist: withChecklist,
         ),
       ),
     ),
