@@ -116,8 +116,18 @@ class B2BImportService:
                 keywords_include=list(cfg.b2b_center_keywords_include or []),
                 keywords_exclude=list(cfg.b2b_center_keywords_exclude or []),
             )
-            # New refs first so a capped run always discovers fresh tenders.
-            refs.sort(key=lambda r: (f"b2b:{r.uid}" in by_ref, r.uid))
+            # Refresh due known tenders first (description/positions updates),
+            # then discover new refs, then known-but-not-due. With a per-run cap
+            # this prevents both starvation directions.
+            def _order(ref: B2BTradeRef) -> tuple[int, str]:
+                body = (by_ref.get(f"b2b:{ref.uid}") or {}).get("body")
+                if isinstance(body, dict) and self._is_due(body, ref):
+                    return (0, ref.uid)
+                if f"b2b:{ref.uid}" not in by_ref:
+                    return (1, ref.uid)
+                return (2, ref.uid)
+
+            refs.sort(key=_order)
             limit = max(1, int(cfg.b2b_center_max_cards_per_run))
             for ref in refs[:limit]:
                 source_ref = f"b2b:{ref.uid}"
