@@ -109,6 +109,12 @@ class B2BImportService:
                 ref = str(body.get("source_ref") or "").strip()
                 if ref:
                     by_ref[ref] = row
+                # Lifecycle is derived from the deadline: refresh it for every
+                # stored tender on each run, even when the card isn't refetched.
+                if body and row.get("row_id"):
+                    await self._refresh_lifecycle(
+                        instances, instance.id, str(row["row_id"]), body
+                    )
             flt = B2BCategoryFilter(
                 categories=list(cfg.b2b_center_categories or []),
                 min_remaining_hours=cfg.b2b_center_min_remaining_hours,
