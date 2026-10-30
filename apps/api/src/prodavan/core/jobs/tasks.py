@@ -462,6 +462,31 @@ def register_tasks(app) -> None:
         logger.info("celery task %s", job_names.SWEEP_WEB_PRODUCTS_TTL)
         return run_async(_run())
 
+    @app.task(name=job_names.B2B_TENDER_IMPORT, bind=False)
+    def b2b_tender_import() -> dict[str, Any]:
+        """B2B-Center: импорт/обновление тендеров в таблицу mod_equipment.
+
+        Работает без вебхуков и без отдельного docker-compose: B2B-Center
+        Integration API опрашивается напрямую, строки пишутся в module JSONB.
+        """
+        from prodavan.application.b2b.importer import B2BImportService
+        from prodavan.infrastructure.persistence.database import get_session_factory
+
+        async def _run() -> dict[str, Any]:
+            async def _work() -> dict[str, Any]:
+                factory = get_session_factory()
+                async with factory() as session:
+                    return await B2BImportService(session).run()
+
+            return await run_with_job_lock(
+                "b2b_tender_import",
+                ttl_sec=3 * 3600,
+                fn=_work,
+            )
+
+        logger.info("celery task %s", job_names.B2B_TENDER_IMPORT)
+        return run_async(_run())
+
     @app.task(name=job_names.WEBHOOK_DELIVER, bind=False)
     def webhook_deliver() -> dict[str, Any]:
         """Исходящие вебхуки: доставка outbox (подписанные POST + ретраи)."""

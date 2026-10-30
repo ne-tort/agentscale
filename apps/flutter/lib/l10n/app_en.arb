@@ -1310,6 +1310,14 @@
       }
     }
   },
+  "chatCustomerPositionsTitle": "Customer positions",
+  "chatCustomerPositionsEmpty": "No customer positions",
+  "chatCustomerOffersEmpty": "No found products",
+  "chatCustomerOfferPartNumber": "Part number",
+  "chatCustomerOfferSeller": "Seller",
+  "chatCustomerOfferExact": "Exact",
+  "chatCustomerOfferAnalog": "Analog",
+  "chatCustomerOfferDoubt": "Doubt",
   "chatModelPricePerMtok": "{priceIn} / {priceOut} $ · 1M tokens",
   "@chatModelPricePerMtok": {
     "placeholders": {

@@ -34,7 +34,7 @@ def _equipment_mcp_list_header() -> dict[str, Any]:
         "table_slug": "equipment_mcp",
         "ensure_row": {
             "name": "prodavan-equipment",
-            "version": "3.2.0",
+            "version": "3.3.0",
             "enabled": True,
         },
         "fields": [
@@ -4185,9 +4185,200 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "type": "text",
                 "required": False,
             },
+            # WAVE17 (B2B): структурированные поля импорта из B2B-Center.
+            # description/positions/цена/ссылка/номер/закон — то, что нужно
+            # агенту и человеку без повторного похода на площадку.
+            {
+                "table_slug": "tenders",
+                "name": "number",
+                "label": {"ru": "Номер процедуры", "en": "Procedure number"},
+                "type": "text",
+                "required": False,
+            },
+            {
+                "table_slug": "tenders",
+                "name": "description",
+                "label": {"ru": "Описание", "en": "Description"},
+                "type": "text",
+                "required": False,
+            },
+            {
+                "table_slug": "tenders",
+                "name": "customer_inn",
+                "label": {"ru": "ИНН заказчика", "en": "Customer INN"},
+                "type": "text",
+                "required": False,
+            },
+            {
+                "table_slug": "tenders",
+                "name": "organizer",
+                "label": {"ru": "Организатор", "en": "Organizer"},
+                "type": "text",
+                "required": False,
+            },
+            {
+                "table_slug": "tenders",
+                "name": "federal_law",
+                "label": {"ru": "Закон", "en": "Federal law"},
+                "type": "text",
+                "required": False,
+            },
+            {
+                "table_slug": "tenders",
+                "name": "trade_type",
+                "label": {"ru": "Тип процедуры", "en": "Procedure type"},
+                "type": "text",
+                "required": False,
+            },
+            {
+                "table_slug": "tenders",
+                "name": "procedure_place",
+                "label": {"ru": "Место проведения", "en": "Procedure place"},
+                "type": "text",
+                "required": False,
+            },
+            {
+                "table_slug": "tenders",
+                "name": "category",
+                "label": {"ru": "Категория", "en": "Category"},
+                "type": "enum",
+                "required": False,
+                "default": "other",
+                "enum": {
+                    "values": ["it", "power", "office", "construction", "medical", "auto", "other"],
+                    "labels": {
+                        "it": "ИТ и вычислительная техника",
+                        "power": "Электрика и питание",
+                        "office": "Офис и мебель",
+                        "construction": "Строительство",
+                        "medical": "Медицина",
+                        "auto": "Авто и спецтехника",
+                        "other": "Другое",
+                    },
+                },
+            },
+            {
+                "table_slug": "tenders",
+                "name": "price_total",
+                "label": {"ru": "Сумма тендера ₽", "en": "Tender amount"},
+                "type": "number",
+                "required": False,
+            },
+            {
+                "table_slug": "tenders",
+                "name": "currency",
+                "label": {"ru": "Валюта", "en": "Currency"},
+                "type": "text",
+                "required": False,
+                "default": "RUB",
+            },
+            {
+                "table_slug": "tenders",
+                "name": "published_at",
+                "label": {"ru": "Опубликован", "en": "Published"},
+                "type": "datetime",
+                "required": False,
+            },
+            # Два независимых статуса: срок жизни вычисляется автоматически,
+            # статус работы меняет человек/агент.
+            {
+                "table_slug": "tenders",
+                "name": "lifecycle_status",
+                "label": {"ru": "Срок жизни", "en": "Lifecycle"},
+                "type": "enum",
+                "required": False,
+                "default": "active",
+                "read_only": True,
+                "enum": {
+                    "values": ["active", "inactive"],
+                    "labels": {"active": "Активный", "inactive": "Неактивный"},
+                },
+            },
+            {
+                "table_slug": "tenders",
+                "name": "work_status",
+                "label": {"ru": "Статус работы", "en": "Work status"},
+                "type": "enum",
+                "required": False,
+                "default": "new",
+                "enum": {
+                    "values": ["new", "in_progress", "processed", "invalid", "on_hold"],
+                    "labels": {
+                        "new": "Новый",
+                        "in_progress": "Взят в работу",
+                        "processed": "Обработан",
+                        "invalid": "Невалиден",
+                        "on_hold": "На паузе",
+                    },
+                },
+            },
+            {
+                "table_slug": "tenders",
+                "name": "source_platform",
+                "label": {"ru": "Площадка", "en": "Platform"},
+                "type": "text",
+                "required": False,
+                "default": "b2b-center",
+                "read_only": True,
+                "hidden": True,
+            },
+            {
+                "table_slug": "tenders",
+                "name": "source_streams",
+                "label": {"ru": "Потоки", "en": "Streams"},
+                "type": "text",
+                "required": False,
+                "read_only": True,
+                "hidden": True,
+            },
+            {
+                "table_slug": "tenders",
+                "name": "okpd_codes",
+                "label": {"ru": "ОКПД2", "en": "OKPD2"},
+                "type": "json",
+                "required": False,
+                "default": [],
+                "read_only": True,
+                "hidden": True,
+            },
+            {
+                "table_slug": "tenders",
+                "name": "content_hash",
+                "label": {"ru": "Хэш источника", "en": "Source hash"},
+                "type": "text",
+                "required": False,
+                "read_only": True,
+                "hidden": True,
+            },
+            {
+                "table_slug": "tenders",
+                "name": "last_synced_at",
+                "label": {"ru": "Обновлён из источника", "en": "Source synced"},
+                "type": "datetime",
+                "required": False,
+                "read_only": True,
+                "hidden": True,
+            },
+            {
+                "table_slug": "tenders",
+                "name": "taken_at",
+                "label": {"ru": "Взят в работу", "en": "Taken at"},
+                "type": "datetime",
+                "required": False,
+                "read_only": True,
+                "hidden": True,
+            },
+            {
+                "table_slug": "tenders",
+                "name": "taken_by",
+                "label": {"ru": "Кто взял", "en": "Taken by"},
+                "type": "text",
+                "required": False,
+                "read_only": True,
+                "hidden": True,
+            },
             # Позиции тендера — SoT состава. Элемент: {id, title, part_number,
-            # qty}. Импорт в чат (tender_attach) копирует их в request_lines с
-            # tender_id + tender_line_id = lines_json[].id.
+            # qty, unit, price, comment, source_position_id}.
             {
                 "table_slug": "tenders",
                 "name": "lines_json",
@@ -7301,14 +7492,15 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "kind": "collection",
                     "scaffold": {"title": {"ru": "Тендеры", "en": "Tenders"}},
                     "title_field": "title",
-                    "subtitle_fields": ["customer", "status"],
-                    "on_load": {"action": "equipment_pipeline_sync"},
+                    "subtitle_fields": ["customer", "work_status"],
+                    # импортёр пишет строки сам; не запускаем тяжёлый pipeline
+                    # на каждом открытии списка (O(T×B) на тысячах тендеров).
                     "columns": [
                         {
                             "field": "title",
                             "label": {"ru": "Название", "en": "Title"},
                             "max_lines": 2,
-                            "width": 240,
+                            "width": 250,
                         },
                         {
                             "field": "customer",
@@ -7317,10 +7509,39 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "max_width": 180,
                         },
                         {
+                            "field": "category",
+                            "label": {"ru": "Категория", "en": "Category"},
+                            "max_width": 140,
+                        },
+                        {
                             "field": "positions_count",
                             "label": {"ru": "Позиций", "en": "Positions"},
                             "align": "end",
                             "max_width": 90,
+                        },
+                        {
+                            "field": "price_total",
+                            "label": {"ru": "Сумма тендера", "en": "Tender amount"},
+                            "format": "money",
+                            "align": "end",
+                            "max_width": 130,
+                        },
+                        {
+                            "field": "deadline_at",
+                            "label": {"ru": "Срок подачи", "en": "Deadline"},
+                            "format": "deadline",
+                            "align": "end",
+                            "max_width": 120,
+                        },
+                        {
+                            "field": "lifecycle_status",
+                            "label": {"ru": "Срок жизни", "en": "Lifecycle"},
+                            "max_width": 120,
+                        },
+                        {
+                            "field": "work_status",
+                            "label": {"ru": "Статус работы", "en": "Work status"},
+                            "max_width": 140,
                         },
                         {
                             "field": "found_pct",
@@ -7331,7 +7552,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                         },
                         {
                             "field": "sum_rub",
-                            "label": {"ru": "Сумма ₽", "en": "Sum RUB"},
+                            "label": {"ru": "Сумма подбора ₽", "en": "Selected RUB"},
                             "format": "money",
                             "align": "end",
                             "max_width": 130,
@@ -7341,36 +7562,38 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "label": {"ru": "Маржа", "en": "Margin"},
                             "format": "margin_pair",
                             "align": "end",
-                            "max_width": 150,
+                            "max_width": 140,
                         },
+                    ],
+                    "sort": [
+                        {"field": "published_at", "dir": "desc"},
+                        {"field": "deadline_at", "dir": "asc"},
+                    ],
+                    # Правая иконка строки: backend сам создаёт/находит проект
+                    # «Тендеры», сессию и копирует позиции.
+                    "row_actions": [
                         {
-                            "field": "suppliers_count",
-                            "label": {"ru": "Поставщиков", "en": "Suppliers"},
-                            "align": "end",
-                            "max_width": 110,
-                        },
-                        {
-                            "field": "deadline_at",
-                            "label": {"ru": "Срок подачи", "en": "Deadline"},
-                            "format": "deadline",
-                            "align": "end",
-                            "max_width": 120,
-                        },
-                        {
-                            "field": "status",
-                            "label": {"ru": "Статус", "en": "Status"},
-                            "max_width": 130,
-                        },
+                            "action": "tender_take_to_work",
+                            "icon": "playlist_add_check",
+                            "label": {"ru": "Взять в работу", "en": "Take to work"},
+                            "when": {"field": "work_status", "in": ["new", "on_hold"]},
+                        }
                     ],
                     "row_tap": {"kind": "open_form", "view": "tenders_form"},
                     "inline_add": {"field": "title", "title": "Добавить тендер"},
-                    # отбракованные (агентом или вручную) — приглушены warning-ом
                     "row_style": [
                         {
-                            "when": {"field": "status", "eq": "irrelevant"},
+                            "when": {"field": "lifecycle_status", "eq": "inactive"},
                             "accent": "warning",
                         },
-                        {"when": {"field": "status", "eq": "won"}, "accent": "success"},
+                        {
+                            "when": {"field": "work_status", "eq": "invalid"},
+                            "accent": "error",
+                        },
+                        {
+                            "when": {"field": "work_status", "eq": "processed"},
+                            "accent": "success",
+                        },
                     ],
                     "empty": _empty(
                         "Нет тендеров",
@@ -7388,17 +7611,31 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "kind": "form",
                     "mode": "edit",
                     "title": {"ru": "Тендер", "en": "Tender"},
+                    "scaffold": {
+                        "actions": [
+                            {
+                                "kind": "invoke_action",
+                                "action": "tender_take_to_work",
+                                "icon": "playlist_add_check",
+                                "label": {"ru": "Взять в работу", "en": "Take to work"},
+                            }
+                        ]
+                    },
                     "fields": [
                         {"column": "title", "widget": "value", "icon": "gavel"},
                         {"column": "customer", "widget": "value", "icon": "business"},
+                        {"column": "number", "widget": "value", "icon": "tag"},
+                        {"column": "category", "widget": "value", "icon": "category"},
                         {"column": "deadline_at", "widget": "value", "icon": "event"},
-                        {"column": "status", "widget": "choice", "icon": "flag"},
-                        {"column": "comment", "widget": "value", "icon": "notes"},
-                        # WAVE15: источник тендера (b2b-center и т.п.) — read-only,
-                        # заполняется внешним intake (external API), не пайплайном.
+                        {"column": "lifecycle_status", "widget": "value", "icon": "hourglass"},
+                        {"column": "work_status", "widget": "choice", "icon": "flag"},
+                        {"column": "price_total", "widget": "value", "icon": "payments"},
+                        {"column": "description", "widget": "markdown_editor", "icon": "notes"},
+                        {"column": "comment", "widget": "value", "icon": "edit_note"},
+                        {"column": "federal_law", "widget": "value", "icon": "gavel"},
+                        {"column": "organizer", "widget": "value", "icon": "corporate_fare"},
                         {"column": "source_url", "widget": "value", "icon": "link"},
                         {"column": "source_ref", "widget": "value", "icon": "tag"},
-                        {"column": "relevance_note", "widget": "value", "icon": "psychology"},
                         {"column": "lines_json", "widget": "tender_lines_table"},
                         {"column": "project_ids", "widget": "project_multiselect"},
                     ],
@@ -7635,19 +7872,30 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "trigger": {"on": [], "async": False},
                     "ui": {"placement": ["row"], "icon": "add_shopping_cart"},
                 },
-                # WAVE14: «Взять в работу» — позиции тендера (lines_json)
-                # копируются в request_lines АКТИВНОГО чата со ссылкой
-                # tender_id + tender_line_id (идемпотентно: повторный вызов
-                # обновляет существующие позиции, а не дублирует). Вызывается
-                # из MCP (tender_attach) и кнопкой на карточке/строке тендера.
+                # WAVE17: «Взять в работу» — backend сам находит/создаёт проект
+                # «Тендеры», создаёт сессию, копирует позиции и запускает
+                # стартовый ход. В отличие от tender_attach не зависит от
+                # активного чата и не уводит позиции в synthetic main.
+                {
+                    "id": "tender_take_to_work",
+                    "label": {"ru": "Взять в работу", "en": "Take to work"},
+                    "kind": "equipment.tender_take_to_work",
+                    "enabled": True,
+                    "params": {"project_name": "Тендеры"},
+                    "trigger": {"on": [], "async": False},
+                    "ui": {"placement": ["row", "scaffold"], "icon": "playlist_add_check"},
+                },
+                # WAVE14 legacy: позиции тендера в АКТИВНЫЙ чат (MCP/external
+                # intake). В UI не показываем — для человека есть
+                # tender_take_to_work выше.
                 {
                     "id": "tender_attach",
-                    "label": {"ru": "В чат", "en": "Take to chat"},
+                    "label": {"ru": "В текущий чат", "en": "Attach to current chat"},
                     "kind": "equipment.tender_attach",
                     "enabled": True,
                     "params": {},
                     "trigger": {"on": [], "async": False},
-                    "ui": {"placement": ["row", "scaffold"], "icon": "playlist_add_check"},
+                    "ui": {"placement": [], "icon": "playlist_add_check"},
                 },
                 # WAVE7: ручная правка строки «Закупка» (маржа % → реестр
                 # поставщиков и бюджетные строки, доставка → суммы).
@@ -8190,7 +8438,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "row_id": "equipment_mcp_default",
                     "body": {
                         "name": "prodavan-equipment",
-                        "version": "3.2.0",
+                        "version": "3.3.0",
                         "enabled": True,
                     },
                 },

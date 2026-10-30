@@ -175,6 +175,13 @@ data:
   # успевал и кэшировал, поэтому второй запрос был мгновенным). 45с — выше
   # внутреннего бюджета, но ниже таймаута tool'а.
   WEB_SEARCH_TIMEOUT_SEC: "45"
+  # B2B-Center importer: credentials come from agentscale-b2b-secrets
+  # (optional secret; empty -> importer logs skipped, API stays healthy).
+  B2B_CENTER_ENABLED: "true"
+  B2B_CENTER_PROJECT_ID: "proj_b020562c389e4bd5"
+  B2B_CENTER_CATEGORIES: '["it","power","office"]'
+  B2B_CENTER_INTERVAL_SEC: "14400"
+  B2B_CENTER_MAX_CARDS_PER_RUN: "40"
   # Platform probe pod — verify AI keys & fetch their model list via agent-runtime.
   # The probe pod runs in agentscale-dev-sandboxes (see sandboxes/probe-pod.yaml).
   POD_PROBE_ENABLED: "true"

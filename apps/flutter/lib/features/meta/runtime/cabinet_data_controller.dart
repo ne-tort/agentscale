@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 
 import 'package:prodavan/core/api/prodavan_api.dart';
+import 'package:prodavan/core/session/chat_open_intent.dart';
 import 'package:prodavan/core/widgets/app_entity_collection.dart';
 import 'package:prodavan/features/meta/module_cell_format.dart';
 import 'package:prodavan/features/meta/module_meta_manifest.dart';
@@ -466,6 +467,19 @@ class CabinetDataController extends ChangeNotifier with ModulePickContextMixin {
       sessionId: sessionId,
     );
     await loadAll();
+    final movedSessionId = result['session_id']?.toString();
+    final openedProjectId = result['project_id']?.toString();
+    if (movedSessionId != null &&
+        movedSessionId.isNotEmpty &&
+        openedProjectId != null &&
+        openedProjectId.isNotEmpty) {
+      chatOpenIntent.value = ChatOpenIntent(
+        projectId: openedProjectId,
+        sessionId: movedSessionId,
+        projectName: result['project_name']?.toString(),
+        title: result['title']?.toString(),
+      );
+    }
     return result;
   }
 

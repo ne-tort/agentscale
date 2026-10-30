@@ -50,12 +50,13 @@ EQUIPMENT_AGENTS_MD = """\
 
 ## Что принадлежит платформе
 
-Не пишешь и не пересчитываешь: `status`, `found_count`, `selected_offer_id`,
-`offers_count`, `is_best`, лица групп, `components_count`, `price_total`,
-`best_*` карточек, `resolved_*` и `constraints_label` слотов,
-`spec_summary`, `price_*`, `compat_*` сборок, поля тендеров
-(`positions_count`, `found_pct`, `sum_rub`, `margin_pct`,
-`suppliers_count`, `imported_chat_ids`).
+Не пишешь и не пересчитываешь: `status`, `work_status`, `lifecycle_status`,
+`found_count`, `selected_offer_id`, `offers_count`, `is_best`, лица групп,
+`components_count`, `price_total`, `best_*` карточек, `resolved_*` и
+`constraints_label` слотов, `spec_summary`, `price_*`, `compat_*` сборок,
+поля тендеров (`positions_count`, `found_pct`, `sum_rub`, `margin_pct`,
+`suppliers_count`, `imported_chat_ids`, `source_*`). Тендеры и их позиции
+приходят из B2B-импортёра и доступны только на чтение.
 
 Твоя запись группы или карточки запускает пайплайн: офферы и цены появятся
 сами. Никогда не копируй товары и цены из поиска в `found_offers`.
@@ -107,7 +108,9 @@ MCP `prodavan-equipment` (подключён): `equipment_catalog_sources`,
 `found_groups_*`, `equipment_types_list`, `part_cards_list`,
 `part_card_upsert`, `part_card_delete`, `ready_builds_list`,
 `ready_build_get`, `ready_build_upsert`, `ready_build_slot_upsert`,
-`ready_build_attach`, `equipment_builds_*`, `tenders_*`, `tender_attach`.
+`ready_build_attach`, `equipment_builds_*`, `tenders_list`, `tender_get`,
+`tender_take_to_work`. Не вызывай `tender_upsert`/`tender_positions_upsert`:
+источник тендеров — импортёр, правки состава в чате запрещены.
 
 Встроенные: `web.search` (сверка партномеров и характеристик, не источник цен
 для офферов), `web.fetch` (страница магазина), `todo.write` (чеклист),
@@ -151,10 +154,25 @@ EQUIPMENT_RULES_FILES: list[_EquipmentRuleFile] = [
         """\
 # Тендеры
 
-Позиции могут прийти из тендера (внешний источник, напр. b2b-center): у них
-заполнены `tender_id` и `tender_line_id`. `tender_attach` берёт тендер в
-работу и копирует позиции в чат; `tender_upsert` со `status=irrelevant` и
-коротким `relevance_note` — отбраковка (после неё по тендеру остановись).
+Тендеры приходят из B2B-Center автоматически и лежат в таблице `tenders`.
+Позиции тендера, взятые в работу, уже скопированы в `request_lines` этого чата
+со связкой `tender_id` + `tender_line_id`; отдельно ничего импортировать не
+нужно.
+
+## Что делает человек
+
+В таблице тендеров есть действие «Взять в работу»: backend сам создаёт/находит
+проект «Тендеры», открывает сессию и присылает тебе данные тендера. Ты не
+создаёшь тендеры, не меняешь их состав и не вызываешь вебхуки.
+
+## Статусы
+
+- `lifecycle_status` — `active`/`inactive`, вычисляется по сроку подачи;
+  `inactive` не работаем.
+- `work_status` — `new`, `in_progress`, `processed`, `invalid`, `on_hold`.
+  После взятия в работу он уже `in_progress`; `processed` ставь, когда все
+  позиции обработаны, `invalid` — если тендер не наш (с объяснением в
+  `relevance_note`), `on_hold` — если нужны данные заказчика.
 
 ## Наш профиль
 
@@ -179,8 +197,9 @@ EQUIPMENT_RULES_FILES: list[_EquipmentRuleFile] = [
 
 `comment` тендера — требования заказчика к предложению: форма КП,
 сертификаты, сроки оплаты, поставка. Читай их перед отправкой: там сказано,
-нужны ли все позиции и что приложить. Метаданные площадки (номер, закон,
-организатор) — в поле `meta`, это не требования.
+нужны ли все позиции и что приложить. Структурированные метаданные площадки
+(`number`, `federal_law`, `organizer`, `source_url`, `price_total`) — в полях
+тендера, это не требования.
 """,
         5,
     ),

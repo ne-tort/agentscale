@@ -126,6 +126,22 @@ IconData metaIconFromName(String? name, {IconData fallback = Icons.extension_out
       return Icons.toggle_on_outlined;
     case 'currency_exchange':
       return Icons.currency_exchange;
+    // Tenders / B2B
+    case 'gavel':
+      return Icons.gavel_rounded;
+    case 'playlist_add_check':
+      return Icons.playlist_add_check_rounded;
+    case 'hourglass':
+    case 'hourglass_empty':
+      return Icons.hourglass_empty_rounded;
+    case 'corporate_fare':
+      return Icons.corporate_fare_rounded;
+    case 'edit_note':
+      return Icons.edit_note_rounded;
+    case 'payments':
+      return Icons.payments_outlined;
+    case 'business':
+      return Icons.business_rounded;
     default:
       return fallback;
   }

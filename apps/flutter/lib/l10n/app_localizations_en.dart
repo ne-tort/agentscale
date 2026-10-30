@@ -2160,6 +2160,30 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String get chatCustomerPositionsTitle => 'Customer positions';
+
+  @override
+  String get chatCustomerPositionsEmpty => 'No customer positions';
+
+  @override
+  String get chatCustomerOffersEmpty => 'No found products';
+
+  @override
+  String get chatCustomerOfferPartNumber => 'Part number';
+
+  @override
+  String get chatCustomerOfferSeller => 'Seller';
+
+  @override
+  String get chatCustomerOfferExact => 'Exact';
+
+  @override
+  String get chatCustomerOfferAnalog => 'Analog';
+
+  @override
+  String get chatCustomerOfferDoubt => 'Doubt';
+
+  @override
   String chatModelPricePerMtok(String priceIn, String priceOut) {
     return '$priceIn / $priceOut \$ · 1M tokens';
   }

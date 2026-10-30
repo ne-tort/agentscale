@@ -2182,6 +2182,30 @@ class AppLocalizationsRu extends AppLocalizations {
   }
 
   @override
+  String get chatCustomerPositionsTitle => 'Позиции заказчика';
+
+  @override
+  String get chatCustomerPositionsEmpty => 'Нет позиций заказчика';
+
+  @override
+  String get chatCustomerOffersEmpty => 'Нет найденных товаров';
+
+  @override
+  String get chatCustomerOfferPartNumber => 'Партномер';
+
+  @override
+  String get chatCustomerOfferSeller => 'Продавец';
+
+  @override
+  String get chatCustomerOfferExact => 'Точное';
+
+  @override
+  String get chatCustomerOfferAnalog => 'Аналог';
+
+  @override
+  String get chatCustomerOfferDoubt => 'Сомнения';
+
+  @override
   String chatModelPricePerMtok(String priceIn, String priceOut) {
     return '$priceIn / $priceOut \$ · 1M токенов';
   }
