@@ -455,6 +455,25 @@ class Settings(BaseSettings):
     # Idle pause sweep shares the trigger worker loop when enabled (default off).
     idle_pause_worker_enabled: bool = False
 
+    # B2B-Center tender importer (supplier Integration API, read-only).
+    # Credentials live in the k8s secret `agentscale-b2b-secrets`; empty values
+    # disable the importer without breaking the API.
+    b2b_center_enabled: bool = False
+    b2b_center_base_url: str = "https://www.b2b-center.ru/integration"
+    b2b_center_login: str = ""
+    b2b_center_password: str = ""
+    b2b_center_project_id: str = ""
+    b2b_center_cabinet_id: str = ""
+    b2b_center_categories: list[str] = Field(default_factory=lambda: ["it", "power", "office"])
+    b2b_center_min_remaining_hours: float = 24.0
+    b2b_center_skip_not_open: bool = False
+    b2b_center_keywords_include: list[str] = Field(default_factory=list)
+    b2b_center_keywords_exclude: list[str] = Field(default_factory=list)
+    b2b_center_interval_sec: int = 4 * 3600
+    b2b_center_max_cards_per_run: int = 40
+    # New session/project for "Взять в работу".
+    tender_project_name: str = "Тендеры"
+
     # P0 Celery (C-JOBS). When enabled + broker, in-process trigger loop is skipped.
     celery_enabled: bool = False
     celery_broker_url: str | None = None  # default: REDIS_URL

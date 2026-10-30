@@ -22,6 +22,7 @@ from prodavan.api.v1 import (
     agent,
     ai_keys,
     auth,
+    b2b,
     cabinets,
     company_ai_keys,
     company_ai_models,
@@ -72,5 +73,6 @@ router.include_router(projects.router)
 router.include_router(tenant_infra.router)
 router.include_router(pod_modules.router)
 router.include_router(agent.router)
+router.include_router(b2b.router)
 router.include_router(external.router)
 router.include_router(internal_pods.router)

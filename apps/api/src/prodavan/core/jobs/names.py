@@ -19,3 +19,5 @@ WEBHOOK_DELIVER = "prodavan.jobs.webhook_deliver"
 BIND_REFRESH_SWEEP = "prodavan.jobs.bind_refresh_sweep"
 # TTL 72ч для «Интернет товары» (web_products)
 SWEEP_WEB_PRODUCTS_TTL = "prodavan.jobs.sweep_web_products_ttl"
+# B2B-Center: периодический импорт тендеров в mod_equipment
+B2B_TENDER_IMPORT = "prodavan.jobs.b2b_tender_import"

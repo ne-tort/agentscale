@@ -735,10 +735,12 @@ TOOLS: list[dict[str, Any]] = [
     {
         "name": "tenders_list",
         "description": (
-            "List tenders (тендеры) — global groups of customer positions with "
-            "aggregates: positions_count, linked_positions_count (already in chats), "
-            "found_pct, sum_rub, margin_pct, suppliers_count, deadline_at, status. "
-            "Aggregates are materialized by the platform pipeline — do not set them."
+            "List tenders (тендеры) — global groups of customer positions shown "
+            "in the tender table. Fields include lifecycle_status "
+            "(active|inactive), work_status (new|in_progress|processed|invalid|"
+            "on_hold), source_url, number, price_total, deadline_at, category and "
+            "aggregates positions_count/linked_positions_count/found_pct/sum_rub. "
+            "Tender content is read-only: it is maintained by the B2B importer."
         ),
         "inputSchema": {
             "type": "object",
@@ -854,6 +856,25 @@ TOOLS: list[dict[str, Any]] = [
                 "replace": {"type": "boolean", "default": False},
             },
             "required": ["tender_id", "lines"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "tender_take_to_work",
+        "description": (
+            "Take a tender into work end-to-end: finds/creates the «Тендеры» "
+            "project, opens a new chat, copies tender positions into "
+            "request_lines, marks the tender work_status=in_progress and starts "
+            "the kickoff turn with full tender context. Use this instead of "
+            "tender_attach when working from the tender table."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "module_id": {"type": "string", "default": DEFAULT_MODULE_ID},
+                "tender_id": {"type": "string"},
+            },
+            "required": ["tender_id"],
             "additionalProperties": False,
         },
     },
@@ -1761,6 +1782,20 @@ def _tender_body_from_args(arguments: dict[str, Any], *, creating: bool) -> dict
     return body
 
 
+def _tender_take_to_work(mid: str, arguments: dict[str, Any], sid: str | None) -> Any:
+    """«Взять тендер в работу»: project/chat/positions/kickoff — backend."""
+    tender_id = str(arguments.get("tender_id") or "").strip()
+    if not tender_id:
+        raise RuntimeError("tender_id is required for tender_take_to_work")
+    _, _, project_id = _env()
+    return _http(
+        "POST",
+        f"/projects/{project_id}/modules/{mid}/actions/tender_take_to_work/invoke",
+        {"row_id": tender_id, "params": {}},
+        session_id=sid,
+    )
+
+
 def _tender_attach(mid: str, arguments: dict[str, Any], sid: str | None) -> Any:
     """«Взять тендер в работу» (серверное действие tender_attach)."""
     tender_id = str(arguments.get("tender_id") or "").strip()
@@ -2261,6 +2296,8 @@ def _call_tool(name: str, arguments: dict[str, Any]) -> Any:
             _data_path(mid, "web_products", row_id),
             session_id=sid,
         )
+    if name == "tender_take_to_work":
+        return _tender_take_to_work(mid, arguments, sid)
     if name == "tender_attach":
         return _tender_attach(mid, arguments, sid)
 
@@ -2424,7 +2461,7 @@ def _handle(msg: dict[str, Any]) -> dict[str, Any] | None:
             "result": {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "prodavan-equipment", "version": "3.2.0"},
+                "serverInfo": {"name": "prodavan-equipment", "version": "3.3.0"},
             },
         }
     if method == "notifications/initialized":

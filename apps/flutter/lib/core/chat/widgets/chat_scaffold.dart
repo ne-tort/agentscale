@@ -806,6 +806,8 @@ class ChatScaffold extends StatefulWidget {
     this.updating = false,
     this.onUpdate,
     this.onDismissUpdate,
+    this.showChecklist = false,
+    this.rightPanel,
   });
 
   final ChatSessionController controller;
@@ -830,6 +832,11 @@ class ChatScaffold extends StatefulWidget {
   final bool updating;
   final VoidCallback? onUpdate;
   final VoidCallback? onDismissUpdate;
+
+  /// Checklist is disabled by default; the tender chat uses [rightPanel]
+  /// (customer positions) instead.
+  final bool showChecklist;
+  final Widget? rightPanel;
 
   @override
   State<ChatScaffold> createState() => _ChatScaffoldState();
@@ -929,10 +936,15 @@ class _ChatScaffoldState extends State<ChatScaffold> {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final checklistTasks = _checklistFor(controller);
-        final showChecklist =
-            checklistTasks.isNotEmpty &&
-            constraints.maxWidth >= _kChecklistMinWidth;
+        final checklistTasks = widget.showChecklist
+            ? _checklistFor(controller)
+            : const <ChatChecklistTask>[];
+        final sidePanel = widget.rightPanel ??
+            (widget.showChecklist && checklistTasks.isNotEmpty
+                ? ChatChecklistPanel(tasks: checklistTasks)
+                : null);
+        final showSidebar =
+            sidePanel != null && constraints.maxWidth >= _kChecklistMinWidth;
         final maxW = _columnMaxWidth(constraints.maxWidth);
         final blocks = controller.visibleBlocks;
         final turns = controller.visibleTurns;
@@ -1028,7 +1040,7 @@ class _ChatScaffoldState extends State<ChatScaffold> {
           ),
         );
 
-        if (!showChecklist) {
+        if (!showSidebar) {
           return Center(child: column);
         }
         final groupMaxW = maxW + _kChatGutter + kChatChecklistWidth;
@@ -1046,7 +1058,7 @@ class _ChatScaffoldState extends State<ChatScaffold> {
                     width: kChatChecklistWidth,
                     child: Align(
                       alignment: Alignment.topLeft,
-                      child: ChatChecklistPanel(tasks: checklistTasks),
+                      child: sidePanel,
                     ),
                   ),
                 ),

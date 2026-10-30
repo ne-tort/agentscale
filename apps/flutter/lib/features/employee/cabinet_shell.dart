@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/preferences/collapsed_projects_store.dart';
 import 'package:prodavan/core/responsive/app_breakpoints.dart';
+import 'package:prodavan/core/session/chat_open_intent.dart';
 import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_layout.dart';
@@ -89,6 +90,7 @@ class _CabinetShellState extends State<CabinetShell> {
     super.initState();
     workContext.enterCabinet(widget.cabinetId);
     workContext.addListener(_onWorkContext);
+    chatOpenIntent.addListener(_onChatOpenIntent);
     _loadNav();
     _loadSelectionAndSidebar();
     unawaited(_loadCollapsedProjects());
@@ -100,6 +102,7 @@ class _CabinetShellState extends State<CabinetShell> {
     _presenceHeartbeat?.cancel();
     _sidebarRefreshDebounce?.cancel();
     workContext.removeListener(_onWorkContext);
+    chatOpenIntent.removeListener(_onChatOpenIntent);
     super.dispose();
   }
 
@@ -471,8 +474,24 @@ class _CabinetShellState extends State<CabinetShell> {
     });
   }
 
-  Future<void> _openChat(Map<String, dynamic> chat) async {
-    final sessionId = chat['session_id'] as String?;
+  void _onChatOpenIntent() {
+    final req = chatOpenIntent.value;
+    if (req == null || !mounted) return;
+    chatOpenIntent.value = null;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      unawaited(
+        _openChat({
+          'session_id': req.sessionId,
+          'project_id': req.projectId,
+          'project_name': req.projectName,
+          'title': req.title,
+        }),
+      );
+    });
+  }
+
+  Future<void> _openChat(Map<String, dynamic> chat) async {    final sessionId = chat['session_id'] as String?;
     final projectId = chat['project_id'] as String?;
     if (sessionId == null || projectId == null) return;
     // Already viewing this chat — keep selection, do not remount.

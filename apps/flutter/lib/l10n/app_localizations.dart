@@ -3806,6 +3806,54 @@ abstract class AppLocalizations {
   /// **'{done}/{total} tasks done'**
   String chatChecklistProgress(int done, int total);
 
+  /// No description provided for @chatCustomerPositionsTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Customer positions'**
+  String get chatCustomerPositionsTitle;
+
+  /// No description provided for @chatCustomerPositionsEmpty.
+  ///
+  /// In en, this message translates to:
+  /// **'No customer positions'**
+  String get chatCustomerPositionsEmpty;
+
+  /// No description provided for @chatCustomerOffersEmpty.
+  ///
+  /// In en, this message translates to:
+  /// **'No found products'**
+  String get chatCustomerOffersEmpty;
+
+  /// No description provided for @chatCustomerOfferPartNumber.
+  ///
+  /// In en, this message translates to:
+  /// **'Part number'**
+  String get chatCustomerOfferPartNumber;
+
+  /// No description provided for @chatCustomerOfferSeller.
+  ///
+  /// In en, this message translates to:
+  /// **'Seller'**
+  String get chatCustomerOfferSeller;
+
+  /// No description provided for @chatCustomerOfferExact.
+  ///
+  /// In en, this message translates to:
+  /// **'Exact'**
+  String get chatCustomerOfferExact;
+
+  /// No description provided for @chatCustomerOfferAnalog.
+  ///
+  /// In en, this message translates to:
+  /// **'Analog'**
+  String get chatCustomerOfferAnalog;
+
+  /// No description provided for @chatCustomerOfferDoubt.
+  ///
+  /// In en, this message translates to:
+  /// **'Doubt'**
+  String get chatCustomerOfferDoubt;
+
   /// No description provided for @chatModelPricePerMtok.
   ///
   /// In en, this message translates to:

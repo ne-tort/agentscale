@@ -42,6 +42,9 @@ spec:
                 name: agentscale-config
             - secretRef:
                 name: agentscale-api-secrets
+            - secretRef:
+                name: agentscale-b2b-secrets
+                optional: true
           volumeMounts:
             - name: storage
               mountPath: /data/storage
@@ -64,6 +67,9 @@ spec:
                 name: agentscale-config
             - secretRef:
                 name: agentscale-api-secrets
+            - secretRef:
+                name: agentscale-b2b-secrets
+                optional: true
           volumeMounts:
             - name: storage
               mountPath: /data/storage
@@ -115,6 +121,9 @@ spec:
                 name: agentscale-config
             - secretRef:
                 name: agentscale-api-secrets
+            - secretRef:
+                name: agentscale-b2b-secrets
+                optional: true
           env:
             - name: KAFKA_CONSUMER_ENABLED
               value: "false"
