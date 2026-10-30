@@ -51,6 +51,9 @@ spec:
                 name: agentscale-config
             - secretRef:
                 name: agentscale-api-secrets
+            - secretRef:
+                name: agentscale-b2b-secrets
+                optional: true
           env:
             # Workers must not race API on alembic (entrypoint also respects this).
             - name: RUN_MIGRATIONS
@@ -137,6 +140,9 @@ spec:
                 name: agentscale-config
             - secretRef:
                 name: agentscale-api-secrets
+            - secretRef:
+                name: agentscale-b2b-secrets
+                optional: true
           env:
             - name: RUN_MIGRATIONS
               value: "0"
@@ -215,6 +221,9 @@ spec:
                 name: agentscale-config
             - secretRef:
                 name: agentscale-api-secrets
+            - secretRef:
+                name: agentscale-b2b-secrets
+                optional: true
           env:
             - name: RUN_MIGRATIONS
               value: "0"
