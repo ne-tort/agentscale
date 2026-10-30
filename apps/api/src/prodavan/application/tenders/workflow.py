@@ -230,10 +230,34 @@ class TenderWorkflowService:
             except AppError as exc:
                 if attempt == 1 and exc.code in {"POD_NOT_RUNNING", "PROJECT_PAUSED"}:
                     await self._reload_once(target=target, principal=principal, employee=employee)
-                    await asyncio.sleep(1.0)
+                    await self._wait_for_runtime(target.id)
                     continue
                 raise
         raise AppError(code="INTERNAL", title="Не удалось создать сессию", status=500)
+
+    async def _wait_for_runtime(self, project_id: str, *, attempts: int = 20) -> None:
+        """Wait until the restarted sandbox is observed running.
+
+        `reload_project` only asks for desired RUNNING; the sandbox takes a few
+        seconds. Without this the first chat creation races the pod and fails
+        even though the project was just restarted.
+        """
+        from prodavan.application.pod_service.query import PodQuery
+
+        for _ in range(max(1, attempts)):
+            try:
+                runtime = await PodQuery(self._session).runtime_view(project_id)
+            except Exception:
+                runtime = None
+            if runtime is not None and str(runtime.get("observed_state") or "") == "running":
+                return
+            await asyncio.sleep(2.0)
+        raise AppError(
+            code="POD_NOT_RUNNING",
+            title="Проект «Тендеры» запускается",
+            status=409,
+            detail="Под проекта ещё не готов; повторите через несколько секунд",
+        )
 
     async def _attach(
         self,
