@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/widgets.dart';
 
 import 'package:prodavan/core/api/prodavan_api.dart';
@@ -21,6 +23,12 @@ typedef ModuleActionInvokeFn = Future<Map<String, dynamic>> Function({
   String? rowId,
 });
 
+typedef ModuleContentDownloadFn = Future<Uint8List> Function({
+  required String assetId,
+  String? versionId,
+  String? blobVersionId,
+});
+
 /// Inherited scope for live module interpreters (upload, API, project leaf).
 class ModuleRuntimeScope extends InheritedWidget {
   const ModuleRuntimeScope({
@@ -30,6 +38,7 @@ class ModuleRuntimeScope extends InheritedWidget {
     required this.uploadContentFn,
     required this.uploadSecretFn,
     this.invokeActionFn,
+    this.downloadContentFn,
     this.api,
     this.cabinetId,
     this.companyId,
@@ -100,6 +109,15 @@ class ModuleRuntimeScope extends InheritedWidget {
           projectId: projectId,
         );
       },
+      downloadContentFn: ({
+        required String assetId,
+        String? versionId,
+        String? blobVersionId,
+      }) => api.downloadContentAsset(
+        assetId: assetId,
+        versionId: versionId,
+        blobVersionId: blobVersionId,
+      ),
       child: child,
     );
   }
@@ -111,6 +129,7 @@ class ModuleRuntimeScope extends InheritedWidget {
     required ModuleContentUploadFn uploadContentFn,
     required ModuleSecretUploadFn uploadSecretFn,
     ModuleActionInvokeFn? invokeActionFn,
+    ModuleContentDownloadFn? downloadContentFn,
     required Widget child,
   }) {
     return ModuleRuntimeScope(
@@ -120,6 +139,7 @@ class ModuleRuntimeScope extends InheritedWidget {
       uploadContentFn: uploadContentFn,
       uploadSecretFn: uploadSecretFn,
       invokeActionFn: invokeActionFn,
+      downloadContentFn: downloadContentFn,
       child: child,
     );
   }
@@ -132,6 +152,7 @@ class ModuleRuntimeScope extends InheritedWidget {
     required ModuleContentUploadFn uploadContentFn,
     required ModuleSecretUploadFn uploadSecretFn,
     ModuleActionInvokeFn? invokeActionFn,
+    ModuleContentDownloadFn? downloadContentFn,
     required Widget child,
   }) {
     return ModuleRuntimeScope(
@@ -142,6 +163,7 @@ class ModuleRuntimeScope extends InheritedWidget {
       uploadContentFn: uploadContentFn,
       uploadSecretFn: uploadSecretFn,
       invokeActionFn: invokeActionFn,
+      downloadContentFn: downloadContentFn,
       child: child,
     );
   }
@@ -150,6 +172,7 @@ class ModuleRuntimeScope extends InheritedWidget {
   final ModuleContentUploadFn uploadContentFn;
   final ModuleSecretUploadFn uploadSecretFn;
   final ModuleActionInvokeFn? invokeActionFn;
+  final ModuleContentDownloadFn? downloadContentFn;
   final String? cabinetId;
   final String? companyId;
 
@@ -193,6 +216,22 @@ class ModuleRuntimeScope extends InheritedWidget {
     return fn(actionId: actionId, rowId: rowId);
   }
 
+  Future<Uint8List> downloadContentAsset({
+    required String assetId,
+    String? versionId,
+    String? blobVersionId,
+  }) {
+    final fn = downloadContentFn;
+    if (fn == null) {
+      throw StateError('content download requires module runtime scope');
+    }
+    return fn(
+      assetId: assetId,
+      versionId: versionId,
+      blobVersionId: blobVersionId,
+    );
+  }
+
   @override
   bool updateShouldNotify(ModuleRuntimeScope oldWidget) {
     return uploadKind != oldWidget.uploadKind ||
@@ -201,6 +240,7 @@ class ModuleRuntimeScope extends InheritedWidget {
         projectId != oldWidget.projectId ||
         sessionId != oldWidget.sessionId ||
         moduleId != oldWidget.moduleId ||
+        downloadContentFn != oldWidget.downloadContentFn ||
         api != oldWidget.api;
   }
 }

@@ -19,13 +19,22 @@ logger = logging.getLogger(__name__)
 _DEFAULT_READ_MAX = 10_485_760
 
 
+def _normalize_response_path(raw: object) -> str:
+    value = str(raw or "").replace("\\", "/")
+    if value == "/workspace":
+        value = ""
+    elif value.startswith("/workspace/"):
+        value = value[len("/workspace/") :]
+    return normalize_workspace_path(value)
+
+
 def _entry_from_dict(raw: dict[str, Any]) -> WorkspaceEntry:
     kind = raw.get("kind")
     if kind not in ("file", "dir"):
         kind = "file"
     return WorkspaceEntry(
         name=str(raw.get("name") or ""),
-        path=str(raw.get("path") or ""),
+        path=_normalize_response_path(raw.get("path")),
         kind=kind,  # type: ignore[arg-type]
         size=raw.get("size") if kind == "file" else None,
         modified_at=raw.get("modified_at"),
@@ -141,7 +150,18 @@ class K8sExecWorkspaceAdapter:
                 status=422,
                 detail="path required",
             )
-        body = await self._run_json(runtime_ref=runtime_ref, args=["stat", rel])
+        try:
+            body = await self._run_json(runtime_ref=runtime_ref, args=["stat", rel])
+        except AppError as exc:
+            if exc.code == "POD_EXEC_FAILED" and "FileNotFoundError" in (exc.detail or ""):
+                raise AppError(
+                    code="WORKSPACE_NOT_FOUND",
+                    title="Not Found",
+                    status=404,
+                    detail="workspace path not found",
+                    extra={"path": rel},
+                ) from exc
+            raise
         return _entry_from_dict(body)
 
     async def delete(self, *, runtime_ref: str, path: str) -> None:
@@ -153,7 +173,18 @@ class K8sExecWorkspaceAdapter:
                 status=422,
                 detail="path required",
             )
-        await self._run_bytes(runtime_ref=runtime_ref, args=["rm", rel])
+        try:
+            await self._run_bytes(runtime_ref=runtime_ref, args=["rm", rel])
+        except AppError as exc:
+            if exc.code == "POD_EXEC_FAILED" and "FileNotFoundError" in (exc.detail or ""):
+                raise AppError(
+                    code="WORKSPACE_NOT_FOUND",
+                    title="Not Found",
+                    status=404,
+                    detail="workspace path not found",
+                    extra={"path": rel},
+                ) from exc
+            raise
 
     async def move(self, *, runtime_ref: str, src: str, dst: str) -> None:
         s = normalize_workspace_path(src)

@@ -390,13 +390,19 @@ async def test_procurement_apply_updates_registry_and_budget(io: FakeIO) -> None
     await io.update(
         "procurement",
         proc_row["row_id"],
-        {**proc_row["body"], "margin_pct": 25, "include_delivery": True},
+        {
+            **proc_row["body"],
+            "margin_pct": 25,
+            "delivery_rub": 500,
+            "include_delivery": True,
+        },
     )
     result = await svc.apply_procurement_row(io, row_id=proc_row["row_id"])
 
     assert result["kind"] == "equipment.procurement_apply"
     # реестр обновлён
     assert io.body("trusted_sellers", "seller_ivanov")["margin_pct"] == 25
+    assert io.body("trusted_sellers", "seller_ivanov")["delivery_rub"] == 500
     # бюджетные строки Иванова (line_2, markup_source=seller) — обновлены
     b2 = next(b for b in io.rows("budget_lines") if b["body"]["line_id"] == "line_2")["body"]
     assert b2["markup"] == 0.25
@@ -404,15 +410,29 @@ async def test_procurement_apply_updates_registry_and_budget(io: FakeIO) -> None
 
     # Агрегаты пересчитаны ТЕМ ЖЕ проходом, что и sync: эффективные позиции
     # (бюджетные снапшоты), а не только явные чекбоксы — суммы не обнуляются.
-    # Иванов: line_2 (Кабель, 450) × маржа 25% = 112.5; доставка 300 включена.
+    # Иванов: line_2 (Кабель, 450) × маржа 25% = 112.5; доставка 500 включена.
     proc = next(p for p in io.rows("procurement") if p["body"]["seller"] == "Иванов")["body"]
     assert proc["include_delivery"] is True
-    assert proc["delivery_rub"] == 300
+    assert proc["delivery_rub"] == 500
     assert proc["margin_pct"] == 25
     assert proc["sum_rub"] == 450.0
     assert proc["selected_count"] == 1
-    assert proc["sum_margin_rub"] == pytest.approx(-187.5)
-    assert proc["sum_with_margin_rub"] == pytest.approx(862.5)
+    assert proc["sum_margin_rub"] == pytest.approx(-387.5)
+    assert proc["sum_with_margin_rub"] == pytest.approx(1062.5)
+
+    # Переключение «Включить доставку» в Flutter идёт тем же
+    # procurement_apply и убирает доставку из расчёта, не меняя реестр.
+    await io.update(
+        "procurement",
+        proc_row["row_id"],
+        {**proc, "include_delivery": False},
+    )
+    await svc.apply_procurement_row(io, row_id=proc_row["row_id"])
+    proc = next(p for p in io.rows("procurement") if p["body"]["seller"] == "Иванов")["body"]
+    assert proc["include_delivery"] is False
+    assert proc["delivery_rub"] == 500
+    assert proc["sum_margin_rub"] == pytest.approx(112.5)
+    assert proc["sum_with_margin_rub"] == pytest.approx(562.5)
 
 
 async def test_budget_manual_markup_survives(io: FakeIO) -> None:
@@ -1161,6 +1181,55 @@ async def test_best_prefers_instock_priceless_over_onorder_priced(monkeypatch) -
     grp = io.body("found_groups", "grp_1")
     assert grp["best_offer_id"] != "o_noprice_stock"
     assert io.body("found_offers", grp["best_offer_id"])["price"] == 1200.0
+
+
+async def test_budget_snapshot_is_removed_when_last_offer_disappears(monkeypatch) -> None:
+    """Derived budget/procurement data must not retain a vanished offer."""
+    _patch_os(monkeypatch, [])
+    monkeypatch.setattr(fx_mod, "convert_offer_price", _fake_convert)
+    io = FakeIO(
+        {
+            "catalogs": [],
+            "request_lines": [
+                {"row_id": "line_1", "body": {"title": "Позиция", "part_number": "ABC-5", "qty": 1}},
+            ],
+            "found_groups": [
+                {"row_id": "grp_1", "body": {"line_id": "line_1", "part_number": "ABC-5", "match_kind": "exact"}},
+            ],
+            "found_offers": [
+                {
+                    "row_id": "offer_1",
+                    "body": {
+                        "group_id": "grp_1",
+                        "line_id": "line_1",
+                        "title": "Товар",
+                        "seller": "Поставщик",
+                        "part_number": "ABC-5",
+                        "src_hash": "hash-1",
+                        "currency": "RUB",
+                        "price": 100.0,
+                        "in_stock": True,
+                        "match_kind": "exact",
+                    },
+                },
+            ],
+            "trusted_sellers": [{"row_id": "seller_1", "body": {"name": "Поставщик", "is_enabled": True}}],
+            "budget_lines": [],
+            "procurement": [],
+        }
+    )
+    svc = EquipmentPipelineService(session=object())
+
+    await svc.run(io, materialize=False)
+    assert len(io.rows("budget_lines")) == 1
+
+    await io.delete("found_offers", "offer_1")
+    stats = await svc.run(io, materialize=False)
+
+    assert stats["budget_deleted"] == 1
+    assert io.rows("budget_lines") == []
+    assert io.body("request_lines", "line_1")["status"] == "open"
+    assert io.rows("procurement") == []
 
 
 async def test_budget_snapshot_carries_match_kind(monkeypatch) -> None:

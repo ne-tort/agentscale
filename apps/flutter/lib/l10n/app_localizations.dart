@@ -1268,6 +1268,48 @@ abstract class AppLocalizations {
   /// **'Metrics not yet received or unavailable'**
   String get adminContainerMetricsUnavailable;
 
+  /// No description provided for @metricsSeriesEmpty.
+  ///
+  /// In en, this message translates to:
+  /// **'No CPU or memory samples yet'**
+  String get metricsSeriesEmpty;
+
+  /// No description provided for @metricsSeriesError.
+  ///
+  /// In en, this message translates to:
+  /// **'Metrics could not be loaded'**
+  String get metricsSeriesError;
+
+  /// No description provided for @metricsSeriesUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'Metrics are not currently available'**
+  String get metricsSeriesUnavailable;
+
+  /// No description provided for @metricsSeriesCpu.
+  ///
+  /// In en, this message translates to:
+  /// **'CPU'**
+  String get metricsSeriesCpu;
+
+  /// No description provided for @metricsSeriesMemory.
+  ///
+  /// In en, this message translates to:
+  /// **'Memory'**
+  String get metricsSeriesMemory;
+
+  /// No description provided for @metricsSeriesCpuValue.
+  ///
+  /// In en, this message translates to:
+  /// **'CPU {value}'**
+  String metricsSeriesCpuValue(String value);
+
+  /// No description provided for @metricsSeriesMemoryValue.
+  ///
+  /// In en, this message translates to:
+  /// **'Memory {value}'**
+  String metricsSeriesMemoryValue(String value);
+
   /// No description provided for @adminContainerLastError.
   ///
   /// In en, this message translates to:
@@ -3074,6 +3116,12 @@ abstract class AppLocalizations {
   /// **'No employees'**
   String get companyNoEmployees;
 
+  String get companyEmployeesTab;
+  String get companyEmployeeRecycleBin;
+  String get companyRestoreEmployee;
+  String companyRestoreEmployeeConfirm(String login);
+  String get companyNoDeletedEmployees;
+
   /// No description provided for @companyOrgMetrics.
   ///
   /// In en, this message translates to:
@@ -4577,7 +4625,7 @@ abstract class AppLocalizations {
   /// No description provided for @projectPreviewTruncated.
   ///
   /// In en, this message translates to:
-  /// **'Preview truncated to first 200k characters'**
+  /// **'Preview is truncated; only the first 256 KB of the file are shown.'**
   String get projectPreviewTruncated;
 
   /// No description provided for @projectProject.
@@ -4886,6 +4934,9 @@ abstract class AppLocalizations {
   /// **'File saved'**
   String get projectWorkspaceDownloaded;
 
+  /// No description provided for @projectWorkspaceDownloadTooLarge.
+  String projectWorkspaceDownloadTooLarge(String size, String limit);
+
   /// No description provided for @projectUpdateProject.
   ///
   /// In en, this message translates to:
@@ -4898,6 +4949,12 @@ abstract class AppLocalizations {
   /// **'Reset agent'**
   String get projectResetAgent;
 
+  /// No description provided for @projectResetWarning.
+  ///
+  /// In en, this message translates to:
+  /// **'All agent sessions will be stopped, and their chat history and usage records will be permanently deleted. Workspace files and project settings will be preserved.'**
+  String get projectResetWarning;
+
   /// No description provided for @projectConfigureBeforeLaunch.
   ///
   /// In en, this message translates to:
@@ -4909,6 +4966,18 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Not selected'**
   String get projectAiProviderNotSelected;
+
+  /// No description provided for @projectAiProviderUnavailableReselect.
+  ///
+  /// In en, this message translates to:
+  /// **'Saved AI provider is unavailable. Select another provider before launch'**
+  String get projectAiProviderUnavailableReselect;
+
+  /// No description provided for @projectAiProviderUnavailableNoOptions.
+  ///
+  /// In en, this message translates to:
+  /// **'Saved AI provider is unavailable. Add an eligible provider before launch'**
+  String get projectAiProviderUnavailableNoOptions;
 
   /// No description provided for @projectAiKeyColumnProvider.
   ///
@@ -5023,6 +5092,168 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Modules'**
   String get projectModulesLabel;
+
+  /// No description provided for @scheduleTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Schedules'**
+  String get scheduleTitle;
+
+  /// No description provided for @scheduleAdd.
+  ///
+  /// In en, this message translates to:
+  /// **'Add schedule'**
+  String get scheduleAdd;
+
+  /// No description provided for @scheduleDeleteConfirmTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete schedule?'**
+  String get scheduleDeleteConfirmTitle;
+
+  /// No description provided for @scheduleDeleteConfirmMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'This schedule will be permanently deleted.'**
+  String get scheduleDeleteConfirmMessage;
+
+  /// No description provided for @scheduleCancel.
+  ///
+  /// In en, this message translates to:
+  /// **'Cancel'**
+  String get scheduleCancel;
+
+  /// No description provided for @scheduleDelete.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete'**
+  String get scheduleDelete;
+
+  /// No description provided for @scheduleNoSchedules.
+  ///
+  /// In en, this message translates to:
+  /// **'No schedules yet'**
+  String get scheduleNoSchedules;
+
+  /// No description provided for @scheduleCreate.
+  ///
+  /// In en, this message translates to:
+  /// **'Create schedule'**
+  String get scheduleCreate;
+
+  /// No description provided for @scheduleNextRun.
+  ///
+  /// In en, this message translates to:
+  /// **'Next run'**
+  String get scheduleNextRun;
+
+  /// No description provided for @scheduleNotScheduled.
+  ///
+  /// In en, this message translates to:
+  /// **'Not scheduled'**
+  String get scheduleNotScheduled;
+
+  /// No description provided for @schedulePayload.
+  ///
+  /// In en, this message translates to:
+  /// **'Payload'**
+  String get schedulePayload;
+
+  /// No description provided for @scheduleActions.
+  ///
+  /// In en, this message translates to:
+  /// **'Schedule actions'**
+  String get scheduleActions;
+
+  /// No description provided for @scheduleEdit.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit'**
+  String get scheduleEdit;
+
+  /// No description provided for @scheduleEditTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit schedule'**
+  String get scheduleEditTitle;
+
+  /// No description provided for @scheduleNew.
+  ///
+  /// In en, this message translates to:
+  /// **'New schedule'**
+  String get scheduleNew;
+
+  /// No description provided for @scheduleName.
+  ///
+  /// In en, this message translates to:
+  /// **'Name'**
+  String get scheduleName;
+
+  /// No description provided for @scheduleCron.
+  ///
+  /// In en, this message translates to:
+  /// **'Cron expression'**
+  String get scheduleCron;
+
+  /// No description provided for @scheduleCronHelper.
+  ///
+  /// In en, this message translates to:
+  /// **'Five fields, e.g. 0 9 * * 1-5'**
+  String get scheduleCronHelper;
+
+  /// No description provided for @scheduleTimezone.
+  ///
+  /// In en, this message translates to:
+  /// **'Timezone'**
+  String get scheduleTimezone;
+
+  /// No description provided for @scheduleTimezoneHelper.
+  ///
+  /// In en, this message translates to:
+  /// **'IANA timezone, e.g. UTC or Europe/London'**
+  String get scheduleTimezoneHelper;
+
+  /// No description provided for @scheduleEnabledFor.
+  ///
+  /// In en, this message translates to:
+  /// **'Enable schedule {name}'**
+  String scheduleEnabledFor(String name);
+
+  /// No description provided for @schedulePayloadJson.
+  ///
+  /// In en, this message translates to:
+  /// **'Payload (JSON object)'**
+  String get schedulePayloadJson;
+
+  /// No description provided for @scheduleEnabled.
+  ///
+  /// In en, this message translates to:
+  /// **'Enabled'**
+  String get scheduleEnabled;
+
+  /// No description provided for @scheduleSave.
+  ///
+  /// In en, this message translates to:
+  /// **'Save'**
+  String get scheduleSave;
+
+  /// No description provided for @scheduleRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'Required'**
+  String get scheduleRequired;
+
+  /// No description provided for @scheduleInvalidJson.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter a valid JSON object'**
+  String get scheduleInvalidJson;
+
+  /// No description provided for @scheduleMissedRunsWarning.
+  ///
+  /// In en, this message translates to:
+  /// **'Catch-up was limited after an outage; at least {count} runs were missed.'**
+  String scheduleMissedRunsWarning(int count);
 
   /// No description provided for @commonAuto.
   ///

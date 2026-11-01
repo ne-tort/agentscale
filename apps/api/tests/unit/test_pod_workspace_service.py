@@ -95,6 +95,84 @@ async def test_list_entries_when_running() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["move", "copy"])
+async def test_mutations_reject_root_source_or_destination(operation: str) -> None:
+    session = MagicMock()
+    workspace = _FakeWorkspace()
+    workspace.move = AsyncMock()
+    workspace.copy = AsyncMock()
+    svc = PodWorkspaceService(session, workspace=workspace)
+    with patch(
+        "prodavan.application.pod_service.workspace_service.require_running_pod_runtime",
+        new=AsyncMock(
+            return_value={"observed_state": "running", "stub": False, "runtime_ref": "pod-demo"}
+        ),
+    ):
+        method = getattr(svc, f"{operation}_entry")
+        with pytest.raises(AppError) as exc:
+            await method(
+                project_id="proj_x",
+                src=".",
+                dst="notes.txt",
+                principal=_principal(),
+                employee=None,
+            )
+    assert exc.value.code == "VALIDATION_ERROR"
+    assert exc.value.status == 422
+    getattr(workspace, operation).assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_mutations_reject_encoded_parent_segments() -> None:
+    session = MagicMock()
+    workspace = _FakeWorkspace()
+    workspace.move = AsyncMock()
+    svc = PodWorkspaceService(session, workspace=workspace)
+    with patch(
+        "prodavan.application.pod_service.workspace_service.require_running_pod_runtime",
+        new=AsyncMock(
+            return_value={"observed_state": "running", "stub": False, "runtime_ref": "pod-demo"}
+        ),
+    ):
+        with pytest.raises(AppError) as exc:
+            await svc.move_entry(
+                project_id="proj_x",
+                src="%252e%252e%252fsecret.txt",
+                dst=r"safe\copy.txt",
+                principal=_principal(),
+                employee=None,
+            )
+    assert exc.value.status == 422
+    workspace.move.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_download_rejects_oversized_file_before_reading() -> None:
+    session = MagicMock()
+    workspace = _FakeWorkspace()
+    workspace.read_bytes = AsyncMock(side_effect=AssertionError("oversized file must not be read"))
+    svc = PodWorkspaceService(session, workspace=workspace)
+    with patch(
+        "prodavan.application.pod_service.workspace_service.require_running_pod_runtime",
+        new=AsyncMock(
+            return_value={"observed_state": "running", "stub": False, "runtime_ref": "pod-demo"}
+        ),
+    ):
+        with pytest.raises(AppError) as exc:
+            await svc.read_content(
+                project_id="proj_x",
+                path="AGENTS.md",
+                principal=_principal(),
+                employee=None,
+                max_bytes=4,
+            )
+    assert exc.value.code == "PAYLOAD_TOO_LARGE"
+    assert exc.value.status == 413
+    assert exc.value.extra == {"max_bytes": 4, "size": 9}
+    workspace.read_bytes.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_preview_text_rejects_binary() -> None:
     session = MagicMock()
 

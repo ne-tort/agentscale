@@ -97,3 +97,13 @@ def test_compose_attachment_only_triggers_agent() -> None:
     assert "Поступи с ним, согласно инструкциям." in agent
     display = compose_display_text(user_text="", items=items)
     assert display == "Вложение: report.pdf"
+
+
+def test_derived_tabular_json_name_avoids_existing_attachment_basename() -> None:
+    from prodavan.application.projects.attachment_delivery import _unique_workspace_filename
+
+    counts = {"report.json": 1}
+    derived = _unique_workspace_filename("report.json", counts=counts)
+
+    assert derived == "report (2).json"
+    assert len({"inbox/report.json", f"inbox/{derived}"}) == 2

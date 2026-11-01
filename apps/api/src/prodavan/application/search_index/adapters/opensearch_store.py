@@ -257,6 +257,33 @@ class OpenSearchStore:
             must.append({"match_all": {}})
         filter_clauses: list[dict[str, Any]] = []
         for key, value in (filter or {}).items():
+            if key == "__project_scope__" and isinstance(value, dict):
+                project_id = str(value.get("project_id") or "").strip()
+                if project_id:
+                    project_should: list[dict[str, Any]] = [
+                        {"term": {"project_id": project_id}}
+                    ]
+                    if bool(value.get("include_unscoped")):
+                        # OpenSearch does not index explicit nulls, so an owner
+                        # document without a project_id is represented by a
+                        # missing field.
+                        project_should.append(
+                            {"bool": {"must_not": [{"exists": {"field": "project_id"}}]}}
+                        )
+                    filter_clauses.append(
+                        {
+                            "bool": {
+                                "should": project_should,
+                                "minimum_should_match": 1,
+                            }
+                        }
+                    )
+                    requested_project_id = value.get("requested_project_id")
+                    if requested_project_id is not None:
+                        filter_clauses.append(
+                            {"term": {"project_id": requested_project_id}}
+                        )
+                continue
             filter_clauses.append({"term": {key: value}})
         body: dict[str, Any] = {
             "from": from_,
@@ -293,7 +320,13 @@ class OpenSearchStore:
             )
             for h in hits_raw
         ]
-        return SearchResult(hits=hits, total=total, took_ms=data.get("took"))
+        next_search_after = hits[-1].sort if hits and sort else None
+        return SearchResult(
+            hits=hits,
+            total=total,
+            took_ms=data.get("took"),
+            next_search_after=next_search_after,
+        )
 
     async def count(
         self,

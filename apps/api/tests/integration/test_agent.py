@@ -988,7 +988,7 @@ def test_trigger_dispatch_drain_batch(client: TestClient) -> None:
 
 
 @requires_postgres
-def test_trigger_regenerate_and_webhook_ack(client: TestClient) -> None:
+def test_trigger_regenerate_and_webhook_runs_agent_turn(client: TestClient) -> None:
     admin_h = {"Authorization": f"Bearer {_token(sub='regen-admin', platform_admin=True)}"}
 
     co = client.post(
@@ -1059,13 +1059,54 @@ def test_trigger_regenerate_and_webhook_ack(client: TestClient) -> None:
         json={"kind": "webhook.http", "payload": {"source": "test"}},
     )
     assert webhook.status_code == 202, webhook.text
-    ack = client.post(
+    dispatched_webhook = client.post(
         f"/api/v1/projects/{project_id}/triggers/dispatch",
         headers=owner_h,
     )
-    assert ack.status_code == 200, ack.text
-    assert ack.json().get("dispatched") is True
-    assert ack.json().get("action") == "ack_webhook.http"
+    assert dispatched_webhook.status_code == 200, dispatched_webhook.text
+    webhook_result = dispatched_webhook.json()
+    assert webhook_result.get("dispatched") is True
+    assert webhook_result.get("action") == "run_webhook.http"
+    webhook_session = webhook_result.get("run", {}).get("session_id")
+    assert webhook_session
+    webhook_transcript = client.get(
+        f"/api/v1/projects/{project_id}/chat/transcript?session_id={webhook_session}",
+        headers=owner_h,
+    )
+    assert webhook_transcript.status_code == 200, webhook_transcript.text
+    assert any(
+        block.get("kind") == "user" and '"source": "test"' in block.get("text", "")
+        for block in webhook_transcript.json().get("blocks", [])
+    )
+
+    scheduled = client.post(
+        f"/api/v1/projects/{project_id}/triggers",
+        headers=owner_h,
+        json={
+            "kind": "system.schedule",
+            "payload": {"schedule_id": "daily", "due_at": "2026-11-01T08:00:00Z"},
+        },
+    )
+    assert scheduled.status_code == 202, scheduled.text
+    dispatched_schedule = client.post(
+        f"/api/v1/projects/{project_id}/triggers/dispatch",
+        headers=owner_h,
+    )
+    assert dispatched_schedule.status_code == 200, dispatched_schedule.text
+    schedule_result = dispatched_schedule.json()
+    assert schedule_result.get("dispatched") is True
+    assert schedule_result.get("action") == "run_system.schedule"
+    schedule_session = schedule_result.get("run", {}).get("session_id")
+    assert schedule_session
+    schedule_transcript = client.get(
+        f"/api/v1/projects/{project_id}/chat/transcript?session_id={schedule_session}",
+        headers=owner_h,
+    )
+    assert schedule_transcript.status_code == 200, schedule_transcript.text
+    assert any(
+        block.get("kind") == "user" and '"schedule_id": "daily"' in block.get("text", "")
+        for block in schedule_transcript.json().get("blocks", [])
+    )
 
 
 @requires_postgres
@@ -1516,6 +1557,16 @@ def test_pod_agent_service_token_append_and_list(client: TestClient, monkeypatch
     )
     assert appended.status_code == 201, appended.text
     assert appended.json()["type"] == "tool_approval_request"
+
+    # Pending HITL state must survive a transcript longer than the ordinary
+    # tail cap; the bridge/runtime may ask for pending approvals at any point.
+    for index in range(501):
+        noise = client.post(
+            f"/api/v1/projects/{project_id}/agent/sessions/{session_id}/events",
+            headers=pod_h,
+            json={"type": "text_delta", "data": {"text": f"transcript-{index}"}},
+        )
+        assert noise.status_code == 201, noise.text
 
     pending = client.get(
         f"/api/v1/projects/{project_id}/agent/sessions/{session_id}/pending-approvals",

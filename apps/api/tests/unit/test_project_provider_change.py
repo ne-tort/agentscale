@@ -288,6 +288,43 @@ async def test_select_runtime_key_honours_project_key_over_first_runtime() -> No
 
 
 @pytest.mark.asyncio
+async def test_select_runtime_key_does_not_replace_unavailable_project_key() -> None:
+    svc = _keys_svc()
+    other = SimpleNamespace(id="aik_other", provider="codex", api_kind="custom")
+    svc.list_available_keys_for_project = AsyncMock(return_value=[{"id": "aik_other"}])
+    svc._get_row = AsyncMock(return_value=other)
+    svc._pick_runtime_rows = MagicMock(return_value=([other], []))
+    svc._finalize_lazy_disabled = AsyncMock()
+
+    with pytest.raises(AppError) as exc:
+        await svc.select_runtime_key_for_project(
+            project=SimpleNamespace(resolved_ai_key_id="aik_pinned", agent_provider="codex")
+        )
+
+    assert exc.value.code == "NO_AI_KEY"
+    assert "configured project AI key" in exc.value.detail
+
+
+@pytest.mark.asyncio
+async def test_select_runtime_key_honours_pin_even_if_provider_preference_differs() -> None:
+    svc = _keys_svc()
+    pinned = SimpleNamespace(id="aik_pin", provider="xai", api_kind="xai_oauth")
+    svc.list_available_keys_for_project = AsyncMock(return_value=[{"id": "aik_pin"}])
+    svc._get_row = AsyncMock(return_value=pinned)
+    svc._pick_runtime_rows = MagicMock(return_value=([pinned], []))
+    svc._finalize_lazy_disabled = AsyncMock()
+
+    picked = await svc.select_runtime_key_for_project(
+        project=SimpleNamespace(resolved_ai_key_id="aik_pin", agent_provider="codex"),
+        preferred_provider="codex",
+    )
+
+    assert picked is pinned
+    # Provider filtering must not run before a pinned key is resolved.
+    svc._pick_runtime_rows.assert_called_once_with([pinned], preferred_provider=None)
+
+
+@pytest.mark.asyncio
 async def test_select_runtime_key_raises_when_nothing_runtime_capable() -> None:
     svc = _keys_svc()
     cli = SimpleNamespace(id="aik_cli", provider="codex", api_kind="cli_subscription")

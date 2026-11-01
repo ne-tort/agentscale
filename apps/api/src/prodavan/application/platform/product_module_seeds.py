@@ -2975,6 +2975,14 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
 
             {
                 "table_slug": "procurement",
+                "name": "include_delivery",
+                "label": {"ru": "Включить доставку", "en": "Include delivery"},
+                "type": "bool",
+                "required": False,
+                "default": True,
+            },
+            {
+                "table_slug": "procurement",
                 "name": "delivery_rub",
                 "label": {"ru": "Доставка ₽", "en": "Delivery RUB"},
                 "type": "number",
@@ -5527,7 +5535,20 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "align": "end",
                             "max_width": 130,
                         },
-
+                        {
+                            "field": "margin_pct",
+                            "label": {"ru": "Маржа %", "en": "Margin %"},
+                            "align": "end",
+                            "max_width": 100,
+                            "editable": True,
+                        },
+                        {
+                            "field": "include_delivery",
+                            "label": {"ru": "Включить доставку", "en": "Include delivery"},
+                            "align": "center",
+                            "max_width": 130,
+                            "editable": True,
+                        },
                         {
                             "field": "delivery_rub",
                             "label": {"ru": "Доставка ₽", "en": "Delivery RUB"},
@@ -7007,6 +7028,12 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "max_width": 110,
                         },
                         {
+                            "field": "lead_time",
+                            "label": {"ru": "Срок / наличие", "en": "Lead time / stock"},
+                            "max_lines": 2,
+                            "max_width": 130,
+                        },
+                        {
                             "field": "price",
                             "label": {"ru": "Цена", "en": "Price"},
                             "format": "offer_price",
@@ -7814,7 +7841,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "budget_table": "budget_lines",
                     "procurement_table": "procurement",
                 },
-                "trigger": {"on": ["row.created", "row.updated"], "async": True},
+                "trigger": {"on": ["row.created", "row.updated", "row.deleted"], "async": True},
                 "ui": {"placement": ["scaffold"], "icon": "sync"},
             },
                 # WAVE7: единый пайплайн — материализация офферов из OpenSearch,
@@ -7907,7 +7934,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "params": {
                         "procurement_table": "procurement",
                     },
-                    "trigger": {"on": ["row.updated"], "async": True},
+                    "trigger": {"on": ["row.updated", "row.deleted"], "async": True},
                     "ui": {"placement": []},
                 },
                 # WAVE16: отправка письма из «Исходящих» (queued → sent/failed).

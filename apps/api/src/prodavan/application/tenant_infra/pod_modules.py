@@ -87,6 +87,7 @@ class PodModuleDataService:
         row_id: str,
         session_id: str | None = None,
         previous_body: dict[str, Any] | None = None,
+        row_deleted: bool = False,
     ) -> None:
         """Best-effort auto-actions (equipment.budget_sync) after a bridge write.
 
@@ -123,6 +124,7 @@ class PodModuleDataService:
                 principal=principal,
                 employee=None,
                 session_id=session_id,
+                row_deleted=row_deleted,
             )
         except Exception:
             logger.exception(
@@ -608,6 +610,7 @@ class PodModuleDataService:
                     if existing is not None and isinstance(existing.get("body"), dict)
                     else None
                 ),
+                row_deleted=True,
             )
         except Exception:
             logger.exception(

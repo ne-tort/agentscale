@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from prodavan.application.cabinets.cabinet_module_service import CabinetModuleService
 from prodavan.application.content.tabular_index import index_tabular_bytes
 from prodavan.application.content.upload_service import UploadService
+from prodavan.application.modules.documents_file_ref import normalize_documents_file_ref
 from prodavan.application.pod_service.container_env_resolver import field_value_as_secret_ref
 from prodavan.domain.errors import AppError
 from prodavan.domain.identity import Principal
@@ -32,8 +33,38 @@ _OWNER_REMOTE_KINDS = frozenset(
         "content.list_remote_sql_databases",
         "content.list_remote_sql_tables",
         "content.index_opensearch",
+        "content.index_tabular",
     }
 )
+
+
+def _canonical_document_file_ref(value: Any, *, detail: str) -> dict[str, Any]:
+    """Keep document actions aligned with the pod Documents FileRef contract.
+
+    Module rows are validated at write time, but action parameters can carry an
+    out-of-band ``template_file``. Passing a storage-key-only object to
+    DocumentsService would fail only after the flow reaches blob loading.
+    """
+    if not isinstance(value, dict):
+        raise AppError(
+            code="VALIDATION_ERROR",
+            title="Validation Error",
+            status=422,
+            detail=f"{detail} must be a FileRef object",
+        )
+    missing = [
+        key
+        for key in ("asset_id", "version_id")
+        if not isinstance(value.get(key), str) or not value[key].strip()
+    ]
+    if missing:
+        raise AppError(
+            code="VALIDATION_ERROR",
+            title="Validation Error",
+            status=422,
+            detail=f"{detail} missing canonical FileRef fields: {', '.join(missing)}",
+        )
+    return dict(value)
 
 
 def remote_probe_connection_key(body: dict[str, Any], params: dict[str, Any]) -> str:
@@ -422,6 +453,8 @@ class ModuleActionExecutor:
         action_id: str,
         row_id: str | None = None,
         principal: Principal,
+        employee: EmployeeRow | None = None,
+        extra_params: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Platform/company module instance — remote SQL + OpenSearch index actions."""
         action = await self._load_action(module_id=module_id, action_id=action_id)
@@ -440,13 +473,17 @@ class ModuleActionExecutor:
                 status=403,
                 detail="action not available for owner module scope",
             )
-        params = action.get("params") if isinstance(action.get("params"), dict) else {}
+        params = dict(action.get("params")) if isinstance(action.get("params"), dict) else {}
+        if isinstance(extra_params, dict) and extra_params:
+            # Owner editors may supply row-specific context at invocation time,
+            # matching cabinet and pod action contracts.
+            params.update({k: v for k, v in extra_params.items() if v is not None})
         common = dict(
             module_id=module_id,
             params=params,
             row_id=row_id,
             principal=principal,
-            employee=None,
+            employee=employee,
             owner_kind=owner_kind,
             owner_id=owner_id,
             cabinet_id="",
@@ -460,6 +497,8 @@ class ModuleActionExecutor:
             return await self._list_remote_sql_tables(**common)
         if kind == "content.index_opensearch":
             return await self._index_opensearch(**common)
+        if kind == "content.index_tabular":
+            return await self._index_tabular(**common)
         raise AppError(
             code="NOT_IMPLEMENTED",
             title="Not Implemented",
@@ -1722,6 +1761,7 @@ class ModuleActionExecutor:
         project_id: str | None = None,
         session_id: str | None = None,
         row_id: str | None = None,
+        row_deleted: bool = False,
     ) -> None:
         """Best-effort WAVE7: авто-пайплайн «Подбора товаров» после записей строк.
 
@@ -1730,6 +1770,7 @@ class ModuleActionExecutor:
           без материализации (пересчёт best/бюджета/закупки — например после
           ручной правки оффера или выбора сборки);
         - ``procurement`` → ``equipment.procurement_apply`` (маржа/доставка);
+        - ``row.deleted`` triggers rebuild derived aggregates after source deletion;
         - WAVE12: ``part_cards`` / ``ready_builds`` / ``ready_build_slots`` →
           пайплайн каталога «Готовые сборки».
 
@@ -1775,13 +1816,30 @@ class ModuleActionExecutor:
                     continue
                 trigger = action.get("trigger") if isinstance(action.get("trigger"), dict) else {}
                 on = trigger.get("on") if isinstance(trigger.get("on"), list) else []
-                if "row.created" not in on and "row.updated" not in on:
+                if row_deleted:
+                    if "row.deleted" not in on:
+                        continue
+                elif "row.created" not in on and "row.updated" not in on:
                     continue
                 matched_kind = kind
                 break
             if matched_kind is None:
                 return
             if matched_kind == "equipment.procurement_apply":
+                if row_deleted:
+                    # The triggering procurement row no longer exists; rebuild
+                    # the derived supplier aggregate from the remaining source rows.
+                    await self._equipment_pipeline(
+                        cabinet_id=cabinet_id,
+                        module_id=module_id,
+                        params={},
+                        principal=principal,
+                        employee=employee,
+                        project_id=project_id,
+                        session_id=session_id,
+                        materialize=False,
+                    )
+                    return
                 if not (row_id or "").strip():
                     return
                 await self._procurement_apply(
@@ -1846,6 +1904,8 @@ class ModuleActionExecutor:
         project_id: str | None = None,
         previous_body: dict[str, Any] | None = None,
         session_id: str | None = None,
+        owner_kind: str | None = None,
+        owner_id: str | None = None,
     ) -> None:
         """Best-effort: run content.index_tabular actions matching table after row write."""
         for action in await self._list_actions(module_id=module_id):
@@ -1862,9 +1922,11 @@ class ModuleActionExecutor:
                 continue
             source_column = str(params.get("source_column") or "source_file")
             status_col = str(params.get("status_column") or "status")
-            rows = await self._list_module_rows(
+            rows = await self._list_rows_for_scope(
                 cabinet_id=cabinet_id,
                 project_id=project_id,
+                owner_kind=owner_kind,
+                owner_id=owner_id,
                 module_id=module_id,
                 table_slug=table_slug,
                 principal=principal,
@@ -1909,6 +1971,8 @@ class ModuleActionExecutor:
                     row_id=row_id,
                     principal=principal,
                     employee=employee,
+                    owner_kind=owner_kind,
+                    owner_id=owner_id,
                 )
             except AppError:
                 # Domain failure already persisted as status=error — surface to client.
@@ -2635,17 +2699,21 @@ class ModuleActionExecutor:
             indexed = index_tabular_bytes(raw, filename=filename)
             indexed_columns = list(indexed.columns)
 
-            cab = await self._session.get(CabinetInstanceRow, cabinet_id)
-            if cab is None or not cab.company_id:
-                raise AppError(
-                    code="VALIDATION_ERROR",
-                    title="Validation Error",
-                    status=422,
-                    detail="cabinet has no company for content upload",
-                )
+            if owner_kind:
+                owner_company_id = owner_id if owner_kind == "company" else None
+            else:
+                cab = await self._session.get(CabinetInstanceRow, cabinet_id)
+                if cab is None or not cab.company_id:
+                    raise AppError(
+                        code="VALIDATION_ERROR",
+                        title="Validation Error",
+                        status=422,
+                        detail="cabinet has no company for content upload",
+                    )
+                owner_company_id = cab.company_id
             asset_id, version_id = await UploadService(self._session).upload_bytes_as_asset(
                 data=indexed.sqlite_bytes,
-                owner_company_id=cab.company_id,
+                owner_company_id=owner_company_id,
                 principal=principal,
                 employee=employee,
                 mime="application/x-sqlite3",
@@ -3015,6 +3083,9 @@ class ModuleActionExecutor:
                 status=422,
                 detail=f"row {file_col!r} has no file_ref to convert",
             )
+        file_ref = _canonical_document_file_ref(
+            file_ref, detail=f"row {file_col!r} file_ref"
+        )
         filename = str(file_ref.get("filename") or "").strip()
         if not filename:
             raise AppError(
@@ -3126,7 +3197,12 @@ class ModuleActionExecutor:
                     detail=f"row {template_col!r} has no template file_ref",
                 )
         else:
-            template_ref = dict(template_file)  # type: ignore[arg-type]
+            template_ref = _canonical_document_file_ref(
+                template_file, detail="template_file"
+            )
+        template_ref = _canonical_document_file_ref(
+            template_ref, detail="template_file"
+        )
         filename = str(template_ref.get("filename") or "").strip()
         if not filename:
             raise AppError(

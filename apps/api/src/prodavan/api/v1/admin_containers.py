@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Query
-from fastapi.responses import Response
+from fastapi import APIRouter, Query, Request
 
 from prodavan.api.deps import PlatformAdminDep, SessionDep
-from prodavan.api.v1.workspace_bodies import WorkspaceCopyBody, WorkspaceMoveBody
+from prodavan.api.v1.workspace_bodies import (
+    WorkspaceCopyBody,
+    WorkspaceMoveBody,
+    read_workspace_upload,
+)
 from prodavan.application.admin.container_read_service import AdminContainerReadService
 from prodavan.application.pod_service import PodCommand, PodReconcileService
-from prodavan.application.pod_service.workspace_service import PodWorkspaceService
+from prodavan.application.pod_service.workspace_service import PodWorkspaceService, workspace_download_response
 
 router = APIRouter(prefix="/admin/containers", tags=["admin-containers"])
 
@@ -90,11 +93,24 @@ async def download_admin_workspace_content(
         principal=admin,
         employee=None,
     )
-    safe_name = entry.name.replace('"', "")
-    return Response(
-        content=data,
-        media_type="application/octet-stream",
-        headers={"Content-Disposition": f'attachment; filename="{safe_name}"'},
+    return workspace_download_response(data, entry)
+
+
+@router.put("/{project_id}/workspace/content")
+async def upload_admin_workspace_content(
+    project_id: str,
+    request: Request,
+    admin: PlatformAdminDep,
+    session: SessionDep,
+    path: str = Query(min_length=1),
+) -> dict:
+    await AdminContainerReadService(session).get_container(project_id)
+    return await PodWorkspaceService(session).write_content(
+        project_id=project_id,
+        path=path,
+        data=await read_workspace_upload(request),
+        principal=admin,
+        employee=None,
     )
 
 

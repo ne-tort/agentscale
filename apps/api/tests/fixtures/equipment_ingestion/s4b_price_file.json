@@ -1,0 +1,16 @@
+{
+  "source_kind": "s4b_price_file",
+  "external_file_id": "price-list-2026-01-15.csv",
+  "media_type": "text/csv",
+  "rows": [
+    {
+      "sku": "SRV-RACK-01",
+      "supplier": "Supplier LLC",
+      "title": "Rack server",
+      "price": "125000.00",
+      "currency": "RUB",
+      "quantity": "2",
+      "unit": "pcs"
+    }
+  ]
+}

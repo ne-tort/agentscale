@@ -39,6 +39,7 @@ class _ProjectContainerPageState extends State<ProjectContainerPage> {
   Map<String, dynamic>? _container;
   Map<String, dynamic>? _metrics;
   Map<String, dynamic>? _projectMetrics;
+  bool _metricsError = false;
 
   AppJob? get _job => appJobStore.lifecycleFor(widget.projectId);
 
@@ -92,9 +93,12 @@ class _ProjectContainerPageState extends State<ProjectContainerPage> {
       final container = await workContext.api.getProjectContainer(widget.projectId);
       Map<String, dynamic>? metrics;
       Map<String, dynamic>? projectMetrics;
+      var metricsError = false;
       try {
         metrics = await workContext.api.getProjectContainerMetrics(widget.projectId);
-      } catch (_) {}
+      } catch (_) {
+        metricsError = true;
+      }
       try {
         projectMetrics = await workContext.api.getProjectMetrics(widget.projectId);
       } catch (_) {}
@@ -103,6 +107,7 @@ class _ProjectContainerPageState extends State<ProjectContainerPage> {
           appRefreshDataEquals(_container, container) &&
           appRefreshDataEquals(_metrics, metrics) &&
           appRefreshDataEquals(_projectMetrics, projectMetrics) &&
+          _metricsError == metricsError &&
           !_loading) {
         return;
       }
@@ -110,6 +115,7 @@ class _ProjectContainerPageState extends State<ProjectContainerPage> {
         _container = container;
         _metrics = metrics;
         _projectMetrics = projectMetrics;
+        _metricsError = metricsError;
         _loading = false;
       });
     } catch (e) {
@@ -150,6 +156,7 @@ class _ProjectContainerPageState extends State<ProjectContainerPage> {
                   container: _container,
                   runtimeMetrics: _metrics,
                   projectMetrics: _projectMetrics,
+                  runtimeMetricsError: _metricsError,
                 ),
                 if (containerRuntimeHealthy(_container))
                   AppNavPreference(

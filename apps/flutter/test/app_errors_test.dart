@@ -80,6 +80,43 @@ void main() {
     expect(presented.diagnostic.contains('project is paused'), isTrue);
   });
 
+  testWidgets('PAYLOAD_TOO_LARGE displays localized actual size and max_bytes', (tester) async {
+    final l10n = await l10nFor(tester, const Locale('ru'));
+    final presented = AppErrors.present(
+      ProdavanApiException(
+        413,
+        '{"code":"PAYLOAD_TOO_LARGE","extra":{"size":2097152,"max_bytes":1048576}}',
+      ),
+      l10n,
+    );
+    expect(presented.display, l10n.projectWorkspaceDownloadTooLarge('2.0 MB', '1.0 MB'));
+    expect(presented.diagnostic, contains('size=2097152 max_bytes=1048576'));
+  });
+
+  testWidgets('PAYLOAD_TOO_LARGE accepts flattened API metadata', (tester) async {
+    final l10n = await l10nFor(tester, const Locale('en'));
+    final presented = AppErrors.present(
+      ProdavanApiException(
+        413,
+        '{"code":"PAYLOAD_TOO_LARGE","size":1048577,"max_bytes":1048576}',
+      ),
+      l10n,
+    );
+    expect(presented.display, l10n.projectWorkspaceDownloadTooLarge('1.0 MB', '1.0 MB'));
+  });
+
+  testWidgets('PAYLOAD_TOO_LARGE without valid limits keeps friendly fallback', (tester) async {
+    final l10n = await l10nFor(tester, const Locale('ru'));
+    final presented = AppErrors.present(
+      ProdavanApiException(
+        413,
+        '{"code":"PAYLOAD_TOO_LARGE","extra":{"size":512,"max_bytes":1024}}',
+      ),
+      l10n,
+    );
+    expect(presented.display, l10n.errorHttpStatus(413));
+  });
+
   testWidgets('PROJECT_PAUSED maps to localized copy without EN leak', (tester) async {
     final l10n = await l10nFor(tester, const Locale('ru'));
     final presented = AppErrors.present(

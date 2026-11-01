@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse, Response
 from pydantic import BaseModel, Field
 
@@ -188,6 +188,34 @@ async def begin_asset_version(
         employee=employee,
         mime=body.mime,
         ttl_seconds=body.ttl_seconds,
+    )
+
+
+@router.put("/assets/{asset_id}/versions/{version_id}/upload")
+async def upload_asset_version(
+    asset_id: str,
+    version_id: str,
+    request: Request,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: Annotated[EmployeeRow | None, Depends(get_current_employee)] = None,
+) -> dict:
+    """Upload version bytes through the API for clients outside the cluster."""
+    chunks: list[bytes] = []
+    size = 0
+    async for chunk in request.stream():
+        size += len(chunk)
+        if size > 100 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="upload exceeds 100 MiB limit")
+        chunks.append(chunk)
+    data = b"".join(chunks)
+    return await AssetService(session).upload_version_bytes(
+        asset_id=asset_id,
+        version_id=version_id,
+        data=data,
+        principal=principal,
+        employee=employee,
+        mime=request.headers.get("content-type"),
     )
 
 

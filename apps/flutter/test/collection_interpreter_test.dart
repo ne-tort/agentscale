@@ -96,7 +96,7 @@ Map<String, dynamic> _rowTapManifestJson() => {
           'enabled': true,
         },
         {
-          'slug': 'offers',
+          'slug': 'found_offers',
           'label': 'Offers',
           'storage_kind': 'json_document',
           'enabled': true,
@@ -116,7 +116,7 @@ Map<String, dynamic> _rowTapManifestJson() => {
           'type': 'text',
         },
         {
-          'table_slug': 'offers',
+          'table_slug': 'found_offers',
           'name': 'title',
           'label': 'Название',
           'type': 'text',
@@ -157,7 +157,7 @@ Map<String, dynamic> _rowTapManifestJson() => {
         },
         {
           'slug': 'offers_for_line',
-          'table_slug': 'offers',
+          'table_slug': 'found_offers',
           'kind': 'collection',
           'ui_json': {
             'version': 1,
@@ -183,7 +183,7 @@ Map<String, dynamic> _rowTapManifestJson() => {
             'body': {'title': 'Линия 2'},
           },
           {
-            'table_slug': 'offers',
+            'table_slug': 'found_offers',
             'row_id': 'offer42',
             'body': {'title': 'Оффер 42'},
           },
@@ -340,7 +340,7 @@ Map<String, dynamic> _wave7ManifestJson() => {
           'enabled': true,
         },
         {
-          'slug': 'offers',
+          'slug': 'found_offers',
           'label': 'Offers',
           'storage_kind': 'json_document',
           'enabled': true,
@@ -372,19 +372,19 @@ Map<String, dynamic> _wave7ManifestJson() => {
           'type': 'number',
         },
         {
-          'table_slug': 'offers',
+          'table_slug': 'found_offers',
           'name': 'title',
           'label': 'Товар',
           'type': 'text',
         },
         {
-          'table_slug': 'offers',
+          'table_slug': 'found_offers',
           'name': 'seller',
           'label': 'Поставщик',
           'type': 'text',
         },
         {
-          'table_slug': 'offers',
+          'table_slug': 'found_offers',
           'name': 'is_selected',
           'label': 'Выбран',
           'type': 'bool',
@@ -431,7 +431,7 @@ Map<String, dynamic> _wave7ManifestJson() => {
         },
         {
           'slug': 'offers_list',
-          'table_slug': 'offers',
+          'table_slug': 'found_offers',
           'kind': 'collection',
           'ui_json': {
             'version': 1,
@@ -492,21 +492,42 @@ Map<String, dynamic> _wave7ManifestJson() => {
             'body': {'title': 'Без цены', 'rank': 2},
           },
           {
-            'table_slug': 'offers',
+            'table_slug': 'found_offers',
             'row_id': 'o1',
-            'body': {'title': 'Товар Иванова', 'seller': 'Иванов', 'is_selected': false},
+            'body': {
+               'title': 'Товар Иванова',
+               'seller': 'Иванов',
+               'line_id': 'line1',
+               'is_selected': false,
+             },
           },
           {
-            'table_slug': 'offers',
+            'table_slug': 'found_offers',
             'row_id': 'o2',
-            'body': {'title': 'Товар Петрова', 'seller': 'Петров', 'is_selected': false},
+            'body': {
+               'title': 'Товар Петрова',
+               'seller': 'Петров',
+               'line_id': 'line2',
+               'is_selected': false,
+             },
           },
           {
-            'table_slug': 'offers',
+            'table_slug': 'found_offers',
             'row_id': 'o3',
             'body': {
               'title': 'Ещё Иванов',
+               'line_id': 'line1',
               'seller': 'Иванов',
+              'is_selected': true,
+            },
+          },
+          {
+            'table_slug': 'found_offers',
+            'row_id': 'o4',
+            'body': {
+              'title': 'Второй выбранный',
+              'seller': 'Иванов',
+              'line_id': 'line2',
               'is_selected': true,
             },
           },
@@ -575,15 +596,41 @@ void _wave7Group(String description) {
       // контекстный бинд по полю: только офферы Иванова
       expect(find.text('Товар Иванова'), findsOneWidget);
       expect(find.text('Ещё Иванов'), findsOneWidget);
+      expect(find.text('Второй выбранный'), findsOneWidget);
       expect(find.text('Товар Петрова'), findsNothing);
 
-      // чекбокс вместо радио; выбранный ряд отмечен
+      // чекбокс вместо радио; выбор сохраняется независимо для каждой позиции
       final checkboxes = tester.widgetList<Checkbox>(find.byType(Checkbox)).toList();
-      expect(checkboxes.length, 2);
-      expect(checkboxes.any((c) => c.value == true), isTrue);
+      expect(checkboxes.length, 3);
+      expect(checkboxes.where((checkbox) => checkbox.value == true), hasLength(2));
     });
 
-    testWidgets('bool editable cell toggles via patchField', (tester) async {
+    testWidgets('found offer selection is independent per request line', (tester) async {
+      tester.view.physicalSize = const Size(1200, 700);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      final manifest = ModuleMetaManifest.fromJson(_wave7ManifestJson());
+      final seeds = SeedDataController(manifest);
+      final view = manifest.viewBySlug('offers_list')!;
+
+      await tester.pumpWidget(
+        _ruApp(
+          CollectionViewInterpreter(
+            manifest: manifest,
+            view: view,
+            seeds: seeds,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final checkboxes = tester.widgetList<Checkbox>(find.byType(Checkbox)).toList();
+      expect(checkboxes, hasLength(4));
+      expect(checkboxes.where((checkbox) => checkbox.value == true), hasLength(2));
+    });
+
+    testWidgets('bool editable cell toggles via patchField', (tester) async { 
       tester.view.physicalSize = const Size(1200, 700);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.reset);

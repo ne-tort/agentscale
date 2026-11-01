@@ -69,6 +69,37 @@ async def test_reap_zombies_deletes_stale_untracked_pod() -> None:
 
 
 @pytest.mark.asyncio
+async def test_clear_stale_preparing_marker_after_launch_crash() -> None:
+    """A crash after materialization begins must not leave project stuck preparing."""
+    session = AsyncMock()
+    project = MagicMock(status="draft", launch_phase="preparing")
+    stale_query = MagicMock()
+    stale_query.scalars.return_value.all.return_value = [project]
+    session.execute = AsyncMock(return_value=stale_query)
+
+    svc = PodReconcileService(session, runtime=AsyncMock())
+    with pytest.MonkeyPatch.context() as patcher:
+        patcher.setattr("prodavan.application.pod_service.reconcile.settings.pod_preparing_timeout_sec", 1)
+        assert await svc._clear_stale_preparing_markers() == 1
+
+    assert project.launch_phase is None
+    assert project.status == "error"
+
+
+@pytest.mark.asyncio
+async def test_clear_stale_preparing_marker_keeps_fresh_marker() -> None:
+    """Fresh preparation remains visible while materialization is in progress."""
+    session = AsyncMock()
+    query = MagicMock()
+    query.scalars.return_value.all.return_value = []
+    session.execute = AsyncMock(return_value=query)
+
+    svc = PodReconcileService(session, runtime=AsyncMock())
+    assert await svc._clear_stale_preparing_markers() == 0
+    session.execute.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_run_skips_when_advisory_lock_held() -> None:
     # POD-P2a: when another process holds the reconcile lock, run() skips
     # without touching k8s or DB rows.

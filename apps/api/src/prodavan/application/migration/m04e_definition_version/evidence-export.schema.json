@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "MIG-M04E-02 M05 evidence handoff",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "tenant_id", "app_definition_id", "source_snapshot_digest", "canonical_digest",
+    "checkpoint", "accepted", "quarantined", "gates", "status", "canonical_positive_writes"
+  ],
+  "properties": {
+    "tenant_id": {"type": "string", "minLength": 1},
+    "app_definition_id": {"type": "string", "minLength": 1},
+    "source_snapshot_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "canonical_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "checkpoint": {
+      "type": "object",
+      "required": ["partition", "phase", "after_source_id", "sequence"],
+      "properties": {
+        "partition": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"type": "string"}},
+        "phase": {"enum": ["definition", "version"]},
+        "after_source_id": {"type": ["string", "null"]},
+        "sequence": {"type": "integer", "minimum": 0}
+      }
+    },
+    "accepted": {"type": "array", "items": {"$ref": "#/$defs/evidence"}},
+    "quarantined": {"type": "array", "items": {"$ref": "#/$defs/evidence"}},
+    "gates": {"type": "array", "items": {"type": "object", "required": ["name", "passed"]}},
+    "status": {"enum": ["ready", "blocked"]},
+    "canonical_positive_writes": {"const": false}
+  },
+  "$defs": {
+    "evidence": {
+      "type": "object",
+      "required": ["source_kind", "source_id", "schema_version", "source_digest", "canonical_digest", "status", "reason_code", "correlation_id"],
+      "properties": {
+        "source_kind": {"type": "string"},
+        "source_id": {"type": "string"},
+        "schema_version": {"type": "string"},
+        "source_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "canonical_digest": {"type": ["string", "null"]},
+        "status": {"enum": ["accepted", "quarantined", "conflict"]},
+        "reason_code": {"type": ["string", "null"]},
+        "correlation_id": {"type": "string"}
+      }
+    }
+  }
+}

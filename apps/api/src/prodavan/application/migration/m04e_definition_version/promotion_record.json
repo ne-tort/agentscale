@@ -1,0 +1,27 @@
+{
+  "record_id": "MIG-M04E-02:blocked:2026-11-01:initial",
+  "task_id": "MIG-M04E-02",
+  "status": "blocked",
+  "partition": null,
+  "source_snapshot_digest": null,
+  "canonical_digest": null,
+  "checkpoint": null,
+  "accepted_count": null,
+  "quarantined_count": null,
+  "gate_evidence": {
+    "MIG-M04-01": "missing",
+    "MIG-M04E-01": "missing",
+    "active_typed_parent_scope": "missing"
+  },
+  "resolver_proof": "contract-only; no source rows resolved",
+  "artifact_lifecycle_evidence": "not established",
+  "m05_handoff": "blocked",
+  "legacy_read_write_owner": "legacy",
+  "canonical_positive_writes": false,
+  "actor": "delegated implementation agent",
+  "recorded_at": "2026-11-01T18:14:08+04:00[Europe/Samara]",
+  "decision_owner": "migration coordinator",
+  "writer_generation": null,
+  "correlation_id": "MIG-M04E-02-initial",
+  "rollback": "Stop only this partition; preserve mappings, quarantine and audit evidence; keep legacy definitions/versions as read/write owner and repair forward. No cleanup or canonical handoff."
+}

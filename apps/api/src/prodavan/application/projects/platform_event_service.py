@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.domain.cabinets import CabinetStatus
@@ -16,6 +17,19 @@ from prodavan.infrastructure.persistence.models.platform_events import PlatformE
 class PlatformEventService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
+
+    @staticmethod
+    def _public(row: PlatformEventRow) -> dict:
+        return {
+            "id": row.id,
+            "event_type": row.event_type,
+            "company_id": row.company_id,
+            "project_id": row.project_id,
+            "cabinet_id": row.cabinet_id,
+            "actor_sub": row.actor_sub,
+            "payload": row.payload,
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+        }
 
     async def _cabinet_ids_for_delivery(
         self,
@@ -44,6 +58,7 @@ class PlatformEventService:
         cabinet_id: str | None = None,
         principal: Principal | None = None,
         payload: dict | None = None,
+        idempotency_key: str | None = None,
     ) -> dict:
         if event_type not in PLATFORM_EVENT_TYPES:
             raise AppError(
@@ -52,28 +67,50 @@ class PlatformEventService:
                 status=422,
                 detail=f"unsupported platform event type: {event_type}",
             )
+        if idempotency_key:
+            existing = await self._session.scalar(
+                select(PlatformEventRow).where(
+                    PlatformEventRow.idempotency_key == idempotency_key
+                )
+            )
+            if existing is not None:
+                return self._public(existing)
+
         row = PlatformEventRow(
             event_type=event_type,
             company_id=company_id,
             project_id=project_id,
             cabinet_id=cabinet_id,
             actor_sub=principal.sub if principal else None,
+            idempotency_key=idempotency_key,
             payload=payload or {},
         )
-        self._session.add(row)
-        await self._session.flush()
+        try:
+            if idempotency_key:
+                # Put both the INSERT and its flush inside the savepoint. A
+                # concurrent emitter can win the unique constraint; rolling
+                # back only this nested transaction keeps the caller's
+                # transaction usable for the replay lookup below.
+                async with self._session.begin_nested():
+                    self._session.add(row)
+                    await self._session.flush()
+            else:
+                self._session.add(row)
+                await self._session.flush()
+        except IntegrityError:
+            if not idempotency_key:
+                raise
+            existing = await self._session.scalar(
+                select(PlatformEventRow).where(
+                    PlatformEventRow.idempotency_key == idempotency_key
+                )
+            )
+            if existing is None:
+                raise
+            return self._public(existing)
         deliveries: list[dict] = []
         # Package SPI removed with MCP packages; platform events stay in DB only.
-        out = {
-            "id": row.id,
-            "event_type": row.event_type,
-            "company_id": row.company_id,
-            "project_id": row.project_id,
-            "cabinet_id": row.cabinet_id,
-            "actor_sub": row.actor_sub,
-            "payload": row.payload,
-            "created_at": row.created_at.isoformat() if row.created_at else None,
-        }
+        out = self._public(row)
         if deliveries:
             out["cabinet_deliveries"] = deliveries
             if cabinet_id and len(deliveries) == 1:

@@ -72,6 +72,23 @@ void main() {
     );
   });
 
+  test('containerIsPaused recognizes agent-sandbox suspended runtime', () {
+    expect(
+      containerIsPaused(const {
+        'status': 'active',
+        'runtime': {'observed_state': 'suspended'},
+      }),
+      isTrue,
+    );
+    expect(
+      containerIsPaused(const {
+        'status': 'active',
+        'runtime': {'observed_state': 'running'},
+      }),
+      isFalse,
+    );
+  });
+
   test('containerShowResourceStatTiles false when paused', () {
     expect(
       containerShowResourceStatTiles(const {

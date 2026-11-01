@@ -4,14 +4,17 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
-from fastapi.responses import Response
+from fastapi import APIRouter, Depends, Query, Request
 
 from prodavan.api.deps import PrincipalDep, SessionDep, get_current_employee
-from prodavan.api.v1.workspace_bodies import WorkspaceCopyBody, WorkspaceMoveBody
+from prodavan.api.v1.workspace_bodies import (
+    WorkspaceCopyBody,
+    WorkspaceMoveBody,
+    read_workspace_upload,
+)
 from prodavan.application.admin.container_read_service import AdminContainerReadService
 from prodavan.application.identity.service import EntitlementService
-from prodavan.application.pod_service.workspace_service import PodWorkspaceService
+from prodavan.application.pod_service.workspace_service import PodWorkspaceService, workspace_download_response
 from prodavan.infrastructure.persistence.models.identity import EmployeeRow
 
 router = APIRouter(prefix="/companies/{company_id}/containers", tags=["company-containers"])
@@ -135,11 +138,27 @@ async def download_company_workspace_content(
         principal=principal,
         employee=employee,
     )
-    safe_name = entry.name.replace('"', "")
-    return Response(
-        content=data,
-        media_type="application/octet-stream",
-        headers={"Content-Disposition": f'attachment; filename="{safe_name}"'},
+    return workspace_download_response(data, entry)
+
+
+@router.put("/{project_id}/workspace/content")
+async def upload_company_workspace_content(
+    company_id: str,
+    project_id: str,
+    request: Request,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: Annotated[EmployeeRow | None, Depends(get_current_employee)],
+    path: str = Query(min_length=1),
+) -> dict:
+    await EntitlementService(session).require_company_actor(principal, company_id, employee=employee)
+    await AdminContainerReadService(session).get_container_for_company(company_id, project_id)
+    return await PodWorkspaceService(session).write_content(
+        project_id=project_id,
+        path=path,
+        data=await read_workspace_upload(request),
+        principal=principal,
+        employee=employee,
     )
 
 

@@ -550,6 +550,7 @@ class EquipmentPipelineService:
             "sellers_created": 0,
             "budget_created": 0,
             "budget_updated": 0,
+            "budget_deleted": 0,
             "builds_updated": 0,
             "builds_deleted": 0,
             "build_slot_groups_updated": 0,
@@ -1453,7 +1454,7 @@ class EquipmentPipelineService:
         registry: _SellerRegistry,
     ) -> dict[str, Any]:
         """Снапшот budget_lines: выбранный оффер → best-группа → best-оффер."""
-        stats = {"budget_created": 0, "budget_updated": 0}
+        stats = {"budget_created": 0, "budget_updated": 0, "budget_deleted": 0}
         budget_rows = [r for r in await io.list(BUDGET_TABLE) if isinstance(r, dict)]
         budget_by_line = {
             str((r.get("body") or {}).get("line_id") or ""): r for r in budget_rows
@@ -1567,6 +1568,16 @@ class EquipmentPipelineService:
                         break
 
             if offer is None:
+                # budget_lines is a derived snapshot, not an archive: retaining
+                # a former offer after its last candidate disappeared makes
+                # procurement and exports count a product that is no longer
+                # selectable. Manual markup cannot make an orphan snapshot
+                # live again, so remove that snapshot with the same row IO.
+                existing = budget_by_line.get(line_id)
+                if existing is not None:
+                    budget_row_id = str(existing.get("row_id") or "")
+                    if budget_row_id and await io.delete(BUDGET_TABLE, budget_row_id):
+                        stats["budget_deleted"] += 1
                 continue
 
             obody = offer.get("body") or {}
@@ -2279,8 +2290,11 @@ class EquipmentPipelineService:
             selected_count = len(seller_lines)
 
             existing = proc_by_seller.get(token)
-            # Доставка поставщика (из реестра) — всегда расход: вычитается из
-            # маржи. Отдельного включения больше нет (колонка убрана из UI).
+            existing_body = dict(existing.get("body") or {}) if existing else {}
+            # Старые строки считаются с включённой доставкой, чтобы после
+            # обновления их расчёт совпал с прежним контрактом.
+            include_delivery = existing_body.get("include_delivery") is not False
+            charged_delivery = delivery if include_delivery else 0.0
             if existing is None:
                 body = {
                     "seller": display_name,
@@ -2290,6 +2304,7 @@ class EquipmentPipelineService:
                     "qty_total": qty_total,
                     "sum_rub": round(sum_rub, 2),
                     "margin_pct": margin_pct,
+                    "include_delivery": True,
                     "delivery_rub": delivery,
                     "sum_margin_rub": round(margin_rub - delivery, 2),
                     "sum_with_margin_rub": round(sum_rub + margin_rub + delivery, 2),
@@ -2307,9 +2322,10 @@ class EquipmentPipelineService:
                 "selected_count": selected_count,
                 "qty_total": qty_total,
                 "sum_rub": round(sum_rub, 2),
+                "include_delivery": include_delivery,
                 "delivery_rub": delivery,
-                "sum_margin_rub": round(margin_rub - delivery, 2),
-                "sum_with_margin_rub": round(sum_rub + margin_rub + delivery, 2),
+                "sum_margin_rub": round(margin_rub - charged_delivery, 2),
+                "sum_with_margin_rub": round(sum_rub + margin_rub + charged_delivery, 2),
                 # margin_pct — зеркало реестра поставщиков: правка в «Закупке»
                 # пишется в реестр через procurement_apply, обратная связь
                 # приходит отсюда. Расхождений быть не должно.
@@ -2458,6 +2474,10 @@ class EquipmentPipelineService:
             margin_pct = _num_or(body.get("margin_pct"), None)
             if margin_pct is not None and _num_or(seller_body.get("margin_pct"), None) != margin_pct:
                 seller_body["margin_pct"] = margin_pct
+            delivery_rub = _num_or(body.get("delivery_rub"), None)
+            if delivery_rub is not None and _num_or(seller_body.get("delivery_rub"), 0.0) != delivery_rub:
+                seller_body["delivery_rub"] = delivery_rub
+            if seller_body != entry["body"]:
                 await io.update(SELLERS_TABLE, entry_id, seller_body)
                 sellers_updated += 1
                 entry["body"] = seller_body

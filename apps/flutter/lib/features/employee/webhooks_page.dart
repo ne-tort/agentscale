@@ -40,7 +40,9 @@ class _WebhooksPageState extends State<WebhooksPage>
   late final TabController _tabs = TabController(length: 3, vsync: this);
   bool _loading = true;
   String? _error;
+  final Set<String> _updatingHookIds = <String>{};
   List<Map<String, dynamic>> _hooks = const [];
+  List<Map<String, dynamic>> _deliveries = const [];
   List<Map<String, dynamic>> _keys = const [];
 
   @override
@@ -63,10 +65,12 @@ class _WebhooksPageState extends State<WebhooksPage>
     try {
       final api = workContext.api;
       final hooks = await api.listWebhookSubscriptions();
+      final deliveries = await api.listWebhookDeliveries();
       final keys = await api.listAppKeys();
       if (!mounted) return;
       setState(() {
         _hooks = hooks;
+        _deliveries = deliveries;
         _keys = keys;
         _loading = false;
       });
@@ -137,6 +141,25 @@ class _WebhooksPageState extends State<WebhooksPage>
         builder: (_) => _SecretPage(title: title, secret: secret, hint: hint),
       ),
     );
+  }
+
+  Future<void> _setHookEnabled(Map<String, dynamic> hook, bool enabled) async {
+    final id = (hook['id'] ?? '').toString();
+    if (id.isEmpty || _updatingHookIds.contains(id)) return;
+    setState(() => _updatingHookIds.add(id));
+    try {
+      await workContext.api.setWebhookSubscriptionEnabled(id, enabled: enabled);
+      if (!mounted) return;
+      setState(() {
+        hook['enabled'] = enabled;
+        _updatingHookIds.remove(id);
+      });
+      AppSnackBar.success(context, enabled ? 'Подписка включена' : 'Подписка приостановлена');
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _updatingHookIds.remove(id));
+      AppErrors.showSnack(context, e);
+    }
   }
 
   Future<void> _deleteHook(Map<String, dynamic> hook) async {
@@ -233,6 +256,16 @@ class _WebhooksPageState extends State<WebhooksPage>
           )
         else
           for (final hook in _hooks) _hookTile(hook),
+        const SizedBox(height: AppSpacing.md),
+        Text('Последние доставки', style: Theme.of(context).textTheme.titleMedium),
+        const SizedBox(height: AppSpacing.xs),
+        if (_deliveries.isEmpty)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: AppSpacing.md),
+            child: Text('Доставок пока нет'),
+          )
+        else
+          for (final delivery in _deliveries) _deliveryTile(delivery),
       ],
     );
   }
@@ -259,11 +292,85 @@ class _WebhooksPageState extends State<WebhooksPage>
             if (!enabled) 'выключен',
           ].join(' · '),
         ),
-        trailing: IconButton(
-          tooltip: 'Удалить',
-          icon: const Icon(Icons.delete_outline),
-          onPressed: () => _deleteHook(hook),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (_updatingHookIds.contains((hook['id'] ?? '').toString()))
+              const SizedBox(
+                width: 40,
+                height: 40,
+                child: Padding(
+                  padding: EdgeInsets.all(12),
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              )
+            else
+              IconButton(
+                tooltip: enabled ? 'Приостановить' : 'Включить',
+                icon: Icon(enabled ? Icons.pause_circle_outline : Icons.play_circle_outline),
+                onPressed: () => _setHookEnabled(hook, !enabled),
+              ),
+            IconButton(
+              tooltip: 'Удалить',
+              icon: const Icon(Icons.delete_outline),
+              onPressed: () => _deleteHook(hook),
+            ),
+          ],
         ),
+      ),
+    );
+  }
+
+  Future<void> _retryDelivery(Map<String, dynamic> delivery) async {
+    final id = (delivery['id'] ?? '').toString();
+    if (id.isEmpty) return;
+    try {
+      await workContext.api.retryWebhookDelivery(id);
+      if (!mounted) return;
+      AppSnackBar.success(context, 'Доставка поставлена в очередь');
+      await _load();
+    } catch (e) {
+      if (mounted) AppErrors.showSnack(context, e);
+    }
+  }
+
+  Widget _deliveryTile(Map<String, dynamic> delivery) {
+    final status = (delivery['status'] ?? 'unknown').toString();
+    final event = (delivery['event_type'] ?? '').toString();
+    final url = (delivery['url'] ?? '').toString();
+    final attempts = delivery['attempts'] ?? 0;
+    final responseStatus = delivery['response_status'];
+    final error = (delivery['last_error'] ?? '').toString();
+    final subscriptionEnabled = delivery['subscription_enabled'];
+    final retryHistory = (delivery['retry_history'] as List?)?.cast<Map>() ?? const <Map>[];
+    final failed = status == 'exhausted';
+    return Card(
+      margin: const EdgeInsets.only(bottom: AppSpacing.sm),
+      child: ListTile(
+        leading: Icon(
+          failed ? Icons.error_outline : Icons.outbox_outlined,
+          color: failed ? Theme.of(context).colorScheme.error : null,
+        ),
+        title: Text('$event · $status'),
+        subtitle: Text(
+          [
+            if (url.isNotEmpty) url,
+            'попыток: $attempts',
+            if (responseStatus != null) 'HTTP $responseStatus',
+            if (subscriptionEnabled == false) 'подписка приостановлена',
+            if (error.isNotEmpty) error,
+            if (retryHistory.isNotEmpty) 'история попыток: ${retryHistory.length}',
+          ].join(' · '),
+          maxLines: 3,
+          overflow: TextOverflow.ellipsis,
+        ),
+        trailing: failed
+            ? IconButton(
+                tooltip: 'Повторить доставку',
+                icon: const Icon(Icons.replay_outlined),
+                onPressed: () => _retryDelivery(delivery),
+              )
+            : null,
       ),
     );
   }

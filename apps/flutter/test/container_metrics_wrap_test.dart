@@ -22,6 +22,101 @@ Widget themed(Widget home, {Locale locale = const Locale('en')}) {
 }
 
 void main() {
+  testWidgets('project metrics response renders CPU and RAM history with latest values', (tester) async {
+    await tester.pumpWidget(
+      themed(
+        const ContainerMetricsWrap(
+          container: {'observed_state': 'running', 'runtime': {'metrics_available': true}},
+          runtimeMetrics: {
+            'window': '1h',
+            'series': [
+              {'timestamp': '2026-01-01T00:00:00Z', 'cpu_millicores': 120, 'memory_bytes': 1048576},
+              {'timestamp': '2026-01-01T00:05:00Z', 'cpu_millicores': 240, 'memory_bytes': 2097152},
+            ],
+          },
+        ),
+        locale: const Locale('en'),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('CPU'), findsOneWidget);
+    expect(find.text('Memory'), findsOneWidget);
+    expect(find.text('CPU 240m'), findsOneWidget);
+    expect(find.text('Memory 2.0 MB'), findsOneWidget);
+    expect(find.byType(CustomPaint), findsWidgets);
+  });
+
+  testWidgets('project metrics response without CPU/RAM samples shows localized empty state', (tester) async {
+    await tester.pumpWidget(
+      themed(
+        const ContainerMetricsWrap(
+          container: {'observed_state': 'running'},
+          runtimeMetrics: {'window': '1h', 'series': [{'timestamp': '2026-01-01T00:00:00Z'}]},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('CPU —'), findsNothing);
+    expect(find.text('Memory —'), findsNothing);
+    expect(find.text('No CPU or memory samples yet'), findsOneWidget);
+  });
+
+  testWidgets('project metrics accepts wrapped series and latest fallback', (tester) async {
+    await tester.pumpWidget(
+      themed(
+        const ContainerMetricsWrap(
+          container: {'observed_state': 'running'},
+          runtimeMetrics: {
+            'series': {
+              'data': [
+                {'cpu': '80', 'memoryBytes': 1048576},
+              ],
+            },
+          },
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('CPU 80m'), findsOneWidget);
+    expect(find.text('Memory 1.0 MB'), findsOneWidget);
+  });
+
+  testWidgets('project metrics falls back to latest sample when series is empty', (tester) async {
+    await tester.pumpWidget(
+      themed(
+        const ContainerMetricsWrap(
+          container: {'observed_state': 'running'},
+          runtimeMetrics: {
+            'series': <Object>[],
+            'latest': {'cpu_millicores': 60, 'memory_bytes': 524288},
+          },
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('CPU 60m'), findsOneWidget);
+    expect(find.text('Memory 512.0 KB'), findsOneWidget);
+  });
+
+  testWidgets('project metrics error is localized', (tester) async {
+    await tester.pumpWidget(
+      themed(
+        const ContainerMetricsWrap(
+          container: {'observed_state': 'running'},
+          runtimeMetricsError: true,
+        ),
+        locale: const Locale('ru'),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Не удалось загрузить метрики'), findsOneWidget);
+  });
+
   testWidgets('sandbox runtime row shows ref, warm badge and fqdn tooltip', (tester) async {
     await tester.pumpWidget(
       themed(

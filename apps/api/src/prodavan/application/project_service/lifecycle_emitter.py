@@ -22,6 +22,7 @@ class ProjectLifecycleEmitter:
         cabinet_id: str,
         principal: Principal,
         payload: dict | None = None,
+        idempotency_key: str | None = None,
     ) -> None:
         await self._platform.emit(
             event_type=event_type,
@@ -30,4 +31,5 @@ class ProjectLifecycleEmitter:
             cabinet_id=cabinet_id,
             principal=principal,
             payload=payload,
+            idempotency_key=idempotency_key,
         )

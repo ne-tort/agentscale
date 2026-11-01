@@ -13,6 +13,7 @@ __all__ = [
     "PlatformEventService",
     "ProjectAttachmentService",
     "ProjectTriggerService",
+    "ProjectScheduleService",
     "get_materialize_service",
 ]
 
@@ -22,6 +23,7 @@ _LAZY: dict[str, tuple[str, str]] = {
     "PlatformEventService": (".platform_event_service", "PlatformEventService"),
     "ProjectAttachmentService": (".attachment_service", "ProjectAttachmentService"),
     "ProjectTriggerService": (".trigger_service", "ProjectTriggerService"),
+    "ProjectScheduleService": (".schedule_service", "ProjectScheduleService"),
 }
 
 

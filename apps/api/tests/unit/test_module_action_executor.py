@@ -317,3 +317,38 @@ async def test_invoke_owner_allows_index_opensearch_kind() -> None:
         )
     assert out["status"] == "indexing"
     mocked.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_invoke_owner_allows_index_tabular_for_company_scope() -> None:
+    """Owner editors can index an uploaded local tabular catalog."""
+    from unittest.mock import AsyncMock, patch
+
+    executor = ModuleActionExecutor(session=_FakeSession([
+        {
+            "id": "index_catalog_tabular",
+            "kind": "content.index_tabular",
+            "params": {"table_slug": "catalogs", "source_column": "source_file"},
+        },
+    ]))
+    with patch.object(
+        executor,
+        "_index_tabular",
+        new=AsyncMock(return_value={"kind": "content.index_tabular", "status": "ready"}),
+    ) as mocked:
+        out = await executor.invoke_owner(
+            owner_kind="company",
+            owner_id="co_1",
+            module_id="mod_equipment",
+            action_id="index_catalog_tabular",
+            row_id="cat_1",
+            principal=Principal(sub="owner", roles=frozenset()),
+        )
+
+    assert out == {"kind": "content.index_tabular", "status": "ready"}
+    mocked.assert_awaited_once()
+    kwargs = mocked.await_args.kwargs
+    assert kwargs["owner_kind"] == "company"
+    assert kwargs["owner_id"] == "co_1"
+    assert kwargs["cabinet_id"] == ""
+    assert kwargs["row_id"] == "cat_1"

@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://prodavan.dev/schemas/declarative-app/v1/schema.json",
+  "title": "Declarative App and Isolated Plugin Protocol v1",
+  "type": "object",
+  "required": ["protocol", "appId", "version", "displayName", "entrypoints", "requestedCapabilities"],
+  "additionalProperties": false,
+  "properties": {
+    "protocol": { "const": "1.0" },
+    "appId": { "type": "string", "pattern": "^[a-z][a-z0-9-]{2,63}$" },
+    "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+(-[0-9A-Za-z.-]+)?$" },
+    "displayName": { "type": "string", "minLength": 1, "maxLength": 120 },
+    "description": { "type": "string", "maxLength": 2000 },
+    "entrypoints": {
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 2,
+      "additionalProperties": false,
+      "properties": {
+        "ui": { "$ref": "#/$defs/uiEntrypoint" },
+        "plugin": { "$ref": "#/$defs/pluginEntrypoint" }
+      }
+    },
+    "requestedCapabilities": { "type": "array", "items": { "$ref": "#/$defs/capabilityRequest" }, "uniqueItems": true },
+    "quotas": { "$ref": "#/$defs/quotas" },
+    "lifecycle": { "$ref": "#/$defs/lifecycle" },
+    "metadata": { "type": "object", "additionalProperties": { "type": "string" } }
+  },
+  "$defs": {
+    "capability": { "type": "string", "enum": ["ui.render", "ui.navigation", "storage.kv", "storage.files", "network.fetch", "events.subscribe", "platform.commands", "platform.queries", "secrets.read", "identity.read"] },
+    "capabilityRequest": {
+      "type": "object", "required": ["name", "reason"], "additionalProperties": false,
+      "properties": { "name": { "$ref": "#/$defs/capability" }, "reason": { "type": "string", "minLength": 1 }, "optional": { "type": "boolean" }, "constraints": { "$ref": "#/$defs/constraints" } }
+    },
+    "constraints": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "resources": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "methods": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "domains": { "type": "array", "items": { "type": "string", "format": "hostname" }, "uniqueItems": true },
+        "eventTypes": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "maxBytesPerRequest": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "uiEntrypoint": {
+      "type": "object", "required": ["kind", "root"], "additionalProperties": false,
+      "properties": { "kind": { "const": "declarative-ui" }, "root": { "$ref": "#/$defs/uiNode" }, "routes": { "type": "array", "items": { "$ref": "#/$defs/route" }, "uniqueItems": true } }
+    },
+    "route": { "type": "object", "required": ["id", "path", "title", "root"], "additionalProperties": false, "properties": { "id": { "type": "string" }, "path": { "type": "string" }, "title": { "type": "string" }, "root": { "type": "string" } } },
+    "uiNode": {
+      "oneOf": [
+        { "type": "object", "required": ["type", "children"], "additionalProperties": false, "properties": { "type": { "enum": ["stack", "row", "column"] }, "id": { "type": "string" }, "children": { "type": "array", "items": { "$ref": "#/$defs/uiNode" } } } },
+        { "type": "object", "required": ["type", "id"], "additionalProperties": false, "properties": { "type": { "enum": ["text", "button", "input", "table"] }, "id": { "type": "string" }, "props": { "type": "object" }, "bindings": { "type": "object", "additionalProperties": { "type": "string" } } } },
+        { "type": "object", "required": ["type", "id", "name"], "additionalProperties": false, "properties": { "type": { "const": "slot" }, "id": { "type": "string" }, "name": { "type": "string" } } }
+      ]
+    },
+    "pluginEntrypoint": {
+      "type": "object", "required": ["kind", "runtime", "artifact", "rpc"], "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "isolated-code-plugin" }, "runtime": { "const": "sandbox-v1" },
+        "artifact": { "type": "object", "required": ["uri", "sha256"], "additionalProperties": false, "properties": { "uri": { "type": "string", "format": "uri" }, "sha256": { "type": "string", "pattern": "^[a-fA-F0-9]{64}$" } } },
+        "rpc": { "type": "object", "required": ["transport", "methods"], "additionalProperties": false, "properties": { "transport": { "const": "host-message" }, "methods": { "type": "array", "items": { "$ref": "#/$defs/pluginMethod" }, "uniqueItems": true } } }
+      }
+    },
+    "pluginMethod": { "type": "object", "required": ["name"], "additionalProperties": false, "properties": { "name": { "type": "string", "pattern": "^[a-z][a-z0-9._-]*$" }, "description": { "type": "string" }, "inputSchema": { "type": "object" }, "outputSchema": { "type": "object" }, "requiredCapabilities": { "type": "array", "items": { "$ref": "#/$defs/capability" }, "uniqueItems": true } } },
+    "quotas": { "type": "object", "additionalProperties": false, "properties": { "maxMemoryMb": { "type": "integer", "minimum": 1 }, "maxCpuMsPerMinute": { "type": "integer", "minimum": 1 }, "maxWallTimeMsPerInvocation": { "type": "integer", "minimum": 1 }, "maxConcurrentInvocations": { "type": "integer", "minimum": 1 }, "maxRpcMessageBytes": { "type": "integer", "minimum": 1 }, "maxStorageBytes": { "type": "integer", "minimum": 1 }, "maxNetworkRequestsPerMinute": { "type": "integer", "minimum": 1 } } },
+    "lifecycle": { "type": "object", "required": ["restart"], "additionalProperties": false, "properties": { "startupTimeoutMs": { "type": "integer", "minimum": 1 }, "shutdownTimeoutMs": { "type": "integer", "minimum": 1 }, "restart": { "enum": ["never", "on-failure", "always"] }, "maxRestarts": { "type": "integer", "minimum": 0 } } }
+  }
+}

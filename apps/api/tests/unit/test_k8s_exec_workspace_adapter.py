@@ -34,7 +34,7 @@ async def test_list_entries_parses_workspace_fs_json(monkeypatch) -> None:
         "entries": [
             {
                 "name": "AGENTS.md",
-                "path": "AGENTS.md",
+                "path": "/workspace/AGENTS.md",
                 "kind": "file",
                 "size": 12,
                 "modified_at": "2026-01-01T00:00:00+00:00",
@@ -55,6 +55,7 @@ async def test_list_entries_parses_workspace_fs_json(monkeypatch) -> None:
     entries = await adapter.list_entries(runtime_ref="pod-demo", path="")
     assert len(entries) == 1
     assert entries[0].name == "AGENTS.md"
+    assert entries[0].path == "AGENTS.md"
     assert entries[0].kind == "file"
 
 
@@ -87,6 +88,38 @@ async def test_list_entries_maps_exec_transport_error(monkeypatch) -> None:
         await adapter.list_entries(runtime_ref="pod-demo", path="")
     assert exc_info.value.code == "POD_EXEC_FORBIDDEN"
     assert exc_info.value.status == 403
+
+
+@pytest.mark.asyncio
+@pytest.mark.asyncio
+async def test_delete_missing_path_preserves_normalized_error_metadata(monkeypatch) -> None:
+    client = AsyncMock()
+    client.namespace = "prodavan-sandboxes"
+    client.auth = object()
+    client.get_pod = AsyncMock(return_value=_running_pod())
+
+    async def _exec(**kwargs):
+        _ = kwargs
+        return ExecResult(
+            stdout=b"",
+            stderr=b'{"error":"FileNotFoundError: missing"}',
+            exit_code=1,
+        )
+
+    monkeypatch.setattr(
+        "prodavan.application.pod_service.adapters.k8s.workspace_exec.exec_in_pod",
+        _exec,
+    )
+
+    adapter = K8sExecWorkspaceAdapter(client=client)
+    from prodavan.domain.errors import AppError
+
+    with pytest.raises(AppError) as exc_info:
+        await adapter.delete(runtime_ref="pod-demo", path=r"/tmp\\missing.txt")
+
+    assert exc_info.value.code == "WORKSPACE_NOT_FOUND"
+    assert exc_info.value.status == 404
+    assert exc_info.value.extra == {"path": "tmp/missing.txt"}
 
 
 @pytest.mark.asyncio

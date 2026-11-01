@@ -1,6 +1,7 @@
 """Celery task names (C-JOBS contract ids)."""
 
 TRIGGER_DRAIN = "prodavan.jobs.trigger_drain"
+PRODUCE_PROJECT_SCHEDULES = "prodavan.jobs.produce_project_schedules"
 DISPATCH_TRIGGER = "prodavan.jobs.dispatch_trigger"
 IDLE_PAUSE_SWEEP = "prodavan.jobs.idle_pause_sweep"
 REMATERIALIZE_PROJECT = "prodavan.jobs.rematerialize_project"

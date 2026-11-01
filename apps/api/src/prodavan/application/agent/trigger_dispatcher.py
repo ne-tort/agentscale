@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,8 +23,10 @@ from prodavan.infrastructure.persistence.models.projects import ProjectTriggerRo
 _DEFAULT_DRAIN_MAX = 10
 _HARD_DRAIN_MAX = 50
 
-# Kinds that only need queue ack until a real handler exists (cabinet SPI / cron).
-_ACK_ONLY_KINDS = frozenset({"project.prepare", "system.schedule", "webhook.http"})
+# Lifecycle-only triggers do not represent work for the agent runtime.
+_ACK_ONLY_KINDS = frozenset({"project.prepare"})
+# Event triggers execute in the project agent, with their complete payload in context.
+_RUNTIME_EVENT_KINDS = frozenset({"system.schedule", "webhook.http"})
 
 
 class AgentTriggerDispatcher:
@@ -331,7 +335,12 @@ class AgentTriggerDispatcher:
         payload = trigger.payload or {}
 
         try:
-            if trigger.kind in {"chat.message", "telegram.message", "chat.regenerate"}:
+            if trigger.kind in {
+                "chat.message",
+                "telegram.message",
+                "chat.regenerate",
+                *_RUNTIME_EVENT_KINDS,
+            }:
                 project = await self._projects.get_project(project_id)
                 if project.status == ProjectStatus.DRAFT:
                     return await self._finish_hard_fail(trigger, "project_not_launched")
@@ -340,6 +349,26 @@ class AgentTriggerDispatcher:
                 if await PodQuery(self._session).get_for_project(project_id) is None:
                     return await self._finish_hard_fail(trigger, "project_not_launched")
                 await self._pods.ensure_running_for_project(project_id, principal=principal)
+
+            if trigger.kind in _RUNTIME_EVENT_KINDS:
+                event_json = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
+                text = (
+                    f"Событие автоматизации `{trigger.kind}`. "
+                    "Обработай входные данные как задачу проекта. "
+                    "Данные события (JSON):\n"
+                    f"```json\n{event_json}\n```"
+                )
+                result = await self._run_chat_turn(
+                    project_id=project_id,
+                    principal=principal,
+                    employee=employee,
+                    text=text,
+                    attachment_refs=[],
+                )
+                return await self._finish_ok(
+                    trigger,
+                    {"action": f"run_{trigger.kind}", "run": result},
+                )
 
             if trigger.kind in {"chat.message", "telegram.message"}:
                 text = str(payload.get("text") or "")

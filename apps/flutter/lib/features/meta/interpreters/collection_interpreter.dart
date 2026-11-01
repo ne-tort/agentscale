@@ -33,6 +33,7 @@ import 'package:prodavan/features/meta/widgets/file_upload_field.dart';
 import 'package:prodavan/features/meta/widgets/contact_picker_field.dart';
 import 'package:prodavan/features/meta/widgets/project_multiselect_field.dart';
 import 'package:prodavan/features/meta/widgets/server_paged_add_button.dart';
+import 'package:prodavan/features/meta/widgets/server_search_context.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 double? _doubleFromUi(Object? raw) {
@@ -112,7 +113,7 @@ class CollectionViewInterpreter extends StatelessWidget {
         styled = _withNoOfferPlaceholder(context, uiJson, styled);
         styled = _withDashEmptyCells(context, uiJson, styled);
         styled = _withWarningCells(context, uiJson, styled);
-        var rows = _withSelection(context, uiJson, styled);
+        var rows = _withSelection(context, uiJson, tableSlug, styled);
         rows = _withEditableCells(context, uiJson, tableSlug, rows);
         rows = _withRowActions(context, uiJson, l10n, locale, rows);
         rows = _withBenefitBadges(context, uiJson, l10n, rows);
@@ -252,6 +253,7 @@ class CollectionViewInterpreter extends StatelessWidget {
               _CollectionOnLoad(
                 seeds: seeds,
                 actionId: onLoadAction,
+                tableSlug: tableSlug,
               ),
             if (hasPoll)
               _CollectionPoller(
@@ -340,17 +342,12 @@ class CollectionViewInterpreter extends StatelessWidget {
           validator: (raw) => raw.trim().isNotEmpty,
           onSave: (raw) => adapter.setServerSearch(tableSlug, raw.trim()),
         ),
-        if (currentSearch.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.only(bottom: AppSpacing.xs),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: InputChip(
-                label: Text(currentSearch, overflow: TextOverflow.ellipsis),
-                onDeleted: () => unawaited(adapter.setServerSearch(tableSlug, '')),
-              ),
-            ),
-          ),
+        ServerSearchContext(
+          query: currentSearch,
+          inStockOnly: stockFilter && adapter.serverStockOnly(tableSlug),
+          onClearQuery: () => unawaited(adapter.setServerSearch(tableSlug, '')),
+          onShowAllStock: () => unawaited(adapter.setServerStockOnly(tableSlug, false)),
+        ),
         Padding(
       padding: const EdgeInsets.fromLTRB(0, 0, 0, AppSpacing.xs),
       child: Row(
@@ -1401,31 +1398,37 @@ class CollectionViewInterpreter extends StatelessWidget {
       try {
         final result = await controller.invokeAction(actionId, rowId: rowId);
         final savedFile = await _saveActionFileRef(controller, result);
-        if (context.mounted) {
-          if (savedFile) {
-            AppSnackBar.success(
-              context,
-              AppLocalizations.of(context).projectWorkspaceDownloaded,
-            );
-          } else {
-            AppSnackBar.success(
-              context,
-              moduleActionLabel(
-                context,
-                actionId,
-                manifest.actions,
-              ),
-            );
-          }
-        }
+        _showActionSuccess(context, actionId, savedFile);
       } catch (e) {
-        if (context.mounted) {
-          AppErrors.showSnack(context, e);
-        }
+        if (context.mounted) AppErrors.showSnack(context, e);
+      }
+      return;
+    }
+    if (seeds is OwnerModuleDataController) {
+      try {
+        final result = await (seeds as OwnerModuleDataController)
+            .invokeAction(actionId, rowId: rowId);
+        final savedFile = await saveOwnerModuleActionFile(
+          seeds as OwnerModuleDataController,
+          result,
+        );
+        _showActionSuccess(context, actionId, savedFile);
+      } catch (e) {
+        if (context.mounted) AppErrors.showSnack(context, e);
       }
       return;
     }
     PreviewStub.run(context, actionId);
+  }
+
+  void _showActionSuccess(BuildContext context, String actionId, bool savedFile) {
+    if (!context.mounted) return;
+    AppSnackBar.success(
+      context,
+      savedFile
+          ? AppLocalizations.of(context).projectWorkspaceDownloaded
+          : moduleActionLabel(context, actionId, manifest.actions),
+    );
   }
 
   /// row_tap `context_field`: open the linked row (its id lives in the tapped
@@ -1454,6 +1457,7 @@ class CollectionViewInterpreter extends StatelessWidget {
   List<AppEntityRow> _withSelection(
     BuildContext context,
     Map<String, dynamic> uiJson,
+    String tableSlug,
     List<AppEntityRow> rows,
   ) {
     final selection = uiJson['selection'];
@@ -1464,20 +1468,34 @@ class CollectionViewInterpreter extends StatelessWidget {
     }
     final field = selection['field'] as String? ?? 'is_selected';
     final actionId = selection['action'] as String? ?? '';
+    // found_offers has one effective selection per request line, not one
+    // selection for the entire supplier/group table. Keep other equipment
+    // tables on the generic single-selected-row behavior.
+    final selectedByLine = <String, String>{};
     String? selectedId;
     for (final row in rows) {
       final item = seeds.itemById(row.id);
-      final body = item?['body'];
-      if (body is Map && body[field] == true) {
+      final body = item is Map ? item['body'] : null;
+      if (body is! Map || body[field] != true) continue;
+      if (tableSlug == 'found_offers') {
+        final lineId = body['line_id']?.toString() ?? '';
+        if (lineId.isNotEmpty) selectedByLine[lineId] = row.id;
+      } else {
         selectedId = row.id;
         break;
       }
     }
     return rows.map((row) {
+      final item = seeds.itemById(row.id);
+      final body = item is Map ? item['body'] : null;
+      final lineId = body is Map ? body['line_id']?.toString() ?? '' : '';
+      final selected = tableSlug == 'found_offers' && lineId.isNotEmpty
+          ? selectedByLine[lineId] == row.id
+          : selectedId == row.id;
       return _selectionRow(
         row: row,
         selection: selection,
-        selected: selectedId == row.id,
+        selected: selected,
         onSelect: readOnly || actionId.isEmpty
             ? null
             : () => _invokeAction(context, actionId, rowId: row.id),
@@ -1787,10 +1805,12 @@ class _CollectionOnLoad extends StatefulWidget {
   const _CollectionOnLoad({
     required this.seeds,
     required this.actionId,
+    required this.tableSlug,
   });
 
   final dynamic seeds;
   final String actionId;
+  final String tableSlug;
 
   @override
   State<_CollectionOnLoad> createState() => _CollectionOnLoadState();
@@ -1798,6 +1818,11 @@ class _CollectionOnLoad extends StatefulWidget {
 
 class _CollectionOnLoadState extends State<_CollectionOnLoad> {
   bool _started = false;
+  bool _running = true;
+  Object? _error;
+
+  bool get _isEquipmentPipeline =>
+      widget.actionId == 'equipment_pipeline_sync';
 
   @override
   void initState() {
@@ -1808,22 +1833,123 @@ class _CollectionOnLoadState extends State<_CollectionOnLoad> {
   Future<void> _run() async {
     if (_started || !mounted) return;
     _started = true;
+    if (mounted) {
+      setState(() {
+        _running = true;
+        _error = null;
+      });
+    }
     final controller = switch (widget.seeds) {
       CabinetDataController c => c,
       RuntimeDataAdapter a => a.controller,
       _ => null,
     };
-    if (controller == null) return;
+    if (controller == null) {
+      if (mounted) {
+        setState(() {
+          _running = false;
+          _error = StateError('module runtime is unavailable');
+        });
+      }
+      return;
+    }
     try {
+      // CabinetDataController.invokeAction reloads rows after the action.
       await controller.invokeAction(widget.actionId);
-      await controller.loadAll();
-    } catch (_) {
-      // Тихая сверка при открытии таблицы: ошибки не мешают просмотру данных.
+      if (mounted) setState(() => _running = false);
+    } catch (error) {
+      // Keep the last rows visible, but expose a failed equipment refresh so
+      // an empty derived table is not mistaken for a successful sync.
+      if (mounted) {
+        setState(() {
+          _running = false;
+          _error = error;
+        });
+      }
     }
   }
 
+  Widget _equipmentStatus(BuildContext context) {
+    final colors = context.appColors;
+    final label = widget.tableSlug == 'procurement'
+        ? 'Закупка: сверка данных'
+        : 'Подбор техники: сверка данных';
+    if (_running) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(
+          AppSpacing.md,
+          AppSpacing.xs,
+          AppSpacing.md,
+          0,
+        ),
+        child: Row(
+          children: [
+            const SizedBox(
+              width: 14,
+              height: 14,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+            const SizedBox(width: AppSpacing.sm),
+            Text(label, style: TextStyle(color: colors.muted, fontSize: 12)),
+          ],
+        ),
+      );
+    }
+    final error = _error;
+    if (error == null) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.md,
+        AppSpacing.xs,
+        AppSpacing.md,
+        0,
+      ),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: colors.warning.withValues(alpha: 0.10),
+          border: Border.all(color: colors.warning.withValues(alpha: 0.45)),
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.sm,
+            vertical: AppSpacing.xs,
+          ),
+          child: Row(
+            children: [
+              Icon(Icons.sync_problem_outlined, color: colors.warning, size: 18),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: Text(
+                  '$label недоступна. Показаны последние сохранённые строки; stale-позиции не обновлены.',
+                  style: TextStyle(color: colors.warning, fontSize: 12),
+                ),
+              ),
+              IconButton(
+                tooltip: 'Повторить сверку',
+                visualDensity: VisualDensity.compact,
+                onPressed: () {
+                  setState(() {
+                    _started = false;
+                    _running = true;
+                    _error = null;
+                  });
+                  unawaited(_run());
+                },
+                icon: Icon(Icons.refresh, color: colors.warning, size: 18),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
-  Widget build(BuildContext context) => const SizedBox.shrink();
+  Widget build(BuildContext context) {
+    if (!_isEquipmentPipeline) return const SizedBox.shrink();
+    return _equipmentStatus(context);
+  }
 }
 
 /// Invisible poller: reloads `seeds.loadAll()` on the ui_json.poll_while

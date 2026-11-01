@@ -245,6 +245,17 @@ class OwnerModuleDataService:
             owner_kind=owner_kind,
             owner_id=owner_id,
         )
+        await executor.maybe_auto_index_tabular(
+            cabinet_id="",
+            module_id=module_id,
+            table_slug=table_slug,
+            row_id=row_id,
+            principal=principal,
+            employee=None,
+            previous_body=previous_body,
+            owner_kind=owner_kind,
+            owner_id=owner_id,
+        )
         await executor.maybe_auto_index_opensearch(
             cabinet_id="",
             module_id=module_id,

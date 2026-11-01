@@ -274,6 +274,14 @@ def test_create_company_name_only_then_invite_admin(client: TestClient) -> None:
     assert body["company"].get("contact_email") is None
     assert "admin_employee" not in body
     company_id = body["company"]["id"]
+    company_admin = {
+        "Authorization": "Bearer "
+        + _token(
+            sub=body["company"]["keycloak_sub"],
+            username=company_id,
+            roles=["company"],
+        )
+    }
 
     invited = client.post(
         f"/api/v1/companies/{company_id}/employees",
@@ -288,6 +296,43 @@ def test_create_company_name_only_then_invite_admin(client: TestClient) -> None:
     assert invited.status_code == 201, invited.text
     assert invited.json()["contact_email"] == "later-admin@nameonly.test"
     assert invited.json().get("keycloak_sub"), "invite must persist employees.keycloak_sub immediately"
+
+    employee_id = invited.json()["id"]
+    deleted = client.delete(
+        f"/api/v1/employees/{employee_id}",
+        headers=company_admin,
+    )
+    assert deleted.status_code == 200, deleted.text
+    replacement = client.post(
+        f"/api/v1/companies/{company_id}/employees",
+        headers=company_admin,
+        json={"login": "lateradmin", "password": "replacement-pass"},
+    )
+    assert replacement.status_code == 201, replacement.text
+    blocked_restore = client.post(
+        f"/api/v1/employees/{employee_id}/restore",
+        headers=company_admin,
+    )
+    assert blocked_restore.status_code == 409, blocked_restore.text
+    replacement_deleted = client.delete(
+        f"/api/v1/employees/{replacement.json()['id']}",
+        headers=company_admin,
+    )
+    assert replacement_deleted.status_code == 200, replacement_deleted.text
+    restored = client.post(
+        f"/api/v1/employees/{employee_id}/restore",
+        headers=company_admin,
+    )
+    assert restored.status_code == 200, restored.text
+    assert restored.json()["status"] == "disabled"
+    assert restored.json()["paused"] is True
+    listed_after_restore = client.get(
+        f"/api/v1/companies/{company_id}/employees",
+        headers=company_admin,
+    )
+    assert listed_after_restore.status_code == 200
+    restored_employee = next(item for item in listed_after_restore.json()["items"] if item["id"] == employee_id)
+    assert restored_employee["status"] == "disabled"
 
     patched = client.patch(
         f"/api/v1/admin/companies/{company_id}",

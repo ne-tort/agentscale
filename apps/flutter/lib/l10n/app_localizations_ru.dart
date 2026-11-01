@@ -675,6 +675,27 @@ class AppLocalizationsRu extends AppLocalizations {
       'Метрики ещё не получены или недоступны';
 
   @override
+  String get metricsSeriesEmpty => 'Данных CPU и памяти пока нет';
+
+  @override
+  String get metricsSeriesError => 'Не удалось загрузить метрики';
+
+  @override
+  String get metricsSeriesUnavailable => 'Метрики сейчас недоступны';
+
+  @override
+  String get metricsSeriesCpu => 'CPU';
+
+  @override
+  String get metricsSeriesMemory => 'Память';
+
+  @override
+  String metricsSeriesCpuValue(String value) => 'CPU: $value';
+
+  @override
+  String metricsSeriesMemoryValue(String value) => 'Память: $value';
+
+  @override
   String get adminContainerLastError => 'Ошибка';
 
   @override
@@ -1710,6 +1731,22 @@ class AppLocalizationsRu extends AppLocalizations {
   String get companyNoEmployees => 'Нет сотрудников';
 
   @override
+  String get companyEmployeesTab => 'Сотрудники';
+
+  @override
+  String get companyEmployeeRecycleBin => 'Корзина';
+
+  @override
+  String get companyRestoreEmployee => 'Восстановить сотрудника';
+
+  @override
+  String companyRestoreEmployeeConfirm(String login) =>
+      'Восстановить $login? Он будет включен в список приостановленных сотрудников.';
+
+  @override
+  String get companyNoDeletedEmployees => 'Корзина пуста';
+
+  @override
   String get companyOrgMetrics => 'Метрики организации';
 
   @override
@@ -2615,7 +2652,7 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get projectPreviewTruncated =>
-      'Превью обрезано до первых 200k символов';
+      'Превью сокращено: показаны только первые 256 КБ файла.';
 
   @override
   String get projectProject => 'Проект';
@@ -2782,10 +2819,18 @@ class AppLocalizationsRu extends AppLocalizations {
   String get projectWorkspaceDownloaded => 'Файл сохранён';
 
   @override
+  String projectWorkspaceDownloadTooLarge(String size, String limit) =>
+      'Файл занимает $size, что больше лимита скачивания $limit. Поддерживаемые текстовые файлы всё ещё можно просматривать.';
+
+  @override
   String get projectUpdateProject => 'Обновить проект';
 
   @override
   String get projectResetAgent => 'Сбросить агента';
+
+  @override
+  String get projectResetWarning =>
+      'Все сессии агента будут остановлены, а их история диалогов и записи использования будут удалены без возможности восстановления. Файлы рабочего пространства и настройки проекта сохранятся.';
 
   @override
   String get projectConfigureBeforeLaunch =>
@@ -2793,6 +2838,14 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get projectAiProviderNotSelected => 'Не выбран';
+
+  @override
+  String get projectAiProviderUnavailableReselect =>
+      'Сохранённый провайдер AI недоступен. Выберите другой перед запуском';
+
+  @override
+  String get projectAiProviderUnavailableNoOptions =>
+      'Сохранённый провайдер AI недоступен. Добавьте доступный провайдер перед запуском';
 
   @override
   String get projectAiKeyColumnProvider => 'Провайдер';
@@ -2853,6 +2906,90 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get projectModulesLabel => 'Модули';
+
+  @override
+  String get scheduleTitle => 'Расписания';
+
+  @override
+  String get scheduleAdd => 'Добавить расписание';
+
+  @override
+  String get scheduleDeleteConfirmTitle => 'Удалить расписание?';
+
+  @override
+  String get scheduleDeleteConfirmMessage =>
+      'Расписание будет удалено без возможности восстановления.';
+
+  @override
+  String get scheduleCancel => 'Отмена';
+
+  @override
+  String get scheduleDelete => 'Удалить';
+
+  @override
+  String get scheduleNoSchedules => 'Расписаний пока нет';
+
+  @override
+  String get scheduleCreate => 'Создать расписание';
+
+  @override
+  String get scheduleNextRun => 'Следующий запуск';
+
+  @override
+  String get scheduleNotScheduled => 'Не запланирован';
+
+  @override
+  String get schedulePayload => 'Данные';
+
+  @override
+  String get scheduleActions => 'Действия с расписанием';
+
+  @override
+  String get scheduleEdit => 'Изменить';
+
+  @override
+  String get scheduleEditTitle => 'Изменить расписание';
+
+  @override
+  String get scheduleNew => 'Новое расписание';
+
+  @override
+  String get scheduleName => 'Название';
+
+  @override
+  String get scheduleCron => 'Cron-выражение';
+
+  @override
+  String get scheduleCronHelper => 'Пять полей, например 0 9 * * 1-5';
+
+  @override
+  String get scheduleTimezone => 'Часовой пояс';
+
+  @override
+  String get scheduleTimezoneHelper =>
+      'Часовой пояс IANA, например UTC или Europe/Moscow';
+
+  @override
+  String scheduleEnabledFor(String name) => 'Включить расписание «$name»';
+
+  @override
+  String get schedulePayloadJson => 'Данные (JSON-объект)';
+
+  @override
+  String get scheduleEnabled => 'Включено';
+
+  @override
+  String get scheduleSave => 'Сохранить';
+
+  @override
+  String get scheduleRequired => 'Обязательное поле';
+
+  @override
+  String get scheduleInvalidJson => 'Введите корректный JSON-объект';
+
+  @override
+  String scheduleMissedRunsWarning(int count) =>
+      'После сбоя восстановление ограничено: пропущено не менее $count запусков.';
 
   @override
   String get commonAuto => 'Авто';

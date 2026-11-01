@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/foundation.dart';
 
 import 'package:prodavan/core/api/admin_api.dart';
@@ -176,6 +178,41 @@ class OwnerModuleDataController extends ChangeNotifier with ModulePickContextMix
     _items.removeWhere((i) => i['row_id'] == rowId);
     notifyListeners();
   }
+
+  /// Invoke an action against this platform/company module instance.
+  /// Reload rows because actions may update owner-scoped data server-side.
+  Future<Map<String, dynamic>> invokeAction(String actionId, {String? rowId}) async {
+    final result = _isCompany
+        ? await _companyApi!.invokeModuleAction(
+            companyId: companyId!,
+            moduleId: moduleId,
+            actionId: actionId,
+            rowId: rowId,
+          )
+        : await _adminApi!.invokeModuleAction(
+            moduleId: moduleId,
+            actionId: actionId,
+            rowId: rowId,
+          );
+    await loadAll();
+    return result;
+  }
+
+  Future<Uint8List> downloadContentAsset({
+    required String assetId,
+    String? versionId,
+    String? blobVersionId,
+  }) => _isCompany
+      ? _companyApi!.downloadContentAsset(
+          assetId: assetId,
+          versionId: versionId,
+          blobVersionId: blobVersionId,
+        )
+      : _adminApi!.downloadContentAsset(
+          assetId: assetId,
+          versionId: versionId,
+          blobVersionId: blobVersionId,
+        );
 
   void refresh() => notifyListeners();
 

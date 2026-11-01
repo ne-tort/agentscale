@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import or_, select
+from sqlalchemy import exists, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.application.pod_service.command import PodCommand
@@ -68,13 +68,15 @@ class PodReconcileService:
             return await self._run_reconcile()
 
     async def _run_reconcile(self) -> dict:
-        fixed = 0
+        fixed = await self._clear_stale_preparing_markers()
+        resumed_projects: list[str] = []
         # Include FAILED pods that still desire RUNNING so WSL/node flaps can heal.
         q = await self._session.execute(
             select(ProjectPodRow, ProjectRow)
             .join(ProjectRow, ProjectRow.id == ProjectPodRow.project_id, isouter=True)
             .where(
                 or_(
+                    ProjectRow.launch_phase == "resuming",
                     ProjectPodRow.status.notin_((PodStatus.TERMINATED, PodStatus.FAILED)),
                     (ProjectPodRow.status == PodStatus.FAILED)
                     & (ProjectPodRow.desired_state == PodDesiredState.RUNNING.value),
@@ -87,6 +89,15 @@ class PodReconcileService:
                     await self._runtime.terminate(runtime_ref=pod.runtime_ref)
                     pod.status = PodStatus.TERMINATED
                     fixed += 1
+                continue
+            # Resume is intentionally asynchronous in the HTTP path. If the API
+            # process dies after persisting this marker, reconcile must finish the
+            # transition instead of leaving the project paused forever.
+            if project.launch_phase == "resuming":
+                await self._recover_interrupted_resume(project, pod)
+                if project.status == ProjectStatus.ACTIVE and project.launch_phase == "resuming":
+                    resumed_projects.append(project.id)
+                fixed += 1
                 continue
             # Keep desired=RUNNING for ERROR projects that still want a live pod.
             if pod.desired_state == PodDesiredState.RUNNING.value and project.status in {
@@ -172,7 +183,142 @@ class PodReconcileService:
                 promote_actions += 1
 
         await self._session.commit()
+        from prodavan.application.agent.trigger_dispatcher import AgentTriggerDispatcher
+        from prodavan.core.jobs.enqueue import enqueue_trigger_drain
+
+        for project_id in resumed_projects:
+            try:
+                project = await self._session.get(ProjectRow, project_id)
+                if project is None or not project.owner_employee_id:
+                    continue
+                from prodavan.infrastructure.persistence.models.identity import EmployeeRow
+
+                employee = await self._session.get(EmployeeRow, project.owner_employee_id)
+                if employee is None:
+                    continue
+                principal = Principal(
+                    sub=employee.keycloak_sub or employee.id,
+                    email=employee.email,
+                    roles=frozenset({"employee"}),
+                )
+                await AgentTriggerDispatcher(self._session).dispatch_batch(
+                    project_id=project_id,
+                    principal=principal,
+                    employee=employee,
+                    max_n=10,
+                )
+            except Exception:
+                logger.exception("resume trigger dispatch failed project_id=%s", project_id)
+        if resumed_projects:
+            enqueue_trigger_drain()
         return {"fixed": fixed, "zombies_deleted": zombies, "metrics": sample_stats, "observed": promote_actions}
+
+    async def _clear_stale_preparing_markers(self) -> int:
+        """End abandoned launch preparation when no pod was ever provisioned."""
+        cutoff = datetime.now(UTC) - timedelta(seconds=settings.pod_preparing_timeout_sec)
+        q = await self._session.execute(
+            select(ProjectRow).where(
+                ProjectRow.launch_phase == "preparing",
+                ProjectRow.updated_at < cutoff,
+                ~exists().where(ProjectPodRow.project_id == ProjectRow.id),
+            )
+        )
+        stale = q.scalars().all()
+        for project in stale:
+            project.launch_phase = None
+            project.status = ProjectStatus.ERROR
+        return len(stale)
+
+    async def _recover_interrupted_resume(
+        self, project: ProjectRow, pod: ProjectPodRow
+    ) -> None:
+        try:
+            await self._pods.sync_desired(
+                project.id,
+                PodDesiredState.RUNNING,
+                principal=_SYSTEM,
+                reason="resume",
+            )
+        except Exception as exc:
+            logger.exception("resume recovery failed project_id=%s", project.id)
+            project.status = ProjectStatus.ERROR
+            project.launch_phase = None
+            pod.last_error = str(exc)[:2000]
+            return
+
+        project.status = ProjectStatus.ACTIVE
+        from prodavan.application.projects.runtime_side_effects import bootstrap_project_sessions
+
+        # Keep the persisted marker until registration finishes. If this
+        # process dies, reconcile retries the same idempotent bootstrap.
+        try:
+            bootstrap_result = await bootstrap_project_sessions(
+                self._session, project_id=project.id
+            )
+            if bootstrap_result.get("skipped") == "pod_not_running":
+                raise RuntimeError("pod is not running for resume session bootstrap")
+        except Exception:
+            # Pod resume succeeded; leave ``resuming`` durable so the next
+            # reconcile retries session reactivation/bridge registration.
+            logger.exception("resume session bootstrap failed project_id=%s", project.id)
+            return
+
+        # A previously failed pod can be reused for resume. Once both the pod
+        # and its sessions are bootstrapped, an old runtime error is no longer
+        # truthful and must not leak through the active project's API view.
+        pod.last_error = None
+
+        from prodavan.application.project_service.lifecycle_emitter import (
+            ProjectLifecycleEmitter,
+        )
+
+        if project.launch_phase == "resuming":
+            await ProjectLifecycleEmitter(self._session).emit(
+                event_type="project.resumed",
+                company_id=project.company_id,
+                project_id=project.id,
+                cabinet_id=project.cabinet_id,
+                principal=_SYSTEM,
+                payload={"resume_generation": project.resume_generation},
+                idempotency_key=(
+                    f"project-resumed:{project.id}:{project.resume_generation}"
+                ),
+            )
+            await self._session.commit()
+            from prodavan.application.agent.trigger_dispatcher import AgentTriggerDispatcher
+            from prodavan.infrastructure.persistence.models.identity import EmployeeRow
+            from prodavan.core.jobs.enqueue import enqueue_trigger_drain
+
+            employee = await self._session.get(EmployeeRow, project.owner_employee_id)
+            if employee is None:
+                return
+            principal = Principal(
+                sub=employee.keycloak_sub or employee.id,
+                email=employee.email,
+                roles=frozenset({"employee"}),
+            )
+            dispatch = await AgentTriggerDispatcher(self._session).dispatch_batch(
+                project_id=project.id,
+                principal=principal,
+                employee=employee,
+                max_n=10,
+            )
+            locked = await self._session.execute(
+                select(ProjectRow).where(ProjectRow.id == project.id).with_for_update()
+            )
+            current = locked.scalar_one()
+            dispatch_failed = dispatch.get("reason") in {"project_paused", "dispatch_error"} or any(
+                item.get("reason") in {"project_paused", "dispatch_error"}
+                for item in dispatch.get("items", [])
+            )
+            if (
+                current.launch_phase == "resuming"
+                and current.resume_generation == project.resume_generation
+                and not dispatch_failed
+            ):
+                current.launch_phase = None
+            await self._session.commit()
+            enqueue_trigger_drain()
 
     async def _reap_zombies(self) -> int:
         """Delete k8s Pods managed by pod-service without a live PG row."""

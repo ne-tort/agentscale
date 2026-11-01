@@ -398,9 +398,12 @@ async def list_company_employees(
     principal: PrincipalDep,
     session: SessionDep,
     employee: Annotated[EmployeeRow | None, Depends(get_current_employee)],
+    include_deleted: bool = False,
 ) -> dict:
     await EntitlementService(session).require_company_actor(principal, company_id, employee=employee)
-    items = await AdminCompanyService(session).list_company_employees(company_id)
+    items = await AdminCompanyService(session).list_company_employees(
+        company_id, include_deleted=include_deleted
+    )
     return {"items": items}
 
 

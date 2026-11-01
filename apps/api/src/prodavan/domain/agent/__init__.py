@@ -1,5 +1,15 @@
 """Agent domain exports (L08)."""
 
+from prodavan.domain.agent.control_plane import (
+    AgentRunCreate,
+    AgentRunStatus,
+    AgentRunView,
+    ApprovalDecision,
+    ApprovalRequestCreate,
+    ApprovalRequestStatus,
+    ApprovalRequestView,
+    EventEnvelope,
+)
 from prodavan.domain.agent.types import (
     FROZEN_EVENT_TYPES,
     PERSISTABLE_EVENT_TYPES,
@@ -19,6 +29,14 @@ from prodavan.domain.agent.types import (
 )
 
 __all__ = [
+    "AgentRunCreate",
+    "AgentRunStatus",
+    "AgentRunView",
+    "ApprovalDecision",
+    "ApprovalRequestCreate",
+    "ApprovalRequestStatus",
+    "ApprovalRequestView",
+    "EventEnvelope",
     "FROZEN_EVENT_TYPES",
     "PERSISTABLE_EVENT_TYPES",
     "PLATFORM_EVENT_TOOL_APPROVAL_DECISION",

@@ -109,24 +109,49 @@ class EquipmentSearchService:
         query = build_equipment_search_query(search, in_stock_only)
         items: list[dict[str, Any]] = []
         total = 0
+        # ``from_`` is a global offset over the merged catalog stream. Applying
+        # it to every physical index drops candidates before the merge and makes
+        # later employee-UI pages incomplete. Fetch the prefix from each index,
+        # using search_after batches because Search Index caps every request at
+        # 200 rows, then apply the offset once after the deterministic merge.
+        needed = from_ + size
         for index in indexes:
-            result = await svc.search(
-                namespace=OS_NAMESPACE,
-                index=index,
-                query=query,
-                from_=from_,
-                size=size,
-                company_id="platform",
-                cabinet_id=None,
-                project_id=None,
-                apply_tenant_filter=False,
-                session=self._session,
-                sort=SEARCH_SORT,
-            )
-            total += result.total
-            items.extend(doc_to_master_row(h.source, doc_id=getattr(h, "doc_id", None)) for h in result.hits)
-        items.sort(key=lambda r: r["src_hash"])
-        return {"items": items, "total": total, "page": page, "page_size": size}
+            cursor: list[Any] | None = None
+            fetched = 0
+            while fetched < needed:
+                batch_size = min(PAGE_SIZE_MAX, needed - fetched)
+                result = await svc.search(
+                    namespace=OS_NAMESPACE,
+                    index=index,
+                    query=query,
+                    from_=0,
+                    size=batch_size,
+                    company_id="platform",
+                    cabinet_id=None,
+                    project_id=None,
+                    apply_tenant_filter=False,
+                    session=self._session,
+                    sort=SEARCH_SORT,
+                    search_after=cursor,
+                )
+                total = total + result.total if cursor is None else total
+                hits = result.hits
+                items.extend(
+                    doc_to_master_row(h.source, doc_id=getattr(h, "doc_id", None))
+                    for h in hits
+                )
+                fetched += len(hits)
+                if len(hits) < batch_size:
+                    break
+                next_cursor = getattr(result, "next_search_after", None)
+                if not next_cursor and hits:
+                    next_cursor = getattr(hits[-1], "sort", None)
+                if not next_cursor or next_cursor == cursor:
+                    break
+                cursor = list(next_cursor)
+        items.sort(key=lambda r: (r["src_hash"], r["catalog_id"], r["row_id"]))
+        page_items = items[from_ : from_ + size]
+        return {"items": page_items, "total": total, "page": page, "page_size": size}
 
     async def fetch_by_src_hash(
         self, *, cabinet_id: str, src_hash: str

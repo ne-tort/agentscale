@@ -6,6 +6,7 @@ import logging
 
 from prodavan.application.metrics.accumulator import MetricsAccumulator
 from prodavan.application.metrics.adapters.redis_counter_store import build_counter_store
+from prodavan.application.metrics.adapters.redis_metrics_store import build_metrics_store
 from prodavan.core.events.envelope import EventEnvelope
 from prodavan.domain.metrics.types import (
     ENTITY_CABINET,
@@ -26,6 +27,25 @@ async def handle_relation_envelope(envelope: EventEnvelope) -> None:
         return
     if envelope.event_type not in {RELATION_GRANTED, RELATION_REVOKED, "relation.replaced"}:
         return
+
+    event_id = (envelope.event_id or "").strip()
+    store = build_metrics_store()
+    dedup_id = f"relation:{event_id}" if event_id else ""
+    if dedup_id and await store.is_event_complete(dedup_id):
+        return
+    if dedup_id and not await store.claim_event(dedup_id):
+        raise RuntimeError(f"metrics relation event is already claimed: {event_id}")
+    try:
+        await _apply_relation_envelope(envelope)
+        if dedup_id:
+            await store.complete_event(dedup_id)
+    except Exception:
+        if dedup_id:
+            await store.release_event_claim(dedup_id)
+        raise
+
+
+async def _apply_relation_envelope(envelope: EventEnvelope) -> None:
     payload = dict(envelope.payload or {})
     subject_kind = str(payload.get("subject_kind") or "").strip().lower()
     subject_id = str(payload.get("subject_id") or "").strip()

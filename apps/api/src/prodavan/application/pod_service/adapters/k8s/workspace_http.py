@@ -39,13 +39,22 @@ def _endpoint_headers(endpoint: RuntimeEndpoint) -> dict[str, str]:
     return headers
 
 
+def _normalize_response_path(raw: object) -> str:
+    value = str(raw or "").replace("\\", "/")
+    if value == "/workspace":
+        value = ""
+    elif value.startswith("/workspace/"):
+        value = value[len("/workspace/") :]
+    return normalize_workspace_path(value)
+
+
 def _entry_from_dict(raw: dict[str, Any]) -> WorkspaceEntry:
     kind = raw.get("kind")
     if kind not in ("file", "dir"):
         kind = "file"
     return WorkspaceEntry(
         name=str(raw.get("name") or ""),
-        path=str(raw.get("path") or ""),
+        path=_normalize_response_path(raw.get("path")),
         kind=kind,  # type: ignore[arg-type]
         size=raw.get("size") if kind == "file" else None,
         modified_at=raw.get("modified_at"),
@@ -135,6 +144,7 @@ class HttpWorkspaceAdapterBase:
                 title="Bad Gateway",
                 status=502,
                 detail=response.text[:500],
+                extra={"runtime_status": response.status_code},
             )
         if response.status_code == 204:
             return {}
@@ -188,6 +198,7 @@ class HttpWorkspaceAdapterBase:
                 title="Bad Gateway",
                 status=502,
                 detail=response.text[:500],
+                extra={"path": rel, "runtime_status": response.status_code},
             )
         return response.content
 
@@ -200,11 +211,22 @@ class HttpWorkspaceAdapterBase:
                 status=422,
                 detail="path required",
             )
-        body = await self._request_json(
-            runtime_ref=runtime_ref,
-            method="GET",
-            path=f"/v1/workspace/stat?path={quote(rel, safe='')}",
-        )
+        try:
+            body = await self._request_json(
+                runtime_ref=runtime_ref,
+                method="GET",
+                path=f"/v1/workspace/stat?path={quote(rel, safe='')}",
+            )
+        except AppError as exc:
+            if exc.code == "RUNTIME_FS_FAILED" and exc.extra.get("runtime_status") == 404:
+                raise AppError(
+                    code="WORKSPACE_NOT_FOUND",
+                    title="Not Found",
+                    status=404,
+                    detail="workspace path not found",
+                    extra={"path": rel},
+                ) from exc
+            raise
         return _entry_from_dict(body)
 
     async def delete(self, *, runtime_ref: str, path: str) -> None:
@@ -216,11 +238,22 @@ class HttpWorkspaceAdapterBase:
                 status=422,
                 detail="path required",
             )
-        await self._request_json(
-            runtime_ref=runtime_ref,
-            method="DELETE",
-            path=f"/v1/workspace/entries?path={quote(rel, safe='')}",
-        )
+        try:
+            await self._request_json(
+                runtime_ref=runtime_ref,
+                method="DELETE",
+                path=f"/v1/workspace/entries?path={quote(rel, safe='')}",
+            )
+        except AppError as exc:
+            if exc.code == "RUNTIME_FS_FAILED" and exc.extra.get("runtime_status") == 404:
+                raise AppError(
+                    code="WORKSPACE_NOT_FOUND",
+                    title="Not Found",
+                    status=404,
+                    detail="workspace path not found",
+                    extra={"path": rel},
+                ) from exc
+            raise
 
     async def move(self, *, runtime_ref: str, src: str, dst: str) -> None:
         s = normalize_workspace_path(src)

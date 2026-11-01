@@ -31,6 +31,7 @@ from prodavan.api.v1 import (
     content,
     documents,
     external,
+    employee_search,
     health,
     identity,
     pod_modules,
@@ -71,6 +72,7 @@ router.include_router(cabinets.router)
 router.include_router(projects.cabinet_projects_router)
 router.include_router(projects.router)
 router.include_router(tenant_infra.router)
+router.include_router(employee_search.router)
 router.include_router(pod_modules.router)
 router.include_router(agent.router)
 router.include_router(b2b.router)

@@ -38,6 +38,56 @@ async def test_start_is_idempotent_by_turn_id() -> None:
 
 
 @pytest.mark.asyncio
+async def test_completed_turn_retry_reuses_record_instead_of_starting_duplicate() -> None:
+    reg = DetachedTurnRegistry()
+    runs = 0
+
+    async def runner(turn):  # type: ignore[no-untyped-def]
+        nonlocal runs
+        runs += 1
+        turn.assistant_text = "answer"
+
+    original = await reg.start(
+        turn_id="stable-turn", session_id="s1", project_id="p1", start_seq=4, runner=runner
+    )
+    await original.task
+
+    retried = await reg.start(
+        turn_id="stable-turn", session_id="s1", project_id="p1", start_seq=8, runner=runner
+    )
+
+    assert retried is original
+    assert runs == 1
+    assert retried.start_seq == 4
+    assert retried.assistant_text == "answer"
+
+
+@pytest.mark.asyncio
+async def test_same_turn_id_isolated_between_sessions() -> None:
+    reg = DetachedTurnRegistry()
+    gate = asyncio.Event()
+
+    async def runner(_turn):  # type: ignore[no-untyped-def]
+        await gate.wait()
+
+    first = await reg.start(
+        turn_id="reused-client-id", session_id="s1", project_id="p1", start_seq=0, runner=runner
+    )
+    second = await reg.start(
+        turn_id="reused-client-id", session_id="s2", project_id="p2", start_seq=0, runner=runner
+    )
+
+    assert first is not second
+    assert reg.get("reused-client-id", session_id="s1") is first
+    assert reg.get("reused-client-id", session_id="s2") is second
+    first.task.cancel()
+    second.task.cancel()
+    for task in (first.task, second.task):
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+
+@pytest.mark.asyncio
 async def test_run_survives_when_no_one_watches() -> None:
     """The run keeps going even if the starter never awaits it (client gone)."""
     reg = DetachedTurnRegistry()

@@ -59,7 +59,7 @@ async def test_list_entries_parses_runtime_response(adapter: HttpAgentRuntimeWor
     mock_response.status_code = 200
     mock_response.json.return_value = {
         "entries": [
-            {"name": "README.md", "path": "README.md", "kind": "file", "size": 12},
+            {"name": "README.md", "path": "/workspace/README.md", "kind": "file", "size": 12},
             {"name": "src", "path": "src", "kind": "dir"},
         ],
     }
@@ -77,6 +77,7 @@ async def test_list_entries_parses_runtime_response(adapter: HttpAgentRuntimeWor
 
     assert len(entries) == 2
     assert entries[0].name == "README.md"
+    assert entries[0].path == "README.md"
     assert entries[1].kind == "dir"
     call = mock_http.request.await_args
     assert call.args[0] == "GET"
@@ -163,6 +164,31 @@ async def test_delete_sends_delete_request(adapter: HttpAgentRuntimeWorkspaceAda
     call = mock_http.request.await_args
     assert call.args[0] == "DELETE"
     assert "tmp%2Fold.txt" in call.args[1] or "tmp/old.txt" in call.args[1]
+
+
+@pytest.mark.asyncio
+async def test_delete_missing_path_preserves_normalized_error_metadata(
+    adapter: HttpAgentRuntimeWorkspaceAdapter,
+) -> None:
+    mock_response = MagicMock()
+    mock_response.status_code = 404
+    mock_response.text = "missing"
+    mock_http = _mock_http_client(response=mock_response)
+
+    with (
+        patch("prodavan.application.pod_service.adapters.k8s.workspace_http.settings") as mock_settings,
+        patch(
+            "prodavan.application.pod_service.adapters.k8s.workspace_http.httpx.AsyncClient",
+            return_value=mock_http,
+        ),
+    ):
+        mock_settings.pod_agent_runtime_port = 3921
+        with pytest.raises(AppError) as exc_info:
+            await adapter.delete(runtime_ref="pod-wk-demo", path=r"/tmp\\missing.txt")
+
+    assert exc_info.value.code == "WORKSPACE_NOT_FOUND"
+    assert exc_info.value.status == 404
+    assert exc_info.value.extra == {"path": "tmp/missing.txt"}
 
 
 @pytest.mark.asyncio

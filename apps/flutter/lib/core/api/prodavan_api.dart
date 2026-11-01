@@ -6,6 +6,38 @@ import 'package:http/http.dart' as http;
 import 'package:prodavan/core/auth/auth_http.dart';
 
 /// Minimal Prodavan API client (L05) — Bearer + work context headers.
+class WorkspaceFileDownload {
+  const WorkspaceFileDownload({
+    required this.bytes,
+    this.normalizedPath,
+    this.size,
+    this.filename,
+  });
+
+  final Uint8List bytes;
+  final String? normalizedPath;
+  final int? size;
+  final String? filename;
+
+  factory WorkspaceFileDownload.fromResponse(http.Response response, {required String requestedPath}) {
+    final normalizedPath = response.headers['x-workspace-path'] ?? requestedPath;
+    final size = int.tryParse(response.headers['x-workspace-size'] ?? '') ?? response.bodyBytes.length;
+    return WorkspaceFileDownload(
+      bytes: response.bodyBytes,
+      normalizedPath: normalizedPath,
+      size: size,
+      filename: filenameFromContentDisposition(response.headers['content-disposition']),
+    );
+  }
+
+  static String? filenameFromContentDisposition(String? value) {
+    if (value == null) return null;
+    final match = RegExp(r'filename="([^"]*)"', caseSensitive: false).firstMatch(value);
+    final filename = match?.group(1)?.trim();
+    return filename == null || filename.isEmpty ? null : filename;
+  }
+}
+
 class ProdavanApi {
   ProdavanApi({
     required this.baseUrl,
@@ -188,6 +220,67 @@ class ProdavanApi {
     } finally {
       this.cabinetId = prev;
     }
+  }
+
+  /// Employee-scoped Search Index query. Response hits carry their source in
+  /// `document`; normalize the envelope here so callers never confuse it with
+  /// the legacy module-row paging response (`items`).
+  Future<({List<Map<String, dynamic>> hits, int total, List<dynamic>? nextSearchAfter})>
+      employeeSearchQuery({
+    required String projectId,
+    required String namespace,
+    required String index,
+    Map<String, dynamic>? query,
+    Map<String, dynamic> filter = const {},
+    List<Map<String, dynamic>>? sort,
+    List<dynamic>? searchAfter,
+    int from = 0,
+    int size = 50,
+  }) async {
+    final res = await AuthHttp.post(
+      _uri('/projects/$projectId/search/query'),
+      body: jsonEncode({
+        'namespace': namespace,
+        'index': index,
+        if (query != null) 'query': query,
+        'filter': filter,
+        if (sort != null) 'sort': sort,
+        if (searchAfter != null) 'search_after': searchAfter,
+        'from': from,
+        'size': size,
+      }),
+      extraHeaders: _workHeaders,
+    );
+    _throwIfError(res);
+    final decoded = jsonDecode(res.body);
+    if (decoded is! Map) {
+      throw const FormatException('Invalid employee search response');
+    }
+    final rawHits = decoded['hits'];
+    final totalValue = decoded['total'];
+    final next = decoded['next_search_after'];
+    if (rawHits is! List ||
+        totalValue is! num ||
+        (next != null && next is! List)) {
+      throw const FormatException('Unsupported employee search response shape');
+    }
+    final hits = <Map<String, dynamic>>[];
+    for (final raw in rawHits) {
+      if (raw is! Map || raw['document'] is! Map) {
+        throw const FormatException('Unsupported employee search hit shape');
+      }
+      final hit = Map<String, dynamic>.from(raw);
+      final row = Map<String, dynamic>.from(hit['document'] as Map);
+      row['id'] = hit['id']?.toString() ?? row['id'];
+      row['score'] = hit['score'];
+      row['sort'] = hit['sort'];
+      hits.add(row);
+    }
+    return (
+      hits: hits,
+      total: totalValue.toInt(),
+      nextSearchAfter: next is List ? List<dynamic>.from(next) : null,
+    );
   }
 
   /// Server-paged virtual tables (master_price): rows live in OpenSearch,
@@ -705,6 +798,102 @@ class ProdavanApi {
     }
   }
 
+  Future<List<Map<String, dynamic>>> listProjectSchedules(String projectId) async {
+    final prevProj = this.projectId;
+    this.projectId = projectId;
+    try {
+      final res = await AuthHttp.get(
+        _uri('/projects/$projectId/schedules'),
+        extraHeaders: _workHeaders,
+      );
+      _throwIfError(res);
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      final items = body['items'];
+      if (items is List) {
+        return items.map((item) => Map<String, dynamic>.from(item as Map)).toList();
+      }
+      return const [];
+    } finally {
+      this.projectId = prevProj;
+    }
+  }
+
+  Future<Map<String, dynamic>> createProjectSchedule({
+    required String projectId,
+    required String name,
+    required String cron,
+    required String timezone,
+    required Map<String, dynamic> payload,
+    required bool enabled,
+  }) async {
+    final prevProj = this.projectId;
+    this.projectId = projectId;
+    try {
+      final res = await AuthHttp.post(
+        _uri('/projects/$projectId/schedules'),
+        body: jsonEncode({
+          'name': name,
+          'cron': cron,
+          'timezone': timezone,
+          'payload': payload,
+          'enabled': enabled,
+        }),
+        extraHeaders: _workHeaders,
+      );
+      _throwIfError(res);
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    } finally {
+      this.projectId = prevProj;
+    }
+  }
+
+  Future<Map<String, dynamic>> patchProjectSchedule({
+    required String projectId,
+    required String scheduleId,
+    String? name,
+    String? cron,
+    String? timezone,
+    Map<String, dynamic>? payload,
+    bool? enabled,
+  }) async {
+    final prevProj = this.projectId;
+    this.projectId = projectId;
+    try {
+      final body = <String, dynamic>{};
+      if (name != null) body['name'] = name;
+      if (cron != null) body['cron'] = cron;
+      if (timezone != null) body['timezone'] = timezone;
+      if (payload != null) body['payload'] = payload;
+      if (enabled != null) body['enabled'] = enabled;
+      final res = await AuthHttp.patch(
+        _uri('/projects/$projectId/schedules/$scheduleId'),
+        body: jsonEncode(body),
+        extraHeaders: _workHeaders,
+      );
+      _throwIfError(res);
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    } finally {
+      this.projectId = prevProj;
+    }
+  }
+
+  Future<void> deleteProjectSchedule({
+    required String projectId,
+    required String scheduleId,
+  }) async {
+    final prevProj = this.projectId;
+    this.projectId = projectId;
+    try {
+      final res = await AuthHttp.delete(
+        _uri('/projects/$projectId/schedules/$scheduleId'),
+        extraHeaders: _workHeaders,
+      );
+      _throwIfError(res);
+    } finally {
+      this.projectId = prevProj;
+    }
+  }
+
   Future<List<Map<String, dynamic>>> listProjectAiKeys(String projectId) async {
     final prevProj = this.projectId;
     this.projectId = projectId;
@@ -765,6 +954,43 @@ class ProdavanApi {
     );
     _throwIfError(res);
     return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<bool> setWebhookSubscriptionEnabled(
+    String subscriptionId, {
+    required bool enabled,
+  }) async {
+    final res = await AuthHttp.patch(
+      _uri('/external/webhooks/$subscriptionId'),
+      extraHeaders: {
+        ..._workHeaders,
+        'Content-Type': 'application/json',
+      },
+      body: jsonEncode({'enabled': enabled}),
+    );
+    _throwIfError(res);
+    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    return body['enabled'] == true;
+  }
+
+  Future<List<Map<String, dynamic>>> listWebhookDeliveries({int limit = 100}) async {
+    final res = await AuthHttp.get(
+      _uri('/external/webhook-deliveries', {'limit': '$limit'}),
+      extraHeaders: _workHeaders,
+    );
+    _throwIfError(res);
+    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    final items = body['items'];
+    if (items is List) return items.cast<Map<String, dynamic>>();
+    return const [];
+  }
+
+  Future<void> retryWebhookDelivery(String deliveryId) async {
+    final res = await AuthHttp.post(
+      _uri('/external/webhook-deliveries/$deliveryId/retry'),
+      extraHeaders: _workHeaders,
+    );
+    _throwIfError(res);
   }
 
   Future<void> deleteWebhookSubscription(String subscriptionId) async {
@@ -917,7 +1143,7 @@ class ProdavanApi {
     }
   }
 
-  Future<Uint8List> downloadWorkspaceFile({
+  Future<WorkspaceFileDownload> downloadWorkspaceFile({
     required String projectId,
     required String path,
   }) async {
@@ -931,7 +1157,39 @@ class ProdavanApi {
         extraHeaders: _workHeaders,
       );
       _throwIfError(res);
-      return res.bodyBytes;
+      return WorkspaceFileDownload(
+        bytes: res.bodyBytes,
+        normalizedPath: res.headers['x-workspace-path'],
+        size: int.tryParse(res.headers['x-workspace-size'] ?? ''),
+        filename: WorkspaceFileDownload.filenameFromContentDisposition(
+          res.headers['content-disposition'],
+        ),
+      );
+    } finally {
+      this.projectId = prevProj;
+    }
+  }
+
+  Future<Map<String, dynamic>> uploadWorkspaceFile({
+    required String projectId,
+    required String path,
+    required Uint8List bytes,
+  }) async {
+    final prevProj = this.projectId;
+    this.projectId = projectId;
+    try {
+      final res = await AuthHttp.put(
+        _uri('/projects/$projectId/container/workspace/content').replace(
+          queryParameters: {'path': path},
+        ),
+        body: bytes,
+        extraHeaders: {
+          ..._workHeaders,
+          'Content-Type': 'application/octet-stream',
+        },
+      );
+      _throwIfError(res);
+      return jsonDecode(res.body) as Map<String, dynamic>;
     } finally {
       this.projectId = prevProj;
     }

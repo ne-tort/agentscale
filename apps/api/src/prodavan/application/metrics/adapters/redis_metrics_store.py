@@ -27,6 +27,10 @@ def _dedup_key(event_id: str) -> str:
     return f"metrics:dedup:{event_id}"
 
 
+def _claim_key(event_id: str) -> str:
+    return f"metrics:claim:{event_id}"
+
+
 def _ttl_sec() -> int:
     interval = max(5, int(settings.metrics_sample_interval_sec))
     return max(int(settings.metrics_sample_ttl_sec), interval * 4)
@@ -81,8 +85,24 @@ class RedisMetricsStore:
     async def put_pod_last_sample(self, pod_id: str, sample: dict[str, Any]) -> None:
         await self._set_json(_pod_last_key(pod_id), sample, ex=_ttl_sec())
 
-    async def mark_event_processed(self, event_id: str) -> bool:
-        """Return True if this event_id was not seen before (should process)."""
+    async def is_event_complete(self, event_id: str) -> bool:
+        """Return whether the durable completion marker exists."""
+        from prodavan.core.infra.redis_manager import get_redis_manager
+
+        eid = (event_id or "").strip()
+        if not eid:
+            return False
+        mgr = get_redis_manager()
+        if mgr is None or not mgr.enabled:
+            return False
+        try:
+            return bool(await mgr.client.exists(_dedup_key(eid)))
+        except Exception:
+            logger.exception("metrics event completion lookup failed event=%s", eid)
+            return False
+
+    async def claim_event(self, event_id: str) -> bool:
+        """Claim an event briefly; completed events are checked separately."""
         from prodavan.core.infra.redis_manager import get_redis_manager
 
         eid = (event_id or "").strip()
@@ -91,13 +111,45 @@ class RedisMetricsStore:
         mgr = get_redis_manager()
         if mgr is None or not mgr.enabled:
             return True
-        key = _dedup_key(eid)
         try:
-            created = await mgr.client.set(key, "1", nx=True, ex=_ttl_sec() * 24)
+            if await mgr.client.exists(_dedup_key(eid)):
+                return False
+            created = await mgr.client.set(_claim_key(eid), "1", nx=True, ex=_ttl_sec() * 24)
             return bool(created)
         except Exception:
-            logger.exception("metrics dedup failed event=%s", eid)
+            logger.exception("metrics event claim failed event=%s", eid)
             return True
+
+    async def complete_event(self, event_id: str) -> None:
+        """Persist completion only after all metric side effects succeed."""
+        from prodavan.core.infra.redis_manager import get_redis_manager
+
+        eid = (event_id or "").strip()
+        if not eid:
+            return
+        mgr = get_redis_manager()
+        if mgr is None or not mgr.enabled:
+            return
+        try:
+            await mgr.client.set(_dedup_key(eid), "1", ex=_ttl_sec() * 24)
+            await mgr.client.delete(_claim_key(eid))
+        except Exception:
+            logger.exception("metrics event completion failed event=%s", eid)
+
+    async def release_event_claim(self, event_id: str) -> None:
+        """Release an in-flight claim when processing fails."""
+        from prodavan.core.infra.redis_manager import get_redis_manager
+
+        eid = (event_id or "").strip()
+        if not eid:
+            return
+        mgr = get_redis_manager()
+        if mgr is None or not mgr.enabled:
+            return
+        try:
+            await mgr.client.delete(_claim_key(eid))
+        except Exception:
+            logger.exception("metrics event claim release failed event=%s", eid)
 
     async def _set_json(self, key: str, value: dict[str, Any], *, ex: int) -> None:
         from prodavan.core.infra.redis_manager import get_redis_manager

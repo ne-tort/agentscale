@@ -15,6 +15,7 @@ os.environ.setdefault("AUTH_TEST_SECRET", "dev-only-test-secret-change-me")
 
 from prodavan.application.pod_service.ports.workspace import WorkspaceEntry
 from prodavan.application.pod_service.workspace_service import PodWorkspaceService
+from prodavan.domain.errors import AppError
 from prodavan.application.project_service.access import ProjectAccessPolicy
 from prodavan.config.settings import settings
 from prodavan.infrastructure.auth.jwt import reset_jwt_validator
@@ -61,11 +62,21 @@ class _MemoryWorkspace:
 
     async def stat(self, *, runtime_ref: str, path: str) -> WorkspaceEntry:
         _ = runtime_ref
+        if path == "folder":
+            return WorkspaceEntry(name=path, path=path, kind="dir", size=None, modified_at=None)
         data = self.files[path]
         return WorkspaceEntry(name=path, path=path, kind="file", size=len(data), modified_at=None)
 
     async def delete(self, *, runtime_ref: str, path: str) -> None:
         _ = runtime_ref
+        if path not in self.files:
+            raise AppError(
+                code="WORKSPACE_NOT_FOUND",
+                title="Not Found",
+                status=404,
+                detail="workspace path not found",
+                extra={"path": path},
+            )
         del self.files[path]
 
     async def move(self, *, runtime_ref: str, src: str, dst: str) -> None:
@@ -75,6 +86,10 @@ class _MemoryWorkspace:
     async def copy(self, *, runtime_ref: str, src: str, dst: str) -> None:
         _ = runtime_ref
         self.files[dst] = self.files[src]
+
+    async def write_bytes(self, *, runtime_ref: str, path: str, data: bytes) -> None:
+        _ = runtime_ref
+        self.files[path] = data
 
 
 async def _running_runtime_gate(
@@ -205,6 +220,173 @@ def test_workspace_preview_and_download(client: TestClient, running_workspace: _
     )
     assert download.status_code == 200, download.text
     assert download.content == b"hello workspace"
+
+
+@requires_postgres
+def test_workspace_download_contract_is_consistent_across_scopes(
+    client: TestClient, running_workspace: _MemoryWorkspace
+) -> None:
+    owner_h, project_id, company_id = _launch_project(client)
+    routes = (
+        (f"/api/v1/projects/{project_id}/container/workspace/content", owner_h),
+        (f"/api/v1/companies/{company_id}/containers/{project_id}/workspace/content", owner_h),
+        (
+            f"/api/v1/admin/containers/{project_id}/workspace/content",
+            {"Authorization": f"Bearer {_token(sub='workspace-contract-admin', platform_admin=True)}"},
+        ),
+    )
+
+    for endpoint, headers in routes:
+        response = client.get(endpoint, headers=headers, params={"path": "./notes.txt"})
+        assert response.status_code == 200, response.text
+        assert response.content == b"hello workspace"
+        assert response.headers["x-workspace-path"] == "notes.txt"
+        assert response.headers["x-workspace-size"] == str(len(running_workspace.files["notes.txt"]))
+        assert response.headers["content-disposition"] == 'attachment; filename="notes.txt"'
+
+
+@requires_postgres
+def test_workspace_download_rejects_oversized_file(
+    client: TestClient, running_workspace: _MemoryWorkspace
+) -> None:
+    owner_h, project_id, _ = _launch_project(client)
+    running_workspace.files["large.bin"] = b"x" * (10_485_760 + 1)
+
+    download = client.get(
+        f"/api/v1/projects/{project_id}/container/workspace/content",
+        headers=owner_h,
+        params={"path": "large.bin"},
+    )
+
+    assert download.status_code == 413, download.text
+    assert download.json()["code"] == "PAYLOAD_TOO_LARGE"
+
+
+@requires_postgres
+def test_workspace_upload_creates_and_replaces_file(
+    client: TestClient, running_workspace: _MemoryWorkspace
+) -> None:
+    owner_h, project_id, _ = _launch_project(client)
+    endpoint = f"/api/v1/projects/{project_id}/container/workspace/content"
+
+    uploaded = client.put(
+        endpoint,
+        headers=owner_h,
+        params={"path": "notes/new.txt"},
+        content=b"created from UI",
+    )
+    assert uploaded.status_code == 200, uploaded.text
+    assert uploaded.json() == {"written": True, "path": "notes/new.txt", "size": 15}
+    assert running_workspace.files["notes/new.txt"] == b"created from UI"
+
+    replaced = client.put(
+        endpoint,
+        headers=owner_h,
+        params={"path": "notes/new.txt"},
+        content=b"replaced",
+    )
+    assert replaced.status_code == 200, replaced.text
+    assert running_workspace.files["notes/new.txt"] == b"replaced"
+
+
+@requires_postgres
+def test_workspace_upload_acceptance_empty_and_normalized_atomic_replace(
+    client: TestClient, running_workspace: _MemoryWorkspace
+) -> None:
+    owner_h, project_id, _ = _launch_project(client)
+    endpoint = f"/api/v1/projects/{project_id}/container/workspace/content"
+
+    created = client.put(
+        endpoint,
+        headers=owner_h,
+        params={"path": "/notes/./atomic.txt"},
+        content=b"first",
+    )
+    assert created.status_code == 200, created.text
+    assert created.json() == {"written": True, "path": "notes/atomic.txt", "size": 5}
+
+    emptied = client.put(
+        endpoint,
+        headers={**owner_h, "Content-Type": "application/octet-stream"},
+        params={"path": "notes\\\\atomic.txt"},
+        content=b"",
+    )
+    assert emptied.status_code == 200, emptied.text
+    assert emptied.json() == {"written": True, "path": "notes/atomic.txt", "size": 0}
+    assert running_workspace.files["notes/atomic.txt"] == b""
+
+
+@requires_postgres
+def test_workspace_upload_rejects_root_normalization_paths(
+    client: TestClient, running_workspace: _MemoryWorkspace
+) -> None:
+    owner_h, project_id, _ = _launch_project(client)
+    endpoint = f"/api/v1/projects/{project_id}/container/workspace/content"
+
+    for path in (".", "notes/.."):
+        uploaded = client.put(
+            endpoint,
+            headers=owner_h,
+            params={"path": path},
+            content=b"must not overwrite workspace root",
+        )
+        assert uploaded.status_code == 422, uploaded.text
+
+    assert running_workspace.files["notes.txt"] == b"hello workspace"
+
+
+@requires_postgres
+def test_workspace_upload_rejects_directory_path_with_metadata(
+    client: TestClient, running_workspace: _MemoryWorkspace
+) -> None:
+    owner_h, project_id, _ = _launch_project(client)
+    endpoint = f"/api/v1/projects/{project_id}/container/workspace/content"
+
+    uploaded = client.put(
+        endpoint,
+        headers=owner_h,
+        params={"path": "folder"},
+        content=b"must not replace directory",
+    )
+
+    assert uploaded.status_code == 422, uploaded.text
+    assert uploaded.json()["code"] == "VALIDATION_ERROR"
+    assert uploaded.json()["path"] == "folder"
+    assert uploaded.json()["kind"] == "dir"
+
+
+@requires_postgres
+def test_workspace_upload_rejects_oversized_content(
+    client: TestClient, running_workspace: _MemoryWorkspace
+) -> None:
+    owner_h, project_id, _ = _launch_project(client)
+    endpoint = f"/api/v1/projects/{project_id}/container/workspace/content"
+    original = running_workspace.files["notes.txt"]
+
+    uploaded = client.put(
+        endpoint,
+        headers=owner_h,
+        params={"path": "notes.txt"},
+        content=b"x" * (10_485_760 + 1),
+    )
+
+    assert uploaded.status_code == 413, uploaded.text
+    assert uploaded.json()["code"] == "PAYLOAD_TOO_LARGE"
+    assert running_workspace.files["notes.txt"] == original
+
+
+@requires_postgres
+def test_workspace_delete_missing_returns_stable_metadata(
+    client: TestClient, running_workspace: _MemoryWorkspace
+) -> None:
+    owner_h, project_id, _ = _launch_project(client)
+    endpoint = f"/api/v1/projects/{project_id}/container/workspace/entries"
+
+    deleted = client.delete(endpoint, headers=owner_h, params={"path": r"/missing\\file.txt"})
+
+    assert deleted.status_code == 404, deleted.text
+    assert deleted.json()["code"] == "WORKSPACE_NOT_FOUND"
+    assert deleted.json()["path"] == "missing/file.txt"
 
 
 @requires_postgres

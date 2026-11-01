@@ -7,6 +7,7 @@ import json
 import os
 import shutil
 import sys
+import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -90,7 +91,21 @@ def cmd_write(path: str) -> None:
         raise ValueError("path required")
     target.parent.mkdir(parents=True, exist_ok=True)
     data = sys.stdin.buffer.read()
-    target.write_bytes(data)
+    # Stage in the destination directory so os.replace is atomic on the same
+    # filesystem and a failed write preserves the previous file contents.
+    fd, temporary_name = tempfile.mkstemp(prefix=f".{target.name}.", dir=target.parent)
+    try:
+        with os.fdopen(fd, "wb") as temporary:
+            temporary.write(data)
+            temporary.flush()
+            os.fsync(temporary.fileno())
+        os.replace(temporary_name, target)
+    except Exception:
+        try:
+            os.unlink(temporary_name)
+        except FileNotFoundError:
+            pass
+        raise
     rel = target.relative_to(WORKSPACE_ROOT.resolve()).as_posix()
     print(json.dumps({"ok": True, "path": rel, "size": len(data)}), flush=True)
 

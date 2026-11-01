@@ -83,6 +83,8 @@ class SearchIndexPort(Protocol):
         from_: int,
         size: int,
         filter: dict[str, Any] | None = None,
+        sort: list[dict[str, Any]] | None = None,
+        search_after: list[Any] | None = None,
     ) -> SearchResult: ...
 
     async def count(

@@ -999,20 +999,48 @@ class ChatSessionController {
   }
 
   Future<void> resolveApproval(String approvalId, String decision) async {
+    Map<String, dynamic>? original;
+    for (final approval in pendingApprovals) {
+      if (approval['id']?.toString() == approvalId) {
+        original = approval;
+        break;
+      }
+    }
+    // The renderer uses the user-facing `allow` label, while the API contract
+    // is deliberately `approve`/`deny`.
+    final apiDecision = decision == 'allow' ? 'approve' : decision;
     // Collapse the work log immediately; the transcript reload below is the
-    // authoritative confirmation.
+    // authoritative confirmation. If delivery fails, the approval is restored
+    // from the server so a stale/re-adopted runtime never hides the action.
     pendingApprovals = [
       for (final approval in pendingApprovals)
         if (approval['id']?.toString() != approvalId) approval,
     ];
     notifyImmediate();
-    await api.resolveToolApproval(
-      projectId: projectId,
-      sessionId: sessionId,
-      approvalId: approvalId,
-      decision: decision,
-    );
-    await loadTranscript();
+    try {
+      await api.resolveToolApproval(
+        projectId: projectId,
+        sessionId: sessionId,
+        approvalId: approvalId,
+        decision: apiDecision,
+      );
+      await loadTranscript();
+    } catch (e) {
+      try {
+        final refreshed = await _fetchPending();
+        pendingApprovals = refreshed;
+      } catch (_) {
+        // Keep the optimistic rollback below when the refresh is unavailable.
+      }
+      if (original != null &&
+          !pendingApprovals.any(
+            (approval) => approval['id']?.toString() == approvalId,
+          )) {
+        pendingApprovals = [...pendingApprovals, original];
+      }
+      error = e;
+      notifyImmediate();
+    }
   }
 
   /// Start/stop the live-tail poller so it runs only while the agent is

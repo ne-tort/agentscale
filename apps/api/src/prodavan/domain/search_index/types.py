@@ -76,6 +76,8 @@ class SearchResult:
     hits: list[SearchHit] = field(default_factory=list)
     total: int = 0
     took_ms: int | None = None
+    # Cursor for deep paging; populated when the backend receives an explicit sort.
+    next_search_after: list[Any] | None = None
 
 
 def physical_index(namespace: str, index: str) -> str:

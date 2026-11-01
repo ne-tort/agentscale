@@ -314,3 +314,79 @@ async def test_pod_create_runs_budget_sync_with_stamped_session(monkeypatch) -> 
     assert budget_calls and budget_calls[0]["session_id"] == "ags_123"
     assert budget_calls[0]["project_id"] == "proj_1"
     assert budget_calls[0]["cabinet_id"] == "cab_1"
+
+
+@pytest.mark.asyncio
+async def test_pod_delete_marks_row_deleted_for_declarative_pipeline(monkeypatch) -> None:
+    """Bridge deletes must fire ``row.deleted`` actions for derived tables."""
+    svc = _pod_svc()
+    project = SimpleNamespace(id="proj_1", cabinet_id="cab_1", company_id="co_1")
+    inst = SimpleNamespace(id="minst_cab")
+    monkeypatch.setattr(svc, "_require_project_row", AsyncMock(return_value=project))
+    monkeypatch.setattr(svc._runtime, "_sot_for_project", AsyncMock(return_value=inst))
+    monkeypatch.setattr(
+        svc._instances,
+        "get_data_row",
+        AsyncMock(return_value={"row_id": "row_9", "body": {"line_id": "line_1"}, "session_id": "ags_123"}),
+    )
+    monkeypatch.setattr(svc._instances, "delete_data_row", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        "prodavan.application.modules.equipment_offers_service.cascade_equipment_delete",
+        AsyncMock(),
+    )
+    calls: list[dict] = []
+
+    async def _index(self, **kwargs):  # noqa: ANN001, ANN003
+        _ = kwargs
+
+    async def _budget(self, **kwargs):  # noqa: ANN001, ANN003
+        calls.append(kwargs)
+
+    monkeypatch.setattr(ModuleActionExecutor, "maybe_auto_index_tabular", _index)
+    monkeypatch.setattr(ModuleActionExecutor, "maybe_auto_budget_sync", _budget)
+
+    out = await svc.delete_data_row(
+        bridge=_bridge(),
+        project_id="proj_1",
+        module_id="mod_equipment",
+        table_slug="request_lines",
+        row_id="row_9",
+    )
+
+    assert out["deleted"] is True
+    assert calls and calls[0]["row_deleted"] is True
+    assert calls[0]["session_id"] == "ags_123"
+
+
+@pytest.mark.asyncio
+async def test_deleted_row_runs_only_row_deleted_action(monkeypatch) -> None:
+    executor = _executor()
+    monkeypatch.setattr(
+        executor,
+        "_list_actions",
+        AsyncMock(
+            return_value=[
+                {
+                    "kind": "equipment.pipeline",
+                    "params": {"groups_table": "found_groups"},
+                    "trigger": {"on": ["row.deleted"]},
+                }
+            ]
+        ),
+    )
+    pipeline = AsyncMock(return_value={"ok": True})
+    monkeypatch.setattr(executor, "_equipment_pipeline", pipeline)
+
+    await executor.maybe_auto_budget_sync(
+        cabinet_id="cab_1",
+        module_id="mod_equipment",
+        table_slug="request_lines",
+        principal=_principal(),
+        employee=None,
+        project_id="proj_1",
+        session_id="ags_123",
+        row_deleted=True,
+    )
+
+    assert pipeline.await_count == 1
+    assert pipeline.await_args.kwargs["materialize"] is False

@@ -320,7 +320,7 @@ class AdminApi {
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
-  Future<Uint8List> downloadWorkspaceFile({
+  Future<WorkspaceFileDownload> downloadWorkspaceFile({
     required String projectId,
     required String path,
   }) async {
@@ -330,7 +330,14 @@ class AdminApi {
       ),
     );
     _throwIfError(res);
-    return res.bodyBytes;
+    return WorkspaceFileDownload(
+      bytes: res.bodyBytes,
+      normalizedPath: res.headers['x-workspace-path'],
+      size: int.tryParse(res.headers['x-workspace-size'] ?? ''),
+      filename: WorkspaceFileDownload.filenameFromContentDisposition(
+        res.headers['content-disposition'],
+      ),
+    );
   }
 
   Future<void> deleteContainer(String projectId) async {
@@ -948,6 +955,24 @@ class AdminApi {
     );
     _throwIfError(res);
     return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  /// Download a FileRef result through the API proxy.
+  Future<Uint8List> downloadContentAsset({
+    required String assetId,
+    String? versionId,
+    String? blobVersionId,
+  }) async {
+    var uri = _uri('/content/assets/$assetId/download');
+    uri = uri.replace(queryParameters: {
+      'proxy': '1',
+      if (versionId != null && versionId.isNotEmpty) 'version_id': versionId,
+      if (blobVersionId != null && blobVersionId.isNotEmpty)
+        'blob_version_id': blobVersionId,
+    });
+    final res = await AuthHttp.get(uri);
+    _throwIfError(res);
+    return res.bodyBytes;
   }
 
   void _throwIfError(http.Response res) {

@@ -112,9 +112,12 @@ class PodCommand:
         if pod.desired_state == desired.value:
             if self._status_matches_desired(pod, desired) and not force_rehydrate:
                 return
-            if desired == PodDesiredState.RUNNING and pod.status == PodStatus.PROVISIONING:
-                if not force_rehydrate:
-                    return
+            if (
+                desired == PodDesiredState.RUNNING
+                and pod.status == PodStatus.PROVISIONING
+                and reason != "resume"
+            ):
+                return
 
         pod.desired_state = desired.value
         payload = {"reason": reason} if reason else None
@@ -189,7 +192,12 @@ class PodCommand:
                     pod_id=pod.id,
                     payload=payload,
                 )
-        except Exception as exc:
+        except AppError as exc:
+            # A failed workspace checkpoint is a safety stop: the workload has
+            # not been touched yet, so preserve its lifecycle state and let the
+            # API return a retryable 502 instead of manufacturing pod failure.
+            if exc.code == "WORKSPACE_CHECKPOINT_FAILED":
+                raise
             pod.status = PodStatus.FAILED
             pod.last_error = str(exc)[:2000]
             await self._events.emit(
@@ -456,7 +464,21 @@ class PodCommand:
         from prodavan.application.projects.workspace_checkpoint import checkpoint_project_workspace
 
         await bump_pod_bridge_generation(pod.id)
-        await checkpoint_project_workspace(self._session, project_id=project.id, best_effort=True)
+        # Reload destroys/recreates the workload; do not terminate it until the
+        # current agent-authored workspace is safely checkpointed.
+        try:
+            await checkpoint_project_workspace(
+                self._session, project_id=project.id, best_effort=False
+            )
+        except AppError:
+            raise
+        except Exception as exc:
+            raise AppError(
+                code="WORKSPACE_CHECKPOINT_FAILED",
+                title="Workspace Checkpoint Failed",
+                status=502,
+                detail=str(exc)[:300] or "could not save project workspace",
+            ) from exc
         ref = pod.runtime_ref or project.container_ref
         if ref:
             try:

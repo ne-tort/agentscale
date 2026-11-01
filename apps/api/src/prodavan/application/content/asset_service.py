@@ -199,6 +199,39 @@ class AssetService:
             "method": "PUT",
         }
 
+    async def upload_version_bytes(
+        self,
+        *,
+        asset_id: str,
+        version_id: str,
+        data: bytes,
+        principal: Principal,
+        employee: EmployeeRow | None,
+        mime: str | None = None,
+    ) -> dict[str, Any]:
+        """Store a blob through the API and finalize its version.
+
+        This avoids requiring browser/mobile clients to resolve the private
+        object-store endpoint returned by the presigned upload flow.
+        """
+        asset = await self._session.get(ContentAssetRow, asset_id)
+        if asset is None:
+            raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="asset not found")
+        await self._acl.require_write_asset(principal=principal, employee=employee, asset=asset)
+        ver = await self._session.get(ContentBlobVersionRow, version_id)
+        if ver is None or ver.asset_id != asset_id:
+            raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="version not found")
+
+        store = ensure_file_store()
+        await store.put_bytes(ver.storage_key, data, content_type=mime)
+        ver.size = len(data)
+        ver.sha256 = hashlib.sha256(data).hexdigest()
+        if mime:
+            asset.mime = mime
+        await self._session.commit()
+        await self._session.refresh(ver)
+        return _version_public(ver)
+
     async def finalize_version(
         self,
         *,

@@ -306,6 +306,83 @@ def test_company_employees_and_summary(client: TestClient) -> None:
 
 
 @requires_postgres
+def test_company_employee_recycle_bin_is_company_scoped(client: TestClient) -> None:
+    platform = _token(sub="recycle-platform", platform_admin=True)
+    platform_h = {"Authorization": f"Bearer {platform}"}
+
+    first = client.post(
+        "/api/v1/companies",
+        headers=platform_h,
+        json={"name": "RecycleFirst", "password": "test-company-pass", "admin_email": "boss@recycle-first.test"},
+    )
+    second = client.post(
+        "/api/v1/companies",
+        headers=platform_h,
+        json={"name": "RecycleSecond", "password": "test-company-pass", "admin_email": "boss@recycle-second.test"},
+    )
+    assert first.status_code == 201, first.text
+    assert second.status_code == 201, second.text
+    first_id = first.json()["company"]["id"]
+    second_id = second.json()["company"]["id"]
+    first_admin = {"Authorization": f"Bearer {owner_bearer_token(_token, first.json())}"}
+    second_admin = {"Authorization": f"Bearer {owner_bearer_token(_token, second.json())}"}
+
+    tombstone = client.post(
+        f"/api/v1/companies/{first_id}/employees",
+        headers=first_admin,
+        json={"login": "removedmember", "password": "test-employee-pass", "contact_email": "removed@recycle-first.test"},
+    )
+    assert tombstone.status_code == 201, tombstone.text
+    deleted = client.delete(f"/api/v1/employees/{tombstone.json()['id']}", headers=first_admin)
+    assert deleted.status_code == 200, deleted.text
+
+    foreign_tombstone = client.post(
+        f"/api/v1/companies/{second_id}/employees",
+        headers=second_admin,
+        json={"login": "foreignremoved", "password": "test-employee-pass", "contact_email": "removed@recycle-second.test"},
+    )
+    assert foreign_tombstone.status_code == 201, foreign_tombstone.text
+    foreign_deleted = client.delete(
+        f"/api/v1/employees/{foreign_tombstone.json()['id']}", headers=second_admin
+    )
+    assert foreign_deleted.status_code == 200, foreign_deleted.text
+
+    live = client.post(
+        f"/api/v1/companies/{first_id}/employees",
+        headers=first_admin,
+        json={"login": "livemember", "password": "test-employee-pass", "contact_email": "live@recycle-first.test"},
+    )
+    assert live.status_code == 201, live.text
+
+    default_list = client.get(f"/api/v1/companies/{first_id}/employees", headers=first_admin)
+    assert default_list.status_code == 200, default_list.text
+    default_items = default_list.json()["items"]
+    default_ids = {item["id"] for item in default_items}
+    assert tombstone.json()["id"] not in default_ids
+    assert live.json()["id"] in default_ids
+    assert all("deleted_at" not in item for item in default_items)
+
+    recycle = client.get(
+        f"/api/v1/companies/{first_id}/employees?include_deleted=true",
+        headers=first_admin,
+    )
+    assert recycle.status_code == 200, recycle.text
+    recycle_items = recycle.json()["items"]
+    recycle_ids = {item["id"] for item in recycle_items}
+    assert tombstone.json()["id"] in recycle_ids
+    assert foreign_tombstone.json()["id"] not in recycle_ids
+    assert live.json()["id"] not in recycle_ids
+    deleted_item = next(item for item in recycle_items if item["id"] == tombstone.json()["id"])
+    assert deleted_item["deleted_at"]
+
+    cross_tenant = client.get(
+        f"/api/v1/companies/{first_id}/employees?include_deleted=true",
+        headers=second_admin,
+    )
+    assert cross_tenant.status_code == 403, cross_tenant.text
+
+
+@requires_postgres
 def test_admin_company_description_and_running_cabinets(client: TestClient) -> None:
     admin = _token(sub="desc-admin", email="desc@example.com", platform_admin=True)
     created = client.post(

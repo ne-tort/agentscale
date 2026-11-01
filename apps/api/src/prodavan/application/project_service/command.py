@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime
 import logging
 
 from sqlalchemy import select
@@ -239,15 +240,30 @@ class ProjectCommand:
         enabled = await self._resolve_enabled_module_ids(row)
         row.launch_phase = "preparing"
         await self._session.flush()
-        mat = await self._materialize.materialize_project(
-            session=self._session,
-            project_id=row.id,
-            cabinet_id=row.cabinet_id,
-            cabinet_name=inst.name,
-            project_name=row.name,
-            when="project.created",
-            enabled_module_ids=enabled,
-        )
+        try:
+            mat = await self._materialize.materialize_project(
+                session=self._session,
+                project_id=row.id,
+                cabinet_id=row.cabinet_id,
+                cabinet_name=inst.name,
+                project_name=row.name,
+                when="project.created",
+                enabled_module_ids=enabled,
+            )
+        except Exception as exc:
+            # Materialization is part of launch preparation. Persist the same
+            # terminal lifecycle semantics as a pod launch failure so a failed
+            # workspace build cannot leave the project stuck in ``preparing``.
+            logger.exception("project materialization failed project_id=%s", row.id)
+            row.status = ProjectStatus.ERROR
+            row.launch_phase = None
+            await self._session.commit()
+            raise AppError(
+                code="PROJECT_MATERIALIZE_FAILED",
+                title="Project Materialization Failed",
+                status=502,
+                detail=str(exc)[:300],
+            ) from exc
         row.materialize_manifest = dict(mat.module_paths or {})
         row.launch_phase = None
         await self._session.flush()
@@ -310,7 +326,20 @@ class ProjectCommand:
         purge_workspace: bool = False,
     ) -> None:
         if not purge_workspace:
-            await checkpoint_project_workspace(self._session, project_id=row.id, best_effort=True)
+            try:
+                # Pause/reload/delete must not destroy the only current copy of
+                # agent-authored files when the last-good checkpoint fails.
+                await checkpoint_project_workspace(
+                    self._session, project_id=row.id, best_effort=False
+                )
+            except Exception as exc:
+                logger.exception("workspace checkpoint failed before runtime stop project_id=%s", row.id)
+                raise AppError(
+                    code="WORKSPACE_CHECKPOINT_FAILED",
+                    title="Workspace Checkpoint Failed",
+                    status=502,
+                    detail=str(exc)[:300] or "could not save project workspace",
+                ) from exc
         await stop_project_runtime(
             self._session,
             project_id=row.id,
@@ -522,6 +551,10 @@ class ProjectCommand:
             return {"ok": False, "reason": "deleted", "project_id": project_id}
         live_pod = await self._get_live_pod(row.id)
         mat = await self._sync_project_workspace(row)
+        # A successful background retry recovers the durable ERROR state before
+        # the pod transition decides whether the project should be running.
+        if row.status == ProjectStatus.ERROR:
+            row.status = ProjectStatus.ACTIVE
         if live_pod is not None:
             await self._apply_post_rematerialize(
                 row, live_pod, principal=_SYSTEM_JOB, reason="rematerialize"
@@ -633,9 +666,50 @@ class ProjectCommand:
                 status=422,
                 detail="project pod does not exist; launch project first",
             )
-        mat = await self._sync_project_workspace(row)
+        row.launch_phase = "preparing"
+        await self._session.flush()
+        try:
+            mat = await self._sync_project_workspace(row)
+        except Exception as exc:
+            # Workspace sync can fail after pruning/writing part of the tree. Persist
+            # the same terminal lifecycle state as launch materialization so the
+            # client sees durable failure details instead of a generic 500.
+            logger.exception("project workspace sync failed project_id=%s", row.id)
+            row.status = ProjectStatus.ERROR
+            row.launch_phase = None
+            if row.workspace_outdated_at is None:
+                row.workspace_outdated_at = datetime.now(UTC)
+            await self._session.commit()
+            raise AppError(
+                code="PROJECT_MATERIALIZE_FAILED",
+                title="Project Materialization Failed",
+                status=502,
+                detail=str(exc)[:300],
+            ) from exc
 
-        await self._apply_post_rematerialize(row, live_pod, principal=principal, reason="sync")
+        row.launch_phase = None
+        # A successful explicit sync also recovers a project left in ERROR by a
+        # prior materialization failure. Otherwise the API reports success while
+        # leaving the project stuck in a terminal lifecycle state.
+        if row.status == ProjectStatus.ERROR:
+            row.status = ProjectStatus.ACTIVE
+        try:
+            await self._apply_post_rematerialize(row, live_pod, principal=principal, reason="sync")
+        except Exception as exc:
+            # Keep the retry marker and persist a terminal lifecycle state when
+            # the pod cannot accept the newly materialized workspace.
+            logger.exception("project sync runtime transition failed project_id=%s", row.id)
+            row.status = ProjectStatus.ERROR
+            row.launch_phase = None
+            if row.workspace_outdated_at is None:
+                row.workspace_outdated_at = datetime.now(UTC)
+            await self._session.commit()
+            raise AppError(
+                code="PROJECT_SYNC_RUNTIME_FAILED",
+                title="Project Sync Runtime Failed",
+                status=502,
+                detail=str(exc)[:300],
+            ) from exc
 
         from prodavan.application.projects.workspace_outdated import clear_workspace_outdated
 
@@ -705,6 +779,8 @@ class ProjectCommand:
             )
         await self._stop_and_pause_runtime(row, principal=principal, reason="pause")
         row.status = ProjectStatus.PAUSED
+        # Invalidate any in-flight resume worker before pause commits.
+        row.launch_phase = None
         emit_payload = dict(payload or {})
         await self._events.emit(
             event_type="project.paused",
@@ -734,6 +810,13 @@ class ProjectCommand:
             write=True,
             allow_paused=True,
         )
+        # Serialize the state check and generation increment. Without a row lock,
+        # two requests can both observe PAUSED, each mint a generation, and start
+        # duplicate resume work before either request commits its marker.
+        locked = await self._session.execute(
+            select(ProjectRow).where(ProjectRow.id == row.id).with_for_update()
+        )
+        row = locked.scalar_one()
         # Idempotent: already active or resume in flight — do not 422 (UI double-tap / race).
         if row.status == ProjectStatus.ACTIVE:
             return await self._project_public(row)
@@ -760,6 +843,8 @@ class ProjectCommand:
             platform_fallback=company_policy.platform_fallback,
         )
         row.launch_phase = "resuming"
+        row.resume_generation = (row.resume_generation or 0) + 1
+        resume_generation = row.resume_generation
         await self._session.commit()
         await self._session.refresh(row)
         from prodavan.config.settings import settings
@@ -774,27 +859,59 @@ class ProjectCommand:
                     principal=principal,
                     reason="resume",
                 )
-                row.status = ProjectStatus.ACTIVE
-                row.launch_phase = None
-                await self._events.emit(
-                    event_type="project.resumed",
-                    company_id=row.company_id,
-                    project_id=row.id,
-                    cabinet_id=row.cabinet_id,
-                    principal=principal,
+                locked = await self._session.execute(
+                    select(ProjectRow).where(ProjectRow.id == row.id).with_for_update()
                 )
+                row = locked.scalar_one()
+                if row.launch_phase != "resuming" or row.resume_generation != resume_generation:
+                    await self._session.commit()
+                    await self._session.refresh(row)
+                    return await self._project_public(row, include_runtime=True)
+                row.status = ProjectStatus.ACTIVE
             except Exception as exc:
                 logger.warning("stub resume failed project_id=%s: %s", row.id, exc)
+                locked = await self._session.execute(
+                    select(ProjectRow).where(ProjectRow.id == row.id).with_for_update()
+                )
+                row = locked.scalar_one()
+                if row.launch_phase != "resuming" or row.resume_generation != resume_generation:
+                    await self._session.commit()
+                    await self._session.refresh(row)
+                    return await self._project_public(row, include_runtime=True)
                 row.status = ProjectStatus.ERROR
                 row.launch_phase = None
-            await self._session.commit()
-            await self._session.refresh(row)
             if row.status == ProjectStatus.ACTIVE:
                 try:
                     from prodavan.application.agent.trigger_dispatcher import AgentTriggerDispatcher
                     from prodavan.core.jobs.enqueue import enqueue_trigger_drain
 
-                    await bootstrap_project_sessions(self._session, project_id=row.id)
+                    bootstrap_result = await bootstrap_project_sessions(
+                        self._session, project_id=row.id
+                    )
+                    if bootstrap_result.get("skipped") == "pod_not_running":
+                        raise RuntimeError("pod is not running for resume session bootstrap")
+                    locked = await self._session.execute(
+                        select(ProjectRow).where(ProjectRow.id == row.id).with_for_update()
+                    )
+                    row = locked.scalar_one()
+                    if row.launch_phase != "resuming" or row.resume_generation != resume_generation:
+                        await self._session.commit()
+                        await self._session.refresh(row)
+                        return await self._project_public(row, include_runtime=True)
+                    if row.launch_phase == "resuming":
+                        await self._events.emit(
+                            event_type="project.resumed",
+                            company_id=row.company_id,
+                            project_id=row.id,
+                            cabinet_id=row.cabinet_id,
+                            principal=principal,
+                            payload={"resume_generation": row.resume_generation},
+                            idempotency_key=(
+                                f"project-resumed:{row.id}:{row.resume_generation}"
+                            ),
+                        )
+                    # Commit the idempotent event while keeping ``resuming``
+                    # durable. If dispatch fails, reconcile must retry bootstrap.
                     await self._session.commit()
                     await AgentTriggerDispatcher(self._session).dispatch_batch(
                         project_id=row.id,
@@ -803,13 +920,27 @@ class ProjectCommand:
                         max_n=10,
                     )
                     enqueue_trigger_drain()
+                    locked = await self._session.execute(
+                        select(ProjectRow).where(ProjectRow.id == row.id).with_for_update()
+                    )
+                    row = locked.scalar_one()
+                    if row.launch_phase == "resuming" and row.resume_generation == resume_generation:
+                        row.launch_phase = None
+                        await self._session.commit()
                 except Exception:
+                    # Keep the marker durable until the pod bridge registration
+                    # succeeds; reconcile retries this idempotent bootstrap.
                     logger.exception("stub resume post-bootstrap failed project_id=%s", row.id)
+                    await self._session.commit()
+            else:
+                await self._session.commit()
+            await self._session.refresh(row)
             return await self._project_public(row, include_runtime=True)
 
         asyncio.create_task(
             self._resume_background(
                 project_id=row.id,
+                resume_generation=row.resume_generation,
                 principal=principal,
                 employee=employee,
             ),
@@ -821,6 +952,7 @@ class ProjectCommand:
         self,
         *,
         project_id: str,
+        resume_generation: int,
         principal: Principal,
         employee: EmployeeRow | None,
     ) -> None:
@@ -830,7 +962,7 @@ class ProjectCommand:
         async with factory() as session:
             cmd = ProjectCommand(session)
             row = await cmd._access.get_project_or_none(project_id)
-            if row is None:
+            if row is None or row.launch_phase != "resuming" or row.resume_generation != resume_generation:
                 return
             try:
                 await cmd._pods.sync_desired(
@@ -839,36 +971,77 @@ class ProjectCommand:
                     principal=principal,
                     reason="resume",
                 )
-                row.status = ProjectStatus.ACTIVE
-                row.launch_phase = None
-                await cmd._events.emit(
-                    event_type="project.resumed",
-                    company_id=row.company_id,
-                    project_id=row.id,
-                    cabinet_id=row.cabinet_id,
-                    principal=principal,
+                locked = await session.execute(
+                    select(ProjectRow).where(ProjectRow.id == project_id).with_for_update()
                 )
+                row = locked.scalar_one()
+                if row.launch_phase != "resuming" or row.resume_generation != resume_generation:
+                    await session.commit()
+                    return
+                row.status = ProjectStatus.ACTIVE
             except Exception as exc:
                 logger.warning("resume background failed project_id=%s: %s", project_id, exc)
+                locked = await session.execute(
+                    select(ProjectRow).where(ProjectRow.id == project_id).with_for_update()
+                )
+                row = locked.scalar_one()
+                if row.launch_phase != "resuming" or row.resume_generation != resume_generation:
+                    await session.commit()
+                    return
                 row.status = ProjectStatus.ERROR
                 row.launch_phase = None
-            await session.commit()
             if row.status == ProjectStatus.ACTIVE:
                 try:
                     from prodavan.application.agent.trigger_dispatcher import AgentTriggerDispatcher
                     from prodavan.core.jobs.enqueue import enqueue_trigger_drain
 
-                    await bootstrap_project_sessions(session, project_id=row.id)
+                    bootstrap_result = await bootstrap_project_sessions(
+                        session, project_id=row.id
+                    )
+                    if bootstrap_result.get("skipped") == "pod_not_running":
+                        raise RuntimeError("pod is not running for resume session bootstrap")
+                    locked = await session.execute(
+                        select(ProjectRow).where(ProjectRow.id == project_id).with_for_update()
+                    )
+                    row = locked.scalar_one()
+                    if row.launch_phase != "resuming" or row.resume_generation != resume_generation:
+                        await session.commit()
+                        return
+                    if row.launch_phase == "resuming":
+                        await cmd._events.emit(
+                            event_type="project.resumed",
+                            company_id=row.company_id,
+                            project_id=project_id,
+                            cabinet_id=row.cabinet_id,
+                            principal=principal,
+                            payload={"resume_generation": row.resume_generation},
+                            idempotency_key=(
+                                f"project-resumed:{row.id}:{row.resume_generation}"
+                            ),
+                        )
+                    # Commit the idempotent event while keeping ``resuming``
+                    # durable. If dispatch fails, reconcile must retry bootstrap.
                     await session.commit()
                     await AgentTriggerDispatcher(session).dispatch_batch(
-                        project_id=row.id,
+                        project_id=project_id,
                         principal=principal,
                         employee=employee,
                         max_n=10,
                     )
                     enqueue_trigger_drain()
+                    locked = await session.execute(
+                        select(ProjectRow).where(ProjectRow.id == project_id).with_for_update()
+                    )
+                    row = locked.scalar_one()
+                    if row.launch_phase == "resuming" and row.resume_generation == resume_generation:
+                        row.launch_phase = None
+                        await session.commit()
                 except Exception:
                     logger.exception("resume post-bootstrap failed project_id=%s", project_id)
+                    # Keep ``resuming`` durable so reconcile retries registration.
+                    await session.commit()
+            else:
+                await session.commit()
 
     async def reload_project(
         self,
@@ -910,6 +1083,10 @@ class ProjectCommand:
                 reason="reload",
             )
             row.status = ProjectStatus.ACTIVE
+        except AppError:
+            # Workspace checkpoint failures are retryable safety stops; the
+            # existing workload was intentionally left intact.
+            raise
         except Exception:
             row.status = ProjectStatus.ERROR
         await self._session.commit()

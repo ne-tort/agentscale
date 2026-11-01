@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from datetime import UTC, datetime
+import secrets
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -290,6 +291,61 @@ class AdminCompanyService:
             return None, None
         return row.webhook_hmac_secret, row.telegram_hmac_secret
 
+    async def get_ingress_webhook_status(self, company_id: str) -> dict[str, bool]:
+        """Return configured flags only; never expose ingress signing secrets."""
+        await self._require_company(company_id)
+        webhook_secret, telegram_secret = await self.get_ingress_hmac_secrets(company_id)
+        return {
+            "webhook_hmac_configured": bool(webhook_secret),
+            "telegram_hmac_configured": bool(telegram_secret),
+        }
+
+    async def rotate_ingress_webhook_secret(self, company_id: str, *, channel: str) -> str:
+        """Create and persist a fresh incoming-hook HMAC secret; return it once."""
+        await self._require_company(company_id)
+        if channel not in {"webhook", "telegram"}:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="channel must be webhook or telegram",
+            )
+        row = await self._session.get(CompanyAgentRuntimePolicyRow, company_id)
+        if row is None:
+            row = CompanyAgentRuntimePolicyRow(company_id=company_id)
+            self._session.add(row)
+        secret = secrets.token_urlsafe(32)
+        if channel == "webhook":
+            row.webhook_hmac_secret = secret
+        else:
+            row.telegram_hmac_secret = secret
+        await self._session.commit()
+        from prodavan.application.admin.company_runtime_cache import invalidate_company_runtime_cache
+
+        await invalidate_company_runtime_cache(company_id)
+        return secret
+
+    async def clear_ingress_webhook_secret(self, company_id: str, *, channel: str) -> None:
+        """Disable an incoming signed-hook channel."""
+        await self._require_company(company_id)
+        if channel not in {"webhook", "telegram"}:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="channel must be webhook or telegram",
+            )
+        row = await self._session.get(CompanyAgentRuntimePolicyRow, company_id)
+        if row is not None:
+            if channel == "webhook":
+                row.webhook_hmac_secret = None
+            else:
+                row.telegram_hmac_secret = None
+            await self._session.commit()
+        from prodavan.application.admin.company_runtime_cache import invalidate_company_runtime_cache
+
+        await invalidate_company_runtime_cache(company_id)
+
     async def get_agent_policy(self, company_id: str) -> CompanyAgentRuntimePolicy:
         from prodavan.application.admin.company_runtime_cache import (
             get_cached_agent_policy,
@@ -562,15 +618,19 @@ class AdminCompanyService:
             raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Employee not found")
         return emp
 
-    async def list_company_employees(self, company_id: str) -> list[dict]:
+    async def list_company_employees(
+        self, company_id: str, *, include_deleted: bool = False
+    ) -> list[dict]:
         await self._require_company(company_id)
+        filters = [MembershipRow.company_id == company_id]
+        if include_deleted:
+            filters.append(EmployeeRow.deleted_at.is_not(None))
+        else:
+            filters.append(EmployeeRow.deleted_at.is_(None))
         q = await self._session.execute(
             select(EmployeeRow, MembershipRow.role)
             .join(MembershipRow, MembershipRow.employee_id == EmployeeRow.id)
-            .where(
-                MembershipRow.company_id == company_id,
-                EmployeeRow.deleted_at.is_(None),
-            )
+            .where(*filters)
             .order_by(EmployeeRow.login)
         )
         rows = q.all()
@@ -610,7 +670,7 @@ class AdminCompanyService:
         cabinets_by_emp = dict(cab_q.all())
         online_map = await MetricsReadService().batch_employee_online(emp_ids)
 
-        return [
+        items = [
             {
                 "id": emp.id,
                 "login": emp.login,
@@ -625,6 +685,10 @@ class AdminCompanyService:
             }
             for emp, role in rows
         ]
+        if include_deleted:
+            for item, (emp, _) in zip(items, rows, strict=True):
+                item["deleted_at"] = emp.deleted_at.isoformat() if emp.deleted_at else None
+        return items
 
     async def set_employee_password(
         self, company_id: str, employee_id: str, *, password: str

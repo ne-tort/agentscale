@@ -257,6 +257,23 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     assert tables["found_offers"]["scope"]["chats"] == "current"
     supplier_offers = next(v for v in meta["views"] if v["slug"] == "supplier_offers")
     assert supplier_offers["ui_json"]["data_scope"] == {"chats": "all"}
+
+
+def test_procurement_edit_contract_dispatches_apply_fields() -> None:
+    """§89: Flutter's generic editable cells must expose procurement inputs."""
+    meta = mod_equipment_meta()
+    procurement = next(v for v in meta["views"] if v["slug"] == "procurement_list")
+    columns = {c["field"]: c for c in procurement["ui_json"]["columns"]}
+    assert columns["margin_pct"]["editable"] is True
+    assert columns["include_delivery"]["editable"] is True
+    procurement_fields = {
+        c["name"]: c for c in meta["columns"] if c["table_slug"] == "procurement"
+    }
+    assert procurement_fields["include_delivery"]["type"] == "bool"
+    assert procurement_fields["include_delivery"]["default"] is True
+    action = next(a for a in meta["actions"] if a["id"] == "procurement_apply")
+    assert action["kind"] == "equipment.procurement_apply"
+    assert "row.updated" in action["trigger"]["on"]
     # дрилл-даун из «Закупки»: заголовок с именем поставщика из контекстной строки
     assert supplier_offers["ui_json"]["scaffold"]["title_template"]["ru"] == "Товары {seller}"
     # лицо группы: флаг «устарело» для warning-подсветки + колонка hidden
@@ -1007,6 +1024,8 @@ def test_equipment_search_page_seeds() -> None:
     assert ui["row_tap"]["action"] == "equipment_match_to_line"
     stock_col = next(c for c in ui["columns"] if c["field"] == "in_stock")
     assert stock_col["format"] == "stock_label"
+    lead_time_col = next(c for c in ui["columns"] if c["field"] == "lead_time")
+    assert lead_time_col["label"]["ru"] == "Срок / наличие"
     action = next(a for a in meta["actions"] if a["id"] == "equipment_match_to_line")
     assert action["kind"] == "equipment.match_to_line"
     # мастер-прайс тоже сопоставляет по тапу

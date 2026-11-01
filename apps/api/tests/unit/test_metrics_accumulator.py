@@ -149,6 +149,11 @@ async def test_relation_granted_employee_company_updates_counter() -> None:
     store.incr_counter = AsyncMock(return_value=1)
     store.append_counter_series = AsyncMock()
     store.get_parent = AsyncMock(return_value=None)
+    dedup = MagicMock()
+    dedup.is_event_complete = AsyncMock(return_value=False)
+    dedup.claim_event = AsyncMock(return_value=True)
+    dedup.complete_event = AsyncMock()
+    dedup.release_event_claim = AsyncMock()
     envelope = relation_event_envelope(
         event_id="r1",
         event_type=RELATION_GRANTED,
@@ -163,7 +168,47 @@ async def test_relation_granted_employee_company_updates_counter() -> None:
     with patch(
         "prodavan.application.metrics.consumer.relation_handler.build_counter_store",
         return_value=store,
+    ), patch(
+        "prodavan.application.metrics.consumer.relation_handler.build_metrics_store",
+        return_value=dedup,
     ):
         await handle_metrics_envelope(envelope)
     store.put_link.assert_awaited()
     store.incr_counter.assert_awaited()
+    dedup.complete_event.assert_awaited_once_with("relation:r1")
+
+
+@pytest.mark.asyncio
+async def test_relation_redelivery_skips_duplicate_counter_side_effect() -> None:
+    store = MagicMock()
+    store.put_link = AsyncMock()
+    store.incr_counter = AsyncMock(return_value=1)
+    store.append_counter_series = AsyncMock()
+    store.get_parent = AsyncMock(return_value=None)
+    dedup = MagicMock()
+    dedup.is_event_complete = AsyncMock(side_effect=[False, True])
+    dedup.claim_event = AsyncMock(return_value=True)
+    dedup.complete_event = AsyncMock()
+    dedup.release_event_claim = AsyncMock()
+    envelope = relation_event_envelope(
+        event_id="r_duplicate",
+        event_type=RELATION_GRANTED,
+        company_id="co_1",
+        payload={
+            "subject_kind": "employee",
+            "subject_id": "emp_1",
+            "object_kind": "company",
+            "object_id": "co_1",
+        },
+    )
+    with patch(
+        "prodavan.application.metrics.consumer.relation_handler.build_counter_store",
+        return_value=store,
+    ), patch(
+        "prodavan.application.metrics.consumer.relation_handler.build_metrics_store",
+        return_value=dedup,
+    ):
+        await handle_metrics_envelope(envelope)
+        await handle_metrics_envelope(envelope)
+    store.incr_counter.assert_awaited_once()
+    dedup.claim_event.assert_awaited_once_with("relation:r_duplicate")

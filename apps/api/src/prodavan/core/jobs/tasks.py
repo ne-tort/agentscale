@@ -140,6 +140,24 @@ def register_tasks(app) -> None:
         logger.info("celery task %s", job_names.TRIGGER_DRAIN)
         return run_async(_run())
 
+    @app.task(name=job_names.PRODUCE_PROJECT_SCHEDULES, bind=False)
+    def produce_project_schedules() -> dict[str, Any]:
+        from prodavan.application.projects import ProjectScheduleService
+        from prodavan.infrastructure.persistence.database import get_session_factory
+
+        async def _run() -> dict[str, Any]:
+            async def _produce() -> dict[str, Any]:
+                factory = get_session_factory()
+                async with factory() as session:
+                    result = await ProjectScheduleService(session).produce_due()
+                    await session.commit()
+                    return result
+
+            return await run_with_job_lock("produce_project_schedules", ttl_sec=60, fn=_produce)
+
+        logger.info("celery task %s", job_names.PRODUCE_PROJECT_SCHEDULES)
+        return run_async(_run())
+
     @app.task(name=job_names.DISPATCH_TRIGGER, bind=False)
     def dispatch_trigger(trigger_id: str) -> dict[str, Any]:
         from prodavan.application.agent.trigger_dispatcher import AgentTriggerDispatcher

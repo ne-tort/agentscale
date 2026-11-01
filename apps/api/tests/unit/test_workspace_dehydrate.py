@@ -68,6 +68,28 @@ def test_upload_workspace_tar_overwrites_and_deletes_orphans(file_store: FileSto
     assert not file_store.exists_sync("projects/ws1/workspace/node_modules/x/a.js")
 
 
+def test_oversized_checkpoint_keeps_previous_last_good_file(
+    file_store: FileStoreManager, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A skipped large replacement must not prune the existing workspace file."""
+    import prodavan.application.pod_service.workspace_tar_upload as upload_module
+
+    monkeypatch.setattr(upload_module, "max_file_bytes", lambda: 3)
+    key = "projects/ws_large/workspace/output.bin"
+    file_store.put_bytes_sync(key, b"old")
+
+    result = upload_module.upload_workspace_tar(
+        workspace_key="ws_large",
+        tar_bytes=_tar_bytes({"output.bin": b"larger than cap"}),
+        store=file_store,
+    )
+
+    assert result.uploaded == 0
+    assert result.skipped == 1
+    assert result.deleted == 0
+    assert file_store.get_bytes_sync(key) == b"old"
+
+
 def test_hydrate_prefix_lands_under_workspace_root() -> None:
     """Contract: object key projects/{k}/workspace/AGENTS.md → /workspace/AGENTS.md."""
 

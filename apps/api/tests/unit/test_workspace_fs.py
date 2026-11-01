@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from prodavan.runtime import workspace_fs
 
 
@@ -61,3 +63,30 @@ def test_workspace_fs_write_reads_stdin(tmp_path: Path, monkeypatch) -> None:
     assert body["ok"] is True
     assert body["path"] == "inbox/note.txt"
     assert (tmp_path / "inbox" / "note.txt").read_bytes() == b"hello-write"
+
+
+def test_workspace_fs_write_replaces_atomically_on_commit(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(workspace_fs, "WORKSPACE_ROOT", tmp_path)
+    target = tmp_path / "notes.txt"
+    target.write_bytes(b"old-content")
+
+    import io
+    import sys
+
+    class _Stdin:
+        buffer = io.BytesIO(b"new-content")
+
+    monkeypatch.setattr(sys, "stdin", _Stdin())
+    original_replace = workspace_fs.os.replace
+
+    def _fail_replace(source: str, destination: Path) -> None:
+        raise OSError("simulated atomic commit failure")
+
+    monkeypatch.setattr(workspace_fs.os, "replace", _fail_replace)
+    with pytest.raises(OSError, match="simulated atomic commit failure"):
+        workspace_fs.cmd_write("notes.txt")
+
+    assert target.read_bytes() == b"old-content"
+    monkeypatch.setattr(workspace_fs.os, "replace", original_replace)
+    workspace_fs.cmd_write("notes.txt")
+    assert target.read_bytes() == b"new-content"
