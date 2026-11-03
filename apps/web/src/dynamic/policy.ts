@@ -1,4 +1,4 @@
-import { validateRouteRequirements, type ContextDimension, type RouteRequirements, type ValidatedRoute } from "./schema";
+import { deepFreeze, validateRoute, validateRouteRequirements, type ContextDimension, type RouteRequirements, type ValidatedRoute } from "./schema";
 import type { RequestContext } from "./protocol";
 import { missingContext } from "./protocol";
 
@@ -15,12 +15,21 @@ export interface RoutePolicyInput {
 }
 
 export function evaluateRoute(context: RequestContext, route: ValidatedRoute, policy: RoutePolicyInput): RouteDecision {
-  if (!validateRouteRequirements(policy.requirements) || route.requirements !== policy.requirements) return { allowed: false, code: "route_scope_mismatch" };
+  const ids = new Set([route.root]);
+  if (!validateRouteRequirements(policy.requirements) || !validateRoute(route, ids) || !sameRequirements(route.requirements, policy.requirements)) return { allowed: false, code: "route_scope_mismatch" };
   const missing = missingContext(context, policy.requirements.context);
   if (missing.length) return { allowed: false, code: "missing_context" };
-  if (context.tenantId !== policy.appTenantId || (policy.appCabinetId !== undefined && context.cabinetId !== policy.appCabinetId) || (policy.appProjectId !== undefined && context.projectId !== policy.appProjectId)) return { allowed: false, code: "route_scope_mismatch" };
+  if (!policy.appTenantId || context.tenantId !== policy.appTenantId ||
+      (policy.appCabinetId !== undefined && (!context.cabinetId || context.cabinetId !== policy.appCabinetId)) ||
+      (policy.appProjectId !== undefined && (!context.projectId || context.projectId !== policy.appProjectId))) return { allowed: false, code: "route_scope_mismatch" };
   if ((policy.requirements.capabilities ?? []).some((capability) => !policy.effectiveCapabilities.has(capability))) return { allowed: false, code: "capability_denied" };
-  return { allowed: true, route };
+  return { allowed: true, route: deepFreeze({ ...route, requirements: { context: [...route.requirements.context], ...(route.requirements.capabilities ? { capabilities: [...route.requirements.capabilities] } : {}) } }) };
+}
+
+function sameRequirements(left: RouteRequirements, right: RouteRequirements): boolean {
+  const same = (a: readonly string[] | undefined, b: readonly string[] | undefined) =>
+    (a ?? []).length === (b ?? []).length && (a ?? []).every((value, index) => value === (b ?? [])[index]);
+  return same(left.context, right.context) && same(left.capabilities, right.capabilities);
 }
 
 export function defaultRouteRequirements(): RouteRequirements {

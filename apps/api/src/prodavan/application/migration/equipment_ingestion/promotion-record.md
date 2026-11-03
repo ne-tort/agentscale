@@ -24,12 +24,13 @@
 
 ## Blockers and gate
 
-1. Upstream canonical owner/tenant/project identity is incomplete or unproven. Source and supplier identity are required; ingestion blocks before positive artifacts/snapshots when identity is missing. Owner/source mappings must not be inferred from labels, URLs, IDs, or payload claims.
-2. No bounded source partition, source schema inventory, immutable object-store adapter, transactional evidence store/CAS adapter, freshness policy thresholds, or projection rebuild/publish adapter has been supplied. This task defines ports/contracts only; no database, ORM, routes, OpenSearch wiring, or schema change is included.
-3. No accepted upstream migration gate/handoff evidence or coordinator promotion decision is present.
-4. Acceptance fixtures exist but were intentionally not executed under migration verification freeze.
+1. Upstream canonical owner/tenant/project identity is incomplete or unproven. Source and verified supplier identity are required; ingestion blocks before positive artifacts/snapshots when identity is missing. Owner/source mappings must not be inferred from labels, URLs, IDs, or payload claims.
+2. The generic `application/equipment_ingestion` contracts/service and `equipment_v2_*` ORM foundation exist, but no production source/run repository, module-catalog adapter, checkpoint/CAS evidence store, immutable raw-object bridge, concrete API route, or Celery task wiring exists. The generic source kinds do not implement legacy local-file or remote PostgreSQL catalogs and do not bind their owner/project and supplier identity to the canonical contract. No accepted source partition/schema inventory, freshness thresholds, or projection publisher has been supplied.
+3. `equipment_sources` is referenced in migration target documentation but has no implemented source registry API/model in this worktree. The actual legacy import and required no-second-worker handoff are recorded in `source-handoff.md`; legacy catalogs and OpenSearch remain authoritative.
+4. No accepted upstream migration gate/handoff evidence or coordinator promotion decision is present.
+5. Acceptance fixtures exist but were intentionally not executed under migration verification freeze.
 
-Promotion remains blocked until canonical identity mappings and partition ownership are evidenced; source schema and supplier identity are reviewed; persistence proves immutable artifact retention, idempotency/checkpoint CAS and append-only audit; freshness thresholds/last-good policy and projection generation fencing are agreed; acceptance tests are explicitly authorized and pass; and coordinator records a superseding promotion decision. No source rows or payloads were acquired in this task.
+Promotion remains blocked until canonical identity mappings and partition ownership are evidenced; source schema and supplier identity are reviewed; persistence proves immutable artifact retention, idempotency/checkpoint CAS and append-only audit; freshness thresholds/last-good policy and projection generation fencing are agreed; the current catalog route and registered Celery job have an accepted durable handoff; acceptance tests are explicitly authorized and pass; and coordinator records a superseding promotion decision. No source rows or payloads were acquired in this task.
 
 ## Rollback
 

@@ -20,6 +20,7 @@ from prodavan.api.v1 import (
     admin_search_index,
     admin_triggers,
     agent,
+    agent_runs,
     ai_keys,
     auth,
     b2b,
@@ -75,6 +76,7 @@ router.include_router(tenant_infra.router)
 router.include_router(employee_search.router)
 router.include_router(pod_modules.router)
 router.include_router(agent.router)
+router.include_router(agent_runs.router)
 router.include_router(b2b.router)
 router.include_router(external.router)
 router.include_router(internal_pods.router)

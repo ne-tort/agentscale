@@ -90,3 +90,31 @@ def test_workspace_fs_write_replaces_atomically_on_commit(tmp_path: Path, monkey
     monkeypatch.setattr(workspace_fs.os, "replace", original_replace)
     workspace_fs.cmd_write("notes.txt")
     assert target.read_bytes() == b"new-content"
+
+
+def test_workspace_fs_mkdir_creates_root_and_nested_directories(tmp_path: Path, monkeypatch, capsys) -> None:
+    monkeypatch.setattr(workspace_fs, "WORKSPACE_ROOT", tmp_path)
+
+    workspace_fs.cmd_mkdir("docs")
+    workspace_fs.cmd_mkdir("docs/reference")
+
+    assert (tmp_path / "docs").is_dir()
+    assert (tmp_path / "docs" / "reference").is_dir()
+    assert json.loads(capsys.readouterr().out.splitlines()[-1]) == {"created": True, "path": "docs/reference"}
+
+
+@pytest.mark.parametrize("path", ["../outside", "%252e%252e%252fsecret", "/absolute", "docs/../../outside"])
+def test_workspace_fs_mkdir_rejects_traversal(tmp_path: Path, monkeypatch, path: str) -> None:
+    monkeypatch.setattr(workspace_fs, "WORKSPACE_ROOT", tmp_path)
+    with pytest.raises(ValueError, match="relative"):
+        workspace_fs.cmd_mkdir(path)
+
+
+def test_workspace_fs_mkdir_rejects_existing_file_or_directory(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(workspace_fs, "WORKSPACE_ROOT", tmp_path)
+    (tmp_path / "file.txt").write_text("file", encoding="utf-8")
+    (tmp_path / "folder").mkdir()
+
+    for path in ("file.txt", "folder"):
+        with pytest.raises(FileExistsError):
+            workspace_fs.cmd_mkdir(path)

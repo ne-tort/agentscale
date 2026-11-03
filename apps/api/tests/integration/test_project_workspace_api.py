@@ -48,13 +48,29 @@ class _MemoryWorkspace:
             "AGENTS.md": b"# Agents\n",
             "notes.txt": b"hello workspace",
         }
+        self.directories: set[str] = {"folder"}
 
     async def list_entries(self, *, runtime_ref: str, path: str) -> list[WorkspaceEntry]:
-        _ = runtime_ref, path
-        return [
-            WorkspaceEntry(name=name, path=name, kind="file", size=len(data), modified_at=None)
-            for name, data in sorted(self.files.items())
-        ]
+        _ = runtime_ref
+        prefix = f"{path}/" if path else ""
+        entries = []
+        for item_path in sorted([*self.files, *self.directories]):
+            if not item_path.startswith(prefix):
+                continue
+            name = item_path[len(prefix) :]
+            if not name or "/" in name:
+                continue
+            is_dir = item_path in self.directories
+            entries.append(
+                WorkspaceEntry(
+                    name=name,
+                    path=item_path,
+                    kind="dir" if is_dir else "file",
+                    size=None if is_dir else len(self.files[item_path]),
+                    modified_at=None,
+                )
+            )
+        return entries
 
     async def read_bytes(self, *, runtime_ref: str, path: str, max_bytes: int) -> bytes:
         _ = runtime_ref
@@ -62,10 +78,41 @@ class _MemoryWorkspace:
 
     async def stat(self, *, runtime_ref: str, path: str) -> WorkspaceEntry:
         _ = runtime_ref
-        if path == "folder":
-            return WorkspaceEntry(name=path, path=path, kind="dir", size=None, modified_at=None)
+        if path in self.directories:
+            return WorkspaceEntry(name=path.rsplit("/", 1)[-1], path=path, kind="dir", size=None, modified_at=None)
+        if path not in self.files:
+            raise AppError(
+                code="WORKSPACE_NOT_FOUND",
+                title="Not Found",
+                status=404,
+                detail="workspace path not found",
+                extra={"path": path},
+            )
         data = self.files[path]
         return WorkspaceEntry(name=path, path=path, kind="file", size=len(data), modified_at=None)
+
+    async def create_directory(self, *, runtime_ref: str, path: str) -> None:
+        _ = runtime_ref
+        if path in self.files or path in self.directories:
+            raise AppError(
+                code="WORKSPACE_ALREADY_EXISTS",
+                title="Conflict",
+                status=409,
+                detail="workspace path already exists",
+                extra={"path": path, "kind": "file" if path in self.files else "dir"},
+            )
+        parts = path.split("/")
+        for index in range(1, len(parts)):
+            parent = "/".join(parts[:index])
+            if parent in self.files:
+                raise AppError(
+                    code="WORKSPACE_PATH_CONFLICT",
+                    title="Conflict",
+                    status=409,
+                    detail="a parent workspace path is not a directory",
+                    extra={"path": path},
+                )
+        self.directories.update("/".join(parts[:index]) for index in range(1, len(parts) + 1))
 
     async def delete(self, *, runtime_ref: str, path: str) -> None:
         _ = runtime_ref
@@ -89,6 +136,10 @@ class _MemoryWorkspace:
 
     async def write_bytes(self, *, runtime_ref: str, path: str, data: bytes) -> None:
         _ = runtime_ref
+        if path in self.directories:
+            raise AppError(code="VALIDATION_ERROR", title="Validation Error", status=422, detail="path is a directory")
+        parts = path.split("/")
+        self.directories.update("/".join(parts[:index]) for index in range(1, len(parts)))
         self.files[path] = data
 
 
@@ -198,7 +249,7 @@ def test_workspace_list_entries(client: TestClient, running_workspace: _MemoryWo
     assert listed.status_code == 200, listed.text
     body = listed.json()
     names = {e["name"] for e in body["entries"]}
-    assert names == {"AGENTS.md", "notes.txt"}
+    assert names == {"AGENTS.md", "notes.txt", "folder"}
 
 
 @requires_postgres
@@ -353,6 +404,111 @@ def test_workspace_upload_rejects_directory_path_with_metadata(
     assert uploaded.json()["code"] == "VALIDATION_ERROR"
     assert uploaded.json()["path"] == "folder"
     assert uploaded.json()["kind"] == "dir"
+
+
+@requires_postgres
+def test_workspace_mkdir_creates_root_and_nested_directories(
+    client: TestClient, running_workspace: _MemoryWorkspace
+) -> None:
+    owner_h, project_id, _ = _launch_project(client)
+    endpoint = f"/api/v1/projects/{project_id}/container/workspace/mkdir"
+
+    created = client.post(endpoint, headers=owner_h, json={"path": "docs"})
+    assert created.status_code == 201, created.text
+    assert created.json() == {"created": True, "path": "docs"}
+
+    nested = client.post(endpoint, headers=owner_h, json={"path": "docs/reference"})
+    assert nested.status_code == 201, nested.text
+    assert nested.json() == {"created": True, "path": "docs/reference"}
+
+    readback = client.get(
+        f"/api/v1/projects/{project_id}/container/workspace/entries",
+        headers=owner_h,
+        params={"path": "docs"},
+    )
+    assert readback.status_code == 200, readback.text
+    assert [(entry["path"], entry["kind"]) for entry in readback.json()["entries"]] == [
+        ("docs/reference", "dir")
+    ]
+    assert "docs" in running_workspace.directories
+    assert "docs/reference" in running_workspace.directories
+
+
+@requires_postgres
+def test_workspace_mkdir_rejects_collisions_and_traversal(
+    client: TestClient, running_workspace: _MemoryWorkspace
+) -> None:
+    owner_h, project_id, _ = _launch_project(client)
+    endpoint = f"/api/v1/projects/{project_id}/container/workspace/mkdir"
+
+    for path, kind in (("folder", "dir"), ("notes.txt", "file")):
+        conflict = client.post(endpoint, headers=owner_h, json={"path": path})
+        assert conflict.status_code == 409, conflict.text
+        assert conflict.json()["code"] == "WORKSPACE_ALREADY_EXISTS"
+        assert conflict.json()["path"] == path
+        if kind == "file":
+            assert conflict.json()["kind"] == kind
+
+    traversal = client.post(endpoint, headers=owner_h, json={"path": "%252e%252e%252fsecret"})
+    assert traversal.status_code == 422, traversal.text
+    assert "secret" not in running_workspace.files
+
+    parent_file = client.post(endpoint, headers=owner_h, json={"path": "notes.txt/child"})
+    assert parent_file.status_code == 409, parent_file.text
+    assert parent_file.json()["code"] == "WORKSPACE_PATH_CONFLICT"
+
+
+def test_workspace_mkdir_requires_authentication(client: TestClient) -> None:
+    response = client.post(
+        "/api/v1/projects/project-1/container/workspace/mkdir",
+        json={"path": "docs"},
+    )
+    assert response.status_code == 401, response.text
+
+
+@requires_postgres
+def test_workspace_mkdir_route_is_project_scoped(
+    client: TestClient, running_workspace: _MemoryWorkspace
+) -> None:
+    owner_h, project_id, company_id = _launch_project(client)
+    body = {"path": "project-only"}
+    project_route = f"/api/v1/projects/{project_id}/container/workspace/mkdir"
+    created = client.post(project_route, headers=owner_h, json=body)
+    assert created.status_code == 201, created.text
+
+    company_route = f"/api/v1/companies/{company_id}/containers/{project_id}/workspace/mkdir"
+    company_response = client.post(company_route, headers=owner_h, json=body)
+    assert company_response.status_code == 404, company_response.text
+
+    admin_route = f"/api/v1/admin/containers/{project_id}/workspace/mkdir"
+    admin_headers = {"Authorization": f"Bearer {_token(sub='workspace-mkdir-scope-admin', platform_admin=True)}"}
+    admin_response = client.post(admin_route, headers=admin_headers, json=body)
+    assert admin_response.status_code == 404, admin_response.text
+    assert running_workspace.directories == {"folder", "project-only"}
+
+
+@requires_postgres
+@pytest.mark.parametrize(("code", "status"), [("PROJECT_PAUSED", 409), ("POD_NOT_RUNNING", 409)])
+def test_workspace_mkdir_rejects_paused_or_unavailable_pod(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    code: str,
+    status: int,
+) -> None:
+    owner_h, project_id, _ = _launch_project(client)
+
+    async def _deny(self, *, project_id, principal, employee, write=False):
+        _ = self, project_id, principal, employee, write
+        raise AppError(code=code, title="Conflict", status=status, detail="workspace not writable")
+
+    monkeypatch.setattr(PodWorkspaceService, "_require_running_runtime", _deny)
+    response = client.post(
+        f"/api/v1/projects/{project_id}/container/workspace/mkdir",
+        headers=owner_h,
+        json={"path": "blocked"},
+    )
+    assert response.status_code == status, response.text
+    assert response.json()["code"] == code
 
 
 @requires_postgres

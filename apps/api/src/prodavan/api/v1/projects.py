@@ -97,6 +97,12 @@ class AttachmentBody(BaseModel):
     content_type: str | None = Field(default=None, max_length=128)
 
 
+class WorkspaceMkdirBody(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    path: str = Field(min_length=1, max_length=500)
+
+
 EmployeeDep = Annotated[EmployeeRow | None, Depends(get_current_employee)]
 
 
@@ -246,6 +252,22 @@ async def upload_project_workspace_content(
         project_id=project_id,
         path=path,
         data=data,
+        principal=principal,
+        employee=employee,
+    )
+
+
+@router.post("/projects/{project_id}/container/workspace/mkdir", status_code=201)
+async def create_project_workspace_directory(
+    project_id: str,
+    body: WorkspaceMkdirBody,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+) -> dict:
+    return await PodWorkspaceService(session).create_directory(
+        project_id=project_id,
+        path=body.path,
         principal=principal,
         employee=employee,
     )

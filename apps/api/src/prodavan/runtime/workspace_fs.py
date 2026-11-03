@@ -10,12 +10,20 @@ import sys
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
+from urllib.parse import unquote
 
 WORKSPACE_ROOT = Path(os.environ.get("WORKSPACE_ROOT", "/workspace"))
 
 
 def _resolve(rel: str) -> Path:
-    text = (rel or "").strip().replace("\\", "/").lstrip("/")
+    text = (rel or "").strip().replace("\\", "/")
+    for _ in range(3):
+        decoded = unquote(text)
+        if decoded == text:
+            break
+        text = decoded
+    if text.startswith("/") or ".." in text.split("/"):
+        raise ValueError("path must be relative and stay inside workspace root")
     root = WORKSPACE_ROOT.resolve()
     target = (root / text).resolve() if text else root
     if target != root and root not in target.parents:
@@ -110,6 +118,15 @@ def cmd_write(path: str) -> None:
     print(json.dumps({"ok": True, "path": rel, "size": len(data)}), flush=True)
 
 
+def cmd_mkdir(path: str) -> None:
+    target = _resolve(path)
+    if target == WORKSPACE_ROOT.resolve():
+        raise ValueError("path required")
+    target.mkdir(parents=True, exist_ok=False)
+    rel = target.relative_to(WORKSPACE_ROOT.resolve()).as_posix()
+    print(json.dumps({"created": True, "path": rel}), flush=True)
+
+
 def cmd_cp(src: str, dst: str) -> None:
     s = _resolve(src)
     d = _resolve(dst)
@@ -151,6 +168,9 @@ def main(argv: list[str] | None = None) -> None:
     p_write = sub.add_parser("write")
     p_write.add_argument("path")
 
+    p_mkdir = sub.add_parser("mkdir")
+    p_mkdir.add_argument("path")
+
     args = parser.parse_args(argv)
     if args.cmd == "list":
         cmd_list(args.path)
@@ -166,11 +186,13 @@ def main(argv: list[str] | None = None) -> None:
         cmd_cp(args.src, args.dst)
     elif args.cmd == "write":
         cmd_write(args.path)
+    elif args.cmd == "mkdir":
+        cmd_mkdir(args.path)
 
 
 if __name__ == "__main__":
     try:
         main()
     except Exception as exc:
-        print(json.dumps({"error": str(exc)}), file=sys.stderr)
+        print(json.dumps({"error": f"{type(exc).__name__}: {exc}"}), file=sys.stderr)
         raise SystemExit(1) from exc

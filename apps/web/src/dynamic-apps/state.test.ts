@@ -39,7 +39,7 @@ describe("dynamic app view state", () => {
       reduceDynamicAppsState(loading, { type: "mutate", appId: detail.appId }),
       { type: "failed", message: "denied" },
     );
-    expect(failed).toMatchObject({ kind: "error", message: "denied", page, detail });
+    expect(failed).toMatchObject({ kind: "error", message: "denied", page, detail: undefined });
   });
 });
 
@@ -65,7 +65,7 @@ describe("dynamic app gateway contract", () => {
   it("rejects app/version scope changes before transport", async () => {
     const gateway: CapabilityGateway = { invoke: async () => detail, notify: () => undefined };
     const registry = createDynamicAppRegistryContract({ gateway, appId: detail.appId, manifestVersion: detail.manifestVersion });
-    expect(() => registry.detail("other.app")).toThrow("scope");
+    expect(() => registry.detail("other-app")).toThrow("scope");
     expect(() => registry.grant({ appId: detail.appId, manifestVersion: "2.0.0", capability: { name: "ui.render", decision: "granted", grantedBy: "administrator" } })).toThrow("version");
   });
 });

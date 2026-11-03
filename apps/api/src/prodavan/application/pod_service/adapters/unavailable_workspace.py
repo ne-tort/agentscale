@@ -69,3 +69,16 @@ class UnavailableWorkspaceAdapter:
             status=409,
             detail="pod is not running",
         )
+
+    async def create_directory(self, *, runtime_ref: str, path: str) -> None:
+        _ = runtime_ref, path
+        raise AppError(
+            code="POD_NOT_RUNNING",
+            title="Conflict",
+            status=409,
+            detail="pod is not running",
+        )
+
+
+
+

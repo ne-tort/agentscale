@@ -76,6 +76,15 @@ class HttpWorkspaceAdapterBase:
             detail="agent runtime has no workspace write API",
         )
 
+    async def _mkdir_fallback(self, *, runtime_ref: str, path: str) -> None:
+        _ = runtime_ref, path
+        raise AppError(
+            code="RUNTIME_FS_FAILED",
+            title="Bad Gateway",
+            status=502,
+            detail="agent runtime has no workspace mkdir API",
+        )
+
     async def _invalidate_runtime_endpoint(
         self, runtime_ref: str, endpoint: RuntimeEndpoint
     ) -> None:
@@ -139,12 +148,22 @@ class HttpWorkspaceAdapterBase:
 
         response = await self._execute_with_reresolve(runtime_ref=runtime_ref, send=_send)
         if response.status_code >= 400:
+            try:
+                problem = response.json()
+            except Exception:
+                problem = {}
+            if not isinstance(problem, dict):
+                problem = {}
             raise AppError(
                 code="RUNTIME_FS_FAILED",
                 title="Bad Gateway",
                 status=502,
-                detail=response.text[:500],
-                extra={"runtime_status": response.status_code},
+                detail=str(problem.get("detail") or response.text[:500]),
+                extra={
+                    "runtime_status": response.status_code,
+                    "runtime_code": str(problem.get("code") or ""),
+                    "runtime_extra": problem,
+                },
             )
         if response.status_code == 204:
             return {}
@@ -163,6 +182,93 @@ class HttpWorkspaceAdapterBase:
             if isinstance(item, dict):
                 out.append(_entry_from_dict(item))
         return out
+
+    async def create_directory(self, *, runtime_ref: str, path: str) -> None:
+        rel = normalize_workspace_path(path)
+        if not rel:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="path required",
+            )
+        try:
+            body = await self._request_json(
+                runtime_ref=runtime_ref,
+                method="POST",
+                path="/v1/workspace/mkdir",
+                json_body={"path": rel},
+            )
+        except AppError as exc:
+            runtime_status = exc.extra.get("runtime_status")
+            runtime_code = exc.extra.get("runtime_code")
+            if runtime_code == "POD_NOT_RUNNING":
+                raise AppError(
+                    code="POD_NOT_RUNNING",
+                    title="Conflict",
+                    status=409,
+                    detail=exc.detail or "pod is not running",
+                ) from exc
+            if runtime_code in {"WORKSPACE_NOT_FOUND", "WORKSPACE_PARENT_NOT_FOUND"}:
+                raise AppError(
+                    code="WORKSPACE_NOT_FOUND",
+                    title="Not Found",
+                    status=404,
+                    detail="workspace parent path not found",
+                    extra={"path": rel},
+                ) from exc
+            if runtime_code == "WORKSPACE_ALREADY_EXISTS":
+                runtime_extra = exc.extra.get("runtime_extra")
+                raise AppError(
+                    code="WORKSPACE_ALREADY_EXISTS",
+                    title="Conflict",
+                    status=409,
+                    detail="workspace path already exists",
+                    extra={"path": rel, **(runtime_extra if isinstance(runtime_extra, dict) else {})},
+                ) from exc
+            if runtime_code == "WORKSPACE_PATH_CONFLICT":
+                raise AppError(
+                    code="WORKSPACE_PATH_CONFLICT",
+                    title="Conflict",
+                    status=409,
+                    detail="a parent workspace path is not a directory",
+                    extra={"path": rel},
+                ) from exc
+            if runtime_code in {"WORKSPACE_PERMISSION_DENIED", "FORBIDDEN"}:
+                raise AppError(
+                    code="WORKSPACE_PERMISSION_DENIED",
+                    title="Forbidden",
+                    status=403,
+                    detail="permission denied creating workspace directory",
+                    extra={"path": rel},
+                ) from exc
+            if exc.code == "RUNTIME_FS_FAILED" and runtime_status in {404, 405}:
+                await self._mkdir_fallback(runtime_ref=runtime_ref, path=rel)
+                return
+            if exc.code == "RUNTIME_FS_FAILED" and runtime_status == 403:
+                raise AppError(
+                    code="WORKSPACE_PERMISSION_DENIED",
+                    title="Forbidden",
+                    status=403,
+                    detail="permission denied creating workspace directory",
+                    extra={"path": rel},
+                ) from exc
+            if exc.code == "RUNTIME_FS_FAILED" and runtime_status == 409:
+                raise AppError(
+                    code="WORKSPACE_ALREADY_EXISTS",
+                    title="Conflict",
+                    status=409,
+                    detail="workspace path already exists",
+                    extra={"path": rel},
+                ) from exc
+            raise
+        if body.get("created") is not True or _normalize_response_path(body.get("path")) != rel:
+            raise AppError(
+                code="RUNTIME_FS_FAILED",
+                title="Bad Gateway",
+                status=502,
+                detail="workspace mkdir result did not match requested path",
+            )
 
     async def read_bytes(self, *, runtime_ref: str, path: str, max_bytes: int) -> bytes:
         rel = normalize_workspace_path(path)
@@ -193,12 +299,22 @@ class HttpWorkspaceAdapterBase:
 
         response = await self._execute_with_reresolve(runtime_ref=runtime_ref, send=_send)
         if response.status_code >= 400:
+            try:
+                problem = response.json()
+            except Exception:
+                problem = {}
+            if not isinstance(problem, dict):
+                problem = {}
             raise AppError(
                 code="RUNTIME_FS_FAILED",
                 title="Bad Gateway",
                 status=502,
-                detail=response.text[:500],
-                extra={"path": rel, "runtime_status": response.status_code},
+                detail=str(problem.get("detail") or response.text[:500]),
+                extra={
+                    "runtime_status": response.status_code,
+                    "runtime_code": str(problem.get("code") or ""),
+                    "runtime_extra": problem,
+                },
             )
         return response.content
 
@@ -355,3 +471,14 @@ class HttpAgentRuntimeWorkspaceAdapter(HttpWorkspaceAdapterBase):
             path=path,
             data=data,
         )
+
+    async def _mkdir_fallback(self, *, runtime_ref: str, path: str) -> None:
+        from prodavan.application.pod_service.adapters.k8s.workspace_exec import (
+            K8sExecWorkspaceAdapter,
+        )
+
+        await K8sExecWorkspaceAdapter(client=self._client).create_directory(
+            runtime_ref=runtime_ref,
+            path=path,
+        )
+

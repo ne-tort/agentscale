@@ -125,7 +125,7 @@ async def test_import_port_owns_atomic_identity_digest_cas_and_conflict_preserva
             assert identity == (candidate.source_kind, candidate.source_id, candidate.schema_version)
             assert digest == candidate_canonical_digest(candidate)
             return type("Record", (), {"outcome": ImportOutcome.CONFLICT,
-                "reason": "source_digest_changed", "digest": "sha256:" + "f" * 64})()
+                "reason": "source_digest_changed", "digest": digest})()
     record = await import_compatibility_candidate(store=AtomicStore(), candidate=CANDIDATE,
                                                   dependencies_ready=True)
     assert record.outcome is ImportOutcome.CONFLICT

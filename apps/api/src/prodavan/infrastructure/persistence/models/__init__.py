@@ -17,6 +17,14 @@ from prodavan.infrastructure.persistence.models.agent_control_plane import (
     AgentRunRow,
     ApprovalRequestRow,
 )
+from prodavan.infrastructure.persistence.agent_control_plane.models import (
+    AgentControlPlaneAggregateRow,
+    AgentControlPlaneCommandRow,
+    AgentControlPlaneEnqueueIntentRow,
+    AgentControlPlaneEventRow,
+    AgentControlPlaneOutboxEventRow,
+    AgentControlPlaneRunScopeRow,
+)
 from prodavan.infrastructure.persistence.models.ai_keys import (
     AiKeyAuditEventRow,
     AiKeyCheckResultRow,
@@ -79,9 +87,14 @@ from prodavan.infrastructure.persistence.models.external_api import (
     WebhookSubscriptionRow,
 )
 from prodavan.infrastructure.persistence.models.dynamic_app_grants import DynamicAppCapabilityGrantRow
+# T00 blocker: canonical_grants.CanonicalGrantRow duplicates the legacy grant table.
+# Keep it unregistered until table ownership is resolved.
 from prodavan.infrastructure.persistence.models.owner_registry import (
+    CanonicalTenantAnchorRow,
     ScopeOwnerAuditRow,
+    ScopeOwnerCabinetAnchorRow,
     ScopeOwnerMappingRow,
+    ScopeOwnerProjectAnchorRow,
     ScopeOwnerQuarantineRow,
     ScopeRegistryRow,
 )
@@ -95,9 +108,6 @@ from prodavan.infrastructure.persistence.models.plugin_instance_registry import 
     PluginInstanceRegistryLinkRow,
     PluginInstanceRegistryRow,
 )
-# T00 blocker: canonical_grants.CanonicalGrantRow claims the already-registered
-# dynamic_app_capability_grants table owned by DynamicAppCapabilityGrantRow.
-# Do not import canonical_grants until its table-ownership conflict is resolved.
 from prodavan.infrastructure.persistence.models.dynamic_apps import (
     AppDefinitionRow,
     AppGrantRow,
@@ -122,6 +132,12 @@ from prodavan.infrastructure.persistence.models.runtime_revisions import (
 )
 
 __all__ = [
+    "AgentControlPlaneAggregateRow",
+    "AgentControlPlaneCommandRow",
+    "AgentControlPlaneEnqueueIntentRow",
+    "AgentControlPlaneEventRow",
+    "AgentControlPlaneOutboxEventRow",
+    "AgentControlPlaneRunScopeRow",
     "AgentEventRow",
     "AgentRunRow",
     "AgentSessionRow",
@@ -132,16 +148,6 @@ __all__ = [
     "WebhookSubscriptionRow",
     "AgentUsageRow",
     "DynamicAppCapabilityGrantRow",
-    "ScopeOwnerAuditRow",
-    "ScopeOwnerMappingRow",
-    "ScopeOwnerQuarantineRow",
-    "ScopeRegistryRow",
-    "DynamicAppDefinitionFoundationRow",
-    "DynamicAppDefinitionVersionFoundationRow",
-    "M04EDefinitionVersionPromotionEvidenceRow",
-    "PluginInstanceRegistryRow",
-    "PluginInstanceRegistryLinkRow",
-    "M05PluginInstancePromotionEvidenceRow",
     "AppDefinitionRow",
     "AppGrantRow",
     "AppInstanceRow",
@@ -165,6 +171,19 @@ __all__ = [
     "CompanyCabinetQuotaRow",
     "CompanyTenantInfraQuotaRow",
     "CompanyRow",
+    "CanonicalTenantAnchorRow",
+    "ScopeOwnerAuditRow",
+    "ScopeOwnerCabinetAnchorRow",
+    "ScopeOwnerMappingRow",
+    "ScopeOwnerProjectAnchorRow",
+    "ScopeOwnerQuarantineRow",
+    "ScopeRegistryRow",
+    "DynamicAppDefinitionFoundationRow",
+    "DynamicAppDefinitionVersionFoundationRow",
+    "M04EDefinitionVersionPromotionEvidenceRow",
+    "M05PluginInstancePromotionEvidenceRow",
+    "PluginInstanceRegistryLinkRow",
+    "PluginInstanceRegistryRow",
     "ContentAclEntryRow",
     "ContentAliasBindingRow",
     "ContentAliasRow",

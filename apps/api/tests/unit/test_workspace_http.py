@@ -111,6 +111,132 @@ async def test_read_bytes_returns_content(
 
 
 @pytest.mark.asyncio
+async def test_create_directory_posts_json_to_runtime_mkdir_route(
+    adapter: HttpAgentRuntimeWorkspaceAdapter,
+) -> None:
+    response = MagicMock()
+    response.status_code = 201
+    response.json.return_value = {"created": True, "path": "docs/reference"}
+    mock_http = _mock_http_client(response=response)
+    with (
+        patch("prodavan.application.pod_service.adapters.k8s.workspace_http.settings") as mock_settings,
+        patch(
+            "prodavan.application.pod_service.adapters.k8s.workspace_http.httpx.AsyncClient",
+            return_value=mock_http,
+        ),
+    ):
+        mock_settings.pod_agent_runtime_port = 3921
+        await adapter.create_directory(runtime_ref="pod-wk-demo", path="docs/reference")
+    call = mock_http.request.await_args
+    assert call.args[0] == "POST"
+    assert call.args[1].endswith("/v1/workspace/mkdir")
+    assert call.kwargs["json"] == {"path": "docs/reference"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("runtime_status", "expected_code", "status", "detail"),
+    [
+        (403, "WORKSPACE_PERMISSION_DENIED", 403, "permission denied"),
+        (409, "WORKSPACE_ALREADY_EXISTS", 409, "path exists"),
+    ],
+)
+async def test_create_directory_maps_runtime_errors(
+    adapter: HttpAgentRuntimeWorkspaceAdapter,
+    runtime_status: int,
+    expected_code: str,
+    status: int,
+    detail: str,
+) -> None:
+    response = MagicMock()
+    response.status_code = runtime_status
+    response.text = detail
+    mock_http = _mock_http_client(response=response)
+    with (
+        patch("prodavan.application.pod_service.adapters.k8s.workspace_http.settings") as mock_settings,
+        patch(
+            "prodavan.application.pod_service.adapters.k8s.workspace_http.httpx.AsyncClient",
+            return_value=mock_http,
+        ),
+    ):
+        mock_settings.pod_agent_runtime_port = 3921
+        with pytest.raises(AppError) as exc:
+            await adapter.create_directory(runtime_ref="pod-wk-demo", path="docs")
+    assert exc.value.code == expected_code
+    assert exc.value.status == status
+
+
+@pytest.mark.asyncio
+async def test_create_directory_rejects_mismatched_runtime_readback(
+    adapter: HttpAgentRuntimeWorkspaceAdapter,
+) -> None:
+    response = MagicMock()
+    response.status_code = 201
+    response.json.return_value = {"created": True, "path": "docs/other"}
+    mock_http = _mock_http_client(response=response)
+    with (
+        patch("prodavan.application.pod_service.adapters.k8s.workspace_http.settings") as mock_settings,
+        patch(
+            "prodavan.application.pod_service.adapters.k8s.workspace_http.httpx.AsyncClient",
+            return_value=mock_http,
+        ),
+    ):
+        mock_settings.pod_agent_runtime_port = 3921
+        with pytest.raises(AppError) as exc:
+            await adapter.create_directory(runtime_ref="pod-wk-demo", path="docs")
+    assert exc.value.code == "RUNTIME_FS_FAILED"
+    assert exc.value.status == 502
+
+
+@pytest.mark.asyncio
+async def test_create_directory_falls_back_to_exec_when_runtime_route_is_missing(
+    adapter: HttpAgentRuntimeWorkspaceAdapter,
+) -> None:
+    response = MagicMock()
+    response.status_code = 404
+    response.text = '{"detail":"Not Found"}'
+    mock_http = _mock_http_client(response=response)
+    fallback = AsyncMock()
+    adapter._mkdir_fallback = fallback  # type: ignore[method-assign]
+    with (
+        patch("prodavan.application.pod_service.adapters.k8s.workspace_http.settings") as mock_settings,
+        patch(
+            "prodavan.application.pod_service.adapters.k8s.workspace_http.httpx.AsyncClient",
+            return_value=mock_http,
+        ),
+    ):
+        mock_settings.pod_agent_runtime_port = 3921
+        await adapter.create_directory(runtime_ref="pod-wk-demo", path="docs")
+    fallback.assert_awaited_once_with(runtime_ref="pod-wk-demo", path="docs")
+
+
+@pytest.mark.asyncio
+async def test_create_directory_fails_explicitly_when_route_is_missing_without_exec_fallback(
+    adapter: HttpAgentRuntimeWorkspaceAdapter,
+) -> None:
+    response = MagicMock()
+    response.status_code = 404
+    response.text = '{"detail":"Not Found"}'
+    mock_http = _mock_http_client(response=response)
+    adapter._mkdir_fallback = AsyncMock(side_effect=AppError(
+        code="RUNTIME_FS_FAILED", title="Bad Gateway", status=502,
+        detail="agent runtime has no workspace mkdir API",
+    ))  # type: ignore[method-assign]
+    with (
+        patch("prodavan.application.pod_service.adapters.k8s.workspace_http.settings") as mock_settings,
+        patch(
+            "prodavan.application.pod_service.adapters.k8s.workspace_http.httpx.AsyncClient",
+            return_value=mock_http,
+        ),
+    ):
+        mock_settings.pod_agent_runtime_port = 3921
+        with pytest.raises(AppError) as exc:
+            await adapter.create_directory(runtime_ref="pod-wk-demo", path="docs")
+    assert exc.value.code == "RUNTIME_FS_FAILED"
+    assert exc.value.status == 502
+
+
+@pytest.mark.asyncio
 async def test_read_bytes_rejects_empty_path(adapter: HttpAgentRuntimeWorkspaceAdapter) -> None:
     with pytest.raises(AppError) as exc_info:
         await adapter.read_bytes(runtime_ref="pod-wk-demo", path="", max_bytes=1024)

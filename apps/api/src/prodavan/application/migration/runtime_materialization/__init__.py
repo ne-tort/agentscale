@@ -1,24 +1,62 @@
-"""Fail-closed runtime materialization contracts for MIG-RES-02.
+"""Port-only runtime revision state machine for MIG-RES-02."""
 
-No production adapter is provided here. Callers must supply atomic stores and
-all dependency evidence; the default planner/apply path denies promotion.
-"""
-
-from .materialization import (
+from .state_machine import (
+    AppliedRevision,
+    ApplyClaim,
     ApplyOutcome,
     ApplyResult,
-    AppliedRevision,
-    DesiredRevision,
+    AttemptRecord,
+    ClaimResult,
+    ClaimStatus,
     DependencyEvidence,
+    DesiredRevision,
+    MaterializationOperation,
     MaterializationPlan,
+    OperationAction,
+    OperationReceipt,
+    OperationValidation,
+    OwnershipEntry,
+    OwnershipManifest,
     PlanAction,
+    PlannedOperation,
+    PreparedRevision,
+    Provenance,
+    RedactedRuntimeAuditPort,
+    RevisionPhase,
     RollbackCommand,
+    RuntimeAuditRecord,
+    RuntimeClockPort,
+    RuntimeDiagnostic,
+    RuntimeEvidenceValidationPort,
+    RuntimeMaterializationService,
+    RuntimeOperationPort,
+    RuntimeOperationValidationPort,
+    RuntimeRevisionState,
+    RuntimeRevisionStorePort,
+    ValidationReport,
+    canonical_digest,
     plan_materialization,
-    apply_materialization,
+)
+from .sqlalchemy_repository import (
+    PersistenceResult,
+    PersistenceStatus,
+    SqlAlchemyRuntimeRevisionRepository,
+    TransactionalRuntimeAuditPort,
 )
 
+RuntimeRevisionService = RuntimeMaterializationService
+
 __all__ = [
-    "ApplyOutcome", "ApplyResult", "AppliedRevision", "DesiredRevision",
-    "DependencyEvidence", "MaterializationPlan", "PlanAction", "RollbackCommand",
-    "plan_materialization", "apply_materialization",
+    "AppliedRevision", "ApplyClaim", "ApplyOutcome", "ApplyResult", "AttemptRecord",
+    "ClaimResult", "ClaimStatus", "MaterializationOperation", "OperationAction",
+    "DependencyEvidence", "DesiredRevision", "MaterializationPlan", "OperationReceipt",
+    "OperationValidation", "OwnershipEntry", "OwnershipManifest", "PlanAction",
+    "PlannedOperation", "PreparedRevision", "Provenance", "RedactedRuntimeAuditPort",
+    "RevisionPhase", "RollbackCommand",
+    "RuntimeAuditRecord", "RuntimeClockPort", "RuntimeDiagnostic", "RuntimeEvidenceValidationPort",
+    "RuntimeMaterializationService",
+    "RuntimeRevisionService", "RuntimeOperationPort", "RuntimeOperationValidationPort", "RuntimeRevisionState",
+    "RuntimeRevisionStorePort", "ValidationReport", "canonical_digest", "plan_materialization",
+    "PersistenceResult", "PersistenceStatus", "SqlAlchemyRuntimeRevisionRepository",
+    "TransactionalRuntimeAuditPort",
 ]

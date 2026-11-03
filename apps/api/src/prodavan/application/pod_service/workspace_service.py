@@ -226,6 +226,35 @@ class PodWorkspaceService:
         await self._workspace.write_bytes(runtime_ref=runtime_ref, path=rel, data=data)
         return {"written": True, "path": rel, "size": len(data)}
 
+    async def create_directory(
+        self,
+        *,
+        project_id: str,
+        path: str,
+        principal: Principal,
+        employee: EmployeeRow | None,
+    ) -> dict:
+        runtime_ref, _ = await self._require_running_runtime(
+            project_id=project_id, principal=principal, employee=employee, write=True
+        )
+        rel = normalize_workspace_path(path)
+        if not rel:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="path required",
+            )
+        if len(rel) > 500:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="path exceeds the 500 character limit",
+            )
+        await self._workspace.create_directory(runtime_ref=runtime_ref, path=rel)
+        return {"created": True, "path": rel}
+
     async def delete_entry(
         self,
         *,

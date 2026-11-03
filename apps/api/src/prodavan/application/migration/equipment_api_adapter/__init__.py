@@ -1,0 +1,45 @@
+"""Read-only API adapter boundary for the equipment migration domain."""
+
+from .adapter import EquipmentApiAdapter
+from .contracts import (
+    AdapterError,
+    AdapterErrorCode,
+    CatalogOfferQuery,
+    CatalogQuery,
+    CandidateQuery,
+    CreateCandidateGroupCommand,
+    CreateRequestCommand,
+    EquipmentActorKind,
+    EquipmentApiScope,
+    EquipmentCommandEnvelope,
+    ExportProcurementCommand,
+    OfferQuery,
+    PrepareEquipmentCommandResult,
+    ProcurementQuery,
+    RefreshCatalogCommand,
+    RefreshOffersCommand,
+    RequestQuery,
+    SelectOfferCommand,
+)
+
+__all__ = [
+    "AdapterError",
+    "AdapterErrorCode",
+    "CatalogOfferQuery",
+    "CatalogQuery",
+    "CandidateQuery",
+    "CreateCandidateGroupCommand",
+    "CreateRequestCommand",
+    "EquipmentActorKind",
+    "EquipmentApiAdapter",
+    "EquipmentApiScope",
+    "EquipmentCommandEnvelope",
+    "ExportProcurementCommand",
+    "OfferQuery",
+    "PrepareEquipmentCommandResult",
+    "ProcurementQuery",
+    "RefreshCatalogCommand",
+    "RefreshOffersCommand",
+    "RequestQuery",
+    "SelectOfferCommand",
+]

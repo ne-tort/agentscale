@@ -1,39 +1,51 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { createApiClient } from "./client";
+import type { ChatRunRequest, ChatStreamEvent } from "./types";
 
-/** Server implementation is outside the web-only R-11/R-12 task zone. */
-describe("chat facade durable binding acceptance contract (blocked until backend persistence integration)", () => {
-  it("keeps canonical stream disabled until durable scope/session/turn/run binding exists", () => {
-    const backendFacadeIntegrationAvailable = false;
-    const durableTurnRunBindingAvailable = false;
-    const durableRunEventIndexAvailable = false;
-    const canonicalReplayEnabled = backendFacadeIntegrationAvailable && durableTurnRunBindingAvailable && durableRunEventIndexAvailable;
-    expect(canonicalReplayEnabled).toBe(false);
+const request: ChatRunRequest = {
+  project_id: "project-1",
+  session_id: "session-1",
+  turn_id: "turn-1",
+  text: "hello",
+  attachment_refs: [],
+};
+
+function stream(body: string): Response {
+  return new Response(body, { headers: { "Content-Type": "text/event-stream" } });
+}
+
+describe("legacy chat stream acceptance contract", () => {
+  it("uses the real POST route and legacy body, with no durable run or replay claims", async () => {
+    const fetch = vi.fn(async () => stream("data: {\"type\":\"_turn_complete\",\"data\":{}}\n\n"));
+    const client = createApiClient({ baseUrl: "/api/v1", fetcher: fetch });
+    const received: ChatStreamEvent[] = [];
+
+    for await (const event of client.runChat(request)) received.push(event);
+
+    expect(received).toEqual([{ type: "_turn_complete", data: {} }]);
+    const [url, init] = fetch.mock.calls[0];
+    expect(url).toBe("/api/v1/projects/project-1/chat/stream");
+    expect(JSON.parse(String(init?.body))).toEqual({
+      session_id: "session-1",
+      text: "hello",
+      attachment_refs: [],
+      turn_id: "turn-1",
+    });
+    expect(init?.headers).not.toHaveProperty("Last-Event-ID");
+    expect(init?.headers).not.toHaveProperty("X-Chat-Tenant-ID");
+    expect(init?.headers).not.toHaveProperty("X-Chat-Run-ID");
   });
 
-  it("requires server to bind and authorize exact tenant/project/session/turn/run before legacy invocation", () => {
-    const requiredBindingDimensions = ["tenant_id", "project_id", "session_id", "turn_id", "run_id"];
-    const serverAcceptance = {
-      atomicIdempotentTurnClaim: true,
-      bindingDigestPersisted: true,
-      scopeComparedToAuthenticatedContext: true,
-      legacyInvokedOnlyAfterBindingCommit: true,
-      clientHeadersTreatedAsClaimsNotAuthority: true,
-      unknownOutcomeReattachesSameTurnAndNeverCreatesAnother: true,
-    };
-    expect(requiredBindingDimensions).toEqual(["tenant_id", "project_id", "session_id", "turn_id", "run_id"]);
-    expect(Object.values(serverAcceptance).every(Boolean)).toBe(true);
-  });
+  it("treats keepalive comments as transport noise and preserves event order", async () => {
+    const fetch = vi.fn(async () => stream([
+      ": keepalive\n\n",
+      "data: {\"type\":\"_session\",\"data\":{\"session_id\":\"session-1\"}}\n\n",
+      "data: {\"type\":\"text_delta\",\"data\":{\"text\":\"hello\"}}\n\n",
+    ].join("")));
+    const client = createApiClient({ fetcher: fetch });
+    const events: ChatStreamEvent[] = [];
+    for await (const event of client.runChat(request)) events.push(event);
 
-  it("requires an exclusive durable event cursor scoped to the resolved run", () => {
-    const acceptance = {
-      eventIndexUniqueByRunAndSequence: true,
-      eventIdBoundToRun: true,
-      lastEventIdResolvedOnlyWithinBoundRun: true,
-      sequenceAndEventIdMustIdentifySameCursor: true,
-      everySerializedEventMatchesScopeAndRun: true,
-      detachedLegacyRowsAreNotReplayableWithoutRunBinding: true,
-      cursorBeyondRunHeadFailsClosed: true,
-    };
-    expect(Object.values(acceptance).every(Boolean)).toBe(true);
+    expect(events.map((event) => event.type)).toEqual(["_session", "text_delta"]);
   });
 });

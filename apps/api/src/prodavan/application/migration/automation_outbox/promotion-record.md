@@ -1,8 +1,8 @@
 # MIG-AUTO-02 promotion record
 
-- Record ID: `MIG-AUTO-02:blocked:preflight:2026-11-01`
+- Record ID: `MIG-AUTO-02:blocked:preflight:2026-11-01` (superseded)
 - Task: `MIG-AUTO-02`
-- Status: `blocked`
+- Status: `superseded by implementation-promotion-record.md; prior evidence remains historical`
 - Scope: `exclusive automation_outbox application/test zones only`
 - Partition: `none admitted; AUTO-01 ownership and persistence handoff not evidenced`
 - Durable outbox transactions / delivery adapter / lease authority: `not found or not supplied`

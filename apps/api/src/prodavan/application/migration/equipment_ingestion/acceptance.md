@@ -2,23 +2,31 @@
 
 Status: specified; not executed under migration verification freeze.
 
+MIG-EQ-SOURCE-INGESTION-03 source-handoff analysis: blocked. The actual legacy
+`mod_equipment.catalogs` import journey and the required route/queue/persistence
+handoff are recorded in [source-handoff.md](source-handoff.md). Keep its current
+Celery indexer/OpenSearch read owner authoritative; do not infer canonical
+source/supplier identity or dual-index.
+
 ## Source and identity
 
-- Source adapters provide stable source kind/id/schema identity and bounded cursor pages; acquisition limits are enforced.
+- Source adapters provide stable source kind/id/schema identity, bounded cursor pages, and raw bytes with an explicitly verified digest; both record count and artifact bytes are bounded before evidence commit.
 - Canonical tenant and owner identity plus verified supplier identity are mandatory. Incomplete or ambiguous identity blocks before positive append; no ID-prefix, display-name, URL, brand, or payload inference.
 - Resume is bound to the same run/source/supplier identity. A changed identity or cursor/checkpoint CAS conflict stops the run without overwriting evidence.
+- The legacy catalog path is not an accepted adapter until its module owner and file-version/remote source are resolved to canonical tenant/owner/source and an explicit verified supplier mapping; seller labels and `src_hash` are insufficient.
+- A source handoff must reuse the existing equipment catalog Celery worker/queue and current user import routes after a durable run/outbox commit; it must not introduce a parallel indexer or duplicate legacy catalog indexing.
 
 ## Evidence and normalization
 
-- Every page's raw bytes are stored by immutable artifact reference and content digest before normalized rows can be accepted.
-- Snapshot and offer identities retain tenant, owner, source, supplier, run, artifact, schema, source revision, observed time, and provenance digest.
-- Normalization identity disagreement and unsupported/ambiguous source semantics are quarantined or blocked; never silently mapped to positive offers.
-- Replays are idempotent for identical digest; same evidence identity with different bytes/content is conflict and cannot replace the first evidence.
+- Every page is committed through one CAS transaction: immutable raw bytes/artifact, that page's snapshot, run counters and the advanced checkpoint either all persist or none do. A checkpoint never advances on a raw/snapshot/run failure.
+- Each snapshot contains only the accepted offers from its own page. Observed, accepted and quarantined row counts remain separate; malformed rows retain redacted row digest/error code while their bytes stay in raw evidence.
+- Offer normalizers validate an uppercase three-letter currency token, finite nonnegative decimal prices, supported availability (including rejection of `on_order`), deterministic offer identity, source/supplier separation and artifact/snapshot/source-record provenance. A downstream ISO 4217 registry may apply stricter policy without inferring a currency.
+- Exact page replay is idempotent. Reusing the same run/cursor/artifact identity with changed bytes or normalized content is an immutable collision and cannot overwrite accepted evidence.
 
 ## Freshness and projection
 
-- Failed/blocked source refresh does not delete or overwrite last-good accepted snapshots; retained data reports stale. With no accepted history freshness is unknown, never fresh-empty.
-- Projection is a derived, versioned, deterministic rebuild from accepted immutable snapshots, with source snapshot digest and generation-fenced publish contract. Projection failure does not mutate source evidence.
+- Source failure is recorded separately from immutable last-good snapshots; failure markers make stale freshness observable without rewriting accepted snapshot history.
+- Projection is a derived, versioned, deterministic rebuild from accepted immutable snapshots with a digest of the complete scoped input set. Publish atomically compares both projection generation and that input digest; a newly accepted snapshot fences out stale rebuilds. Projection failure does not mutate source evidence.
 - Rebuild replay produces equivalent output for same snapshot set and contract version; a stale generation cannot publish after a newer accepted snapshot.
 
 ## Promotion gate / rollback

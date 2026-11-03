@@ -20,15 +20,25 @@ export interface BrokerPolicy {
 const CAPABILITIES = new Set<BrokerCapability>(["ui.navigation", "storage.kv", "storage.files", "events.subscribe", "platform.commands", "platform.queries"]);
 const DENIED_METHODS = /(?:fetch|network|sql|redis|kafka|mongo|opensearch|kubernetes|shell|cookie|token|secret)/i;
 const RESERVED = new Set(["__proto__", "prototype", "constructor"]);
+const MAX_MESSAGE_BYTES = 64 * 1024;
+const MAX_IN_FLIGHT = 16;
 
-function isJson(value: unknown, seen = new Set<object>()): value is JsonValue {
+function isJson(value: unknown, seen = new Set<object>(), depth = 0, budget = { nodes: 0 }): value is JsonValue {
+  budget.nodes += 1;
+  if (budget.nodes > 2_000 || depth > 12) return false;
   if (value === null || typeof value === "string" || typeof value === "boolean") return true;
   if (typeof value === "number") return Number.isFinite(value);
   if (typeof value !== "object" || seen.has(value)) return false;
   seen.add(value);
-  if (Array.isArray(value)) return value.every((item) => isJson(item, seen));
+  if (Array.isArray(value)) return value.length <= 2_000 && value.every((item) => isJson(item, seen, depth + 1, budget));
   const proto = Object.getPrototypeOf(value);
-  return (proto === Object.prototype || proto === null) && Object.entries(value).every(([key, item]) => !RESERVED.has(key) && isJson(item, seen));
+  const valid = (proto === Object.prototype || proto === null) && Object.entries(value).length <= 2_000
+    && Object.entries(value).every(([key, item]) => !RESERVED.has(key) && key.length <= 256 && typeof item !== "undefined" && isJson(item, seen, depth + 1, budget));
+  seen.delete(value);
+  return valid;
+}
+function byteLength(value: unknown): number {
+  try { return new TextEncoder().encode(JSON.stringify(value)).byteLength; } catch { return MAX_MESSAGE_BYTES + 1; }
 }
 
 export function createCapabilityBroker(policy: BrokerPolicy) {
@@ -40,7 +50,8 @@ export function createCapabilityBroker(policy: BrokerPolicy) {
       if (killed || policy.isKilled?.()) throw new Error("BROKER_KILLED");
       const capability = policy.methods.get(method);
       if (!capability || !CAPABILITIES.has(capability) || DENIED_METHODS.test(method) || !policy.allowedCapabilities.has(capability)) throw new Error("CAPABILITY_DENIED");
-      if (!isJson(input)) throw new Error("INVALID_INPUT");
+      if (!isJson(input) || byteLength(input) > MAX_MESSAGE_BYTES) throw new Error("INVALID_INPUT");
+      if (active.size >= MAX_IN_FLIGHT) throw new Error("REQUEST_LIMIT");
       const controller = new AbortController();
       active.add(controller);
       const abort = () => controller.abort();
@@ -50,7 +61,7 @@ export function createCapabilityBroker(policy: BrokerPolicy) {
         if (signal?.aborted) controller.abort();
         const result = await policy.adapter({ capability, method, input, signal: controller.signal });
         if (controller.signal.aborted) throw new Error("REQUEST_CANCELLED_OR_TIMED_OUT");
-        if (!isJson(result)) throw new Error("INVALID_RESPONSE");
+        if (!isJson(result) || byteLength(result) > MAX_MESSAGE_BYTES) throw new Error("INVALID_RESPONSE");
         return result;
       } finally {
         clearTimeout(timer);

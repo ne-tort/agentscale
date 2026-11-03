@@ -126,6 +126,61 @@ class K8sExecWorkspaceAdapter:
                 out.append(_entry_from_dict(item))
         return out
 
+    async def create_directory(self, *, runtime_ref: str, path: str) -> None:
+        rel = normalize_workspace_path(path)
+        if not rel:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="path required",
+            )
+        try:
+            body = await self._run_json(runtime_ref=runtime_ref, args=["mkdir", rel])
+        except AppError as exc:
+            detail = exc.detail or ""
+            if exc.code == "POD_EXEC_FAILED":
+                if "FileExistsError" in detail:
+                    raise AppError(
+                        code="WORKSPACE_ALREADY_EXISTS",
+                        title="Conflict",
+                        status=409,
+                        detail="workspace path already exists",
+                        extra={"path": rel},
+                    ) from exc
+                if "NotADirectoryError" in detail:
+                    raise AppError(
+                        code="WORKSPACE_PATH_CONFLICT",
+                        title="Conflict",
+                        status=409,
+                        detail="a parent workspace path is not a directory",
+                        extra={"path": rel},
+                    ) from exc
+                if "PermissionError" in detail:
+                    raise AppError(
+                        code="WORKSPACE_PERMISSION_DENIED",
+                        title="Forbidden",
+                        status=403,
+                        detail="permission denied creating workspace directory",
+                        extra={"path": rel},
+                    ) from exc
+                if "FileNotFoundError" in detail:
+                    raise AppError(
+                        code="WORKSPACE_NOT_FOUND",
+                        title="Not Found",
+                        status=404,
+                        detail="workspace parent path not found",
+                        extra={"path": rel},
+                    ) from exc
+            raise
+        if body.get("created") is not True or _normalize_response_path(body.get("path")) != rel:
+            raise AppError(
+                code="POD_EXEC_FAILED",
+                title="Bad Gateway",
+                status=502,
+                detail="workspace mkdir result did not match requested path",
+            )
+
     async def read_bytes(self, *, runtime_ref: str, path: str, max_bytes: int) -> bytes:
         rel = normalize_workspace_path(path)
         if not rel:

@@ -17,7 +17,7 @@ from prodavan.api.deps import (
 )
 from prodavan.application.identity.service import EntitlementService, IdentityCommandService
 from prodavan.domain.errors import AppError
-from prodavan.domain.identity import MembershipRole
+from prodavan.domain.identity import EmployeeStatus, MembershipRole
 from prodavan.infrastructure.keycloak.provisioning import get_provisioning
 from prodavan.infrastructure.persistence.models.identity import CompanyRow, EmployeeRow
 
@@ -83,7 +83,22 @@ async def me(
     if principal.is_company_principal:
         company = await svc.ensure_company_principal(principal)
     contours = svc.contours_for(principal, employee, company=company)
+    if principal.is_platform_admin:
+        active = True
+    elif principal.is_company_principal:
+        active = (
+            company is not None
+            and company.deleted_at is None
+            and company.status == "active"
+        )
+    else:
+        active = (
+            employee is not None
+            and employee.deleted_at is None
+            and employee.status == EmployeeStatus.ACTIVE
+        )
     return {
+        "active": active,
         "sub": principal.sub,
         "email": principal.email,
         "roles": sorted(principal.roles),

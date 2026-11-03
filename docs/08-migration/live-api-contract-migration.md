@@ -1,18 +1,24 @@
 # Live API contract migration
 
-Статус: migration artifact, только документация. Дата baseline: 2026-11-01.
+Статус: source API inventory + typed migration artifact, только документация. Baseline FastAPI + React web: 2026-11-02; legacy Flutter callsites are not used as the current web-client inventory.
 
-Этот документ формализует перенос фактического API-контракта между текущим FastAPI + Flutter клиентом и целевым typed resource/domain contract. Он не меняет production API, не добавляет compatibility routes и не запускает генераторы. Любой target endpoint ниже является целевым именем/типом для будущего контракта, а не требованием немедленно переименовать live route.
+Канонический source/API ↔ web inventory теперь находится в [`api-contracts/README.md`](api-contracts/README.md); полный маршрутный реестр с method/path/body/query/header/status/response/auth/source — [`api-contracts/routes-current.md`](api-contracts/routes-current.md). Этот файл продолжает существующий migration artifact: здесь остаётся target typed resource/domain mapping и migration sequence. Не создавать параллельную карту маршрутов.
+
+Документы фиксируют живое состояние FastAPI + React web, а не меняют production API и не задают target endpoint names как уже реализованные server features. Проверки и генераторы OpenAPI не выполнялись.
 
 ## 1. Scope и источники истины
 
+### Scope of the retained migration sketch
+
+The client call map below refers to the former Flutter client and typed-contract proposal. It remains design history, not the live React/web inventory; use [`api-contracts/README.md`](api-contracts/README.md) for React comparisons.
+
 ### В scope
 
-- текущая регистрация FastAPI routers под `/api/v1`;
-- фактические вызовы Flutter из `apps/flutter/lib/core/api/*.dart`;
-- employee, company, platform-admin, auth, module runtime, agent/chat, container/workspace и Pod bridge surfaces;
-- mapping каждого surface к typed resource/domain API с сохранением ownership и action semantics;
-- порядок миграции: inventory → typed schemas → adapters → feature cutover → legacy retirement.
+- current FastAPI router registration and typed migration targets;
+- historical Flutter call sites from `apps/flutter/lib/core/api/*.dart`, retained only for the typed-contract sketch;
+- employee, company, platform-admin, auth, module runtime, agent/chat, container/workspace and Pod bridge surfaces;
+- mapping surfaces to typed resource/domain API while preserving ownership and action semantics;
+- target migration order: inventory → typed schemas → adapters → feature cutover → legacy retirement.
 
 ### Не в scope
 
@@ -45,32 +51,16 @@ All public paths are currently mounted under the configured `/api/v1` prefix. Ta
 
 ## 3. Current router inventory
 
-The following is the live registration inventory from `apps/api/src/prodavan/api/v1/router.py`:
+Полный live inventory заменён canonical reference: [`api-contracts/routes-current.md`](api-contracts/routes-current.md). Контрактные правила, React callsite comparison и client blockers: [`api-contracts/README.md`](api-contracts/README.md). Этот migration doc намеренно не дублирует route matrix.
 
-| Router module | Current route family | Target domain |
-|---|---|---|
-| `health`, `stub` | `/health/*`, `/stub` | `platform-health` (server-only except health probe) |
-| `auth`, `identity` | `/auth/*`, `/me`, identity links | `auth`, `identity` |
-| `cabinets` | `/cabinets/*` | `cabinet` |
-| `projects` | `/projects/*`, `/cabinets/{cabinet_id}/projects/*` | `project`, `project-lifecycle` |
-| `agent` | `/projects/{project_id}/agent/*`, `/chat*`, sessions, events | `agent-session`, `chat` |
-| `company_ai_keys`, `company_ai_models`, `company_containers`, `company_modules` | `/companies/{company_id}/...` | `company-ai`, `company-runtime`, `company-module` |
-| `ai_keys` | employee/project AI key availability and scoped key routes | `ai-credentials` |
-| `content`, `documents` | content assets and project documents | `content-asset`, `document` |
-| `external`, `b2b` | webhooks/app keys and tender compatibility surface | `integration`, `tender-compat` |
-| `tenant_infra`, `pod_modules` | project infra/modules bridge-facing routes | private `tenant-infra`, `module-runtime` |
-| `admin_companies`, `admin_profile`, `admin_metrics` | platform company/profile/metrics | `admin.company`, `admin.profile`, `admin.metrics` |
-| `admin_cabinets`, `admin_projects`, `admin_containers`, `admin_modules` | platform resource management | `admin.cabinet`, `admin.project`, `admin.container`, `admin.module` |
-| `admin_ai_models`, `admin_catalogs`, `admin_search_index` | catalogs, models, indexes | `admin.catalog`, `admin.ai-model`, `admin.search` |
-| `admin_document_store`, `admin_object_store`, `admin_platform_events` | operational storage/events | `admin.operations` |
-| `admin_triggers`, `admin_recycle` | maintenance/actions and restore/purge | `admin.operations` |
-| `internal_pods` | `/internal/pods/*` | private `pod-runtime`; never generated for Flutter |
+`main_pod.py` поднимает отдельный Pod-only listener с ограниченным subset; подробности доверенной границы и точные mounts приведены в route inventory. `agent_runs` — отдельный employee/OIDC surface, не Pod bridge.
 
-The separate `apps/api/src/prodavan/main_pod.py` application registers a reduced Pod API (`agent`, `tenant_infra`, `pod_modules`, `documents`, `internal_pods`). It is a different trust boundary and must not be merged into the public client contract.
 
-## 4. Current client areas
+## 4. Historical Flutter client areas
 
-| Current client area | Source | Main live concerns | Target typed client boundary |
+This table is retained only as the scope sketch for the original Flutter typed-contract proposal. It is not a current React/web coverage report; current web consumers and gaps are documented in [`api-contracts/README.md`](api-contracts/README.md).
+
+| Historical client area | Source | Scope at time of Flutter proposal | Target typed client boundary |
 |---|---|---|---|
 | Auth/session | `apps/flutter/lib/core/auth/*` | login, refresh, logout, OIDC config, token persistence | `AuthApi`, `SessionStore`, typed `AuthError` |
 | Employee shell/work context | `core/session/*`, `core/api/prodavan_api.dart` | `/me`, cabinet selection, project selection, headers | `WorkContext` + `CabinetApi`/`ProjectApi` |
@@ -84,7 +74,9 @@ The separate `apps/api/src/prodavan/main_pod.py` application registers a reduced
 
 The three large handwritten clients are transport/domain mixed surfaces. They should become thin typed facades; feature code should depend on domain interfaces, not on `jsonDecode` maps or mutable `cabinetId/projectId` fields.
 
-## 5. Current → target endpoint mapping
+## 5. Current → target endpoint mapping (historical Flutter migration sketch)
+
+The mappings below were written for the previous Flutter client and a language-neutral typed target. They are design sketches, not a verified current React/web coverage matrix and not the authoritative source route inventory. Use [`api-contracts/README.md`](api-contracts/README.md) and [`api-contracts/routes-current.md`](api-contracts/routes-current.md) for current FastAPI ↔ React facts. Keep this section only when working on the future typed-contract design; do not infer live endpoint availability from the target names below.
 
 ### 5.1 Auth and identity
 

@@ -1,12 +1,18 @@
-import { createContext, useContext, useMemo, useState, type PropsWithChildren } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type PropsWithChildren } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { createApiClient } from "../api/client";
 import type { ApiClient, Cabinet, Employee, Id, Project, SessionTokens } from "../api/types";
+import { AuthLifecycle, type AuthSnapshot, type AuthStatus } from "./auth/lifecycle";
+import { getSafeNextPath } from "./auth/redirect";
 
 interface AuthContextValue {
   employee?: Employee;
   cabinets: Cabinet[];
   tokens?: SessionTokens;
+  status: AuthStatus;
+  isLoading: boolean;
   isAuthenticated: boolean;
+  error?: Error;
   signIn(tokens: SessionTokens, employee?: Employee, cabinets?: Cabinet[]): void;
   signOut(): void;
 }
@@ -24,18 +30,64 @@ export interface WorkContextValue {
 
 const WorkContext = createContext<WorkContextValue | undefined>(undefined);
 
+function browserStorage(): Storage | undefined {
+  try { return typeof window === "undefined" ? undefined : window.localStorage; } catch { return undefined; }
+}
+
 export function AppProviders({ children }: PropsWithChildren) {
-  const [tokens, setTokens] = useState<SessionTokens>();
-  const [employee, setEmployee] = useState<Employee>();
-  const [cabinets, setCabinets] = useState<Cabinet[]>([]);
+  const location = useLocation();
+  const navigate = useNavigate();
   const [project, setProject] = useState<Project>();
-  const api = useMemo(() => createApiClient({ getAccessToken: () => tokens?.access_token }), [tokens]);
-  const work = useMemo<WorkContextValue>(() => ({ project, projectId: project?.id, cabinetId: project?.cabinet_id, setProject }), [project]);
+  const tokenRef = useRef<SessionTokens | undefined>(undefined);
+  const api = useMemo(() => createApiClient({ getAccessToken: () => tokenRef.current?.access_token }), []);
+  const lifecycle = useMemo(() => new AuthLifecycle(api, browserStorage()), [api]);
+  const [authSnapshot, setAuthSnapshot] = useState<AuthSnapshot>(() => lifecycle.getSnapshot());
+  const pendingReturnTo = useRef<string | undefined>(undefined);
+
+  useEffect(() => {
+    const unsubscribe = lifecycle.subscribe((snapshot) => {
+      tokenRef.current = snapshot.tokens;
+      setAuthSnapshot(snapshot);
+    });
+    void lifecycle.recover();
+    return unsubscribe;
+  }, [lifecycle]);
+
+  useEffect(() => {
+    if (authSnapshot.status !== "authenticated") return;
+    const destination = pendingReturnTo.current
+      ?? (location.pathname === "/login" ? getSafeNextPath(location.search) ?? "/projects" : undefined);
+    if (!destination) return;
+    pendingReturnTo.current = undefined;
+    navigate(destination, { replace: true });
+  }, [authSnapshot.status, location.pathname, location.search, navigate]);
+
+  const work = useMemo<WorkContextValue>(() => ({
+    project,
+    projectId: project?.id,
+    cabinetId: project?.cabinet_id,
+    setProject,
+  }), [project]);
+
   const auth = useMemo<AuthContextValue>(() => ({
-    employee, cabinets, tokens, isAuthenticated: Boolean(tokens?.access_token),
-    signIn: (nextTokens, nextEmployee, nextCabinets) => { setTokens(nextTokens); setEmployee(nextEmployee); setCabinets(nextCabinets ?? []); },
-    signOut: () => { setTokens(undefined); setEmployee(undefined); setCabinets([]); setProject(undefined); },
-  }), [cabinets, employee, project, tokens]);
+    employee: authSnapshot.employee,
+    cabinets: authSnapshot.cabinets,
+    tokens: authSnapshot.tokens,
+    status: authSnapshot.status,
+    isLoading: authSnapshot.status === "loading",
+    isAuthenticated: authSnapshot.status === "authenticated",
+    error: authSnapshot.error,
+    signIn: (tokens, employee, cabinets) => {
+      pendingReturnTo.current = getSafeNextPath(location.search);
+      void lifecycle.signIn(tokens, employee, cabinets);
+    },
+    signOut: () => {
+      pendingReturnTo.current = undefined;
+      setProject(undefined);
+      void lifecycle.signOut();
+    },
+  }), [authSnapshot, lifecycle, location.search]);
+
   return <ApiContext.Provider value={api}><AuthContext.Provider value={auth}><WorkContext.Provider value={work}>{children}</WorkContext.Provider></AuthContext.Provider></ApiContext.Provider>;
 }
 

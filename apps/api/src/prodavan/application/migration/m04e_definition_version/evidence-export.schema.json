@@ -1,6 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "MIG-M04E-02 M05 evidence handoff",
+  "description": "Contract only. No source export is ready until the recorded promotion blockers are resolved. canonical_positive_writes is permanently false in this handoff.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -26,18 +27,52 @@
     "quarantined": {"type": "array", "items": {"$ref": "#/$defs/evidence"}},
     "gates": {"type": "array", "items": {"type": "object", "required": ["name", "passed"]}},
     "status": {"enum": ["ready", "blocked"]},
-    "canonical_positive_writes": {"const": false}
+    "canonical_positive_writes": {"const": false},
+    "handoff_marker": {
+      "type": ["object", "null"],
+      "required": ["record_id", "task_id", "status", "actor", "recorded_at", "decision_owner", "correlation_id", "canonical_positive_writes"],
+      "properties": {
+        "record_id": {"type": "string", "minLength": 1},
+        "task_id": {"const": "MIG-M04E-02"},
+        "status": {"enum": ["ready", "blocked"]},
+        "actor": {"type": "string", "minLength": 1},
+        "recorded_at": {"type": "string", "minLength": 1},
+        "decision_owner": {"type": "string", "minLength": 1},
+        "correlation_id": {"type": "string", "minLength": 1},
+        "canonical_positive_writes": {"const": false}
+      }
+    }
   },
   "$defs": {
     "evidence": {
       "type": "object",
-      "required": ["source_kind", "source_id", "schema_version", "source_digest", "canonical_digest", "status", "reason_code", "correlation_id"],
+      "required": ["source_kind", "source_id", "schema_version", "source_digest", "canonical_digest", "status", "reason_code", "correlation_id", "tenant_id", "app_definition_id", "phase", "source_snapshot_digest", "proof_evidence"],
       "properties": {
         "source_kind": {"type": "string"},
         "source_id": {"type": "string"},
         "schema_version": {"type": "string"},
         "source_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "observed_source_digest": {"type": ["string", "null"], "pattern": "^sha256:[0-9a-f]{64}$"},
+        "observed_artifact_digest": {"type": ["string", "null"], "pattern": "^sha256:[0-9a-f]{64}$"},
+        "artifact_uri": {"type": ["string", "null"]},
+        "artifact_digest": {"type": ["string", "null"], "pattern": "^sha256:[0-9a-f]{64}$"},
         "canonical_digest": {"type": ["string", "null"]},
+        "canonical_identity": {"type": "array", "items": {"type": "string"}},
+        "canonical_version_id": {"type": ["string", "null"]},
+        "tenant_id": {"type": ["string", "null"]},
+        "app_definition_id": {"type": ["string", "null"]},
+        "phase": {"enum": ["definition", "version", null]},
+        "source_snapshot_digest": {"type": ["string", "null"], "pattern": "^sha256:[0-9a-f]{64}$"},
+        "proof_evidence": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 2,
+            "items": {"type": "string"}
+          }
+        },
+        "blocker_evidence": {"type": "array", "items": {"type": "string"}},
         "status": {"enum": ["accepted", "quarantined", "conflict"]},
         "reason_code": {"type": ["string", "null"]},
         "correlation_id": {"type": "string"}

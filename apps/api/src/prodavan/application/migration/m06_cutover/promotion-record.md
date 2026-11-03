@@ -2,31 +2,29 @@
 
 - Record ID: `MIG-M06-03:tenant-a:definition-a:blocked:2026-11-01`
 - Task: `MIG-M06-03`
-- Status: `blocked` (bounded cutover command/state machine implemented; no partition promoted)
-- Scope: one `(tenant_id, app_definition_id)` partition per command; bounded command payload, CAS revision, no global switch
-- Partition reviewed: `(tenant-a, definition-a)`; this is a fixture/evidence scope, not authorization to promote
-- Upstream M06-02 parity gate: `not_ready`; trusted partition handoff/report digest, bounded observation evidence, final-delta checkpoint and verification are unavailable
-- Current parity evidence: no accepted report; no observations/deltas claimed; all unmeasured counts remain unknown, not zero
-- Writer lease/epoch/fencing: command contract requires partition-bound unexpired lease, monotonic epoch and fencing token; runtime lease issuer/production repository integration is not supplied by this task
-- Current decision owner: `legacy`
-- Current canonical read owner: `legacy`
-- Legacy projection marker: `read_only=false` until a valid promotion
-- Canonical positive writes: `false`; decision owner is deliberately unchanged by this read transition
-- Promotion/cutover authorized: `false`
-- Immutable evidence: append-only promotion/blocked/rollback record includes partition, actor/time, before/after state and read owner, epoch/fencing token, parity digests/checkpoint, stable reason and canonical SHA-256 record digest; state and evidence commit through one atomic repository transition
-- Actor/time: implementation agent; record dated `2026-11-01`; coordinator review/signature pending
+- Status: `blocked` (promotion remains disabled; local state-machine implementation is contract-only)
+- Scope: immutable lineage for one `(tenant_id, app_definition_id)` partition per command; bounded command payload and fenced revision/CAS transition
+- Current evidence: fixture-only `(tenant-a, definition-a)`; no production owner marker, upstream gate bundle, or positive cutover proof supplied
+- Required upstream digest chain: M04 scope -> M04E definition/version -> M05 runtime -> M06 parity, each bound to the same partition and source snapshot with parent evidence ID/digest links
+- Final delta: requires an immutable writer-drain receipt, zero active legacy writers/claims, matching fencing epoch and final source sequence; repository CAS must compare the live source tail against that frozen sequence
+- Current decision/read/write owner: `legacy` / `legacy` / `legacy`; no partition was promoted
+- Canonical positive writes: `false`; a positive transition additionally requires verified M06 canonical snapshot/report digests and audit/parity counters
+- Rollback policy: append-only pre-read-cutover rollback requires fresh legacy-restoration evidence; post-read-cutover legacy rollback is forbidden and canonical forward repair keeps reads canonical while writes are fenced
+- Promotion and rollback records: immutable partition-bound records include command/record digest, actor/time, exact read/decision/write owners, epoch/fencing token, prior-record link, all gate references and final-delta sequence
+- Promotion/cutover authorized: `false`; actual upstream proof and trusted verifier/repository wiring are not supplied
+- Verification freeze: acceptance tests were authored but intentionally not run; tests, builds, lint, formatting, compilation and Git checks remain unexecuted
 
 ## Gate decision
 
-The command handler is fail-closed. Current M06-02 status blocks promotion with `m06_02_parity_gate_not_ready`; the command transitions the selected partition to `blocked` using CAS, appends blocked evidence, and leaves canonical read ownership, decision ownership, and writer epoch unchanged. Promotion can only be considered after a trusted, partition-matching M06-02 handoff verifies its report and source snapshot digests, final delta checkpoint, positive writer epoch, non-empty bounded observations, zero unexplained mismatches, zero unresolved positive bindings, zero unknown mappings, zero stale-generation acceptances, and complete audit. A lease bound to the same partition must be unexpired and fenced above the current partition epoch.
+The command handler is fail-closed. Positive transition remains blocked until trusted, same-partition M04, M04E, M05 and M06 evidence is verified with full parent-linked digests, matching source/canonical snapshots, final-delta checkpoint, a drained legacy writer fence and an atomic live-source-tail comparison. The proof must include a positive writer epoch, non-empty bounded observations, zero unexplained mismatches, zero unresolved positive bindings, zero unknown mappings, zero stale-generation acceptances and complete audit. Missing evidence does not count as zero.
 
-A successful promotion moves only that partition's canonical read owner to `canonical`, marks the legacy read projection read-only, and retains `legacy` as decision owner. It does not enable canonical positive decisions/writes. Repository integration must provide one atomic transition(expected revision, resulting state, immutable evidence, lease/fencing); split append-evidence plus CAS is forbidden. Uncertain failures are reconciled by idempotency ID and must never delete or rewrite prior records.
+A successful promotion changes the partition's canonical read, decision and write owners together, marks the legacy projection read-only and records exact gate digests plus final-delta sequence. It does not claim production integration: the repository must implement one atomic state/evidence transition, revision and lease fencing, and compare-and-set of the live source tail. Uncertain failures reconcile only through command ID and immutable lineage; no record is deleted or rewritten.
 
 ## Acceptance and rollback
 
 Acceptance fixtures are in `apps/api/tests/migration/m06_cutover/acceptance_fixtures.py`; contract assertions are in `apps/api/tests/migration/m06_cutover/test_acceptance_contract.py`. They cover fail-closed missing parity, all parity counters, partition isolation, lease expiry/partition/epoch fencing, read-owner versus decision-owner separation, legacy projection marker, immutable evidence, CAS races, idempotency, and rollback. Per migration verification freeze, tests/build/lint/format/compile/git checks were not run.
 
-Rollback is partition-scoped and requires a fresh, unexpired lease with epoch above current writer epoch. It restores canonical read owner to `legacy`, clears the legacy read-only marker and leaves decision ownership `legacy`; it appends a separate immutable rollback evidence record. Existing promotion and parity evidence remain retained. Re-promotion after rollback requires a strictly newer epoch and a newly accepted parity handoff; no evidence deletion or global rollback is permitted.
+Rollback is permitted only before canonical read cutover. It requires a fresh, unexpired lease and immutable proof that legacy ownership is restored, canonical claims are stopped and drained, and no legacy claims remain unresolved. It restores the exclusive legacy read/decision/write owner and appends a separate rollback record. After canonical read cutover there is no legacy rollback authority; forward repair retains canonical reads, fences writes on uncertainty, and restores canonical writes only after fresh verified reconciliation.
 
 ## Risks and dependencies
 

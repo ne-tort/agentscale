@@ -29,6 +29,7 @@ function guardMethod(boundary: CapabilityBoundary | undefined, method: string, c
 export function createCapabilityGateway(transport: CapabilityGatewayTransport, getBoundary: () => CapabilityBoundary | undefined): CapabilityGateway {
   return {
     invoke: async <TResult extends JsonValue = JsonValue, TParams extends JsonValue = JsonValue>(method: string, params?: TParams, options?: GatewayInvokeOptions) => {
+      if (options?.signal?.aborted) throw new DOMException("The request was aborted", "AbortError");
       guardMethod(getBoundary(), method, options?.capability);
       return transport.request<TResult, TParams>({ method, params, deadlineAt: options?.deadlineAt, signal: options?.signal });
     },
