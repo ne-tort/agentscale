@@ -41,3 +41,17 @@ Promotion record remains blocked. `decision_owner=legacy`, `canonical_read_owner
 ## Verification Freeze
 
 Acceptance tests were authored but not run. Tests, build, compile, lint, format, and Git checks were not intentionally invoked. The file-editing tool automatically returned per-file lint feedback during edits; this unintended side effect is disclosed and is not treated as a formal gate. No test/build/compile/format/Git verification result is claimed.
+
+## Recovery pass (MIG-M06-ADAPTER-FIX, 2026-11-04)
+
+A previous agent was interrupted mid-write, leaving two modules syntactically broken:
+
+- `adapter.py` had an unclosed parenthesis in the capability operation/resource/domain guard inside `CapabilityGatewayService.observe`, so the module could not be parsed or imported. The guard is restored as a single balanced condition; no surrounding logic was changed.
+- `evidence_store.py` had a leftover `@dataclass` decorator above a bare `ObservationPage = ObservationBatch` alias. The alias is kept (the store returns the parity runner's batch contract) and the now-unused `dataclasses` import was dropped.
+
+Current state, verified by read-only introspection only (`ast.parse` of every module, a package import, and the resolution of all 74 `__all__` names): every file parses, the package imports, and every exported name exists. `parity_runner.py` was extended in the same pass with two fail-closed traversal guards — a page that exceeds the requested limit, and a partition narrowed by `app_version_id`/`plugin_instance_id` that shadow evidence cannot prove — plus a page budget that bounds a source which never completes a truncated window.
+
+New acceptance artifacts (authored, not executed): `test_evidence_store_contract.py` pins context usability, cursor parsing, audit redaction, reason-code mapping, the mapping correlation key and run-key replay/conflict; `test_parity_bounds_contract.py` pins the narrowing refusal, the page overshoot block, the page budget, byte-identical JSON export and blocked-report self-consistency.
+
+Still blocked: no production composition root, no accepted partition-bound upstream handoff evidence, no reviewed RLS/append-only/uniqueness contract, and no durable production report registry (`InMemoryParityReportStore` is a test double that must never be composed in production). See `promotion-record.md`.
+

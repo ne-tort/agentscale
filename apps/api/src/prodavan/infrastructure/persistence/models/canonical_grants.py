@@ -4,6 +4,24 @@ This module is deliberately schema-only.  It defines the target persistence
 surface for canonical grants, mapping, quarantine and append-shaped audit
 history.  M04/M04.e/M05 gates are not satisfied in the migration workspace,
 so no positive import or trusted writer is exposed here.
+
+Table ownership (MIG-DDL-M06-01, see
+``docs/08-migration/canonical-grants-ownership-decision.md``)
+-------------------------------------------------------------
+This module is the single owning DDL description of every table it declares;
+``models/__init__.py`` registers exactly these classes and no other model may
+claim the same ``__tablename__``.
+
+* ``dynamic_app_capability_grants`` is the canonical policy owner of effective
+  authorization after the bounded M06 cutover.
+* ``models/dynamic_app_grants.py::DynamicAppCapabilityGrantRow`` was a second,
+  narrower description of that same physical table.  It is retired: it is not
+  imported by the models package (two ``__tablename__`` claims would fork
+  ``Base.metadata``) and must be deleted in a follow-up task owned by the
+  dynamic-app zone.
+* ``dynamic_app_grants`` (``models/dynamic_apps.py::AppGrantRow``) is a
+  different physical table and stays the read-only legacy compatibility
+  projection; it is never an authorization source.
 """
 
 from __future__ import annotations
@@ -47,10 +65,18 @@ class CanonicalGrantRow(Base):
 
     __tablename__ = "dynamic_app_capability_grants"
     __table_args__ = (
+        # Same-definition proof and immutable-artifact equality in one key:
+        # (id, definition_id, artifact_digest) is unique on the version table,
+        # so a grant can never reference a version of another definition or an
+        # artifact that is not the published snapshot of that exact version.
         ForeignKeyConstraint(
-            ["app_version_id", "app_definition_id"],
-            ["m04e_dynamic_app_versions.id", "m04e_dynamic_app_versions.definition_id"],
-            name="fk_cap_grant_version_definition",
+            ["app_version_id", "app_definition_id", "app_artifact_digest"],
+            [
+                "m04e_dynamic_app_versions.id",
+                "m04e_dynamic_app_versions.definition_id",
+                "m04e_dynamic_app_versions.artifact_digest",
+            ],
+            name="fk_cap_grant_version_definition_artifact",
             ondelete="RESTRICT",
         ),
         ForeignKeyConstraint(
@@ -137,7 +163,9 @@ class CanonicalGrantRow(Base):
     project_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
     scope_registry_id: Mapped[str] = mapped_column(String(40), nullable=False)
     scope_kind: Mapped[str] = mapped_column(String(32), nullable=False)
-    scope_id: Mapped[str] = mapped_column(String(80), nullable=False)
+    # Aligned with scope_registry.scope_id and m05_plugin_instances.scope_id so
+    # the typed registry FK never compares differently sized identity keys.
+    scope_id: Mapped[str] = mapped_column(String(40), nullable=False)
     capability_key: Mapped[str] = mapped_column(String(200), nullable=False)
     subject_kind: Mapped[str] = mapped_column(String(16), nullable=False)
     subject_id: Mapped[str] = mapped_column(String(160), nullable=False)
@@ -309,7 +337,9 @@ class CanonicalGrantWriterEpochRow(Base):
     tenant_id: Mapped[str] = mapped_column(String(40), nullable=False)
     app_definition_id: Mapped[str] = mapped_column(String(80), nullable=False)
     scope_kind: Mapped[str] = mapped_column(String(32), nullable=False)
-    scope_id: Mapped[str] = mapped_column(String(80), nullable=False)
+    # Same width as scope_registry.scope_id: the typed registry key is the FK
+    # target, so the fence partition can never name a scope it cannot resolve.
+    scope_id: Mapped[str] = mapped_column(String(40), nullable=False)
     writer_epoch: Mapped[int] = mapped_column(BigInteger, nullable=False)
     advanced_by: Mapped[str] = mapped_column(String(160), nullable=False)
     correlation_id: Mapped[str] = mapped_column(String(160), nullable=False)
@@ -322,6 +352,12 @@ class M06CanonicalGrantPromotionEvidenceRow(Base):
     __tablename__ = "m06_canonical_grant_promotion_evidence"
     __table_args__ = (
         UniqueConstraint("tenant_id", "definition_id", "partition_id", "revision_id", name="uq_m06_grant_promotion_revision"),
+        ForeignKeyConstraint(
+            ["definition_id", "tenant_id"],
+            ["m04e_dynamic_app_definitions.id", "m04e_dynamic_app_definitions.tenant_id"],
+            name="fk_m06_grant_promotion_definition_tenant",
+            ondelete="RESTRICT",
+        ),
         CheckConstraint(f"outcome IN {_PROMOTION_STATES}", name="ck_m06_grant_promotion_outcome"),
         CheckConstraint("canonical_positive_writes = false", name="ck_m06_grant_no_positive_writes"),
         CheckConstraint("source_digest ~ '^sha256:[0-9a-f]{64}$'", name="ck_m06_grant_promotion_source_sha256"),
@@ -372,6 +408,46 @@ M06_DEPENDENCY_BLOCKERS = (
     "MIG-M04E-02 incomplete: definition/version foundation validation and artifact proof are not promoted",
     "MIG-M05-01 incomplete: exact instance reciprocal key/runtime fencing evidence is not promoted",
     "approved capability identity and method-to-operation mapping evidence is absent",
+)
+
+
+# Ownership decision artifacts for MIG-DDL-M06-01.  Static review inputs only:
+# they describe which model owns which physical table, not an executed check.
+M06_TABLE_OWNERS = {
+    "dynamic_app_capability_grants": "CanonicalGrantRow",
+    "dynamic_app_capability_grant_mappings": "CanonicalGrantMappingRow",
+    "dynamic_app_capability_grant_quarantine": "CanonicalGrantQuarantineRow",
+    "dynamic_app_capability_audit": "CanonicalGrantAuditRow",
+    "dynamic_app_capability_writer_epochs": "CanonicalGrantWriterEpochRow",
+    "m06_canonical_grant_promotion_evidence": "M06CanonicalGrantPromotionEvidenceRow",
+}
+
+M06_RETIRED_DUPLICATES = {
+    "dynamic_app_grants.py::DynamicAppCapabilityGrantRow": (
+        "second __tablename__ claim on dynamic_app_capability_grants; retired, not "
+        "imported by the models package, deletion owned by the dynamic-app zone"
+    ),
+}
+
+M06_LEGACY_PROJECTION = {
+    "table": "dynamic_app_grants",
+    "model": "models.dynamic_apps.AppGrantRow",
+    "state": "read-only compatibility projection; never an authorization source",
+}
+
+M06_DDL_OWNERSHIP_CASES = (
+    "one_owning_model_per_physical_table",
+    "canonical_model_is_the_only_dynamic_app_capability_grants_owner",
+    "retired_legacy_duplicate_is_not_registered_in_metadata",
+    "dynamic_app_grants_projection_stays_a_separate_read_only_table",
+    "revision_2026110304_matches_metadata_columns_and_constraints",
+    "revision_2026110304_contains_no_rls_or_privilege_ddl",
+    "grant_on_foreign_instance_is_rejected_by_exact_instance_fk",
+    "version_of_another_definition_or_other_artifact_is_rejected_by_composite_fk",
+    "stale_writer_generation_cannot_write_under_the_partition_epoch",
+    "duplicate_active_grant_is_rejected_by_partial_unique_index",
+    "audit_and_mapping_survive_grant_deletion_with_null_target",
+    "promotion_evidence_never_allows_positive_writes",
 )
 
 M06_ROLLBACK_GATE = {
@@ -472,8 +548,12 @@ __all__ = [
     "CanonicalGrantWriterEpochRow",
     "M06CanonicalGrantPromotionEvidenceRow",
     "M06_ACCEPTANCE_CASES",
+    "M06_DDL_OWNERSHIP_CASES",
     "M06_DEPENDENCY_BLOCKERS",
+    "M06_LEGACY_PROJECTION",
     "M06_PRIVILEGE_INVENTORY",
+    "M06_RETIRED_DUPLICATES",
     "M06_ROLLBACK_GATE",
+    "M06_TABLE_OWNERS",
     "RLS_POLICY_DDL",
 ]

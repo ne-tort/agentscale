@@ -33,6 +33,21 @@ CANDIDATE_MODELS = {
     },
 }
 
+# Single-owner canonical grant surface (MIG-OWNERSHIP-CLEANUP-01). All six
+# classes are declared in ``canonical_grants.py``, including the owner of
+# ``dynamic_app_capability_grants`` that the retired duplicate used to claim.
+CANONICAL_MODELS = {
+    "CanonicalGrantRow": "dynamic_app_capability_grants",
+    "CanonicalGrantMappingRow": "dynamic_app_capability_grant_mappings",
+    "CanonicalGrantQuarantineRow": "dynamic_app_capability_grant_quarantine",
+    "CanonicalGrantAuditRow": "dynamic_app_capability_audit",
+    "CanonicalGrantWriterEpochRow": "dynamic_app_capability_writer_epochs",
+    "M06CanonicalGrantPromotionEvidenceRow": "m06_canonical_grant_promotion_evidence",
+}
+
+RETIRED_GRANT_MODULE = "dynamic_app_grants.py"
+RETIRED_GRANT_CLASS = "DynamicAppCapabilityGrantRow"
+
 
 def _tree(path: Path) -> ast.Module:
     return ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
@@ -412,15 +427,26 @@ def test_m05_reciprocal_fk_declarations_match_the_unique_target_keys() -> None:
     raise AssertionError("M05 reciprocal ForeignKeyConstraint loop is missing")
 
 
-def test_legacy_grant_is_registered_and_canonical_duplicate_is_not() -> None:
+def test_canonical_grants_own_all_six_tables_and_retired_duplicate_is_gone() -> None:
     tables, _ = _all_model_contracts()
-    assert {(path.name, name) for path, name, _ in tables["dynamic_app_capability_grants"]} == {
-        ("dynamic_app_grants.py", "DynamicAppCapabilityGrantRow"),
-        ("canonical_grants.py", "CanonicalGrantRow"),
-    }
+    declared = _class_tables(MODELS_DIR / "canonical_grants.py")
+    canonical_module = MODEL_PREFIX + "canonical_grants"
     imports = _package_imports(_tree(MODELS_INIT))
-    assert (MODEL_PREFIX + "dynamic_app_grants", "DynamicAppCapabilityGrantRow") in imports
-    assert not any(module == MODEL_PREFIX + "canonical_grants" for module, _ in imports)
+    exports = _exported_names(_tree(MODELS_INIT))
+
+    assert declared == CANONICAL_MODELS
+    for class_name, table_name in CANONICAL_MODELS.items():
+        owners = [(path.name, owner_name) for path, owner_name, _ in tables.get(table_name, [])]
+        assert owners == [("canonical_grants.py", class_name)]
+        assert (canonical_module, class_name) in imports
+        assert class_name in exports
+
+    # The retired narrow duplicate is deleted, so no module may re-declare the
+    # capability grant table and the package must neither import nor export it.
+    assert not (MODELS_DIR / RETIRED_GRANT_MODULE).exists()
+    assert not any(module == MODEL_PREFIX + RETIRED_GRANT_MODULE.removesuffix(".py") for module, _ in imports)
+    assert not any(class_name == RETIRED_GRANT_CLASS for _, class_name in imports)
+    assert RETIRED_GRANT_CLASS not in exports
 
 
 def test_alembic_metadata_loads_the_package_registration_surface() -> None:

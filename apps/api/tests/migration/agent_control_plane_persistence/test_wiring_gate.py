@@ -124,10 +124,20 @@ def test_feature_gated_binding_keeps_writes_disabled_after_metadata_registration
     assert "if not self.writes_enabled:" in dependency
 
 
-def test_enqueue_intent_has_no_dispatch_consumer_yet() -> None:
+def test_enqueue_intent_dispatch_consumer_is_zone_owned() -> None:
+    """The enqueue intents now have exactly one consumer, and it lives in the zone.
+
+    This gate replaced the earlier "no consumer exists yet" assertion.  The
+    handoff table must not be read by a second, unowned caller: the durable
+    consumer is the only piece of host wiring allowed to name the ORM row.
+    """
+
+    consumer = PERSISTENCE_ZONE / "intent_consumer.py"
+    assert consumer.is_file()
+
     consumers = []
     for path in PRODAVAN_SOURCE.rglob("*.py"):
-        if path in {PERSISTENCE_ZONE / "models.py", PERSISTENCE_ZONE / "repository.py"}:
+        if path in {PERSISTENCE_ZONE / "models.py", PERSISTENCE_ZONE / "repository.py", consumer}:
             continue
         if path == MODELS_INIT:
             continue
@@ -135,5 +145,11 @@ def test_enqueue_intent_has_no_dispatch_consumer_yet() -> None:
             consumers.append(path)
     assert consumers == []
 
+    source = consumer.read_text(encoding="utf-8")
+    assert "FOR UPDATE SKIP LOCKED" in source
+    assert "lease_token" in source
+    assert "lease_until" in source
+
     wiring = (PERSISTENCE_ZONE / "WIRING.md").read_text(encoding="utf-8")
-    assert "No dispatcher/repair consumer owns the enqueue intents" in wiring
+    assert "dispatcher/repair consumer" in wiring
+    assert "intent_consumer.py" in wiring

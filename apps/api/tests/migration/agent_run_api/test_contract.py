@@ -118,13 +118,14 @@ def test_employee_api_exposes_run_approval_and_timeline_routes() -> None:
 
 def test_employee_api_has_no_memory_or_legacy_write_fallback() -> None:
     source = (API_ROOT / "src/prodavan/api/v1/agent_runs.py").read_text(encoding="utf-8")
-    assert "agent_control_plane_dispatcher_unwired" in (
-        API_ROOT / "src/prodavan/api/migration_agent_runs/dependencies.py"
-    ).read_text(encoding="utf-8")
     dependency = (
         API_ROOT / "src/prodavan/api/migration_agent_runs/dependencies.py"
     ).read_text(encoding="utf-8")
-    assert "writes_enabled=False" in dependency
+    # The write switch is a gate result, never an unconditional constant.
+    assert "writes_enabled: bool = False" in dependency
+    assert "writes_enabled=True" in dependency
+    assert "AGENT_RUN_API_DISABLED" in dependency
+    assert "agent_run_api_feature_flag_disabled" in dependency
     assert "backend.require_writes()" in source
     assert "AgentSessionService" not in source
     assert "AgentRunRow(" not in source
@@ -133,7 +134,7 @@ def test_employee_api_has_no_memory_or_legacy_write_fallback() -> None:
     assert "record_and_enqueue" not in source
 
 
-def test_orm_registration_and_queue_dispatch_remain_explicit_blockers() -> None:
+def test_orm_registration_is_complete_and_the_queue_consumer_is_wired() -> None:
     models_init = (
         API_ROOT / "src/prodavan/infrastructure/persistence/models/__init__.py"
     ).read_text(encoding="utf-8")
@@ -145,14 +146,21 @@ def test_orm_registration_and_queue_dispatch_remain_explicit_blockers() -> None:
         "AgentControlPlaneOutboxEventRow",
         "AgentControlPlaneRunScopeRow",
     }
-    assert not required.intersection(
-        line.strip().split(" as ")[0].rstrip(",")
-        for line in models_init.splitlines()
-        if line.lstrip().startswith('"')
-    )
-    wiring = (
-        API_ROOT
-        / "src/prodavan/infrastructure/persistence/agent_control_plane/WIRING.md"
+    for name in required:
+        assert f'"{name}",' in models_init, f"{name} is not registered/exported"
+
+    dependency = (
+        API_ROOT / "src/prodavan/api/migration_agent_runs/dependencies.py"
     ).read_text(encoding="utf-8")
-    assert "dispatcher/repair consumer" in wiring
-    assert "rows remain pending" in wiring
+    # Registration is proved against real metadata, not against a hardcoded list.
+    assert "Base.metadata.tables" in dependency
+    assert "agent_control_plane_models_not_registered" in dependency
+    # The committed handoff is owned by a real durable consumer.
+    assert "build_intent_dispatcher" in dependency
+    assert "dispatch_batch" in dependency
+    assert 'INTENT_QUEUE_NAME = "agent-control-plane"' in dependency
+    assert "agent_control_plane_dispatcher_unavailable" in dependency
+    # The old blanket refusal code must not be the permanent API behaviour.
+    agent_source = (API_ROOT / "src/prodavan/api/v1/agent_runs.py").read_text(encoding="utf-8")
+    assert "agent_control_plane_dispatcher_unwired" not in dependency
+    assert "agent_control_plane_dispatcher_unwired" not in agent_source

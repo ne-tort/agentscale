@@ -400,6 +400,9 @@ export function useChatWorkspace(options: UseChatWorkspaceOptions) {
     streamTurnRef.current = turn.turnId;
     writePending(projectId, turn);
     try {
+      // The service keeps the last committed cursor per `turnId`, so a retry of
+      // this same turn resumes with `Last-Event-ID` instead of replaying events
+      // the UI already applied. No cursor is passed for a new turn.
       for await (const event of service.streamTurn(turn, projectId, controller.signal)) {
         if (controller.signal.aborted) return;
         if (streamSelectionRevision !== selectionRevisionRef.current) {

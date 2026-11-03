@@ -19,6 +19,7 @@ from typing import Any, Mapping, Protocol, Sequence
 
 _SHA256_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 _CURRENCY_RE = re.compile(r"^[A-Z]{3}$")
+_REASON_CODE_RE = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
 _ALLOWED_AVAILABILITY = frozenset({"in_stock", "out_of_stock", "backorder", "unknown"})
 
 
@@ -81,6 +82,17 @@ def offer_provenance_digest(*, source_id: str, supplier_id: str,
 
 def _page_key(run_id: str, cursor: str | None) -> str:
     return _digest({"run_id": run_id, "cursor": cursor})[7:]
+
+
+def _page_commit_outcome(value: Any) -> "PageCommitOutcome":
+    """Normalize a bare result or a typed outcome; unknown shapes are failures."""
+
+    if isinstance(value, PageCommitOutcome):
+        return value
+    if isinstance(value, PageCommitResult):
+        return PageCommitOutcome(result=value, reason_code=value.value)
+    return PageCommitOutcome(result=PageCommitResult.CONFLICT,
+                             reason_code="page_commit_result_invalid")
 
 
 def _aware(value: datetime) -> None:
@@ -175,6 +187,44 @@ class PageCommitResult(StrEnum):
     REPLAYED = "replayed"
     CONFLICT = "conflict"
     CHECKPOINT_CONFLICT = "checkpoint_conflict"
+    PARTIALLY_COMMITTED = "partially_committed"
+
+
+@dataclass(frozen=True, slots=True)
+class PageCommitOutcome:
+    """Typed commit outcome carrying a redacted reason code and offer counters.
+
+    A durable adapter returns this instead of a bare ``PageCommitResult`` so the
+    orchestration can distinguish "the whole page committed" from "the page was
+    only partially written". ``PARTIALLY_COMMITTED`` means offer batches reached
+    the database but the page did not reach its terminal state: the checkpoint
+    stayed put, so the page is retried and every retried offer must match by
+    ``(snapshot_id, external_key)``. That outcome can never yield a succeeded run.
+
+    ``reason_code`` is a redacted machine code (``[a-z][a-z0-9_.-]*``) and never
+    contains payload, credential or supplier text.
+    """
+
+    result: PageCommitResult
+    reason_code: str
+    offers_written: int = 0
+    offers_replayed: int = 0
+    offers_conflicted: int = 0
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.result, PageCommitResult):
+            raise ValueError("page commit outcome requires a typed result")
+        if not isinstance(self.reason_code, str) or not _REASON_CODE_RE.fullmatch(self.reason_code):
+            raise ValueError("page commit outcome reason_code must be a redacted code")
+        for name in ("offers_written", "offers_replayed", "offers_conflicted"):
+            value = getattr(self, name)
+            if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+                raise ValueError("page commit offer counters must be nonnegative integers")
+        if self.result is PageCommitResult.COMMITTED and self.offers_conflicted:
+            raise ValueError("a committed page cannot report conflicting offers")
+        if self.result not in (PageCommitResult.COMMITTED,
+                               PageCommitResult.PARTIALLY_COMMITTED) and self.offers_written:
+            raise ValueError("only a committed or partially committed page may report written offers")
 
 
 @dataclass(frozen=True, slots=True)
@@ -356,17 +406,24 @@ class CatalogProjection:
 class IngestionEvidencePort(Protocol):
     """Durable evidence boundary; ``commit_page`` must be one transaction.
 
-    A new page commits the exact raw bytes/artifact, exact page snapshot and run
-    checkpoint together. Any failure leaves all three unchanged. Exact replay
-    returns ``REPLAYED`` if the durable run already contains the identical page,
-    even when it has advanced beyond that page. Changed raw bytes or snapshot
-    content returns ``CONFLICT`` and cannot overwrite accepted evidence.
+    A new page commits the exact raw bytes/artifact, exact page snapshot, every
+    offer batch of that page and the run checkpoint together. Any failure leaves
+    all of them unchanged. Exact replay returns ``REPLAYED`` if the durable run
+    already contains the identical page, even when it has advanced beyond that
+    page. Changed raw bytes or snapshot content returns ``CONFLICT`` and cannot
+    overwrite accepted evidence.
+
+    An adapter may return a :class:`PageCommitOutcome` instead of a bare result
+    to report a redacted reason code and offer counters, including the
+    ``PARTIALLY_COMMITTED`` case where offer batches landed but the page did not
+    reach its terminal state. A bare :class:`PageCommitResult` stays supported.
     """
 
     async def load_run(self, run_id: str) -> IngestionRun | None: ...
     async def commit_page(self, *, artifact: RawArtifact, payload: bytes,
                           snapshot: CatalogSnapshot, run: IngestionRun,
-                          expected_checkpoint: str | None) -> PageCommitResult: ...
+                          expected_checkpoint: str | None
+                          ) -> PageCommitResult | PageCommitOutcome: ...
     async def mark_source_failure(self, source_id: str, *, at: datetime, reason: str) -> None: ...
     async def record_run_failure(self, *, run: IngestionRun,
                                  expected_checkpoint: str | None) -> bool: ...
@@ -709,12 +766,29 @@ class EquipmentIngestionService:
                 observed_count=next_observed_count,
                 quarantined_count=next_quarantined_count,
             )
-            result = await self._evidence.commit_page(
-                artifact=artifact, payload=raw, snapshot=snapshot,
-                run=run_record, expected_checkpoint=expected_checkpoint,
-            )
-            if result not in (PageCommitResult.COMMITTED, PageCommitResult.REPLAYED):
-                code = ("checkpoint_cas_conflict" if result is PageCommitResult.CHECKPOINT_CONFLICT
+            try:
+                outcome = _page_commit_outcome(await self._evidence.commit_page(
+                    artifact=artifact, payload=raw, snapshot=snapshot,
+                    run=run_record, expected_checkpoint=expected_checkpoint,
+                ))
+            except Exception:
+                # A durable adapter may fail after some offer batches landed. The
+                # page never reached its terminal state, so the run must not be
+                # reported as running or succeeded; resume uses the same cursor.
+                return await self._source_failed(
+                    run_id, source, supplier, cursor, page_count, accepted_count,
+                    observed_count, quarantined_count, artifact_ids, snapshot_ids,
+                    run_started, latest_update, "page_commit_failed", page.observed_at,
+                )
+            if outcome.result is PageCommitResult.PARTIALLY_COMMITTED:
+                return await self._source_failed(
+                    run_id, source, supplier, cursor, page_count, accepted_count,
+                    observed_count, quarantined_count, artifact_ids, snapshot_ids,
+                    run_started, latest_update, "page_commit_partially_written",
+                    page.observed_at,
+                )
+            if outcome.result not in (PageCommitResult.COMMITTED, PageCommitResult.REPLAYED):
+                code = ("checkpoint_cas_conflict" if outcome.result is PageCommitResult.CHECKPOINT_CONFLICT
                         else "immutable_page_replay_conflict")
                 return self._blocked(run_id, source, supplier, started, code, prior=prior)
 

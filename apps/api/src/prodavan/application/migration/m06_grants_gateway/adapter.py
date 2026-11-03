@@ -12,8 +12,9 @@ from typing import Any, Mapping, Protocol
 
 from prodavan.application.scope_registry.contracts import RlsContext
 
-SCHEMA_VERSION = "m06-grant-mapping-v3"
+SCHEMA_VERSION = "m06-grant-mapping-v4"
 OPERATION_MAP_VERSION = "operation-constraints-v1"
+METHOD_MAPPING_VERSION = "capability-method-mapping-v1"
 APPROVED_CAPABILITIES = frozenset({
     "ui.render", "ui.navigation", "storage.kv", "storage.files", "network.fetch",
     "events.subscribe", "platform.commands", "platform.queries", "secrets.read", "identity.read",
@@ -30,6 +31,19 @@ CAPABILITY_OPERATIONS = MappingProxyType({
     "secrets.read": frozenset({"read"}),
     "identity.read": frozenset({"read"}),
 })
+
+
+def schema_identity() -> Mapping[str, str]:
+    """Identity of the approved mapping grammar; every evidence digest is bound to it."""
+    return MappingProxyType({
+        "schema_version": SCHEMA_VERSION,
+        "operation_map_version": OPERATION_MAP_VERSION,
+        "method_mapping_version": METHOD_MAPPING_VERSION,
+    })
+
+
+def schema_identity_digest() -> str:
+    return digest(schema_identity())
 
 
 class AdapterOutcome(StrEnum):
@@ -64,6 +78,7 @@ class AuthenticatedGrantContext:
     plugin_instance_id: str | None = None
     runtime_generation: int | None = None
     writer_generation: int | None = None
+    app_definition_id: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.authenticated, bool):
@@ -72,15 +87,16 @@ class AuthenticatedGrantContext:
             raise ValueError("correlation_id is required")
         for value in (self.tenant_id, self.subject_kind, self.subject_id, self.session_id,
                       self.cabinet_id, self.project_id, self.correlation_id,
-                      self.transaction_id, self.plugin_instance_id):
+                      self.transaction_id, self.plugin_instance_id, self.app_definition_id):
             if value is not None and not value.strip():
                 raise ValueError("authenticated identity fields cannot be blank")
         for value in (self.runtime_generation, self.writer_generation):
             if value is not None and (not isinstance(value, int) or isinstance(value, bool) or value <= 0):
                 raise ValueError("runtime and writer generations must be positive integers")
-        fenced = (self.plugin_instance_id, self.runtime_generation, self.writer_generation)
+        fenced = (self.plugin_instance_id, self.runtime_generation, self.writer_generation,
+                  self.app_definition_id)
         if any(value is not None for value in fenced) and not all(value is not None for value in fenced):
-            raise ValueError("M05 instance and runtime/writer generations must be bound together")
+            raise ValueError("app definition, M05 instance and runtime/writer generations must be bound together")
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,7 +117,7 @@ class DependencyGates:
     m04e_definition_version_evidence_id: str | None = None
     m05_instance_runtime_evidence_id: str | None = None
     atomic_evidence_id: str | None = None
-    m05_identity_binding_digest: str | None = None
+    request_identity_digest: str | None = None
     m06_schema_accepted: bool = False
     m06_schema_evidence_id: str | None = None
     m06_schema_evidence_digest: str | None = None
@@ -121,6 +137,12 @@ class DependencyGates:
     final_delta_checkpoint: str | None = None
     installation_scope_kind: str | None = None
     installation_scope_id: str | None = None
+    company_id: str | None = None
+    app_id: str | None = None
+    manifest_version: str | None = None
+    subject_kind: str | None = None
+    cabinet_id: str | None = None
+    project_id: str | None = None
 
     def __post_init__(self) -> None:
         if any(not isinstance(value, bool) for value in (
@@ -152,8 +174,13 @@ class DependencyGates:
         )
 
     @property
-    def positive_projection_ready(self) -> bool:
-        """All accepted handoffs exist; absent markers keep positive projection blocked."""
+    def upstream_ready(self) -> bool:
+        """Accepted M04/M04E/M05/M06 partition handoffs exist, without an identity claim.
+
+        Identity resolution itself depends on upstream readiness, so this marker must
+        not require the resolved request identity. Every positive projection check
+        additionally requires :attr:`positive_projection_ready`.
+        """
         return bool(
             self.ready
             and self.m04_scope_accepted is True
@@ -169,20 +196,20 @@ class DependencyGates:
                 self.m04e_definition_version_evidence_id,
                 self.m05_instance_runtime_evidence_id, self.atomic_evidence_id,
             ))
-            and is_sha256(self.m05_identity_binding_digest)
-            and all(isinstance(value, str) and value.strip() for value in (
-                self.tenant_id, self.app_definition_id, self.app_version_id, self.scope_kind,
-                self.scope_id, self.plugin_instance_id, self.subject_id, self.session_id,
-                self.transaction_id, self.correlation_id, self.final_delta_checkpoint,
-                self.installation_scope_kind, self.installation_scope_id,
-            ))
-            and self.runtime_generation is not None and self.runtime_generation > 0
             and self.writer_generation is not None and self.writer_generation > 0
             and self.trusted_writer_epoch == self.writer_generation
+            and self.m06_schema_digest == schema_identity_digest()
+        )
+
+    @property
+    def positive_projection_ready(self) -> bool:
+        """Upstream handoffs plus one exactly attested request identity."""
+        return bool(
+            self.upstream_ready
+            and self.runtime_generation is not None and self.runtime_generation > 0
             and is_sha256(self.source_digest)
-            and self.m06_schema_digest == digest({
-                "schema_version": SCHEMA_VERSION, "operation_map_version": OPERATION_MAP_VERSION,
-            })
+            and is_sha256(self.request_identity_digest)
+            and gates_request_identity_digest(self) == self.request_identity_digest
         )
 
     @property
@@ -222,29 +249,78 @@ class DependencyGates:
         ):
             if not is_sha256(value):
                 missing.append(label)
-        if not is_sha256(self.m05_identity_binding_digest):
-            missing.append("m05_exact_identity_binding")
-        for value, label in (
-            (self.tenant_id, "tenant_id"), (self.app_definition_id, "app_definition_id"),
-            (self.app_version_id, "app_version_id"), (self.scope_kind, "scope_kind"),
-            (self.scope_id, "scope_id"), (self.plugin_instance_id, "plugin_instance_id"),
-            (self.subject_id, "subject_id"), (self.session_id, "session_id"),
-            (self.transaction_id, "transaction_id"), (self.correlation_id, "correlation_id"),
-            (self.final_delta_checkpoint, "final_delta_checkpoint"),
-        ):
-            if not isinstance(value, str) or not value.strip():
-                missing.append(label)
+        if gates_request_identity_digest(self) is None:
+            missing.append("exact_request_identity")
+        if not is_sha256(self.request_identity_digest):
+            missing.append("request_identity_digest")
+        elif gates_request_identity_digest(self) != self.request_identity_digest:
+            missing.append("request_identity_digest_mismatch")
         if self.runtime_generation is None or self.runtime_generation <= 0:
             missing.append("runtime_generation")
         if self.writer_generation is None or self.writer_generation <= 0:
             missing.append("writer_generation")
+        if self.trusted_writer_epoch != self.writer_generation:
+            missing.append("trusted_writer_epoch_mismatch")
         if not is_sha256(self.source_digest):
             missing.append("source_digest")
-        if (is_sha256(self.m06_schema_digest) and self.m06_schema_digest != digest({
-                "schema_version": SCHEMA_VERSION, "operation_map_version": OPERATION_MAP_VERSION,
-        })):
+        if is_sha256(self.m06_schema_digest) and self.m06_schema_digest != schema_identity_digest():
             missing.append("m06_schema_version_mismatch")
-        return tuple(missing)
+        return tuple(dict.fromkeys(missing))
+
+
+REQUEST_IDENTITY_FIELDS = (
+    "tenant_id", "company_id", "app_definition_id", "app_id", "app_version_id",
+    "manifest_version", "scope_kind", "scope_id", "installation_scope_kind",
+    "installation_scope_id", "cabinet_id", "project_id", "subject_kind", "subject_id",
+    "session_id", "plugin_instance_id", "runtime_generation", "writer_generation",
+)
+_OPTIONAL_IDENTITY_FIELDS = frozenset({"cabinet_id", "project_id"})
+
+
+def _identity_mapping_payload(values: Mapping[str, Any]) -> Mapping[str, Any] | None:
+    payload: dict[str, Any] = {}
+    for name in REQUEST_IDENTITY_FIELDS:
+        value = values.get(name)
+        if isinstance(value, int) and not isinstance(value, bool):
+            if value <= 0:
+                return None
+        elif value is None and name in _OPTIONAL_IDENTITY_FIELDS:
+            pass
+        elif not (isinstance(value, str) and value.strip()):
+            return None
+        payload[name] = value
+    return MappingProxyType(payload)
+
+
+def _request_identity_payload(source: object) -> Mapping[str, Any] | None:
+    """Exact attested request identity; ``None`` when any anchor is absent.
+
+    The full per-call binding digest cannot be pre-accepted partition evidence, so
+    handoff gates attest exactly the fields that trusted resolution can re-derive
+    before the call: tenant/company, definition/version, anchors, subject/session,
+    exact instance and runtime/writer generations. Transaction, correlation and
+    artifact digest are compared separately against resolved server state.
+    """
+    return _identity_mapping_payload({name: getattr(source, name, None)
+                                      for name in REQUEST_IDENTITY_FIELDS})
+
+
+def request_identity_digest_from_mapping(values: Mapping[str, Any]) -> str | None:
+    """Digest of an explicit request-identity mapping, or ``None`` if incomplete."""
+    payload = _identity_mapping_payload(values)
+    return None if payload is None else digest(payload)
+
+
+def gates_request_identity_digest(gates: "DependencyGates") -> str | None:
+    payload = _request_identity_payload(gates)
+    return None if payload is None else digest(payload)
+
+
+def request_identity_digest(identity: "ResolvedGrantIdentity") -> str:
+    payload = _request_identity_payload(identity)
+    if payload is None:
+        raise IdentityResolutionError("resolved_request_identity_incomplete")
+    return digest(payload)
 
 
 def source_payload_digest(source: "LegacyGrantSource") -> str:
@@ -437,6 +513,8 @@ class ShadowObservation:
     checkpoint: str
     correlation_id: str
     observed_at: str
+    operation_mapping_digest: str = ""
+    mismatch_explanation: str | None = None
 
     def __post_init__(self) -> None:
         if not all(value.strip() for value in (
@@ -450,6 +528,18 @@ class ShadowObservation:
             raise ValueError("canonical_digest must be sha256")
         if self.binding_digest is not None and not is_sha256(self.binding_digest):
             raise ValueError("binding_digest must be sha256")
+        if not is_sha256(self.operation_mapping_digest):
+            raise ValueError("approved operation mapping digest is required")
+        if not isinstance(self.mismatch, bool) or not isinstance(self.mismatch_explained, bool):
+            raise ValueError("shadow mismatch markers must be explicit booleans")
+        if self.mismatch_explained and not self.mismatch:
+            raise ValueError("an explained observation must still record its mismatch")
+        if self.mismatch and not self.mismatch_explained and self.mismatch_explanation is not None:
+            raise ValueError("unexplained mismatch cannot carry an explanation code")
+        if self.mismatch_explained and not (
+            isinstance(self.mismatch_explanation, str) and self.mismatch_explanation.strip()
+        ):
+            raise ValueError("explained mismatch requires a stable explanation code")
         observed_at = datetime.fromisoformat(self.observed_at)
         _aware(observed_at)
 
@@ -697,6 +787,14 @@ class GrantSetAdapter:
         )
 
 
+class MethodOperationPort(Protocol):
+    """Approved method -> operation registry; never an authorization decision."""
+
+    async def resolve(self, *, identity: ResolvedGrantIdentity, method: str, capability: str,
+                      operation: str, resource: str, domain: str | None
+                      ) -> "MethodOperationResolution": ...
+
+
 class CapabilityGatewayService:
     """Shadow facade; returns the legacy answer and only appends target evidence."""
 
@@ -708,6 +806,7 @@ class CapabilityGatewayService:
                  canonical_shadow: CanonicalShadowDecisionPort, handoffs: DependencyHandoffPort,
                  evidence_read: EvidenceReadPort,
                  evidence_transaction: TrustedEvidenceTransactionPort,
+                 method_mapping: MethodOperationPort,
                  page_size: int = 100) -> None:
         if not 1 <= page_size <= 500:
             raise ValueError("page_size must be between 1 and 500")
@@ -715,6 +814,7 @@ class CapabilityGatewayService:
         self._handoffs = handoffs
         self._evidence_read = evidence_read
         self._evidence_transaction, self._page_size = evidence_transaction, page_size
+        self._method_mapping = method_mapping
 
     async def observe(self, *, source: LegacyGrantSource, context: AuthenticatedGrantContext,
                       capability: str, operation: str, resource: str, domain: str | None,
@@ -758,7 +858,7 @@ class CapabilityGatewayService:
         except Exception:
             return None
         if (gates is None or not self._handoff_matches(gates, context, source, source_digest)
-                or not gates.positive_projection_ready):
+                or not gates.upstream_ready):
             return None
         try:
             prior = await self._evidence_read.find_mapping(
@@ -777,14 +877,23 @@ class CapabilityGatewayService:
         ):
             return None
         exact_binding = binding_digest(identity)
-        if (identity.writer_generation != gates.writer_generation
+        if (not gates.positive_projection_ready
+                or identity.writer_generation != gates.writer_generation
                 or identity.runtime_generation != gates.runtime_generation
-                or exact_binding != gates.m05_identity_binding_digest
+                or request_identity_digest(identity) != gates.request_identity_digest
                 or identity.transaction_id != context.transaction_id
                 or not is_sha256(identity.owner_evidence_digest)
                 or not is_sha256(identity.rls_evidence_digest)
                 or not is_sha256(identity.definition_evidence_digest)
                 or not is_sha256(identity.instance_evidence_digest)):
+            return None
+        if prior is not None and prior.tenant_id is None:
+            unresolved = SourceMappingRecord(source.source_kind, source.source_id, SCHEMA_VERSION,
+                                             identity.tenant_id, source_digest, None, exact_binding,
+                                             AdapterOutcome.CONFLICT, "prior_mapping_tenant_unresolved",
+                                             checkpoint, context.correlation_id)
+            await self._commit_evidence(unresolved, context, "prior_mapping_tenant_unresolved",
+                                         {"source_digest": source_digest})
             return None
         if prior is not None and prior.tenant_id != identity.tenant_id:
             conflict = SourceMappingRecord(source.source_kind, source.source_id, SCHEMA_VERSION,
@@ -812,6 +921,14 @@ class CapabilityGatewayService:
                                          {"checked_at": checked_at.isoformat(),
                                           "observed_at": checked_at.isoformat()})
             return None
+        if prior is not None and prior.binding_digest is None:
+            incomplete = SourceMappingRecord(source.source_kind, source.source_id, SCHEMA_VERSION,
+                                             identity.tenant_id, source_digest, None, exact_binding,
+                                             AdapterOutcome.CONFLICT, "prior_mapping_evidence_incomplete",
+                                             checkpoint, context.correlation_id)
+            await self._commit_evidence(incomplete, context, "prior_mapping_evidence_incomplete",
+                                        {"source_digest": source_digest})
+            return None
         if prior is not None and prior.binding_digest != exact_binding:
             conflict = SourceMappingRecord(source.source_kind, source.source_id, SCHEMA_VERSION,
                                            identity.tenant_id, source_digest, None, exact_binding,
@@ -834,7 +951,7 @@ class CapabilityGatewayService:
             if mapped is None:
                 raise MappingError("capability_unknown")
             if (mapped.operations and (operation not in mapped.operations
-                    or resource not in mapped.resources or domain not in mapped.domains):
+                    or resource not in mapped.resources or domain not in mapped.domains)):
                 raise MappingError("requested_operation_resource_or_domain_unmapped")
             canonical_source_digest = digest(tuple(
                 (name, item.payload_digest) for name, item in sorted(mapped_by_capability.items())
@@ -847,6 +964,35 @@ class CapabilityGatewayService:
                                          context.correlation_id)
             await self._commit_evidence(record, context, reason, {"capability_key_digest": digest(capability)})
             return None
+        try:
+            method_resolution = await self._method_mapping.resolve(
+                identity=identity, method=method, capability=capability, operation=operation,
+                resource=resource, domain=domain or "")
+        except Exception:
+            failed = SourceMappingRecord(source.source_kind, source.source_id, SCHEMA_VERSION,
+                                         identity.tenant_id, source_digest, canonical_source_digest,
+                                         exact_binding, AdapterOutcome.QUARANTINED,
+                                         "method_mapping_read_failed", checkpoint,
+                                         context.correlation_id)
+            await self._commit_evidence(failed, context, "method_mapping_read_failed",
+                                        {"method_digest": digest(method)})
+            return None
+        if not isinstance(method_resolution, MethodOperationResolution):
+            return None
+        if not method_resolution.approved:
+            record = SourceMappingRecord(
+                source.source_kind, source.source_id, SCHEMA_VERSION, identity.tenant_id,
+                source_digest, canonical_source_digest, exact_binding, AdapterOutcome.QUARANTINED,
+                method_resolution.reason_code, checkpoint, context.correlation_id)
+            await self._commit_evidence(record, context, method_resolution.reason_code,
+                                        {"method_digest": digest(method),
+                                         "capability_key_digest": digest(capability)})
+            return None
+        canonical_source_digest = digest({
+            "mapping": canonical_source_digest,
+            "method_mapping": method_resolution.mapping_digest,
+            "schema_identity": schema_identity(),
+        })
         if mapped.expires_at is not None and mapped.expires_at <= source.issued_at:
             record = SourceMappingRecord(source.source_kind, source.source_id, SCHEMA_VERSION,
                                          identity.tenant_id, source_digest, None, exact_binding,
@@ -867,7 +1013,16 @@ class CapabilityGatewayService:
                                      identity.tenant_id, source_digest, canonical_source_digest,
                                      exact_binding, outcome, deny_reason, checkpoint,
                                      context.correlation_id)
-        if prior is not None and prior.canonical_digest != canonical_source_digest:
+        if prior is not None and prior.outcome in {AdapterOutcome.CONFLICT, AdapterOutcome.BLOCKED}:
+            # A conflict/blocked mapping is not repairable by replay: it needs an
+            # operator-reviewed forward decision, not another automatic attempt.
+            await self._commit_evidence(None, context, "non_promotable_source_replay",
+                                         {"prior_outcome": prior.outcome.value,
+                                          "source_digest": source_digest})
+            return None
+        repair = prior is not None and prior.outcome is AdapterOutcome.QUARANTINED
+        if prior is not None and prior.canonical_digest is not None and (
+                prior.canonical_digest != canonical_source_digest):
             conflict = SourceMappingRecord(source.source_kind, source.source_id, SCHEMA_VERSION,
                                            identity.tenant_id, source_digest, canonical_source_digest,
                                            exact_binding, AdapterOutcome.CONFLICT, "mapping_digest_changed",
@@ -875,10 +1030,9 @@ class CapabilityGatewayService:
             await self._commit_evidence(conflict, context, "mapping_digest_changed",
                                          {"canonical_digest": canonical_source_digest})
             return None
-        if prior is not None and prior.outcome not in {AdapterOutcome.MAPPED_EVIDENCE, AdapterOutcome.KNOWN_DENY}:
-            await self._commit_evidence(None, context, "non_promotable_source_replay",
-                                         {"prior_outcome": prior.outcome.value,
-                                          "source_digest": source_digest})
+        if prior is not None and not repair and prior.canonical_digest is None:
+            await self._commit_evidence(None, context, "prior_mapping_digest_missing",
+                                         {"source_digest": source_digest})
             return None
         try:
             legacy_decision = await self._legacy.decide(
@@ -891,7 +1045,8 @@ class CapabilityGatewayService:
                 resource=resource, domain=domain, constraints=request_constraints, now=checked_at)
             observation = self._observation(identity, source, mapped, canonical_source_digest,
                                             legacy_decision, canonical_decision,
-                                            source_digest, checkpoint, context.correlation_id, checked_at)
+                                            source_digest, checkpoint, context.correlation_id,
+                                            checked_at, method_resolution.mapping_digest)
         except Exception as exc:
             reason = str(exc) if isinstance(exc, IdentityResolutionError) else "shadow_decision_failed"
             failed = SourceMappingRecord(source.source_kind, source.source_id, SCHEMA_VERSION,
@@ -907,7 +1062,7 @@ class CapabilityGatewayService:
             source_digest, canonical_source_digest, exact_binding, AdapterOutcome.CONFLICT,
             "concurrent_source_key_conflict", checkpoint, context.correlation_id)
         committed = await self._commit_transaction(context=context, transaction=EvidenceTransaction(
-            None if prior is not None else record,
+            record if (prior is None or repair) else None,
             ({"protocol_decision": mapped.decision, "reason_code": deny_reason}
              if known_deny else None),
             observation, self._audit_event(record, context, event),
@@ -915,6 +1070,8 @@ class CapabilityGatewayService:
             conflict_quarantine={"reason_code": "concurrent_source_key_conflict"} if race_conflict else None,
             conflict_audit=self._audit_event(race_conflict, context, "concurrent_source_key_conflict")
             if race_conflict else None))
+        if repair:
+            return observation if committed is MappingOutcome.RECORDED else None
         if prior is not None:
             return observation if committed is MappingOutcome.REPLAY else None
         return observation if committed in {MappingOutcome.RECORDED, MappingOutcome.REPLAY} else None
@@ -925,6 +1082,7 @@ class CapabilityGatewayService:
         return bool(
             gates.tenant_id == context.tenant_id
             and gates.app_definition_id == source.app_definition_id
+            and gates.app_definition_id == context.app_definition_id
             and gates.app_version_id == source.app_version_id
             and gates.scope_kind == "plugin_instance"
             and gates.scope_id == context.plugin_instance_id
@@ -944,16 +1102,25 @@ class CapabilityGatewayService:
     def _observation(identity: ResolvedGrantIdentity, source: LegacyGrantSource, mapped: GrantMapping,
                      canonical_digest: str, legacy_decision: ShadowDecision,
                      canonical_decision: ShadowDecision, source_digest: str,
-                     checkpoint: str, correlation_id: str, observed_at: datetime) -> ShadowObservation:
+                     checkpoint: str, correlation_id: str, observed_at: datetime,
+                     method_digest: str) -> ShadowObservation:
         expected_binding = binding_digest(identity)
         if legacy_decision.binding_digest != expected_binding or canonical_decision.binding_digest != expected_binding:
             raise IdentityResolutionError("decision_binding_digest_mismatch")
         mismatch = (legacy_decision.allowed != canonical_decision.allowed
                     or _decision_class(legacy_decision.reason_code) != _decision_class(canonical_decision.reason_code))
-        return ShadowObservation(identity.tenant_id, identity.app_definition_id, source.source_id,
-                                 mapped.capability_key, source_digest, canonical_digest,
-                                 expected_binding, legacy_decision, canonical_decision, mismatch, False,
-                                 checkpoint, correlation_id, observed_at.isoformat())
+        explanation = None
+        if mismatch:
+            explanation = MISMATCH_EXPLANATIONS.get(
+                (_decision_class(legacy_decision.reason_code),
+                 _decision_class(canonical_decision.reason_code)))
+        return ShadowObservation(
+            identity.tenant_id, identity.app_definition_id, source.source_id,
+            mapped.capability_key, source_digest, canonical_digest,
+            expected_binding, legacy_decision, canonical_decision, mismatch,
+            explanation is not None, checkpoint, correlation_id, observed_at.isoformat(),
+            method_digest, explanation,
+        )
 
     @staticmethod
     def _audit_event(record: SourceMappingRecord | None, context: AuthenticatedGrantContext,
@@ -1020,6 +1187,7 @@ class CapabilityGatewayService:
                     and (identity.scope_kind != "plugin_instance" or identity.scope_id == identity.plugin_instance_id)
                     and identity.app_id == source.app_id and identity.manifest_version == source.manifest_version
                     and source.app_definition_id == identity.app_definition_id
+                    and context.app_definition_id == identity.app_definition_id
                     and source.app_version_id == identity.app_version_id
                     and identity.tenant_id == context.tenant_id and identity.subject_id == context.subject_id
                     and identity.transaction_id == context.transaction_id
@@ -1101,6 +1269,75 @@ def _json_default(value: Any) -> Any:
     raise TypeError(f"unsupported digest value: {type(value).__name__}")
 
 
+def observation_evidence(observation: ShadowObservation) -> Mapping[str, Any]:
+    """Redacted, digest-only shadow evidence; safe for an append-only audit row."""
+    if not isinstance(observation, ShadowObservation):
+        raise TypeError("shadow evidence must be a ShadowObservation")
+    return MappingProxyType({
+        "tenant_id": observation.tenant_id,
+        "app_definition_id": observation.app_definition_id,
+        "source_id": observation.source_id,
+        "capability_key": observation.capability_key,
+        "source_digest": observation.source_digest,
+        "canonical_digest": observation.canonical_digest,
+        "binding_digest": observation.binding_digest,
+        "operation_mapping_digest": observation.operation_mapping_digest,
+        "legacy_allowed": observation.legacy_decision.allowed,
+        "legacy_reason_class": _decision_class(observation.legacy_decision.reason_code),
+        "canonical_allowed": observation.canonical_decision.allowed,
+        "canonical_reason_class": _decision_class(observation.canonical_decision.reason_code),
+        "mismatch": observation.mismatch,
+        "mismatch_explained": observation.mismatch_explained,
+        "mismatch_explanation": observation.mismatch_explanation,
+        "checkpoint": observation.checkpoint,
+        "correlation_id": observation.correlation_id,
+        "observed_at": observation.observed_at,
+    })
+
+
+def observation_from_evidence(value: Mapping[str, Any]) -> ShadowObservation:
+    """Rebuild a shadow observation from stored evidence; reject anything incomplete."""
+    if not isinstance(value, Mapping):
+        raise ValueError("stored shadow evidence must be an object")
+    required = ("tenant_id", "app_definition_id", "source_id", "capability_key",
+                "source_digest", "checkpoint", "correlation_id", "observed_at",
+                "legacy_allowed", "legacy_reason_class", "canonical_allowed",
+                "canonical_reason_class", "mismatch", "mismatch_explained",
+                "operation_mapping_digest")
+    if any(name not in value for name in required):
+        raise ValueError("stored shadow evidence is incomplete")
+    binding = value.get("binding_digest")
+    if not isinstance(binding, str) or not is_sha256(binding):
+        raise ValueError("stored shadow evidence requires the exact binding digest")
+    canonical = value.get("canonical_digest")
+    if canonical is not None and not is_sha256(canonical):
+        raise ValueError("stored shadow canonical digest must be sha256")
+    legacy_allowed = value["legacy_allowed"]
+    canonical_allowed = value["canonical_allowed"]
+    if not isinstance(legacy_allowed, bool) or not isinstance(canonical_allowed, bool):
+        raise ValueError("stored shadow decisions must be explicit booleans")
+    legacy_reason = "allowed" if legacy_allowed else str(value["legacy_reason_class"])
+    canonical_reason = "allowed" if canonical_allowed else str(value["canonical_reason_class"])
+    return ShadowObservation(
+        tenant_id=str(value["tenant_id"]),
+        app_definition_id=str(value["app_definition_id"]),
+        source_id=str(value["source_id"]),
+        capability_key=str(value["capability_key"]),
+        source_digest=str(value["source_digest"]),
+        canonical_digest=canonical,
+        binding_digest=binding,
+        legacy_decision=ShadowDecision(legacy_allowed, legacy_reason, binding),
+        canonical_decision=ShadowDecision(canonical_allowed, canonical_reason, binding),
+        mismatch=bool(value["mismatch"]),
+        mismatch_explained=bool(value["mismatch_explained"]),
+        checkpoint=str(value["checkpoint"]),
+        correlation_id=str(value["correlation_id"]),
+        observed_at=str(value["observed_at"]),
+        operation_mapping_digest=str(value["operation_mapping_digest"]),
+        mismatch_explanation=value.get("mismatch_explanation"),
+    )
+
+
 def binding_digest(identity: ResolvedGrantIdentity) -> str:
     return digest({"tenant_id": identity.tenant_id, "app_definition_id": identity.app_definition_id,
                    "app_version_id": identity.app_version_id, "app_id": identity.app_id,
@@ -1145,9 +1382,27 @@ def _aware(value: datetime | None) -> None:
         raise ValueError("timestamps must be timezone-aware")
 
 
+APPROVED_MISMATCH_EXPLANATIONS = frozenset({
+    "legacy_capability_not_requested_by_manifest",
+    "legacy_and_canonical_lifecycle_disagree",
+    "legacy_scope_policy_not_yet_canonical",
+    "canonical_grant_not_yet_backfilled",
+})
+MISMATCH_EXPLANATIONS = MappingProxyType({
+    ("allowed", "denied"): "canonical_grant_not_yet_backfilled",
+    ("allowed", "quarantined_binding"): "canonical_grant_not_yet_backfilled",
+    ("denied", "allowed"): "legacy_scope_policy_not_yet_canonical",
+    ("expired", "allowed"): "legacy_and_canonical_lifecycle_disagree",
+    ("revoked", "allowed"): "legacy_and_canonical_lifecycle_disagree",
+    ("allowed", "expired"): "legacy_and_canonical_lifecycle_disagree",
+    ("allowed", "revoked"): "legacy_and_canonical_lifecycle_disagree",
+})
+# Explicit, reviewable mismatch classes; nothing else may be auto-explained.
+
+
 def _decision_class(reason_code: str) -> str:
     normalized = reason_code.strip().lower()
-    if normalized in {"expired", "grant_expired", "expired_grant"}:
+    if normalized in {"expired", "grant_expired", "expired_grant", "source_grant_expired"}:
         return "expired"
     if normalized in {"revoked", "grant_revoked", "revoked_grant", "protocol_revoked"}:
         return "revoked"
@@ -1155,7 +1410,12 @@ def _decision_class(reason_code: str) -> str:
         return "quarantined_binding"
     if normalized in {"allowed", "allow", "granted"}:
         return "allowed"
-    if normalized in {"denied", "deny", "not_granted", "protocol_denied"}:
+    if normalized in {"denied", "deny", "not_granted", "protocol_denied",
+                      "grant_missing", "grant_denied", "scope_denied", "quota_exceeded",
+                      "method_unknown", "method_ambiguous", "capability_not_requested",
+                      "capability_mismatch", "operation_not_granted", "resource_not_granted",
+                      "domain_not_granted", "constraints_not_satisfied", "lifecycle_denied",
+                      "cross_version", "app_missing", "grants_missing", "invalid_request"}:
         return "denied"
     return normalized
 
@@ -1175,3 +1435,38 @@ class MappingError(ValueError):
 
 class IdentityResolutionError(RuntimeError):
     """A resolver or shadow decision violated the server-bound identity contract."""
+
+
+@dataclass(frozen=True, slots=True)
+class MethodOperationResolution:
+    """Outcome of the approved method -> operation registry lookup.
+
+    A rejected lookup is quarantine evidence, never a positive mapping and never an
+    allow: the legacy decision stays authoritative for the shadow comparison.
+    """
+
+    approved: bool
+    reason_code: str
+    mapping_digest: str
+    capability_key: str | None = None
+    operation: str | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.approved, bool):
+            raise ValueError("method mapping approval must be explicit")
+        if not isinstance(self.reason_code, str) or not self.reason_code.strip():
+            raise ValueError("method mapping outcome requires a stable reason code")
+        if not is_sha256(self.mapping_digest):
+            raise ValueError("method mapping digest must be sha256")
+        if self.approved and (self.reason_code != "approved"
+                              or not (self.capability_key or "").strip()):
+            raise ValueError("approved method mapping requires the exact capability identity")
+
+    @classmethod
+    def approved_mapping(cls, *, mapping_digest: str, capability_key: str,
+                         operation: str) -> "MethodOperationResolution":
+        return cls(True, "approved", mapping_digest, capability_key, operation)
+
+    @classmethod
+    def rejected(cls, reason_code: str) -> "MethodOperationResolution":
+        return cls(False, reason_code, digest({"rejected": reason_code}))

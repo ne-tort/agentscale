@@ -59,6 +59,8 @@ import type {
   WorkspaceMutationResponse,
   WorkspacePreview,
 } from "./types";
+import { SseCursor, SseParser, UpstreamStreamMalformed, envelopeKind, readWireEnvelope, streamIdentity } from "../shared/sse";
+import type { SseFrame, StreamIdentity, WireEventType } from "../shared/sse";
 
 export class ApiRequestError extends Error {
   constructor(public readonly error: ApiError) {
@@ -88,58 +90,24 @@ export interface ApiClientOptions {
   fetcher?: typeof fetch;
 }
 
-interface SseFrame { data: string; event?: string }
+/** `ChatStreamOptions` plus the reconnect cursor header value. */
+export type ChatRunReconnectOptions = ChatStreamOptions & {
+  /** Value for `Last-Event-ID`; only sent when resuming the same turn. */
+  lastEventId?: string;
+};
 
-class SseFrameParser {
-  private line = "";
-  private data: string[] = [];
-  private event: string | undefined;
-  private swallowLf = false;
-
-  push(input: string, eof = false): SseFrame[] {
-    const frames: SseFrame[] = [];
-    for (const char of input) {
-      if (this.swallowLf) {
-        this.swallowLf = false;
-        if (char === "\n") continue;
-      }
-      if (char === "\r") {
-        this.finishLine(frames);
-        this.swallowLf = true;
-      } else if (char === "\n") {
-        this.finishLine(frames);
-      } else {
-        this.line += char;
-      }
-    }
-    if (eof) {
-      if (this.line.length) this.finishLine(frames);
-      this.dispatch(frames);
-    }
-    return frames;
-  }
-
-  private finishLine(frames: SseFrame[]): void {
-    const line = this.line;
-    this.line = "";
-    if (!line) {
-      this.dispatch(frames);
-      return;
-    }
-    if (line.startsWith(":")) return;
-    const colon = line.indexOf(":");
-    const field = colon < 0 ? line : line.slice(0, colon);
-    const value = colon < 0 ? "" : line.slice(colon + 1).replace(/^ /, "");
-    if (field === "data") this.data.push(value);
-    else if (field === "event") this.event = value;
-  }
-
-  private dispatch(frames: SseFrame[]): void {
-    if (this.data.length) frames.push({ data: this.data.join("\n"), ...(this.event === undefined ? {} : { event: this.event }) });
-    this.data = [];
-    this.event = undefined;
-  }
-}
+/** Wire `event_type` -> event type the chat UI understands today. */
+const WIRE_TO_UI_EVENT_TYPE: Record<WireEventType, string> = {
+  run_started: "start",
+  text_delta: "text_delta",
+  transcript_block: "block",
+  tool_call: "tool_call",
+  tool_result: "tool_result",
+  status: "status",
+  error: "error",
+  done: "done",
+  keepalive: "keepalive",
+};
 
 function isRecord(value: unknown): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -184,10 +152,66 @@ function errorFromPayload(payload: unknown, status: number, statusText: string):
   return { code: `HTTP_${status}`, title: statusText || "Request failed", status };
 }
 
-function parseLegacyEvent(frame: SseFrame): ChatStreamEvent {
+/**
+ * Seed the replay cursor from a `Last-Event-ID` value.
+ *
+ * Only the legacy `run_id:sequence` form is resolvable here. A UUID cursor is
+ * sent back verbatim but is never parsed as a sequence and never re-derived
+ * locally: that would require a server-side run index.
+ */
+function seedFromLastEventId(value: string | undefined): StreamIdentity | undefined {
+  if (value === undefined || value === "") return undefined;
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)) return undefined;
+  const match = /^(.+):(\d+)$/.exec(value);
+  if (!match) return undefined;
+  const sequence = Number.parseInt(match[2], 10);
+  if (!Number.isSafeInteger(sequence)) return undefined;
+  return streamIdentity({ runId: match[1], sequence });
+}
+
+function protocolFailure(error: unknown): ChatStreamProtocolError {
+  if (error instanceof ChatStreamProtocolError) return error;
+  if (error instanceof UpstreamStreamMalformed) {
+    if (error.reason === "invalid_event_id" || error.reason === "event_id_unresolved") return new ChatStreamProtocolError("invalid_last_event_id");
+    if (error.reason === "run_scope_mismatch") return new ChatStreamProtocolError("stream_cursor_conflict");
+    return new ChatStreamProtocolError("upstream_stream_malformed");
+  }
+  return new ChatStreamProtocolError("upstream_stream_malformed");
+}
+
+/**
+ * Decode one frame: legacy `{type, data}` or the canonical wire envelope.
+ * Transport `id:`/`event:` values are validated against the envelope, and the
+ * frame is rejected as a whole when the two disagree.
+ */
+function parseStreamEvent(frame: SseFrame): ChatStreamEvent {
+  if (frame.data.length === 0) throw new ChatStreamProtocolError("empty_stream_frame");
   let parsed: unknown;
   try { parsed = JSON.parse(frame.data); } catch { throw new ChatStreamProtocolError("invalid_json_event"); }
-  if (!isRecord(parsed) || typeof parsed.type !== "string" || !isRecord(parsed.data)) {
+
+  const kind = envelopeKind(parsed);
+  if (kind === "wire") {
+    let envelope: ReturnType<typeof readWireEnvelope>;
+    try {
+      envelope = readWireEnvelope(parsed, {
+        ...(frame.id === undefined ? {} : { transportId: frame.id }),
+        ...(frame.event === undefined ? {} : { transportEvent: frame.event }),
+      });
+    } catch (error) {
+      throw protocolFailure(error);
+    }
+    return {
+      type: WIRE_TO_UI_EVENT_TYPE[envelope.eventType],
+      data: envelope.payload,
+      ...(envelope.sequence === undefined ? {} : { seq: envelope.sequence }),
+      ...(envelope.occurredAt === undefined ? {} : { at: envelope.occurredAt }),
+      ...(envelope.runId === undefined ? {} : { run_id: envelope.runId }),
+      ...(envelope.eventId === undefined ? {} : { event_id: envelope.eventId }),
+      ...(envelope.sessionId === undefined ? {} : { session_id: envelope.sessionId }),
+    };
+  }
+
+  if (kind !== "application" || !isRecord(parsed) || typeof parsed.type !== "string" || !isRecord(parsed.data)) {
     throw new ChatStreamProtocolError("invalid_legacy_event");
   }
   if (frame.event !== undefined && frame.event !== parsed.type) {
@@ -326,8 +350,9 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
     };
   }
 
-  async function* runChat(requestBody: ChatRunRequest, streamOptions: ChatStreamOptions = {}): AsyncIterable<ChatStreamEvent> {
+  async function* runChat(requestBody: ChatRunRequest, streamOptions: ChatRunReconnectOptions = {}): AsyncIterable<ChatStreamEvent> {
     const token = options.getAccessToken?.();
+    const lastEventId = streamOptions.lastEventId;
     const body = {
       ...(requestBody.session_id ? { session_id: requestBody.session_id } : {}),
       text: requestBody.text,
@@ -344,6 +369,8 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
           Accept: "text/event-stream",
           "Content-Type": "application/json",
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          // Only a reconnect carries a cursor; the initial POST never claims one.
+          ...(lastEventId === undefined || lastEventId === "" ? {} : { "Last-Event-ID": lastEventId }),
         },
         body: JSON.stringify(body),
       });
@@ -356,23 +383,40 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
-    const parser = new SseFrameParser();
+    const parser = new SseParser();
+    const cursor = new SseCursor(seedFromLastEventId(lastEventId));
     let closeReader = true;
     try {
-      while (true) {
+      let done = false;
+      while (!done) {
         let chunk: ReadableStreamReadResult<Uint8Array>;
         try { chunk = await reader.read(); } catch (cause) {
           if (streamOptions.signal?.aborted) throw cause;
           throw new ChatStreamNetworkError(cause);
         }
+        done = chunk.done;
         const text = chunk.done ? decoder.decode() : decoder.decode(chunk.value, { stream: true });
-        for (const frame of parser.push(text, chunk.done)) {
-          const event = parseLegacyEvent(frame);
-          if (event.type === "_error") throw apiErrorFromStreamEvent(event);
-          await streamOptions.onEvent?.(event);
+        const frames = chunk.done ? [...parser.push(text).frames, ...parser.end().frames] : parser.push(text).frames;
+        for (const frame of frames) {
+          const event = parseStreamEvent(frame);
+          const identity = streamIdentity({
+            ...(frame.id !== undefined && frame.id !== "" ? { eventId: frame.id } : {}),
+            ...(typeof event.run_id === "string" ? { runId: event.run_id } : {}),
+            ...(typeof event.seq === "number" ? { sequence: event.seq } : {}),
+          });
+          const verdict = cursor.inspect(identity);
+          if (verdict.kind === "conflict") throw new ChatStreamProtocolError("stream_cursor_conflict");
+          // Replayed frames were already delivered and committed once.
+          if (verdict.kind === "duplicate" || verdict.kind === "stale") continue;
+          // Both legacy error shapes are terminal for this attempt. A bare
+          // `error` without run/sequence stays non-replayable: the cursor is
+          // not advanced for it.
+          if (event.type === "_error" || event.type === "error") throw apiErrorFromStreamEvent(event);
+          if (streamOptions.onEvent) await streamOptions.onEvent(event);
           yield event;
+          // Advance the cursor only after the caller accepted the event.
+          cursor.commit(identity);
         }
-        if (chunk.done) break;
       }
       closeReader = false;
     } finally {

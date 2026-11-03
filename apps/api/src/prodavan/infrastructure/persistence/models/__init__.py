@@ -86,9 +86,18 @@ from prodavan.infrastructure.persistence.models.external_api import (
     WebhookDeliveryRow,
     WebhookSubscriptionRow,
 )
-from prodavan.infrastructure.persistence.models.dynamic_app_grants import DynamicAppCapabilityGrantRow
-# T00 blocker: canonical_grants.CanonicalGrantRow duplicates the legacy grant table.
-# Keep it unregistered until table ownership is resolved.
+# MIG-DDL-M06-01: canonical grants own their tables; see
+# docs/08-migration/canonical-grants-ownership-decision.md. The retired
+# dynamic_app_grants.DynamicAppCapabilityGrantRow duplicate is deliberately not
+# imported — a second __tablename__ claim would fork Base.metadata.
+from prodavan.infrastructure.persistence.models.canonical_grants import (
+    CanonicalGrantAuditRow,
+    CanonicalGrantMappingRow,
+    CanonicalGrantQuarantineRow,
+    CanonicalGrantRow,
+    CanonicalGrantWriterEpochRow,
+    M06CanonicalGrantPromotionEvidenceRow,
+)
 from prodavan.infrastructure.persistence.models.owner_registry import (
     CanonicalTenantAnchorRow,
     ScopeOwnerAuditRow,
@@ -147,7 +156,12 @@ __all__ = [
     "WebhookDeliveryRow",
     "WebhookSubscriptionRow",
     "AgentUsageRow",
-    "DynamicAppCapabilityGrantRow",
+    "CanonicalGrantAuditRow",
+    "CanonicalGrantMappingRow",
+    "CanonicalGrantQuarantineRow",
+    "CanonicalGrantRow",
+    "CanonicalGrantWriterEpochRow",
+    "M06CanonicalGrantPromotionEvidenceRow",
     "AppDefinitionRow",
     "AppGrantRow",
     "AppInstanceRow",
@@ -223,3 +237,22 @@ __all__ = [
     "ResourceRow",
     "ResourceVersionRow",
 ]
+
+
+def __getattr__(name: str):
+    """Fail closed for the retired duplicate grant model (MIG-DDL-M06-01).
+
+    ``DynamicAppCapabilityGrantRow`` described the same physical table as
+    ``CanonicalGrantRow`` with a narrower, non-canonical shape. Importing it
+    would create a second ``Table`` object for ``dynamic_app_capability_grants``
+    and fork ``Base.metadata``, so the name is not exported any more.
+    """
+
+    if name == "DynamicAppCapabilityGrantRow":
+        raise AttributeError(
+            "DynamicAppCapabilityGrantRow is retired: dynamic_app_capability_grants "
+            "is owned by models.canonical_grants.CanonicalGrantRow. Use "
+            "CanonicalGrantRow. The retired declaration file has been deleted; "
+            "see docs/08-migration/canonical-grants-ownership-decision.md."
+        )
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

@@ -61,7 +61,8 @@ class ApplicationIdentityResolutionAdapter(IdentityResolutionPort):
                 or not context.correlation_id.strip() or checked_at.tzinfo is None
                 or checked_at.utcoffset() is None or app_id != source.app_id
                 or manifest_version != source.manifest_version
-                or not source.app_definition_id or not source.app_version_id):
+                or not source.app_definition_id or not source.app_version_id
+                or context.app_definition_id != source.app_definition_id):
             raise IdentityResolutionError("authenticated_m04_m04e_m05_context_missing")
         if not dependency_gates.positive_projection_ready:
             raise IdentityResolutionError("m06_upstream_or_schema_handoff_blocked")
@@ -216,6 +217,7 @@ def _handoff_matches(gates: DependencyGates, context: AuthenticatedGrantContext,
     return bool(
         gates.tenant_id == context.tenant_id
         and gates.app_definition_id == source.app_definition_id
+        and gates.app_definition_id == context.app_definition_id
         and gates.app_version_id == source.app_version_id
         and gates.scope_kind == "plugin_instance" and gates.scope_id == context.plugin_instance_id
         and gates.installation_scope_kind == source.asserted_scope_kind

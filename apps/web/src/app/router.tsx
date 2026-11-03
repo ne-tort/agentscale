@@ -24,6 +24,7 @@ import {
   RunsPage,
 } from "../routes/pages";
 import { AutomationsPage } from "../features/automations";
+import { DynamicModulePage, DynamicModulesPage } from "../features/dynamic-modules";
 
 const APP_FRAME_STYLES = `
 .employee-app-frame{min-height:100vh;background:#f3f7f5;color:#17232b}
@@ -77,7 +78,7 @@ function AppFrame() {
     {!isProjectWorkspace && <header className="employee-app-header">
       <Link to="/projects" className="employee-app-brand">agentscale</Link>
       <nav className="employee-app-navigation" aria-label="Application navigation">
-        <Link to="/projects">Projects</Link><Link to="/cabinets">Cabinets</Link><Link to="/company">Company</Link><Link to="/company/modules">Module bindings</Link><Link to="/company/content">Content</Link><Link to="/admin/modules">Module catalog</Link><Link to="/admin">Admin</Link>
+        <Link to="/projects">Projects</Link><Link to="/cabinets">Cabinets</Link><Link to="/company">Company</Link><Link to="/company/modules">Module bindings</Link><Link to="/company/content">Content</Link><Link to="/admin/modules">Module catalog</Link><Link to="/dynamic-modules">Dynamic modules</Link><Link to="/admin">Admin</Link>
       </nav>
       <div className="employee-app-account"><span>{auth.employee?.display_name ?? "Employee"}</span><button type="button" onClick={auth.signOut}>Sign out</button></div>
     </header>}
@@ -239,6 +240,9 @@ export function AppRouter() {
         <Route path="cabinets/:cabinetId" element={<CabinetPage />} />
         <Route path="company/*" element={<CompanyPage />} />
         <Route path="admin/*" element={<AdminPage />} />
+        {/* Dynamic module registry screens (definitions → versions → install → grants). */}
+        <Route path="dynamic-modules" element={<DynamicModulesPage />} />
+        <Route path="dynamic-modules/:definitionId" element={<DynamicModulePage />} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>
     </Route>

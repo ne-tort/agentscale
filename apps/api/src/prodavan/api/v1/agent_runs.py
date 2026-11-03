@@ -10,10 +10,15 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from prodavan.api.deps import PrincipalDep, SessionDep, get_current_employee
-from prodavan.api.migration_agent_runs.dependencies import AgentRunBackendDep, FEATURE_FLAG
+from prodavan.api.migration_agent_runs.dependencies import (
+    AgentRunBackend,
+    AgentRunBackendDep,
+    FEATURE_FLAG,
+)
 from prodavan.api.migration_agent_runs.schemas import (
     AgentRunCancelled,
     AgentRunCreated,
+    AgentRunDispatchReport,
     AgentRunList,
     AgentRunRecord,
     ApprovalDecisionBody,
@@ -164,6 +169,27 @@ def _queue_count(result) -> int:
     return len(result.event_results)
 
 
+async def _dispatch_committed(
+    *,
+    backend: AgentRunBackend,
+    trace_id: str,
+    result,
+) -> AgentRunDispatchReport:
+    """Hand committed enqueue intents to the durable consumer.
+
+    Called only after the control-plane transaction returned ``applied`` or
+    ``duplicate``: the state transition, its events, the outbox projection and
+    the enqueue intents were written in that one transaction. This call never
+    writes domain state; it asks the consumer to claim the intents it just made
+    durable. Failure is reported, not raised — the pending row remains the
+    durable handoff for the next consumer round.
+    """
+    return await backend.dispatch_after_commit(
+        trace_id=trace_id,
+        intent_count=_queue_count(result),
+    )
+
+
 async def _project(
     *,
     project_id: str,
@@ -303,10 +329,16 @@ async def create_agent_run(
     if result.status not in {ControlPlaneWriteStatus.APPLIED, ControlPlaneWriteStatus.DUPLICATE}:
         raise _write_error(result)
     assert result.run is not None
+    dispatch = await _dispatch_committed(
+        backend=backend,
+        trace_id=linkage.trace_id,
+        result=result,
+    )
     return AgentRunCreated(
         run=_record(result.run, sequence=result.event_results[0].aggregate_version),
         duplicate=result.status is ControlPlaneWriteStatus.DUPLICATE,
         queue_intents_recorded=_queue_count(result),
+        dispatch=dispatch,
     )
 
 
@@ -388,6 +420,11 @@ async def cancel_agent_run(
     if result.status not in {ControlPlaneWriteStatus.APPLIED, ControlPlaneWriteStatus.DUPLICATE}:
         raise _write_error(result)
     assert result.run is not None
+    dispatch = await _dispatch_committed(
+        backend=backend,
+        trace_id=linkage.trace_id,
+        result=result,
+    )
     return AgentRunCancelled(
         run=_record(
             result.run,
@@ -395,6 +432,7 @@ async def cancel_agent_run(
         ),
         duplicate=result.status is ControlPlaneWriteStatus.DUPLICATE,
         queue_intents_recorded=_queue_count(result),
+        dispatch=dispatch,
     )
 
 
@@ -575,6 +613,13 @@ async def decide_agent_approval(
             extra={"blocker": "agent_control_plane_aggregate_cursor_missing"},
         )
     status = ApprovalRequestStatus.APPROVED if body.decision == "approve" else ApprovalRequestStatus.DENIED
+    linkage = _linkage(
+        tenant_id=tenant_id,
+        employee=actor,
+        project_id=project_id,
+        session_id=scope.session_id,
+        idempotency_key=key,
+    )
     try:
         result = await backend.control_plane(tenant_id=tenant_id).decide_approval(
             approval_id,
@@ -584,13 +629,7 @@ async def decide_agent_approval(
                 decision_reason=body.reason,
             ),
             run_id=run.id,
-            linkage=_linkage(
-                tenant_id=tenant_id,
-                employee=actor,
-                project_id=project_id,
-                session_id=scope.session_id,
-                idempotency_key=key,
-            ),
+            linkage=linkage,
             expected_approval_sequence=body.expected_approval_sequence,
             expected_run_sequence=body.expected_run_sequence,
             command_idempotency_key=key,
@@ -604,6 +643,11 @@ async def decide_agent_approval(
     if result.status not in {ControlPlaneWriteStatus.APPLIED, ControlPlaneWriteStatus.DUPLICATE}:
         raise _write_error(result)
     assert result.run is not None and result.approval is not None
+    dispatch = await _dispatch_committed(
+        backend=backend,
+        trace_id=linkage.trace_id,
+        result=result,
+    )
     return ApprovalDecisionResult(
         approval=_approval_record(result.approval),
         run=_record(
@@ -616,6 +660,7 @@ async def decide_agent_approval(
         ),
         duplicate=result.status is ControlPlaneWriteStatus.DUPLICATE,
         queue_intents_recorded=_queue_count(result),
+        dispatch=dispatch,
     )
 
 
@@ -796,17 +841,18 @@ async def cancel_agent_approval(
             detail="approval or run aggregate cursor is missing",
             extra={"blocker": "agent_control_plane_aggregate_cursor_missing", "feature_flag": FEATURE_FLAG},
         )
+    linkage = _linkage(
+        tenant_id=tenant_id,
+        employee=actor,
+        project_id=project_id,
+        session_id=scope.session_id,
+        idempotency_key=key,
+    )
     try:
         result = await backend.control_plane(tenant_id=tenant_id).cancel_approval(
             approval_id=approval_id,
             run_id=run.id,
-            linkage=_linkage(
-                tenant_id=tenant_id,
-                employee=actor,
-                project_id=project_id,
-                session_id=scope.session_id,
-                idempotency_key=key,
-            ),
+            linkage=linkage,
             expected_approval_sequence=body.expected_approval_sequence,
             expected_run_sequence=body.expected_run_sequence,
             command_idempotency_key=key,
@@ -825,6 +871,11 @@ async def cancel_agent_approval(
     if result.status not in {ControlPlaneWriteStatus.APPLIED, ControlPlaneWriteStatus.DUPLICATE}:
         raise _write_error(result)
     assert result.run is not None and result.approval is not None
+    dispatch = await _dispatch_committed(
+        backend=backend,
+        trace_id=linkage.trace_id,
+        result=result,
+    )
     return ApprovalDecisionResult(
         approval=_approval_record(result.approval),
         run=_record(
@@ -837,6 +888,7 @@ async def cancel_agent_approval(
         ),
         duplicate=result.status is ControlPlaneWriteStatus.DUPLICATE,
         queue_intents_recorded=_queue_count(result),
+        dispatch=dispatch,
     )
 
 

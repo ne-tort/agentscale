@@ -113,12 +113,33 @@ class ApprovalInbox(BaseModel):
     limit: int
 
 
+class AgentRunDispatchReport(BaseModel):
+    """Redacted outcome of the post-commit durable dispatch trigger.
+
+    ``triggered`` says the capped consumer round actually ran; the counters are
+    what it decided. A ``reason`` means delivery was deferred and the committed
+    enqueue intent stays pending, claimable by the next consumer round.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    triggered: bool
+    claimed: int = Field(default=0, ge=0)
+    delivered: int = Field(default=0, ge=0)
+    retried: int = Field(default=0, ge=0)
+    rejected: int = Field(default=0, ge=0)
+    quarantined: int = Field(default=0, ge=0)
+    lease_lost: int = Field(default=0, ge=0)
+    reason: str | None = None
+
+
 class AgentRunCreated(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     run: AgentRunRecord
     duplicate: bool
     queue_intents_recorded: int = Field(ge=1)
+    dispatch: AgentRunDispatchReport | None = None
 
 
 class AgentRunCancelled(BaseModel):
@@ -127,6 +148,7 @@ class AgentRunCancelled(BaseModel):
     run: AgentRunRecord
     duplicate: bool
     queue_intents_recorded: int = Field(ge=1)
+    dispatch: AgentRunDispatchReport | None = None
 
 
 class ApprovalDecisionResult(BaseModel):
@@ -136,6 +158,7 @@ class ApprovalDecisionResult(BaseModel):
     run: AgentRunRecord
     duplicate: bool
     queue_intents_recorded: int = Field(ge=2)
+    dispatch: AgentRunDispatchReport | None = None
 
 
 class EventTimeline(BaseModel):
@@ -171,6 +194,7 @@ class EventTimelineQuery(BaseModel):
 __all__ = [
     "AgentRunCancelled",
     "AgentRunCreated",
+    "AgentRunDispatchReport",
     "AgentRunList",
     "AgentRunRecord",
     "ApprovalDecisionBody",
