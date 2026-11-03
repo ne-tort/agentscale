@@ -15,6 +15,21 @@ class AdapterScope(StrEnum):
     CHAT_RUN = "web:chat_run"
 
 
+class LastEventIdError(ValueError):
+    """Stable transport-level rejection of a malformed ``Last-Event-ID``.
+
+    Subclasses ``ValueError`` so existing callers keep their contract; the
+    transport maps ``code`` to an RFC 7807 ``400`` instead of letting a raw
+    ``ValueError`` mutate into a generic 500/502.
+    """
+
+    code = "INVALID_LAST_EVENT_ID"
+
+    def __init__(self, code: str = "INVALID_LAST_EVENT_ID") -> None:
+        self.code = code
+        super().__init__(code)
+
+
 @dataclass(frozen=True, slots=True)
 class ReplayCursor:
     """Parsed SSE cursor; the sequence is scoped to one run/session."""
@@ -27,22 +42,26 @@ class ReplayCursor:
 
 
 def parse_last_event_id(value: str | None) -> ReplayCursor | None:
-    """Parse ``Last-Event-ID`` without accepting ambiguous negative cursors."""
+    """Parse ``Last-Event-ID`` without accepting ambiguous negative cursors.
+
+    Accepts the legacy/application ``run_id:sequence`` form and a bare
+    non-negative sequence. UUID wire ids are deliberately not understood here:
+    they can only be resolved through a trusted run index by the transport.
+    """
     if value is None or not value.strip():
         return None
     raw = value.strip()
     if ":" in raw:
         run_id, sequence = raw.rsplit(":", 1)
         if not run_id:
-            raise ValueError("Last-Event-ID has an empty run id")
+            raise LastEventIdError()
     else:
         run_id, sequence = None, raw
-    try:
-        seq = int(sequence)
-    except ValueError as exc:
-        raise ValueError("Last-Event-ID must contain an integer sequence") from exc
+    if not sequence.isascii() or not sequence.isdigit():
+        raise LastEventIdError()
+    seq = int(sequence)
     if seq < 0:
-        raise ValueError("Last-Event-ID sequence must be non-negative")
+        raise LastEventIdError()
     return ReplayCursor(run_id=run_id, after_seq=seq)
 
 
@@ -72,10 +91,16 @@ def legacy_event_to_run_event(raw: object, *, fallback_run_id: str | None = None
     except ValueError as exc:
         raise ValueError(f"unsupported legacy stream event: {event_name}") from exc
     seq_raw = raw.get("seq", raw.get("sequence", data.pop("seq", None)))
-    if seq_raw is None:
+    if seq_raw is None or isinstance(seq_raw, bool):
         raise ValueError("legacy stream event has no sequence")
+    try:
+        seq = int(seq_raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("legacy stream event has a non-numeric sequence") from exc
+    if seq < 0:
+        raise ValueError("legacy stream event has a negative sequence")
     block = raw.get("block") or data.pop("block", None)
     if isinstance(block, dict):
         block = ChatBlock.model_validate(block)
     text = raw.get("text", data.pop("text", None))
-    return RunStreamEvent(type=event_kind, run_id=run_id, seq=int(seq_raw), text=text, block=block, data=data)
+    return RunStreamEvent(type=event_kind, run_id=run_id, seq=seq, text=text, block=block, data=data)

@@ -12,6 +12,7 @@ from prodavan.application.web_facade.contracts import (
 )
 
 from .contracts import AdapterScope, legacy_event_to_run_event, parse_last_event_id
+from .envelopes import MalformedStreamEvent
 from .ports import LegacyServices
 
 
@@ -74,6 +75,11 @@ class WebFacadeAdapter:
         self, *, context: WebRequestContext, request: ChatRunRequest,
         last_event_id: str | None = None,
     ) -> AsyncIterator[SseEventEnvelope]:
+        """Translate one legacy turn into application envelopes.
+
+        The scope checks run on every call, including replay: transport auth
+        never substitutes for the application capability check.
+        """
         self._require(AdapterScope.CHAT_RUN)
         ScopeBoundary(self._context(context)).session(request.project_id, request.session_id)
         cursor = parse_last_event_id(last_event_id)
@@ -84,7 +90,13 @@ class WebFacadeAdapter:
             if isinstance(raw, RunStreamEvent):
                 event = raw
             else:
-                event = legacy_event_to_run_event(raw, fallback_run_id=cursor.run_id)
+                try:
+                    event = legacy_event_to_run_event(raw, fallback_run_id=cursor.run_id)
+                except (TypeError, ValueError) as exc:
+                    # A broken upstream frame is never partially forwarded: the
+                    # transport maps this to 502 before headers (or a redacted
+                    # terminal error after them), never to a cursor error.
+                    raise MalformedStreamEvent() from exc
             # A cursor is scoped to one run. Never leak a later/different run
             # into a reconnect stream merely because its sequence is larger.
             if cursor and cursor.run_id and event.run_id != cursor.run_id:

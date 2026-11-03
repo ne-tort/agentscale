@@ -15,6 +15,7 @@ from typing import Any, Mapping, Protocol, Sequence
 
 from .domain import (
     AssociationBackfill,
+    BudgetAllocation,
     CandidateGroup,
     DomainScope,
     EquipmentProjection,
@@ -29,6 +30,7 @@ from .domain import (
     select_tender,
     _stable_digest,
 )
+from .durable_export import DurableExportBundle, prepare_durable_export
 from .transactions import (
     EquipmentDomainTransactionPort,
     EquipmentTransactionResult,
@@ -71,12 +73,20 @@ class EquipmentDomainSnapshot:
     candidate_groups: tuple[CandidateGroup, ...]
     tenders: tuple[EquipmentTender, ...]
     source_generation: int = 0
+    budget_allocations: tuple[BudgetAllocation, ...] = ()
+    unresolved_subjects: tuple[tuple[str, str], ...] = ()
+    empty_candidate_groups: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.source_revision.strip():
             raise ValueError("source revision is required for deterministic projection")
         if self.source_generation < 0:
             raise ValueError("source generation cannot be negative")
+        if any(not subject_id.strip() or not reason_code.strip()
+               for subject_id, reason_code in self.unresolved_subjects):
+            raise ValueError("unresolved snapshot evidence requires a subject and a reason code")
+        if any(not group_id.strip() for group_id in self.empty_candidate_groups):
+            raise ValueError("empty candidate group evidence requires a group identity")
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,6 +115,12 @@ class EquipmentActorPort(Protocol):
 class HumanDecisionPort(Protocol):
     async def load_selections(self, *, scope: DomainScope, actor_id: str) -> tuple[HumanSelection, ...]:
         """Read immutable explicit selections for actor and exact project scope."""
+        ...
+
+
+class EquipmentBudgetPort(Protocol):
+    async def load_allocations(self, *, scope: DomainScope) -> tuple[BudgetAllocation, ...]:
+        """Read durable budget reservations for the exact tenant/owner/project."""
         ...
 
 
@@ -146,12 +162,14 @@ class EquipmentDomainService:
     def __init__(self, *, source: EquipmentDomainReadPort,
                  actors: EquipmentActorPort, decisions: HumanDecisionPort,
                  associations: OrderedAssociationPort | None = None,
-                 transaction: EquipmentDomainTransactionPort | None = None) -> None:
+                 transaction: EquipmentDomainTransactionPort | None = None,
+                 budgets: EquipmentBudgetPort | None = None) -> None:
         self._source = source
         self._actors = actors
         self._decisions = decisions
         self._associations = associations
         self._transaction = transaction
+        self._budgets = budgets
 
     async def project(self, *, scope: DomainScope) -> EquipmentProjection:
         snapshot = await self._load_snapshot(scope)
@@ -160,7 +178,17 @@ class EquipmentDomainService:
             candidate_groups=snapshot.candidate_groups, tenders=snapshot.tenders,
             expected_scope=scope, source_revision=snapshot.source_revision,
             source_generation=snapshot.source_generation,
+            unresolved_reasons=self._unresolved_reasons(snapshot),
         )
+
+    @staticmethod
+    def _unresolved_reasons(snapshot: EquipmentDomainSnapshot) -> tuple[str, ...]:
+        """Surface source evidence the snapshot could not prove as blockers.
+
+        The reason codes are stable tokens (never row payloads), so a blocked
+        projection stays diagnosable without exposing source data.
+        """
+        return tuple(sorted({code for _, code in snapshot.unresolved_subjects}))
 
     async def commit_selection(self, *, scope: DomainScope, actor_id: str,
                                selection_id: str, line_id: str, tender_id: str,
@@ -262,6 +290,67 @@ class EquipmentDomainService:
             export_id=export_id,
         )
         return export
+
+    async def prepare_export_bundle(self, *, scope: DomainScope, actor_id: str,
+                                    export_id: str) -> DurableExportBundle:
+        """Build the durable export bundle, including budget and empty-group evidence.
+
+        Unlike :meth:`prepare_export` this never raises on "nothing selected":
+        an incomplete or empty scope is reported as ``partial``/``empty`` so an
+        operator can see the gap, while the transaction port still refuses to
+        commit anything that is not ``full``.
+        """
+        actor = await self._human_actor(actor_id=actor_id, scope=scope)
+        snapshot = await self._load_snapshot(scope)
+        projection = build_projection(
+            requests=snapshot.requests, lines=snapshot.lines,
+            candidate_groups=snapshot.candidate_groups, tenders=snapshot.tenders,
+            expected_scope=scope, source_revision=snapshot.source_revision,
+            source_generation=snapshot.source_generation,
+            unresolved_reasons=self._unresolved_reasons(snapshot),
+        )
+        selections = await self._decisions.load_selections(scope=scope, actor_id=actor.actor_id)
+        self._assert_selection_history_scope(
+            history=selections, actor_id=actor.actor_id, scope=scope)
+        allocations = await self._budget_allocations(scope)
+        return prepare_durable_export(
+            projection=projection, selections=selections, scope=scope,
+            actor_id=actor.actor_id, export_id=export_id,
+            budget_allocations=allocations,
+            empty_candidate_group_ids=snapshot.empty_candidate_groups,
+        )
+
+    async def commit_export_bundle(self, *, scope: DomainScope, actor_id: str,
+                                   export_id: str) -> EquipmentTransactionResult:
+        """Commit exactly the bundle that was prepared from durable rows.
+
+        A ``partial`` or ``empty`` bundle is refused with a blocked result: an
+        incomplete selection set is never reported as a durable export.
+        """
+        bundle = await self.prepare_export_bundle(
+            scope=scope, actor_id=actor_id, export_id=export_id)
+        if not bundle.committable or bundle.prepared_export is None:
+            return blocked_transaction_result(
+                scope=scope, operation="procurement_export",
+                idempotency_key=bundle.idempotency_key,
+                payload_digest=bundle.bundle_digest,
+                source_revision=bundle.source_revision or "unavailable",
+                source_generation=bundle.source_generation,
+                reason_code=(
+                    "equipment_procurement_export_empty"
+                    if not bundle.lines else "equipment_selection_set_incomplete"
+                ),
+            )
+        return await self.commit_export(scope=scope, actor_id=actor_id, export_id=export_id)
+
+    async def _budget_allocations(
+        self, scope: DomainScope,
+    ) -> tuple[BudgetAllocation, ...]:
+        if self._budgets is None:
+            # No budget port means the budget is unknown, and unknown is
+            # reported as unfilled - never as "covered".
+            return ()
+        return tuple(await self._budgets.load_allocations(scope=scope))
 
     async def commit_export(self, *, scope: DomainScope, actor_id: str,
                             export_id: str) -> EquipmentTransactionResult:

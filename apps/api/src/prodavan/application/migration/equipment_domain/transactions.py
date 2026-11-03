@@ -1,10 +1,16 @@
 """Atomic application ports for the equipment decision and export workflow.
 
-This module deliberately contains no database, object-store, legacy-row, or
-supplier adapter.  A host must provide the two transaction ports before a
-selection or procurement export can be reported as durable.  The port is the
-only place allowed to claim that the mutation, immutable audit evidence and
-idempotency record committed together.
+The concrete durable implementation now lives in :mod:`durable`
+(:class:`~.durable.SqlAlchemyEquipmentRepository`) and is wired by
+:func:`~.composition.build_durable_equipment_service`; this module keeps the
+contracts, the transaction commands and the receipt validation that both sides
+share.
+
+The port is still the only place allowed to claim that the mutation, the
+append-only audit evidence and the idempotency record committed together.
+``WIRING_BLOCKER`` is therefore no longer a description of the production path:
+it is the explicit no-write outcome a host receives when it composes
+:class:`~.service.EquipmentDomainService` **without** a transaction port.
 """
 
 from __future__ import annotations
@@ -24,6 +30,10 @@ from .domain import (
 
 
 WIRING_BLOCKER = "equipment_domain_transaction_adapter_unwired"
+#: Returned only when a host composes the service without a transaction port.
+#: The durable composition (:func:`~.composition.build_durable_equipment_service`)
+#: never produces it.
+UNWIRED_REASON = WIRING_BLOCKER
 
 
 def _is_sha256(value: str) -> bool:
@@ -306,6 +316,7 @@ __all__ = [
     "HumanSelectionTransactionPort",
     "ProcurementExportTransactionPort",
     "SelectionTransaction",
+    "UNWIRED_REASON",
     "WIRING_BLOCKER",
     "blocked_transaction_result",
     "validate_transaction_result",

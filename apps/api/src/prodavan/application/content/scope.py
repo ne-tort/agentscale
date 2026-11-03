@@ -216,7 +216,13 @@ def asset_owner_scope(*, owner_company_id: str | None) -> str:
 
 
 def is_company_private(*, visibility: str, owner_company_id: str | None) -> bool:
-    return visibility == ContentVisibility.COMPANY and bool(owner_company_id)
+    """True for a tenant-owned asset that is restricted to its creator.
+
+    ``company`` visibility is shared inside the tenant; ``private`` is the
+    narrow case. The predicate previously reported the opposite, which would
+    have inverted any caller-side check built on it.
+    """
+    return visibility == ContentVisibility.PRIVATE and bool(owner_company_id)
 
 
 async def load_cabinet(session: AsyncSession, cabinet_id: str) -> CabinetInstanceRow | None:

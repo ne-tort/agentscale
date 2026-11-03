@@ -188,6 +188,12 @@ class PageCommitResult(StrEnum):
     CONFLICT = "conflict"
     CHECKPOINT_CONFLICT = "checkpoint_conflict"
     PARTIALLY_COMMITTED = "partially_committed"
+    #: The page transaction committed (artifact evidence, snapshot, offers,
+    #: checkpoint and run status), but a required post-commit step failed, e.g.
+    #: search indexing after the commit. The committed evidence is kept and the
+    #: run must not be reported as ``succeeded``; repair is a forward re-run of
+    #: the post-commit step from the committed snapshot.
+    COMMITTED_INCOMPLETE = "committed_incomplete"
 
 
 @dataclass(frozen=True, slots=True)
@@ -201,8 +207,16 @@ class PageCommitOutcome:
     stayed put, so the page is retried and every retried offer must match by
     ``(snapshot_id, external_key)``. That outcome can never yield a succeeded run.
 
+    ``COMMITTED_INCOMPLETE`` is the committed counterpart of a failure: the page
+    is durable but a post-commit requirement (search indexing) failed, so the run
+    is failed with the adapter's reason code while the page stays committed and
+    resumable from its advanced checkpoint.
+
     ``reason_code`` is a redacted machine code (``[a-z][a-z0-9_.-]*``) and never
-    contains payload, credential or supplier text.
+    contains payload, credential or supplier text. A reason code that differs
+    from the bare ``PageCommitResult`` value is treated as adapter-supplied and
+    is surfaced verbatim by the orchestration; the bare enum keeps the generic
+    legacy codes.
     """
 
     result: PageCommitResult
@@ -223,7 +237,8 @@ class PageCommitOutcome:
         if self.result is PageCommitResult.COMMITTED and self.offers_conflicted:
             raise ValueError("a committed page cannot report conflicting offers")
         if self.result not in (PageCommitResult.COMMITTED,
-                               PageCommitResult.PARTIALLY_COMMITTED) and self.offers_written:
+                               PageCommitResult.PARTIALLY_COMMITTED,
+                               PageCommitResult.COMMITTED_INCOMPLETE) and self.offers_written:
             raise ValueError("only a committed or partially committed page may report written offers")
 
 
@@ -771,25 +786,41 @@ class EquipmentIngestionService:
                     artifact=artifact, payload=raw, snapshot=snapshot,
                     run=run_record, expected_checkpoint=expected_checkpoint,
                 ))
-            except Exception:
+            except Exception as exc:
                 # A durable adapter may fail after some offer batches landed. The
                 # page never reached its terminal state, so the run must not be
                 # reported as running or succeeded; resume uses the same cursor.
                 return await self._source_failed(
                     run_id, source, supplier, cursor, page_count, accepted_count,
                     observed_count, quarantined_count, artifact_ids, snapshot_ids,
-                    run_started, latest_update, "page_commit_failed", page.observed_at,
+                    run_started, latest_update, _exception_reason(exc), page.observed_at,
+                )
+            if outcome.result is PageCommitResult.COMMITTED_INCOMPLETE:
+                # The page is durable, but a post-commit requirement failed. The
+                # checkpoint advanced, so resume continues after this page; the
+                # run is failed with the adapter's reason and is never succeeded.
+                return await self._committed_incomplete(
+                    run_id=run_id, source=source, supplier=supplier,
+                    cursor=page.next_cursor, page_count=next_page_count,
+                    accepted_count=next_accepted_count, observed_count=next_observed_count,
+                    quarantined_count=next_quarantined_count, artifact_ids=next_artifacts,
+                    snapshot_ids=next_snapshots, started_at=run_started,
+                    at=page.observed_at, code=outcome.reason_code,
                 )
             if outcome.result is PageCommitResult.PARTIALLY_COMMITTED:
                 return await self._source_failed(
                     run_id, source, supplier, cursor, page_count, accepted_count,
                     observed_count, quarantined_count, artifact_ids, snapshot_ids,
-                    run_started, latest_update, "page_commit_partially_written",
+                    run_started, latest_update,
+                    _specific_reason(outcome, "page_commit_partially_written"),
                     page.observed_at,
                 )
             if outcome.result not in (PageCommitResult.COMMITTED, PageCommitResult.REPLAYED):
-                code = ("checkpoint_cas_conflict" if outcome.result is PageCommitResult.CHECKPOINT_CONFLICT
-                        else "immutable_page_replay_conflict")
+                code = _specific_reason(outcome, (
+                    "checkpoint_cas_conflict"
+                    if outcome.result is PageCommitResult.CHECKPOINT_CONFLICT
+                    else "immutable_page_replay_conflict"
+                ))
                 return self._blocked(run_id, source, supplier, started, code, prior=prior)
 
             page_count, accepted_count = next_page_count, next_accepted_count
@@ -848,6 +879,37 @@ class EquipmentIngestionService:
                            error_code="checkpoint_cas_conflict")
         return failed_run
 
+    async def _committed_incomplete(
+        self, *, run_id: str, source: SourceIdentity, supplier: SupplierIdentity,
+        cursor: str | None, page_count: int, accepted_count: int, observed_count: int,
+        quarantined_count: int, artifact_ids: Sequence[str],
+        snapshot_ids: Sequence[str], started_at: datetime, at: datetime, code: str,
+    ) -> IngestionRun:
+        """Fail the run after a committed page whose post-commit step failed.
+
+        The source is not at fault, so no source-failure marker is written. The
+        run record is failed at the *advanced* checkpoint: the committed page is
+        evidence and must not be re-ingested, while the run stays non-terminal
+        until the post-commit step is repaired from that committed page.
+        """
+        _aware(at)
+        failed_run = IngestionRun(
+            run_id=run_id, source=source, supplier=supplier,
+            status=IngestionRunStatus.FAILED, checkpoint_cursor=cursor,
+            page_count=page_count, record_count=accepted_count,
+            artifact_ids=tuple(artifact_ids), snapshot_ids=tuple(snapshot_ids),
+            started_at=started_at, updated_at=at, error_code=code,
+            observed_count=observed_count, quarantined_count=quarantined_count,
+        )
+        recorded = await self._evidence.record_run_failure(
+            run=failed_run, expected_checkpoint=cursor,
+        )
+        if not recorded:
+            return build_blocked_run(run_id=run_id, source=source, supplier=supplier,
+                                     reason_code="checkpoint_cas_conflict", now=at,
+                                     prior=failed_run)
+        return failed_run
+
     @staticmethod
     def _offer_payload(offer: CatalogOffer) -> Mapping[str, Any]:
         return {
@@ -897,25 +959,57 @@ class EquipmentIngestionService:
     @staticmethod
     def _blocked(run_id: str, source: SourceIdentity, supplier: SupplierIdentity,
                  now: datetime, code: str, *, prior: IngestionRun | None = None) -> IngestionRun:
-        return IngestionRun(
-            run_id=run_id, source=source, supplier=supplier,
-            status=IngestionRunStatus.BLOCKED,
-            checkpoint_cursor=prior.checkpoint_cursor if prior else None,
-            page_count=prior.page_count if prior else 0,
-            record_count=prior.record_count if prior else 0,
-            artifact_ids=prior.artifact_ids if prior else (),
-            snapshot_ids=prior.snapshot_ids if prior else (),
-            started_at=prior.started_at if prior else now, updated_at=now,
-            error_code=code,
-            observed_count=prior.observed_count if prior and prior.observed_count is not None else 0,
-            quarantined_count=prior.quarantined_count if prior else 0,
-        )
+        return build_blocked_run(run_id=run_id, source=source, supplier=supplier,
+                                 reason_code=code, now=now, prior=prior)
+
+
+def _specific_reason(outcome: PageCommitOutcome, fallback: str) -> str:
+    """Prefer an adapter-supplied redacted reason over the generic code."""
+    if outcome.reason_code and outcome.reason_code != outcome.result.value:
+        return outcome.reason_code
+    return fallback
+
+
+def _exception_reason(exc: BaseException) -> str:
+    """Accept a redacted reason code from a durable adapter, else stay generic."""
+    code = getattr(exc, "reason_code", None)
+    if isinstance(code, str) and _REASON_CODE_RE.fullmatch(code):
+        return code
+    return "page_commit_failed"
+
+
+def normalize_page_commit_outcome(value: Any) -> PageCommitOutcome:
+    """Public normalizer for evidence adapters that wrap another adapter."""
+    return _page_commit_outcome(value)
+
+
+def build_blocked_run(*, run_id: str, source: SourceIdentity, supplier: SupplierIdentity,
+                      reason_code: str, now: datetime,
+                      prior: IngestionRun | None = None) -> IngestionRun:
+    """Build a fail-closed run that carries the prior committed evidence."""
+    _aware(now)
+    if not isinstance(reason_code, str) or not _REASON_CODE_RE.fullmatch(reason_code):
+        raise ValueError("blocked run reason_code must be a redacted code")
+    return IngestionRun(
+        run_id=run_id, source=source, supplier=supplier,
+        status=IngestionRunStatus.BLOCKED,
+        checkpoint_cursor=prior.checkpoint_cursor if prior else None,
+        page_count=prior.page_count if prior else 0,
+        record_count=prior.record_count if prior else 0,
+        artifact_ids=prior.artifact_ids if prior else (),
+        snapshot_ids=prior.snapshot_ids if prior else (),
+        started_at=prior.started_at if prior else now, updated_at=now,
+        error_code=reason_code,
+        observed_count=prior.observed_count if prior else 0,
+        quarantined_count=prior.quarantined_count if prior else 0,
+    )
 
 
 __all__ = [
     "CatalogOffer", "CatalogProjection", "CatalogSnapshot", "EquipmentIngestionService",
     "FreshnessState", "IngestionEvidencePort", "IngestionRun", "IngestionRunStatus",
-    "PageCommitResult", "ProjectionContract", "ProjectionRebuildPort", "QuarantinedRow",
-    "RawArtifact", "SourceAdapter", "SourceIdentity", "SourcePage", "SupplierIdentity",
-    "build_catalog_projection", "evidence_digest", "offer_identity", "offer_provenance_digest",
+    "PageCommitOutcome", "PageCommitResult", "ProjectionContract", "ProjectionRebuildPort",
+    "QuarantinedRow", "RawArtifact", "SourceAdapter", "SourceIdentity", "SourcePage",
+    "SupplierIdentity", "build_blocked_run", "build_catalog_projection", "evidence_digest",
+    "normalize_page_commit_outcome", "offer_identity", "offer_provenance_digest",
 ]

@@ -36,6 +36,8 @@ MAX_LINK_KIND_LEN = 64
 MAX_LINK_ID_LEN = 40
 MAX_MIME_LEN = 128
 MAX_TITLE_LEN = 260
+#: ``content_aliases.label`` is ``String(200)`` — narrower than an asset title.
+MAX_ALIAS_LABEL_LEN = 200
 MAX_TAGS = 64
 MAX_TAG_LEN = 64
 VERSION_PAGE_DEFAULT = 50
@@ -160,6 +162,7 @@ class ContentErrorCode(StrEnum):
     CONTENT_ACL_PLATFORM_GRANT_FORBIDDEN = "CONTENT_ACL_PLATFORM_GRANT_FORBIDDEN"
     CONTENT_LINK_KIND_UNSUPPORTED = "CONTENT_LINK_KIND_UNSUPPORTED"
     CONTENT_LINK_TARGET_CONFLICT = "CONTENT_LINK_TARGET_CONFLICT"
+    CONTENT_ALIAS_VISIBILITY_UNSUPPORTED = "CONTENT_ALIAS_VISIBILITY_UNSUPPORTED"
 
 
 #: Stable code returned by ``DELETE /content/assets/{id}`` without ``purge``.
@@ -177,6 +180,15 @@ def _normalize_tags(tags: Iterable[str] | None) -> list[str]:
         if text and text not in seen:
             seen.append(text)
     return sorted(seen)
+
+
+def normalize_tags(tags: Iterable[str] | None) -> list[str]:
+    """Public form of the tag projection: stripped, de-duplicated, sorted.
+
+    Persisted rows and idempotency projections must use the same function or a
+    replay with ``[" b", "a "]`` would not match the stored ``["a", "b"]``.
+    """
+    return _normalize_tags(tags)
 
 
 def canonical_asset_request(
@@ -376,6 +388,7 @@ __all__ = [
     "STORAGE_KEY_EXPOSURE",
     "MAX_UPLOAD_BYTES",
     "MAX_IDEMPOTENCY_KEY_LEN",
+    "MAX_ALIAS_LABEL_LEN",
     "VERSION_PAGE_DEFAULT",
     "VERSION_PAGE_MAX",
     "VERSION_TTL_DEFAULT",
@@ -402,4 +415,5 @@ __all__ = [
     "acl_duplicate_keys",
     "link_kind_is_caller_assignable",
     "normalize_link_kind",
+    "normalize_tags",
 ]

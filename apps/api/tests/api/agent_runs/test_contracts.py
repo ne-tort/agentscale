@@ -156,12 +156,16 @@ def test_route_contracts_keep_project_scope_and_expose_durable_cursor_pages() ->
     assert "await AgentSessionService" not in source
 
 
-def test_writes_remain_fail_closed_until_dispatcher_is_wired() -> None:
+def test_writes_remain_fail_closed_until_the_gate_and_consumer_are_wired() -> None:
     source = __import__("inspect").getsource(agent_runs)
-    assert "backend.require_writes()" in source
-    assert "agent_control_plane_dispatcher_unwired" in (
-        inspect.getsource(AgentRunBackend.require_writes)
-    )
+    assert source.count("backend.require_writes()") >= 3
+    require_source = inspect.getsource(AgentRunBackend.require_writes)
+    # Off by default: the flag gate refuses with an explicit code and blocker.
+    assert "agent_run_api_feature_flag_disabled" in require_source
+    assert "AGENT_RUN_API_DISABLED" in require_source
+    # A committed intent with no consumer would be queued forever, so refuse.
+    assert "agent_control_plane_dispatcher_unavailable" in require_source
+    assert "writes_enabled" in require_source
     assert "in_memory" not in source.lower()
 
 

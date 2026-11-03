@@ -113,11 +113,19 @@ class ObservationBatch:
 
 
 class ParityReportStorePort(Protocol):
-    """Append-only report registry keyed by the deterministic run key."""
+    """Append-only report registry keyed by the deterministic run key.
 
-    async def load(self, *, run_key: str) -> Mapping[str, Any] | None: ...
+    The server context is passed through so a durable registry can bind the write
+    to the partition's tenant and RLS scope. A durable implementation must refuse a
+    missing context; ``InMemoryParityReportStore`` is a test double that ignores it
+    and must never be composed in a production path.
+    """
 
-    async def save(self, *, run_key: str, report: Mapping[str, Any]) -> ReportOutcome: ...
+    async def load(self, *, run_key: str, context: Any | None = None
+                   ) -> Mapping[str, Any] | None: ...
+
+    async def save(self, *, run_key: str, report: Mapping[str, Any],
+                   context: Any | None = None) -> ReportOutcome: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -412,11 +420,17 @@ class BoundedParityRunner:
     async def run_and_record(self, *, request: ParityRunRequest, context: Any,
                              dependency_gates: DependencyGates | None = None
                              ) -> tuple[ParityRunReport, ReportOutcome | None]:
-        """Run and persist; a partial traversal is returned without being recorded."""
+        """Run and persist; a partial traversal is returned without being recorded.
+
+        The server context is forwarded to the registry: a durable store binds the
+        write to the partition's tenant and RLS scope, so a report can never be
+        recorded under another tenant.
+        """
         report = await self.run(request=request, context=context, dependency_gates=dependency_gates)
         if not report.checkpoint.complete_window or self._reports is None:
             return report, None
-        return report, await self._reports.save(run_key=report.run_key, report=report.to_json())
+        return report, await self._reports.save(
+            run_key=report.run_key, report=report.to_json(), context=context)
 
 
 def run_key_for(summary: ParityEvidenceSummary, request: ParityRunRequest) -> str:

@@ -58,6 +58,8 @@ export interface RegistryRequest {
   readonly routeId: string;
   readonly context: RequestContext;
   readonly effectiveCapabilities: ReadonlySet<string>;
+  /** True when the route performs authoritative reads/writes; then a shell context is refused. */
+  readonly requiresAuthoritativeScope?: boolean;
   readonly signal?: AbortSignal;
 }
 export type RegistryResolution =
@@ -78,7 +80,7 @@ function failure(code: ArtifactError["code"], context: RequestContext): Artifact
   if (code === "unknown_app") return Object.freeze({ state: "unknown_app", code, traceId: context.traceId });
   if (code === "unknown_route") return Object.freeze({ state: "unknown_route", code, traceId: context.traceId });
   if (code === "invalid_app" || code === "validation_error") return Object.freeze({ state: "invalid", code, traceId: context.traceId });
-  if (code === "capability_denied" || code === "missing_context" || code === "route_scope_mismatch") return Object.freeze({ state: "denied", code, traceId: context.traceId });
+  if (code === "capability_denied" || code === "missing_context" || code === "route_scope_mismatch" || code === "unverified_context") return Object.freeze({ state: "denied", code, traceId: context.traceId });
   if (code === "quarantined" || code === "correlation_mismatch" || code === "replay_detected") return Object.freeze({ state: "quarantined", code, traceId: context.traceId });
   return Object.freeze({ state: "stale", code: "stale_revision", traceId: context.traceId });
 }
@@ -161,8 +163,9 @@ function validResponse(value: unknown): value is RegistryResponse {
   return value.notModified === true ? value.snapshot === undefined : value.snapshot !== undefined;
 }
 function validRegistryRequest(value: unknown): value is RegistryRequest {
-  if (!exactObject(value, ["appId", "version", "routeId", "context", "effectiveCapabilities", "signal"], ["appId", "version", "routeId", "context", "effectiveCapabilities"])) return false;
+  if (!exactObject(value, ["appId", "version", "routeId", "context", "effectiveCapabilities", "requiresAuthoritativeScope", "signal"], ["appId", "version", "routeId", "context", "effectiveCapabilities"])) return false;
   if (!ownNonEmpty(value.appId) || !ownNonEmpty(value.version) || !ownNonEmpty(value.routeId) || !(value.effectiveCapabilities instanceof Set)) return false;
+  if (value.requiresAuthoritativeScope !== undefined && typeof value.requiresAuthoritativeScope !== "boolean") return false;
   if ([...value.effectiveCapabilities].some((capability) => typeof capability !== "string" || !isCapabilityName(capability))) return false;
   const signal = value.signal;
   return signal === undefined || (typeof signal === "object" && signal !== null && typeof (signal as AbortSignal).aborted === "boolean" && typeof (signal as AbortSignal).addEventListener === "function");
@@ -319,7 +322,7 @@ export class SignedRegistryResolver {
     if (pluginArtifact && entry.artifactDigest !== `sha256:${pluginArtifact.sha256.toLowerCase()}`) return failure("quarantined", context);
     const routeCapabilities = candidate.requirements.capabilities ?? [];
     if (routeCapabilities.some((capability) => !requestedCapabilities.has(capability) || !entry.grants.includes(capability) || !effectiveCapabilities.has(capability))) return failure("capability_denied", context);
-    const decision = evaluateRoute(context, route, { appTenantId: entry.tenantId, appCabinetId: entry.cabinetId, appProjectId: entry.projectId, requirements: route.requirements, effectiveCapabilities });
+    const decision = evaluateRoute(context, route, { appTenantId: entry.tenantId, appCabinetId: entry.cabinetId, appProjectId: entry.projectId, requirements: route.requirements, effectiveCapabilities, requiresAuthoritativeScope: request.requiresAuthoritativeScope === true });
     if (!decision.allowed) return failure(decision.code === "missing_context" ? "missing_context" : decision.code, context);
     return deepFreeze({ state: "resolved" as const, manifest, route: decision.route, digest: entry.artifactDigest, etag: cache.etag, cacheKey: cache.cacheKey, correlationId });
   }

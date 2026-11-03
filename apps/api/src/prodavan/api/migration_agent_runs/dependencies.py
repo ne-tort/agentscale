@@ -42,7 +42,7 @@ from prodavan.api.migration_agent_runs.schemas import AgentRunDispatchReport
 from prodavan.application.agent_control_plane import DurableAgentControlPlane
 from prodavan.application.agent_control_plane.contracts import ControlPlaneAtomicWrite, ControlPlaneWriteResult
 from prodavan.application.agent_control_plane.ports import AgentControlPlaneTransactionPort
-from prodavan.application.agent_runs.dispatcher import DispatchRunner
+from prodavan.application.agent_runs import DispatchRunner
 from prodavan.domain.agent.control_plane import AgentRunView, ApprovalRequestView, EventEnvelope
 from prodavan.domain.errors import AppError
 from prodavan.infrastructure.persistence.database import get_session_factory
@@ -248,7 +248,7 @@ def _repository_factory() -> AgentControlPlaneRepository:
 def _dispatcher_factory() -> DispatchRunner:
     """Compose the durable enqueue-intent consumer for this queue.
 
-    The escalation handler registry is empty while ``AgentRunExecutionPort`` has
+    The execution handler registry is empty while ``AgentRunExecutionPort`` has
     no adapter, so the consumer claims intents and records a redacted
     ``intent_handler_not_wired`` retry instead of pretending to deliver them.
     """

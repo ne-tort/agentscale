@@ -15,6 +15,14 @@ from .commands import (
     require_kind,
     validate_payload,
 )
+from .composition import (
+    ResourceApiBackend,
+    ResourceApiPorts,
+    assemble_resource_api,
+    build_resource_api,
+    install_resource_api_ports,
+    resource_api_port_factory,
+)
 from .contracts import (
     METADATA_LIFECYCLE,
     RESOURCE_KINDS,
@@ -36,12 +44,19 @@ from .contracts import (
 )
 from .errors import ResourceApiError, ResourceApiErrorCode, StaleResourceState, StoreConflict
 from .materialization import PlannedSelection, ResourceMaterializationService, StoredPlan
-from .ports import ProjectProof, ResourceScopeProofPort, ResourceStorePort
+from .ports import (
+    ApplyReceipt,
+    ProjectProof,
+    ResourceApplyReceiptPort,
+    ResourceScopeProofPort,
+    ResourceStorePort,
+)
 from .scope import ResolvedTarget, ResourceScopeService
 
 __all__ = [
     "METADATA_LIFECYCLE",
     "RESOURCE_KINDS",
+    "ApplyReceipt",
     "BindingView",
     "MaterializationApplyView",
     "MaterializationEntryView",
@@ -52,8 +67,11 @@ __all__ = [
     "ResolvedTarget",
     "ResolvedTenant",
     "ResourceAggregate",
+    "ResourceApiBackend",
     "ResourceApiError",
     "ResourceApiErrorCode",
+    "ResourceApiPorts",
+    "ResourceApplyReceiptPort",
     "ResourceCommandService",
     "ResourceMaterializationService",
     "ResourceProvenanceView",
@@ -70,10 +88,14 @@ __all__ = [
     "StoredVersion",
     "StoreConflict",
     "VersionView",
+    "assemble_resource_api",
+    "build_resource_api",
     "build_version",
+    "install_resource_api_ports",
     "normalize_slug",
     "operation_digest",
     "require_idempotency_key",
     "require_kind",
+    "resource_api_port_factory",
     "validate_payload",
 ]

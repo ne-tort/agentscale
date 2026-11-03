@@ -12,13 +12,13 @@ import hashlib
 import re
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.application.content.access_policy import AccessPolicyService
 from prodavan.application.content.contracts import (
+    MAX_ALIAS_LABEL_LEN,
     MAX_IDEMPOTENCY_KEY_LEN,
-    MAX_TITLE_LEN,
     ContentErrorCode,
     canonical_alias_request,
     canonical_alias_row,
@@ -36,7 +36,10 @@ from prodavan.domain.content.types import AliasStatus, ContentVisibility
 from prodavan.domain.errors import AppError
 from prodavan.domain.identity import Principal
 from prodavan.domain.ownership import OwnerScope
-from prodavan.infrastructure.persistence.models.content import ContentAliasRow
+from prodavan.infrastructure.persistence.models.content import (
+    ContentAliasBindingRow,
+    ContentAliasRow,
+)
 from prodavan.infrastructure.persistence.models.identity import EmployeeRow
 
 _SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{1,126}[a-z0-9]$")
@@ -115,6 +118,13 @@ class AliasService:
         actor = await self._scope(principal=principal, employee=employee, scope=scope)
         actor.require_employee()
         normalized = self.normalize_slug(slug)
+        if owner_company_id is not None and not str(owner_company_id).strip():
+            raise AppError(
+                code=ContentErrorCode.VALIDATION_ERROR,
+                title="Validation Error",
+                status=422,
+                detail="owner_company_id must be a company id or absent",
+            )
         tenant_id = actor.tenant_or_404_for(owner_company_id, detail="company not found")
         if tenant_id is None and not actor.is_platform_admin:
             raise forbidden("platform-owned aliases require platform.admin")
@@ -125,7 +135,19 @@ class AliasService:
                 status=422,
                 detail="visibility must be private|company",
             )
-        if label is not None and len(label) > MAX_TITLE_LEN:
+        if str(visibility) == ContentVisibility.PRIVATE:
+            # content_aliases has no created_by column, so "private" cannot be
+            # enforced as creator-only. Refuse instead of silently publishing.
+            raise AppError(
+                code=ContentErrorCode.CONTENT_ALIAS_VISIBILITY_UNSUPPORTED,
+                title="Unsupported alias visibility",
+                status=422,
+                detail=(
+                    "aliases do not support private visibility: content_aliases has no "
+                    "created_by column, so a per-creator restriction cannot be enforced"
+                ),
+            )
+        if label is not None and len(label) > MAX_ALIAS_LABEL_LEN:
             raise AppError(
                 code=ContentErrorCode.VALIDATION_ERROR,
                 title="Validation Error",
@@ -174,6 +196,10 @@ class AliasService:
         # whether the existing alias belongs to another tenant.
         current = await self.get_by_slug_optional(normalized)
         if current is not None:
+            if current.owner_company_id is None and not actor.is_platform_admin:
+                # Platform-owned permalinks are not readable by tenants without a
+                # grant, so reporting a conflict would disclose their existence.
+                raise not_found("alias not found")
             if alias_tenant_visible(current, actor):
                 raise AppError(
                     code=ContentErrorCode.CONFLICT,
@@ -302,6 +328,15 @@ class AliasService:
         scope: ContentActorScope | None = None,
     ) -> dict[str, Any]:
         actor = await self._scope(principal=principal, employee=employee, scope=scope)
+        if not (company_id or "").strip():
+            # An empty selector would otherwise degrade into "platform-owned"
+            # and list published aliases.
+            raise AppError(
+                code=ContentErrorCode.VALIDATION_ERROR,
+                title="Validation Error",
+                status=422,
+                detail="company_id is required",
+            )
         tenant_id = actor.tenant_or_404_for(company_id, detail="company not found")
         size = max(1, min(limit, 200))
         try:
@@ -338,8 +373,15 @@ class AliasService:
         rows = rows[:size]
         items: list[dict[str, Any]] = []
         for row in rows:
+            # Disabled aliases stay listed with ``status="disabled"``: DELETE
+            # disables instead of destroying, so hiding the row would hide the
+            # evidence that the permalink exists and was switched off.
             if await self._acl.can_read_alias(
-                principal=principal, employee=employee, alias=row, scope=actor
+                principal=principal,
+                employee=employee,
+                alias=row,
+                scope=actor,
+                allow_disabled=True,
             ):
                 items.append(alias_public(row))
         next_cursor = None
@@ -381,6 +423,16 @@ class AliasService:
                 status=422,
                 detail="visibility must be private|company",
             )
+        if visibility is not None and str(visibility) == ContentVisibility.PRIVATE:
+            raise AppError(
+                code=ContentErrorCode.CONTENT_ALIAS_VISIBILITY_UNSUPPORTED,
+                title="Unsupported alias visibility",
+                status=422,
+                detail=(
+                    "aliases do not support private visibility: content_aliases has no "
+                    "created_by column, so a per-creator restriction cannot be enforced"
+                ),
+            )
         if label is not None:
             row.label = label
         if description is not None:
@@ -419,7 +471,17 @@ class AliasService:
         row.status = AliasStatus.DISABLED
         await self._session.commit()
         await self._session.refresh(row)
-        return {"deleted": True, "retained_evidence": True, **alias_public(row)}
+        retained = await self._session.execute(
+            select(func.count(ContentAliasBindingRow.id)).where(
+                ContentAliasBindingRow.alias_id == alias_id
+            )
+        )
+        return {
+            "deleted": True,
+            "retained_evidence": True,
+            "retained_bindings": int(retained.scalar_one() or 0),
+            **alias_public(row),
+        }
 
 
 __all__ = ["AliasService", "alias_public"]

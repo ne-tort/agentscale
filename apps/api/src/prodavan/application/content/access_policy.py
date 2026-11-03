@@ -137,16 +137,14 @@ class AccessPolicyService:
     def _default_alias_read(alias: ContentAliasRow, scope: ContentActorScope) -> bool:
         """Tenant default for reading an alias.
 
-        ``content_aliases`` has no ``created_by`` column, so a ``private`` alias
-        cannot be scoped to its creator the way a private asset is. A company
-        alias is therefore readable by its tenant, while a private alias stays
-        grant-only (plus platform admins, checked by the caller).
+        ``content_aliases`` has no ``created_by`` column, so a private alias
+        cannot be scoped to its creator the way a private asset is. Creation of
+        ``visibility=private`` is therefore refused
+        (``CONTENT_ALIAS_VISIBILITY_UNSUPPORTED``) and reads follow tenancy;
+        legacy private rows keep working for their own tenant instead of becoming
+        unreadable for everyone.
         """
-        return (
-            alias.visibility == ContentVisibility.COMPANY
-            and bool(alias.owner_company_id)
-            and alias.owner_company_id in scope.tenant_ids
-        )
+        return bool(alias.owner_company_id) and alias.owner_company_id in scope.tenant_ids
 
     @staticmethod
     def _default_alias_write(alias: ContentAliasRow, scope: ContentActorScope) -> bool:
@@ -243,6 +241,37 @@ class AccessPolicyService:
             principal=principal, employee=employee, alias=alias, scope=actor
         ):
             raise forbidden("no write access to alias")
+
+    async def require_admin_alias(
+        self,
+        *,
+        principal: Principal,
+        employee: EmployeeRow | None,
+        alias: ContentAliasRow,
+        scope: ContentActorScope | None = None,
+    ) -> None:
+        """Rewriting an alias ACL needs ownership or an explicit ``admin`` grant.
+
+        A bare ``write`` grant must not be able to re-grant access: that would let
+        a writer escalate itself to ``admin`` and mint grants for other people.
+        """
+        actor = await self.scope_for(principal=principal, employee=employee, scope=scope)
+        if not alias_tenant_visible(alias, actor):
+            raise not_found("alias not found")
+        if actor.is_platform_admin:
+            return
+        if await self._has_explicit_grant(
+            resource_kind=ContentResourceKind.ALIAS,
+            resource_id=alias.id,
+            scope=actor,
+            permission=AclPermission.ADMIN,
+        ):
+            return
+        if self._default_alias_write(alias, actor):
+            # Tenant ownership is the alias equivalent of "the owning company
+            # administers its own permalink"; there is no created_by column.
+            return
+        raise forbidden("admin access to alias required")
 
     # -- assets -------------------------------------------------------------
 
@@ -401,7 +430,7 @@ class AccessPolicyService:
         alias = await self._session.get(ContentAliasRow, resource_id)
         if alias is None:
             raise not_found("alias not found")
-        await self.require_write_alias(
+        await self.require_admin_alias(
             principal=principal, employee=employee, alias=alias, scope=actor
         )
 

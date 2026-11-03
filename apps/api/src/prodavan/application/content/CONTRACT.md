@@ -50,7 +50,10 @@ Rules:
 3. Creating a **platform-owned** object (`owner_company_id = null`) requires
    `platform.admin`; a company tenant cannot publish platform-wide content.
 4. `owner_scope` is always derived from the validated owner. The client never
-   supplies it.
+   supplies it. An empty-string `owner_company_id` is `422 VALIDATION_ERROR`, not
+   a fallback to platform ownership.
+5. `company_id` is a **required** selector on `GET /assets` and `GET /aliases`.
+   An empty or absent selector is `422`, never an implicit "platform-owned" list.
 
 ## 3. Immutable, digest-bound versions
 
@@ -94,8 +97,16 @@ Principal kinds accepted by `PUT .../acl`:
 | `platform` | literally `platform` | only a platform admin |
 
 ACL rewrite (`PUT`) requires `admin`-level access: an explicit `admin` grant, the
-private creator, the owning tenant, or `platform.admin`. Duplicate
+private creator, the owning tenant, or `platform.admin`. For an **alias** the
+rewrite needs the owning tenant or an explicit `admin` grant — a `write` grant
+alone cannot re-grant (otherwise a writer could escalate itself). Duplicate
 `(kind, id, permission)` triples ⇒ `422 CONTENT_ACL_DUPLICATE`.
+
+Aliases have no `created_by` column, so `visibility=private` is refused at create
+and patch time with `422 CONTENT_ALIAS_VISIBILITY_UNSUPPORTED` instead of being
+silently treated as company-shared. Reading a disabled alias (metadata, ACL,
+binding history) needs tenant/ACL access; resolving it to bytes stays `403`
+(`DownloadService` uses the active-only gate).
 
 Every operation re-evaluates the ACL server-side; there is no cached or
 client-asserted authorization.
@@ -116,6 +127,8 @@ Added by this slice:
 |---|---|---|
 | `GET` | `/assets/{id}/versions` | Deterministic version history (`version` desc, cursor) |
 | `GET` | `/assets/{id}/versions/{vid}` | Single version metadata |
+| `DELETE` | `/assets/{id}/versions/{vid}` | Abort a **staged** version (409 when sealed) |
+| `GET` | `/assets/{id}/dependents` | Read-only delete evidence (admin gate) |
 | `GET` | `/assets/{id}/links` | Asset ↔ entity edges |
 | `POST` | `/assets/{id}/links` | Create an edge (`replace` to re-point) |
 | `DELETE` | `/assets/{id}/links/{link_id}` | Remove an edge |
@@ -126,6 +139,14 @@ Added by this slice:
 `DELETE /assets/{id}` **without** `purge` is the archive path and fails closed
 (§6). Status codes: `200` for reads and mutations (matching the shipped client),
 `404` / `403` / `409` / `413` / `422` for the documented errors.
+
+### Aborting a staged version
+
+`DELETE /assets/{id}/versions/{vid}` removes an **unsealed** row and its stored
+bytes, then frees the version number for the next `begin`. A sealed version is
+`409 CONTENT_VERSION_SEALED`: the digest is immutable evidence, so new bytes need
+a new row. Requires `write` access to the asset; a version of another asset or
+tenant is `404`.
 
 ### Idempotency
 
@@ -151,10 +172,13 @@ required for byte-identical response replay (§6).
    Requires a reviewed revision adding a nullable `archived_at` (+ index) before
    `DELETE` can archive. **No DDL was added here.**
    Evidence is still preserved on every destructive path:
-   `AssetService.dependency_report()` lists live alias bindings, asset links and
-   version count; purge refuses to run while dependents exist unless
-   `cascade=true`, and `cascade` only supersedes bindings/links — it never
-   rewrites binding history.
+   `AssetService.dependency_report()` lists every alias binding (live **and**
+   superseded — the FK cascade would erase the whole resolve history), asset
+   links and the version count. `GET /assets/{id}/dependents` returns the same
+   report read-only behind the `admin` gate. Purge refuses an asset with **any**
+   binding row, even with `cascade=true`, because the cascade cannot preserve it;
+   entity links are removable only with `cascade=true` (they are the asset's own
+   1:1 slots, not history).
 2. **Idempotency receipts — `content_idempotency_receipts_table_missing`.**
    Derived-id replay covers the observable contract (same key ⇒ same resource,
    different body ⇒ `409`). Exact response replay needs a receipt table.
@@ -165,7 +189,11 @@ required for byte-identical response replay (§6).
 4. **Alias `DELETE` disables, it does not destroy.** `content_aliases.status`
    already models `disabled`. Deleting the row would cascade away
    `content_alias_bindings`, i.e. the evidence of what the permalink served.
-   Response: `{"deleted": true, "retained_evidence": true, …}`.
+   Response: `{"deleted": true, "retained_evidence": true, "retained_bindings": N, …}`.
+   A disabled alias stays readable (metadata, ACL, binding history), stays in
+   the company list with `status="disabled"`, refuses new bindings with
+   `409 CONFLICT`, and serves no bytes (`403`); `PATCH status=active` restores
+   resolution from the retained binding.
 
 ## 7. Compatibility notes
 
@@ -181,6 +209,15 @@ required for byte-identical response replay (§6).
   `contracts.ContentErrorCode`.
 * `GET /assets/{id}/download` now sets `Content-Disposition`,
   `X-Content-SHA256` and `X-Content-Size`. Previously the client had no filename.
+* `VersionResource.etag` is the sealed SHA-256 on the upload path (strong
+  validator for the exact bytes) and the object-store ETag on the presign path
+  when the backend provides one.
+* The shipped `content-ops` client (`apps/web/.../content-ops/service.ts`)
+  validates ACL entries against `employee|company|platform` only, while the API
+  also accepts `cabinet|project|role`. Listing an asset that carries one of the
+  newer grants therefore fails that client's `safeAclEntry` with
+  `INVALID_RESPONSE`; the API must not hide those grants, so the client needs to
+  widen its union (tracked outside this zone).
 
 ## 8. Deliberate non-goals
 

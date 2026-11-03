@@ -9,7 +9,9 @@ the single seam between them:
   :func:`install_resource_api_ports` once, at process start;
 * :func:`build_resource_api` assembles the command and materialization services
   for one request;
-* when no factory is registered the request fails closed with
+* when no factory is registered, the durable adapter set shipped with
+  ``application.resources.adapters`` is used (real tables from revision
+  ``2026110306``); when even that is unavailable the request fails closed with
   ``503 RESOURCE_STORE_UNAVAILABLE``. There is deliberately no in-memory or
   legacy fallback: serving resources from process memory would bypass tenant
   scoping, immutable versions and the materialization CAS boundary.
@@ -92,9 +94,22 @@ def assemble_resource_api(ports: ResourceApiPorts) -> ResourceApiBackend:
     )
 
 
+def _default_factory() -> PortFactory | None:
+    """The durable adapter set installed with the package, when importable."""
+    try:
+        from prodavan.application.resources.adapters.factory import (
+            default_resource_api_ports,
+        )
+    except Exception:  # noqa: BLE001 - a missing adapter is a closed gate
+        return None
+    return default_resource_api_ports
+
+
 def build_resource_api(session: Any) -> ResourceApiBackend:
     """Assemble the request-scoped backend or fail closed."""
     factory = _factory
+    if factory is None:
+        factory = _default_factory()
     if factory is None:
         fail(
             ResourceApiErrorCode.RESOURCE_STORE_UNAVAILABLE,

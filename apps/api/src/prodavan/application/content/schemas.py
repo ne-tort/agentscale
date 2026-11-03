@@ -18,6 +18,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from prodavan.application.content.contracts import (
+    MAX_ALIAS_LABEL_LEN,
     MAX_IDEMPOTENCY_KEY_LEN,
     MAX_MIME_LEN,
     MAX_PRINCIPAL_ID_LEN,
@@ -109,6 +110,8 @@ class AssetDependents(BaseModel):
     asset_id: str
     version_count: int = 0
     active_alias_bindings: list[str] = Field(default_factory=list)
+    binding_ids: list[str] = Field(default_factory=list)
+    binding_count: int = 0
     asset_links: list[str] = Field(default_factory=list)
     safe_to_purge: bool = False
     archive_available: bool = False
@@ -190,7 +193,7 @@ class CreateAliasBody(BaseModel):
     slug: str = Field(min_length=3, max_length=128)
     owner_company_id: str | None = None
     visibility: Literal["private", "company"] = "company"
-    label: str | None = Field(default=None, max_length=MAX_TITLE_LEN)
+    label: str | None = Field(default=None, max_length=MAX_ALIAS_LABEL_LEN)
     description: str | None = Field(default=None, max_length=4000)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -198,7 +201,7 @@ class CreateAliasBody(BaseModel):
 class PatchAliasBody(BaseModel):
     model_config = Strict
 
-    label: str | None = Field(default=None, max_length=MAX_TITLE_LEN)
+    label: str | None = Field(default=None, max_length=MAX_ALIAS_LABEL_LEN)
     description: str | None = Field(default=None, max_length=4000)
     metadata: dict[str, Any] | None = None
     status: Literal["active", "disabled"] | None = None

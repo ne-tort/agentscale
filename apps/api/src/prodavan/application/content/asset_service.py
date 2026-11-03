@@ -23,8 +23,9 @@ Invariants enforced here (see ``CONTRACT.md`` §3):
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import and_, func, or_, select
@@ -34,6 +35,7 @@ from prodavan.application.content.access_policy import AccessPolicyService
 from prodavan.application.content.contracts import (
     ARCHIVE_BLOCKER,
     ARCHIVE_BLOCKER_CODE,
+    ARCHIVE_BLOCKER_SLUG,
     MAX_IDEMPOTENCY_KEY_LEN,
     MAX_MIME_LEN,
     MAX_TAGS,
@@ -49,6 +51,7 @@ from prodavan.application.content.contracts import (
     canonical_asset_request,
     canonical_asset_row,
     digest_of,
+    normalize_tags,
     projections_match,
 )
 from prodavan.application.content.pagination import decode_cursor, encode_cursor
@@ -75,6 +78,8 @@ from prodavan.infrastructure.persistence.models.identity import EmployeeRow
 
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _ID_HEX_RE = re.compile(r"^[0-9a-f]{16}$")
+
+logger = logging.getLogger(__name__)
 
 
 def _iso(value: datetime | None) -> str | None:
@@ -225,6 +230,15 @@ class AssetService:
         actor = await self._scope(principal=principal, employee=employee, scope=scope)
         actor.require_employee()
         self._validate_asset_fields(visibility=visibility, mime=mime, title=title, tags=tags)
+        if owner_company_id is not None and not str(owner_company_id).strip():
+            # "" is neither "platform owned" nor a tenant: reject instead of
+            # silently degrading into the platform branch.
+            raise AppError(
+                code=ContentErrorCode.VALIDATION_ERROR,
+                title="Validation Error",
+                status=422,
+                detail="owner_company_id must be a company id or absent",
+            )
         tenant_id = actor.tenant_or_404_for(owner_company_id, detail="company not found")
         if tenant_id is None and not actor.is_platform_admin:
             # A company tenant cannot create platform-published assets.
@@ -265,7 +279,7 @@ class AssetService:
             visibility=str(visibility),
             mime=mime,
             title=title,
-            tags=sorted({str(tag) for tag in (tags or [])}),
+            tags=requested["tags"],
             created_by=actor.employee_id,
         )
         if asset_id is not None:
@@ -304,6 +318,15 @@ class AssetService:
         scope: ContentActorScope | None = None,
     ) -> dict[str, Any]:
         actor = await self._scope(principal=principal, employee=employee, scope=scope)
+        if not (company_id or "").strip():
+            # ``company_id=""`` must not degrade into ``owner_company_id IS NULL``
+            # and list platform-published assets for a tenant caller.
+            raise AppError(
+                code=ContentErrorCode.VALIDATION_ERROR,
+                title="Validation Error",
+                status=422,
+                detail="company_id is required",
+            )
         tenant_id = actor.tenant_or_404_for(company_id, detail="company not found")
         size = max(1, min(limit, 200))
         try:
@@ -382,7 +405,7 @@ class AssetService:
         if title is not None:
             row.title = title
         if tags is not None:
-            row.tags = sorted({str(tag) for tag in tags})
+            row.tags = normalize_tags(tags)
         if visibility is not None:
             row.visibility = str(visibility)
         await self._session.commit()
@@ -413,15 +436,29 @@ class AssetService:
             title="Content archive unavailable",
             status=409,
             detail=ARCHIVE_BLOCKER,
-            extra={"blocker": "content_assets_archive_columns_missing"},
+            extra={
+                "blocker": ARCHIVE_BLOCKER_SLUG,
+                "resource_id": asset_id,
+                "dependents": await self.dependency_report(asset_id),
+            },
         )
 
     async def dependency_report(self, asset_id: str) -> dict[str, Any]:
-        """Evidence retained for a delete decision (rows are never removed here)."""
+        """Evidence retained for a delete decision (rows are never removed here).
+
+        ``binding_ids`` lists **every** binding row, including superseded ones:
+        ``content_alias_bindings.asset_id`` is ``ON DELETE CASCADE``, so a hard
+        delete would erase the whole resolve history, not only the live edge.
+        """
         bindings = await self._session.execute(
             select(ContentAliasBindingRow.id).where(
                 ContentAliasBindingRow.asset_id == asset_id,
                 ContentAliasBindingRow.superseded_at.is_(None),
+            )
+        )
+        all_bindings = await self._session.execute(
+            select(ContentAliasBindingRow.id).where(
+                ContentAliasBindingRow.asset_id == asset_id
             )
         )
         links = await self._session.execute(
@@ -433,13 +470,48 @@ class AssetService:
             )
         )
         active_bindings = list(bindings.scalars().all())
+        binding_history = list(all_bindings.scalars().all())
         asset_links = list(links.scalars().all())
         return {
             "asset_id": asset_id,
             "active_alias_bindings": active_bindings,
+            "binding_ids": binding_history,
+            "binding_count": len(binding_history),
             "asset_links": asset_links,
             "version_count": int(versions.scalar_one() or 0),
-            "safe_to_purge": not active_bindings and not asset_links,
+            "safe_to_purge": not binding_history and not asset_links,
+        }
+
+    async def delete_evidence(
+        self,
+        *,
+        asset_id: str,
+        principal: Principal,
+        employee: EmployeeRow | None,
+        scope: ContentActorScope | None = None,
+    ) -> dict[str, Any]:
+        """Read the evidence that a destructive delete would have to discard.
+
+        The archive column is still missing, so this is the only non-destructive
+        way to inspect the delete decision: live alias bindings, entity links and
+        the version count. Requires the same ``admin`` access as the delete.
+        """
+        actor = await self._scope(principal=principal, employee=employee, scope=scope)
+        row = await self._session.get(ContentAssetRow, asset_id)
+        if row is None or not asset_tenant_visible(row, actor):
+            raise not_found("asset not found")
+        await self._acl.require_admin_asset(
+            principal=principal, employee=employee, asset=row, scope=actor
+        )
+        report = await self.dependency_report(asset_id)
+        return {
+            **report,
+            "archive_available": False,
+            "archive_blocker": ARCHIVE_BLOCKER_CODE,
+            "evidence_policy": (
+                "no status/archived_at column exists on content_assets, so DELETE "
+                "refuses to pretend; this report is retained instead of removing rows"
+            ),
         }
 
     async def purge(
@@ -451,7 +523,16 @@ class AssetService:
         cascade: bool = False,
         scope: ContentActorScope | None = None,
     ) -> dict[str, Any]:
-        """Explicit destructive purge. Platform admin only, dependents denied."""
+        """Explicit destructive purge. Platform admin only.
+
+        Fail-closed twice over:
+
+        * an asset that any alias binding points at (live **or** superseded) is
+          refused, because the FK cascade would erase that resolve history and a
+          purge cannot preserve it;
+        * entity links are refused without ``cascade=true``, which removes only
+          those edges (they are the asset's own 1:1 slots, not history).
+        """
         actor = await self._scope(principal=principal, employee=employee, scope=scope)
         if not actor.is_platform_admin:
             row = await self._session.get(ContentAssetRow, asset_id)
@@ -462,28 +543,36 @@ class AssetService:
         if row is None:
             raise not_found("asset not found")
         report = await self.dependency_report(asset_id)
-        if not report["safe_to_purge"] and not cascade:
+        if report["binding_ids"]:
             raise AppError(
                 code=ContentErrorCode.CONTENT_DELETE_HAS_DEPENDENTS,
                 title="Content asset has dependents",
                 status=409,
-                detail="asset is referenced by alias bindings or asset links; pass cascade=true to detach",
+                detail=(
+                    "asset is referenced by alias binding history; a purge would "
+                    "cascade-delete that evidence, so the asset cannot be destroyed "
+                    "until the bindings are moved to another asset"
+                ),
                 extra={
                     "active_alias_bindings": report["active_alias_bindings"],
-                    "asset_links": report["asset_links"],
+                    "binding_ids": report["binding_ids"],
+                    "archive_blocker": ARCHIVE_BLOCKER_CODE,
                 },
             )
-        if cascade:
+        if report["asset_links"] and not cascade:
+            raise AppError(
+                code=ContentErrorCode.CONTENT_DELETE_HAS_DEPENDENTS,
+                title="Content asset has dependents",
+                status=409,
+                detail="asset is linked to domain entities; pass cascade=true to remove those edges",
+                extra={"asset_links": report["asset_links"]},
+            )
+        if report["asset_links"]:
             q = await self._session.execute(
                 select(ContentAssetLinkRow).where(ContentAssetLinkRow.asset_id == asset_id)
             )
             for link in q.scalars().all():
                 await self._session.delete(link)
-            q = await self._session.execute(
-                select(ContentAliasBindingRow).where(ContentAliasBindingRow.asset_id == asset_id)
-            )
-            for binding in q.scalars().all():
-                binding.superseded_at = datetime.now(UTC)
         return await self._hard_delete(row, report=report)
 
     async def delete(
@@ -644,9 +733,11 @@ class AssetService:
         await store.put_bytes(ver.storage_key, data, content_type=mime)
         ver.size = len(data)
         ver.sha256 = actual
+        # Strong validator for the exact bytes the client just sent; a later
+        # upload into this row is refused, so the etag cannot drift.
+        ver.etag = actual
         ver.object_metadata = {**(ver.object_metadata or {}), "sealed": True}
         if mime:
-            ver.etag = None
             asset.mime = mime
         await self._session.commit()
         await self._session.refresh(ver)
@@ -711,7 +802,7 @@ class AssetService:
                     extra={"expected_sha256": candidate, "actual_sha256": actual},
                 )
         ver.size = head.size
-        ver.etag = head.etag
+        ver.etag = head.etag or actual
         ver.sha256 = actual
         ver.object_metadata = {**(ver.object_metadata or {}), "sealed": True}
         if head.content_type and not row.mime:
@@ -719,6 +810,57 @@ class AssetService:
         await self._session.commit()
         await self._session.refresh(ver)
         return version_public(ver)
+
+    async def abort_version(
+        self,
+        *,
+        asset_id: str,
+        version_id: str,
+        principal: Principal,
+        employee: EmployeeRow | None,
+        scope: ContentActorScope | None = None,
+    ) -> dict[str, Any]:
+        """Discard a **staged** (unsealed) version and its bytes.
+
+        Sealed versions are immutable evidence and are refused with
+        ``409 CONTENT_VERSION_SEALED``; the only way past a sealed row is a new
+        version. Aborting the latest staged row frees its version number for the
+        next ``begin``, which is safe because an unsealed version is never
+        downloadable or bindable. Requires ``write`` access to the asset.
+        """
+        actor = await self._scope(principal=principal, employee=employee, scope=scope)
+        asset = await self._session.get(ContentAssetRow, asset_id)
+        if asset is None or not asset_tenant_visible(asset, actor):
+            raise not_found("asset not found")
+        await self._acl.require_write_asset(
+            principal=principal, employee=employee, asset=asset, scope=actor
+        )
+        ver = await self._require_version(asset_id=asset_id, version_id=version_id)
+        if self._is_sealed(ver):
+            raise AppError(
+                code=ContentErrorCode.CONTENT_VERSION_SEALED,
+                title="Version sealed",
+                status=409,
+                detail="sealed versions are immutable evidence; abort only applies to a staged upload",
+                extra={"version_id": ver.id, "sha256": ver.sha256},
+            )
+        version_number = int(ver.version)
+        storage_key = ver.storage_key
+        await self._session.delete(ver)
+        await self._session.commit()
+        bytes_removed = False
+        if storage_key:
+            try:
+                bytes_removed = bool(await ensure_file_store().delete(storage_key))
+            except Exception:  # noqa: BLE001 - cleanup must not resurrect the row
+                logger.warning("content.abort_version: blob cleanup failed for %s", storage_key)
+        return {
+            "aborted": True,
+            "asset_id": asset_id,
+            "version_id": version_id,
+            "version": version_number,
+            "bytes_removed": bytes_removed,
+        }
 
     async def list_versions(
         self,

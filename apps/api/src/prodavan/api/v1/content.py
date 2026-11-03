@@ -16,10 +16,15 @@ Hard rules enforced by this router (not by the client):
 * ``POST`` create operations honour ``Idempotency-Key``: same key + same body
   replays the original resource, same key + different body is
   ``409 IDEMPOTENCY_REPLAY``.
+* A staged (unsealed) version can be aborted (``DELETE .../versions/{vid}``);
+  a sealed one cannot, because its digest is the evidence.
 * ``DELETE /content/assets/{id}`` fails closed: there is no archive column
   (``409 CONTENT_ARCHIVE_UNAVAILABLE``) and destructive purge is platform-admin
-  only and refuses assets with live aliases/links
-  (``409 CONTENT_DELETE_HAS_DEPENDENTS``).
+  only and refuses assets with any alias binding history or live entity links
+  (``409 CONTENT_DELETE_HAS_DEPENDENTS``). ``GET
+  /content/assets/{id}/dependents`` exposes the same evidence read-only.
+* ``DELETE /content/aliases/{id}`` disables the permalink instead of deleting the
+  row, so binding history survives; ``PATCH status=active`` re-enables it.
 
 Response bodies stay flat (``{"items": [...]}``, single resource object) because
 the shipped web client and the module/document adapters already read that shape.
@@ -41,7 +46,7 @@ from prodavan.api.deps import (
 )
 from prodavan.application.content.access_policy import AccessPolicyService
 from prodavan.application.content.alias_binding_service import AliasBindingService
-from prodavan.application.content.alias_service import AliasService
+from prodavan.application.content.alias_service import AliasService, alias_public
 from prodavan.application.content.asset_link_service import AssetLinkService
 from prodavan.application.content.asset_service import AssetService
 from prodavan.application.content.contracts import (
@@ -56,6 +61,7 @@ from prodavan.application.content.schemas import (
     AclList,
     AliasBindingList,
     AliasResource,
+    AssetDependents,
     AssetLink,
     AssetLinkList,
     AssetList,
@@ -69,6 +75,7 @@ from prodavan.application.content.schemas import (
     PatchAliasBody,
     PatchAssetBody,
     ReplaceAclBody,
+    VersionAbortResult,
     VersionList,
     VersionResource,
 )
@@ -116,7 +123,15 @@ async def _download_response(
         headers["X-Content-Size"] = str(int(target.size))
     if target.url and not proxy:
         return RedirectResponse(url=target.url, status_code=302, headers=headers)
-    assert target.storage_key is not None
+    if target.storage_key is None:
+        # Never assert here: assertions vanish under ``python -O`` and would
+        # then crash the request with a bare AttributeError.
+        raise AppError(
+            code=ContentErrorCode.NOT_READY,
+            title="Not Ready",
+            status=422,
+            detail="download target has neither a redirect nor stored bytes",
+        )
     raw = await ensure_file_store().get_bytes(target.storage_key)
     media = target.content_type or "application/octet-stream"
     return Response(content=raw, media_type=media, headers=headers)
@@ -267,6 +282,34 @@ async def delete_asset(
         cascade=cascade,
         scope=scope,
     )
+
+
+@router.get("/assets/{asset_id}/dependents", response_model=AssetDependents)
+async def get_asset_dependents(
+    asset_id: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    work: WorkContextDep,
+    employee: EmployeeDep = None,
+) -> AssetDependents:
+    """Evidence for the delete decision: bindings, links, version count.
+
+    Archive is still blocked by the missing ``archived_at`` column, so this is
+    how a caller inspects what a destructive purge would discard. Requires the
+    same ``admin`` access as ``DELETE`` and is tenant-scoped (a foreign asset is
+    ``404``).
+    """
+    scope = await resolve_actor_scope(
+        session,
+        principal=principal,
+        employee=employee,
+        cabinet_id=work.cabinet_id,
+        project_id=work.project_id,
+    )
+    payload = await AssetService(session).delete_evidence(
+        asset_id=asset_id, principal=principal, employee=employee, scope=scope
+    )
+    return AssetDependents.model_validate(payload)
 
 
 # --- versions ---------------------------------------------------------------
@@ -425,6 +468,39 @@ async def finalize_asset_version(
         scope=scope,
     )
     return VersionResource.model_validate(payload)
+
+
+@router.delete("/assets/{asset_id}/versions/{version_id}", response_model=VersionAbortResult)
+async def abort_asset_version(
+    asset_id: str,
+    version_id: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    work: WorkContextDep,
+    employee: EmployeeDep = None,
+) -> VersionAbortResult:
+    """Abort a staged (unsealed) upload.
+
+    The web client stages a version before the bytes are confirmed; without this
+    route a cancelled upload left an unusable version row behind. A **sealed**
+    version is refused with ``409 CONTENT_VERSION_SEALED`` — the digest is
+    immutable evidence and new bytes require a new version.
+    """
+    scope = await resolve_actor_scope(
+        session,
+        principal=principal,
+        employee=employee,
+        cabinet_id=work.cabinet_id,
+        project_id=work.project_id,
+    )
+    payload = await AssetService(session).abort_version(
+        asset_id=asset_id,
+        version_id=version_id,
+        principal=principal,
+        employee=employee,
+        scope=scope,
+    )
+    return VersionAbortResult.model_validate(payload)
 
 
 @router.get("/assets/{asset_id}/download")
@@ -732,11 +808,20 @@ async def alias_bindings(
         cabinet_id=work.cabinet_id,
         project_id=work.project_id,
     )
-    alias = await AliasService(session).get(
+    # Binding history is retained evidence: it stays readable after ``DELETE``
+    # disabled the alias, so this uses management access (write/admin) instead
+    # of the active-only read gate used by resolve/download.
+    alias_row = await AliasService(session).require_management_row(
         alias_id=alias_id, principal=principal, employee=employee, scope=scope
     )
-    items = await AliasBindingService(session).history(alias_id, limit=limit)
-    return AliasBindingList.model_validate({"alias": alias, "items": items})
+    items = await AliasBindingService(session).history(
+        alias_id,
+        limit=limit,
+        principal=principal,
+        employee=employee,
+        scope=scope,
+    )
+    return AliasBindingList.model_validate({"alias": alias_public(alias_row), "items": items})
 
 
 @router.get("/aliases/{slug}/resolve")

@@ -128,6 +128,10 @@ class _SelectionSnapshot:
     selections: tuple[PlannedSelection, ...]
     scopes: Mapping[str, ResourceScope]
     warnings: tuple[str, ...] = ()
+    #: Blocked reasons raised while reading: an inactive resource that is still
+    #: bound must never reach the CAS boundary, even though its version rows are
+    #: still published (the archive transition does not rewrite version status).
+    vetoes: tuple[str, ...] = ()
 
     def scope_of(self, resource_id: str) -> ResourceScope:
         scope = self.scopes.get(resource_id)
@@ -226,6 +230,8 @@ class ResourceMaterializationService:
             )
         )
         blockers = tuple(failure.code for failure in resolution.failures)
+        if snapshot.vetoes:
+            blockers = blockers + snapshot.vetoes
         if not blockers and not snapshot.selections:
             # An empty selection is legitimate state, but presenting it as a
             # ready plan would let a caller believe resources were materialized.
@@ -458,6 +464,7 @@ class ResourceMaterializationService:
         selected: list[PlannedSelection] = []
         scopes: dict[str, ResourceScope] = {}
         skipped: list[str] = []
+        vetoes: list[str] = []
         for binding in sorted(bindings, key=lambda item: (item.resource_id, item.binding_id)):
             if binding.resource_id not in visible:
                 continue
@@ -467,6 +474,16 @@ class ResourceMaterializationService:
             if row is None:
                 continue
             scopes[row.resource_id] = row.scope
+            lifecycle = views.lifecycle_of(row)
+            if lifecycle is not ResourceLifecycle.ACTIVE:
+                # A bound resource that was archived or quarantined keeps its
+                # published version rows, so the resolver alone would still see a
+                # consistent snapshot. Selection is therefore vetoed here, where
+                # the root lifecycle is known, and the plan is never ready.
+                vetoes.append(
+                    f"resource_not_active:{binding.binding_id}:{lifecycle.value}"
+                )
+                continue
             version = await self.store.get_version(
                 resource_id=row.resource_id, number=binding.version_number
             )
@@ -486,6 +503,7 @@ class ResourceMaterializationService:
             selections=tuple(selected),
             scopes=scopes,
             warnings=tuple(skipped),
+            vetoes=tuple(vetoes),
         )
 
 

@@ -164,12 +164,25 @@ class AssetLinkService:
                 )
             previous_asset = await self._session.get(ContentAssetRow, existing.asset_id)
             if previous_asset is not None:
-                await self._acl.require_admin_asset(
-                    principal=principal,
-                    employee=employee,
-                    asset=previous_asset,
-                    scope=actor,
-                )
+                try:
+                    await self._acl.require_admin_asset(
+                        principal=principal,
+                        employee=employee,
+                        asset=previous_asset,
+                        scope=actor,
+                    )
+                except AppError as exc:
+                    # Never reveal why: an invisible owner is reported as a plain
+                    # conflict on the target, not as 403/404 about another asset.
+                    raise AppError(
+                        code=ContentErrorCode.CONTENT_LINK_TARGET_CONFLICT,
+                        title="Link target already bound",
+                        status=409,
+                        detail=(
+                            "another asset owns this link target and cannot be "
+                            "re-pointed by this caller"
+                        ),
+                    ) from exc
             existing.asset_id = asset_id
             await self._session.commit()
             await self._session.refresh(existing)

@@ -38,8 +38,10 @@ from prodavan.api.v1 import (
     identity,
     pod_modules,
     projects,
+    resources,
     stub,
     tenant_infra,
+    web_stream,
 )
 
 router = APIRouter()
@@ -75,6 +77,7 @@ router.include_router(cabinets.router)
 router.include_router(projects.cabinet_projects_router)
 router.include_router(projects.router)
 router.include_router(tenant_infra.router)
+router.include_router(web_stream.router)
 router.include_router(employee_search.router)
 router.include_router(pod_modules.router)
 router.include_router(agent.router)
@@ -82,3 +85,4 @@ router.include_router(agent_runs.router)
 router.include_router(b2b.router)
 router.include_router(external.router)
 router.include_router(internal_pods.router)
+router.include_router(resources.router)

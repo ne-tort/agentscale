@@ -455,65 +455,11 @@ class SqlCanonicalEvidenceStore:
 
     async def _fence_writer_epoch(self, session: AsyncSession,
                                   context: AuthenticatedGrantContext) -> None:
-        if not self._writer_epoch_required:
-            return
-        epoch = await session.scalar(
-            select(CanonicalGrantWriterEpochRow.writer_epoch)
-            .where(
-                CanonicalGrantWriterEpochRow.tenant_id == context.tenant_id,
-                CanonicalGrantWriterEpochRow.app_definition_id == context.app_definition_id,
-                CanonicalGrantWriterEpochRow.scope_kind == "plugin_instance",
-                CanonicalGrantWriterEpochRow.scope_id == context.plugin_instance_id,
-            )
-            .with_for_update()
-        )
-        if epoch is None:
-            raise EvidenceStoreBlocked(("writer_epoch_evidence_missing",))
-        if epoch != context.writer_generation:
-            raise EvidenceStoreBlocked(("stale_writer_generation",))
+        await fence_writer_epoch(session, context, required=self._writer_epoch_required)
 
     @staticmethod
     async def _bind_context(session: AsyncSession, context: AuthenticatedGrantContext) -> None:
-        values = {
-            "tenant_id": context.tenant_id,
-            "cabinet_id": context.cabinet_id or "",
-            "project_id": context.project_id or "",
-            "user_id": context.subject_id,
-            "role": context.rls_context.role if context.rls_context else "m06-evidence",
-            "writer_generation": str(context.writer_generation),
-            "writer_epoch": str(context.writer_generation),
-            "migration_role": "true",
-            "audit_writer": "true",
-        }
-        await session.execute(
-            text(
-                "SELECT set_config('app.tenant_id', :tenant_id, true), "
-                "set_config('app.cabinet_id', :cabinet_id, true), "
-                "set_config('app.project_id', :project_id, true), "
-                "set_config('app.user_id', :user_id, true), "
-                "set_config('app.role', :role, true), "
-                "set_config('app.writer_generation', :writer_generation, true), "
-                "set_config('app.writer_epoch', :writer_epoch, true), "
-                "set_config('app.migration_role', :migration_role, true), "
-                "set_config('app.audit_writer', :audit_writer, true)"
-            ),
-            values,
-        )
-        readback = (
-            await session.execute(
-                text(
-                    "SELECT current_setting('app.tenant_id', true) AS tenant_id, "
-                    "current_setting('app.writer_epoch', true) AS writer_epoch, "
-                    "current_setting('app.migration_role', true) AS migration_role, "
-                    "current_setting('app.audit_writer', true) AS audit_writer"
-                )
-            )
-        ).mappings().one()
-        if (readback["tenant_id"] != values["tenant_id"]
-                or readback["writer_epoch"] != values["writer_epoch"]
-                or readback["migration_role"] != values["migration_role"]
-                or readback["audit_writer"] != values["audit_writer"]):
-            raise EvidenceStoreBlocked(("transaction_local_context_readback_mismatch",))
+        await bind_transaction_context(session, context)
 
 
 class SqlParityEvidenceSummaryReader:
@@ -607,16 +553,26 @@ class SqlParityEvidenceSummaryReader:
 
 
 class InMemoryParityReportStore:
-    """Append-only run-key registry; same key+content replays, same key+other content conflicts."""
+    """Append-only run-key registry; same key+content replays, same key+other content conflicts.
+
+    Test double only: it keeps nothing durable, ignores the tenant of the supplied
+    context and must never be composed in a production path
+    (:class:`~.parity_store.SqlParityReportStore` is the durable registry). The
+    ``IS_TEST_DOUBLE`` marker lets a composition root refuse it explicitly.
+    """
+
+    IS_TEST_DOUBLE = True
 
     def __init__(self) -> None:
         self._reports: dict[str, str] = {}
 
-    async def load(self, *, run_key: str) -> Mapping[str, Any] | None:
+    async def load(self, *, run_key: str, context: Any | None = None
+                   ) -> Mapping[str, Any] | None:
         stored = self._reports.get(run_key)
         return None if stored is None else dict(json.loads(stored))
 
-    async def save(self, *, run_key: str, report: Mapping[str, Any]) -> Any:
+    async def save(self, *, run_key: str, report: Mapping[str, Any],
+                   context: Any | None = None) -> Any:
         encoded = json.dumps(report, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
         existing = self._reports.get(run_key)
         if existing is None:
@@ -645,6 +601,81 @@ def _context_usable(context: AuthenticatedGrantContext) -> bool:
         and context.rls_context.tenant_id == context.tenant_id
         and context.rls_context.user_id == context.subject_id
     )
+
+
+def durable_context_usable(context: Any) -> bool:
+    """Public predicate for every durable M06 boundary (evidence and report stores)."""
+    return _context_usable(context)
+
+
+async def bind_transaction_context(session: AsyncSession,
+                                   context: AuthenticatedGrantContext) -> None:
+    """Set the transaction-local tenant/RLS GUCs and prove the readback matches.
+
+    Every durable M06 statement runs after this call, so a missing or mismatched
+    tenant context raises instead of degrading into a wider read.
+    """
+    values = {
+        "tenant_id": context.tenant_id,
+        "cabinet_id": context.cabinet_id or "",
+        "project_id": context.project_id or "",
+        "user_id": context.subject_id,
+        "role": context.rls_context.role if context.rls_context else "m06-evidence",
+        "writer_generation": str(context.writer_generation),
+        "writer_epoch": str(context.writer_generation),
+        "migration_role": "true",
+        "audit_writer": "true",
+    }
+    await session.execute(
+        text(
+            "SELECT set_config('app.tenant_id', :tenant_id, true), "
+            "set_config('app.cabinet_id', :cabinet_id, true), "
+            "set_config('app.project_id', :project_id, true), "
+            "set_config('app.user_id', :user_id, true), "
+            "set_config('app.role', :role, true), "
+            "set_config('app.writer_generation', :writer_generation, true), "
+            "set_config('app.writer_epoch', :writer_epoch, true), "
+            "set_config('app.migration_role', :migration_role, true), "
+            "set_config('app.audit_writer', :audit_writer, true)"
+        ),
+        values,
+    )
+    readback = (
+        await session.execute(
+            text(
+                "SELECT current_setting('app.tenant_id', true) AS tenant_id, "
+                "current_setting('app.writer_epoch', true) AS writer_epoch, "
+                "current_setting('app.migration_role', true) AS migration_role, "
+                "current_setting('app.audit_writer', true) AS audit_writer"
+            )
+        )
+    ).mappings().one()
+    if (readback["tenant_id"] != values["tenant_id"]
+            or readback["writer_epoch"] != values["writer_epoch"]
+            or readback["migration_role"] != values["migration_role"]
+            or readback["audit_writer"] != values["audit_writer"]):
+        raise EvidenceStoreBlocked(("transaction_local_context_readback_mismatch",))
+
+
+async def fence_writer_epoch(session: AsyncSession, context: AuthenticatedGrantContext,
+                             *, required: bool = True) -> None:
+    """Compare the live partition epoch with the context generation, never guess."""
+    if not required:
+        return
+    epoch = await session.scalar(
+        select(CanonicalGrantWriterEpochRow.writer_epoch)
+        .where(
+            CanonicalGrantWriterEpochRow.tenant_id == context.tenant_id,
+            CanonicalGrantWriterEpochRow.app_definition_id == context.app_definition_id,
+            CanonicalGrantWriterEpochRow.scope_kind == "plugin_instance",
+            CanonicalGrantWriterEpochRow.scope_id == context.plugin_instance_id,
+        )
+        .with_for_update()
+    )
+    if epoch is None:
+        raise EvidenceStoreBlocked(("writer_epoch_evidence_missing",))
+    if epoch != context.writer_generation:
+        raise EvidenceStoreBlocked(("stale_writer_generation",))
 
 
 def _outcome_from_status(status: str, reason_code: str | None) -> AdapterOutcome:
@@ -717,5 +748,8 @@ __all__ = [
     "SHADOW_EVENTS",
     "SqlCanonicalEvidenceStore",
     "SqlParityEvidenceSummaryReader",
+    "bind_transaction_context",
+    "durable_context_usable",
+    "fence_writer_epoch",
     "mapping_identity_key",
 ]

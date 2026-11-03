@@ -23,6 +23,7 @@ from prodavan.application.content.scope import (
     not_found,
     resolve_actor_scope,
 )
+from prodavan.domain.content.types import AliasStatus
 from prodavan.domain.errors import AppError
 from prodavan.domain.identity import Principal
 from prodavan.infrastructure.persistence.models.content import (
@@ -103,6 +104,16 @@ class AliasBindingService:
         await self._acl.require_write_alias(
             principal=principal, employee=employee, alias=alias, scope=actor
         )
+        if alias.status != AliasStatus.ACTIVE:
+            # Rebinding a disabled permalink would silently make it serve bytes
+            # again without the owner re-enabling it first.
+            raise AppError(
+                code=ContentErrorCode.CONFLICT,
+                title="Conflict",
+                status=409,
+                detail="alias is disabled; re-enable it before binding a version",
+                extra={"alias_id": alias_id, "status": alias.status},
+            )
         await self._acl.require_read_asset(
             principal=principal, employee=employee, asset=asset, scope=actor
         )
@@ -184,8 +195,22 @@ class AliasBindingService:
         alias_id: str,
         *,
         limit: int = 20,
+        principal: Principal | None = None,
+        employee: EmployeeRow | None = None,
         scope: ContentActorScope | None = None,
     ) -> list[dict[str, Any]]:
+        """Binding history, newest first.
+
+        Passing a principal enforces the alias ``write`` ACL so this evidence is
+        never readable by an unrelated tenant or an ungranted member. The alias
+        may be disabled: history is exactly what must survive ``DELETE``.
+        """
+        if principal is not None:
+            actor = await self._scope(principal=principal, employee=employee, scope=scope)
+            alias = await self._require_alias(alias_id=alias_id, actor=actor)
+            await self._acl.require_write_alias(
+                principal=principal, employee=employee, alias=alias, scope=actor
+            )
         q = await self._session.execute(
             select(ContentAliasBindingRow)
             .where(ContentAliasBindingRow.alias_id == alias_id)

@@ -200,6 +200,43 @@ class BudgetProjection:
             raise ValueError("stale or already-on-order offers cannot be procurement eligible")
 
 
+class BudgetAllocationStatus(StrEnum):
+    """Lifecycle of one durable budget reservation for a scoped request."""
+
+    RESERVED = "reserved"
+    COMMITTED = "committed"
+    RELEASED = "released"
+
+
+@dataclass(frozen=True, slots=True)
+class BudgetAllocation:
+    """One ``equipment_v2_budget_allocations`` row scoped to a request.
+
+    The durable table is the only source: an absent row means "budget not filled
+    in yet" and is reported as an explicit empty allocation set, never invented
+    from an offer price or a sheet total.
+    """
+
+    request_id: str
+    cost_center: str
+    amount: Decimal
+    currency: str
+    status: str = BudgetAllocationStatus.RESERVED
+
+    def __post_init__(self) -> None:
+        if not all(isinstance(value, str) and value.strip()
+                   for value in (self.request_id, self.cost_center, self.status)):
+            raise ValueError("budget allocation request, cost center and status are required")
+        if len(self.currency) != 3 or not self.currency.isalpha() or self.currency.upper() != self.currency:
+            raise ValueError("budget allocation currency must be a three-letter uppercase code")
+        if not isinstance(self.amount, Decimal) or not self.amount.is_finite() or self.amount <= 0:
+            raise ValueError("budget allocation amount must be finite and positive")
+
+    @property
+    def released(self) -> bool:
+        return self.status == BudgetAllocationStatus.RELEASED.value
+
+
 @dataclass(frozen=True, slots=True)
 class EquipmentTender:
     tender_id: str
@@ -397,8 +434,15 @@ def build_projection(*, requests: Sequence[TypedRequest], lines: Sequence[Reques
                      tenders: Sequence[EquipmentTender],
                      expected_scope: DomainScope | None = None,
                      source_revision: str = "",
-                     source_generation: int = 0) -> EquipmentProjection:
-    """Build stable output, rejecting cross-scope links and identity ambiguity."""
+                     source_generation: int = 0,
+                     unresolved_reasons: Sequence[str] = ()) -> EquipmentProjection:
+    """Build stable output, rejecting cross-scope links and identity ambiguity.
+
+    ``unresolved_reasons`` carries evidence the source could not prove (an
+    unmapped source, an unavailable currency, a detached selection).  Any such
+    reason blocks the projection instead of being dropped, so a caller can never
+    mistake partially resolved durable rows for a complete snapshot.
+    """
     reqs = tuple(sorted(requests, key=lambda item: (item.request_id, _stable_digest(item))))
     line_rows = tuple(sorted(lines, key=lambda item: (item.request_id, item.ordinal,
                                                        item.line_id, _stable_digest(item))))
@@ -409,6 +453,7 @@ def build_projection(*, requests: Sequence[TypedRequest], lines: Sequence[Reques
                                                           item.source_record_id, item.tender_id,
                                                           _stable_digest(item))))
     reasons: list[str] = []
+    reasons.extend(unresolved_reasons)
     if source_generation < 0:
         reasons.append("negative_source_generation")
     request_by_id = {item.request_id: item for item in reqs}
@@ -567,6 +612,20 @@ def active_human_selections(selections: Sequence[HumanSelection]) -> tuple[Human
     return active
 
 
+def selection_evidence_digest(selections: Sequence[HumanSelection]) -> str:
+    """Stable digest over the selected-offer evidence set (order independent).
+
+    Shared by export preparation and the durable transaction adapter so a
+    committed export can re-prove the selection set it was built from.
+    """
+    return _stable_digest(tuple(sorted(
+        (item.selection_id, item.actor_id, item.line_id, item.tender_id, item.reason,
+         item.projection_digest, item.supersedes_selection_id, item.manual_override,
+         item.supplier_id, item.source_id, item.source_record_id, item.source_schema_version)
+        for item in selections
+    )))
+
+
 def prepare_procurement_export(*, projection: EquipmentProjection, selections: Sequence[HumanSelection],
                                actor_id: str, export_id: str) -> ProcurementExport:
     """Materialize export rows from explicit, same-project human selections only."""
@@ -641,12 +700,7 @@ def prepare_procurement_export(*, projection: EquipmentProjection, selections: S
     totals: dict[str, Decimal] = {}
     for row in ordered_rows:
         totals[row.currency] = _exact_sum((totals.get(row.currency, Decimal("0")), row.total))
-    selection_digest = _stable_digest(tuple(sorted(
-        (item.selection_id, item.actor_id, item.line_id, item.tender_id, item.reason,
-         item.projection_digest, item.supersedes_selection_id, item.manual_override,
-         item.supplier_id, item.source_id, item.source_record_id, item.source_schema_version)
-        for item in selections
-    )))
+    selection_digest = selection_evidence_digest(selections)
     first_line = line_by_id[ordered_rows[0].line_id]
     idempotency_key = _stable_digest({
         "tenant_id": first_line.evidence.tenant_id,
@@ -664,9 +718,11 @@ def prepare_procurement_export(*, projection: EquipmentProjection, selections: S
 
 
 __all__ = [
-    "AssociationBackfill", "BudgetProjection", "CandidateGroup", "DomainEvidence", "DomainScope",
+    "AssociationBackfill", "BudgetAllocation", "BudgetAllocationStatus", "BudgetProjection",
+    "CandidateGroup", "DomainEvidence", "DomainScope",
     "EquipmentDomainStatus", "EquipmentProjection", "EquipmentTender", "HumanSelection",
     "JsonbAssociation", "OfferFreshness", "ProcurementExport", "ProcurementExportLine",
     "ProjectionContract", "RequestLine", "TypedRequest",
-    "active_human_selections", "build_projection", "prepare_procurement_export", "select_tender",
+    "active_human_selections", "build_projection", "prepare_procurement_export",
+    "select_tender", "selection_evidence_digest",
 ]

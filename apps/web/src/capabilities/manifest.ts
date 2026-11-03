@@ -1,5 +1,6 @@
-import type { CapabilityName, DeclarativeAppManifest, ProtocolVersion } from "../../../../packages/schemas/declarative-app/v1";
+import type { CapabilityRequest, DeclarativeAppManifest, ProtocolVersion } from "../../../../packages/schemas/declarative-app/v1";
 import { DECLARATIVE_APP_PROTOCOL_VERSION } from "../../../../packages/schemas/declarative-app/v1";
+import { capabilityConstraintMismatch, isKnownCapability } from "./contracts";
 
 export class InvalidManifestError extends Error {
   constructor(message: string) {
@@ -8,10 +9,11 @@ export class InvalidManifestError extends Error {
   }
 }
 
-const capabilityNames = new Set<CapabilityName>([
-  "ui.render", "ui.navigation", "storage.kv", "storage.files", "network.fetch",
-  "events.subscribe", "platform.commands", "platform.queries", "secrets.read", "identity.read",
-]);
+function validRequest(request: Partial<CapabilityRequest>): boolean {
+  if (!isKnownCapability(request.name)) return false;
+  if (typeof request.reason !== "string" || request.reason.length === 0) return false;
+  return capabilityConstraintMismatch(request.name, request.constraints) === undefined;
+}
 
 export function parseAppManifest(value: unknown): DeclarativeAppManifest {
   if (!value || typeof value !== "object") throw new InvalidManifestError("Manifest must be an object");
@@ -19,7 +21,7 @@ export function parseAppManifest(value: unknown): DeclarativeAppManifest {
   if (manifest.protocol !== DECLARATIVE_APP_PROTOCOL_VERSION) throw new InvalidManifestError("Unsupported manifest protocol");
   if (typeof manifest.appId !== "string" || !manifest.appId || typeof manifest.version !== "string" || !manifest.version ||
       typeof manifest.displayName !== "string" || !manifest.displayName || !Array.isArray(manifest.requestedCapabilities) ||
-      !manifest.requestedCapabilities.every((request) => request && typeof request === "object" && capabilityNames.has(request.name) && typeof request.reason === "string" && request.reason.length > 0)) {
+      !manifest.requestedCapabilities.every((request) => request && typeof request === "object" && validRequest(request))) {
     throw new InvalidManifestError("Manifest is missing or has invalid required fields");
   }
   if (!manifest.entrypoints || typeof manifest.entrypoints !== "object") throw new InvalidManifestError("Manifest entrypoints are required");

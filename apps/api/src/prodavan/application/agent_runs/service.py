@@ -22,7 +22,10 @@ from prodavan.domain.agent.control_plane import EventEnvelope
 EXECUTION_BLOCKERS = {
     "model_registration": "agent_control_plane_models_not_registered",
     "migration": "agent_control_plane_database_not_ready",
-    "enqueue_dispatch": "agent_control_plane_dispatcher_unwired",
+    # The dispatcher and its durable consumer now exist; this code is only
+    # reported when the consumer cannot be composed at all, so a committed
+    # intent is never left without a potential claimer.
+    "enqueue_dispatch": "agent_control_plane_dispatcher_unavailable",
     "run_claim": "agent_run_durable_claim_and_lease_unwired",
     "provider_unknown_outcome": "agent_run_provider_outcome_reconciliation_unwired",
 }

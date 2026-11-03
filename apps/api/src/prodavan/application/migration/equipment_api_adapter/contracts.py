@@ -32,6 +32,20 @@ class AdapterErrorCode(StrEnum):
     WRITE_DISABLED = "write_disabled"
     CONFLICT = "conflict"
     LEGACY_ROW_INVALID = "legacy_row_invalid"
+    # Durable-persistence codes.  Each maps one durable reason code onto a stable
+    # API token, so a client never has to parse a Python exception message.
+    TRUSTED_CONTEXT_MISSING = "trusted_context_missing"
+    CROSS_TENANT = "cross_tenant"
+    PROJECT_ANCHOR_MISSING = "project_anchor_missing"
+    SELECTION_CONFLICT = "selection_conflict"
+    SELECTION_MEMBERSHIP_INVALID = "selection_membership_invalid"
+    SELECTED_OFFER_DETACHED = "selected_offer_detached"
+    STALE_PROJECTION = "stale_projection"
+    EXPORT_NOT_READY = "export_not_ready"
+    IDEMPOTENCY_CONFLICT = "idempotency_conflict"
+    COMMIT_UNKNOWN = "commit_unknown"
+    DURABLE_UNAVAILABLE = "durable_unavailable"
+    REQUEST_NOT_FOUND = "request_not_found"
 
 
 class EquipmentActorKind(StrEnum):
@@ -303,6 +317,8 @@ class CreateRequestCommand:
     title: str
     currency: str
     created_at: str
+    source_id: str | None = None
+    source_schema_version: str | None = None
     expected_source_revision: str | None = None
     expected_snapshot_digest: str | None = None
     canonical_registry_digest: str | None = None
@@ -321,6 +337,8 @@ class CreateRequestCommand:
             raise AdapterError(AdapterErrorCode.INVALID_QUERY, "created_at must be ISO-8601") from error
         if parsed.tzinfo is None or parsed.utcoffset() is None:
             raise AdapterError(AdapterErrorCode.INVALID_QUERY, "created_at must include a timezone")
+        _optional_id(self.source_id, "source_id")
+        _optional_revision(self.source_schema_version, "source_schema_version")
         _optional_revision(self.expected_source_revision, "expected_source_revision")
         _optional_digest(self.expected_snapshot_digest, "expected_snapshot_digest")
         _optional_digest(self.canonical_registry_digest, "canonical_registry_digest")

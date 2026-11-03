@@ -104,7 +104,18 @@ def test_wiring_document_states_registration_and_dispatch_blockers() -> None:
     assert "No DDL, Alembic, live database action, or test execution was performed" in wiring
 
 
-def test_feature_gated_binding_keeps_writes_disabled_after_metadata_registration() -> None:
+def test_feature_gated_binding_keeps_writes_closed_by_default() -> None:
+    """The binding must stay closed unless *all* of the host gates pass.
+
+    This gate used to assert that the dependency returned
+    ``writes_enabled=False`` unconditionally with a hard-coded
+    ``agent_control_plane_dispatcher_unwired`` literal.  With the dispatcher and
+    consumer in place that literal is no longer the truth: writes are now gated
+    on the feature flag, metadata registration and database readiness, and the
+    default binding is still closed.  The assertions below are deliberately
+    structural so they survive renames of individual blocker codes.
+    """
+
     models = _tree(MODELS_INIT)
     imports = {
         node.module: {alias.name for alias in node.names}
@@ -114,14 +125,27 @@ def test_feature_gated_binding_keeps_writes_disabled_after_metadata_registration
     assert imports["prodavan.infrastructure.persistence.agent_control_plane.models"] == EXPECTED_MODELS
 
     dependency = API_SOURCE.read_text(encoding="utf-8")
-    assert dependency.index("if not _feature_enabled") < dependency.index("missing_model_tables(set(Base.metadata.tables))")
-    assert dependency.index("missing_model_tables(set(Base.metadata.tables))") < dependency.index(
-        "SqlAlchemyAgentControlPlaneRepository(session_factory=get_session_factory())"
-    )
+
+    # Order matters: a request must be refused for the cheapest reason first and
+    # may only touch the database after the flag and metadata gates pass.
+    flag_gate = dependency.index("if not _feature_enabled")
+    model_gate = dependency.index("missing = missing_model_tables(registered)")
+    db_probe = dependency.index('SELECT 1 FROM "{table_name}" LIMIT 0')
+    assert flag_gate < model_gate < db_probe
+
+    # The default is still closed, and every refusal path has a stable code.
     assert "writes_enabled: bool = False" in dependency
-    assert "return AgentRunBackend(transaction=transaction, session=session, writes_enabled=False)" in dependency
-    assert 'blocker="agent_control_plane_dispatcher_unwired"' in dependency
+    assert "BLOCKER_FEATURE_FLAG_DISABLED" in dependency
+    assert "BLOCKER_MODELS_NOT_REGISTERED" in dependency
+    assert "BLOCKER_DATABASE_NOT_READY" in dependency
+
+    # Writes may only be enabled in the branch that took all three gates.
     assert "if not self.writes_enabled:" in dependency
+    enable_index = dependency.index("writes_enabled=True")
+    assert db_probe < enable_index
+
+    # The retired blanket refusal must not survive.
+    assert "agent_control_plane_dispatcher_unwired" not in dependency
 
 
 def test_enqueue_intent_dispatch_consumer_is_zone_owned() -> None:
