@@ -59,6 +59,26 @@ library-пакетов с корректными fail-closed контракта�
 
 ## 3. Разрывы (порт без реализации)
 
+> **Статус на 2026-11-04: раздел устарел по существу и сохранён как история.**
+> G1, G2, G3, G4, G5, G6, G8, G9 получили реализации — см. таблицу ниже. Актуальное
+> состояние ведёт реестр `UNIMPLEMENTED_PORTS` в `application/migration/composition.py`,
+> и гейт `tests/migration/integration_seams/test_seam_contract.py` сверяет реестр с кодом,
+> поэтому расхождение между этим документом и кодом больше не может остаться незамеченным.
+> Документ не переписан целиком намеренно: исходные формулировки полезны, чтобы видеть,
+> чем именно был разрыв.
+
+| # | Порт | Реализация (2026-11-04) |
+|---|---|---|
+| G1 | `M05HandoffPort` | `evidence_ports.SqlM05HandoffEvidenceStore` |
+| G2 | `M05PromotionRecordPort` | `evidence_ports.SqlM05PromotionEvidenceStore` |
+| G3 | `PartitionHandoffReadPort` | `evidence_ports.SqlPartitionHandoffReadStore` (bulk-режим ещё не принимается builder'ом) |
+| G4 | `EvidenceStore` (M04E) | `m04e_ports.SqlM04EEvidenceStore` + таблицы ledger `2026110315` |
+| G5 | cutover: repository + 4 верификатора | `m06_cutover/ports.py` (fail-closed: схемы cutover-состояния ещё нет) |
+| G6 | `UpstreamGatePort`, `CandidateProofPort`, `CandidateReader` | `m04e_ports.py` |
+| G8 | `M05IdentityEvidencePort` / `RuntimeInstanceLifecycle` | были реализованы и на момент ревиза |
+| G9 | `ProviderAttemptJournalPort` | `infrastructure/.../attempt_journal.py` поверх таблицы `2026110311` |
+| G7 | `ScopeRegistryTransactionManagerPort` и tenant-context порты | `tenant_context.py`; остаётся отсутствующий `TrustedPrincipalResolver` на auth-границе |
+
 Severity: **S1** — блокирует cutover, **S2** — блокирует соответствующий gate/этап, **S3** — шум/риск.
 
 | # | Порт | Объявлен | Что означает | Sev |

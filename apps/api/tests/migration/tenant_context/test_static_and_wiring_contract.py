@@ -180,12 +180,18 @@ def _call_name(node: ast.Call) -> str | None:
 
 
 def _executed_statements(tree: ast.Module) -> tuple[list[str], list[ast.AST]]:
-    """Every statement the module hands to an executor, as literals, plus dynamic ones."""
+    """Every statement the module hands to an executor, as literals, plus dynamic ones.
+
+    Functions are visited *everywhere* in the tree, not only at module level: most of the
+    production statements are executed from methods (``_apply_tenant_context``,
+    ``_restore_previous``, ``_narrow``), so a module-body-only walk would silently skip
+    them and the check would pass for the wrong reason.
+    """
 
     module_bindings = _module_bindings(tree)
     values: list[str] = []
     dynamic: list[ast.AST] = []
-    for function in tree.body:
+    for function in ast.walk(tree):
         if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
         if function.name in EXECUTOR_FUNCTIONS:
@@ -251,6 +257,37 @@ def test_no_guc_write_is_built_by_interpolation() -> None:
     statements, dynamic = _executed_statements(MODULE_TREE)
     assert statements, "the scan must find the executed statements, not an empty set"
     assert dynamic == [], [ast.dump(node) for node in dynamic]
+
+
+def test_every_sql_constant_is_reached_by_the_scan() -> None:
+    """No statement literal may escape inspection (the scan must not be blind anywhere).
+
+    Every ``_*_SQL`` constant of the module is executed through an executor call site, so
+    all of them must be found by :func:`_executed_statements`.  A statement that is
+    invoiced but not reached means the scan has a blind spot — and an unchecked statement
+    is exactly the one that could smuggle in a non-local ``set_config``.
+    """
+
+    statements, _ = _executed_statements(MODULE_TREE)
+    sql_constants: dict[str, list[str]] = {}
+    for name, expression in _module_bindings(MODULE_TREE).items():
+        if not name.endswith("_SQL"):
+            continue
+        for candidate in expression:
+            resolved, _dynamic = _resolved_statements(candidate, {})
+            if resolved:
+                sql_constants[name] = resolved
+    assert sql_constants, "the module must define its statements as module constants"
+    missing = {
+        name
+        for name, values in sql_constants.items()
+        if not set(values) <= set(statements)
+    }
+    assert missing == set(), f"statements never reached by the scan: {sorted(missing)}"
+    # The tenant/trust reads and the two executors are covered by the same walk.
+    assert any("pg_roles" in value for value in statements)
+    assert any("txid_current" in value for value in statements)
+    assert any("pg_policies" in value for value in statements)
 
 
 def test_the_scan_really_catches_a_violation() -> None:

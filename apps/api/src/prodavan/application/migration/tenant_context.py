@@ -526,7 +526,7 @@ def _previous_values(readback: Mapping[str, object]) -> dict[str, str]:
     what makes the capture observe real values instead of ``None``.
     """
 
-    return {name: str(readback.get(_READBACK_KEY[name]) or "") for name in _SETTINGS}
+    return {name: str(readback.get(name) or "") for name in _SETTINGS}
 
 
 async def _read_previous(session: object) -> dict[str, str]:
