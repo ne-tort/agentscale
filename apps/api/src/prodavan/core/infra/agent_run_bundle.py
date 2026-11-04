@@ -28,9 +28,10 @@ has four members, and the map below is the whole of this module's policy:
 | ``runner`` | ``application/agent_runs/worker.SessionAgentTurnRunner`` | the worker (``agent_run_turn_runner_unwired``): nothing can drive ``agent.session_service.start_detached_turn``, i.e. no provider turn happens. |
 | *(not a member)* ``lease_store`` | ``.../agent_control_plane/lease_store.SqlAlchemyRunLeaseStore`` | the fenced execution port and the addressed intent pipeline cannot be built at all (``agent_run_lease_store_unwired``), so the consumer loop loses its port as well. |
 
-The lease store is deliberately **not** a bundle member: the contract has four
-fields and this task may not change it.  It is reported separately because a
-bundle without it is a bundle whose port cannot exist.
+The lease store is deliberately **not a contract member**: the dataclass has four
+fields and this task may not change another slice's contract.  It is carried on the
+bundle and reported separately, because a bundle without it is a bundle whose port
+cannot exist.
 
 Fail-closed assembly
 --------------------
@@ -42,9 +43,11 @@ member ``None`` and adds a named blocker.  There is no in-memory stand-in and no
 report it (:meth:`AgentRunHostDependencies.worker_blockers` /
 :meth:`AgentRunHostDependencies.consumer_blockers`).
 
-The report is *derived* from the dependencies object that is handed to the host,
-never tracked beside it, so a caller can never see "wired" in a report and a
-``None`` in the bundle.
+The per-member blockers in the report are *derived* from the very dependencies
+object (and lease store) the host receives, never tracked beside them, so a caller
+cannot read "wired" in a report while the host holds a ``None``.  The composition
+codes and the redacted per-member reasons are additive metadata on top of that
+derivation: they explain *why* a member is missing, they never soften it.
 
 Install / restore
 -----------------
@@ -352,10 +355,10 @@ def _as_attempt_journal(value: Any) -> Any:
 class _Assembly:
     """A single composition attempt.
 
-    Every member is built in its own guarded step.  The class keeps three things:
-    the resolved session factory, the lazily built control-plane repository (shared
-    by the run read port and the control-plane factory so one process does not
-    multiply repositories), and the list of composition-level codes.
+    Every member is built in its own guarded step.  The class keeps the resolved
+    session factory, the lazily built control-plane repository (shared by the run
+    read port and the control-plane factory, so one process does not multiply
+    repositories), the composition-level codes and the redacted per-member reasons.
     """
 
     def __init__(

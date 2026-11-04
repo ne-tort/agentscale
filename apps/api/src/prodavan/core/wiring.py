@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from prodavan.config.settings import settings
-from prodavan.core.infra.agent_run_worker_resource import AgentRunWorkerResource
+from prodavan.core.infra.agent_run_bundle import build_agent_run_host_resource
 from prodavan.core.infra.database_resource import DatabaseEngineResource
 from prodavan.core.infra.gotenberg_manager import GotenbergManager
 from prodavan.core.infra.k8s_manager import k8s_manager_from_settings
@@ -63,11 +63,15 @@ def build_lifespan_manager() -> LifespanManager:
     # Registered right after the DB resource: the runtime opens its own sessions
     # from the process factory, so storage must be started first.
     manager.register(web_stream_runtime_resource_from_settings())
-    # Durable Agent Run loops (MIG-AR-HOST-01): inert unless one of the
-    # AGENT_RUN_{WORKER,CONSUMER}_ENABLED flags is on and the execution adapter
-    # has registered its composition. Registered after the DB resource, so storage
-    # is started before any loop can take a session (and stopped after it).
-    manager.register(AgentRunWorkerResource())
+    # Durable Agent Run loops (MIG-AR-HOST-01/02): inert unless one of the
+    # AGENT_RUN_{WORKER,CONSUMER}_ENABLED flags is on. The bundle builds every
+    # dependency from the process session factory and publishes it on the host
+    # seam, and the resource is composed over the *addressed* intent handler
+    # registry — the old non-addressable handler needs ``port.claim_run``, which a
+    # fenced adapter does not have, so intents would walk to their poison-pill.
+    # Registered after the DB resource, so storage starts before any loop can take
+    # a session (and stops after it).
+    manager.register(build_agent_run_host_resource())
     manager.register(k8s_manager_from_settings())
     # agent-sandbox SDK client (inert unless pod_runtime_mode=sandbox; Wave 2
     # runtime adapter resolves it lazily via get_sandbox_client_manager).

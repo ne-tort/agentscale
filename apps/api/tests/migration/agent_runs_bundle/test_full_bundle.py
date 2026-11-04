@@ -39,6 +39,7 @@ from prodavan.core.infra.agent_run_bundle import (
 from prodavan.core.infra.agent_run_worker_resource import (
     INTENT_QUEUE_NAME,
     AgentRunHostDependencies,
+    AgentRunHostSettings,
     AgentRunWorkerResource,
     _consumer_lease_seconds,
     current_host_dependency_provider,
@@ -268,7 +269,9 @@ def test_host_resource_is_built_with_bundle_dispatcher_and_factory() -> None:
     restore_agent_run_host_dependencies()
     factory = FakeSessionFactory()
 
-    resource = build_agent_run_host_resource(session_factory=factory)
+    resource = build_agent_run_host_resource(
+        config=AgentRunHostSettings(), session_factory=factory
+    )
 
     assert isinstance(resource, AgentRunWorkerResource)
     assert resource.name == "agent_run_host"
