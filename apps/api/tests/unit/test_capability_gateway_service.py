@@ -46,6 +46,9 @@ class EchoAdapter:
 
 
 def request() -> CapabilityRequest:
+    # `domain` — часть точного сравнения с грантом: запрос без домена не доказывает
+    # принадлежность домен-скоуд гранту, поэтому gateway обязан отказывать. Прежняя
+    # фикстура оставляла domain=None и ожидала ALLOW для гранта с domains={"storage"}.
     return CapabilityRequest(
         context=RequestContext(
             app_id="inventory-app",
@@ -56,6 +59,7 @@ def request() -> CapabilityRequest:
         capability="storage.kv",
         operation="read",
         resource="project/p-1/key/item",
+        domain="storage",
     )
 
 

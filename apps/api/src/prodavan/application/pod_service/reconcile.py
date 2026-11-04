@@ -262,6 +262,32 @@ class PodReconcileService:
             return
 
         project.status = ProjectStatus.ACTIVE
+        resumed = project.launch_phase == "resuming"
+        resume_generation = project.resume_generation
+
+        from prodavan.application.project_service.lifecycle_emitter import (
+            ProjectLifecycleEmitter,
+        )
+
+        if resumed:
+            # The event announces the pod-level resume, which is what
+            # ``sync_desired`` just completed. It is emitted before the bridge
+            # bootstrap for two reasons: the resume of the pod is the durable
+            # fact, and a crash anywhere after this flush must still leave the
+            # retry re-emitting under the *same* generation key. That key makes
+            # the projection at-most-once (``PlatformEventService`` replays the
+            # existing row instead of inserting a second one).
+            await ProjectLifecycleEmitter(self._session).emit(
+                event_type="project.resumed",
+                company_id=project.company_id,
+                project_id=project.id,
+                cabinet_id=project.cabinet_id,
+                principal=_SYSTEM,
+                payload={"resume_generation": resume_generation},
+                idempotency_key=(f"project-resumed:{project.id}:{resume_generation}"),
+            )
+            await self._session.commit()
+
         from prodavan.application.projects.runtime_side_effects import bootstrap_project_sessions
 
         # Keep the persisted marker until registration finishes. If this
@@ -283,68 +309,57 @@ class PodReconcileService:
         # truthful and must not leak through the active project's API view.
         pod.last_error = None
 
-        from prodavan.application.project_service.lifecycle_emitter import (
-            ProjectLifecycleEmitter,
+        if not resumed:
+            return
+
+        # The resume is complete: the pod is RUNNING and its sessions are
+        # registered. Release the durable marker here rather than after the
+        # trigger drain — draining queued triggers is a follow-up worker
+        # concern, and gating the marker on it left an ACTIVE project marked
+        # "resuming" forever whenever the owner row was missing, so every later
+        # reconcile pass re-ran bridge registration for a project that was not
+        # resuming. Reconcile itself is serialised by the advisory lock, so no
+        # other pass can be mid-resume on this project while this one commits.
+        project.launch_phase = None
+        await self._session.commit()
+
+        from prodavan.application.agent.trigger_dispatcher import AgentTriggerDispatcher
+        from prodavan.infrastructure.persistence.models.identity import EmployeeRow
+        from prodavan.core.jobs.enqueue import enqueue_trigger_drain
+
+        employee = await self._session.get(EmployeeRow, project.owner_employee_id)
+        if employee is None:
+            return
+        principal = Principal(
+            sub=employee.keycloak_sub or employee.id,
+            email=employee.email,
+            roles=frozenset({"employee"}),
         )
-
-        if project.launch_phase == "resuming":
-            resume_generation = project.resume_generation
-            await ProjectLifecycleEmitter(self._session).emit(
-                event_type="project.resumed",
-                company_id=project.company_id,
+        dispatch = None
+        try:
+            dispatch = await AgentTriggerDispatcher(
+                self._session, runtime=self._runtime
+            ).dispatch_batch(
                 project_id=project.id,
-                cabinet_id=project.cabinet_id,
-                principal=_SYSTEM,
-                payload={"resume_generation": resume_generation},
-                idempotency_key=(f"project-resumed:{project.id}:{resume_generation}"),
+                principal=principal,
+                employee=employee,
+                max_n=10,
             )
-            # The resume itself is complete: the pod is RUNNING and its sessions
-            # are registered. Release the durable marker here, not after the
-            # trigger drain. Draining queued triggers is a follow-up worker
-            # concern — holding the marker for it left an ACTIVE project marked
-            # "resuming" forever whenever the owner was missing or the drain
-            # reported an inconclusive result, and every later reconcile pass
-            # then re-ran bridge registration for a project that was not resuming.
-            project.launch_phase = None
-            await self._session.commit()
-            from prodavan.application.agent.trigger_dispatcher import AgentTriggerDispatcher
-            from prodavan.infrastructure.persistence.models.identity import EmployeeRow
-            from prodavan.core.jobs.enqueue import enqueue_trigger_drain
-
-            employee = await self._session.get(EmployeeRow, project.owner_employee_id)
-            if employee is None:
-                return
-            principal = Principal(
-                sub=employee.keycloak_sub or employee.id,
-                email=employee.email,
-                roles=frozenset({"employee"}),
+        except Exception:
+            # The resume outcome is already committed and the queued triggers
+            # are still in the outbox, so a drain error must not abort the whole
+            # reconcile pass and skip every other pod in this run. The sibling
+            # drain loop below isolates its dispatch the same way.
+            logger.exception("resume trigger dispatch failed project_id=%s", project.id)
+        if dispatch is not None and _dispatch_failed(dispatch):
+            # Best effort: the dispatcher already released the claimed trigger
+            # for retry, so the drain worker owns the remainder.
+            logger.warning(
+                "resume trigger dispatch incomplete project_id=%s reason=%s",
+                project.id,
+                dispatch.get("reason"),
             )
-            dispatch = None
-            try:
-                dispatch = await AgentTriggerDispatcher(
-                    self._session, runtime=self._runtime
-                ).dispatch_batch(
-                    project_id=project.id,
-                    principal=principal,
-                    employee=employee,
-                    max_n=10,
-                )
-            except Exception:
-                # The resume outcome is already committed and the queued
-                # triggers are still in the outbox, so a drain error here must
-                # not abort the whole reconcile pass (every other pod in this
-                # run would be skipped). The sibling drain loop below isolates
-                # its dispatch the same way.
-                logger.exception("resume trigger dispatch failed project_id=%s", project.id)
-            if dispatch is not None and _dispatch_failed(dispatch):
-                # Best effort: the dispatcher already released the claimed
-                # trigger for retry, so the drain worker owns the remainder.
-                logger.warning(
-                    "resume trigger dispatch incomplete project_id=%s reason=%s",
-                    project.id,
-                    dispatch.get("reason"),
-                )
-            enqueue_trigger_drain()
+        enqueue_trigger_drain()
 
     async def _reap_zombies(self) -> int:
         """Delete k8s Pods managed by pod-service without a live PG row."""

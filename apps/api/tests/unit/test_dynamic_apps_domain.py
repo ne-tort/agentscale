@@ -66,13 +66,23 @@ def test_published_definition_requires_current_version() -> None:
 
 
 def test_manifest_contract_matches_declarative_app_v1() -> None:
+    # Манифест валиден по всем полям, кроме проверяемого: иначе более ранний
+    # валидатор (appId/displayName) срабатывает первым и тест перестаёт
+    # проверять рассогласование `version` и `manifest_version`.
     with pytest.raises(ValidationError, match="manifest version"):
         AppVersion(
             id="version-1",
             app_definition_id="definition-1",
             manifest_version="1.0.0",
             artifact_digest="sha256:" + "a" * 64,
-            manifest={"protocol": "1.0", "version": "2.0.0", "requestedCapabilities": [], "entrypoints": {"ui": {}}},
+            manifest={
+                "protocol": "1.0",
+                "appId": "demo",
+                "displayName": "Demo",
+                "version": "2.0.0",
+                "requestedCapabilities": [],
+                "entrypoints": {"ui": {}},
+            },
             created_at=NOW,
         )
 
@@ -83,7 +93,7 @@ def test_manifest_contract_matches_declarative_app_v1() -> None:
             manifest_version="1.0.0",
             artifact_digest="sha256:" + "a" * 64,
             manifest={
-                "protocol": "1.0", "appId": "demo", "version": "1.0.0",
+                "protocol": "1.0", "appId": "demo", "displayName": "Demo", "version": "1.0.0",
                 "entrypoints": {"plugin": {"artifact": {"sha256": "b" * 64}}},
                 "requestedCapabilities": [],
             },
@@ -92,13 +102,23 @@ def test_manifest_contract_matches_declarative_app_v1() -> None:
 
 
 def test_published_version_requires_publication_timestamp() -> None:
+    # Валидный по манифесту версия-объект: единственное нарушение — статус
+    # PUBLISHED без published_at. Пустой manifest проверял бы protocol, а не
+    # требование публикационной метки.
     with pytest.raises(ValidationError, match="published_at"):
         AppVersion(
             id="version-1",
             app_definition_id="definition-1",
             manifest_version="1.0.0",
             artifact_digest="sha256:" + "a" * 64,
-            manifest={},
+            manifest={
+                "protocol": "1.0",
+                "appId": "demo",
+                "displayName": "Demo",
+                "version": "1.0.0",
+                "requestedCapabilities": [],
+                "entrypoints": {"ui": {}},
+            },
             status=AppLifecycleStatus.PUBLISHED,
             created_at=NOW,
         )

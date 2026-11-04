@@ -150,7 +150,8 @@ async def test_deny_routes_full_transaction_evidence_without_reconstruction():
     assert result.final_result_event.event_id == "final-1"
     assert result.scope == ("project", "project-1")
     assert result.integrity.auth_event.digests["arguments_digest"] == DIGEST
-    assert result.redacted.redaction_version == original.redaction_version
+    # Same reason as above: the redaction marker belongs to the full envelope.
+    assert result.outcome.redaction_version == original.redaction_version
 
 
 @pytest.mark.asyncio
