@@ -6,7 +6,11 @@ from datetime import timedelta
 
 import pytest
 
-from prodavan.application.capability_method_mapping.contracts import ResourceDomainConstraint
+from prodavan.application.capability_method_mapping.contracts import (
+    CapabilityMethodMapping,
+    MethodIdentity,
+    ResourceDomainConstraint,
+)
 from prodavan.application.migration.m06_grants_gateway.adapter import (
     AdapterOutcome,
     CapabilityGatewayService,
@@ -221,7 +225,12 @@ async def test_cross_tenant_replay_is_detected_from_the_global_source_identity()
                             rls_context=RLS.model_copy(update={"tenant_id": "tenant-b"}))
     other_identity = replace(IDENTITY, tenant_id="tenant-b", company_id="company-b")
     other_partition = replace(PARTITION, tenant_id="tenant-b")
-    gates = replace(GOOD_GATES, tenant_id="tenant-b",
+    # The trusted handoff double must attest the *other* tenant completely: the gates
+    # carry company_id, so leaving it at the original company would make
+    # ``gates_request_identity_digest`` disagree with the attested digest and the call
+    # would be refused as an identity mismatch before the cross-tenant replay is even
+    # visible. A cross-tenant replay is one the server resolves consistently.
+    gates = replace(GOOD_GATES, tenant_id="tenant-b", company_id="company-b",
                     request_identity_digest=request_identity_digest(other_identity))
     service, store = _service(identity=other_identity, read=_Read(prior), gates=gates)
     assert await _observe(service, context=other_context) is None
@@ -316,20 +325,32 @@ async def test_conflicted_prior_mapping_is_not_silently_replayed():
 
 @pytest.mark.asyncio
 async def test_canonical_digest_change_after_mapping_is_a_conflict():
+    # Two registry generations of the *same* method identity: the approved mapping was
+    # revised (a second resource is now declared), so the canonical digest the adapter
+    # derives today differs from the one recorded with the first mapping. A revised
+    # declaration is a new row, never an in-place mutation of a frozen dataclass.
+    revised = CapabilityMethodMapping(
+        identity=MethodIdentity(server="files", tool="read", version="1.0.0"),
+        capability_key="storage.files", operation="read",
+        constraints=ResourceDomainConstraint(resources=("workspace", "archive"),
+                                             domains=("files",)),
+        supported_protocol_version="mcp-1", tool_version_compatibility=("1.0.0",),
+    )
     service, store = _service()
     first = await _observe(service)
     assert first is not None
     recorded = store.transactions[-1][1].mapping
-    changed = replace(MAPPING_READ_PORT.configured()[0],
-                      constraints=ResourceDomainConstraint(
-                          resources=("workspace", "archive"), domains=("files",)))
+    assert recorded.canonical_digest is not None
+    changed = declared_method_mapping(revised).mapping_digest
+    assert changed != declared_method_mapping(MAPPING_READ_PORT.configured()[0]).mapping_digest
     service, store = _service(
         read=_Read(recorded), mapping=ApprovedMethodOperationAdapter(
-            mappings=DeclaredMappingReadPort((changed, APPROVED_MAPPINGS[1])),
+            mappings=DeclaredMappingReadPort((revised, APPROVED_MAPPINGS[1])),
             method_servers={"read": "files", "delete": "files"},
             method_versions={"read": "1.0.0", "delete": "1.0.0"}, now=NOW))
     assert await _observe(service) is None
     assert store.transactions[-1][1].conflict_mapping.reason_code == "mapping_digest_changed"
+    assert recorded.canonical_digest is not None
 
 
 @pytest.mark.asyncio
@@ -432,5 +453,13 @@ def test_grant_set_grammar_rejects_broadening_and_ambiguity():
 
 def test_module_action_kinds_only_map_to_approved_operations():
     assert module_capability_operations("data.select_row") == frozenset({"read"})
+    assert module_capability_operations("data.delete_row") == frozenset({"delete"})
     assert module_capability_operations("equipment.pipeline") is None
-    assert module_capability_operations("data.create_row") == frozenset({"create"})
+    # ``create`` is not an operation of the closed approved vocabulary: the canonical
+    # grammar expresses row creation as ``storage.*:write``, and ``ui.render`` owns
+    # ``render``. The gate must therefore refuse to hand back an operation no canonical
+    # decision can enforce instead of translating the action onto a neighbouring one —
+    # so an unmapped action kind quarantines rather than broadening the request.
+    assert module_capability_operations("data.create_row") is None
+    assert module_capability_operations("documents.convert") is None
+    assert module_capability_operations("documents.fill_template") == frozenset({"render"})

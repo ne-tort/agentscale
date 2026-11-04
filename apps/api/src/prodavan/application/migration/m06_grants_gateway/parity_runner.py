@@ -128,6 +128,17 @@ class ParityReportStorePort(Protocol):
                    context: Any | None = None) -> ReportOutcome: ...
 
 
+EMPTY_WINDOW_CURSOR = "empty-window"
+MATERIALIZED_WINDOW_CURSOR = "materialized-window"
+"""Cursors recorded for a complete traversal that has no page cursor to report.
+
+A complete window must still name the position the read stopped at, because ``None``
+there reads as "no traversal happened" and could be resumed or re-recorded as if the
+window were untouched. An empty page keeps a stable token, and a caller that aggregates
+already-materialized evidence (no paging at all) records the materialized token.
+"""
+
+
 @dataclass(frozen=True, slots=True)
 class ParityCheckpoint:
     """Resumable traversal position; never a parity conclusion on its own."""
@@ -143,6 +154,25 @@ class ParityCheckpoint:
             raise ValueError("checkpoint observation count must be non-negative")
         if self.complete_window and self.cursor is None:
             raise ValueError("a complete window needs the final cursor it stopped at")
+
+    @classmethod
+    def for_complete_window(cls, cursor: str | None,
+                            observation_count: int) -> "ParityCheckpoint":
+        """Checkpoint for a traversal that consumed the whole requested window."""
+        if observation_count < 0:
+            raise ValueError("checkpoint observation count must be non-negative")
+        if cursor is None:
+            if observation_count:
+                raise ValueError("a complete window needs the final cursor it stopped at")
+            cursor = EMPTY_WINDOW_CURSOR
+        return cls(cursor, observation_count, True)
+
+    @classmethod
+    def for_materialized_window(cls, observation_count: int) -> "ParityCheckpoint":
+        """Checkpoint for evidence that was already collected instead of paged."""
+        if observation_count < 0:
+            raise ValueError("checkpoint observation count must be non-negative")
+        return cls(MATERIALIZED_WINDOW_CURSOR, observation_count, True)
 
     @property
     def digest(self) -> str:
@@ -411,7 +441,8 @@ class BoundedParityRunner:
                 break
             if batch.next_cursor is None:
                 return _blocked_report(request, ("observation_cursor_missing",), dependency_gates)
-        checkpoint = ParityCheckpoint(cursor, len(collected), complete)
+        checkpoint = (ParityCheckpoint.for_complete_window(cursor, len(collected)) if complete
+                      else ParityCheckpoint(cursor, len(collected), False))
         return _build_report(
             request=request, summary=summary, observations=tuple(collected),
             checkpoint=checkpoint, dependency_gates=dependency_gates,
@@ -434,12 +465,20 @@ class BoundedParityRunner:
 
 
 def run_key_for(summary: ParityEvidenceSummary, request: ParityRunRequest) -> str:
+    """Deterministic registry key for one requested parity run.
+
+    The key binds what was *asked*: the partition, the window, the observation budget
+    and the source position the run was meant to evaluate (final delta checkpoint and
+    writer epoch). The digest of the evidence actually observed
+    (``source_snapshot_digest``) is deliberately excluded: re-running the same request
+    and finding different evidence must surface as an explicit registry conflict, not
+    as a silent second report recorded under a freshly derived key.
+    """
     return digest({
         "report_schema": REPORT_SCHEMA,
         "partition": request.partition.digest,
         "window_start": request.window_start.astimezone(UTC).isoformat(),
         "window_end": request.window_end.astimezone(UTC).isoformat(),
-        "source_snapshot_digest": summary.source_snapshot_digest,
         "final_delta_checkpoint": summary.final_delta_checkpoint,
         "writer_epoch": summary.writer_epoch,
         "max_observations": request.max_observations,
@@ -469,6 +508,9 @@ def _build_report(*, request: ParityRunRequest, summary: ParityEvidenceSummary,
         blocked.append("accepted_upstream_and_atomic_evidence_handoffs")
     else:
         blocked.extend(dependency_gates.missing_markers)
+    # The coverage/empty-window facts are reported in ``blocked_reasons`` even when the
+    # partition is still being traversed: a reviewer must see why the run did not
+    # conclude, not only that the status was incomplete.
     if not ordered:
         blocked.append("no_shadow_observations")
     if not checkpoint.complete_window:
@@ -487,6 +529,10 @@ def _build_report(*, request: ParityRunRequest, summary: ParityEvidenceSummary,
         blocked.append("unresolved_canonical_or_binding_digest")
     if checkpoint.complete_window and not ordered:
         blocked.append("empty_observation_window")
+    # Traversal state decides first: a window that was never fully consumed is an
+    # incomplete observation of the partition and must say so, even though every
+    # blocker it already discovered is listed in ``blocked_reasons``. Only a complete
+    # window can conclude, and then any outstanding blocker outranks readiness.
     if not checkpoint.complete_window:
         status = ParityStatus.INCOMPLETE
     elif blocked:

@@ -150,7 +150,7 @@ async def test_flag_off_installs_nothing_and_withdraws_cleanly() -> None:
     resource = ResourceApplyResource(enabled=False)
     await resource.startup()
     assert materialization_apply_port(object()) is None  # type: ignore[arg-type]
-    assert resource.health() is None
+    assert await resource.health() is None
     await resource.shutdown()
     assert materialization_apply_port(object()) is None  # type: ignore[arg-type]
 
@@ -630,6 +630,9 @@ def test_production_policy_requires_only_evidence_the_schema_can_prove() -> None
 def test_every_unproven_evidence_kind_is_documented_with_an_owner() -> None:
     """Fail-closed is not allowed to become silent: each gap names its owner."""
     kinds = {name for name, _ in EVIDENCE_AUTHORITY_BLOCKERS}
+    # ``resource_effect`` is no longer "no adapter exists" (MIG-RES-EFFECT-WIRING-01
+    # wired one); the entry now records what the wired boundary still cannot do, so
+    # the gap keeps its owner instead of being deleted along with the stale claim.
     assert kinds == {"bridge_lease", "approval_link", "event_link", "resource_effect"}
     for _, reason in EVIDENCE_AUTHORITY_BLOCKERS:
         assert "owner:" in reason and len(reason) > 40
@@ -742,8 +745,10 @@ async def test_composition_builds_a_real_port_without_stubs() -> None:
         assert isinstance(instance, ResourceMaterializationApplyPort)
         assert instance.application.executor.gate is not None
         assert instance.application.executor.effects is None, (
-            "no effect adapter exists yet: a populated plan must be refused with "
-            "resource_effect_port_missing instead of acknowledged"
+            "the composer stays neutral: a caller that passes no effect boundary still "
+            "gets the executor's fail-closed resource_effect_port_missing for a "
+            "populated plan (wiring is MIG-RES-EFFECT-WIRING-01, see "
+            "test_effect_wiring.py)"
         )
         assert instance.evidence is not None
         assert instance.clock is not None

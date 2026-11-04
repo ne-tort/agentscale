@@ -1,8 +1,8 @@
 # MIG-RES-EFFECT-01 acceptance artifact — `ResourceOperationEffectPort`
 
-Pod/workspace implementation of the resource-effect boundary. **Artifacts only** —
-nothing here was executed during the migration verification freeze; every claim below
-is a checkable statement about code and contracts, not a record of a passed run.
+Pod/workspace implementation of the resource-effect boundary. Artifacts were authored
+during the migration verification freeze; the wiring follow-up
+(MIG-RES-EFFECT-WIRING-01) and the executed run are recorded in §7.
 
 ## 1. Gap this task closes
 
@@ -125,15 +125,11 @@ Payload decoding (documented, so a planner author knows what lands on disk):
    has to be shaped as a digest mismatch (`_rollback_refusal_digest`), which makes the
    ledger answer `FAILED rollback_effect_unknown`. Owner: executor zone.
    Do not "fix" this by returning a matching receipt from `workspace_effects.py`.
-2. **Wiring is not done here (file zone).** Two one-line changes are needed outside
-   this task's zone, both already supported by existing seams:
-   `core/infra/resource_apply_resource.py` (or whoever calls
-   `build_resource_materialization_apply_port`) must pass
-   `effects=build_pod_workspace_effect_port(session_factory=…)`; and the
-   `"resource_effect"` entry of `EVIDENCE_AUTHORITY_BLOCKERS` in `apply_adapter.py`
-   ("no Pod/workspace effect adapter implements ResourceOperationEffectPort") is now
-   stale and should be removed or reworded. Until the wiring lands, behaviour is
-   unchanged: `BLOCKED resource_effect_port_missing`.
+2. **Wiring — done in MIG-RES-EFFECT-WIRING-01 (§7).** `core/infra/resource_apply_resource.py`
+   now composes `effects=build_pod_workspace_effect_port(session_factory=…)` and the
+   `"resource_effect"` entry of `EVIDENCE_AUTHORITY_BLOCKERS` was reworded: it no
+   longer claims "no adapter exists", it records the remaining `env`/`mcp`/`scope` and
+   rollback gaps with the same owner.
 3. **`durable/__init__.py` does not export the new port** (outside the zone). Import
    it from
    `prodavan.application.resource_materialization.durable.workspace_effects` directly,
@@ -156,10 +152,45 @@ Payload decoding (documented, so a planner author knows what lands on disk):
 * `apps/api/tests/migration/resource_effects/test_workspace_effects.py` (new)
 * `apps/api/tests/migration/resource_effects/acceptance.md` (this file)
 
-Untouched: `durable/effects.py` (contract), `durable/executor.py`, `models/**`,
-Alembic, `application/pod_service/**` (read-only), `apply_adapter.py`.
+Untouched by MIG-RES-EFFECT-01: `durable/effects.py` (contract), `durable/executor.py`,
+`models/**`, Alembic, `application/pod_service/**` (read-only), `apply_adapter.py`.
+(The follow-up in §7 touched `apply_adapter.py` only in `EVIDENCE_AUTHORITY_BLOCKERS`
+and two docstrings — no gate, port or executor logic.)
 
-Formal tests/build/lint/format/compile/git checks are intentionally not run per the
-verification freeze. `ast.parse` on the new module and an import-only
-`python -c` (`import prodavan.application.resource_materialization.durable.workspace_effects`)
-were used as syntax checks; no test was executed.
+## 7. Follow-up: MIG-RES-EFFECT-WIRING-01 (wiring + executed run)
+
+The adapter above was inert until the lifespan resource handed it to the composer.
+That wiring now exists:
+
+* `ResourceApplyResource.startup` builds the adapter through
+  `build_effect_port(session_factory=…)` (a thin seam over
+  `build_pod_workspace_effect_port`) and passes it to
+  `build_apply_port_provider(effects=…)` → `build_resource_materialization_apply_port(effects=…)`.
+  A populated plan therefore reaches `apply_operation` instead of
+  `BLOCKED resource_effect_port_missing`.
+* `build_apply_port_provider` composes the adapter itself when a caller injects none,
+  so no other entry point can publish an effectless port by omission.
+* **Fail-closed composition.** If the adapter cannot be built, `startup` publishes an
+  `UnavailableEffectPort` — never `None` (which would read as "this build has no
+  adapter" and hide the broken wiring) and never a no-op. Every operation, required or
+  optional, gets `succeeded=False`, `reason_code=resource_effect_port_unavailable`,
+  `effect_unknown=True`, bound to the real `resource_operation_digest(operation)` and
+  the exact fence, so the executor records `FAILED required_operation_failed` with the
+  named diagnostic. `ResourceApplyResource.effects_degraded` surfaces the state;
+  `effects_error` carries the exception *type* only.
+* Rollback effects stay unwired on purpose: this adapter cannot restore a generation,
+  so wiring it would only convert `rollback_effect_port_missing` into a refusal.
+* `env`/`mcp`/`scope` remain unsupported (`resource_effect_<kind>_unsupported`) —
+  unchanged, and asserted again through the *wired* port.
+
+Artifacts: `tests/migration/resource_apply_port/test_effect_wiring.py`.
+`AGENTS.md`'s verification freeze was lifted for this task by explicit instruction, so
+the claim above is a **record of a passed run**, not a reasoned-only artifact:
+
+```
+python -m pytest tests/migration/resource_effects tests/migration/resource_apply_port -q
+160 passed, 9 skipped
+```
+
+The 9 skips are the pre-existing PostgreSQL-gated module
+(`test_durable_apply_semantics_db.py`); they were skipped before this task too.

@@ -71,6 +71,9 @@ TARGET_MODELS = {
     VERSION_TABLE: DynamicAppDefinitionVersionFoundationRow,
     SCOPE_REGISTRY_TABLE: ScopeRegistryRow,
 }
+# Deferred foreign keys are staged from every table taking part in the cycle: the
+# M05 tables this revision creates *and* the cross-revision targets.
+DEFERRED_FK_SOURCE_MODELS = {**TARGET_MODELS, **M05_MODELS}
 
 EXACT_IDENTITY_KEY = (
     "plugin_instance_id",
@@ -596,7 +599,9 @@ def test_deferred_foreign_keys_match_orm_columns_and_properties() -> None:
     created = _created_tables(TREE)
     for spec in MODULE.DEFERRED_FOREIGN_KEYS:
         name = spec["name"]
-        source_table = TARGET_MODELS.get(spec["source"])
+        # The cycle spans both directions, so the source of a staged key is either a
+        # cross-revision target (scope_registry) or an M05 table owned by this revision.
+        source_table = DEFERRED_FK_SOURCE_MODELS.get(spec["source"])
         assert source_table is not None, f"{name}: unknown source table {spec['source']}"
         orm_fk = _orm_foreign_keys(source_table.__table__)[name]
         assert spec["local_columns"] == orm_fk["local"], f"{name}: local columns drift"
@@ -704,10 +709,26 @@ def test_scope_registry_anchor_keys_match_metadata_and_are_idempotent() -> None:
     assert "ADD CONSTRAINT" in SOURCE
     downgrade_source = ast.unparse(_function(TREE, "downgrade"))
     assert "_drop_scope_registry_anchor_keys" in downgrade_source
-    helper = ast.unparse(_function(TREE, "_drop_scope_registry_anchor_keys"))
+    # Only executed code must be free of ``IF EXISTS``: the helper's docstring
+    # deliberately documents that the drop is written *without* it.
+    helper_statements = list(_function(TREE, "_drop_scope_registry_anchor_keys").body)
+    if (helper_statements and isinstance(helper_statements[0], ast.Expr)
+            and isinstance(helper_statements[0].value, ast.Constant)
+            and isinstance(helper_statements[0].value.value, str)):
+        helper_statements = helper_statements[1:]
+    helper = "\n".join(ast.unparse(statement) for statement in helper_statements)
     assert "drop_constraint" in helper and "type_='unique'" in helper
     assert "SCOPE_REGISTRY_ANCHOR_KEYS" in helper
-    assert SCOPE_REGISTRY_TABLE in helper
+    # The dropped-from table is checked by value, whether the revision spells it as a
+    # literal or through its module constant.
+    drops = [
+        call for call in ast.walk(_function(TREE, "_drop_scope_registry_anchor_keys"))
+        if isinstance(call, ast.Call) and _call_name(call) == "drop_constraint"
+    ]
+    assert drops, "downgrade must drop the anchor keys"
+    assert all(_value(call.args[1], NAMESPACE) == SCOPE_REGISTRY_TABLE for call in drops), (
+        "anchor keys must only ever be dropped from scope_registry"
+    )
     assert "IF EXISTS" not in helper, "a missing anchor key must fail loudly"
 
 

@@ -119,7 +119,9 @@ def test_audit_event_names_are_the_parity_read_surface():
 async def test_report_registry_replays_identical_content_and_conflicts_on_change():
     reports = InMemoryParityReportStore()
     report = {"run_key": digest("run"), "status": "blocked", "blocked_reasons": ["x"]}
-    assert reports.load(run_key=report["run_key"]) is None
+    # The registry is the durable port, so ``load`` is a coroutine like ``save``: a
+    # missing key must be awaited to observe ``None``.
+    assert await reports.load(run_key=report["run_key"]) is None
     assert await reports.save(run_key=report["run_key"], report=report) is ReportOutcome.RECORDED
     assert await reports.save(run_key=report["run_key"], report=dict(report)) is ReportOutcome.REPLAY
     changed = {**report, "blocked_reasons": ["y"]}

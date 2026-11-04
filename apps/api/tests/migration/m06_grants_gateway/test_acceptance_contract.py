@@ -331,13 +331,25 @@ async def test_reason_class_parity_treats_deny_variants_as_equal():
 
 @pytest.mark.asyncio
 async def test_changed_digest_and_cross_tenant_replay_preserve_prior_mapping():
+    from .acceptance_fixtures import ACCEPTED_SOURCES
+    from prodavan.application.migration.m06_grants_gateway.handoff import inventory_digest
+
     source_digest = source_payload_digest(SOURCE)
     prior = SourceMappingRecord(
         SOURCE.source_kind, SOURCE.source_id, "m06-grant-mapping-v4", "tenant-a",
         source_digest, "sha256:" + "b" * 64, binding_digest(IDENTITY),
         AdapterOutcome.MAPPED_EVIDENCE, None, "old-checkpoint", "old-correlation")
     altered = replace(SOURCE, grants=({**GRANTED, "granted_by": "user"},))
-    service, store = _service(read=_Read(prior))
+    # A changed source digest is only reachable once the trusted partition inventory has
+    # been re-accepted for the new digest; otherwise the handoff resolver refuses the
+    # source outright and nothing about the immutable first mapping is ever tested. The
+    # re-accepted inventory is the realistic path, and the mapping must still conflict.
+    reaccepted = replace(
+        ACCEPTED_SOURCES[0], source_digest=source_payload_digest(altered))
+    service, store = _service(
+        read=_Read(prior),
+        partition=replace(PARTITION, accepted_sources=(reaccepted,),
+                          inventory_digest=inventory_digest((reaccepted,))))
     assert await _observe(service, source=altered) is None
     assert store.transactions[-1][1].conflict_mapping.reason_code == "source_digest_changed"
     assert store.transactions[-1][1].mapping is None
@@ -405,7 +417,13 @@ async def test_quarantined_mapping_is_repaired_forward_not_duplicated():
 
 @pytest.mark.asyncio
 async def test_absent_accepted_handoff_blocks_reads_and_all_evidence_writes():
-    service, store = _service(partition=replace(PARTITION, m04_scope_digest="not-a-digest"))
+    # "Absent" is modelled by the trusted handoff source returning no accepted partition
+    # for the live request. It cannot be modelled by constructing an
+    # AcceptedPartitionEvidence with a malformed digest: that record refuses to exist at
+    # all, which is the stronger invariant asserted first below.
+    with pytest.raises(ValueError, match="must be sha256"):
+        replace(PARTITION, m04_scope_digest="not-a-digest")
+    service, store = _service(partition=None)
     assert await _observe(service) is None
     assert store.transactions == []
     service, store = _service(partition=replace(PARTITION, m06_schema_identity_digest=M04_SCOPE_DIGEST))

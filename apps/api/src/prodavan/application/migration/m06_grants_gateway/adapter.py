@@ -1109,11 +1109,8 @@ class CapabilityGatewayService:
             raise IdentityResolutionError("decision_binding_digest_mismatch")
         mismatch = (legacy_decision.allowed != canonical_decision.allowed
                     or _decision_class(legacy_decision.reason_code) != _decision_class(canonical_decision.reason_code))
-        explanation = None
-        if mismatch:
-            explanation = MISMATCH_EXPLANATIONS.get(
-                (_decision_class(legacy_decision.reason_code),
-                 _decision_class(canonical_decision.reason_code)))
+        explanation = _mismatch_explanation(legacy_decision.reason_code,
+                                            canonical_decision.reason_code) if mismatch else None
         return ShadowObservation(
             identity.tenant_id, identity.app_definition_id, source.source_id,
             mapped.capability_key, source_digest, canonical_digest,
@@ -1398,6 +1395,33 @@ MISMATCH_EXPLANATIONS = MappingProxyType({
     ("allowed", "revoked"): "legacy_and_canonical_lifecycle_disagree",
 })
 # Explicit, reviewable mismatch classes; nothing else may be auto-explained.
+
+LEGACY_SCOPE_POLICY_REASONS = frozenset({
+    "scope_denied", "capability_not_requested", "capability_mismatch",
+    "operation_not_granted", "resource_not_granted", "domain_not_granted",
+    "constraints_not_satisfied",
+})
+"""Legacy denials that are a named scope-policy decision, and only those.
+
+``denied -> allowed`` is the mismatch direction that would *widen* access, so it is
+reconcilable only when the legacy owner denied on purpose over scope, capability or
+constraint policy. A denial because the legacy gateway does not know the method
+(``method_unknown``/``method_ambiguous``), because the grant/request lifecycle is not
+valid, or because the request was malformed is a genuine disagreement with a canonical
+allow: it stays unexplained so it blocks parity review instead of being absorbed by a
+class-level explanation.
+"""
+
+
+def _mismatch_explanation(legacy_reason: str, canonical_reason: str) -> str | None:
+    """Explanation code for one decision disagreement, or ``None`` if unreconciled."""
+    pair = (_decision_class(legacy_reason), _decision_class(canonical_reason))
+    explanation = MISMATCH_EXPLANATIONS.get(pair)
+    if explanation is None:
+        return None
+    if pair == ("denied", "allowed") and legacy_reason.strip().lower() not in LEGACY_SCOPE_POLICY_REASONS:
+        return None
+    return explanation
 
 
 def _decision_class(reason_code: str) -> str:

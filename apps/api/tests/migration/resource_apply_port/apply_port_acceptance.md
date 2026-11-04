@@ -1,8 +1,8 @@
 # MIG-RES-APPLYPORT-01 acceptance artifact
 
-Durable apply port for the Resource API. **Artifacts only** — nothing here was
-executed during the migration verification freeze; every claim below is a checkable
-statement about code and contracts, not a record of a passed run.
+Durable apply port for the Resource API. Artifacts §1–§6 were authored during the
+migration verification freeze and are checkable statements about code and contracts;
+§7 records the effect-port wiring follow-up and the executed run.
 
 ## 1. Gap this task closes
 
@@ -83,7 +83,7 @@ kinds are implemented and switchable but **off**, each with a named owner in
 | `bridge_lease` | no durable publisher writes an opaque `lease://` reference with an expiry/epoch per project | runtime materialization / pod bridge zone |
 | `approval_link` | `ApplyPlan` carries no approval identity, and a CRUD-triggered apply has no agent run to point at; requiring it would refuse every legitimate apply | Resource API command layer |
 | `event_link` | `platform_events` rows are optional for resource commands | `application/resources/api` |
-| `resource_effect` | no Pod/workspace adapter implements `ResourceOperationEffectPort` | workspace / pod runtime zone |
+| `resource_effect` | **not a gate requirement** — it records what the *wired* effect boundary still cannot do: `env`/`mcp`/`scope` are refused per operation (`resource_effect_<kind>_unsupported`) and there is no rollback effect (no workspace-byte snapshot to restore) | runtime materialization / pod runtime zone |
 
 `test_optional_evidence_requirements_refuse_when_switched_on` and
 `test_gate_accepts_satisfied_optional_evidence` prove the checks are real rather than
@@ -92,10 +92,13 @@ from becoming silent.
 
 ## 6. Known limits recorded honestly
 
-1. **Populated plans are refused in production** until a `ResourceOperationEffectPort`
-   exists: the executor answers `resource_effect_port_missing` instead of
-   acknowledging a write that did not happen. Empty plans and the whole
-   attempt/head/audit/receipt path work today.
+1. **Populated plans are now applicable** — `ResourceApplyResource.startup` wires
+   `durable/workspace_effects.py` through `effects=` (MIG-RES-EFFECT-WIRING-01, see
+   §7). `prompt`/`file` operations write through the Pod workspace port. A composer
+   caller that passes no `effects` still gets the executor's
+   `resource_effect_port_missing`, which is the documented fail-closed default of
+   `build_resource_materialization_apply_port` — wiring lives in the lifespan
+   resource, not in the composer.
 2. **No bridge-lease authority** exists, so `require_bridge_lease` stays off. Turning
    it on without a publisher makes every apply refuse — correct, but not deployable.
 3. **No approval linkage** on `ApplyPlan`; approval is enforced where it is claimed
@@ -109,3 +112,39 @@ from becoming silent.
 
 Formal tests/build/lint/format/compile/git checks are intentionally not run per the
 verification freeze.
+
+## 7. MIG-RES-EFFECT-WIRING-01 — effect port wired, and an executed run
+
+`PodWorkspaceOperationEffectPort` existed but nothing passed it to
+`build_resource_materialization_apply_port`, so every non-empty plan still answered
+`BLOCKED resource_effect_port_missing`. Now:
+
+| Claim | Mechanism | Artifact |
+|---|---|---|
+| Startup publishes a real effect boundary | `build_effect_port` → `build_pod_workspace_effect_port(session_factory=…)` → `build_apply_port_provider(effects=…)` | `test_startup_wires_a_real_pod_workspace_effect_port`, `test_provider_composes_the_real_effect_port_when_none_is_injected` |
+| The adapter resolves runtimes through *this* process's factory | `SqlAlchemyProjectRuntimeRefResolver(session_factory=…)` identity | `test_startup_binds_the_project_runtime_resolver_to_the_process_factory` |
+| No rollback capability is claimed | `executor.rollback_effects is None`; `rollback_supported is False` | `test_startup_leaves_rollback_effects_unwired` |
+| Composition failure ⇒ **named** per-apply refusal, never "no effects" | `UnavailableEffectPort`: `resource_effect_port_unavailable`, `effect_unknown=True`, fatal even for `required=False`, receipt bound to the real operation digest + exact fence | `test_effect_composition_failure_publishes_a_named_refusal_port`, `test_unavailable_effect_port_refuses_every_operation[True/False]`, `test_unavailable_effect_port_refuses_compensation_too` |
+| The degraded state is observable, without leaking the error text | `effects_degraded` / `effects_error` (exception *type* only; a message carrying a fake DSN never appears) | same |
+| The low-level composer keeps the fail-closed default | no `effects` ⇒ `executor.effects is None` | `test_the_low_level_composer_still_refuses_a_populated_plan_without_effects` |
+| `env`/`mcp`/`scope` stay deliberately unsupported through the wired port | `resource_effect_<kind>_unsupported`, `effect_unknown=False` | `test_the_wired_boundary_still_refuses_unsupported_kinds[env/mcp/scope]` |
+| Flag off still publishes nothing | `materialization_apply_port(...) -> None`, `health() is None` | `test_flag_off_publishes_nothing_even_with_a_working_effect_port` |
+| Shutdown withdraws the wired port | `install_materialization_apply_port(None)` | `test_shutdown_withdraws_the_wired_port` |
+| The stale blocker claim is gone; the other three are untouched | `EVIDENCE_AUTHORITY_BLOCKERS` | `test_the_stale_no_adapter_claim_is_gone_from_the_blockers`, `test_the_other_blockers_are_untouched` |
+
+The `resource_effect` entry was **reworded, not deleted**: it no longer says "no
+Pod/workspace effect adapter exists" (false now) and instead records the remaining,
+still-true gap (`env`/`mcp`/`scope` unsupported; no rollback effect) under the same
+owner, so the gap keeps its name instead of silently disappearing.
+
+The verification freeze was lifted for this task by explicit instruction, so this
+section is a **record of a passed run**:
+
+```
+python -m pytest tests/migration/resource_effects tests/migration/resource_apply_port -q
+160 passed, 9 skipped
+```
+
+The 9 skips are the pre-existing PostgreSQL-gated module
+(`test_durable_apply_semantics_db.py`, requires `DATABASE_URL` + revision
+`2026110306`); they skip on this machine before and after the change.

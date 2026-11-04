@@ -45,10 +45,15 @@ re-asserted here so the seam cannot quietly weaken them):
 
 Deliberately *not* provided here (documented blockers, never stubs):
 
-* a Pod/workspace effect adapter (``ResourceOperationEffectPort``). With no effect
-  boundary the executor refuses a populated plan with
-  ``resource_effect_port_missing`` — it never acknowledges an apply that wrote
-  nothing. Empty plans still exercise the full fence/audit/receipt path.
+* a Pod/workspace effect adapter. This module does **not** compose one: the
+  production adapter lives in ``durable/workspace_effects.py`` and is wired by the
+  lifespan resource (``core/infra/resource_apply_resource.py``) through
+  ``build_resource_materialization_apply_port(effects=...)``. A caller that omits
+  ``effects`` still gets the executor's fail-closed answer for a populated plan
+  (``BLOCKED resource_effect_port_missing``) — it never acknowledges an apply that
+  wrote nothing. Empty plans always exercise the full fence/audit/receipt path.
+  What the wired adapter *cannot* do remains listed in
+  :data:`EVIDENCE_AUTHORITY_BLOCKERS` under ``resource_effect``.
 * a bridge-lease authority (``lease://`` reference, expiry, revocation). No durable
   publisher exists, so no lease is fabricated; ``require_bridge_lease`` stays off
   until the owner publishes one and the gate refuses the moment it is switched on
@@ -131,7 +136,9 @@ _SOURCE_EVENT = "resource-materialization.apply"
 #: Evidence kinds the durable schema cannot prove yet, with the reason. They are
 #: policy-switchable but off in the production composition: switching one on
 #: without an authority that resolves it makes every apply refuse, which is the
-#: correct failure mode but not a working deployment.
+#: correct failure mode but not a working deployment. The last entry is not a gate
+#: requirement — it records what the *wired* effect boundary still cannot do, so the
+#: remaining gap stays visible now that the port itself is connected.
 EVIDENCE_AUTHORITY_BLOCKERS: tuple[tuple[str, str], ...] = (
     (
         "bridge_lease",
@@ -153,9 +160,12 @@ EVIDENCE_AUTHORITY_BLOCKERS: tuple[tuple[str, str], ...] = (
     ),
     (
         "resource_effect",
-        "no Pod/workspace effect adapter implements ResourceOperationEffectPort; a "
-        "populated plan is refused by the executor with resource_effect_port_missing "
-        "rather than acknowledged as written (owner: workspace/pod runtime zone)",
+        "the Pod/workspace port is wired, but it writes only prompt and file operations: "
+        "env, mcp and scope have no workspace write location here and are refused per "
+        "operation with resource_effect_<kind>_unsupported, and no rollback effect "
+        "exists (no workspace-byte snapshot to restore a generation) "
+        "(owner: runtime materialization / pod runtime zone owns env, MCP, scope and "
+        "generation snapshots)",
     ),
 )
 
@@ -867,10 +877,16 @@ def build_resource_materialization_apply_port(
 ) -> ResourceMaterializationApplyPort:
     """Compose the production apply port; nothing here defaults to a stub.
 
-    ``effects``/``rollback_effects`` stay ``None`` until a Pod/workspace adapter
-    exists: the executor then refuses a populated plan with
-    ``resource_effect_port_missing`` instead of acknowledging an empty write. Pass a
-    real adapter here to enable effects — the port itself does not change.
+    ``effects`` is required for a populated plan to be applicable: the executor
+    answers ``resource_effect_port_missing`` when it is absent, rather than
+    acknowledging a write that never happened. The production composition
+    (``core/infra/resource_apply_resource.py``) passes
+    ``build_pod_workspace_effect_port(session_factory=...)``; this function stays
+    neutral so a test or a caller can inject its own boundary.
+
+    ``rollback_effects`` stays ``None`` in production: the Pod/workspace adapter has
+    no way to restore a prior generation (no workspace-byte snapshot), so a rollback
+    answers ``BLOCKED rollback_effect_port_missing`` instead of recording one.
     """
     resolved_clock = clock or SystemUtcClock()
     resolved_evidence = evidence or SqlAlchemyResourceApplyEvidenceReader(

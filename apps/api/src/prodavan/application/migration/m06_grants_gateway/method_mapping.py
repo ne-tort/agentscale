@@ -43,11 +43,15 @@ MODULE_CAPABILITY_ACTIONS = MappingProxyType({
     "documents.convert": frozenset({"convert"}),
     "documents.fill_template": frozenset({"render"}),
 })
-"""Declarative module action kinds that map onto an approved capability operation.
+"""Declarative module action kinds, keyed to the canonical operation they express.
 
-Only actions whose semantics are identical to an approved operation are listed.
-Anything absent stays unmapped, so the request quarantines instead of being
-silently broadened onto another capability.
+This table is *intent*, not approval: it names the operation a module action kind
+means, and :func:`module_capability_operations` is the fail-closed gate that keeps
+only the entries whose operation exists in the closed approved vocabulary. Some
+kinds therefore stay unmapped on purpose — ``create``, ``convert`` have no canonical
+operation (the approved grammar expresses row creation as ``write`` and only allows
+``render`` for ``ui.render``), so those actions quarantine instead of being silently
+translated onto a neighbouring operation.
 """
 
 APPROVED_OPERATION_KEYS = frozenset(
@@ -181,6 +185,14 @@ class ApprovedMethodOperationAdapter(MethodOperationPort):
 
     async def resolve(self, *, identity: ResolvedGrantIdentity, method: str, capability: str,
                       operation: str, resource: str, domain: str | None) -> MethodOperationResolution:
+        # Rejection order is coarse-to-fine on purpose. The wire-level reason must name
+        # the *request* defect whenever the request itself is already unacceptable:
+        # a capability/operation/method that is not on its approved list is refused
+        # without consulting the registry, so the generic registry outcome
+        # (``unknown_mapping`` for a pair that was simply never declared) can never
+        # mask "this operation is not approved for this capability" or "this method is
+        # not server-approved". Only an otherwise valid, approved triple reaches the
+        # registry, where a missing declaration is an honest ``unknown_mapping``.
         if capability not in APPROVED_CAPABILITIES:
             return MethodOperationResolution.rejected("capability_unknown")
         if operation not in CAPABILITY_OPERATIONS[capability]:
@@ -205,8 +217,17 @@ class ApprovedMethodOperationAdapter(MethodOperationPort):
             ),
         )
         if result.decision is not MappingDecision.ALLOW or result.mapping is None:
-            return MethodOperationResolution.rejected(
-                result.reason.value if result.reason is not None else "unknown_mapping")
+            reason = (result.reason.value if result.reason is not None else "unknown_mapping")
+            if reason == "unknown_mapping":
+                # Capability, operation and method all passed their approved-list checks,
+                # so the registry's "nothing declared for this triple" means this method
+                # is not approved *for this operation of this capability* (the method is
+                # declared for another capability/operation). Reporting the precise
+                # operation-level reason keeps the quarantine evidence actionable, and
+                # both codes stay in the evidence store's unknown-mapping set, so the
+                # partition is blocked either way.
+                reason = "operation_unapproved"
+            return MethodOperationResolution.rejected(reason)
         declared = declared_method_mapping(result.mapping)
         if (declared.capability_key != capability or declared.operation != operation
                 or declared.method != method or declared.server != server):

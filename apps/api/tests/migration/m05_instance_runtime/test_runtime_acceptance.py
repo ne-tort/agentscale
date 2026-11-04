@@ -70,22 +70,23 @@ def scope_anchors(kind=ScopeKind.CABINET):
 def identity(**changes):
     instance_id = changes.get("plugin_instance_id", "instance-1")
     tenant_id = changes.get("tenant_id", "tenant-1")
-    installation = changes.get("installation_scope", scope_anchors())
+    installation = changes.get("installation_scope") or scope_anchors()
     plugin_scope = changes.get("plugin_instance_scope") or ScopeAnchors(
         scope_kind=ScopeKind.PLUGIN_INSTANCE, scope_id=instance_id, tenant_id=tenant_id,
         cabinet_id=installation.cabinet_id, project_id=installation.project_id,
         plugin_instance_id=instance_id)
-    base = InstanceIdentity(
-        plugin_instance_id="instance-1", definition_id="definition-1", version_id="version-1",
-        app_id="app-1", manifest_version="1.0.0", tenant_id="tenant-1",
-        scope_kind=ScopeKind.PLUGIN_INSTANCE, scope_id="instance-1",
-        installation_scope=scope_anchors(), plugin_instance_scope=plugin_scope,
-        artifact_digest=D, subject_id="subject-1", session_id="session-1",
-    )
-    defaults = {"plugin_instance_id": instance_id, "tenant_id": tenant_id,
-                "scope_id": instance_id, "installation_scope": installation,
-                "plugin_instance_scope": plugin_scope}
-    return replace(base, **(defaults | changes))
+    # Built in one pass: InstanceIdentity validates the reciprocal instance/scope
+    # relation in __post_init__, so a base object with fixed ids cannot be patched
+    # afterwards into a coherent cross-instance or cross-tenant identity.
+    values = {
+        "plugin_instance_id": instance_id, "definition_id": "definition-1",
+        "version_id": "version-1", "app_id": "app-1", "manifest_version": "1.0.0",
+        "tenant_id": tenant_id, "scope_kind": ScopeKind.PLUGIN_INSTANCE,
+        "scope_id": instance_id, "installation_scope": installation,
+        "plugin_instance_scope": plugin_scope, "artifact_digest": D,
+        "subject_id": "subject-1", "session_id": "session-1",
+    }
+    return InstanceIdentity(**(values | changes))
 
 
 def checkpoint(after=None, sequence=0):
@@ -758,15 +759,39 @@ async def test_resolver_denies_wrong_reciprocal_plugin_scope_before_runtime_look
 
 @pytest.mark.asyncio
 async def test_writer_generation_cas_advances_exactly_one_and_denies_stale_worker():
-    snap = RuntimeSnapshot(identity(), InstanceLifecycleState.PUBLISHED, RuntimeAvailability.ACTIVE, 4, 8)
-    lifecycle = Lifecycle(WriterCasResult(True, snap, "ok"))
-    result = await advance_writer_generation(lifecycle, identity=identity(), context=context(),
+    # A stale worker is a worker whose expected epoch no longer matches the row, so the
+    # adapter's CAS updates zero rows and reports a denial instead of a snapshot.
+    stale = Lifecycle(WriterCasResult(False, None, "stale_worker_denied"))
+    result = await advance_writer_generation(stale, identity=identity(), context=context(),
         expected_runtime_generation=4, expected_writer_generation=7, upstream=upstream(),
         correlation_id=CORRELATION, identity_evidence=Evidence())
-    assert not result.changed and result.reason_code == "stale_worker_denied"
-    assert lifecycle.calls[0][1]["next_writer_generation"] == 8
-    assert lifecycle.calls[0][1]["expected_writer_generation"] == 7
-    assert lifecycle.calls[0][1]["identity"] == identity()
+    assert not result.changed and result.snapshot is None
+    assert result.reason_code == "stale_worker_denied"
+    call = stale.calls[0][1]
+    assert call["next_writer_generation"] == 8
+    assert call["expected_writer_generation"] == 7
+    assert call["expected_runtime_generation"] == 4
+    assert call["identity"] == identity()
+
+    # A claimed success whose returned row jumped by more than one generation is not
+    # this worker's advance and must be denied.
+    jumped = RuntimeSnapshot(identity(), InstanceLifecycleState.PUBLISHED,
+                             RuntimeAvailability.ACTIVE, 4, 9)
+    malformed = Lifecycle(WriterCasResult(True, jumped, "ok"))
+    denied = await advance_writer_generation(malformed, identity=identity(), context=context(),
+        expected_runtime_generation=4, expected_writer_generation=7, upstream=upstream(),
+        correlation_id=CORRELATION, identity_evidence=Evidence())
+    assert not denied.changed and denied.snapshot is None
+    assert denied.reason_code == "stale_worker_denied"
+
+    # The exact post-CAS row (writer +1, runtime unchanged) is the one accepted shape.
+    advanced = RuntimeSnapshot(identity(), InstanceLifecycleState.PUBLISHED,
+                               RuntimeAvailability.ACTIVE, 4, 8)
+    accepted = await advance_writer_generation(
+        Lifecycle(WriterCasResult(True, advanced, "ok")), identity=identity(), context=context(),
+        expected_runtime_generation=4, expected_writer_generation=7, upstream=upstream(),
+        correlation_id=CORRELATION, identity_evidence=Evidence())
+    assert accepted.changed and accepted.snapshot == advanced
 
 
 @pytest.mark.asyncio
@@ -847,18 +872,26 @@ async def test_terminal_lifecycle_cannot_be_republished_or_resurrected():
 async def test_import_requires_live_subject_and_session_evidence():
     class MissingSessionProof(Evidence):
         async def prove_subject_session(self, *, context, identity):
+            # Counted here, exactly like the base port: the assertion below proves the
+            # service asked the trusted adapter rather than trusting source values.
+            self.session_calls += 1
             return None
 
     missing_session_evidence = MissingSessionProof()
     audit = Audit()
+    store = Store()
     result = await InstanceImportService(
-        Reader([candidate()]), Store(), missing_session_evidence, audit, upstream=upstream()
+        Reader([candidate()]), store, missing_session_evidence, audit, upstream=upstream()
     ).run_page(checkpoint(), context=context())
     assert result.records[0].outcome is ImportOutcome.QUARANTINED
     assert result.records[0].reason_code == "subject_session_binding_unproven"
     assert result.records[0].binding_evidence is None
     assert missing_session_evidence.session_calls == 1
-    assert audit.records[-1].reason_code == "subject_session_binding_unproven"
+    # The row outcome is audited inside the same atomic mapping/checkpoint transaction,
+    # never through the standalone sink: that is what keeps evidence and audit together.
+    assert store.commits[-1][3].reason_code == "subject_session_binding_unproven"
+    assert store.commits[-1][3].outcome == ImportOutcome.QUARANTINED.value
+    assert audit.records == []
 
 
 @pytest.mark.asyncio
@@ -1253,16 +1286,21 @@ def test_m06_handoff_retry_success_uses_append_only_attempt_and_counts_exact_row
         ImportOutcome.QUARANTINED, "subject_session_binding_unproven", CORRELATION,
         cursor_checkpoint=checkpoint("src-2", 2),
     )
-    binding = imported_record("src-2").binding_evidence
+    # src-2 is a distinct instance: after the retry both rows are positive mappings, so
+    # they must carry distinct exact instance identities and the parity evidence must
+    # count the retried row (2 of 2) rather than the original quarantined parity.
+    binding = imported_record("src-2", item=identity(plugin_instance_id="instance-2")).binding_evidence
     assert binding is not None
     attempt = QuarantineRetryAttempt(
         "legacy-instance", "src-2", "schema-v1", original.source_digest, 1,
         ImportOutcome.IMPORTED, None, original.correlation_id, original.checkpoint, binding,
     )
     final_checkpoint = checkpoint("src-2", 2)
-    delta, parity, fence = handoff_evidence(current_checkpoint=final_checkpoint, expected_count=2)
+    delta, parity, fence = handoff_evidence(current_checkpoint=final_checkpoint, expected_count=2,
+                                            imported_count=2)
     result = build_m06_handoff_record(
-        record_id="promotion-retry", records=(imported_record("src-1"), original),
+        record_id="promotion-retry",
+        records=(imported_record("src-1"), original),
         checkpoint=final_checkpoint, upstream=upstream(), actor="agent", recorded_at="fixed-time",
         decision_owner="coordinator", writer_generation=9, correlation_id=CORRELATION,
         final_delta=delta, parity=parity, legacy_fence=fence, retry_attempts=(attempt,),

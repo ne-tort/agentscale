@@ -60,6 +60,10 @@ def bounded_partition_parity(
     for row in selected:
         if row.tenant_id != tenant_id or row.app_definition_id != app_definition_id:
             raise ValueError("observations must belong to exactly one requested partition")
+        # The window is part of the request, so materialized evidence outside it is not
+        # silently aggregated into a report about a different, narrower window.
+        if not window_start <= _observed_at(row) < window_end:
+            raise ValueError("observations must lie inside the requested observation window")
     summary = ParityEvidenceSummary(
         partition=partition,
         source_snapshot_digest=source_snapshot_digest,
@@ -76,7 +80,7 @@ def bounded_partition_parity(
         window_end=window_end,
         max_observations=max_observations,
     )
-    checkpoint = ParityCheckpoint(None, len(selected), bool(selected))
+    checkpoint = ParityCheckpoint.for_materialized_window(len(selected))
     return _build_report(
         request=request,
         summary=summary,
@@ -96,6 +100,11 @@ def _window(value: str) -> datetime:
     if parsed.tzinfo is None or parsed.utcoffset() is None:
         raise ValueError("observation window must use timezone-aware ISO timestamps")
     return parsed
+
+
+def _observed_at(observation: ShadowObservation) -> datetime:
+    """Exactly the timestamp the parity runner orders and bounds evidence by."""
+    return datetime.fromisoformat(observation.observed_at)
 
 
 __all__ = [
