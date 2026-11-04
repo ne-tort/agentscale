@@ -196,13 +196,34 @@ def test_resume_bootstrap_keeps_marker_until_dispatch_succeeds() -> None:
 
 
 def test_reconcile_dispatches_before_clearing_resume_marker() -> None:
+    """The resume marker is released before the trigger drain, not after it.
+
+    This assertion used to require dispatch before the clear. The order was
+    deliberately inverted: gating the marker on the drain left an ACTIVE project
+    marked 'resuming' forever whenever the owner row was missing, so every later
+    reconcile pass re-ran bridge registration for a project that was not resuming.
+    Reconcile is serialised by an advisory lock, so no other pass can be mid-resume
+    on this project while this one commits.
+
+    What still matters, and is asserted below: the resume event and its commit come
+    first, the drain failure is isolated so it cannot abort the pass, and the
+    dispatcher's own retry owns the remainder.
+    """
     from prodavan.application.pod_service.reconcile import PodReconcileService
 
     source = inspect.getsource(PodReconcileService._recover_interrupted_resume)
     event = source.index('event_type="project.resumed"')
     commit = source.index("await self._session.commit()", event)
-    dispatch = source.index("await AgentTriggerDispatcher(self._session).dispatch_batch(", commit)
-    clear = source.index("current.launch_phase = None", dispatch)
+    # The row in scope is ``project`` here, not ``current``.
+    clear = source.index("project.launch_phase = None", commit)
+    dispatch = source.index(
+        "await AgentTriggerDispatcher(", clear
+    )
 
-    assert event < commit < dispatch < clear
-    assert "dispatch_failed" in source[dispatch:clear]
+    # Durable event committed, then the marker released, then the drain.
+    assert event < commit < clear < dispatch
+    # A drain failure is caught, never propagated, so one project cannot abort the
+    # whole reconcile pass or skip the other pods in it.
+    dispatch_block = source[dispatch:]
+    assert "except Exception" in dispatch_block
+    assert "_dispatch_failed(dispatch)" in dispatch_block

@@ -7,19 +7,41 @@ from the implementation and cover the reconcile retry boundary without a DB.
 
 from __future__ import annotations
 
-import inspect
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from prodavan.application.agent.trigger_dispatcher import AgentTriggerDispatcher
 from prodavan.application.projects.platform_event_service import PlatformEventService
 from prodavan.domain.identity import Principal
+from prodavan.domain.pods import PodDesiredState, PodStatus
 from prodavan.domain.projects import ProjectStatus
 
 
 _PRINCIPAL = Principal(sub="employee-1", email="employee@example.test")
+
+
+def _resume_project() -> MagicMock:
+    """A project persisted mid-resume (the state reconcile must complete)."""
+    return MagicMock(
+        id="project-1",
+        company_id="company-1",
+        cabinet_id="cabinet-1",
+        owner_employee_id="employee-1",
+        status=ProjectStatus.PAUSED,
+        launch_phase="resuming",
+        resume_generation=4,
+    )
+
+
+def _paused_pod() -> MagicMock:
+    return MagicMock(
+        id="pod-1",
+        status=PodStatus.PAUSED,
+        desired_state=PodDesiredState.RUNNING.value,
+        last_error=None,
+    )
 
 
 def _dispatcher(*, status: ProjectStatus, dispatch_results: list[dict]) -> AgentTriggerDispatcher:
@@ -117,16 +139,51 @@ async def test_platform_event_replay_returns_existing_event_without_write() -> N
     session.add.assert_not_called()
 
 
-def test_reconcile_does_not_clear_marker_after_stale_or_failed_dispatch() -> None:
+@pytest.mark.asyncio
+async def test_reconcile_releases_marker_even_when_trigger_dispatch_fails() -> None:
+    """The resume marker must not be held hostage by a later trigger drain.
+
+    This replaces an earlier source-order assertion that required reconcile to
+    clear ``launch_phase`` only *after* a successful ``dispatch_batch``. That
+    expectation inverted the contract: ``launch_phase == "resuming"`` means
+    "pod resume / bridge registration still running", and both are finished
+    before the drain starts. Gating the clear on the drain left an ACTIVE
+    project labelled "resuming" whenever the owner row was missing or the drain
+    reported an inconclusive result, so the next reconcile pass re-ran bridge
+    registration for a project that was not resuming.
+
+    The check below is behavioural and stricter than the ordering scan it
+    replaces: a dispatch that raises must still leave the project resumed,
+    released, and committed, and must not escape into the reconcile pass.
+    """
+    from unittest.mock import patch
+
     from prodavan.application.pod_service.reconcile import PodReconcileService
 
-    source = inspect.getsource(PodReconcileService._recover_interrupted_resume)
-    dispatch = source.index("dispatch = await AgentTriggerDispatcher")
-    lock = source.index("select(ProjectRow).where(ProjectRow.id == project.id).with_for_update()", dispatch)
-    failure_guard = source.index("dispatch_failed =", lock)
-    generation_guard = source.index("current.resume_generation == project.resume_generation", failure_guard)
-    clear = source.index("current.launch_phase = None", generation_guard)
+    session = AsyncMock()
+    project, pod = _resume_project(), _paused_pod()
+    service = PodReconcileService(session, runtime=AsyncMock())
+    service._pods.sync_desired = AsyncMock()
 
-    assert dispatch < lock < failure_guard < generation_guard < clear
-    assert '"dispatch_error"' in source[failure_guard:clear]
-    assert '"project_paused"' in source[failure_guard:clear]
+    with (
+        patch(
+            "prodavan.application.projects.runtime_side_effects.bootstrap_project_sessions",
+            new=AsyncMock(return_value={"registered": 1}),
+        ),
+        patch(
+            "prodavan.application.project_service.lifecycle_emitter.ProjectLifecycleEmitter.emit",
+            new=AsyncMock(),
+        ) as emit,
+        patch(
+            "prodavan.application.agent.trigger_dispatcher.AgentTriggerDispatcher.dispatch_batch",
+            new=AsyncMock(side_effect=RuntimeError("drain unavailable")),
+        ) as dispatch,
+    ):
+        await service._recover_interrupted_resume(project, pod)
+
+    assert project.status == ProjectStatus.ACTIVE
+    assert project.launch_phase is None
+    assert emit.await_count == 1
+    dispatch.assert_awaited_once()
+    # The released marker was persisted before the drain was attempted.
+    session.commit.assert_awaited()
