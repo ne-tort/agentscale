@@ -85,7 +85,11 @@ test.describe("protected routes", () => {
 
     await page.getByRole("button", { name: "Sign out" }).click();
 
-    await expect(page).toHaveURL(/\/login$/);
+    // Sign-out drops the session and the guard re-applies on the current route.
+    // `RequireAuth` keeps the signed-out location in `?next=`, so a user who signs
+    // back in lands on the page they left instead of the projects list.
+    await expect(page).toHaveURL(/\/login(\?next=%2Fcabinets)?$/);
+    await expect(page.getByRole("heading", { name: "Sign in to agentscale" })).toBeVisible();
     await expect.poll(async () => page.evaluate(() => window.localStorage.getItem("agentscale.web.session"))).toBeNull();
   });
 });

@@ -14,9 +14,12 @@ function stream(body: string): Response {
   return new Response(body, { headers: { "Content-Type": "text/event-stream" } });
 }
 
+/** The real `fetch` signature, captured where the per-test `fetch` doubles do not shadow it. */
+type FetchLike = typeof fetch;
+
 describe("legacy chat stream acceptance contract", () => {
   it("uses the real POST route and legacy body, with no durable run or replay claims", async () => {
-    const fetch = vi.fn(async () => stream("data: {\"type\":\"_turn_complete\",\"data\":{}}\n\n"));
+    const fetch = vi.fn<FetchLike>(async () => stream("data: {\"type\":\"_turn_complete\",\"data\":{}}\n\n"));
     const client = createApiClient({ baseUrl: "/api/v1", fetcher: fetch });
     const received: ChatStreamEvent[] = [];
 
@@ -37,7 +40,7 @@ describe("legacy chat stream acceptance contract", () => {
   });
 
   it("treats keepalive comments as transport noise and preserves event order", async () => {
-    const fetch = vi.fn(async () => stream([
+    const fetch = vi.fn<FetchLike>(async () => stream([
       ": keepalive\n\n",
       "data: {\"type\":\"_session\",\"data\":{\"session_id\":\"session-1\"}}\n\n",
       "data: {\"type\":\"text_delta\",\"data\":{\"text\":\"hello\"}}\n\n",

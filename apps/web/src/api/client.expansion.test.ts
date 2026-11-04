@@ -10,7 +10,7 @@ afterEach(() => vi.restoreAllMocks());
 describe("expanded central API contracts", () => {
   it("uses the verified schedule CRUD paths, JSON payloads, and 204 delete handling", async () => {
     const schedule = { id: "schedule-1", project_id: "project-1", name: "Hourly", cron: "0 * * * *", timezone: "UTC", payload: {}, enabled: true };
-    const fetcher = vi.fn()
+    const fetcher = vi.fn<FetchLike>()
       .mockResolvedValueOnce(jsonResponse({ items: [schedule] }))
       .mockResolvedValueOnce(jsonResponse(schedule, 201))
       .mockResolvedValueOnce(jsonResponse({ ...schedule, enabled: false }))
@@ -34,7 +34,7 @@ describe("expanded central API contracts", () => {
   });
 
   it("uses the external outgoing webhook routes and exact request fields", async () => {
-    const fetcher = vi.fn()
+    const fetcher = vi.fn<FetchLike>()
       .mockResolvedValueOnce(jsonResponse({ items: [] }))
       .mockResolvedValueOnce(jsonResponse({ id: "wh-1", url: "https://example.test/hook", events: ["agent.completed"], project_id: "project-1", secret: "once" }, 201))
       .mockResolvedValueOnce(jsonResponse({ id: "wh-1", enabled: false }))
@@ -63,7 +63,7 @@ describe("expanded central API contracts", () => {
   });
 
   it("sends project module data and action requests with encoded ids and session context", async () => {
-    const fetcher = vi.fn(async () => jsonResponse({ items: [] }));
+    const fetcher = vi.fn<FetchLike>(async () => jsonResponse({ items: [] }));
     const client = createApiClient({ fetcher });
 
     await client.listProjectRuntimeModules("project-1");
@@ -94,7 +94,7 @@ describe("expanded central API contracts", () => {
   });
 
   it("routes project module action invocation and multipart content upload through the cabinet API", async () => {
-    const fetcher = vi.fn()
+    const fetcher = vi.fn<FetchLike>()
       .mockResolvedValueOnce(jsonResponse({ ok: true }))
       .mockResolvedValueOnce(jsonResponse({ asset_id: "asset-1", version_id: "version-1", filename: "input.txt" }));
     const client = createApiClient({ getAccessToken: () => "token", fetcher });
@@ -116,7 +116,7 @@ describe("expanded central API contracts", () => {
   });
 
   it("covers cabinet module data CRUD, secrets, and the existing project chat settings route", async () => {
-    const fetcher = vi.fn(async () => jsonResponse({ items: [] }));
+    const fetcher = vi.fn<FetchLike>(async () => jsonResponse({ items: [] }));
     const client = createApiClient({ fetcher });
 
     await client.listCabinetModuleData("cabinet-1", "mod-1", "catalog", { page: 2, page_size: 10, search: "adapter", in_stock_only: false }, "session-1");
@@ -146,7 +146,7 @@ describe("expanded central API contracts", () => {
   });
 
   it("covers cabinet bindings, company/admin module CRUD, meta, actions, profile, and payload shapes", async () => {
-    const fetcher = vi.fn(async () => jsonResponse({ items: [] }));
+    const fetcher = vi.fn<FetchLike>(async () => jsonResponse({ items: [] }));
     const client = createApiClient({ fetcher });
 
     await client.listCabinetModules("cabinet-1");
@@ -251,7 +251,7 @@ describe("expanded central API contracts", () => {
   });
 
   it("keeps project attachments JSON/base64 and downloads content as a response stream", async () => {
-    const fetcher = vi.fn()
+    const fetcher = vi.fn<FetchLike>()
       .mockResolvedValueOnce(jsonResponse({ items: [] }))
       .mockResolvedValueOnce(jsonResponse({ id: "attachment-1", filename: "note.txt" }, 201))
       .mockResolvedValueOnce(jsonResponse({ deleted: true }))
@@ -278,7 +278,7 @@ describe("expanded central API contracts", () => {
   });
 
   it("covers project module profile settings and content asset version lifecycle", async () => {
-    const fetcher = vi.fn()
+    const fetcher = vi.fn<FetchLike>()
       .mockResolvedValueOnce(jsonResponse({ module_ids: ["mod-1"], items: [] }))
       .mockResolvedValueOnce(jsonResponse({ module_id: "mod-1", profile_id: "profile-1", profiles: [] }))
       .mockResolvedValueOnce(jsonResponse({ items: [{ id: "asset-1" }] }))
@@ -323,7 +323,7 @@ describe("expanded central API contracts", () => {
   });
 
   it("uses FormData for owner module uploads and raw bytes for content version uploads", async () => {
-    const fetcher = vi.fn()
+    const fetcher = vi.fn<FetchLike>()
       .mockResolvedValueOnce(jsonResponse({ file_ref: { asset_id: "asset-1" } }))
       .mockResolvedValueOnce(jsonResponse({ uploaded: true }))
       .mockResolvedValueOnce(jsonResponse({ uploaded: true }));
@@ -352,7 +352,7 @@ describe("expanded central API contracts", () => {
 
   it("consumes binary download streams and preserves the response filename and media type", async () => {
     const bytes = new Uint8Array([0, 1, 2, 255]);
-    const fetcher = vi.fn(async () => new Response(new ReadableStream<Uint8Array>({
+    const fetcher = vi.fn<FetchLike>(async () => new Response(new ReadableStream<Uint8Array>({
       start(controller) { controller.enqueue(bytes); controller.close(); },
     }), { headers: { "Content-Type": "application/octet-stream", "Content-Disposition": "attachment; filename*=UTF-8''report%20one.bin" } }));
     const client = createApiClient({ fetcher });
@@ -364,7 +364,7 @@ describe("expanded central API contracts", () => {
   });
 
   it("preserves structured FastAPI errors on expanded methods", async () => {
-    const fetcher = vi.fn(async () => new Response(JSON.stringify({ detail: "cron invalid", code: "VALIDATION_ERROR", trace_id: "trace-1" }), {
+    const fetcher = vi.fn<FetchLike>(async () => new Response(JSON.stringify({ detail: "cron invalid", code: "VALIDATION_ERROR", trace_id: "trace-1" }), {
       status: 422,
       statusText: "Unprocessable Entity",
       headers: { "Content-Type": "application/json" },

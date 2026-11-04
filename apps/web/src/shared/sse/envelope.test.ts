@@ -163,7 +163,8 @@ describe("envelope separation", () => {
     expect(() => resolveWireCursor(id, undefined)).toThrow(UpstreamStreamMalformed);
     expect(() => resolveWireCursor("7", resolver)).toThrow(UpstreamStreamMalformed);
     // A UUID absent from the index is unresolved, not "parsed".
-    expect(() => resolveWireCursor(await wireEventId("run-1", 8), resolver)).toThrow(UpstreamStreamMalformed);
+    const unresolved = await wireEventId("run-1", 8);
+    expect(() => resolveWireCursor(unresolved, resolver)).toThrow(UpstreamStreamMalformed);
     // A non-v5 UUID cannot be a deterministic replay id.
     expect(() => resolveWireCursor("2f8c1c0e-6f2c-4a4e-9a1f-2c1b0d9e8a77", resolver)).toThrow(UpstreamStreamMalformed);
   });

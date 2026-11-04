@@ -10,6 +10,7 @@ import {
 } from "./calculations";
 import { createEquipmentProjectService, EquipmentServiceError } from "./project-service";
 import { type EquipmentProjectService, type EquipmentProcurementExport, type EquipmentWorkspaceScope, type EquipmentSourceCatalog } from "./live-contract";
+import { EquipmentSourcesPage, type EquipmentCatalogWorkspace, type EquipmentSourcesService } from "./sources";
 import {
   type EquipmentAuthoritativeOffer,
   type EquipmentCandidateGroup,
@@ -24,6 +25,13 @@ type EquipmentStage = "requests" | "candidates" | "offers" | "procurement" | "ex
 export interface EquipmentProcurementPageProps {
   service?: EquipmentProjectService;
   heading?: string;
+  /** Prerender/acceptance snapshot: без service экран не выдаёт себя за живой API. */
+  initialWorkspace?: EquipmentWorkspace;
+  initialScope?: EquipmentWorkspaceScope;
+  initialCatalogs?: EquipmentSourceCatalog[];
+  initialWorkspaceView?: "procurement" | "sources";
+  initialSourcesWorkspace?: EquipmentCatalogWorkspace;
+  sourcesService?: EquipmentSourcesService;
 }
 
 const STAGES: Array<{ id: EquipmentStage; label: string }> = [
@@ -493,7 +501,16 @@ function ExportStage({ workspace, exportData, busy, onExport }: { workspace: Equ
   );
 }
 
-export function EquipmentProcurementPage({ service: injectedService, heading = "Equipment procurement" }: { service?: EquipmentProjectService; heading?: string }) {
+export function EquipmentProcurementPage({
+  service: injectedService,
+  heading = "Equipment procurement",
+  initialWorkspace,
+  initialScope,
+  initialCatalogs,
+  initialWorkspaceView,
+  initialSourcesWorkspace,
+  sourcesService,
+}: EquipmentProcurementPageProps) {
   const api = useApi();
   const work = useWorkContext();
   const projectId = work.projectId;
@@ -501,13 +518,35 @@ export function EquipmentProcurementPage({ service: injectedService, heading = "
   if (!projectId || !service) {
     return <main className="equipment-page"><div className="equipment-scope-blocker" role="alert"><strong>Project scope unavailable</strong><p>Open equipment from a loaded project. This workspace does not infer cabinet, project, or chat scope.</p></div></main>;
   }
-  return <EquipmentProcurementView heading={heading} service={service} />;
+  return <EquipmentProcurementView
+    catalogs={initialCatalogs}
+    heading={heading}
+    initialScope={initialScope}
+    initialSourcesWorkspace={initialSourcesWorkspace}
+    initialWorkspace={initialWorkspace}
+    initialWorkspaceView={initialWorkspaceView}
+    service={service}
+    sourcesService={sourcesService}
+  />;
 }
 
-function EquipmentProcurementView({ service, heading }: { service: EquipmentProjectService; heading: string }) {
-  const [workspace, setWorkspace] = useState<EquipmentWorkspace>();
-  const [scope, setScope] = useState<EquipmentWorkspaceScope>();
-  const [catalogs, setCatalogs] = useState<EquipmentSourceCatalog[]>([]);
+export interface EquipmentProcurementViewProps {
+  service: EquipmentProjectService;
+  heading: string;
+  /**
+   * Готовый снимок для prerender/acceptance: без него экран загружает workspace
+   * из service в useEffect. Snapshot никогда не выдаётся за живые данные —
+   * всё, что меняет состояние, всё равно идёт через service.
+   */
+  initialWorkspace?: EquipmentWorkspace;
+  initialScope?: EquipmentWorkspaceScope;
+  initialCatalogs?: EquipmentSourceCatalog[];
+}
+
+export function EquipmentProcurementView({ service, heading, initialWorkspace, initialScope, initialCatalogs }: EquipmentProcurementViewProps) {
+  const [workspace, setWorkspace] = useState<EquipmentWorkspace | undefined>(initialWorkspace);
+  const [scope, setScope] = useState<EquipmentWorkspaceScope | undefined>(initialScope);
+  const [catalogs, setCatalogs] = useState<EquipmentSourceCatalog[]>(initialCatalogs ?? []);
   const [activeStage, setActiveStage] = useState<EquipmentStage>("requests");
   const [activeWorkspaceView, setActiveWorkspaceView] = useState<"procurement" | "sources">("procurement");
   const [error, setError] = useState<string>();
@@ -572,7 +611,8 @@ function EquipmentProcurementView({ service, heading }: { service: EquipmentProj
 
   // Тот же fail-closed предикат, что и requireWritable в project-service: глобальный
   // биндинг без разрешения дочерних правок делает все стадии только для чтения.
-  const readOnly = scope !== undefined && scope.bindKind === "global" && !scope.childMayEdit;
+  // Неразрешённый scope writability не подтверждает, поэтому тоже read-only.
+  const readOnly = scope === undefined || (scope.bindKind === "global" && !scope.childMayEdit);
 
   return (
     <main className="equipment-page">

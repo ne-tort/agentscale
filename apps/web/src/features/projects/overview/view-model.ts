@@ -28,7 +28,7 @@ const observedStateLabels: Record<string, string> = {
   unknown: "Состояние неизвестно",
 };
 
-export function observedStateLabel(value?: string): string | undefined {
+export function observedStateLabel(value?: string | null): string | undefined {
   if (!value) return undefined;
   return observedStateLabels[value] ?? value;
 }
@@ -59,7 +59,7 @@ const observedCapabilities: Record<string, readonly ProjectOverviewAction[]> = {
   unknown: ["reload"],
 };
 
-export function projectActions(status: ProjectLifecycle, observedState?: string): ProjectOverviewAction[] {
+export function projectActions(status: ProjectLifecycle, observedState?: string | null): ProjectOverviewAction[] {
   const available = lifecycleCapabilities[status];
   if (!observedState || !(observedState in observedCapabilities)) {
     return status === "paused" || status === "completed"

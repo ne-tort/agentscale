@@ -53,9 +53,19 @@ export interface UiRoute {
   root: string;
 }
 
+/**
+ * One union member per discriminant literal: TypeScript only narrows a discriminated union when
+ * each member carries a single literal `type`, so grouped discriminants would leave consumers
+ * unable to reach `props`/`children`/`name`. The accepted shapes are unchanged.
+ */
 export type UiNode =
-  | { type: "stack" | "row" | "column"; id?: string; children: UiNode[] }
-  | { type: "text" | "button" | "input" | "table"; id: string; props: Record<string, JsonValue>; bindings?: Record<string, string> }
+  | { type: "stack"; id?: string; children: UiNode[] }
+  | { type: "row"; id?: string; children: UiNode[] }
+  | { type: "column"; id?: string; children: UiNode[] }
+  | { type: "text"; id: string; props: Record<string, JsonValue>; bindings?: Record<string, string> }
+  | { type: "button"; id: string; props: Record<string, JsonValue>; bindings?: Record<string, string> }
+  | { type: "input"; id: string; props: Record<string, JsonValue>; bindings?: Record<string, string> }
+  | { type: "table"; id: string; props: Record<string, JsonValue>; bindings?: Record<string, string> }
   | { type: "slot"; id: string; name: string };
 
 export interface PluginMethod {

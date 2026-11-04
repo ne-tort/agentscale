@@ -238,6 +238,12 @@ class ProjectScheduleService:
         if changed_cron or "enabled" in values:
             row.next_run_at = next_cron_at(row.cron, datetime.now(UTC), row.timezone) if row.enabled else None
         await self._session.flush()
+        # ``updated_at`` carries ``onupdate=func.now()``, so the UPDATE expires the
+        # attribute and the value only comes back from the database. Reading it in
+        # ``_public`` would emit a lazy SELECT from inside a non-greenlet call,
+        # which async SQLAlchemy turns into MissingGreenlet (HTTP 500). Refresh
+        # explicitly: one awaited round-trip, then every column is loadable.
+        await self._session.refresh(row)
         return _public(row)
 
     async def delete(self, *, project_id: str, schedule_id: str) -> None:

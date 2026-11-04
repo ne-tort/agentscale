@@ -120,8 +120,9 @@ function validateUi(view: ModuleViewDefinition, viewSlugs: Set<string>, tableSlu
       const tap = ui.row_tap;
       if (!record(tap) || !["open_form", "open_view"].includes(String(tap.kind)) || typeof tap.view !== "string" || !viewSlugs.has(tap.view)) errors.push(`${label} row_tap must open a declared form or view`);
     }
-    if (ui.inline_add !== undefined && (!record(ui.inline_add) || typeof ui.inline_add.field !== "string" || (knownColumns.size > 0 && !knownColumns.has(ui.inline_add.field)) || Object.keys(ui.inline_add).some((key) => !["field", "title", "label", "hintText"].includes(key)))) errors.push(`${label} inline_add must reference a declared field and supported label keys`);
-    if (record(ui.inline_add) && typeof ui.inline_add.field === "string" && columns.find((column) => column.table_slug === view.table_slug && column.name === ui.inline_add!.field)?.type !== "text") errors.push(`${label} inline_add requires a text column`);
+    const inlineAdd = record(ui.inline_add) ? ui.inline_add : undefined;
+    if (ui.inline_add !== undefined && (!inlineAdd || typeof inlineAdd.field !== "string" || (knownColumns.size > 0 && !knownColumns.has(inlineAdd.field)) || Object.keys(inlineAdd).some((key) => !["field", "title", "label", "hintText"].includes(key)))) errors.push(`${label} inline_add must reference a declared field and supported label keys`);
+    if (inlineAdd && typeof inlineAdd.field === "string" && columns.find((column) => column.table_slug === view.table_slug && column.name === inlineAdd.field)?.type !== "text") errors.push(`${label} inline_add requires a text column`);
     if (ui.primary_action !== undefined && (!record(ui.primary_action) || ui.primary_action.kind !== "create_row" || (ui.primary_action.view !== undefined && (typeof ui.primary_action.view !== "string" || !viewSlugs.has(ui.primary_action.view))) || Object.keys(ui.primary_action).some((key) => !["kind", "view", "label"].includes(key)))) errors.push(`${label} primary_action must be an allowlisted create_row command`);
     if (ui.primary_action !== undefined && ui.inline_add !== undefined) errors.push(`${label} must choose either primary_action or inline_add, not both`);
     if (ui.row_filter !== undefined && !record(ui.row_filter)) errors.push(`${label} row_filter must be an object`);
@@ -130,11 +131,15 @@ function validateUi(view: ModuleViewDefinition, viewSlugs: Set<string>, tableSlu
       for (const match of template.matchAll(/\{([a-z][a-z0-9_]*)\}/gi)) if (knownColumns.size > 0 && !knownColumns.has(match[1])) errors.push(`${label} title_template references unknown field '${match[1]}'`);
     }
     if (ui.context_bind !== undefined && (!record(ui.context_bind) || Object.values(ui.context_bind).some((value) => value !== "contextRowId"))) errors.push(`${label} context_bind values must be contextRowId`);
+    const contextHeader = record(ui.context_header) ? ui.context_header : undefined;
     if (ui.context_header !== undefined) {
-      if (!record(ui.context_header) || typeof ui.context_header.table_slug !== "string" || !tableSlugs.has(ui.context_header.table_slug) || !Array.isArray(ui.context_header.fields)) errors.push(`${label} context_header must identify a table and fields`);
-      else (ui.context_header.fields as unknown[]).forEach((item, index) => {
-        if (!record(item) || typeof item.column !== "string" || (columnsByTable.get(ui.context_header!.table_slug as string)?.has(item.column) !== true)) errors.push(`${label} context_header.fields[${index}] references an unknown column`);
-      });
+      if (!contextHeader || typeof contextHeader.table_slug !== "string" || !tableSlugs.has(contextHeader.table_slug) || !Array.isArray(contextHeader.fields)) errors.push(`${label} context_header must identify a table and fields`);
+      else {
+        const headerTableSlug = contextHeader.table_slug;
+        (contextHeader.fields as unknown[]).forEach((item, index) => {
+          if (!record(item) || typeof item.column !== "string" || (columnsByTable.get(headerTableSlug)?.has(item.column) !== true)) errors.push(`${label} context_header.fields[${index}] references an unknown column`);
+        });
+      }
     }
     for (const key of ["toolbar", "row_actions"]) if (ui[key] !== undefined && !Array.isArray(ui[key])) errors.push(`${label} ${key} must be an array`);
     for (const key of ["toolbar", "row_actions"]) if (Array.isArray(ui[key])) (ui[key] as unknown[]).forEach((item, index) => {

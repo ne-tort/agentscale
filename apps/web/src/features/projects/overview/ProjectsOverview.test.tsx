@@ -227,7 +227,7 @@ describe("ProjectsOverview acceptance surface", () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
     expect(document.querySelector("[data-testid='location']")?.textContent).toBe("/projects?cabinet=cab-2");
-    expect(api.listProjects.mock.calls.some(([cabinetId]) => cabinetId === "cab-2")).toBe(true);
+    expect(vi.mocked(api.listProjects).mock.calls.some(([cabinetId]) => cabinetId === "cab-2")).toBe(true);
   });
 
   it("ignores a delayed project list from the previous cabinet after a switch", async () => {
@@ -267,8 +267,8 @@ describe("ProjectsOverview acceptance surface", () => {
     await mount(<MemoryRouter initialEntries={["/projects"]}>
       <Routes><Route path="/projects" element={<><ProjectsOverview service={api} employeeId="employee-1" /><QueryEcho /></>} /></Routes>
     </MemoryRouter>);
-    expect(api.listProjects.mock.calls.some(([cabinetId]) => cabinetId === "cab-2")).toBe(true);
-    expect(document.querySelector(".projects-cabinet-picker select")?.value).toBe("cab-2");
+    expect(vi.mocked(api.listProjects).mock.calls.some(([cabinetId]) => cabinetId === "cab-2")).toBe(true);
+    expect(document.querySelector<HTMLSelectElement>(".projects-cabinet-picker select")?.value).toBe("cab-2");
   });
 
   it("renders lifecycle controls appropriate to draft, active, paused, completed, and error records", async () => {

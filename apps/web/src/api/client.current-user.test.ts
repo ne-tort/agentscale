@@ -2,6 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 import { createApiClient } from "./client";
 import type { CurrentUserWireResponse } from "./types";
 
+/** The real `fetch` signature, captured where the per-test `fetcher` doubles do not shadow it. */
+type FetchLike = typeof fetch;
+
 function meResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
 }
@@ -41,7 +44,7 @@ function companyWire(active: boolean): CurrentUserWireResponse {
 
 describe("GET /api/v1/me current-user normalization", () => {
   it("maps the active employee wire response explicitly", async () => {
-    const fetcher = vi.fn(async () => meResponse({ ...employeeWire(), ignored_server_field: "discard" }));
+    const fetcher = vi.fn<FetchLike>(async () => meResponse({ ...employeeWire(), ignored_server_field: "discard" }));
     const client = createApiClient({ fetcher });
 
     const user = await client.me();
@@ -74,7 +77,7 @@ describe("GET /api/v1/me current-user normalization", () => {
       employee_id: "wire-employee-id",
       memberships: [{ company_id: "wire-membership-company", role: "owner" }],
     };
-    const fetcher = vi.fn(async () => meResponse(wire));
+    const fetcher = vi.fn<FetchLike>(async () => meResponse(wire));
     const user = await createApiClient({ fetcher }).me();
 
     expect(user).toMatchObject({
@@ -89,7 +92,7 @@ describe("GET /api/v1/me current-user normalization", () => {
   });
 
   it("preserves false for a disabled employee", async () => {
-    const fetcher = vi.fn(async () => meResponse(employeeWire({
+    const fetcher = vi.fn<FetchLike>(async () => meResponse(employeeWire({
       active: false,
       employee: {
         id: "employee-1",
@@ -106,7 +109,7 @@ describe("GET /api/v1/me current-user normalization", () => {
   });
 
   it("maps an active company principal without requiring an employee", async () => {
-    const fetcher = vi.fn(async () => meResponse(companyWire(true)));
+    const fetcher = vi.fn<FetchLike>(async () => meResponse(companyWire(true)));
     const user = await createApiClient({ fetcher }).me();
 
     expect(user).toMatchObject({
@@ -127,7 +130,7 @@ describe("GET /api/v1/me current-user normalization", () => {
     ["inactive", null],
     ["deleted", { id: "linked-employee-1", status: "active", email: "admin@example.test", memberships: [] }],
   ])("preserves false for a %s company principal", async (_state, employee) => {
-    const fetcher = vi.fn(async () => meResponse({ ...companyWire(false), employee }));
+    const fetcher = vi.fn<FetchLike>(async () => meResponse({ ...companyWire(false), employee }));
     const user = await createApiClient({ fetcher }).me();
 
     expect(user.active).toBe(false);
@@ -138,7 +141,7 @@ describe("GET /api/v1/me current-user normalization", () => {
     ["missing", { sub: "employee-subject", roles: [], contours: [], company: null, employee: null, work_context: {} }],
     ["non-boolean", { active: "true", sub: "employee-subject", roles: [], contours: [], company: null, employee: null, work_context: {} }],
   ])("rejects a %s top-level active value", async (_label, body) => {
-    const fetcher = vi.fn(async () => meResponse(body));
+    const fetcher = vi.fn<FetchLike>(async () => meResponse(body));
     const userRequest = createApiClient({ fetcher }).me();
 
     await expect(userRequest).rejects.toThrow("Invalid /me response: active must be a boolean");

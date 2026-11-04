@@ -39,6 +39,7 @@ def _read(path: Path) -> str:
 class Interface:
     name: str
     fields: frozenset[str]
+    extends: frozenset[str]
     path: Path
 
 
@@ -55,8 +56,16 @@ def interfaces(path: Path) -> dict[str, Interface]:
     found: dict[str, Interface] = {}
     for match in _INTERFACE_RE.finditer(text):
         fields = set(_FIELD_RE.findall(match.group("body")))
+        parents = {
+            name.strip()
+            for name in (match.group("extends") or "").split(",")
+            if name.strip()
+        }
         found[match.group("name")] = Interface(
-            name=match.group("name"), fields=frozenset(fields), path=path
+            name=match.group("name"),
+            fields=frozenset(fields),
+            extends=frozenset(parents),
+            path=path,
         )
     return found
 
@@ -73,6 +82,20 @@ def interface(path: Path, name: str) -> Interface:
     return found[name]
 
 
+def interface_fields(path: Path, name: str) -> frozenset[str]:
+    """Declared fields of an interface *including* everything it extends."""
+    found = _interfaces_cached(str(path))
+    collected: set[str] = set()
+    pending = [name]
+    while pending:
+        current = pending.pop()
+        if current not in found:
+            raise AssertionError(f"{current} is not declared in {path}")
+        collected |= found[current].fields
+        pending.extend(found[current].extends)
+    return frozenset(collected)
+
+
 # ------------------------------------------------------------------ field readers
 
 
@@ -85,9 +108,9 @@ def read_field_aliases(path: Path, function: str) -> dict[str, tuple[str, ...]]:
     """Map each normalized key to every wire name the client will accept for it.
 
     ``dynamic.ts`` reads snake_case with a camelCase fallback (``firstDefined(value.app_id,
-    value.appId)``); the normalizer's own output key is the property on the left of ``:``.
-    Both are collected: the wire name must exist on the server, and the normalized
-    name must be what the screens read.
+    value.appId)``); the normalizer's own output key is the property on the left of ``:``
+    — which may sit on its own line above a multi-line call. Both are collected: the wire
+    name must exist on the server, and the normalized name must be what the screens read.
     """
     text = _read(path)
     start = text.find(f"export function {function}")
@@ -96,12 +119,16 @@ def read_field_aliases(path: Path, function: str) -> dict[str, tuple[str, ...]]:
     body = text[start:]
     end = body.find("\n}\n")
     body = body[: end if end > 0 else len(body)]
+    # Each ``return { a: ..., b: ..., }`` literal: split on top-level property starts.
+    returned = body.find("return {")
+    if returned >= 0:
+        body = body[returned:]
     aliases: dict[str, tuple[str, ...]] = {}
-    for line in body.splitlines():
-        key = re.match(r"\s*(?:readonly\s+)?(\w+):", line)
+    for block in re.split(r"\n\s{2,6}(?=[a-zA-Z_]\w*:)", body):
+        key = re.match(r"\s*([a-zA-Z_]\w*):", block)
         if not key:
             continue
-        names = _field_alternatives(line)
+        names = _field_alternatives(block)
         if names:
             aliases[key.group(1)] = names
     return aliases
@@ -116,7 +143,7 @@ _IDENTIFIER = r"[A-Za-z_$][\w$.]*"
 def _normalize_path_template(template: str) -> str:
     """Turn a TypeScript template literal into a server-shaped path template.
 
-    ``\`/content/assets/${encodeURIComponent(assetId)}/versions\``` becomes
+    A literal ``/content/assets/${encodeURIComponent(assetId)}/versions`` becomes
     ``/content/assets/{p}/versions``. Query parameters written inside the template
     are dropped: they are covered by the parameter check, not the path check.
     """
@@ -142,26 +169,59 @@ def _client_passthrough() -> dict[str, str]:
 class WebCall:
     call: Call
     template: str
+    #: ``True`` when the path comes from a template literal whose leading host/prefix is
+    #: supplied by the adapter, so only the literal part can be checked here.
+    partial: bool = False
 
 
+_HOST_PREFIX_RE = re.compile(r"(\$\{[^}]*\}|[A-Za-z_$][\w$]*)\s*$")
 _METHOD_HINT = re.compile(r"method:\s*['\"](\w+)['\"]")
+_FETCH_RE = re.compile(r"fetch\(\s*`\{?([A-Za-z_$][\w$]*)")
+
+
+def _mount_prefix() -> str:
+    """Recover the URL prefix the content-ops adapter concatenates in front of a literal.
+
+    ``fetcher(`${baseUrl}${path}`)`` with ``baseUrl = options.baseUrl ?? "/api/v1"``
+    means a literal such as ``/content/assets`` is requested at
+    ``/api/v1/content/assets``. The default is read from the source rather than
+    assumed, so a moved default shows up as a parity failure instead of a silent
+    pass. A service that builds absolute URLs has no such wrapper and yields ``""``.
+    """
+    text = _read(CONTENT_OPS_SERVICE)
+    mount = _FETCH_RE.search(text)
+    if mount is None:
+        return ""
+    default = re.search(r"baseUrl\s*=\s*options\.baseUrl\s*\?\?\s*\"([^\"]*)\"", text)
+    literal = default.group(1).rstrip("/") if default else ""
+    token = mount.group(1)
+    assignment = re.search(
+        rf"\b{re.escape(token)}\s*(?::[^=]+)?=\s*[^;]*?\"([^\"]*)\"", text
+    )
+    if assignment is not None:
+        literal += assignment.group(1)
+    return literal.rstrip("/")
 
 
 def content_ops_calls() -> list[WebCall]:
-    """Every ``/content/...`` request the content-ops service performs."""
+    """Every ``/content/...`` request the content-ops service performs.
+
+    The method is the one declared *after* the path literal, inside the same
+    ``init`` object; reads that pass a bare ``{ signal }`` default to ``GET``.
+    """
     text = _read(CONTENT_OPS_SERVICE)
     calls: list[WebCall] = []
     for match in re.finditer(r"`(/?content/[^`]*)`", text):
         template = match.group(1)
-        window = text[max(0, match.start() - 600) : match.start()]
-        method_match = _METHOD_HINT.findall(window)
-        method = method_match[-1].upper() if method_match else "GET"
+        following = _METHOD_HINT.search(text[match.start() : match.start() + 400])
+        method = following.group(1).upper() if following else "GET"
+        base = _mount_prefix()
         calls.append(
             WebCall(
                 call=Call(
                     method=method,
-                    path=_normalize_path_template(template),
-                    source=f"{CONTENT_OPS_SERVICE.name}",
+                    path=base + _normalize_path_template(template),
+                    source=CONTENT_OPS_SERVICE.name,
                 ),
                 template=template,
             )

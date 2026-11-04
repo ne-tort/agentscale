@@ -28,6 +28,12 @@ export interface ApiMockOptions {
    * - `server-error` — answers 500 with the API error envelope.
    */
   mode?: ApiMode;
+  /**
+   * Keeps the session probe (`/me`) and the auth endpoints answering even when
+   * `mode` is a failure mode. Without this, an `offline` mode signs the user out
+   * (fail-closed `AuthLifecycle`) and the page under test never mounts.
+   */
+  keepSession?: boolean;
   /** Extra per-path handlers, keyed by a path suffix such as `/me`. */
   overrides?: Record<string, (route: Route) => Promise<void> | void>;
 }
@@ -60,7 +66,8 @@ export function requestBody(route: Route): Record<string, unknown> | undefined {
  * Returns a function that removes the mock (handy when a test switches modes).
  */
 export async function mockApi(page: Page, options: ApiMockOptions = {}): Promise<() => Promise<void>> {
-  const { mode = "healthy", overrides = {} } = options;
+  const { mode = "healthy", keepSession = false, overrides = {} } = options;
+  const sessionPaths = new Set([`${API_PREFIX}/me`, `${API_PREFIX}/auth/login`, `${API_PREFIX}/auth/logout`, `${API_PREFIX}/auth/refresh`]);
 
   const handler = async (route: Route): Promise<void> => {
     const path = pathOf(route);
@@ -70,11 +77,12 @@ export async function mockApi(page: Page, options: ApiMockOptions = {}): Promise
       return;
     }
 
-    if (mode === "offline") {
+    const sessionProbe = keepSession && sessionPaths.has(path);
+    if (mode === "offline" && !sessionProbe) {
       await route.abort("failed");
       return;
     }
-    if (mode === "server-error") {
+    if (mode === "server-error" && !sessionProbe) {
       await apiError(route, 500, "INTERNAL_ERROR", "The API failed to answer (mocked 500).");
       return;
     }
@@ -97,6 +105,13 @@ export async function mockApi(page: Page, options: ApiMockOptions = {}): Promise
     }
     if (path === `${API_PREFIX}/cabinets`) {
       await json(route, { items: E2E_CABINETS });
+      return;
+    }
+    // `ProjectLayout` resolves the cabinet of every project route.
+    if (/^\/api\/v1\/cabinets\/[^/]+$/.test(path)) {
+      const requested = path.split("/").pop() ?? E2E_CABINETS[0].id;
+      const known = E2E_CABINETS.find((cabinet) => cabinet.id === requested);
+      await json(route, known ?? { ...E2E_CABINETS[0], id: requested });
       return;
     }
     if (/^\/api\/v1\/cabinets\/[^/]+\/projects$/.test(path)) {

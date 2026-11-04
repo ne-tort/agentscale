@@ -71,8 +71,8 @@ export function SelectField<TValue extends string = string>({
         if (!event.defaultPrevented) onValueChange?.((event.currentTarget.value || undefined) as TValue | undefined);
       }}
       required={required}
-      value={value !== undefined ? value : undefined}
-      defaultValue={value === undefined ? defaultValue : undefined}
+      value={value === undefined || value === null ? undefined : String(value)}
+      defaultValue={value === undefined ? (defaultValue as string | undefined) : undefined}
     >
       {placeholder && <option value="">{placeholder}</option>}
       {options.map((option) => <option disabled={option.disabled} key={option.value} value={option.value}>{option.label}</option>)}

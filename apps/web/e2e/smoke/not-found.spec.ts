@@ -44,15 +44,51 @@ test.describe("unknown routes", () => {
     await expect(page.getByRole("heading", { name: "Проекты", level: 1 })).toBeVisible();
   });
 
-  test("an unknown nested project route renders the project-scope 404", async ({ page }) => {
+  test("an unknown nested project route renders the shell's route-recovery surface", async ({ page }) => {
     await seedSession(page);
     await mockApi(page);
     await page.goto("/projects/project-e2e/no-such-panel");
 
-    // `ProjectLayout` must load the project before the nested `*` route can render,
-    // so this also asserts the layout does not swallow unknown children.
-    await expect(page.getByRole("heading", { name: "Page not found" })).toBeVisible();
-    await expect(page.getByText("/projects/project-e2e/no-such-panel")).toBeVisible();
+    // Inside a project workspace the authority for "which sections exist" is
+    // `WorkspaceShell.resolveWorkspaceRoute`, not the plain router: it renders
+    // `children` only when the path matches a confirmed route, and otherwise
+    // replaces the outlet with this recovery panel. The nested `*` route in
+    // `ProjectLayout` therefore never paints — asserting `NotFoundPage` here
+    // would be testing a surface the shell deliberately shadows.
+    const recovery = page.getByRole("alert").filter({ hasText: "Unsupported workspace route" });
+    await expect(recovery).toBeVisible();
+    await expect(recovery.getByRole("heading", { name: "This route is not available in this workspace" })).toBeVisible();
+    // The deep link is kept so the user can recover without losing it.
+    await expect(page).toHaveURL(/\/projects\/project-e2e\/no-such-panel$/);
+    await expect(recovery.getByText("/projects/project-e2e/no-such-panel")).toBeVisible();
+    // Recovery must be one click, and the shell must stay navigable.
+    await expect(recovery.getByRole("link", { name: "Open E2E Project" })).toHaveAttribute("href", "/projects/project-e2e");
+    await expect(page.getByRole("navigation", { name: "Workspace sections" })).toBeVisible();
+  });
+
+  test("a project route that belongs to another project is refused, not silently loaded", async ({ page }) => {
+    await seedSession(page);
+    await mockApi(page, {
+      overrides: {
+        // The URL says `project-other`, but the shell was scoped to `project-e2e`
+        // only if the layout loaded it — here the layout loads the requested id and
+        // the shell must agree on scope rather than render foreign content.
+        "/projects/project-other": async (route) => {
+          await route.fulfill({
+            status: 404,
+            contentType: "application/json",
+            body: JSON.stringify({ code: "NOT_FOUND", title: "Not found", status: 404, detail: "Проект не найден." }),
+          });
+        },
+      },
+    });
+    await page.goto("/projects/project-other/runtime");
+
+    const alert = page.getByRole("alert");
+    await expect(alert.getByRole("heading", { name: "Проект недоступен" })).toBeVisible();
+    await expect(alert.getByText("Проект не найден.")).toBeVisible();
+    await expect(alert.getByRole("button", { name: "Повторить" })).toBeVisible();
+    await expect(alert.getByRole("link", { name: "Вернуться к проектам" })).toBeVisible();
   });
 
   test("the index redirect reaches /projects", async ({ page }) => {

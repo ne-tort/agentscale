@@ -105,8 +105,8 @@ export interface ApprovalCommandInput {
 export interface CancelRunCommandInput { run: AgentRunRecord; reason?: string; idempotencyKey: string }
 export type WriteOutcome<T> =
   | { kind: "confirmed"; value: T; duplicate: boolean }
-  | { kind: "conflict"; error: Error; current?: unknown }
-  | { kind: "blocked"; error: Error }
+  | { kind: "conflict"; error: Error; current?: unknown; readbackError?: Error }
+  | { kind: "blocked"; error: Error; readbackError?: Error }
   | { kind: "unknown"; error: Error; readbackError?: Error };
 export type RunCreateResult =
   | { kind: "confirmed"; run: AgentRunRecord; duplicate: boolean; queueIntentsRecorded: number }

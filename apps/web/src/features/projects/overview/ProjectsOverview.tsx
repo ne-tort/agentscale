@@ -61,7 +61,7 @@ function statusTone(status: ProjectLifecycle): string {
   return projectStatusTone(status);
 }
 
-function formatDate(value?: string): string {
+function formatDate(value?: string | null): string {
   if (!value) return "";
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? "" : new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium" }).format(date);

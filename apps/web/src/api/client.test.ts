@@ -10,6 +10,13 @@ const request: ChatRunRequest = {
   attachment_refs: [],
 };
 
+/**
+ * The real `fetch` signature, captured at module scope where the per-test `fetch` doubles below do
+ * not shadow it. Typing every mock with it keeps `mock.calls` as `[RequestInfo | URL, RequestInit?]`
+ * tuples, so assertions read the recorded request instead of `[]` / `never`.
+ */
+type FetchLike = typeof fetch;
+
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 }
@@ -34,7 +41,7 @@ afterEach(() => vi.unstubAllGlobals());
 
 describe("typed FastAPI client contracts", () => {
   it("targets /api/v1 and sends Bearer JSON without durable-run headers", async () => {
-    const fetch = vi.fn(async () => jsonResponse({ id: "project-1", cabinet_id: "cabinet-1", name: "Project", status: "draft" }));
+    const fetch = vi.fn<FetchLike>(async () => jsonResponse({ id: "project-1", cabinet_id: "cabinet-1", name: "Project", status: "draft" }));
     const client = createApiClient({ getAccessToken: () => "access-token", fetcher: fetch });
 
     await client.getProject("project/1");
@@ -49,7 +56,7 @@ describe("typed FastAPI client contracts", () => {
   });
 
   it("covers cabinet selection, project CRUD, lifecycle, container and workspace JSON routes", async () => {
-    const fetch = vi.fn(async () => jsonResponse({ items: [] }));
+    const fetch = vi.fn<FetchLike>(async () => jsonResponse({ items: [] }));
     const client = createApiClient({ fetcher: fetch });
 
     await client.listCabinets();
@@ -93,7 +100,7 @@ describe("typed FastAPI client contracts", () => {
   });
 
   it("covers agent session CRUD, fork/title/pin, transcript, drafts and approvals", async () => {
-    const fetch = vi.fn(async () => jsonResponse({ items: [] }));
+    const fetch = vi.fn<FetchLike>(async () => jsonResponse({ items: [] }));
     const client = createApiClient({ fetcher: fetch });
 
     await client.listSessions("project-1");
@@ -129,7 +136,7 @@ describe("typed FastAPI client contracts", () => {
     const binary = new Response("file", {
       headers: { "Content-Type": "text/plain", "Content-Disposition": "attachment; filename=note.txt" },
     });
-    const fetch = vi.fn()
+    const fetch = vi.fn<FetchLike>()
       .mockResolvedValueOnce(jsonResponse({ id: "attachment-1", filename: "note.txt" }))
       .mockResolvedValueOnce(binary);
     const client = createApiClient({ fetcher: fetch });
@@ -146,7 +153,7 @@ describe("typed FastAPI client contracts", () => {
   });
 
   it("sends JSON base64 attachments and exposes trigger, schedule, settings and model routes", async () => {
-    const fetch = vi.fn(async () => jsonResponse({ items: [] }));
+    const fetch = vi.fn<FetchLike>(async () => jsonResponse({ items: [] }));
     const client = createApiClient({ fetcher: fetch });
 
     await client.listAttachments("project-1");
@@ -181,7 +188,7 @@ describe("typed FastAPI client contracts", () => {
 
   it("parses legacy {type,data} SSE, ignores keepalive comments, and does not invent replay headers", async () => {
     const events: ChatStreamEvent[] = [];
-    const fetch = vi.fn(async () => chunkedResponse([
+    const fetch = vi.fn<FetchLike>(async () => chunkedResponse([
       ": keepalive\r\n\r\ndata: {\"type\":\"_session\",\"data\":{\"session_id\":\"session-1\"}}\n\n",
       "data: {\"type\":\"text_delta\",\"data\":{\"text\":\"hel",
       "lo\"}}\n\ndata: {\"type\":\"_turn_complete\",\"data\":{\"session_id\":\"session-1\"}}\n\n",
@@ -200,14 +207,14 @@ describe("typed FastAPI client contracts", () => {
   });
 
   it("surfaces structured server stream errors and transport failures", async () => {
-    const streamFetch = vi.fn(async () => streamResponse("data: {\"type\":\"_error\",\"data\":{\"code\":\"RUNTIME_UNAVAILABLE\",\"detail\":\"agent offline\",\"status\":503}}\n\n"));
+    const streamFetch = vi.fn<FetchLike>(async () => streamResponse("data: {\"type\":\"_error\",\"data\":{\"code\":\"RUNTIME_UNAVAILABLE\",\"detail\":\"agent offline\",\"status\":503}}\n\n"));
     const client = createApiClient({ fetcher: streamFetch });
     await expect(async () => { for await (const _event of client.runChat(request)) { /* consume */ } }).rejects.toBeInstanceOf(ApiRequestError);
 
-    const network = createApiClient({ fetcher: vi.fn(async () => { throw new TypeError("connection_lost"); }) });
+    const network = createApiClient({ fetcher: vi.fn<FetchLike>(async () => { throw new TypeError("connection_lost"); }) });
     await expect(async () => { for await (const _event of network.runChat(request)) { /* consume */ } }).rejects.toBeInstanceOf(ChatStreamNetworkError);
 
-    const malformed = createApiClient({ fetcher: vi.fn(async () => streamResponse("data: {\"type\":\"text_delta\"}\n\n")) });
+    const malformed = createApiClient({ fetcher: vi.fn<FetchLike>(async () => streamResponse("data: {\"type\":\"text_delta\"}\n\n")) });
     await expect(async () => { for await (const _event of malformed.runChat(request)) { /* consume */ } }).rejects.toBeInstanceOf(ChatStreamProtocolError);
   });
 });
