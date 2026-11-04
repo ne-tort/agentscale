@@ -158,9 +158,8 @@ GATE_ACTIVE_TYPED_PARENT_SCOPE: Final = "active_typed_parent_scope"
 MAX_PAGE_SIZE: Final = 1000
 
 #: Legacy ``dynamic_app_versions`` has no tenant column: the partition tenant is
-#: proven through the owning definition row (a join in SQL, an explicit predicate
-#: here) before any version is returned.
-VERSION_TABLE_HAS_TENANT_COLUMN: Final = False
+#: proven through the owning definition row before any version is returned (see the
+#: version-page SQL below, which is bounded by ``app_definition_id``).
 
 _SHA256_PREFIX: Final = "sha256:"
 _SHA256_LENGTH: Final = len(_SHA256_PREFIX) + 64
@@ -230,11 +229,18 @@ class M04EPortReason(StrEnum):
         "mig_m04e_01_positive_promotion_outcome_unrepresentable"
     )
     # -- candidate proof ----------------------------------------------------
+    #: Raised codes: the *question* is malformed, not the row. Never converted into a
+    #: per-row quarantine decision.
     PROOF_CONTEXT_INVALID = "m04e_candidate_proof_context_invalid"
     PROOF_GATES_INVALID = "m04e_candidate_proof_gates_invalid"
-    PROOF_CANDIDATE_BINDING_INVALID = "m04e_candidate_proof_binding_invalid"
+    PROOF_CANDIDATE_PARTITION_MISMATCH = "m04e_candidate_proof_partition_mismatch"
+    PROOF_CANDIDATE_LINEAGE_MISMATCH = "m04e_candidate_proof_lineage_mismatch"
     PROOF_SOURCE_CHANGED = "m04e_candidate_proof_source_changed"
     PROOF_ACTIVE_SCOPE_MISMATCH = "m04e_candidate_proof_active_scope_mismatch"
+    #: Returned code: a fact about this candidate row, which the backfill quarantines.
+    PROOF_CANDIDATE_BINDING_INVALID = "m04e_candidate_proof_binding_invalid"
+    #: Returned code: the partition's legacy definition row is absent.
+    PROOF_DEFINITION_ABSENT = "m04e_candidate_proof_definition_absent"
     # -- evidence store -----------------------------------------------------
     STORE_MAPPING_LEDGER_MISSING = "m04e_backfill_mapping_ledger_missing"
     STORE_OBSERVATION_LEDGER_MISSING = "m04e_backfill_observation_ledger_missing"
@@ -772,14 +778,13 @@ class SqlM04ECandidateReader(_SessionReads):
                     "the source page returned a row with an unexpected source kind",
                     context=context,
                 ))
-            if (candidate.tenant_id, candidate.app_definition_id) != (
-                context.tenant_id, context.app_definition_id,
-            ):
-                raise M04EPortRefused(_refusal(
-                    M04EPortReason.PARTITION_MISMATCH,
-                    "the source page returned a row outside the trusted partition",
-                    context=context,
-                ))
+            # Same guard the adapters apply to a caller-supplied partition, so a
+            # page can never widen the query it was asked for.
+            require_partition(
+                context,
+                tenant_id=candidate.tenant_id or "",
+                app_definition_id=candidate.app_definition_id or "",
+            )
             # Byte order (COLLATE "C") equals code-point order for UTF-8, so this
             # can only fail on a collation/ordering regression — which must abort
             # the page, not silently shorten it.
@@ -1466,7 +1471,7 @@ class SqlM04ECandidateProof(_SessionReads):
             definition = await self._definition_row(session, context)
             if definition is None:
                 return CandidateProofDecision(None, _refusal(
-                    M04EPortReason.M04E_01_DEFINITION_ABSENT,
+                    M04EPortReason.PROOF_DEFINITION_ABSENT,
                     "the partition's legacy definition row is absent for this tenant",
                     context=context, gate_name=GATE_M04E_01_DEFINITION_FOUNDATION,
                 ))
@@ -1557,6 +1562,7 @@ class SqlM04ECandidateProof(_SessionReads):
             )
             if isinstance(current_proof, PortRefusal):
                 return CandidateProofDecision(None, current_proof)
+            current_fields: dict[str, Any] = current_proof
 
             source_material = {
                 "source_kind": candidate.source_kind,
@@ -1632,8 +1638,6 @@ class SqlM04ECandidateProof(_SessionReads):
                     "manifest_version_key_count": manifest_version_count,
                     "artifact_digest_key_count": artifact_digest_count,
                 })
-            assert current_proof is not None
-
             return CandidateProofDecision(CandidateProof(
                 tenant_id=context.tenant_id,
                 app_definition_id=context.app_definition_id,
@@ -1661,7 +1665,7 @@ class SqlM04ECandidateProof(_SessionReads):
                     str(version["artifact_digest"]) if version is not None else None
                 ),
                 artifact_immutability_proof_digest=artifact_immutability_digest,
-                **current_proof,
+                **current_fields,
             ), None)
 
     # -- helpers ----------------------------------------------------------
@@ -1850,7 +1854,7 @@ class SqlM04ECandidateProof(_SessionReads):
             ))
         if not isinstance(candidate, EvidenceCandidate):
             raise M04EPortRefused(_refusal(
-                M04EPortReason.PROOF_CANDIDATE_BINDING_INVALID,
+                M04EPortReason.PROOF_CANDIDATE_LINEAGE_MISMATCH,
                 "the candidate proof requires an EvidenceCandidate",
                 context=context,
             ))
@@ -1858,13 +1862,13 @@ class SqlM04ECandidateProof(_SessionReads):
             context.tenant_id, context.app_definition_id,
         ):
             raise M04EPortRefused(_refusal(
-                M04EPortReason.PROOF_CANDIDATE_BINDING_INVALID,
+                M04EPortReason.PROOF_CANDIDATE_PARTITION_MISMATCH,
                 "the candidate belongs to another tenant/definition partition",
                 context=context,
             ))
         if candidate.source_kind != SOURCE_KIND_BY_PHASE.get(candidate.phase):
             raise M04EPortRefused(_refusal(
-                M04EPortReason.PROOF_CANDIDATE_BINDING_INVALID,
+                M04EPortReason.PROOF_CANDIDATE_LINEAGE_MISMATCH,
                 "the candidate's phase and source kind disagree",
                 context=context,
             ))
@@ -1873,7 +1877,7 @@ class SqlM04ECandidateProof(_SessionReads):
             or candidate.canonical_schema_version != context.canonical_schema_version
         ):
             raise M04EPortRefused(_refusal(
-                M04EPortReason.PROOF_CANDIDATE_BINDING_INVALID,
+                M04EPortReason.PROOF_CANDIDATE_LINEAGE_MISMATCH,
                 "the candidate is outside the context's source/canonical schema lineage",
                 context=context,
             ))

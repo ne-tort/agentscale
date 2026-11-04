@@ -28,14 +28,15 @@ on a *missing* artefact.
 
 Deliberate difference from the older promotion tables
 -----------------------------------------------------
-``m04e_definition_version_promotion_evidence``, ``m05_plugin_instance_promotion_evidence``
-and ``m06_canonical_grant_promotion_evidence`` constrain ``outcome`` to
+``m04e_definition_version_promotion_evidence`` and
+``m05_plugin_instance_promotion_evidence`` constrain ``outcome`` to
 ``('blocked','quarantined')`` and keep the true handoff status inside the redacted
 ``gate_evidence`` envelope (blocker ``promotion_outcome_cannot_express_ready``). That
 limit exists because those tables are historical and rewriting an applied CHECK is a
-data migration. This table is new, so ``outcome`` admits ``ready`` directly: a reader can
-select ``outcome = 'ready'`` without decoding an envelope. The three older tables are
-left untouched.
+data migration, not a schema fix. ``m06_canonical_grant_promotion_evidence`` already
+admits ``('blocked','quarantined','ready','promotable')``; this table follows that
+precedent with the three M04 states, so a reader can select ``outcome = 'ready'``
+without decoding an envelope. The two older tables are left untouched.
 
 Scope kinds
 -----------
@@ -68,8 +69,9 @@ from sqlalchemy.orm import Mapped, mapped_column
 from prodavan.infrastructure.persistence.models.base import Base
 
 
-#: This is the only promotion-evidence table that may record an accepted status.
-#: The older tables keep ``('blocked', 'quarantined')`` on purpose (see module notes).
+#: This is the only M04 promotion-evidence table that may record an accepted status.
+#: The two oldest tables keep ``('blocked', 'quarantined')`` on purpose (see module
+#: notes); M06 already admits ``ready``/``promotable``.
 _PROMOTION_STATES = "('blocked', 'quarantined', 'ready')"
 _SCOPE_KINDS = "('tenant', 'cabinet', 'project')"
 
@@ -228,7 +230,7 @@ class M04ScopePromotionEvidenceRow(Base):
     scope_registry_id: Mapped[str] = mapped_column(String(40), nullable=False)
     revision_id: Mapped[str] = mapped_column(String(80), nullable=False)
     previous_revision_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
-    # 'ready' is admissible here only; the M04E/M05/M06 tables stay
+    # 'ready' is admissible here; the two oldest promotion tables stay
     # blocked/quarantined on purpose (blocker promotion_outcome_cannot_express_ready).
     outcome: Mapped[str] = mapped_column(
         String(16), nullable=False, default="blocked", server_default="blocked"
@@ -303,8 +305,21 @@ M04_SCOPE_EVIDENCE_DEFERRED = {
         "The table is registered in infrastructure/persistence/rls/policies.py with "
         "owner_revision 2026110313, but revision 2026110313 only creates the table. The "
         "ENABLE/FORCE RLS policy is installed by the next registry re-apply revision "
-        "(the same pattern as 2026110307 -> 2026110310 -> 2026110312); until that "
-        "revision lands the install-order gate reports this table as late."
+        "(the same pattern as 2026110307 -> 2026110310 -> 2026110312). Two pre-existing "
+        "gates stay red until that revision lands, both owned outside this task: "
+        "tests/migration/rls/test_policy_install_order.py::"
+        "test_every_registered_table_is_policied_after_its_creating_revision (no "
+        "installer at or after 2026110313) and tests/migration/rls/"
+        "test_policy_registry_contract.py::test_every_wave_table_is_registered_exactly_"
+        "once plus ::test_each_owner_revision_owns_exactly_its_declared_tables "
+        "(WAVE_TABLES has no 2026110313 entry)."
+    ),
+    "registry_version_not_bumped": (
+        "policies.REGISTRY_VERSION still reads 2026110307.1. Bumping it would change "
+        "application/migration/tenant_context.py::SECURITY_REVIEW_ID, which is the "
+        "identity of the security-reviewed RLS manifest used as "
+        "ReviewedM04RlsEvidence.review_id; that re-approval belongs to the RLS "
+        "follow-up task, not to a table-creation task."
     ),
     "scope_registry_tenant_equality": (
         "fk_m04_scope_promotion_registry proves the registry row exists, not that it "
@@ -321,7 +336,8 @@ M04_SCOPE_EVIDENCE_DEFERRED = {
     "writer_and_composition_root": (
         "No production writer appends rows and no composition root binds this store to "
         "SqlPartitionHandoffReadStore; evidence_ports.py and the application layer are "
-        "owned by other tasks."
+        "owned by other tasks. The table removes the 'missing table' blocker; it does "
+        "not by itself make load_partition return accepted evidence for a partition."
     ),
 }
 

@@ -21,11 +21,13 @@ Sources of truth
 
 Decisions recorded in this revision
 -----------------------------------
-* ``outcome`` admits ``('blocked', 'quarantined', 'ready')``. The older promotion
-  tables are CHECK-limited to ``('blocked','quarantined')`` (blocker
-  ``promotion_outcome_cannot_express_ready``); they are deliberately **not** altered,
-  because rewriting an applied CHECK is a data migration. The new table is the only
-  place where the true status is expressible in the column itself.
+* ``outcome`` admits ``('blocked', 'quarantined', 'ready')``. The two oldest promotion
+  tables (M04E, M05) are CHECK-limited to ``('blocked','quarantined')`` (blocker
+  ``promotion_outcome_cannot_express_ready``) and are deliberately **not** altered,
+  because rewriting an applied CHECK is a data migration. M06 already admits
+  ``('blocked','quarantined','ready','promotable')``; this table follows that precedent,
+  so the new table is the first M04 table where the true status is expressible in the
+  column itself.
 * The partition key is ``(tenant_id, scope_kind, scope_id)`` and ``revision_id`` is the
   append-only identity inside it (``uq_m04_scope_promotion_revision``): a repeated
   evidence key collides instead of appending a second accepted row.
@@ -48,7 +50,7 @@ What this revision does not do
 * No privileges, grants, backfill, data statement or writer: the append-only writer, the
   composition-root binding and the database-side append-only privilege gate are owned by
   other tasks (``evidence_ports.py`` and ``application/migration/**`` are not touched).
-* No change to any existing table, including the three older promotion-evidence tables.
+* No change to any existing table, including the older promotion-evidence tables.
 
 The upgrade fails closed before creating anything when the foreign-key target table or
 its ``id`` key is missing, so a partial schema aborts with a named blocker instead of

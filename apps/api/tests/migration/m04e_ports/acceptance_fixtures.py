@@ -37,7 +37,6 @@ SHA_C = "sha256:" + "c" * 64
 SHA_D = "sha256:" + "d" * 64
 SHA_E = "sha256:" + "e" * 64
 SHA_F = "sha256:" + "f" * 64
-SHA_ZERO = "sha256:" + "0" * 64
 
 SOURCE_SCHEMA = "m04.legacy.v1"
 CANONICAL_SCHEMA = "m04e.v1"
@@ -507,12 +506,6 @@ def session(**kwargs: Any) -> tuple[FakeSession, FakeSessionFactory]:
     return fake, FakeSessionFactory(fake)
 
 
-def digest_text_length(value: str) -> int:
-    """Helper asserting the sha256 wire shape used throughout the module."""
-
-    return len(value) if value.startswith("sha256:") else -1
-
-
 def expected_source_digest(candidate: EvidenceCandidate) -> str:
     """Recompute the source digest independently of the production helper."""
 
@@ -551,7 +544,6 @@ __all__ = [
     "SHA_D",
     "SHA_E",
     "SHA_F",
-    "SHA_ZERO",
     "SNAPSHOT_DIGEST",
     "SNAPSHOT_ID",
     "SOURCE_SCHEMA",
@@ -563,7 +555,6 @@ __all__ = [
     "company_row",
     "context",
     "definition_row",
-    "digest_text_length",
     "expected_source_digest",
     "project_anchor_row",
     "project_row",

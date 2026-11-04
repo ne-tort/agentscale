@@ -719,7 +719,7 @@ async def test_candidate_proof_refuses_a_candidate_from_another_partition() -> N
             context=context(), gates=gates, candidate=other,
         )
 
-    assert raised.value.code is M04EPortReason.PROOF_CANDIDATE_BINDING_INVALID
+    assert raised.value.code is M04EPortReason.PROOF_CANDIDATE_PARTITION_MISMATCH
 
 
 async def test_candidate_proof_refuses_an_already_mapped_target_that_disagrees() -> None:

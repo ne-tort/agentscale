@@ -418,14 +418,17 @@ _CANONICAL: tuple[TablePolicySpec, ...] = (
     # registry re-apply revision, because a table-adding revision cannot install its own
     # policy after the fact (see 2026110312). Membership here keeps the coverage report
     # honest in the meantime: an unregistered sibling would be reported, not skipped.
+    # REGISTRY_VERSION is deliberately not bumped here: it also names the reviewed RLS
+    # manifest through application/migration/tenant_context.py::SECURITY_REVIEW_ID, and
+    # re-approving that identity belongs to the RLS follow-up task.
     TablePolicySpec(
         table="m04_scope_promotion_evidence",
         owner_revision="2026110313",
         tenant=ScopedColumn(column="tenant_id"),
         notes=(
-            "Accepted M04-02 scope/RLS evidence row; the only promotion-evidence table "
-            "whose outcome may read 'ready'. Readable in-tenant, append-only for the "
-            "trusted migration writer."
+            "Accepted M04-02 scope/RLS evidence row; the only M04 promotion-evidence "
+            "table whose outcome may read 'ready'. Readable in-tenant, append-only for "
+            "the trusted migration writer."
         ),
     ),
     # --- M05 plugin instance registry (2026110303) ---
