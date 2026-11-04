@@ -33,6 +33,7 @@ Derivable from ``(key, session_factory, writer_generation)`` alone:
 dependency                               constructed as
 ======================================  =============================================
 ``m04e_reader``/``gates``/``proofs``      ``build_m04e_sql_ports(session_factory=...)``
+``m04e_artifacts``                        ``build_m04e_artifact_content_store(factory)``
 ``m04e_store``                            ``SqlM04EBackfillEvidenceStore(factory, scope)``
 ``m04e_m05_handoff``                      ``SqlM05HandoffEvidenceStore(factory, scope)``
 ``m05_promotion_records``                 ``SqlM05PromotionEvidenceStore(factory, scope)``
@@ -47,24 +48,37 @@ Derivable **only** when the operator supplies one collaborator:
   RLS adapters refuse to write a GUC unless an auth-boundary lookup turns a correlation id
   into a sealed principal (``tenant_context.py``), so the resolver is stated, never guessed.
 
+``m05_tenant_context`` / ``m05_runtime_context`` / ``m05_identity_sessions`` /
+``m05_upstream_evidence`` are additionally derivable through :mod:`m05_contexts`, the
+reviewed per-partition builder for exactly those four fields:
+
+* ``build_m05_tenant_context`` wraps the RLS binder over the same ``principal_resolver`` this
+  planner already takes for M04;
+* ``build_m05_runtime_context`` validates the instance owner's **server-resolved**
+  tenant/subject/session/correlation -- it cannot invent them, because the import proves
+  ownership against those exact values (``_resolve_instance_binding`` compares
+  ``identity.subject_id``/``session_id`` with the context and calls
+  ``prove_subject_session``);
+* ``build_m05_identity_sessions`` supplies the ``RuntimeSessionOwnershipPort`` the tree had
+  no implementation of (``SqlAuthSessionOwnership`` over ``auth_sessions``);
+* ``build_m05_upstream_evidence`` assembles ``M04ScopeGateEvidence`` +
+  ``M05RuntimeGateEvidence`` from this partition's stored M04-02 row, a reviewed
+  runtime-gate manifest and the measured instance counts, and takes the M04E
+  ``M05EvidenceExport`` as an input, because the accepted ledger rows it carries are not
+  reconstructible from the marker's counts.
+
+:class:`PartitionAssemblyOverrides` therefore accepts the whole bundle as one
+:class:`~prodavan.application.migration.m05_contexts.M05ContextInputs` value
+(``m05_contexts=``), so an operator states the partition's run inputs once instead of
+re-deriving four objects.  An individual override still wins when given, and an omitted
+input still produces exactly one named blocker.
+
 Genuinely **not** derivable, even for one partition -- each one is a named blocker below, and
 each names exactly what would make the partition executable.  None of them is stubbed:
 
-* ``m04e_artifacts`` -- no ``ArtifactContentPort`` implementation exists anywhere in
-  ``src/prodavan`` (there is no object-storage adapter; ``m04e_definition_version/artifact.py``
-  declares the protocol and says "no adapter is bound here").
 * ``m04e_server_repository`` -- ``ServerDefinitionVersionRepository`` wraps a resolver bound
   to a **caller-owned** ``AsyncSession`` inside one SERIALIZABLE transaction; a factory
   cannot produce the session the caller must own.
-* ``m05_runtime_context`` / ``m05_identity_sessions`` -- the M05 import proves the exact
-  owner ***subject and session*** of the instance being imported
-  (``_resolve_instance_binding`` compares ``identity.subject_id``/``session_id`` with the
-  context and calls ``prove_subject_session``).  An operator is not the instance owner, and
-  no ``RuntimeSessionOwnershipPort`` is implemented in this repository.
-* ``m05_upstream_evidence`` -- ``M05UpstreamEvidence`` is the exact M04 scope gate + M04E
-  export/marker + M05 runtime gate for one snapshot.  Reading it out of durable evidence is
-  a trusted *producer* that does not exist yet; assembling it here would mean inventing
-  gate digests.
 * ``m06_ports`` -- ``ShadowGatewayPorts`` needs the legacy capability owners
   (``legacy_scope``/``legacy_quota``), ``company``, ``canonical_grants`` and
   ``method_mappings``; no composition root publishes those adapters, and
@@ -108,11 +122,23 @@ from prodavan.application.migration.evidence_ports import (
     TrustedEvidenceScope,
 )
 from prodavan.application.migration.m04e_ports import build_m04e_sql_ports
+from prodavan.application.migration.m05_contexts import (
+    M05ContextBlocker,
+    M05ContextInputs,
+    build_m04_scope_gate,
+    build_m05_identity_evidence,
+    build_m05_identity_sessions,
+    build_m05_runtime_context,
+    build_m05_tenant_context,
+    build_m05_upstream_evidence,
+)
 from prodavan.application.migration.m06_cutover.ports import build_cutover_ports
 from prodavan.application.migration.tenant_context import (
     RlsTenantScopeContextAdapter,
-    RlsTrustedTenantContextAdapter,
     TrustedPrincipalResolver,
+)
+from prodavan.infrastructure.persistence.migration_artifact_store import (
+    build_m04e_artifact_content_store,
 )
 
 if TYPE_CHECKING:  # pragma: no cover - typing only, never imported at runtime
@@ -128,6 +154,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only, never imported at runtime
         RuntimeSessionOwnershipPort,
     )
     from prodavan.application.migration.m05_instance_runtime.runtime_service import (
+        M05IdentityEvidencePort,
         M05UpstreamEvidence,
         TrustedRuntimeContext,
     )
@@ -169,6 +196,11 @@ PARTITION_CUTOVER_PORTS_UNAVAILABLE = "partition_cutover_ports_unavailable"
 #: must not invent a different one, so the values live in one place.
 M04E_PAGE_SIZE = 100
 M05_PAGE_SIZE = 100
+
+#: The artifact read bound every M04E caller already states (the composition root and
+#: ``m04e_definition_version/repository.py`` both use 64 MiB), so the partition planner
+#: hands the durable port the same ceiling instead of inventing its own.
+M04E_MAX_ARTIFACT_BYTES = 64 * 1024 * 1024
 
 
 # ---------------------------------------------------------------------------
@@ -280,16 +312,22 @@ def _valid_generation(value: object) -> bool:
 class PartitionAssemblyOverrides:
     """The collaborators a partition cannot derive, stated once and carried as a value.
 
-    Every field defaults to ``None`` -- which is *absence*, and absence always becomes a
-    named blocker.  The type exists so an operator entry point can accept one typed argument
-    instead of ten keyword parameters, and so a report can show exactly what the host
-    supplied (``PartitionChainPlan.built`` is the complement).
+    Every field defaults to ``None`` -- which is *absence*, and absence becomes a named
+    blocker -- with one exception: ``m04e_artifacts`` is **derivable** since
+    ``MIG-ARTIFACT-PORT-01``, so leaving it ``None`` lets the planner construct the durable
+    ``ArtifactContentPort`` for this partition.  An explicit value still wins, which is how
+    a host that already holds a reviewed store keeps it.  The type exists so an operator
+    entry point can accept one typed argument instead of ten keyword parameters, and so a
+    report can show exactly what the host supplied (``PartitionChainPlan.built`` is the
+    complement).
     """
 
     principal_resolver: TrustedPrincipalResolver | None = None
     m04e_artifacts: "ArtifactContentPort | None" = None
     m04e_server_repository: "ServerDefinitionVersionRepository | None" = None
     m04e_page_size: int = M04E_PAGE_SIZE
+    m04e_max_artifact_bytes: int = M04E_MAX_ARTIFACT_BYTES
+    m05_contexts: M05ContextInputs | None = None
     m05_runtime_context: "TrustedRuntimeContext | None" = None
     m05_upstream_evidence: "M05UpstreamEvidence | None" = None
     m05_identity_sessions: "RuntimeSessionOwnershipPort | None" = None
@@ -305,6 +343,8 @@ class PartitionAssemblyOverrides:
             "m04e_artifacts": self.m04e_artifacts,
             "m04e_server_repository": self.m04e_server_repository,
             "m04e_page_size": self.m04e_page_size,
+            "m04e_max_artifact_bytes": self.m04e_max_artifact_bytes,
+            "m05_contexts": self.m05_contexts,
             "m05_runtime_context": self.m05_runtime_context,
             "m05_upstream_evidence": self.m05_upstream_evidence,
             "m05_identity_sessions": self.m05_identity_sessions,
@@ -436,6 +476,8 @@ def build_partition_chain(
     m04e_artifacts: "ArtifactContentPort | None" = None,
     m04e_server_repository: "ServerDefinitionVersionRepository | None" = None,
     m04e_page_size: int = M04E_PAGE_SIZE,
+    m04e_max_artifact_bytes: int = M04E_MAX_ARTIFACT_BYTES,
+    m05_contexts: M05ContextInputs | None = None,
     m05_runtime_context: "TrustedRuntimeContext | None" = None,
     m05_upstream_evidence: "M05UpstreamEvidence | None" = None,
     m05_identity_sessions: "RuntimeSessionOwnershipPort | None" = None,
@@ -459,6 +501,12 @@ def build_partition_chain(
     against a security-reviewed manifest, and no approved manifest exists in the repository
     yet.  Stating it here keeps that refusal visible instead of hiding it behind the M06
     stage's own blockers.
+
+    ``m04e_artifacts`` is an optional *override*: leaving it out constructs the durable
+    ``ArtifactContentPort`` over this partition's session factory
+    (``infrastructure/persistence/migration_artifact_store.py``), which is what removed
+    blocker ``partition_artifact_content_port_unavailable``.  Construction opens no session
+    and starts no object-store resource.
 
     Every other keyword is an *override* for a dependency the partition cannot derive.  Each
     one left out produces exactly one named blocker; nothing is defaulted to a substitute.
@@ -520,10 +568,41 @@ def build_partition_chain(
         ))
     else:
         m04_tenant_context = RlsTenantScopeContextAdapter(principal_resolver=principal_resolver)
-        m05_tenant_context = RlsTrustedTenantContextAdapter(
-            principal_resolver=principal_resolver
-        )
-        built.extend(("m04_tenant_context", "m05_tenant_context"))
+        built.append("m04_tenant_context")
+
+    # The M05 binder goes through the reviewed per-partition builder, which is the one place
+    # that decides whether a binder may exist at all.  A host that isolates M05 (its own
+    # resolver for the instance owner's run) states it in ``m05_contexts``; otherwise both
+    # halves share this plan's resolver, which is what a single operator run wants.
+    m05_resolver = (
+        m05_contexts.principal_resolver
+        if m05_contexts is not None and m05_contexts.principal_resolver is not None
+        else principal_resolver
+    )
+    # An M05 binder is only built when the plan already has a resolver for M04 as well:
+    # one plan addresses one operator run, and a half-authorized graph would let M05 write a
+    # tenant GUC that M04 cannot.
+    m05_tenant_build = (
+        build_m05_tenant_context(principal_resolver=m05_resolver)
+        if principal_resolver is not None
+        else None
+    )
+    if m05_tenant_build is not None:
+        if m05_tenant_build.value is not None:
+            m05_tenant_context = m05_tenant_build.value
+            built.append("m05_tenant_context")
+        else:
+            # ``principal_resolver`` is not None, so its only refusal is "not resolvable";
+            # fold the builder's own codes in rather than inventing a different one.
+            blockers.extend(
+                _blocker(
+                    PARTITION_PRINCIPAL_RESOLVER_UNAVAILABLE,
+                    "m05_tenant_context",
+                    blocker.detail,
+                    blocker.needed,
+                )
+                for blocker in m05_tenant_build.blockers
+            )
 
     # -- M04E reader / gates / proofs --------------------------------------
     m04e_ports, m04e_codes = build_m04e_sql_ports(
@@ -566,16 +645,25 @@ def build_partition_chain(
             "partition_handoff_read",
         ))
 
-    # -- M04E collaborators a factory cannot build -------------------------
+    # -- M04E artifact content port ----------------------------------------
+    # ``ArtifactContentPort`` is derivable, so it is no longer a blocker: an explicit
+    # override wins (a host may hold a reviewed store), otherwise the durable adapter is
+    # constructed over this partition's session factory.  Construction opens no session
+    # and starts no FileStore resource -- ``SqlArtifactContentStore`` resolves the object
+    # store lazily on the first read -- so "nothing runs" still holds.
     if m04e_artifacts is None:
+        m04e_artifacts = build_m04e_artifact_content_store(
+            session_factory=session_factory,
+            max_object_bytes=m04e_max_artifact_bytes,
+        )
+    if m04e_artifacts is None:
+        # Unreachable while ``session_factory`` is not None, but stated rather than
+        # assumed: an absent port must stay a named blocker, never a silent ``None``.
         blockers.append(_blocker(
             PARTITION_M04E_ARTIFACTS_UNAVAILABLE,
             "m04e_artifacts",
-            "no ArtifactContentPort implementation exists in src/prodavan: the M04E backfill "
-            "binds an immutable version by reading its exact artifact bytes, and there is no "
-            "object-storage adapter to read them",
-            "an ArtifactContentPort over the artifact store that holds the M04 app bundles "
-            "(resolve_artifact_uri + read_artifact by exact tenant/definition/version)",
+            "the durable ArtifactContentPort could not be constructed for this partition",
+            "an async_sessionmaker, or an explicit ArtifactContentPort override",
         ))
     else:
         built.append("m04e_artifacts")
@@ -595,43 +683,113 @@ def build_partition_chain(
         built.append("m04e_server_repository")
 
     # -- M05 run-bound collaborators ---------------------------------------
+    #
+    # Three of the four M05 fields are *derivable* from the operator's stated run inputs
+    # (:mod:`m05_contexts`); an explicit override wins when the host already holds the
+    # object.  Either way the field is only filled with something that validates: a
+    # ``TrustedRuntimeContext`` that is not ``usable`` is not a context, so it stays a
+    # blocker rather than being stored.
+    m05_runtime_blockers: tuple[M05ContextBlocker, ...] = ()
+    if m05_contexts is not None:
+        runtime_build = build_m05_runtime_context(
+            tenant_id=m05_contexts.tenant_id,
+            subject_id=m05_contexts.subject_id,
+            session_id=m05_contexts.session_id,
+            correlation_id=m05_contexts.correlation_id,
+            authenticated=m05_contexts.authenticated,
+        )
+        if runtime_build.value is not None and (
+            m05_runtime_context is None or not getattr(m05_runtime_context, "usable", False)
+        ):
+            m05_runtime_context = runtime_build.value
+        if runtime_build.value is not None and (
+            str(runtime_build.value.resolved_tenant_id) != key.tenant_id
+        ):
+            # The context is real but describes another tenant; storing it would let the
+            # import import somebody else's instances.
+            m05_runtime_blockers = (
+                _blocker(
+                    PARTITION_M05_RUNTIME_CONTEXT_UNAVAILABLE,
+                    "m05_runtime_context",
+                    f"the stated runtime context resolves tenant "
+                    f"{runtime_build.value.resolved_tenant_id!r}, but this plan is for "
+                    f"{key.tenant_id!r}",
+                    "the instance owner's runtime context for exactly this partition",
+                ),
+            )
+            m05_runtime_context = None
     if m05_runtime_context is None or not getattr(m05_runtime_context, "usable", False):
-        blockers.append(_blocker(
-            PARTITION_M05_RUNTIME_CONTEXT_UNAVAILABLE,
-            "m05_runtime_context",
-            "the M05 import proves that the authenticated subject and session own the exact "
-            "instance being imported; an operator run has no such context and inventing one "
-            "would let the migration attribute an instance to the wrong owner",
-            "a TrustedRuntimeContext carrying the instance owner's resolved tenant, subject "
-            "and active session (plus correlation), obtained from the owner's authenticated "
-            "session — or a reviewed service-identity mode for operator imports",
-        ))
+        for blocker in m05_runtime_blockers or (
+            _blocker(
+                PARTITION_M05_RUNTIME_CONTEXT_UNAVAILABLE,
+                "m05_runtime_context",
+                "the M05 import proves that the authenticated subject and session own the "
+                "exact instance being imported; an operator run has no such context and "
+                "inventing one would let the migration attribute an instance to the wrong "
+                "owner",
+                "a TrustedRuntimeContext carrying the instance owner's resolved tenant, "
+                "subject and active session (plus correlation), obtained from the owner's "
+                "authenticated session -- stated through m05_contexts= for this partition",
+            ),
+        ):
+            blockers.append(blocker if isinstance(blocker, PartitionChainBlocker) else _blocker(
+                blocker.code, blocker.dependency, blocker.detail, blocker.needed
+            ))
     else:
         built.append("m05_runtime_context")
 
+    m05_upstream_blockers: tuple[M05ContextBlocker, ...] = ()
+    if m05_contexts is not None:
+        upstream_build = build_m05_upstream_evidence(
+            tenant_id=key.tenant_id,
+            app_definition_id=key.app_definition_id,
+            m04_scope=build_m04_scope_gate(
+                tenant_id=key.tenant_id,
+                app_definition_id=key.app_definition_id,
+                row=m05_contexts.m04_scope_row,
+            ).value,
+            m04e_export=m05_contexts.m04e_export,
+            m05_runtime=m05_contexts.m05_runtime,
+            review=m05_contexts.review,
+            counts=m05_contexts.instance_counts,
+        )
+        if upstream_build.value is not None and m05_upstream_evidence is None:
+            m05_upstream_evidence = upstream_build.value
+        m05_upstream_blockers = upstream_build.blockers
     if m05_upstream_evidence is None:
-        blockers.append(_blocker(
-            PARTITION_M05_UPSTREAM_EVIDENCE_UNAVAILABLE,
-            "m05_upstream_evidence",
-            "M05UpstreamEvidence is the exact M04 scope gate, M04E export/handoff marker and "
-            "M05 runtime gate of one snapshot; without it ready_for_import is False for every "
-            "partition, and fabricating the digests would fabricate gate evidence",
-            "a trusted producer that derives M05UpstreamEvidence from durable M04/M04E/M05 "
-            "evidence rows for this partition and snapshot (there is none yet)",
-        ))
+        for blocker in m05_upstream_blockers or (
+            _blocker(
+                PARTITION_M05_UPSTREAM_EVIDENCE_UNAVAILABLE,
+                "m05_upstream_evidence",
+                "M05UpstreamEvidence is the exact M04 scope gate, M04E export/handoff marker "
+                "and M05 runtime gate of one snapshot; without it ready_for_import is False "
+                "for every partition, and fabricating the digests would fabricate gate "
+                "evidence",
+                "the three gates of this partition's snapshot, stated through m05_contexts= "
+                "(stored M04-02 row, M04E export with its marker, reviewed runtime-gate "
+                "manifest and the measured instance counts)",
+            ),
+        ):
+            blockers.append(blocker if isinstance(blocker, PartitionChainBlocker) else _blocker(
+                blocker.code, blocker.dependency, blocker.detail, blocker.needed
+            ))
     else:
         built.append("m05_upstream_evidence")
 
+    if m05_contexts is not None:
+        sessions_build = build_m05_identity_sessions(session_factory=session_factory)
+        if sessions_build.value is not None and m05_identity_sessions is None:
+            m05_identity_sessions = sessions_build.value
     if m05_identity_sessions is None:
         blockers.append(_blocker(
             PARTITION_M05_IDENTITY_SESSIONS_UNAVAILABLE,
             "m05_identity_sessions",
             "M05IdentityEvidence calls prove_subject_session before any row can be imported; "
-            "RuntimeSessionOwnershipPort has no implementation (the baseline has no "
-            "auth-session relation), so every import would refuse with "
-            "subject_session_evidence_port_missing",
-            "a RuntimeSessionOwnershipPort comparing tenant/subject/session against a "
-            "server-side session record (the auth_sessions relation above would supply it)",
+            "without a RuntimeSessionOwnershipPort every candidate would be quarantined as "
+            "unproven (subject_session_evidence_port_missing)",
+            "the RuntimeSessionOwnershipPort built by "
+            "m05_contexts.build_m05_identity_sessions (SqlAuthSessionOwnership over "
+            "auth_sessions), which only needs this plan's session factory",
         ))
     else:
         built.append("m05_identity_sessions")
@@ -646,7 +804,10 @@ def build_partition_chain(
             "refuses without both legacy owners because exact parity compares them",
             "a ShadowGatewayPorts whose legacy_scope/legacy_quota are the live capability "
             "owners, with handoff_partitions set to this plan's partition_handoff_read and "
-            "m05_upstream set to the same M05UpstreamEvidence M05 was assembled with",
+            "m05_upstream set to the same M05UpstreamEvidence M05 was assembled with — or a "
+            "caller that composes the set from this partition through "
+            "m06_grants_gateway.ports_assembly.build_shadow_ports(..., partition=key, "
+            "writer_generation=writer_generation) and passes the complete plan here",
         ))
     else:
         built.append("m06_ports")
@@ -726,6 +887,7 @@ def assemble_partition_chain(**kwargs: object) -> MigrationChain:
 
 
 __all__ = [
+    "M04E_MAX_ARTIFACT_BYTES",
     "M04E_PAGE_SIZE",
     "M05_PAGE_SIZE",
     "PARTITION_CUTOVER_PORTS_UNAVAILABLE",

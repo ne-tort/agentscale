@@ -184,15 +184,19 @@ def test_revision_identifiers_follow_the_cutover_chain() -> None:
     assert module._POLICIES_ADDED_HERE == frozenset({REVISION_ID})
 
 
-def test_the_chain_has_exactly_one_head_and_it_is_a_successor_of_this_revision() -> None:
+def test_the_chain_has_exactly_one_head_and_this_revision_is_on_its_chain() -> None:
     """Was "the head is this revision": no longer true since ``2026110317`` landed.
 
-    The invariant that still matters is that the tree has one head, this revision is on its
-    chain, and its only successor declares it as ``down_revision`` — a second head or a fork
-    would make ``upgrade head`` ambiguous.
+    Then it was "the head is the recorded successor"; ``2026110318`` (the RLS policy rename)
+    has since succeeded *that*. Pinning the head makes this test a clock: it fails every time
+    a sibling revision legitimately extends the chain. The invariant that actually matters is
+    structural — one head, no fork, this revision on the path below it, and its only
+    successor declaring it as ``down_revision`` — so that is what is asserted.
     """
 
-    assert head_revisions() == (SUCCESSOR_REVISION_ID,)
+    heads = head_revisions()
+    assert len(heads) == 1, f"expected exactly one head, got {heads}"
+    assert REVISION_ID in chain_from_head()
     assert revision_graph()[SUCCESSOR_REVISION_ID] == REVISION_ID
 
 
@@ -209,10 +213,16 @@ def test_exactly_one_revision_declares_this_one_as_its_parent() -> None:
 
 
 def test_the_head_walks_back_through_the_m04e_ledger() -> None:
-    chain = chain_from_head()
+    """Walking down from the head reaches this revision in the reviewed order.
 
-    assert chain[:5] == (
-        SUCCESSOR_REVISION_ID,
+    Anchored at this revision's own position rather than at index 0: revisions above it are
+    other tasks' business, and the order *below* it is the part this contract owns.
+    """
+
+    chain = chain_from_head()
+    position = chain.index(REVISION_ID)
+
+    assert chain[position : position + 4] == (
         REVISION_ID,
         DOWN_REVISION_ID,
         "2026110314",
@@ -660,24 +670,34 @@ def test_this_revision_is_its_own_registry_reapply(
 
 
 def test_the_install_order_gate_is_satisfied() -> None:
-    """The same rule ``test_policy_install_order`` enforces, restated from the head."""
+    """The same rule ``test_policy_install_order`` enforces, restated from the head.
+
+    Was "this revision is the newest installer", which only held while ``2026110316`` was the
+    head. ``2026110318`` (the policy rename) now installs too, and a later installer does not
+    break anything — it is the *point* of a registry re-apply. The gate's actual rule is what
+    is asserted: this revision is an installer, and no registered table's ``owner_revision``
+    sits above the last installer (such a table would reach ``upgrade head`` unpolicied).
+    """
+
     chain = chain_from_head()
     position = {revision: index for index, revision in enumerate(reversed(chain))}
     installers = policy_installers() & set(position)
 
     assert installers
-    newest = max(installers, key=lambda revision: position[revision])
-    assert newest == REVISION_ID, (
-        "these tables would stay unpolicied; the install-order gate reports a table "
-        f"whose owner revision comes after the last installer ({newest})"
+    assert REVISION_ID in installers, (
+        "this revision creates tables and must install their policies in the same step"
     )
 
+    newest = max(installers, key=lambda revision: position[revision])
     late = sorted(
         spec.table
         for spec in policies.CANONICAL_TABLE_POLICIES
         if position.get(spec.owner_revision, -1) > position[newest]
     )
-    assert late == []
+    assert late == [], (
+        "these tables would stay unpolicied; the install-order gate reports a table "
+        f"whose owner revision comes after the last installer ({newest}): {late}"
+    )
 
 
 def test_the_coverage_report_finds_nothing_uncovered() -> None:

@@ -84,5 +84,9 @@ export function DynamicModulesEmpty({
   readonly description?: ReactNode;
   readonly action?: ReactNode;
 }) {
-  return <EmptyState action={action} className="dynamic-modules__empty" description={description} title={title} />;
+  // Пустой реестр — это результат загрузки, а не просто разметка: `role="status"`
+  // объявляет его ассистивным технологиям так же, как ошибку/загрузку рядом.
+  return <div role="status">
+    <EmptyState action={action} className="dynamic-modules__empty" description={description} title={title} />
+  </div>;
 }

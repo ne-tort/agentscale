@@ -189,7 +189,12 @@ export function mountIsolatedPlugin(options: PluginHostOptions): IsolatedPluginH
     const message = event.data;
     if (messageBytes(message) > maxBytes || message.protocol !== BROKER_PROTOCOL) { fail("PLUGIN_RPC_INVALID"); return; }
     if (!ready) {
-      if (!exact(message, ["protocol", "type", "instance_id", "nonce", "plugin_id", "version", "digest"]) || message.type !== "plugin.ready" || message.instance_id !== instanceId || message.nonce !== nonce || message.plugin_id !== options.identity.pluginId || message.version !== options.identity.version || message.digest !== options.identity.digest) { fail("PLUGIN_IDENTITY_MISMATCH"); return; }
+      // The envelope is classified before the identity it carries. A message that is not a
+      // well-formed `plugin.ready` handshake is a malformed RPC frame; a well-formed handshake
+      // naming another plugin/version/digest is a spoofed identity. Both fail closed, but one
+      // code for both would hide a real identity mismatch behind a shape error.
+      if (!exact(message, ["protocol", "type", "instance_id", "nonce", "plugin_id", "version", "digest"]) || message.type !== "plugin.ready") { fail("PLUGIN_RPC_INVALID"); return; }
+      if (message.instance_id !== instanceId || message.nonce !== nonce || message.plugin_id !== options.identity.pluginId || message.version !== options.identity.version || message.digest !== options.identity.digest) { fail("PLUGIN_IDENTITY_MISMATCH"); return; }
       ready = true;
       if (timer !== undefined) clearTimeout(timer);
       try { options.onReady?.(); } catch { /* Ready observers cannot affect isolation. */ }

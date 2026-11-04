@@ -71,6 +71,18 @@ def _spec_ids() -> list[str]:
     return [spec.table for spec in CANONICAL_TABLE_POLICIES]
 
 
+def _tenant_scoped_tables() -> list[str]:
+    """Registered tables that carry a tenant anchor (all but the global audits)."""
+
+    return [spec.table for spec in CANONICAL_TABLE_POLICIES if spec.tenant is not None]
+
+
+def _tenantless_tables() -> list[str]:
+    """Registered tables with no tenant anchor: their tenant policy is deny-all."""
+
+    return [spec.table for spec in CANONICAL_TABLE_POLICIES if spec.tenant is None]
+
+
 def _policy_on_table(catalog: PolicyCatalog, table: str, name: str) -> InstalledPolicy:
     for policy in catalog.policies_of(table):
         if policy.name == name:
@@ -160,10 +172,17 @@ def test_declared_policy_names_are_stored_untruncated(
         assert declared in stored, f"{table}: {declared!r} is not stored as declared"
 
 
-@pytest.mark.parametrize("table", _spec_ids())
+@pytest.mark.parametrize("table", _tenant_scoped_tables())
 def test_tenant_policy_is_for_all_with_a_matching_check(
     policy_catalog: PolicyCatalog, table: str
 ) -> None:
+    """The tenant policy of a scoped table must be a real, symmetric predicate.
+
+    Restricted to tables that actually carry a tenant anchor: ``scope_owner_audit``
+    has none, its tenant policy is the deny-all ``false`` on purpose, and it is
+    covered by :func:`test_tenantless_tables_install_a_deny_all_tenant_policy`.
+    """
+
     spec = SPECS[table]
     policy = _policy_on_table(policy_catalog, table, spec.tenant_policy)
     assert policy.command == _POLCMD_FOR_COMMAND["ALL"], (
@@ -189,6 +208,33 @@ def test_tenant_policy_is_for_all_with_a_matching_check(
             f"{table}: table declares {scope_kind} scope but the installed predicate "
             f"never reads {setting}: {policy.using!r}"
         )
+
+
+@pytest.mark.parametrize("table", _tenantless_tables())
+def test_tenantless_tables_install_a_deny_all_tenant_policy(
+    policy_catalog: PolicyCatalog, table: str
+) -> None:
+    """A table with no tenant anchor must be unreachable for tenant sessions.
+
+    ``scope_owner_audit`` has no tenant column, so ``tenant_predicate`` renders
+    ``false`` and the static contract pins that statement.  An earlier draft of
+    the assertion above demanded a ``current_setting`` read from *every* tenant
+    policy and therefore failed on that table - the test modelling a state the
+    contract never promised.  The invariant that does hold is the stronger one:
+    no GUC is consulted at all, so no context can ever match.
+    """
+
+    spec = SPECS[table]
+    assert spec.tenant is None, f"{table} is not tenant-less"
+    policy = _policy_on_table(policy_catalog, table, spec.tenant_policy)
+    assert policy.command == _POLCMD_FOR_COMMAND["ALL"]
+    assert policy.using == "false", (
+        f"{table}: a table without a tenant anchor must install the deny-all tenant "
+        f"predicate, got {policy.using!r}"
+    )
+    assert policy.with_check == "false", (
+        f"{table}: the deny-all tenant policy must also refuse writes, got {policy.with_check!r}"
+    )
 
 
 @pytest.mark.parametrize("table", _spec_ids())

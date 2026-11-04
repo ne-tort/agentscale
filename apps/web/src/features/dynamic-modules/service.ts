@@ -140,7 +140,14 @@ export interface DynamicModuleDefinitionDetail {
 export interface PublishVersionRequest {
   readonly definitionId: string;
   readonly appId: string;
-  readonly kind: DynamicModuleKind;
+  /**
+   * Optional because the API reports the definition kind as optional: the definition
+   * row has no kind column, so the server may not report one. Requiring it here forced
+   * callers to fabricate a kind to satisfy the type -- the manifest itself carries the
+   * kind the operator actually submitted, and the server validates it against the
+   * definition.
+   */
+  readonly kind?: DynamicModuleKind;
   readonly values: PublishFormValues;
 }
 

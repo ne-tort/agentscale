@@ -130,6 +130,21 @@ class PolicyCatalog:
         )
 
 
+def _as_text(value: object) -> str | None:
+    """Normalise a PostgreSQL ``"char"`` value to ``str``.
+
+    ``polcmd`` and ``relkind`` are ``"char"`` columns and asyncpg hands those back
+    as ``bytes`` (``b'r'``).  Decoded once here rather than loosening every
+    assertion that reads them against a ``bytes`` value it should never see.
+    """
+
+    if value is None:
+        return None
+    if isinstance(value, bytes):
+        return value.decode("utf-8")
+    return str(value)
+
+
 _RELATIONS_SQL = text(
     """
     SELECT c.relname,
@@ -180,7 +195,7 @@ async def read_policy_catalog(dsn: str) -> PolicyCatalog:
                 policies = tuple(
                     InstalledPolicy(
                         name=policy_name,
-                        command=command,
+                        command=_as_text(command) or "",
                         using=using_expression,
                         with_check=with_check_expression,
                     )
@@ -190,7 +205,7 @@ async def read_policy_catalog(dsn: str) -> PolicyCatalog:
                 )
                 relations[name] = CatalogRelation(
                     name=name,
-                    kind=kind,
+                    kind=_as_text(kind) or "",
                     row_security=bool(row_security),
                     force_row_security=bool(force_row_security),
                     policies=policies,

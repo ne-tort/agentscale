@@ -210,6 +210,12 @@ class TablePolicySpec:
                 raise RlsRegistryError(f"{self.table}: restriction must be a single predicate")
             if self.table not in restriction:
                 raise RlsRegistryError(f"{self.table}: restriction must be table-qualified")
+        # Name fitting is part of *building* a valid spec, not something a caller
+        # has to remember: the properties are lazy, so without this touch an
+        # unusable table name would construct silently and only explode when
+        # somebody read a policy name (or, worse, never - the DDL would then be
+        # rendered against a name PostgreSQL truncates).
+        _ = (self.tenant_policy, self.trusted_policy)
 
     # -- naming -----------------------------------------------------------
     # The two properties below are the *declared* names, already fitted to the
@@ -411,11 +417,67 @@ def downgrade_statements(spec: TablePolicySpec) -> tuple[str, ...]:
     )
 
 
-def _guarded_do_block(spec: TablePolicySpec, statements: tuple[str, ...], direction: str) -> str:
+def scope_columns(spec: TablePolicySpec) -> tuple[str, ...]:
+    """Every column ``spec``'s predicate names **on the table itself**.
+
+    A direct scope column is read directly; a chain names one column of the child
+    table (the first hop's ``on_column``) and resolves the rest through parents.
+    The list is what the install guard checks before emitting the block: a
+    predicate can only be created once the columns it reads exist.
+    """
+
+    columns: list[str] = []
+    for scoped in (spec.tenant, spec.cabinet, spec.project):
+        if scoped is None:
+            continue
+        if scoped.column is not None:
+            columns.append(scoped.column)
+        elif scoped.chain:
+            columns.append(scoped.chain[0].on_column)
+    return tuple(dict.fromkeys(columns))
+
+
+def _guarded_do_block(
+    spec: TablePolicySpec,
+    statements: tuple[str, ...],
+    direction: str,
+    *,
+    require_columns: bool = False,
+) -> str:
     body = "\n".join(f"        {statement};" for statement in statements)
     # No ``%`` placeholders: the block is executed as literal SQL through
     # Alembic and must not depend on the DBAPI paramstyle.
     notice = f"rls 2026110307 {direction} skipped: relation {spec.table} is absent"
+    columns = scope_columns(spec) if require_columns else ()
+    column_guard = ""
+    if columns:
+        # A scope column may be added by a later revision than the table itself
+        # (MIG-EQ-ANCHORS-01 added ``project_id``/``cabinet_id`` to equipment rows
+        # created in ``2026110305``).  Every registry re-apply walks the *current*
+        # registry, so an early installer would otherwise emit a predicate naming a
+        # column that does not exist yet and abort the whole chain.  The skip is
+        # reported exactly like an absent relation, and the revision that adds the
+        # columns re-applies the registry in the same step, so the policy is never
+        # lost - it is only deferred to the first point where it can be created.
+        wanted = ", ".join(f"'{column}'" for column in columns)
+        column_notice = (
+            f"rls 2026110307 {direction} skipped: relation {spec.table} is missing "
+            "scope column(s) added by a later revision"
+        )
+        column_guard = (
+            "    IF EXISTS (\n"
+            f"        SELECT 1 FROM unnest(ARRAY[{wanted}]::text[]) AS want(colname)\n"
+            "        WHERE NOT EXISTS (\n"
+            "            SELECT 1 FROM pg_attribute AS a\n"
+            f"            WHERE a.attrelid = to_regclass('{spec.table}')\n"
+            "              AND a.attname::text = want.colname\n"
+            "              AND a.attnum > 0 AND NOT a.attisdropped\n"
+            "        )\n"
+            "    ) THEN\n"
+            f"        RAISE NOTICE '{column_notice}';\n"
+            "        RETURN;\n"
+            "    END IF;\n"
+        )
     return (
         "DO $rls$\n"
         "BEGIN\n"
@@ -423,26 +485,38 @@ def _guarded_do_block(spec: TablePolicySpec, statements: tuple[str, ...], direct
         f"        RAISE NOTICE '{notice}';\n"
         "        RETURN;\n"
         "    END IF;\n"
+        f"{column_guard}"
         f"{body}\n"
         "END\n"
         "$rls$"
     )
 
 
-def upgrade_guard_sql(spec: TablePolicySpec) -> str:
+def upgrade_guard_sql(
+    spec: TablePolicySpec, *, require_columns: bool = True
+) -> str:
     """One atomic, idempotent, existence-guarded upgrade block for ``spec``.
 
     A missing relation is *not* an error: sibling revisions create these tables
     and the revision may run against a partial schema.  The skip is reported as
     a PostgreSQL NOTICE and the revision logs it separately, so a silently
     unpolicied table cannot pass unnoticed.
+
+    ``require_columns`` (on by default) additionally skips the block while a scope
+    column the predicate reads does not exist yet.  That is the same situation one
+    level down - the schema is not ready for this policy - and it is reported the
+    same way.  It is not a way to lose a policy: the revision that creates the
+    column re-applies the registry, and the last installer of the chain verifies
+    that every existing canonical relation carries exactly its two policies.
     """
 
-    return _guarded_do_block(spec, upgrade_statements(spec), "upgrade")
+    return _guarded_do_block(spec, upgrade_statements(spec), "upgrade", require_columns=require_columns)
 
 
 def downgrade_guard_sql(spec: TablePolicySpec) -> str:
-    return _guarded_do_block(spec, downgrade_statements(spec), "downgrade")
+    """Removal is never deferred: ``DROP POLICY`` does not read any column."""
+
+    return _guarded_do_block(spec, downgrade_statements(spec), "downgrade", require_columns=False)
 
 
 # ---------------------------------------------------------------------------
@@ -457,6 +531,31 @@ def relation_exists(connection, table: str) -> bool:
         text("SELECT to_regclass(:relation) AS relation"), {"relation": _require_identifier(table, "table")}
     )
     return result.scalar_one() is not None
+
+
+def missing_scope_columns(connection, spec: TablePolicySpec) -> tuple[str, ...]:
+    """Scope columns ``spec`` reads that the relation does not have (yet).
+
+    Mirrors the guard emitted by :func:`upgrade_guard_sql`, so an installer that
+    verifies its own result can tell "the guard deferred this table on purpose"
+    (columns added by a later revision) from "the guard silently skipped a table
+    that should be policied" - only the second is a defect.
+    """
+
+    if not relation_exists(connection, spec.table):
+        return ()
+    present = {
+        row[0]
+        for row in connection.execute(
+            text(
+                "SELECT a.attname::text FROM pg_attribute AS a "
+                "WHERE a.attrelid = to_regclass(:relation) "
+                "AND a.attnum > 0 AND NOT a.attisdropped"
+            ),
+            {"relation": _require_identifier(spec.table, "table")},
+        ).all()
+    }
+    return tuple(column for column in scope_columns(spec) if column not in present)
 
 
 # ---------------------------------------------------------------------------
@@ -764,16 +863,37 @@ _CANONICAL: tuple[TablePolicySpec, ...] = (
             "project_runtime_revisions -> projects; it has no copied tenant column."
         ),
     ),
-    # --- Equipment v2 (2026110305) ---
-    # The catalog side is tenant-owned through the ingestion run; only the run
-    # carries a tenant column, so every catalog child inherits it hop by hop
-    # instead of duplicating a tenant anchor that could drift.
+    # --- Equipment v2 (2026110305; anchors added by 2026110318) ---
+    # MIG-EQ-ANCHORS-01 added nullable ``project_id``/``cabinet_id`` to the three
+    # operational roots (ingestion run, request, tender) and created the two
+    # association tables with their own ``tenant_id``.  Where the anchor exists it
+    # is read *directly*: the two- and three-hop EXISTS chains it replaces were
+    # correct but expensive, and a chain cannot express "this run/request/tender
+    # was made for this project" at all.
+    #
+    # ``allows_null=True`` on the new anchors is not a weakening.  The tenant
+    # comparison stays mandatory and exact, and a row with a NULL anchor is
+    # visible to any session *of its own tenant* - which is precisely the
+    # visibility it had before, when the project GUC was not a predicate at all.
+    # No row of another tenant becomes reachable, and nothing becomes visible to a
+    # session without tenant context (the tenant clause is evaluated first).
+    #
+    # The catalog side (snapshot, offer) keeps its inherited tenant: it has no
+    # tenant column of its own and the design keeps one shared catalog per tenant
+    # with ``project_id IS NULL`` (equipment-association-tables.md 2.1), so there
+    # is no project anchor to switch to.
     TablePolicySpec(
         table="equipment_v2_ingestion_runs",
         owner_revision="2026110305",
         tenant=ScopedColumn(column="tenant_id"),
+        cabinet=ScopedColumn(column="cabinet_id", allows_null=True),
+        project=ScopedColumn(column="project_id", allows_null=True),
         trusted_command="ALL",
-        notes="Root of the catalog ingestion chain; the only catalog table with a tenant anchor.",
+        notes=(
+            "Root of the catalog ingestion chain; the only catalog table with a tenant anchor. "
+            "project_id/cabinet_id are nullable anchors (MIG-EQ-ANCHORS-01): NULL means a "
+            "tenant-wide import, which is what the shared-catalog policy allows."
+        ),
     ),
     TablePolicySpec(
         table="equipment_v2_catalog_snapshots",
@@ -800,8 +920,14 @@ _CANONICAL: tuple[TablePolicySpec, ...] = (
         table="equipment_v2_requests",
         owner_revision="2026110305",
         tenant=ScopedColumn(column="tenant_id"),
+        cabinet=ScopedColumn(column="cabinet_id", allows_null=True),
+        project=ScopedColumn(column="project_id", allows_null=True),
         trusted_command="ALL",
-        notes="Root of the procurement request chain.",
+        notes=(
+            "Root of the procurement request chain. Since MIG-EQ-ANCHORS-01 it carries the "
+            "project/cabinet anchor itself, so a project-scoped session sees only its project's "
+            "requests while an unanchored legacy row stays tenant-wide, never cross-tenant."
+        ),
     ),
     TablePolicySpec(
         table="equipment_v2_request_lines",
@@ -840,8 +966,46 @@ _CANONICAL: tuple[TablePolicySpec, ...] = (
         table="equipment_v2_tenders",
         owner_revision="2026110305",
         tenant=ScopedColumn(column="tenant_id"),
+        cabinet=ScopedColumn(column="cabinet_id", allows_null=True),
+        project=ScopedColumn(column="project_id", allows_null=True),
         trusted_command="ALL",
-        notes="Tender carries its own tenant anchor and references the request by identity.",
+        notes=(
+            "Tender carries its own tenant anchor and references the request by identity; since "
+            "MIG-EQ-ANCHORS-01 it also carries the project/cabinet anchor it must share with that "
+            "request (the equality itself stays a service/trigger invariant, not a predicate)."
+        ),
+    ),
+    # --- Equipment associations (2026110319, task MIG-EQ-ANCHORS-01) ---
+    # Created empty with a mandatory ``tenant_id``, so the tenant predicate is the
+    # direct column from the very first inserted row: no backfill, no inherited hop,
+    # no window in which an unpolicied association table could hold cross-tenant
+    # references. ``trusted_command`` is ALL because the transactional command path
+    # that reorders ``ordinal`` inserts and deletes membership rows.
+    TablePolicySpec(
+        table="equipment_v2_candidate_group_offers",
+        owner_revision="2026110319",
+        tenant=ScopedColumn(column="tenant_id"),
+        cabinet=ScopedColumn(column="cabinet_id", allows_null=True),
+        project=ScopedColumn(column="project_id", allows_null=True),
+        trusted_command="ALL",
+        notes=(
+            "Ordered candidate-group membership (relational replacement for "
+            "candidate_groups.offer_ids during the expand stage; the JSONB array stays "
+            "authoritative until cutover)."
+        ),
+    ),
+    TablePolicySpec(
+        table="equipment_v2_tender_candidate_groups",
+        owner_revision="2026110319",
+        tenant=ScopedColumn(column="tenant_id"),
+        cabinet=ScopedColumn(column="cabinet_id", allows_null=True),
+        project=ScopedColumn(column="project_id", allows_null=True),
+        trusted_command="ALL",
+        notes=(
+            "Ordered tender membership (relational replacement for "
+            "tenders.candidate_group_ids during the expand stage). Same-request membership "
+            "stays a service/trigger invariant; the pair and the order are enforced here."
+        ),
     ),
     # --- Agent Run execution fence + attempt journal (2026110309, 2026110311) ---
     TablePolicySpec(
@@ -1095,7 +1259,9 @@ __all__ = [
     "legacy_policy_names",
     "policy_inventory",
     "registry_tables",
+    "missing_scope_columns",
     "relation_exists",
+    "scope_columns",
     "scoped_column_predicate",
     "tenant_predicate",
     "trusted_policy_statement",

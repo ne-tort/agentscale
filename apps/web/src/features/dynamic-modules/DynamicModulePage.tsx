@@ -8,11 +8,13 @@ import { useDynamicModuleAccess } from "./access";
 import type { DynamicModuleAccess } from "./capability";
 import { useResource, useSubmitController } from "./hooks";
 import {
+  definitionKindLabel,
   definitionStatusLabel,
   definitionStatusTone,
   definitionSubtitle,
   formatDateTime,
   isArchived,
+  ROUTES_UNAVAILABLE,
   UNKNOWN_VALUE,
 } from "./mapping";
 import { createDynamicModulesService, DynamicModuleServiceError, type DynamicModulesService } from "./service";
@@ -171,7 +173,7 @@ export function ManageDynamicModule({
 
       <dl className="dynamic-modules__facts">
         <div><dt>App id</dt><dd><code>{definition.appId}</code></dd></div>
-        <div><dt>Kind</dt><dd>{definition.kind === "declarative-app" ? "Declarative app" : "Isolated code plugin"}</dd></div>
+        <div><dt>Kind</dt><dd>{definitionKindLabel(definition.kind)}</dd></div>
         <div><dt>Latest version</dt><dd><code>{definition.latestVersion ?? UNKNOWN_VALUE}</code></dd></div>
         <div><dt>Created</dt><dd>{formatDateTime(definition.createdAt)}</dd></div>
         <div><dt>Updated</dt><dd>{formatDateTime(definition.updatedAt)}</dd></div>
@@ -180,11 +182,13 @@ export function ManageDynamicModule({
 
       <section className="dynamic-modules__panel" aria-label="Definition routes">
         <h2>Registered routes</h2>
-        {definition.routes.length === 0
-          ? <p className="dynamic-modules__hint">This definition declares no routes, so it cannot be opened from the shell navigation.</p>
-          : <ul className="dynamic-modules__route-list">
-            {definition.routes.map((route) => <li key={route.path}><code>{route.path}</code><span>screen {route.screenId}</span></li>)}
-          </ul>}
+        {definition.routes === undefined
+          ? <p className="dynamic-modules__hint">{ROUTES_UNAVAILABLE}</p>
+          : definition.routes.length === 0
+            ? <p className="dynamic-modules__hint">This definition declares no routes, so it cannot be opened from the shell navigation.</p>
+            : <ul className="dynamic-modules__route-list">
+              {definition.routes.map((route) => <li key={route.path}><code>{route.path}</code><span>screen {route.screenId}</span></li>)}
+            </ul>}
       </section>
 
       <VersionPanel

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from .server_contract import operations, path_parameters, route_matches
+from .server_contract import API_PREFIX, operations, path_parameters, route_matches
 from .web_contract import (
     CONTENT_OPS_SERVICE,
     DYNAMIC_CLIENT,
@@ -20,11 +20,17 @@ from .web_contract import (
 )
 
 
+def _mounted(path: str) -> str:
+    """The client declares paths relative to the API mount (``/companies/...``)."""
+    return path if path.startswith(API_PREFIX) else API_PREFIX + path
+
+
 def _matching_routes(method: str, path: str) -> list[tuple[str, str]]:
+    mounted = _mounted(path)
     return [
         (route_method, route_path)
         for (route_method, route_path) in operations()
-        if route_method == method and route_matches(path, route_path)
+        if route_method == method and route_matches(mounted, route_path)
     ]
 
 
@@ -81,21 +87,23 @@ def test_dynamic_gateway_method_resolves_to_a_registered_route(binding) -> None:
 def test_dynamic_path_identifier_is_the_server_path_parameter(binding) -> None:
     """The identifier the client interpolates is the parameter the server expects.
 
-    This is the check that would have caught a client passing a definition row id
-    where the route declares ``{app_id}``.
+    This is the check that would have caught a client sending a definition *row* id
+    where the route declares ``{app_id}``, or a caller-supplied cabinet that the
+    route does not take at all. ``company_id`` is excluded because the shell
+    resolves the tenant and injects it for every call, so no transport method owns
+    that segment.
     """
     (_, route_path), *_ = _matching_routes(binding.http, binding.path)
-    server_parameters = path_parameters(route_path)
-    if binding.path_identifier is None:
-        assert server_parameters == (), (
-            f"{binding.method} declares no path identifier but the server route has "
-            f"{server_parameters}"
-        )
-        return
-    assert binding.path_identifier in server_parameters, (
-        f"{binding.method} sends {binding.path_identifier!r} in the path; the server route "
-        f"{route_path} declares {server_parameters}"
+    owned = {name for name in path_parameters(route_path) if name != "company_id"}
+    declared = {_snake_case(name) for name in binding.path_identifiers}
+    assert declared == owned, (
+        f"{binding.method} declares path identifier(s) {sorted(declared)} but the route "
+        f"{route_path} declares {sorted(owned)}"
     )
+
+
+def _snake_case(name: str) -> str:
+    return "".join(f"_{char.lower()}" if char.isupper() else char for char in name)
 
 
 @pytest.mark.parametrize(

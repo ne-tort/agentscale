@@ -142,9 +142,12 @@ def test_create_company_with_password_and_disable(client: TestClient) -> None:
     assert created.status_code == 201, created.text
     company = created.json()["company"]
     company_id = company["id"]
-    assert company["username"] == company_id
+    # Login handle is derived from the company name (L02/L03, #80): the org
+    # principal logs in as "{slug}@agentscale.local", not as the company id.
+    # The id-based assertion that used to live here predates that contract.
+    assert company["username"] == "acme@agentscale.local"
     assert company["keycloak_sub"]
-    assert created.json()["credentials"]["username"] == company_id
+    assert created.json()["credentials"]["username"] == company["username"]
     admin_emp = created.json()["admin_employee"]
     emp_id = admin_emp["id"]
     admin_sub = admin_emp["keycloak_sub"]
@@ -311,7 +314,8 @@ def test_create_company_name_only_then_invite_admin(client: TestClient) -> None:
     assert created.status_code == 201, created.text
     body = created.json()
     assert body["company"]["name"] == "NameOnlyCo"
-    assert body["company"]["username"] == body["company"]["id"]
+    # {slug}@agentscale.local — see test_create_company_with_password_and_disable.
+    assert body["company"]["username"] == "nameonlyco@agentscale.local"
     assert body["company"]["keycloak_sub"]
     assert body["company"].get("contact_email") is None
     assert "admin_employee" not in body
@@ -414,7 +418,10 @@ def test_create_company_name_only_then_invite_admin(client: TestClient) -> None:
         headers={"Authorization": f"Bearer {admin}"},
     )
     assert detail.status_code == 200, detail.text
-    assert detail.json()["username"] == company_id
+    # Renaming the company must NOT move the login handle: it is the credential
+    # people type, so it stays pinned to the slug minted at creation time
+    # (company_service keeps login_slug untouched on rename).
+    assert detail.json()["username"] == "nameonlyco@agentscale.local"
     assert detail.json()["password_set"] is True
 
     rotated = client.put(

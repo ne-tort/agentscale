@@ -57,12 +57,14 @@ from prodavan.infrastructure.persistence.models.cabinets import (
 from prodavan.infrastructure.persistence.models.catalog import ReferenceCatalogEntryRow
 from prodavan.infrastructure.persistence.models.equipment_v2 import (
     EquipmentBudgetAllocationRow,
+    EquipmentCandidateGroupOfferRow,
     EquipmentCandidateGroupRow,
     EquipmentCatalogOfferRow,
     EquipmentCatalogSnapshotRow,
     EquipmentIngestionRunRow,
     EquipmentRequestLineRow,
     EquipmentRequestRow,
+    EquipmentTenderCandidateGroupRow,
     EquipmentTenderRow,
 )
 from prodavan.infrastructure.persistence.models.composer_draft import EmployeeComposerDraftRow
@@ -250,12 +252,14 @@ __all__ = [
     "ContentAssetRow",
     "ContentBlobVersionRow",
     "EquipmentBudgetAllocationRow",
+    "EquipmentCandidateGroupOfferRow",
     "EquipmentCandidateGroupRow",
     "EquipmentCatalogOfferRow",
     "EquipmentCatalogSnapshotRow",
     "EquipmentIngestionRunRow",
     "EquipmentRequestLineRow",
     "EquipmentRequestRow",
+    "EquipmentTenderCandidateGroupRow",
     "EquipmentTenderRow",
     "EmployeeRow",
     "IdentityLinkRow",

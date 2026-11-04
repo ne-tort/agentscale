@@ -63,14 +63,23 @@ partition handoff reader       the evidence stores require a resolved
 ``m05_upstream_evidence``      a run/partition-bound context and the exact
                                upstream gate evidence for one instance.
 ``m06_ports``                  ``ShadowGatewayPorts`` needs every M06 port at
-                               once. The legacy repository and scope ports now
-                               have SQL implementations
-                               (``infrastructure/persistence/dynamic_app_gateway``)
-                               and are composed here, but the legacy **quota**
-                               port has no table that can express a
-                               per-invocation limit, and the identity/handoff
-                               collaborators are per-partition. So the port set
-                               stays absent and the quota absence is named.
+                               once. ``application/migration/m06_grants_gateway/
+                               ports_assembly.py::build_shadow_ports`` composes
+                               all sixteen from the real adapters (the legacy
+                               repository/scope over
+                               ``infrastructure/persistence/dynamic_app_gateway``,
+                               the company and canonical-grant readers over
+                               ``infrastructure/persistence/canonical_grants_read``,
+                               and the durable evidence store). What a *process*
+                               still cannot state is structural: the partition
+                               handoff reader needs a ``TrustedEvidenceScope``,
+                               ``M05UpstreamEvidence`` is one snapshot's exact
+                               gate bundle, the M04E repository wraps a
+                               caller-owned SERIALIZABLE session, the method
+                               registry has no persisted read port, and no table
+                               can express a per-invocation quota. Each of those
+                               is now reported as its own code instead of one
+                               blanket ``..._shadow_gateway_ports_unavailable``.
 =============================  ==================================================
 
 Those absences are exactly what ``assemble_migration_chain`` reports per stage,
@@ -139,7 +148,11 @@ PART_EVIDENCE_SCOPE_IS_PER_PARTITION = "migration_chain_evidence_scope_is_per_pa
 #: Run-bound M05 inputs: resolved tenant/subject/session and exact upstream gates.
 PART_M05_RUNTIME_CONTEXT_UNAVAILABLE = "migration_chain_runtime_context_is_per_run"
 PART_M05_UPSTREAM_EVIDENCE_UNAVAILABLE = "migration_chain_upstream_evidence_is_per_partition"
-#: ``ShadowGatewayPorts`` cannot be stated without this port, and no table can decide it.
+#: ``ShadowGatewayPorts`` cannot be stated without the legacy quota port, and no table
+#: can decide it. Kept as the resource-level code an operator already greps for; the
+#: detailed cause now comes from ``ports_assembly`` as
+#: ``m06_legacy_quota_table_missing``, and this code is added only when that plan could
+#: not even be built, so the absence never goes unnamed.
 PART_M06_LEGACY_QUOTA_TABLE_MISSING = "migration_chain_legacy_quota_table_missing"
 #: The remaining M06 ports (identity, handoff, mapping, canonical) are per-partition.
 PART_M06_IDENTITY_AND_HANDOFF_PER_PARTITION = (
@@ -452,6 +465,38 @@ def build_migration_chain_dependencies(
         built.append("legacy_gateway_repository")
         built.append("legacy_gateway_scope")
 
+    # The whole ``ShadowGatewayPorts`` set.  ``build_shadow_ports`` composes every
+    # port it can derive from the process and names every one it cannot, so this
+    # call is what decides whether ``m06_ports`` may be published: a plan with any
+    # blocker keeps the field ``None`` and contributes its own codes.
+    #
+    # At process scope the answer is still "no", and now for stated reasons rather
+    # than one blanket code: a process owns no partition, so the handoff reader has
+    # no ``TrustedEvidenceScope``; ``M05UpstreamEvidence`` is one snapshot's exact
+    # M04+M04E+M05 gate bundle; ``ServerDefinitionVersionRepository`` wraps a
+    # caller-owned SERIALIZABLE session; the method registry has no persisted read
+    # port; and no table can back the quota port.
+    from prodavan.application.migration.m06_grants_gateway.ports_assembly import (
+        build_shadow_ports,
+    )
+
+    shadow_plan = _attempt(
+        "m06_shadow_ports",
+        lambda: build_shadow_ports(session_factory=factory, legacy_ports=legacy_ports),
+        built=built,
+        blockers=blockers,
+    )
+    m06_ports = None
+    if shadow_plan is None:
+        # The plan itself could not be built, so no granular code exists; state the
+        # quota absence (the one gap no port can close) rather than nothing.
+        blockers.append(PART_M06_LEGACY_QUOTA_TABLE_MISSING)
+    else:
+        blockers.extend(shadow_plan.blockers)
+        if shadow_plan.complete:
+            m06_ports = shadow_plan.ports
+            built.append("m06_ports")
+
     # Every absence below is structural (see the module docstring table), not a
     # missing implementation this task could have supplied.
     structural_absences = [
@@ -460,10 +505,10 @@ def build_migration_chain_dependencies(
         PART_EVIDENCE_SCOPE_IS_PER_PARTITION,
         PART_M05_RUNTIME_CONTEXT_UNAVAILABLE,
         PART_M05_UPSTREAM_EVIDENCE_UNAVAILABLE,
-        PART_M06_LEGACY_QUOTA_TABLE_MISSING,
         PART_M06_IDENTITY_AND_HANDOFF_PER_PARTITION,
-        PART_M06_SHADOW_PORTS_UNAVAILABLE,
     ]
+    if m06_ports is None:
+        structural_absences.append(PART_M06_SHADOW_PORTS_UNAVAILABLE)
     if m04_tenant_context is None:
         structural_absences.insert(0, PART_M04_TENANT_CONTEXT_UNAVAILABLE)
     if m05_tenant_context is None:
@@ -491,7 +536,7 @@ def build_migration_chain_dependencies(
         m05_promotion_records=None,
         m05_identity_sessions=None,
         m05_page_size=M05_PAGE_SIZE,
-        m06_ports=None,
+        m06_ports=m06_ports,
         m06_parity_observations=(
             m06_evidence.parity_observations if m06_evidence is not None else None
         ),

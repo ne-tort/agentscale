@@ -121,6 +121,14 @@ def upgrade() -> None:
             # The guard reported the skip; a relation created by a later revision
             # gets its policies from that revision's own re-apply.
             continue
+        if policies.missing_scope_columns(connection, spec):
+            # MIG-EQ-ANCHORS-01: ``equipment_v2`` rows get their project/cabinet
+            # anchors in ``2026110319``, so their predicate cannot be created yet and
+            # the guard defers them to that revision's re-apply - which is the same
+            # revision that adds the columns.  Without this branch the deferral would
+            # read as "a policy went missing" and abort a chain that is in fact
+            # correct; a table that *has* its columns but no policies still fails.
+            continue
         expected = set(spec.policy_names)
         actual = _installed_policy_names(connection, spec.table)
         if actual != expected:

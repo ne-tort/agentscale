@@ -97,7 +97,10 @@ describe("MIG-WEB-02 source acceptance fixtures (not executed during migration f
   it("keeps the opaque-origin handshake blocked and exposes no URL bootstrap", () => {
     const container = document.createElement("div");
     const failures: string[] = [];
-    const args = { document, container, src: "https://plugins.example/plugin", allowedOrigins: new Set(["https://plugins.example"]), identity: { pluginId: "demo", version: "1.0.0", digest: "a".repeat(64) }, broker: { allowedCapabilities: new Set<string>(), methods: new Map(), adapter: async () => null }, onFailure: (code: string) => failures.push(code) };
+    // The artifact identity is the registry digest (`sha256:<hex>`), exactly as
+    // `DynamicCodePluginHost` passes it; a bare hex string is refused by the host.
+    const identity = { pluginId: "demo", version: "1.0.0", digest: `sha256:${"a".repeat(64)}` };
+    const args = { document, container, src: "https://plugins.example/plugin", allowedOrigins: new Set(["https://plugins.example"]), identity, broker: { allowedCapabilities: new Set<string>(), methods: new Map(), adapter: async () => null }, onFailure: (code: string) => failures.push(code) };
     const mounted = mountIsolatedPlugin(args);
     expect(mounted.frame.getAttribute("sandbox")).toBe("allow-scripts");
     expect(new URL(mounted.frame.src).search).toBe("");
@@ -109,7 +112,8 @@ describe("MIG-WEB-02 source acceptance fixtures (not executed during migration f
 
   it("fails closed on non-allowlisted, query-bearing, or non-HTTPS plugin URLs", () => {
     const container = document.createElement("div");
-    const args = { document, container, identity: { pluginId: "demo", version: "1.0.0", digest: "a".repeat(64) }, broker: { allowedCapabilities: new Set<string>(), methods: new Map(), adapter: async () => null } };
+    const identity = { pluginId: "demo", version: "1.0.0", digest: `sha256:${"a".repeat(64)}` };
+    const args = { document, container, identity, broker: { allowedCapabilities: new Set<string>(), methods: new Map(), adapter: async () => null } };
     expect(() => mountIsolatedPlugin({ ...args, src: "https://evil.example/plugin", allowedOrigins: new Set(["https://plugins.example"]) })).toThrow("plugin_origin_not_allowlisted");
     expect(() => mountIsolatedPlugin({ ...args, src: "https://plugins.example/plugin?token=x", allowedOrigins: new Set(["https://plugins.example"]) })).toThrow("plugin_origin_not_allowlisted");
   });

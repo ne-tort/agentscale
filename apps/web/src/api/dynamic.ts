@@ -57,23 +57,40 @@ export interface DynamicModuleRoute {
   readonly screenId: string;
 }
 
+/**
+ * Boundary shapes.
+ *
+ * Every name below is the one the dynamic-apps API actually serializes (see
+ * `application/dynamic_apps_definition/crud_service.py::_*_view` and the green
+ * `tests/migration/dynamic_apps_crud` suite). Three consequences are deliberate:
+ *
+ * - the lifecycle field is `lifecycle`, not `status` — the API translates the
+ *   persisted enum through `api_lifecycle()` and never sends the raw `status`;
+ * - `kind`, `versionCount`, `latestVersion`, `requestedCapabilityCount`, `routes`
+ *   and `manifest` have **no** server source today (the definition row has no
+ *   `kind` column and the view carries no manifest), so they are optional and a
+ *   screen must render an explicit unknown rather than a guess;
+ * - a grant row carries a *set* of capabilities, so one server row is expanded
+ *   into one DTO per capability by `normalizeGrant`.
+ */
 export interface DynamicModuleDefinitionSummary {
   readonly id: Id;
   readonly appId: string;
   readonly displayName: string;
   readonly description?: string;
-  readonly kind: DynamicModuleKind;
+  /** Not a column on the definition row; absent until the API publishes it. */
+  readonly kind?: DynamicModuleKind;
   readonly status: DynamicModuleStatus;
   readonly latestVersion?: string;
-  readonly versionCount: number;
-  readonly requestedCapabilityCount: number;
+  readonly versionCount?: number;
+  readonly requestedCapabilityCount?: number;
   readonly createdAt?: string;
   readonly updatedAt?: string;
   readonly archivedAt?: string;
 }
 
 export interface DynamicModuleDefinition extends DynamicModuleDefinitionSummary {
-  readonly routes: readonly DynamicModuleRoute[];
+  readonly routes?: readonly DynamicModuleRoute[];
   readonly createdBy?: string;
   readonly ownerCabinetId?: string;
   readonly ownerCompanyId?: string;
@@ -85,7 +102,8 @@ export interface DynamicModuleVersion {
   readonly version: string;
   readonly status: DynamicModuleVersionStatus;
   readonly digest: string;
-  readonly manifest: DynamicModuleManifest;
+  /** Absent from the list/detail view today; the digest is the immutable evidence. */
+  readonly manifest?: DynamicModuleManifest;
   readonly notes?: string;
   readonly createdBy?: string;
   readonly createdAt?: string;
@@ -96,8 +114,11 @@ export interface DynamicModuleInstance {
   readonly id: Id;
   readonly definitionId: Id;
   readonly versionId: Id;
-  readonly version: string;
-  readonly cabinetId: Id;
+  /** The API identifies the installed version by id; the semver is not echoed. */
+  readonly version?: string;
+  /** Present only for a cabinet-scoped instance (`scope.kind === "cabinet"`). */
+  readonly cabinetId?: Id;
+  /** Present only for a project-scoped instance (`scope.kind === "project"`). */
   readonly projectId?: Id;
   readonly scope: DynamicModuleScope;
   readonly status: DynamicModuleInstanceStatus;
@@ -108,14 +129,17 @@ export interface DynamicModuleInstance {
 export interface DynamicModuleGrant {
   readonly id: Id;
   readonly definitionId: Id;
+  readonly versionId?: Id;
   readonly instanceId?: Id;
   readonly capabilityId: string;
-  readonly capabilityVersion: string;
+  /** Declared per manifest capability version; not echoed by the grant view. */
+  readonly capabilityVersion?: string;
   readonly decision: DynamicModuleGrantDecision;
   readonly scope: DynamicModuleScope;
-  readonly cabinetId: Id;
+  /** `scope.kind === "cabinet"` ? `scope.id` : undefined. */
+  readonly cabinetId?: Id;
   readonly projectId?: Id;
-  readonly grantedBy: string;
+  readonly grantedBy?: string;
   readonly grantedAt?: string;
   readonly expiresAt?: string;
   readonly revokedAt?: string;
@@ -274,6 +298,12 @@ function optionalCount(value: unknown, field: string): number {
   return value === undefined || value === null ? 0 : requireCount(value, field);
 }
 
+/** Pattern-checked optional string: absent stays absent, present must match. */
+function optionalPattern(value: unknown, pattern: RegExp, field: string): string | undefined {
+  const text = optionalString(value, field);
+  return text === undefined ? undefined : requirePattern(text, pattern, field);
+}
+
 function requirePattern(value: unknown, pattern: RegExp, field: string): string {
   const text = requireString(value, field);
   if (!pattern.test(text)) throw new DynamicModulesProtocolError(field);
@@ -291,6 +321,36 @@ function readEnvelope(payload: unknown, field: string): Wire {
   return payload;
 }
 
+/** Optional member of a closed set: absent stays absent, but a wrong value is still an error. */
+function optionalEnum<T extends string>(value: unknown, allowed: readonly T[], field: string): T | undefined {
+  return value === undefined || value === null ? undefined : requireEnum(value, allowed, field);
+}
+
+function optionalCountField(value: unknown, field: string): number | undefined {
+  return value === undefined || value === null ? undefined : requireCount(value, field);
+}
+
+/**
+ * The API identifies the owning scope as `{kind, id}`; the screens read
+ * `scope`, `cabinetId` and `projectId`. Both spellings are accepted because the
+ * scoped field layout is the one the server actually sends today, and a flat
+ * `cabinet_id` is what an older client expected.
+ */
+export function normalizeScope(value: Wire, field: string): { scope: DynamicModuleScope; cabinetId?: Id; projectId?: Id } {
+  const rawScope = value.scope;
+  if (record(rawScope)) {
+    const kind = requireEnum(rawScope.kind, DYNAMIC_MODULE_SCOPES, `${field}.scope.kind`);
+    const id = requireString(rawScope.id, `${field}.scope.id`);
+    return kind === "project" ? { scope: kind, projectId: id } : { scope: kind, cabinetId: id };
+  }
+  const scope = requireEnum(rawScope, DYNAMIC_MODULE_SCOPES, `${field}.scope`);
+  return {
+    scope,
+    cabinetId: optionalString(firstDefined(value.cabinet_id, value.cabinetId), `${field}.cabinet_id`),
+    projectId: optionalString(firstDefined(value.project_id, value.projectId), `${field}.project_id`),
+  };
+}
+
 export function normalizeDefinitionSummary(raw: unknown, field = "definition"): DynamicModuleDefinitionSummary {
   const value = readEnvelope(raw, field);
   return {
@@ -298,11 +358,14 @@ export function normalizeDefinitionSummary(raw: unknown, field = "definition"): 
     appId: requirePattern(firstDefined(value.app_id, value.appId), DYNAMIC_MODULE_APP_ID_PATTERN, `${field}.app_id`),
     displayName: requireString(firstDefined(value.display_name, value.displayName), `${field}.display_name`),
     description: optionalString(value.description, `${field}.description`),
-    kind: requireEnum(value.kind, DYNAMIC_MODULE_KINDS, `${field}.kind`),
-    status: requireEnum(value.status, DYNAMIC_MODULE_STATUSES, `${field}.status`),
+    // The definition row has no `kind` column, so this is absent on every real
+    // response. It stays optional rather than being guessed from anything else.
+    kind: optionalEnum(value.kind, DYNAMIC_MODULE_KINDS, `${field}.kind`),
+    // The API never sends `status`; it sends the translated `lifecycle`.
+    status: requireEnum(firstDefined(value.lifecycle, value.status), DYNAMIC_MODULE_STATUSES, `${field}.lifecycle`),
     latestVersion: optionalString(firstDefined(value.latest_version, value.latestVersion), `${field}.latest_version`),
-    versionCount: optionalCount(firstDefined(value.version_count, value.versionCount), `${field}.version_count`),
-    requestedCapabilityCount: optionalCount(
+    versionCount: optionalCountField(firstDefined(value.version_count, value.versionCount), `${field}.version_count`),
+    requestedCapabilityCount: optionalCountField(
       firstDefined(value.requested_capability_count, value.requestedCapabilityCount),
       `${field}.requested_capability_count`,
     ),
@@ -310,6 +373,11 @@ export function normalizeDefinitionSummary(raw: unknown, field = "definition"): 
     updatedAt: optionalTimestamp(firstDefined(value.updated_at, value.updatedAt), `${field}.updated_at`),
     archivedAt: optionalTimestamp(firstDefined(value.archived_at, value.archivedAt), `${field}.archived_at`),
   };
+}
+
+/** Count the versions the detail view already carries, so the screen need not guess. */
+function versionsFromDetail(value: Wire): readonly unknown[] | undefined {
+  return Array.isArray(value.versions) ? value.versions : undefined;
 }
 
 function normalizeRoute(raw: unknown, field: string): DynamicModuleRoute {
@@ -327,11 +395,13 @@ function normalizeRoute(raw: unknown, field: string): DynamicModuleRoute {
 export function normalizeDefinition(raw: unknown, field = "definition"): DynamicModuleDefinition {
   const summary = normalizeDefinitionSummary(raw, field);
   const value = readEnvelope(raw, field);
-  const rawRoutes = value.routes ?? [];
-  if (!Array.isArray(rawRoutes)) throw new DynamicModulesProtocolError(`${field}.routes`);
+  const rawRoutes = value.routes;
+  if (rawRoutes !== undefined && !Array.isArray(rawRoutes)) throw new DynamicModulesProtocolError(`${field}.routes`);
+  const rawVersions = versionsFromDetail(value);
   return {
     ...summary,
-    routes: rawRoutes.map((route, index) => normalizeRoute(route, `${field}.routes[${index}]`)),
+    ...(rawVersions ? { versionCount: rawVersions.length } : {}),
+    ...(rawRoutes === undefined ? {} : { routes: rawRoutes.map((route, index) => normalizeRoute(route, `${field}.routes[${index}]`)) }),
     createdBy: optionalString(firstDefined(value.created_by, value.createdBy), `${field}.created_by`),
     ownerCabinetId: optionalString(firstDefined(value.owner_cabinet_id, value.ownerCabinetId), `${field}.owner_cabinet_id`),
     ownerCompanyId: optionalString(firstDefined(value.owner_company_id, value.ownerCompanyId), `${field}.owner_company_id`),
@@ -341,7 +411,11 @@ export function normalizeDefinition(raw: unknown, field = "definition"): Dynamic
 export function normalizeDefinitionPage(payload: unknown, field = "definition_page"): DynamicModuleDefinitionPage {
   const items = readItems(payload, field).map((item, index) => normalizeDefinitionSummary(item, `${field}.items[${index}]`));
   const envelope = record(payload) ? payload : {};
-  const total = envelope.total === undefined || envelope.total === null ? undefined : requireCount(envelope.total, `${field}.total`);
+  const meta = record(envelope.meta) ? envelope.meta : {};
+  const total =
+    envelope.total === undefined || envelope.total === null
+      ? optionalCountField(meta.count, `${field}.total`)
+      : requireCount(envelope.total, `${field}.total`);
   return {
     items,
     nextCursor: optionalString(firstDefined(envelope.next_cursor, envelope.nextCursor), `${field}.next_cursor`),
@@ -349,17 +423,30 @@ export function normalizeDefinitionPage(payload: unknown, field = "definition_pa
   };
 }
 
+/**
+ * The version view names the digest `artifact_digest` and the semver
+ * `manifest_version`; the manifest body itself is not part of the list/detail
+ * payload (only its digest is), and a published version is identified by its own
+ * `lifecycle` string.
+ */
 export function normalizeVersion(raw: unknown, field = "version"): DynamicModuleVersion {
   const value = readEnvelope(raw, field);
   const manifest = value.manifest;
-  if (!record(manifest)) throw new DynamicModulesProtocolError(`${field}.manifest`);
+  if (manifest !== undefined && !record(manifest)) throw new DynamicModulesProtocolError(`${field}.manifest`);
   return {
     id: requireString(value.id, `${field}.id`),
-    definitionId: requireString(firstDefined(value.definition_id, value.definitionId), `${field}.definition_id`),
-    version: requirePattern(value.version, DYNAMIC_MODULE_SEMVER_PATTERN, `${field}.version`),
-    status: requireEnum(value.status, DYNAMIC_MODULE_VERSION_STATUSES, `${field}.status`),
-    digest: requirePattern(firstDefined(value.digest, value.artifact_digest), DYNAMIC_MODULE_DIGEST_PATTERN, `${field}.digest`),
-    manifest,
+    definitionId: requireString(
+      firstDefined(value.app_definition_id, value.definition_id, value.definitionId),
+      `${field}.app_definition_id`,
+    ),
+    version: requirePattern(
+      firstDefined(value.manifest_version, value.version),
+      DYNAMIC_MODULE_SEMVER_PATTERN,
+      `${field}.manifest_version`,
+    ),
+    status: requireEnum(firstDefined(value.lifecycle, value.status), DYNAMIC_MODULE_VERSION_STATUSES, `${field}.lifecycle`),
+    digest: requirePattern(firstDefined(value.artifact_digest, value.digest), DYNAMIC_MODULE_DIGEST_PATTERN, `${field}.artifact_digest`),
+    ...(manifest === undefined ? {} : { manifest }),
     notes: optionalString(value.notes, `${field}.notes`),
     createdBy: optionalString(firstDefined(value.created_by, value.createdBy), `${field}.created_by`),
     createdAt: optionalTimestamp(firstDefined(value.created_at, value.createdAt), `${field}.created_at`),
@@ -373,15 +460,20 @@ export function normalizeVersions(payload: unknown, field = "versions"): readonl
 
 export function normalizeInstance(raw: unknown, field = "instance"): DynamicModuleInstance {
   const value = readEnvelope(raw, field);
+  const scope = normalizeScope(value, field);
   return {
     id: requireString(value.id, `${field}.id`),
-    definitionId: requireString(firstDefined(value.definition_id, value.definitionId), `${field}.definition_id`),
-    versionId: requireString(firstDefined(value.version_id, value.versionId), `${field}.version_id`),
-    version: requirePattern(value.version, DYNAMIC_MODULE_SEMVER_PATTERN, `${field}.version`),
-    cabinetId: requireString(firstDefined(value.cabinet_id, value.cabinetId), `${field}.cabinet_id`),
-    projectId: optionalString(firstDefined(value.project_id, value.projectId), `${field}.project_id`),
-    scope: requireEnum(value.scope, DYNAMIC_MODULE_SCOPES, `${field}.scope`),
-    status: requireEnum(value.status, DYNAMIC_MODULE_INSTANCE_STATUSES, `${field}.status`),
+    definitionId: requireString(
+      firstDefined(value.app_definition_id, value.definition_id, value.definitionId),
+      `${field}.app_definition_id`,
+    ),
+    versionId: requireString(
+      firstDefined(value.app_version_id, value.version_id, value.versionId),
+      `${field}.app_version_id`,
+    ),
+    version: optionalPattern(firstDefined(value.manifest_version, value.version), DYNAMIC_MODULE_SEMVER_PATTERN, `${field}.manifest_version`),
+    ...scope,
+    status: requireEnum(firstDefined(value.lifecycle, value.status), DYNAMIC_MODULE_INSTANCE_STATUSES, `${field}.lifecycle`),
     installedBy: optionalString(firstDefined(value.installed_by, value.installedBy), `${field}.installed_by`),
     installedAt: optionalTimestamp(firstDefined(value.installed_at, value.installedAt), `${field}.installed_at`),
   };
@@ -391,33 +483,78 @@ export function normalizeInstances(payload: unknown, field = "instances"): reado
   return readItems(payload, field).map((item, index) => normalizeInstance(item, `${field}[${index}]`));
 }
 
-export function normalizeGrant(raw: unknown, field = "grant"): DynamicModuleGrant {
-  const value = readEnvelope(raw, field);
-  const rawCapabilityVersion = firstDefined(value.capability_version, value.capabilityVersion);
-  return {
-    id: requireString(value.id, `${field}.id`),
-    definitionId: requireString(firstDefined(value.definition_id, value.definitionId), `${field}.definition_id`),
-    instanceId: optionalString(firstDefined(value.instance_id, value.instanceId), `${field}.instance_id`),
-    capabilityId: requirePattern(firstDefined(value.capability_id, value.capabilityId), DYNAMIC_MODULE_CAPABILITY_PATTERN, `${field}.capability_id`),
-    capabilityVersion: requirePattern(
-      typeof rawCapabilityVersion === "number" ? String(rawCapabilityVersion) : rawCapabilityVersion,
-      DYNAMIC_MODULE_CAPABILITY_VERSION_PATTERN,
-      `${field}.capability_version`,
-    ),
-    decision: requireEnum(value.decision, ["granted", "denied"] as const, `${field}.decision`),
-    scope: requireEnum(value.scope, DYNAMIC_MODULE_SCOPES, `${field}.scope`),
-    cabinetId: requireString(firstDefined(value.cabinet_id, value.cabinetId), `${field}.cabinet_id`),
-    projectId: optionalString(firstDefined(value.project_id, value.projectId), `${field}.project_id`),
-    grantedBy: requireString(firstDefined(value.granted_by, value.grantedBy), `${field}.granted_by`),
-    grantedAt: optionalTimestamp(firstDefined(value.granted_at, value.grantedAt), `${field}.granted_at`),
-    expiresAt: optionalTimestamp(firstDefined(value.expires_at, value.expiresAt), `${field}.expires_at`),
-    revokedAt: optionalTimestamp(firstDefined(value.revoked_at, value.revokedAt), `${field}.revoked_at`),
-    reason: optionalString(value.reason, `${field}.reason`),
-  };
+/**
+ * A grant row is one decision for a *set* of capabilities
+ * (`{"capabilities": [{name, decision, constraints, expires_at}], ...}`), so a row
+ * yields one DTO per capability. Screens that expect one row per capability keep
+ * working, and a caller that needs the row identity reads `grantId`.
+ *
+ * `capabilityVersion` is not echoed by the grant view at all: the accepted
+ * version is part of the manifest, not the decision. It stays optional.
+ */
+export function normalizeGrants(payload: unknown, field = "grants"): readonly DynamicModuleGrant[] {
+  return readItems(payload, field).flatMap((item, index) =>
+    expandGrantRow(item, `${field}[${index}]`),
+  );
 }
 
-export function normalizeGrants(payload: unknown, field = "grants"): readonly DynamicModuleGrant[] {
-  return readItems(payload, field).map((item, index) => normalizeGrant(item, `${field}[${index}]`));
+/** First grant of a row; a single decision row yields exactly one. */
+export function normalizeGrant(raw: unknown, field = "grant"): DynamicModuleGrant {
+  const [first] = expandGrantRow(raw, field);
+  if (!first) throw new DynamicModulesProtocolError(`${field}.capabilities`);
+  return first;
+}
+
+function expandGrantRow(raw: unknown, field: string): readonly DynamicModuleGrant[] {
+  const value = readEnvelope(raw, field);
+  const scope = normalizeScope(value, field);
+  const rowId = requireString(value.id, `${field}.id`);
+  const definitionId = requireString(
+    firstDefined(value.app_definition_id, value.definition_id, value.definitionId),
+    `${field}.app_definition_id`,
+  );
+  const grantedAt = optionalTimestamp(firstDefined(value.issued_at, value.granted_at, value.grantedAt), `${field}.issued_at`);
+  const expiresAt = optionalTimestamp(value.expires_at, `${field}.expires_at`);
+  const rowVersionId = optionalString(
+    firstDefined(value.app_version_id, value.version_id, value.versionId),
+    `${field}.app_version_id`,
+  );
+
+  const capabilities = value.capabilities;
+  if (capabilities !== undefined && !Array.isArray(capabilities)) {
+    throw new DynamicModulesProtocolError(`${field}.capabilities`);
+  }
+  const entries = capabilities !== undefined ? capabilities : [value];
+  return entries.map((entry, index) => {
+    const capability = readEnvelope(entry, `${field}.capabilities[${index}]`);
+    const rawCapabilityVersion = firstDefined(capability.capability_version, capability.capabilityVersion);
+    return {
+      id: rowId,
+      definitionId,
+      ...(rowVersionId === undefined ? {} : { versionId: rowVersionId }),
+      instanceId: optionalString(firstDefined(capability.instance_id, value.instance_id, value.instanceId), `${field}.instance_id`),
+      capabilityId: requirePattern(
+        firstDefined(capability.capability_id, capability.name),
+        DYNAMIC_MODULE_CAPABILITY_PATTERN,
+        `${field}.capabilities[${index}].name`,
+      ),
+      capabilityVersion: optionalPattern(
+        typeof rawCapabilityVersion === "number" ? String(rawCapabilityVersion) : rawCapabilityVersion,
+        DYNAMIC_MODULE_CAPABILITY_VERSION_PATTERN,
+        `${field}.capability_version`,
+      ),
+      decision: requireEnum(capability.decision, ["granted", "denied"] as const, `${field}.capabilities[${index}].decision`),
+      ...scope,
+      grantedBy: optionalString(
+        firstDefined(capability.granted_by, value.granted_by, value.issued_by, value.grantedBy),
+        `${field}.granted_by`,
+      ),
+      grantedAt,
+      expiresAt: optionalTimestamp(capability.expires_at, `${field}.capabilities[${index}].expires_at`) ?? expiresAt,
+      revokedAt: optionalTimestamp(value.revoked_at, `${field}.revoked_at`),
+      reason: optionalString(capability.reason, `${field}.reason`),
+    };
+  });
 }
 
 function normalizeDirectory(payload: unknown, field: string): readonly DynamicModuleDirectoryEntry[] {
@@ -477,23 +614,26 @@ type TransportMethod = (typeof DYNAMIC_MODULES_TRANSPORT_METHODS)[number];
  * Declared next to the transport because it is the client's one machine-readable
  * statement of its HTTP contract: the API parity suite (`apps/api/tests/migration/
  * web_contract_parity`) mounts the real routers and asserts that every entry below
- * resolves to a registered operation, that `pathIdentifier` is a parameter the
- * server route actually declares, and that every `query` key is served. `null`
- * means "no identifier in the path".
+ * resolves to a registered operation, that `pathIdentifiers` are exactly the
+ * parameters the server route declares (minus the shell-owned `companyId`), and
+ * that every `query` key is served.
+ *
+ * `companyId` is excluded from `pathIdentifiers` on purpose: the shell owns the
+ * tenant and injects it, so no transport method takes it from a caller.
  *
  * A transport method added without an entry here fails that suite.
  */
 export const DYNAMIC_ROUTE_BINDINGS = [
-  { method: "listDefinitions", http: "get", path: "/companies/{companyId}/dynamic-apps", pathIdentifier: null, query: ["limit", "cursor", "lifecycle"] },
-  { method: "getDefinition", http: "get", path: "/companies/{companyId}/dynamic-apps/{appId}", pathIdentifier: "appId", query: [] },
-  { method: "listVersions", http: "get", path: "/companies/{companyId}/dynamic-apps/{appId}/versions", pathIdentifier: "appId", query: [] },
-  { method: "publishVersion", http: "post", path: "/companies/{companyId}/dynamic-apps/{appId}/versions/{versionId}/publish", pathIdentifier: "appId", query: [] },
-  { method: "listInstances", http: "get", path: "/companies/{companyId}/dynamic-apps/{appId}/instances", pathIdentifier: "appId", query: ["limit"] },
-  { method: "installInstance", http: "post", path: "/companies/{companyId}/dynamic-apps/{appId}/instances", pathIdentifier: "appId", query: [] },
-  { method: "listGrants", http: "get", path: "/companies/{companyId}/dynamic-apps/{appId}/versions/{versionId}/grants", pathIdentifier: "appId", query: [] },
-  { method: "grantCapability", http: "post", path: "/companies/{companyId}/dynamic-apps/{appId}/versions/{versionId}/grants", pathIdentifier: "appId", query: [] },
-  { method: "revokeCapability", http: "post", path: "/companies/{companyId}/dynamic-apps/{appId}/versions/{versionId}/grants/{capability}/revoke", pathIdentifier: "appId", query: [] },
-  { method: "archiveDefinition", http: "post", path: "/companies/{companyId}/dynamic-apps/{appId}/archive", pathIdentifier: "appId", query: [] },
+  { method: "listDefinitions", http: "get", path: "/companies/{companyId}/dynamic-apps", pathIdentifiers: [], query: ["limit", "cursor", "lifecycle"] },
+  { method: "getDefinition", http: "get", path: "/companies/{companyId}/dynamic-apps/{appId}", pathIdentifiers: ["appId"], query: [] },
+  { method: "listVersions", http: "get", path: "/companies/{companyId}/dynamic-apps/{appId}/versions", pathIdentifiers: ["appId"], query: [] },
+  { method: "publishVersion", http: "post", path: "/companies/{companyId}/dynamic-apps/{appId}/versions/{versionId}/publish", pathIdentifiers: ["appId", "versionId"], query: [] },
+  { method: "listInstances", http: "get", path: "/companies/{companyId}/dynamic-apps/{appId}/instances", pathIdentifiers: ["appId"], query: ["limit"] },
+  { method: "installInstance", http: "post", path: "/companies/{companyId}/dynamic-apps/{appId}/instances", pathIdentifiers: ["appId"], query: [] },
+  { method: "listGrants", http: "get", path: "/companies/{companyId}/dynamic-apps/{appId}/versions/{versionId}/grants", pathIdentifiers: ["appId", "versionId"], query: [] },
+  { method: "grantCapability", http: "post", path: "/companies/{companyId}/dynamic-apps/{appId}/versions/{versionId}/grants", pathIdentifiers: ["appId", "versionId"], query: [] },
+  { method: "revokeCapability", http: "post", path: "/companies/{companyId}/dynamic-apps/{appId}/versions/{versionId}/grants/{capability}/revoke", pathIdentifiers: ["appId", "versionId", "capability"], query: [] },
+  { method: "archiveDefinition", http: "post", path: "/companies/{companyId}/dynamic-apps/{appId}/archive", pathIdentifiers: ["appId"], query: [] },
 ] as const;
 
 export function dynamicModulesTransportOf(api: ApiClient | undefined): DynamicModulesTransport | undefined {

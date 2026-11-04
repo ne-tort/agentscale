@@ -138,7 +138,9 @@ def test_there_is_exactly_one_head_and_this_revision_is_on_its_chain() -> None:
 
     chain = chain_from_head()
     position = chain.index(REVISION_ID)
-    assert chain[position:] == (REVISION_ID, DOWN_REVISION_ID, "2026110315")
+    # The three-revision window at this revision's position, not "everything below it":
+    # the chain continues past ``2026110315`` and that tail is other revisions' business.
+    assert chain[position : position + 3] == (REVISION_ID, DOWN_REVISION_ID, "2026110315")
 
 
 def test_exactly_one_revision_declares_this_one_as_its_parent() -> None:

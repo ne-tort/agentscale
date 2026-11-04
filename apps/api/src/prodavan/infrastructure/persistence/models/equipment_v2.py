@@ -269,3 +269,115 @@ class EquipmentBudgetAllocationRow(Base):
     amount: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
     currency: Mapped[str] = mapped_column(String(3), nullable=False)
     status: Mapped[str] = mapped_column(String(24), nullable=False, default="reserved")
+
+
+class EquipmentCandidateGroupOfferRow(Base):
+    """Relational replacement for ``candidate_groups.offer_ids`` (design doc 3.1).
+
+    One row per ``(candidate_group_id, offer_id)`` pair, with ``ordinal`` keeping
+    the JSON array order.  The pair is the primary key, so a duplicate offer in
+    one group is unrepresentable; ``ordinal`` is uniquely deferred per group, so a
+    transactional reorder can exchange two values inside one statement.
+
+    Scope: every association row carries its own ``tenant_id`` (mandatory - the
+    table is created empty, so no legacy row needs a backfill) and a nullable
+    ``cabinet_id``/``project_id`` mirroring the group's scope.  The scoped
+    composite FKs of the design (``fk_ecg_offer_group_scope`` and the catalog
+    one) need ``NOT NULL`` scope on ``candidate_groups`` and ``catalog_offers``,
+    which neither table has yet, so this revision installs only the parent
+    references a plain constraint can prove; the rest is an open step.
+    """
+
+    __tablename__ = "equipment_v2_candidate_group_offers"
+    __table_args__ = (
+        UniqueConstraint(
+            "candidate_group_id",
+            "ordinal",
+            name="uq_ecg_offer_ordinal",
+            deferrable=True,
+            initially="DEFERRED",
+        ),
+        CheckConstraint("ordinal > 0", name="ck_ecg_offer_ordinal_positive"),
+        Index("ix_ecg_offer_by_offer", "tenant_id", "offer_id"),
+        Index("ix_ecg_offer_project", "project_id"),
+    )
+
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    project_id: Mapped[str | None] = mapped_column(
+        String(40), ForeignKey("projects.id", ondelete="RESTRICT"), nullable=True
+    )
+    cabinet_id: Mapped[str | None] = mapped_column(
+        String(40), ForeignKey("cabinet_instances.id", ondelete="RESTRICT"), nullable=True
+    )
+    candidate_group_id: Mapped[str] = mapped_column(
+        String(40),
+        ForeignKey("equipment_v2_candidate_groups.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    offer_id: Mapped[str] = mapped_column(
+        String(40),
+        ForeignKey("equipment_v2_catalog_offers.id", ondelete="RESTRICT"),
+        primary_key=True,
+    )
+    ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class EquipmentTenderCandidateGroupRow(Base):
+    """Relational replacement for ``tenders.candidate_group_ids`` (design doc 3.2).
+
+    ``(tender_id, candidate_group_id)`` is the primary key and ``ordinal`` is the
+    deferred per-tender order.  The same-request invariant of the design
+    (``tender.request_id`` equals the group's ``request_line.request_id``) is not
+    expressible as a plain FK and stays a trigger/service invariant; what the
+    database enforces here is pair uniqueness, ordering and the two parent
+    references with their delete semantics.
+    """
+
+    __tablename__ = "equipment_v2_tender_candidate_groups"
+    __table_args__ = (
+        UniqueConstraint(
+            "tender_id",
+            "ordinal",
+            name="uq_etender_group_ordinal",
+            deferrable=True,
+            initially="DEFERRED",
+        ),
+        CheckConstraint("ordinal > 0", name="ck_etender_group_ordinal_positive"),
+        Index("ix_etender_group_by_group", "tenant_id", "candidate_group_id"),
+        Index("ix_etender_group_project", "project_id"),
+    )
+
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    project_id: Mapped[str | None] = mapped_column(
+        String(40), ForeignKey("projects.id", ondelete="RESTRICT"), nullable=True
+    )
+    cabinet_id: Mapped[str | None] = mapped_column(
+        String(40), ForeignKey("cabinet_instances.id", ondelete="RESTRICT"), nullable=True
+    )
+    tender_id: Mapped[str] = mapped_column(
+        String(40),
+        ForeignKey("equipment_v2_tenders.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    candidate_group_id: Mapped[str] = mapped_column(
+        String(40),
+        ForeignKey("equipment_v2_candidate_groups.id", ondelete="RESTRICT"),
+        primary_key=True,
+    )
+    ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+#: Association tables revision ``2026110318`` creates, in creation order.
+EQUIPMENT_ANCHOR_ASSOCIATION_TABLES: tuple[str, ...] = (
+    "equipment_v2_candidate_group_offers",
+    "equipment_v2_tender_candidate_groups",
+)
+
+#: Tables revision ``2026110318`` adds ``project_id``/``cabinet_id`` to.
+EQUIPMENT_ANCHORED_TABLES: tuple[str, ...] = (
+    "equipment_v2_ingestion_runs",
+    "equipment_v2_requests",
+    "equipment_v2_tenders",
+)

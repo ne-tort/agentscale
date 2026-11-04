@@ -90,7 +90,11 @@ describe("project automations acceptance surface", () => {
     expect(html).toContain("не принимает trigger id");
     expect(html).toContain("точная причинная связь trigger → run API не возвращает");
     expect(html).toContain("Ingress — это отдельный поток");
-    expect(html).toContain("Скопировать одноразовый секрет");
+    // The one-time-secret controls belong to the post-create state only; a freshly
+    // mounted, still-loading screen has no secret to copy and must not offer one.
+    // That flow is pinned by "never renders the one-time webhook secret and offers
+    // a copy action", which creates the subscription first.
+    expect(html).not.toContain("Скопировать одноразовый секрет");
     expect(html).not.toContain("run succeeded");
     expect(html).not.toContain("delivery succeeded");
   });

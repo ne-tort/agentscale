@@ -78,12 +78,23 @@ function grantProblem(grant: unknown, now: number): string | undefined {
   return problem;
 }
 
+/**
+ * Structural problems in a manifest that make the whole request unusable.
+ *
+ * A request whose constraint bag names a key the capability does not enforce is
+ * *not* structural: it concerns exactly one capability and is recorded as that
+ * capability's `unsupported_constraint` denial, so the reason survives instead of
+ * collapsing into an unexplained empty boundary. Unknown capability names,
+ * missing reasons and malformed fields have no per-capability meaning and
+ * invalidate the whole manifest (fail closed).
+ */
 function validManifest(manifest: DeclarativeAppManifest): string | undefined {
   if (typeof manifest.appId !== "string" || manifest.appId.length === 0) return "invalid_manifest";
   if (typeof manifest.version !== "string" || manifest.version.length === 0) return "invalid_manifest";
   if (!Array.isArray(manifest.requestedCapabilities)) return "invalid_manifest";
   for (const request of manifest.requestedCapabilities) {
     const problem = requestProblem(request);
+    if (problem !== undefined && problem.startsWith("unsupported_constraint")) continue;
     if (problem !== undefined) return problem;
   }
   return undefined;

@@ -139,12 +139,12 @@ def read_field_aliases(path: Path, function: str) -> dict[str, tuple[str, ...]]:
 
 @dataclass(frozen=True, slots=True)
 class RouteBinding:
-    """One declared gateway method: how the client reaches it and what it sends."""
+    """One declared transport method: how the client reaches it and what it sends."""
 
     method: str
     http: str
     path: str
-    path_identifier: str | None
+    path_identifiers: tuple[str, ...]
     query: tuple[str, ...]
 
 
@@ -156,7 +156,7 @@ _BINDING_BLOCK_RE = re.compile(
 def dynamic_route_bindings(path: Path = DYNAMIC_CLIENT) -> list[RouteBinding]:
     """Parse ``DYNAMIC_ROUTE_BINDINGS`` — the client's own wire declaration.
 
-    The client states which HTTP method, path, path identifier and query keys each
+    The client states which HTTP method, path, path identifiers and query keys each
     transport method uses. Declaring it in the client (rather than in this test)
     keeps one source of truth: a screen action that changes shape has to change the
     declaration next to it.
@@ -178,15 +178,15 @@ def dynamic_route_bindings(path: Path = DYNAMIC_CLIENT) -> list[RouteBinding]:
         route = re.search(r'path:\s*"([^"]+)"', line)
         if not (method and http and route):
             raise AssertionError(f"malformed DYNAMIC_ROUTE_BINDINGS entry: {line.strip()}")
-        identifier = re.search(r"pathIdentifier:\s*(null|\"(\w+)\")", line)
+        identifiers = re.search(r"pathIdentifiers:\s*\[([^\]]*)\]", line)
         query = re.search(r"query:\s*\[([^\]]*)\]", line)
         bindings.append(
             RouteBinding(
                 method=method.group(1),
                 http=http.group(1).upper(),
                 path=route.group(1),
-                path_identifier=(
-                    identifier.group(2) if identifier and identifier.group(2) else None
+                path_identifiers=(
+                    tuple(re.findall(r'"(\w+)"', identifiers.group(1))) if identifiers else ()
                 ),
                 query=tuple(re.findall(r'"(\w+)"', query.group(1))) if query else (),
             )

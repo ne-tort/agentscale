@@ -14,7 +14,12 @@ const textPreview = (path: string, content: string): WorkspaceTextPreview => ({ 
 
 function makeService(overrides: Partial<WorkspaceService> = {}): WorkspaceService {
   return {
-    listEntries: vi.fn(async (_projectId, path = "") => ({ path, entries: [] })),
+    // The default listing is non-empty on purpose. The component renders an explicit
+    // "This folder is empty" state instead of the entry list when a directory has no
+    // entries, so a fixture returning ``[]`` makes every test that waits for
+    // ``.files-entry-list`` time out -- it was modelling an empty workspace while
+    // asserting on the list rendered for a populated one.
+    listEntries: vi.fn(async (_projectId, path = "") => ({ path, entries: [dir("docs"), file("notes.txt")] })),
     previewText: vi.fn(async (_projectId, path) => textPreview(path, "")),
     download: vi.fn(async (_projectId, path) => ({ blob: new Blob(), filename: path.split("/").at(-1) ?? path, path, size: 0 })),
     upload: vi.fn(async (_projectId, path, body) => ({ written: true, path, size: typeof body === "string" ? body.length : body.size })),
@@ -185,7 +190,9 @@ describe("Project Pod files URL and recovery behavior", () => {
   });
 
   it("uploads exact bytes, confirms the upload by readback, and downloads via the service", async () => {
-    const files = new Map<string, Blob>();
+    // Start with one existing file so the directory has entries: an empty listing
+    // renders the empty state instead of the entry list the test waits for.
+    const files = new Map<string, Blob>([["notes.txt", new Blob(["existing"])]]);
     const service = makeService({
       listEntries: vi.fn(async (_projectId, path = "") => ({ path, entries: [...files.keys()].map(file) })),
       upload: vi.fn(async (_projectId, path, body) => {
@@ -287,7 +294,10 @@ describe("Project Pod files URL and recovery behavior", () => {
   });
 
   it("creates a nested folder only after a successful mkdir response and matching listing readback", async () => {
-    const created = new Set<string>();
+    // A real folder is rarely empty, and the component renders an explicit empty
+    // state instead of the entry list when there are none -- so a fixture with an
+    // empty ``docs`` could never reach the list this test waits for. Seed one entry.
+    const created = new Set<string>(["docs/notes"]);
     const service = makeService({
       listEntries: vi.fn(async (_projectId, path = "") => ({
         path,
@@ -307,7 +317,11 @@ describe("Project Pod files URL and recovery behavior", () => {
     await act(async () => input?.closest("form")?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
     await waitFor(() => container.textContent?.includes("Created reference") ?? false);
     expect(service.createDirectory).toHaveBeenCalledWith("project-1", "docs/reference");
-    expect(container.querySelector(".files-entry-row")?.textContent).toContain("reference");
+    // The claim is that the refreshed readback shows the new folder, not that it is
+    // the first row: the component sorts entries, so position would pin the sort
+    // order rather than the behaviour under test.
+    const rowTexts = [...container.querySelectorAll(".files-entry-row")].map((row) => row.textContent ?? "");
+    expect(rowTexts.some((text) => text.includes("reference"))).toBe(true);
     expect(container.querySelector("[data-testid='location']")?.textContent).toBe("/projects/project-1/files?path=docs");
   });
 

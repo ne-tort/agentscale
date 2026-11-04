@@ -18,6 +18,16 @@ import type { StatusVariant } from "../../shared/ui";
 
 export const UNKNOWN_VALUE = "—";
 
+/**
+ * Shown when the API could not report a field at all.
+ *
+ * These are deliberately distinct from a status label: "not reported" is an absence of
+ * evidence, and presenting it as a value (or as a default kind) would tell the operator
+ * something the server never said.
+ */
+export const KIND_UNAVAILABLE = "Kind not reported by the server";
+export const ROUTES_UNAVAILABLE = "Route table not reported by the server";
+
 const STATUS_LABELS: Readonly<Record<DynamicModuleStatus, string>> = {
   draft: "Draft",
   validated: "Validated",
@@ -191,8 +201,13 @@ function asText(value: unknown): string | undefined {
  * Read-only descriptor of a stored manifest for the "manifest viewer". Invalid or
  * partial manifests degrade to placeholders instead of throwing: the screen renders
  * what the registry stored and never executes it.
+ *
+ * ``manifest`` is accepted as optional because the API reports a version whose
+ * manifest could not be read as absent, not as an empty object. The body already
+ * tolerated that (``asRecord(...) ?? {}``); the signature now says so, so callers do
+ * not have to pretend the value is present.
  */
-export function summarizeManifest(manifest: DynamicModuleManifest): ManifestSummary {
+export function summarizeManifest(manifest: DynamicModuleManifest | undefined): ManifestSummary {
   const root = asRecord(manifest) ?? {};
   const routes = Array.isArray(root.routes) ? root.routes : [];
   const capabilities = Array.isArray(root.requested_capabilities) ? root.requested_capabilities : [];
@@ -230,8 +245,15 @@ export function summarizeManifest(manifest: DynamicModuleManifest): ManifestSumm
   };
 }
 
-export function manifestText(manifest: DynamicModuleManifest): string {
-  return JSON.stringify(manifest, null, 2);
+/**
+ * Pretty-printed manifest for the viewer.
+ *
+ * ``undefined`` renders as an empty block: the API reports a version whose manifest
+ * could not be read as absent, and the viewer must show that absence rather than the
+ * string "undefined" or a fabricated object.
+ */
+export function manifestText(manifest: DynamicModuleManifest | undefined): string {
+  return manifest === undefined ? "" : JSON.stringify(manifest, null, 2);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -272,13 +294,28 @@ export function isRevocable(grant: DynamicModuleGrant, now = Date.now()): boolea
 export function sortGrants(grants: readonly DynamicModuleGrant[]): readonly DynamicModuleGrant[] {
   return [...grants].sort((left, right) =>
     left.capabilityId.localeCompare(right.capabilityId)
-    || left.capabilityVersion.localeCompare(right.capabilityVersion)
+    // A grant row does not echo the accepted capability version, so an absent value
+    // sorts first rather than being replaced with a fabricated default.
+    || (left.capabilityVersion ?? "").localeCompare(right.capabilityVersion ?? "")
     || (left.projectId ?? "").localeCompare(right.projectId ?? "")
     || left.id.localeCompare(right.id));
 }
 
 export function instanceScopeLabel(instance: DynamicModuleInstance): string {
-  return instance.projectId ? `Project ${instance.projectId}` : `Cabinet ${instance.cabinetId}`;
+  if (instance.projectId) return `Project ${instance.projectId}`;
+  // ``normalizeScope`` guarantees exactly one of the two for every accepted row;
+  // the fallback keeps a malformed DTO from rendering "Cabinet undefined".
+  return instance.cabinetId ? `Cabinet ${instance.cabinetId}` : "Unknown scope";
+}
+
+/**
+ * The definition row has no `kind` column, so the API cannot send one. The screen
+ * says so instead of labelling every app with a default it did not read.
+ */
+export function definitionKindLabel(kind: DynamicModuleDefinition["kind"]): string {
+  if (kind === "declarative-app") return "Declarative app";
+  if (kind === "isolated-code-plugin") return "Isolated code plugin";
+  return KIND_UNAVAILABLE;
 }
 
 export function sortInstances(instances: readonly DynamicModuleInstance[]): readonly DynamicModuleInstance[] {

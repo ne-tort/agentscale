@@ -176,7 +176,7 @@ function checkScreens(screens: unknown, issues: ValidationIssue[]): void {
  */
 export function validateManifestValue(
   value: unknown,
-  expected: { readonly appId: string; readonly kind: DynamicModuleKind },
+  expected: { readonly appId: string; readonly kind?: DynamicModuleKind },
 ): ManifestValidation {
   const issues: ValidationIssue[] = [];
   if (!isRecord(value)) {
@@ -255,7 +255,7 @@ export function validateManifestValue(
  */
 export function parseManifestText(
   text: string,
-  expected: { readonly appId: string; readonly kind: DynamicModuleKind },
+  expected: { readonly appId: string; readonly kind?: DynamicModuleKind },
 ): ManifestValidation {
   if (text.trim().length === 0) {
     return { ok: false, issues: [fail("manifest", "manifest JSON is required")] };
@@ -280,11 +280,16 @@ export function manifestDraftText(manifest: DynamicModuleManifest | undefined): 
  */
 export function starterManifestText(input: {
   readonly appId: string;
-  readonly kind: DynamicModuleKind;
+  /**
+   * Optional on purpose: the API reports ``kind`` as optional, because the definition
+   * row has no kind column and the server cannot always infer one. A starter template
+   * must not invent a kind it did not read, so the field is simply omitted.
+   */
+  readonly kind?: DynamicModuleKind;
   readonly version: string;
 }): string {
   const template = {
-    kind: input.kind,
+    ...(input.kind ? { kind: input.kind } : {}),
     schema_version: SCHEMA_VERSION,
     app_id: input.appId,
     version: input.version,
@@ -351,7 +356,7 @@ function checkReasonCode(value: string, errors: Record<string, string>, field = 
   }
 }
 
-export function validatePublishForm(values: PublishFormValues, expected: { appId: string; kind: DynamicModuleKind }): FieldErrors {
+export function validatePublishForm(values: PublishFormValues, expected: { appId: string; kind?: DynamicModuleKind }): FieldErrors {
   const errors: Record<string, string> = {};
   const manifest = parseManifestText(values.manifestText, expected);
   if (!manifest.ok) errors.manifest = validationMessage(manifest.issues);

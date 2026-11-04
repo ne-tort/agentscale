@@ -218,7 +218,9 @@ function ActionButton({ node, binding, values, inputs, gateway, context, enabled
     } finally { if (controller.current === abort) controller.current = null; setPending(false); }
   };
   return createElement("span", null,
-    createElement("button", { type: "button", disabled: !canRun, title: !binding || !allowed ? labels.missingBinding : undefined, onClick: () => { void invoke(); } }, display(node.props.label) === "-" ? node.id : display(node.props.label)),
+    // The manifest node id is the DOM address of the control (the input below keeps it too); dropping
+    // it left the rendered action button unaddressable and unable to be labelled by its node.
+    createElement("button", { id: node.id, type: "button", disabled: !canRun, title: !binding || !allowed ? labels.missingBinding : undefined, onClick: () => { void invoke(); } }, display(node.props.label) === "-" ? node.id : display(node.props.label)),
     pending ? createElement("button", { type: "button", onClick: () => controller.current?.abort(), "aria-label": labels.cancel }, labels.cancel) : null,
     !inputReady && binding ? createElement("span", { role: "alert" }, "Complete required inputs before continuing.") : null,
     message ? createElement("span", { role: "status" }, message) : null,

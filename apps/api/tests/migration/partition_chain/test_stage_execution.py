@@ -24,6 +24,7 @@ from prodavan.application.migration.m04e_definition_version.backfill import (
 )
 from prodavan.application.migration.partition_chain import (
     PARTITION_M04E_ARTIFACTS_UNAVAILABLE,
+    PARTITION_M04E_SERVER_REPOSITORY_SESSION_BOUND,
     PARTITION_M05_RUNTIME_CONTEXT_UNAVAILABLE,
     build_partition_chain,
 )
@@ -149,8 +150,11 @@ async def test_a_dry_run_against_an_incomplete_partition_does_not_read_evidence(
     )
 
     assert outcome.executable is False
-    assert outcome.blocked(PARTITION_M04E_ARTIFACTS_UNAVAILABLE)
+    # ``m04e_artifacts`` is derived since MIG-ARTIFACT-PORT-01, so the refusal now comes from
+    # a collaborator the partition genuinely cannot own.  The point of the assertion is
+    # unchanged: an incomplete plan is refused and names what is missing.
     assert outcome.blocked(PARTITION_M05_RUNTIME_CONTEXT_UNAVAILABLE)
+    assert outcome.blocked(PARTITION_M04E_SERVER_REPOSITORY_SESSION_BOUND)
     # Nothing was read: the refusal is about the object graph, not about stored evidence.
     assert source.reads == []
 
@@ -178,7 +182,11 @@ async def test_a_real_run_without_a_complete_chain_refuses_and_executes_nothing(
     assert outcome.executed is False
     assert outcome.executable is False
     assert outcome.blocker_codes[0] == PARTITION_EXECUTION_REFUSED
-    assert PARTITION_M04E_ARTIFACTS_UNAVAILABLE in outcome.blocker_codes
+    # The artifact port is derived, so the incomplete plan is now named by the collaborators
+    # the partition still cannot own; the assertion keeps its meaning ("the exact missing
+    # dependency is reported"), not its old subject.
+    assert PARTITION_M04E_SERVER_REPOSITORY_SESSION_BOUND in outcome.blocker_codes
+    assert PARTITION_M04E_ARTIFACTS_UNAVAILABLE not in outcome.blocker_codes
     assert outcome.details[0].startswith("nothing was executed")
     assert service.calls == []
     assert factory.calls == 0

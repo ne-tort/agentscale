@@ -23,8 +23,12 @@ from prodavan.application.migration.partition_chain import (
     PartitionAssemblyOverrides,
     build_partition_chain,
 )
+from prodavan.infrastructure.persistence.migration_artifact_store import (
+    SqlArtifactContentStore,
+)
 from .partition_fixtures import (
     GENERATION,
+    Inert,
     complete_overrides,
     key,
     runtime_context,
@@ -32,9 +36,17 @@ from .partition_fixtures import (
 
 #: Everything a partition cannot derive.  A plan that omits all of them must name all of
 #: them -- this tuple *is* the acceptance list for "the partition is still not runnable".
+#:
+#: ``PARTITION_M04E_ARTIFACTS_UNAVAILABLE`` is deliberately **absent** from this list.  It
+#: used to be here because no ``ArtifactContentPort`` implementation existed anywhere in
+#: ``src/prodavan``; since ``MIG-ARTIFACT-PORT-01`` the durable adapter
+#: (``infrastructure/persistence/migration_artifact_store.py``) is derivable from the
+#: session factory, so demanding that blocker would assert a limitation the code no longer
+#: has.  The derivation is covered instead by
+#: ``test_omitting_the_artifact_port_derives_it_instead_of_blocking`` below, so dropping the
+#: code here removes no coverage.
 UNDERIVABLE_CODES = (
     PARTITION_PRINCIPAL_RESOLVER_UNAVAILABLE,
-    PARTITION_M04E_ARTIFACTS_UNAVAILABLE,
     PARTITION_M04E_SERVER_REPOSITORY_SESSION_BOUND,
     PARTITION_M05_RUNTIME_CONTEXT_UNAVAILABLE,
     PARTITION_M05_UPSTREAM_EVIDENCE_UNAVAILABLE,
@@ -43,7 +55,7 @@ UNDERIVABLE_CODES = (
 )
 
 
-def test_a_partition_with_no_host_collaborators_names_all_seven() -> None:
+def test_a_partition_with_no_host_collaborators_names_every_underivable_one() -> None:
     plan = build_partition_chain(
         key=key(),
         session_factory=object(),
@@ -58,11 +70,52 @@ def test_a_partition_with_no_host_collaborators_names_all_seven() -> None:
     assert len(plan.blocker_codes) == len(UNDERIVABLE_CODES)
 
 
+def test_omitting_the_artifact_port_derives_it_instead_of_blocking() -> None:
+    """``m04e_artifacts`` is a *derived* dependency, not a missing collaborator.
+
+    This replaces the previous expectation that omitting the field yields
+    ``partition_artifact_content_port_unavailable``.  That expectation was right while no
+    implementation existed; it is wrong now, because the planner constructs the durable
+    adapter itself.  The replacement is stricter, not weaker: it requires a concrete
+    implementation of the contract to be wired in, and it still requires the artifact bound
+    to be a real bound.
+    """
+
+    plan = build_partition_chain(
+        key=key(),
+        session_factory=object(),
+        writer_generation=GENERATION,
+        **complete_overrides(m04e_artifacts=None).chain_kwargs(),
+    )
+
+    assert PARTITION_M04E_ARTIFACTS_UNAVAILABLE not in plan.blocker_codes
+    assert "m04e_artifacts" in plan.built
+    assert isinstance(plan.dependencies.m04e_artifacts, SqlArtifactContentStore)
+    assert plan.dependencies.m04e_artifacts.max_object_bytes >= 1
+
+
+def test_an_explicit_artifact_port_override_wins_over_the_derived_one() -> None:
+    """A host that already holds a reviewed store keeps it -- the planner adds no second one."""
+
+    supplied = Inert()
+    plan = build_partition_chain(
+        key=key(),
+        session_factory=object(),
+        writer_generation=GENERATION,
+        **complete_overrides(m04e_artifacts=supplied).chain_kwargs(),
+    )
+
+    assert plan.dependencies.m04e_artifacts is supplied
+    assert "m04e_artifacts" in plan.built
+
+
 @pytest.mark.parametrize(
     ("field", "expected_code"),
     (
         ("principal_resolver", PARTITION_PRINCIPAL_RESOLVER_UNAVAILABLE),
-        ("m04e_artifacts", PARTITION_M04E_ARTIFACTS_UNAVAILABLE),
+        # ``m04e_artifacts`` is intentionally not here: it is derived (see
+        # ``test_omitting_the_artifact_port_derives_it_instead_of_blocking``).  Leaving the
+        # case in would require the planner to lose the port it now builds.
         ("m04e_server_repository", PARTITION_M04E_SERVER_REPOSITORY_SESSION_BOUND),
         ("m05_runtime_context", PARTITION_M05_RUNTIME_CONTEXT_UNAVAILABLE),
         ("m05_upstream_evidence", PARTITION_M05_UPSTREAM_EVIDENCE_UNAVAILABLE),
@@ -91,7 +144,7 @@ def test_omitting_one_collaborator_yields_exactly_its_code(field: str, expected_
     ("field", "expected_dependency"),
     (
         ("principal_resolver", {"principal_resolver"}),
-        ("m04e_artifacts", {"m04e_artifacts"}),
+        # ``m04e_artifacts`` is derived, so omitting it names no dependency (see above).
         ("m04e_server_repository", {"m04e_server_repository"}),
         ("m05_runtime_context", {"m05_runtime_context"}),
         ("m05_upstream_evidence", {"m05_upstream_evidence"}),

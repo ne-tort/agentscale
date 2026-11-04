@@ -494,6 +494,23 @@ def _integration_stub_runtime(request: pytest.FixtureRequest, monkeypatch: pytes
     monkeypatch.setattr(settings, "pod_runtime_mode", "stub")
     monkeypatch.setattr(settings, "pod_agent_runtime_enabled", False)
     monkeypatch.setattr(settings, "agent_inprocess_adapters_enabled", True)
+    # Pod launch mints a scoped bridge JWT, and ``mint_pod_bridge_token`` is
+    # fail-closed on a missing secret (``pod_identity_bridge_strict``). That
+    # invariant belongs to production and is covered by
+    # ``tests/unit/test_tenant_infra_bridge.py``; the integration layer has no
+    # deployment to take the secret from, so it configures one exactly as a
+    # deployment would. Setting it here (rather than per test) keeps every
+    # launch/pod-lifecycle test from failing on configuration instead of code.
+    monkeypatch.setenv("POD_IDENTITY_BRIDGE_SECRET", "integration-bridge-secret")
+    monkeypatch.setattr(settings, "pod_identity_bridge_secret", "integration-bridge-secret")
+    # Bridge-token *revocation* keeps its generation counter in Redis, and strict
+    # mode turns an unavailable cache into 503 POD_BRIDGE_REVOCATION_FAILED so a
+    # pause cannot leave a revoked token valid. That is the production contract
+    # and it stays covered by tests/unit. The integration layer runs against a bare
+    # PostgreSQL (no Redis, no k8s — same shape as the nightly CI job), so it uses
+    # the documented dev/test path: non-strict mode mirrors the generation into the
+    # in-process ``_GEN_FALLBACK``, which is enough for a single-process suite.
+    monkeypatch.setattr(settings, "pod_identity_bridge_strict", False)
 
 
 @pytest.fixture(autouse=True)

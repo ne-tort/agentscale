@@ -329,7 +329,9 @@ class _ModuleIndex:
     functions: dict[str, ast.AST] = field(default_factory=dict)
     classes: dict[str, dict[str, ast.AST]] = field(default_factory=dict)
     imports: dict[str, tuple[str, str]] = field(default_factory=dict)
-
+    #: ``name -> absolute module`` for a package that re-exports through a
+    #: module-level ``_LAZY`` table (``{"X": (".sub", "X")}``).
+    lazy: dict[str, str] = field(default_factory=dict)
 
 class SourceIndex:
     """Parsed ``src/prodavan`` tree, indexed for receiver-aware call following."""
@@ -343,7 +345,7 @@ class SourceIndex:
                 tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
             except SyntaxError:  # pragma: no cover - a broken file fails elsewhere
                 continue
-            self._modules[module] = self._index(tree)
+            self._modules[module] = self._index(tree, module)
 
     def _module_name(self, path: Path) -> str:
         relative = path.relative_to(self.root).with_suffix("")
@@ -352,7 +354,7 @@ class SourceIndex:
             parts.pop()
         return ".".join(["prodavan", *parts])
 
-    def _index(self, tree: ast.Module) -> _ModuleIndex:
+    def _index(self, tree: ast.Module, module: str) -> _ModuleIndex:
         index = _ModuleIndex()
         for node in tree.body:
             if isinstance(node, ast.ClassDef):
@@ -363,20 +365,25 @@ class SourceIndex:
                 }
             elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 index.functions[node.name] = node
-            elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+            elif isinstance(node, ast.ImportFrom):
+                if not node.module or node.level != 0:
+                    continue
                 for alias in node.names:
                     index.imports[alias.asname or alias.name] = (node.module, alias.name)
         # Package ``__init__`` modules in this codebase re-export their submodules
-        # from a lazy ``__getattr__`` (``if name == "X": from ...sub import X``),
-        # so the imports sit *inside* a function body. Without reading those, a
-        # handler's ``ProjectQuery(...).get(...)`` would look like an unknown
-        # receiver and every such route would be reported unguarded — the exact
-        # false positive that makes a guard audit worthless.
+        # lazily — either from an ``if name == "X": from ...sub import X`` chain
+        # or from a module-level ``_LAZY`` table of relative paths. Without
+        # reading both, a handler's ``ProjectQuery(...).get(...)`` would look
+        # like an unknown receiver and every such route would be reported
+        # unguarded: exactly the false positive that makes a guard audit useless.
         for node in ast.walk(tree):
             if not isinstance(node, ast.ImportFrom) or not node.module or node.level != 0:
                 continue
             for alias in node.names:
                 index.imports.setdefault(alias.asname or alias.name, (node.module, alias.name))
+        for name, target in _lazy_reexports(tree).items():
+            if target.startswith("."):
+                index.lazy[name] = _qualify(module, target)
         return index
 
     # -- lookups ------------------------------------------------------- #
@@ -420,9 +427,14 @@ class SourceIndex:
             if owner_name in entry.classes:
                 return owner_module, owner_name
             forward = entry.imports.get(owner_name)
-            if forward is None:
-                return None
-            current = forward
+            if forward is not None:
+                current = forward
+                continue
+            lazy_module = entry.lazy.get(owner_name)
+            if lazy_module is not None:
+                current = (lazy_module, owner_name)
+                continue
+            return None
         return None
 
     # -- guard search -------------------------------------------------- #
@@ -444,10 +456,11 @@ class SourceIndex:
         # ``"Service.method"`` names the class the body runs in, so ``self.other()``
         # can be resolved to ``Service.other`` instead of being dropped.
         owner = qualname.split(".", 1)[0] if "." in qualname else None
+        locals_ = _local_class_bindings(node)
         for called, receiver in _callees(node):
             if called in TENANT_GUARDS:
                 return called
-            target = self._callee_target(module, called, receiver, owner)
+            target = self._callee_target(module, called, receiver, owner, locals_)
             if target is None:
                 continue
             target_module, target_name, target_node = target
@@ -461,7 +474,12 @@ class SourceIndex:
         return None
 
     def _callee_target(
-        self, module: str, called: str, receiver: str | None, owner: str | None
+        self,
+        module: str,
+        called: str,
+        receiver: str | None,
+        owner: str | None,
+        locals_: dict[str, str] | None = None,
     ) -> tuple[str, str, ast.AST] | None:
         """Where ``called`` is defined, as ``(module, qualified name, node)``.
 
@@ -474,7 +492,8 @@ class SourceIndex:
             if receiver == "self" and owner is not None:
                 class_module, class_name = module, owner
             else:
-                resolved = self.resolve_class(module, receiver)
+                name = (locals_ or {}).get(receiver, receiver)
+                resolved = self.resolve_class(module, name)
                 if resolved is None:
                     return None
                 class_module, class_name = resolved
@@ -535,6 +554,83 @@ def _takes_identity(node: ast.AST) -> bool:
         if name in _IDENTITY_PARAMETERS or name.endswith(_IDENTITY_SUFFIXES):
             return True
     return False
+
+
+def _qualify(package: str, dotted: str) -> str:
+    """Resolve a relative module path against the package that declares it."""
+
+    level = len(dotted) - len(dotted.lstrip("."))
+    rest = dotted[level:]
+    parts = package.split(".")
+    if level > 1:
+        parts = parts[: len(parts) - (level - 1)]
+    if rest:
+        parts.extend(rest.split("."))
+    return ".".join(parts)
+
+
+def _lazy_reexports(tree: ast.Module) -> dict[str, str]:
+    """``name -> relative module`` from a module-level ``_LAZY = {"x": (".sub", "x")}``."""
+
+    out: dict[str, str] = {}
+    for node in tree.body:
+        if not isinstance(node, (ast.Assign, ast.AnnAssign)):
+            continue
+        targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+        names = [t.id for t in targets if isinstance(t, ast.Name)]
+        if not any(t.startswith("_LAZY") for t in names):
+            continue
+        value = node.value
+        if not isinstance(value, ast.Dict):
+            continue
+        for key, entry in zip(value.keys, value.values):
+            if not isinstance(key, ast.Constant) or not isinstance(key.value, str):
+                continue
+            if not isinstance(entry, ast.Tuple) or not entry.elts:
+                continue
+            first = entry.elts[0]
+            if isinstance(first, ast.Constant) and isinstance(first.value, str):
+                out[key.value] = first.value
+    return out
+
+
+def _local_class_bindings(node: ast.AST) -> dict[str, str]:
+    """``name -> class`` for ``svc = SomeService(...)`` style locals in a body.
+
+    The application layer of this repository builds a service and calls it in the
+    same breath (``svc = FooService(session); await svc.do(...)``), so without
+    this map the second call has an unknown receiver and a delegating guard one
+    hop away is invisible. Annotations are read too (``access: ProjectAccessPolicy``).
+    """
+
+    bindings: dict[str, str] = {}
+    for sub in ast.walk(node):
+        if isinstance(sub, ast.Assign):
+            names = [t.id for t in sub.targets if isinstance(t, ast.Name)]
+            class_name = _constructed_class(sub.value)
+            if class_name is None:
+                continue
+            for name in names:
+                bindings[name] = class_name
+        elif isinstance(sub, ast.AnnAssign) and isinstance(sub.target, ast.Name):
+            class_name = _constructed_class(sub.value) or _annotation_class(sub.annotation)
+            if class_name is not None:
+                bindings[sub.target.id] = class_name
+    return bindings
+
+
+def _constructed_class(value: ast.AST | None) -> str | None:
+    """``SomeService(...)`` -> ``"SomeService"``; anything else -> ``None``."""
+
+    if isinstance(value, ast.Call) and isinstance(value.func, ast.Name):
+        return value.func.id
+    return None
+
+
+def _annotation_class(annotation: ast.AST | None) -> str | None:
+    if isinstance(annotation, ast.Name):
+        return annotation.id
+    return None
 
 
 __all__ = [

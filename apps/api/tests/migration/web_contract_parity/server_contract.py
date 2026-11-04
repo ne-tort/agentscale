@@ -417,15 +417,21 @@ def server_errors() -> ServerErrors:
     )
     statuses: set[int] = {status for status, _ in _STATUS_AND_TITLE.values()}
 
-    # ``dynamic_apps`` raises ``_error(code, status, detail)``; read the literal status
-    # from every raise site instead of assuming a mapping exists.
+    # The dynamic-app and content surfaces raise statuses inline at each site instead of
+    # going through a code->status table, so the literal at every raise site is the only
+    # honest source. Whole packages are scanned: a status raised from one module of a
+    # package is still answerable through the router that package backs.
     statuses |= _literal_statuses(
-        API_SRC / "application" / "dynamic_apps_definition" / "crud_service.py"
+        API_SRC / "application" / "dynamic_apps_definition",
+        API_SRC / "api" / "v1" / "dynamic_apps.py",
     )
-    # ``content`` raises ``AppError(code=..., status=N, ...)`` inline.
-    statuses |= _literal_statuses(API_SRC / "application" / "content" / "asset_service.py")
-    statuses |= _literal_statuses(API_SRC / "api" / "v1" / "content.py")
-    statuses |= _literal_statuses(API_SRC / "application" / "content" / "alias_service.py")
+    statuses |= _literal_statuses(
+        API_SRC / "application" / "content",
+        API_SRC / "application" / "resources",
+        API_SRC / "api" / "v1" / "content.py",
+        API_SRC / "api" / "v1" / "resources.py",
+        API_SRC / "domain" / "errors.py",
+    )
 
     return ServerErrors(
         dynamic_codes=frozenset(_enum_values(DynamicAppErrorCode)),
@@ -435,24 +441,37 @@ def server_errors() -> ServerErrors:
     )
 
 
-def _literal_statuses(path: Path) -> set[int]:
-    """Every integer literal passed as ``status=`` in a module (AST, not regex)."""
-    if not path.exists():
-        return set()
-    tree = ast.parse(path.read_text(encoding="utf-8"))
+def _literal_statuses(*targets: Path) -> set[int]:
+    """Every integer literal passed as an HTTP status in a module or package (AST)."""
+    files: list[Path] = []
+    for target in targets:
+        if target.is_dir():
+            files.extend(sorted(target.rglob("*.py")))
+        elif target.exists():
+            files.append(target)
     found: set[int] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Call):
+    for path in files:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
             for keyword in node.keywords:
-                if keyword.arg == "status" and isinstance(keyword.value, ast.Constant):
-                    if isinstance(keyword.value.value, int):
-                        found.add(keyword.value.value)
+                if keyword.arg == "status" and _is_status(keyword.value):
+                    found.add(int(keyword.value.value))
             # ``_error(DynamicAppErrorCode.X, 404, "...")`` — positional status.
             for argument in node.args[1:2]:
-                if isinstance(argument, ast.Constant) and isinstance(argument.value, int):
-                    if 400 <= int(argument.value) <= 599:
-                        found.add(int(argument.value))
+                if _is_status(argument):
+                    found.add(int(argument.value))
     return found
+
+
+def _is_status(node: ast.expr) -> bool:
+    return (
+        isinstance(node, ast.Constant)
+        and isinstance(node.value, int)
+        and not isinstance(node.value, bool)
+        and 400 <= int(node.value) <= 599
+    )
 
 
 __all__ = [

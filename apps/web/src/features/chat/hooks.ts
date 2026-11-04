@@ -227,10 +227,17 @@ export function useChatWorkspace(options: UseChatWorkspaceOptions) {
       }
       return payload;
     });
-    draftSaveChainRef.current = write.catch((error: unknown) => {
-      pendingDraftRef.current = { text, sessionId: targetSessionId, revision: scopeRevision };
-      throw error;
-    });
+    // The serialization latch must never stay rejected. Callers see the failure
+    // through the returned `write`; the ref is only a sequencing chain, and a
+    // rejected promise parked there has no attached handler until the *next*
+    // save begins — the browser reports it as an unhandled rejection meanwhile.
+    // Keep the latch settled-safe and let `write` carry the error to its caller.
+    draftSaveChainRef.current = write.then(
+      () => undefined,
+      (error: unknown) => {
+        pendingDraftRef.current = { text, sessionId: targetSessionId, revision: scopeRevision };
+      },
+    );
     return write;
   }, [loadSidebar, projectId, service]);
 
