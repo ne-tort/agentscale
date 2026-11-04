@@ -36,6 +36,13 @@ REVISION_FILE = VERSIONS / "2026110315_m04e_ledger.py"
 REVISION_ID = "2026110315"
 DOWN_REVISION_ID = "2026110314"
 
+#: The revision that landed on top of this one: ``MIG-DDL-CUTOVER-01`` creates the M06
+#: cutover ledger and its live source tail and re-applies the RLS registry in the same
+#: step. It is recorded here (rather than discovered) so "this revision is not forked
+#: and nothing is created after the last policy pass" stays an assertion about a known
+#: successor instead of a tautology over whatever the tree happens to contain.
+SUCCESSOR_REVISION_ID = "2026110316"
+
 MAPPING_TABLE = "m04e_definition_version_mappings"
 QUARANTINE_TABLE = "m04e_definition_version_quarantine"
 CHECKPOINT_TABLE = "m04e_definition_version_checkpoints"
@@ -545,6 +552,7 @@ __all__ = [
     "ROW_FACTORIES",
     "RecordedOps",
     "SPEC_TABLES",
+    "SUCCESSOR_REVISION_ID",
     "audit_row",
     "chain_from_head",
     "checkpoint_row",

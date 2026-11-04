@@ -139,6 +139,14 @@ from prodavan.infrastructure.persistence.models.m04e_ledger import (
     M04EDefinitionVersionMappingRow,
     M04EDefinitionVersionQuarantineRow,
 )
+# MIG-DDL-CUTOVER-01: the two tables SqlCutoverRepository fails closed without —
+# the append-only partition cutover ledger (state CAS + command idempotency) and the
+# live legacy source tail. Registered so they are part of Base.metadata and of the RLS
+# coverage report; importing them enables no writer and no positive canonical write.
+from prodavan.infrastructure.persistence.models.m06_cutover_evidence import (
+    M06PartitionCutoverEvidenceRow,
+    M06PartitionCutoverSourceTailRow,
+)
 from prodavan.infrastructure.persistence.models.dynamic_apps import (
     AppDefinitionRow,
     AppGrantRow,
@@ -224,6 +232,8 @@ __all__ = [
     "M04EDefinitionVersionCheckpointRow",
     "M04EDefinitionVersionMappingRow",
     "M04EDefinitionVersionQuarantineRow",
+    "M06PartitionCutoverEvidenceRow",
+    "M06PartitionCutoverSourceTailRow",
     "M05PluginInstancePromotionEvidenceRow",
     "PluginInstanceRegistryLinkRow",
     "PluginInstanceRegistryRow",

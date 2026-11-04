@@ -558,6 +558,37 @@ _CANONICAL: tuple[TablePolicySpec, ...] = (
         tenant=ScopedColumn(column="tenant_id"),
         notes="Immutable promotion record; never implies a positive writer.",
     ),
+    # --- M06 partition cutover ledger + live source tail (2026110316) ---
+    # MIG-DDL-CUTOVER-01 creates these two tables and re-applies this registry in the
+    # same revision, so no table here is left for "the next pass" (the defect
+    # 2026110309/2026110311 shipped twice, see test_policy_install_order).
+    TablePolicySpec(
+        table="m06_partition_cutover_evidence",
+        owner_revision="2026110316",
+        tenant=ScopedColumn(column="tenant_id"),
+        trusted_command="ALL",
+        notes=(
+            "Append-only cutover ledger: one row per partition transition carrying the "
+            "PartitionCutover snapshot and its PromotionEvidence record. The trusted "
+            "migration writer needs SELECT and INSERT, so the trusted policy is FOR ALL; "
+            "UPDATE/DELETE are denied by the revision's append-only trigger, not by the "
+            "policy. Tenant identity is the only RLS anchor - the partition is "
+            "(tenant_id, app_definition_id) and the state CAS is a unique key, not a "
+            "policy predicate."
+        ),
+    ),
+    TablePolicySpec(
+        table="m06_partition_cutover_source_tail",
+        owner_revision="2026110316",
+        tenant=ScopedColumn(column="tenant_id"),
+        trusted_command="ALL",
+        notes=(
+            "Live legacy source tail per partition, read by the cutover CAS and written "
+            "by the legacy writer, which advances it in place: the trusted writer needs "
+            "UPDATE as well, hence FOR ALL. A missing tail row is what makes a "
+            "final-delta transition refuse, so no policy ever synthesises one."
+        ),
+    ),
     # --- Runtime revisions / materialization (2026110306) ---
     TablePolicySpec(
         table="project_runtime_revisions",

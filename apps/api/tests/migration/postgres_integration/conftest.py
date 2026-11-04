@@ -1,9 +1,10 @@
 """PostgreSQL integration harness for the migration concurrency suite (MIG-INT-PG-01).
 
-This package is authored under the migration **verification freeze**: nothing
-here is executed while the freeze is in force, and importing this module must
-therefore never open a connection, run a migration or touch a database.  Every
-side effect lives inside a fixture, so collection is inert.
+The verification freeze this package was authored under is **lifted**: the suite
+runs against a live PostgreSQL and is expected to be green (see the run result in
+``README.md``).  Collection still stays inert — importing this module opens no
+connection, runs no migration and touches no database; every side effect lives
+inside a fixture.
 
 Design of the harness
 ---------------------
@@ -47,7 +48,7 @@ from dataclasses import dataclass
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import Row, text
+from sqlalchemy import Row, TextClause, text
 from sqlalchemy.engine import Connection, make_url
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import (
@@ -60,6 +61,16 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.pool import NullPool
 
 from prodavan.infrastructure.persistence.models import Base
+
+
+def _statement(sql: str | TextClause) -> TextClause:
+    """Normalise a raw string or an already prepared clause to a ``TextClause``.
+
+    ``text()`` cannot be applied twice, so the harness accepts both forms rather
+    than forcing every test module to inline its SQL as a literal.
+    """
+    return sql if isinstance(sql, TextClause) else text(sql)
+
 
 TEST_DATABASE_URL_ENV = "PRODAVAN_TEST_DATABASE_URL"
 """The one accepted source of the PostgreSQL DSN."""
@@ -208,13 +219,15 @@ class SchemaHarness:
     admin_engine: AsyncEngine
 
     # -------------------------------------------------------------- reading
-    async def scalar(self, sql: str, params: dict | None = None):
+    async def scalar(self, sql: str | TextClause, params: dict | None = None):
         async with self.engine.connect() as conn:
-            return await conn.scalar(text(sql), params or {})
+            return await conn.scalar(_statement(sql), params or {})
 
-    async def rows(self, sql: str, params: dict | None = None) -> list[Row]:
+    async def rows(
+        self, sql: str | TextClause, params: dict | None = None
+    ) -> list[Row]:
         async with self.engine.connect() as conn:
-            return list((await conn.execute(text(sql), params or {})).all())
+            return list((await conn.execute(_statement(sql), params or {})).all())
 
     async def count(self, table: str) -> int:
         """Row count of one table in this schema (table name is not user input)."""
@@ -225,16 +238,25 @@ class SchemaHarness:
         return {table: await self.count(table) for table in tables}
 
     # -------------------------------------------------------------- writing
-    async def execute(self, sql: str, params: dict | None = None) -> None:
-        """Run one statement and commit it immediately."""
-        async with self.engine.begin() as conn:
-            await conn.execute(text(sql), params or {})
+    async def execute(self, sql: str | TextClause, params: dict | None = None) -> None:
+        """Run one statement and commit it immediately.
 
-    async def execute_all(self, statements: list[tuple[str, dict | None]]) -> None:
+        Both a raw ``str`` and a prepared :class:`~sqlalchemy.TextClause` are
+        accepted: several modules keep their SQL in module-level ``text()``
+        constants (``REVOKE_GRANT``, ``CAS_UPDATE``), and re-wrapping an already
+        prepared clause with ``text()`` raises ``TypeError`` before the statement
+        ever reaches the database.
+        """
+        async with self.engine.begin() as conn:
+            await conn.execute(_statement(sql), params or {})
+
+    async def execute_all(
+        self, statements: list[tuple[str | TextClause, dict | None]]
+    ) -> None:
         """Run several statements in **one** transaction, in order."""
         async with self.engine.begin() as conn:
             for sql, params in statements:
-                await conn.execute(text(sql), params or {})
+                await conn.execute(_statement(sql), params or {})
 
     @contextlib.asynccontextmanager
     async def transaction(
@@ -411,8 +433,7 @@ __all__ = [
     "ASYNC_PG_DRIVER",
     "MIGRATION_DATABASE_URL_ENV",
     "SCHEMA_PREFIX",
-    "SchemaHarness",
-    "TEST_DATABASE_URL_ENV",
+    "SchemaHarness",    "TEST_DATABASE_URL_ENV",
     "database_url_from_env",
     "engine_for",
     "migration_database_url",

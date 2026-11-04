@@ -9,6 +9,9 @@ from prodavan.core.infra.gotenberg_manager import GotenbergManager
 from prodavan.core.infra.k8s_manager import k8s_manager_from_settings
 from prodavan.core.infra.kafka_manager import KafkaManager
 from prodavan.core.infra.metrics_consumer_resource import MetricsConsumerResource
+from prodavan.core.infra.migration_chain_resource import (
+    migration_chain_resource_from_settings,
+)
 from prodavan.core.infra.mongo_manager import MongoManager
 from prodavan.core.infra.opensearch_manager import OpenSearchManager
 from prodavan.core.infra.platform_bootstrap_resource import PlatformBootstrapResource
@@ -47,6 +50,16 @@ def build_lifespan_manager() -> LifespanManager:
     # without a bespoke subclass here.
     manager = LifespanManager()
     manager.register(DatabaseEngineResource())
+    # Migration chain host (MIG-COMPOSITION-WIRING-01): assembles M04 -> M04E ->
+    # M05 -> M06 -> cutover from the process session factory and publishes its
+    # diagnostics (nothing is started — no backfill, no cutover). Inert unless
+    # MIGRATION_CHAIN_ENABLED=true: with the flag off nothing is composed and the
+    # resource answers health()=None. Registered right after the DB resource
+    # because every stage's ports open their own sessions from the process
+    # factory, so storage must be started first (and stopped last).
+    # A composition error never crashes the process: the resource logs a code and
+    # starts with health()=False.
+    manager.register(migration_chain_resource_from_settings())
     # Durable Resource API apply port (MIG-RES-APPLYPORT-01): publishes the
     # AtomicMaterializationApplyPort through
     # application.resources.adapters.factory.install_materialization_apply_port and

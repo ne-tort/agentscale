@@ -644,10 +644,33 @@ def test_chain_is_not_wired_into_the_process() -> None:
             f"{service} is now wired into the process layer ({hits}); "
             "re-review docs/08-migration/integration-seams-review.md §7 and shrink the gap list"
         )
-    # Witness of the reviewed state: nothing in the wiring module knows about the chain.
-    assert "migration" not in _read("core/wiring.py").lower(), (
-        "core/wiring.py now mentions migration; re-review review §7 before deleting this witness"
+    # Witness of the reviewed state. Before MIG-COMPOSITION-WIRING-01 this test asserted
+    # that ``core/wiring.py`` never mentions migration at all — that was true, and it was
+    # exactly the defect: the chain could be neither assembled nor diagnosed in a
+    # delivered process. The task makes the chain reachable *without* making it run, so
+    # the witness now pins the three properties that keep it safe, each of which fails if
+    # the old defect comes back in a new form:
+    #
+    # 1. wiring registers the diagnostic resource (and nothing else of the chain);
+    # 2. wiring never assembles the chain itself — that would run at registration time,
+    #    before the DB resource starts, and regardless of the flag;
+    # 3. the resource instantiates no chain service: it only calls the reviewed
+    #    composition root, which builds adapters and starts nothing.
+    wiring = _read("core/wiring.py")
+    assert "migration_chain_resource_from_settings" in wiring
+    assert "assemble_migration_chain" not in wiring, (
+        "core/wiring.py must not assemble the chain directly: registration happens before "
+        "the engine starts and ignores MIGRATION_CHAIN_ENABLED"
     )
+    resource_module = _read("core/infra/migration_chain_resource.py")
+    assert "assemble_migration_chain(" in resource_module, (
+        "the resource must compose through the reviewed composition root"
+    )
+    for service in PROCESS_WIRING_GAPS:
+        assert f"{service}(" not in resource_module, (
+            f"{service} is instantiated in the lifespan resource; the resource may only "
+            "assemble through the composition root, never execute a stage"
+        )
 
 
 def test_m04_application_adapter_still_violates_the_resolve_scope_contract() -> None:

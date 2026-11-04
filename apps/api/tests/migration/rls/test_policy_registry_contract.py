@@ -98,6 +98,11 @@ WAVE_TABLES = {
         "m04e_definition_version_checkpoints",
         "m04e_definition_version_audit",
     ),
+    # MIG-DDL-CUTOVER-01: the partition cutover ledger and its live source tail.
+    "2026110316": (
+        "m06_partition_cutover_evidence",
+        "m06_partition_cutover_source_tail",
+    ),
 }
 
 REVISION_PATH = (

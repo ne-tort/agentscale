@@ -122,9 +122,13 @@ async def seed_scope(harness) -> SeedScope:
         )
         await conn.execute(
             text(
+                # ``base_template`` is NOT NULL with a *client-side* default on the
+                # ORM column (``CabinetsInstanceRow.base_template``), so raw SQL
+                # must supply it: PostgreSQL has no server_default to fall back on.
                 "INSERT INTO cabinet_instances "
-                "(id, name, schema_name, owner_scope, company_grant_scope, status) "
-                "VALUES (:id, :name, :schema, 'platform', 'all', 'active')"
+                "(id, name, schema_name, owner_scope, base_template, "
+                " company_grant_scope, status) "
+                "VALUES (:id, :name, :schema, 'platform', 'base', 'all', 'active')"
             ),
             {
                 "id": scope.cabinet_id,
@@ -193,20 +197,28 @@ async def seed_run(
     run_id: str,
     status: str = "queued",
 ) -> str:
-    """Insert one ``agent_runs`` row (the lease table's FK parent)."""
+    """Insert one ``agent_runs`` row (the lease table's FK parent).
+
+    ``attempt`` is supplied explicitly: it is ``NOT NULL`` on the ORM column with
+    only a *Python-side* ``default=1``, so a raw ``INSERT`` that omits it is
+    rejected by PostgreSQL (SQLite never noticed, because the suite used to run
+    through the ORM).
+    """
     async with harness.engine.begin() as conn:
         await conn.execute(
             text(
                 "INSERT INTO agent_runs "
                 "(id, project_id, session_id, requested_by_employee_id, idempotency_key, "
-                " status, input_payload) "
-                "VALUES (:id, :project, NULL, NULL, :key, :status, CAST(:payload AS jsonb))"
+                " status, attempt, input_payload) "
+                "VALUES (:id, :project, NULL, NULL, :key, :status, :attempt, "
+                " CAST(:payload AS jsonb))"
             ),
             {
                 "id": run_id,
                 "project": scope.project_id,
                 "key": f"seed-{run_id}",
                 "status": status,
+                "attempt": 1,
                 "payload": _jsonb({}),
             },
         )

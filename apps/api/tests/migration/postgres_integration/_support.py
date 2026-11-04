@@ -23,6 +23,7 @@ import asyncio
 import contextlib
 import hashlib
 import json
+import re
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any, TypeVar
 
@@ -196,16 +197,43 @@ def sha256_of_text(value: str) -> str:
     return f"sha256:{hashlib.sha256(value.encode('utf-8')).hexdigest()}"
 
 
+def _cause_chain(error: Exception, *, limit: int = 8) -> list[Exception]:
+    """The exception followed by its ``__cause__``/``__context__`` chain.
+
+    SQLAlchemy's asyncpg dialect rewraps the driver error twice
+    (``asyncpg.exceptions.ForeignKeyViolationError`` ->
+    ``AsyncAdapt_asyncpg_dbapi.IntegrityError`` -> ``sqlalchemy.exc.IntegrityError``),
+    and only the *innermost* object carries ``constraint_name`` and, for some
+    error classes, ``sqlstate``.  Reading only ``error.orig`` therefore loses the
+    constraint name, which is why the chain is walked here.
+    """
+    chain: list[Exception] = []
+    seen: set[int] = set()
+    node: BaseException | None = error
+    while isinstance(node, Exception) and len(chain) < limit and id(node) not in seen:
+        seen.add(id(node))
+        chain.append(node)
+        node = node.__cause__ or node.__context__
+    return chain
+
+
 def sqlstate_of(error: Exception) -> str | None:
     """Best-effort SQLSTATE for an SQLAlchemy ``DBAPIError``.
 
     ``asyncpg`` exposes ``sqlstate``; older/other drivers only expose ``pgcode``.
     Reading both keeps the assertions explicit about *which* PostgreSQL error was
     expected (23505 unique, 23503 foreign key, 23514 check) instead of matching on
-    a message that the driver may localise or reformat.
+    a message that the driver may localise or reformat.  The whole cause chain is
+    inspected, because SQLAlchemy's rewrap layer does not forward every attribute.
     """
-    original = getattr(error, "orig", error)
-    return getattr(original, "sqlstate", None) or getattr(original, "pgcode", None)
+    for node in [getattr(error, "orig", error), *_cause_chain(error)]:
+        value = getattr(node, "sqlstate", None) or getattr(node, "pgcode", None)
+        if value:
+            return str(value)
+    return None
+
+
+_CONSTRAINT_IN_MESSAGE = re.compile(r'constraint "([^"]+)"')
 
 
 def violated_constraint(error: Exception) -> str:
@@ -213,14 +241,19 @@ def violated_constraint(error: Exception) -> str:
 
     Preferred over matching the exception text: PostgreSQL translates messages
     with ``lc_messages``, but the structured ``constraint_name`` field is not
-    translated.  Falls back to the message so a driver that does not expose the
-    field still yields something a test can assert on.
+    translated.  It lives on the **innermost** ``asyncpg`` error, so the whole
+    cause chain is searched; the message is only a last-resort fallback for a
+    driver that does not expose the field at all.
     """
-    original = getattr(error, "orig", error)
-    structured = getattr(original, "constraint_name", None)
-    if structured:
-        return str(structured)
-    return str(original)
+    for node in [_ for _ in _cause_chain(error)]:
+        structured = getattr(node, "constraint_name", None)
+        if structured:
+            return str(structured)
+    for node in _cause_chain(error):
+        match = _CONSTRAINT_IN_MESSAGE.search(str(node))
+        if match:
+            return match.group(1)
+    return str(getattr(error, "orig", error))
 
 
 __all__ = [

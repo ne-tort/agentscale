@@ -155,6 +155,19 @@ def _rows_by_table() -> dict[str, list[dict[str, object]]]:
                 {"id": "audit_ev_a", "tenant_id": TENANT_A},
                 {"id": "audit_ev_b", "tenant_id": TENANT_B},
             ],
+            # --- M06 partition cutover ledger + live source tail (2026110316) ---
+            # Both are scoped by ``tenant_id`` alone: the partition is
+            # ``(tenant_id, app_definition_id)`` but ``app_definition_id`` is not a
+            # tenant anchor, so a row of another tenant must stay invisible even when
+            # the caller names the same definition.
+            "m06_partition_cutover_evidence": [
+                {"id": "cutover_ev_a", "tenant_id": TENANT_A},
+                {"id": "cutover_ev_b", "tenant_id": TENANT_B},
+            ],
+            "m06_partition_cutover_source_tail": [
+                {"tenant_id": TENANT_A},
+                {"tenant_id": TENANT_B},
+            ],
             # --- Equipment v2 (2026110305): two complete, disconnected chains ---
             "equipment_v2_ingestion_runs": [
                 {"id": "run_a", "tenant_id": TENANT_A},

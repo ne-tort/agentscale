@@ -119,14 +119,22 @@ async def test_two_cancels_with_the_same_expected_sequence_have_one_winner(pg_sc
     assert event_types == ["agent_run.created", "agent_run.cancelled"]
     assert await pg_schema.count("agent_control_plane_outbox_events") == 2
     assert await pg_schema.count("agent_control_plane_enqueue_intents") == 2
-    # Both attempts recorded their outcome; only one of them is `applied`.
+    # Both cancel attempts recorded their outcome; only one of them is `applied`.
+    # The receipt table also holds the `agent_run.create` receipt from
+    # ``_start_run``, so the assertion is scoped to the two racing commands: an
+    # unscoped ``GROUP BY status`` would count that third, unrelated `applied`
+    # row and report two winners for a race that had only one.
     receipt_statuses = {
         row[0]: row[1]
         for row in await pg_schema.rows(
-            "SELECT status, count(*) FROM agent_control_plane_commands GROUP BY status"
+            "SELECT status, count(*) FROM agent_control_plane_commands "
+            "WHERE command_idempotency_key IN ('cancel-a', 'cancel-b') "
+            "GROUP BY status"
         )
     }
     assert receipt_statuses == {"applied": 1, "conflict": 1}
+    # ... and the create receipt is still the third row, untouched by the race.
+    assert await pg_schema.count("agent_control_plane_commands") == 3
     # The loser wrote no aggregate of its own: still exactly one cursor row.
     assert await pg_schema.count("agent_control_plane_aggregates") == 1
 

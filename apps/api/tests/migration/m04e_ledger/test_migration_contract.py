@@ -106,6 +106,7 @@ from tests.migration.m04e_ledger.acceptance_fixtures import (
     ROW_FACTORIES,
     RecordedOps,
     SPEC_TABLES,
+    SUCCESSOR_REVISION_ID,
     audit_row,
     chain_from_head,
     checkpoint_row,
@@ -249,22 +250,36 @@ def test_revision_identifiers_follow_the_wave_chain() -> None:
     assert module._POLICIES_ADDED_HERE == frozenset({REVISION_ID})
 
 
-def test_the_chain_has_exactly_one_head_and_it_is_this_revision() -> None:
-    """A second head would make ``upgrade head`` ambiguous and split the wave."""
-    assert head_revisions() == (REVISION_ID,)
+def test_the_chain_has_exactly_one_head_and_it_is_a_successor_of_this_revision() -> None:
+    """Was "the head is this revision": that stopped being true when ``2026110316``
+    landed. The invariant that still matters is that the tree has one head, this
+    revision is on its chain, and its only successor declares it as ``down_revision``
+    (a second head or a fork would make ``upgrade head`` ambiguous)."""
+    assert head_revisions() == (SUCCESSOR_REVISION_ID,)
+    assert revision_graph()[SUCCESSOR_REVISION_ID] == REVISION_ID
 
 
-def test_no_revision_declares_this_one_as_its_parent_yet() -> None:
+def test_exactly_one_revision_declares_this_one_as_its_parent() -> None:
+    """Was "no revision declares this one as its parent yet": ``2026110316`` now does.
+
+    A *second* successor would fork the chain, so exactly one is required.
+    """
     graph = revision_graph()
     children = sorted(revision for revision, down in graph.items() if down == REVISION_ID)
 
-    assert children == [], f"unexpected successors of {REVISION_ID}: {children}"
+    assert children == [SUCCESSOR_REVISION_ID], f"unexpected successors of {REVISION_ID}: {children}"
 
 
 def test_the_head_walks_back_through_the_scope_evidence_and_rls_passes() -> None:
     chain = chain_from_head()
 
-    assert chain[:4] == (REVISION_ID, DOWN_REVISION_ID, "2026110313", "2026110312")
+    assert chain[:5] == (
+        SUCCESSOR_REVISION_ID,
+        REVISION_ID,
+        DOWN_REVISION_ID,
+        "2026110313",
+        "2026110312",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -827,7 +842,12 @@ def test_this_revision_is_its_own_registry_reapply(
     assert owned == set(LEDGER_TABLES)
 
 
-def test_the_newest_policy_installer_is_this_revision() -> None:
+def test_no_registered_table_is_created_after_the_newest_policy_installer() -> None:
+    """Was "the newest policy installer is this revision": true only while this file's
+    revision was the head. ``2026110316`` (the M06 cutover ledger) succeeded it and is
+    itself a registry re-apply, so the rule this test must keep protecting is not "I am
+    newest" but "no table is left behind a re-apply" — asserted against the head chain.
+    """
     chain = chain_from_head()
     position = {revision: index for index, revision in enumerate(reversed(chain))}
 
@@ -835,9 +855,9 @@ def test_the_newest_policy_installer_is_this_revision() -> None:
     assert installers, "no revision installs policies"
     newest = max(installers, key=lambda revision: position[revision])
 
-    assert newest == REVISION_ID, (
-        "a table added here would stay unpolicied; the install-order gate would report "
-        f"it as late (newest installer is {newest})"
+    assert position[newest] >= position[REVISION_ID], (
+        "this revision's own tables would stay unpolicied: the newest policy installer "
+        f"({newest}) predates {REVISION_ID}"
     )
 
 

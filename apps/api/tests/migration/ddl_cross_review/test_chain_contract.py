@@ -1,4 +1,4 @@
-"""Static cross-review contract for the DDL chain ``2026110301``-``2026110311``.
+"""Static cross-review contract for the DDL chain ``2026110301``-``2026110316``.
 
 Task ``MIG-REVIEW-DDL-01``.  This module automates the checks recorded in
 ``docs/08-migration/ddl-chain-cross-review.md``; the prose document is the source
@@ -30,9 +30,9 @@ The three findings that used to carry a **strict** ``xfail`` (B1, M1, M3 of the
 review) are now fixed in the chain and in the RLS registry, so their markers are
 gone and the assertions run live:
 
-* B1 — ``2026110312`` / ``2026110314`` / ``2026110315`` re-apply the registry after
-  the late table-adding revisions, so ``upgrade head`` leaves no tenant table
-  unpolicied;
+* B1 — ``2026110312`` / ``2026110314`` / ``2026110315`` / ``2026110316`` re-apply the
+  registry after the late table-adding revisions, so ``upgrade head`` leaves no tenant
+  table unpolicied;
 * M1 — ``runtime_revision_heads`` / ``runtime_materialization_attempts`` /
   ``runtime_materialization_audit`` are registered (owner ``2026110306``) and the
   ``runtime_`` prefix makes the coverage report able to name them;
@@ -86,7 +86,7 @@ VERSIONS_DIR: Path = H.VERSIONS_DIR
 #: Kept as an explicit range so the contract fails loudly when a new revision
 #: lands without this file being extended: the chain review must be re-run, not
 #: silently widened.
-CHAIN: tuple[str, ...] = tuple(f"20261103{number:02d}" for number in range(1, 16))
+CHAIN: tuple[str, ...] = tuple(f"20261103{number:02d}" for number in range(1, 17))
 CHAIN_ROOT = "2026110202"
 
 #: Revisions of the chain that own tables.
@@ -101,6 +101,8 @@ TABLE_OWNING_REVISIONS: tuple[str, ...] = (
     "2026110311",
     "2026110313",
     "2026110315",
+    # MIG-DDL-CUTOVER-01: the cutover ledger and its live source tail.
+    "2026110316",
 )
 
 #: Revisions that install RLS policies by walking the shared registry.
@@ -110,6 +112,9 @@ POLICY_REVISIONS: tuple[str, ...] = (
     "2026110312",
     "2026110314",
     "2026110315",
+    # ``2026110316`` is the re-apply for the two M06 cutover tables: it creates them
+    # and installs their policies in the same step.
+    "2026110316",
 )
 
 #: ``ALTER TABLE t ADD CONSTRAINT n UNIQUE (a, b)`` emitted as raw SQL.  Revision

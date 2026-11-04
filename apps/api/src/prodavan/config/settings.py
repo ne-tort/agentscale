@@ -376,6 +376,18 @@ class Settings(BaseSettings):
             "WEB_CHAT_STREAM_RUNTIME_ENABLED",
         ),
     )
+    # Migration chain host (M04 -> M04E -> M05 -> M06 -> cutover). Off by default:
+    # with the flag off the API lifespan assembles nothing, resolves no session
+    # factory and keeps the process exactly as it was before the chain was wired.
+    # Turning it on only *assembles* the chain and publishes its diagnostics
+    # (core/infra/migration_chain_resource.py); no backfill or cutover is started.
+    migration_chain_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices(
+            "MIGRATION_CHAIN_ENABLED",
+            "MIGRATION_COMPOSITION_ENABLED",
+        ),
+    )
     projects_auto_rematerialize_on_cabinet_change: bool = Field(
         default=False,
         validation_alias=AliasChoices(

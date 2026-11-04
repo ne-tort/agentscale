@@ -8,8 +8,10 @@ these helpers persist, and the verifiers must accept it.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from datetime import UTC, datetime
 from typing import Any
 
+import sqlalchemy as sa
 from prodavan.application.migration.m06_cutover.cutover import (
     CanonicalRepairEvidence,
     GateEvidence,
@@ -231,14 +233,24 @@ async def seed_source_tail(
     change_sequence: int,
     writer_epoch: int,
 ) -> None:
-    """Persist the live legacy source tail the cutover CAS compares against."""
+    """Persist the live legacy source tail the cutover CAS compares against.
 
+    ``updated_at`` follows the container's declared type: the specification shim renders
+    ``TIMESTAMPTZ`` as text, while the containers built from the registered models carry a
+    real ``DateTime``. A single literal cannot satisfy both, and the fixture must not
+    invent a type the schema does not declare.
+    """
+
+    column = env.tables[CUTOVER_SOURCE_TAIL_TABLE].c["updated_at"]
+    updated_at: Any = datetime(2026, 11, 1, 13, 0, tzinfo=UTC)
+    if not isinstance(column.type, sa.DateTime):
+        updated_at = updated_at.isoformat()
     await env.insert(CUTOVER_SOURCE_TAIL_TABLE, **{
         "tenant_id": tenant_id,
         "app_definition_id": definition_id,
         "change_sequence": change_sequence,
         "writer_epoch": writer_epoch,
-        "updated_at": "2026-11-01T13:00:00+00:00",
+        "updated_at": updated_at,
     })
 
 

@@ -1,11 +1,15 @@
 """SQLite acceptance harness for the cutover ports (test-owned, never production).
 
 Why a mirror instead of ``Base.metadata.create_all``: four of the five evidence tables are
-declared with PostgreSQL ``JSONB``, which the SQLite dialect cannot render, and the cutover
-ledger does not exist in ``Base.metadata`` at all. The harness therefore copies each model's
-columns (``JSONB`` -> ``JSON``) and renders the two cutover tables from
-:func:`~prodavan.application.migration.m06_cutover.ports.cutover_schema_ddl` so the fixture
-cannot drift from the advertised specification.
+declared with PostgreSQL ``JSONB``, which the SQLite dialect cannot render. The harness
+therefore copies each model's columns (``JSONB`` -> ``JSON``) and renders the two cutover
+tables from :func:`~prodavan.application.migration.m06_cutover.ports.cutover_schema_ddl`
+so the fixture cannot drift from the advertised specification.
+
+Since ``MIG-DDL-CUTOVER-01`` the two cutover tables also exist as registered ORM models.
+``create(cutover_from_models=True)`` builds them from those models instead of from the
+specification text, which is how the tests prove the *registered* schema — the one the
+revision creates — is the one the repository works against.
 
 The mirrored tables are only containers: every read in the tests goes through the real ORM
 model class, which is what proves the adapters agree with the registered models.
@@ -37,6 +41,10 @@ from prodavan.infrastructure.persistence.models.dynamic_app_definition_version i
 from prodavan.infrastructure.persistence.models.m04_scope_evidence import (
     M04ScopePromotionEvidenceRow,
 )
+from prodavan.infrastructure.persistence.models.m06_cutover_evidence import (
+    M06PartitionCutoverEvidenceRow,
+    M06PartitionCutoverSourceTailRow,
+)
 from prodavan.infrastructure.persistence.models.plugin_instance_registry import (
     M05PluginInstancePromotionEvidenceRow,
 )
@@ -48,6 +56,10 @@ MIRRORED_MODELS = (
     M06CanonicalGrantPromotionEvidenceRow,
     CanonicalGrantWriterEpochRow,
 )
+
+#: The registered cutover models. ``create(cutover_from_models=True)`` builds the two
+#: containers from these instead of from the specification text.
+CUTOVER_MODELS = (M06PartitionCutoverEvidenceRow, M06PartitionCutoverSourceTailRow)
 
 
 def mirror_table(model: Any, metadata: sa.MetaData) -> sa.Table:
@@ -120,17 +132,60 @@ def spec_table(spec: Any, metadata: sa.MetaData) -> sa.Table:
     )
 
 
+def model_cutover_table(model: Any, metadata: sa.MetaData) -> sa.Table:
+    """Copy a registered cutover model's columns and keys into an isolated metadata.
+
+    The check constraints are dropped on purpose: they carry PostgreSQL regex predicates
+    (``~ '^sha256:...'``) that SQLite cannot evaluate, and this container exists to store
+    rows, not to re-test the constraints (``tests/migration/m06_cutover_evidence`` owns that
+    contract). Columns, primary key and unique keys — the CAS/idempotency surface the
+    repository depends on — are copied exactly, which is the point: the repository is
+    exercised against the *registered* schema rather than the specification text.
+    """
+
+    source = model.__table__
+    columns = [
+        sa.Column(
+            column.name,
+            # JSONB never appears on these models today; keep the mapping total rather
+            # than implicit so a future JSONB column cannot break the harness silently.
+            sa.JSON() if isinstance(column.type, JSONB) else column.type,
+            primary_key=column.primary_key,
+            nullable=not column.primary_key and column.nullable,
+        )
+        for column in source.columns
+    ]
+    keys = [
+        sa.UniqueConstraint(
+            *(column.name for column in constraint.columns), name=constraint.name
+        )
+        for constraint in source.constraints
+        if isinstance(constraint, sa.UniqueConstraint)
+    ]
+    return sa.Table(model.__tablename__, metadata, *columns, *keys)
+
+
 class EvidenceDatabase:
     """One ephemeral SQLite database with the evidence mirror and the cutover ledger."""
 
     def __init__(self) -> None:
+        #: Evidence mirror + (when asked for) the cutover containers built from the models.
         self.metadata = sa.MetaData()
         self.tables: dict[str, sa.Table] = {
             model.__tablename__: mirror_table(model, self.metadata)
             for model in MIRRORED_MODELS
         }
+        #: Specification containers live in their own metadata: they are created from the
+        #: raw ``dialect_neutral_ddl()`` text, never through ``create_all``, and they claim
+        #: the same two table names as the model containers below.
+        self.spec_metadata = sa.MetaData()
         self.cutover_tables = {
-            spec.name: spec_table(spec, self.metadata) for spec in CUTOVER_REQUIRED_SCHEMA
+            spec.name: spec_table(spec, self.spec_metadata) for spec in CUTOVER_REQUIRED_SCHEMA
+        }
+        #: Containers built from the registered ORM models rather than from the spec text.
+        self.model_cutover_tables = {
+            model.__tablename__: model_cutover_table(model, self.metadata)
+            for model in CUTOVER_MODELS
         }
         self.mirrored = frozenset(table.name for table in self.tables.values())
         self._created: list[str] = []
@@ -144,25 +199,33 @@ class EvidenceDatabase:
         )
 
     async def create(self, *, with_cutover_tables: bool = True,
-                     cutover_tables: Sequence[str] | None = None) -> EvidenceDatabase:
+                     cutover_tables: Sequence[str] | None = None,
+                     cutover_from_models: bool = False) -> EvidenceDatabase:
         names = (
             list(cutover_tables)
             if cutover_tables is not None
             else ([CUTOVER_LEDGER_TABLE, CUTOVER_SOURCE_TAIL_TABLE]
                   if with_cutover_tables else [])
         )
+        source = self.model_cutover_tables if cutover_from_models else self.cutover_tables
         for name in names:
-            self.tables[name] = self.cutover_tables[name]
-        model_tables = [table for name, table in self.tables.items() if name in self.mirrored]
+            self.tables[name] = source[name]
+        created_by_orm = (
+            list(self.tables.values())
+            if cutover_from_models
+            else [table for name, table in self.tables.items() if name in self.mirrored]
+        )
         async with self.engine.begin() as connection:
             await connection.run_sync(
-                lambda sync: self.metadata.create_all(sync, tables=model_tables)
+                lambda sync: self.metadata.create_all(sync, tables=created_by_orm)
             )
-            for statement in dialect_neutral_ddl():
-                table_name = statement.split()[2]
-                if table_name in names:
-                    await connection.exec_driver_sql(statement)
-                    self._created.append(table_name)
+            if not cutover_from_models:
+                for statement in dialect_neutral_ddl():
+                    table_name = statement.split()[2]
+                    if table_name in names:
+                        await connection.exec_driver_sql(statement)
+            for name in names:
+                self._created.append(name)
         return self
 
     async def close(self) -> None:

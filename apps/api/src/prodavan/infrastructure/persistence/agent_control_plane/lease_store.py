@@ -500,17 +500,27 @@ class SqlAlchemyRunLeaseStore:
 
     @asynccontextmanager
     async def _session(self) -> AsyncIterator[AsyncSession]:
-        """Join the pinned claim transaction when there is one, else open one."""
+        """Join the pinned claim transaction when there is one, else open one.
+
+        ``close()`` must happen **after** the ``begin()`` block exits.  Closing
+        the session while its transaction is still active makes SQLAlchemy roll
+        the transaction back, and ``SessionTransaction.commit()`` then becomes a
+        no-op on the already-closed transaction: the statement is reported as
+        applied (the driver's ``rowcount`` is ``1``) while nothing is persisted.
+        That silent "CAS succeeded but the lease was never written" is exactly
+        the shape that lets two workers claim one run, and it is invisible
+        without a real database behind the session.
+        """
         pinned = self._pinned
         if pinned is not None:
             yield pinned
             return
         session = self._session_factory()
-        async with session.begin():
-            try:
+        try:
+            async with session.begin():
                 yield session
-            finally:
-                await session.close()
+        finally:
+            await session.close()
 
     # -- RunLeaseStore ------------------------------------------------------
 
