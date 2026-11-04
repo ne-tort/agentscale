@@ -34,6 +34,7 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
+from prodavan.application.migration.m05_contexts import SqlAuthSessionOwnership
 from prodavan.infrastructure.persistence.models.agent import AgentSessionRow  # noqa: F401
 from prodavan.infrastructure.persistence.models.auth_sessions import AuthSessionRow
 from prodavan.infrastructure.persistence.models.identity import (
@@ -41,7 +42,6 @@ from prodavan.infrastructure.persistence.models.identity import (
     EmployeeRow,
     MembershipRow,
 )
-from prodavan.application.migration.m05_contexts import SqlAuthSessionOwnership
 
 from . import fixtures as fx
 

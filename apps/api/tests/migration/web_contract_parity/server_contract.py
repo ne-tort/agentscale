@@ -377,10 +377,18 @@ def content_vocabulary() -> dict[str, frozenset[str]]:
 def dynamic_vocabulary() -> dict[str, frozenset[str]]:
     """Closed value sets the dynamic-app surface emits."""
     from prodavan.application.dynamic_apps_definition.lifecycle import API_LIFECYCLE
-    from prodavan.domain.dynamic_apps import AppScopeKind, CapabilityDecision
+    from prodavan.application.dynamic_apps_definition.lifecycle import api_lifecycle
+    from prodavan.domain.dynamic_apps import AppLifecycleStatus, AppScopeKind, CapabilityDecision
 
+    # Every lifecycle string the serializer can produce, derived by asking it rather
+    # than by copying `API_LIFECYCLE`: a `revoked` row is outside the CRUD surface's
+    # writable vocabulary but `api_lifecycle` still maps it, so it can reach a client.
+    emitted = frozenset(api_lifecycle(status) for status in AppLifecycleStatus)
+    assert set(API_LIFECYCLE) <= emitted, (
+        "API_LIFECYCLE must be a subset of what api_lifecycle() emits"
+    )
     return {
-        "lifecycle": frozenset(API_LIFECYCLE),
+        "lifecycle": emitted,
         "scope": frozenset(_enum_values(AppScopeKind)) - {"tenant"},
         "decision": frozenset(_enum_values(CapabilityDecision)),
     }

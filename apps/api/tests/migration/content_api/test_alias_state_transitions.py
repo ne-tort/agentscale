@@ -185,7 +185,10 @@ def test_asset_list_selector_is_mandatory(
 def test_cross_tenant_alias_history_is_404(
     client: TestClient, tenant_a: Tenant, tenant_b: Tenant
 ) -> None:
-    alias, _ = _bound_alias(client, tenant_a, slug="guarded.alias", data=b"bytes")
+    # ``_bound_alias`` returns (alias, asset, sealed version); this test only needs
+    # the alias, but the helper's arity is what it is — unpacking two raised
+    # ValueError before the request under test was even made.
+    alias, _, _ = _bound_alias(client, tenant_a, slug="guarded.alias", data=b"bytes")
 
     history = client.get(f"{CONTENT}/aliases/{alias['id']}/bindings", headers=tenant_b.headers)
     assert history.status_code == 404, history.text

@@ -28,8 +28,15 @@ export type Id = string;
 export const DYNAMIC_MODULE_KINDS = ["declarative-app", "isolated-code-plugin"] as const;
 export type DynamicModuleKind = (typeof DYNAMIC_MODULE_KINDS)[number];
 
-/** Registry lifecycle of a definition (`dynamic-ui-implementation-contract.md` §7.1). */
-export const DYNAMIC_MODULE_STATUSES = ["draft", "validated", "approved", "published", "disabled", "archived"] as const;
+/**
+ * Registry lifecycle of a definition (`dynamic-ui-implementation-contract.md` §7.1).
+ *
+ * `revoked` is included because the API can emit it: `api_lifecycle()` maps the
+ * persisted `revoked` status through unchanged, so a row written by another surface
+ * (or a future revoke) reaches this client. Omitting it would make `requireEnum`
+ * reject the *entire* list response for one such row.
+ */
+export const DYNAMIC_MODULE_STATUSES = ["draft", "validated", "approved", "published", "disabled", "archived", "revoked"] as const;
 export type DynamicModuleStatus = (typeof DYNAMIC_MODULE_STATUSES)[number];
 
 export const DYNAMIC_MODULE_VERSION_STATUSES = ["draft", "validated", "approved", "published", "rejected", "rolled_back"] as const;
@@ -90,7 +97,9 @@ export interface DynamicModuleDefinitionSummary {
 }
 
 export interface DynamicModuleDefinition extends DynamicModuleDefinitionSummary {
+  /** The definition view has no route table; absent until it publishes one. */
   readonly routes?: readonly DynamicModuleRoute[];
+  /** The definition view carries no actor, cabinet or company column. */
   readonly createdBy?: string;
   readonly ownerCabinetId?: string;
   readonly ownerCompanyId?: string;
@@ -120,9 +129,11 @@ export interface DynamicModuleInstance {
   readonly cabinetId?: Id;
   /** Present only for a project-scoped instance (`scope.kind === "project"`). */
   readonly projectId?: Id;
+  /** `"cabinet" | "project"`, derived from the server's `{kind, id}` scope object. */
   readonly scope: DynamicModuleScope;
   readonly status: DynamicModuleInstanceStatus;
   readonly installedBy?: string;
+  /** The instance view emits `created_at`; there is no separate installed timestamp. */
   readonly installedAt?: string;
 }
 
@@ -475,7 +486,10 @@ export function normalizeInstance(raw: unknown, field = "instance"): DynamicModu
     ...scope,
     status: requireEnum(firstDefined(value.lifecycle, value.status), DYNAMIC_MODULE_INSTANCE_STATUSES, `${field}.lifecycle`),
     installedBy: optionalString(firstDefined(value.installed_by, value.installedBy), `${field}.installed_by`),
-    installedAt: optionalTimestamp(firstDefined(value.installed_at, value.installedAt), `${field}.installed_at`),
+    installedAt: optionalTimestamp(
+      firstDefined(value.created_at, value.installed_at, value.installedAt),
+      `${field}.created_at`,
+    ),
   };
 }
 

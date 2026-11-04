@@ -1,11 +1,25 @@
 export type ResourceId = string;
 export type ResourceKind = "prompt" | "file" | "mcp";
 export type ResourceScopeKind = "platform" | "company" | "cabinet" | "project" | "session";
-export type ResourceLifecycle = "draft" | "published" | "retired" | "blocked";
+/**
+ * `ResourceLifecycle` as the canonical API emits it (`lifecycle_contracts.ResourceLifecycle`).
+ *
+ * `active` is the serving state here, not `published`: the API keeps resource
+ * lifecycle separate from *version* status, where `published` is the serving value.
+ * Using the version vocabulary made every live resource render as neither active nor
+ * published, and invented a `blocked` state the resource model does not have.
+ */
+export type ResourceLifecycle = "draft" | "active" | "archived" | "quarantined";
 export type ResourceVersionStatus = "draft" | "published" | "retired";
 export type ResourceBindingMode = "local" | "global";
-export type MaterializationStatus = "planned" | "applying" | "applied" | "failed" | "blocked" | "stale";
-export type MaterializationEntryStatus = MaterializationStatus | "skipped";
+/**
+ * The plan API answers `ready` or `blocked` (`StoredPlan.status` in
+ * `application/resources/api/materialization.py`). `applied`/`failed`/`stale` are
+ * *apply* outcomes and belong to the apply response, not to a plan.
+ */
+export type MaterializationStatus = "ready" | "blocked";
+export type MaterializationEntryStatus = "planned";
+export type MaterializationOutcome = "applied" | "replayed" | "conflict" | "blocked";
 
 export interface ResourceScope {
   kind: ResourceScopeKind;

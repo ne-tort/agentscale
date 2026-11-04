@@ -14,11 +14,12 @@ from __future__ import annotations
 import pytest
 
 from prodavan.infrastructure.persistence.migration_artifact_store import (
-    ArtifactRefusalCode,
     ArtifactContentRefused,
+    ArtifactRefusalCode,
     SqlArtifactContentStore,
     build_m04e_artifact_content_store,
 )
+
 from .artifact_fixtures import (
     ARTIFACT_BYTES,
     ARTIFACT_DIGEST,
@@ -27,16 +28,16 @@ from .artifact_fixtures import (
     CONTENT_KEY,
     CONTENT_URI,
     DEFINITION,
-    FakeByteStore,
     TENANT,
     VERSION,
     AsyncByteStore,
+    FakeByteStore,
+    RecordingSessionFactory,
     catalogue,
     content_asset,
     content_blob,
     digest_of,
     legacy_version,
-    RecordingSessionFactory,
     target_version,
 )
 

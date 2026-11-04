@@ -899,7 +899,13 @@ _CANONICAL: tuple[TablePolicySpec, ...] = (
         table="equipment_v2_catalog_snapshots",
         owner_revision="2026110305",
         tenant=ScopedColumn(
-            chain=(ParentHop(table="equipment_v2_ingestion_runs", on_column="ingestion_run_id", value_column="tenant_id"),),
+            chain=(
+                ParentHop(
+                    table="equipment_v2_ingestion_runs",
+                    on_column="ingestion_run_id",
+                    value_column="tenant_id",
+                ),
+            ),
         ),
         trusted_command="ALL",
         notes="Snapshot inherits the run tenant; a snapshot never crosses its ingestion run.",

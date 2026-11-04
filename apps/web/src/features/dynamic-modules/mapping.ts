@@ -36,6 +36,7 @@ const STATUS_LABELS: Readonly<Record<DynamicModuleStatus, string>> = {
   published: "Published",
   disabled: "Disabled",
   archived: "Archived",
+  revoked: "Revoked",
 };
 
 const VERSION_STATUS_LABELS: Readonly<Record<DynamicModuleVersionStatus, string>> = {
@@ -66,6 +67,7 @@ export function definitionStatusTone(status: DynamicModuleStatus): StatusVariant
     case "validated": return "info";
     case "disabled":
     case "archived": return "warning";
+    case "revoked": return "danger";
     case "draft": return "neutral";
   }
 }

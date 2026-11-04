@@ -126,7 +126,6 @@ from prodavan.application.migration.m05_contexts import (
     M05ContextBlocker,
     M05ContextInputs,
     build_m04_scope_gate,
-    build_m05_identity_evidence,
     build_m05_identity_sessions,
     build_m05_runtime_context,
     build_m05_tenant_context,
@@ -154,7 +153,6 @@ if TYPE_CHECKING:  # pragma: no cover - typing only, never imported at runtime
         RuntimeSessionOwnershipPort,
     )
     from prodavan.application.migration.m05_instance_runtime.runtime_service import (
-        M05IdentityEvidencePort,
         M05UpstreamEvidence,
         TrustedRuntimeContext,
     )
@@ -507,6 +505,16 @@ def build_partition_chain(
     (``infrastructure/persistence/migration_artifact_store.py``), which is what removed
     blocker ``partition_artifact_content_port_unavailable``.  Construction opens no session
     and starts no object-store resource.
+
+    ``m05_contexts`` is the one-argument form of the four M05 run contexts
+    (:class:`~prodavan.application.migration.m05_contexts.M05ContextInputs`).  With it the
+    planner derives ``m05_runtime_context``, ``m05_upstream_evidence`` and
+    ``m05_identity_sessions`` from the partition's stated run inputs and fills
+    ``m05_tenant_context`` through the same reviewed builder, so the M05 stage becomes
+    *wired* for that partition instead of carrying three permanent blockers.  Each individual
+    ``m05_*`` override still wins when given, and an omitted input still produces the named
+    blocker of the builder that needed it -- so a partial bundle degrades into specific
+    report lines, never into a substitute object.
 
     Every other keyword is an *override* for a dependency the partition cannot derive.  Each
     one left out produces exactly one named blocker; nothing is defaulted to a substitute.
@@ -904,6 +912,7 @@ __all__ = [
     "PARTITION_SESSION_FACTORY_MISSING",
     "PARTITION_WRITER_GENERATION_INVALID",
     "PartitionAssemblyOverrides",
+    "M05ContextInputs",
     "PartitionChainBlocker",
     "PartitionChainKey",
     "PartitionChainPlan",

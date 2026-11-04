@@ -26,11 +26,22 @@ let createObjectURLDescriptor: PropertyDescriptor | undefined;
 let revokeObjectURLDescriptor: PropertyDescriptor | undefined;
 let anchorClickDescriptor: PropertyDescriptor | undefined;
 
+/**
+ * Poll until the UI reflects the action.
+ *
+ * Each poll runs inside its own `act`: React 19 does not commit a state update
+ * until the enclosing `act` scope exits, so a poll that merely yields the event
+ * loop — as this helper used to — can never observe the render it is waiting for
+ * when the caller is itself inside `await act(async () => { … })`. That produced a
+ * three-second timeout on every interaction-based test, not a product failure.
+ */
 async function waitFor(assertion: () => boolean): Promise<void> {
   const deadline = Date.now() + 3000;
   while (!assertion()) {
     if (Date.now() >= deadline) throw new Error("Timed out waiting for Content Ops UI");
-    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 0));
+    });
   }
 }
 
@@ -39,10 +50,13 @@ async function mountPanel(testService: ContentOpsService, assets = [asset]): Pro
   host = document.createElement("div");
   document.body.appendChild(host);
   root = createRoot(host);
+  // Render inside its own act scope, then assert outside it: React 19 only commits
+  // when the enclosing act exits, so an assertion nested inside the same scope waits
+  // for a render that cannot happen yet and times out.
   await act(async () => {
     root?.render(<ContentOpsPanel companyId="company-1" service={testService} initialAssets={assets} />);
-    await waitFor(() => document.querySelectorAll(".content-ops__asset-meta, .content-ops__empty").length > 0);
   });
+  await waitFor(() => document.querySelectorAll(".content-ops__asset-meta, .content-ops__empty").length > 0);
 }
 
 afterEach(async () => {
@@ -110,17 +124,20 @@ describe("Content operations acceptance surface", () => {
     await mountPanel(testService, []);
     expect(document.body.textContent).toContain("Loading company assets...");
 
-    await act(async () => { resolveInitial?.([]); await waitFor(() => document.body.textContent?.includes("No assets returned for this company.") ?? false); });
+    await act(async () => { resolveInitial?.([]); });
+    await waitFor(() => document.body.textContent?.includes("No assets returned for this company.") ?? false);
     const refresh = [...document.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "Refresh assets");
-    await act(async () => { refresh?.click(); await waitFor(() => calls === 2 && document.body.textContent?.includes("Loading company assets...")); });
+    await act(async () => { refresh?.click(); });
+    await waitFor(() => calls === 2 && (document.body.textContent?.includes("Loading company assets...") ?? false));
     expect(document.body.textContent).toContain("Loading company assets...");
     await act(async () => {
       rejectRefresh?.(new ContentOpsError("OFFLINE", 0, "The Content Service could not be reached. Try again."));
-      await waitFor(() => document.querySelector('[role="alert"]') !== null);
     });
+    await waitFor(() => document.querySelector('[role="alert"]') !== null);
     expect(document.querySelector('[role="alert"]')?.textContent).toContain("The Content Service could not be reached. Try again.");
 
-    await act(async () => { refresh?.click(); await waitFor(() => calls === 3 && document.querySelector('[role="alert"]') === null); });
+    await act(async () => { refresh?.click(); });
+    await waitFor(() => calls === 3 && document.querySelector('[role="alert"]') === null);
     expect(document.body.textContent).toContain("No assets returned for this company.");
   });
 
@@ -160,8 +177,8 @@ describe("Content operations acceptance surface", () => {
       });
       await act(async () => {
         document.querySelector<HTMLFormElement>(".content-ops__form")?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
-        await waitFor(() => document.body.textContent?.includes(`Uploaded v${version.version}.`) ?? false);
       });
+      await waitFor(() => document.body.textContent?.includes(`Uploaded v${version.version}.`) ?? false);
     }
 
     const versionSelect = [...document.querySelectorAll<HTMLSelectElement>("select")].find((select) => select.querySelector("option[value='version-1']"));
@@ -179,15 +196,15 @@ describe("Content operations acceptance surface", () => {
     await act(async () => {
       const download = [...document.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "Download selected version");
       download?.click();
-      await waitFor(() => [...document.querySelectorAll<HTMLButtonElement>("button")].some((button) => button.textContent === "Retry download selected version"));
     });
+    await waitFor(() => [...document.querySelectorAll<HTMLButtonElement>("button")].some((button) => button.textContent === "Retry download selected version"));
     expect(downloadVersion).toHaveBeenCalledWith(asset.id, "version-2", "notes.txt");
     expect(document.querySelector('[role="alert"]')?.textContent).toContain("The content operation failed. Try again.");
     expect(document.body.textContent).not.toContain("offline detail must not be rendered");
     await act(async () => {
       [...document.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "Retry download selected version")?.click();
-      await waitFor(() => document.body.textContent?.includes("Downloaded v2.") ?? false);
     });
+    await waitFor(() => document.body.textContent?.includes("Downloaded v2.") ?? false);
     expect(downloadVersion).toHaveBeenCalledTimes(2);
     await act(async () => { await new Promise((resolve) => window.setTimeout(resolve, 1010)); });
     expect(document.body.textContent).toContain('{"source":"upload"}');

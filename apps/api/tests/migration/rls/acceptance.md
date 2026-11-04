@@ -1,7 +1,23 @@
-# MIG-DDL-RLS-01 — acceptance artifact (authored, not executed)
+# MIG-DDL-RLS-01 — acceptance artifact
 
-Status: `done` for authoring; **not verified by execution**. Verification freeze applies:
-no test, build, lint, compile, `alembic upgrade`, database or git command was run.
+Status: the 2026110307 authoring is `done`; the **live** acceptance is
+`tests/migration/rls/test_live_policy_installation.py` (task `MIG-RLS-LIVE-01`),
+which is executed against a migrated PostgreSQL and is green there.
+
+> **Policy naming (updated by MIG-RLS-LIVE-01).** The suffix table below is the
+> pre-`2026110318` spelling. PostgreSQL stores at most 63 bytes of an identifier
+> and truncates silently, so
+> `m04e_definition_version_promotion_evidence_trusted_service_access` (65) was
+> installed as `..._trusted_service_acce`, which no comparison against the catalog
+> could ever match. The registry now derives every name through one rule:
+> `<table>_<full suffix>` while it fits, otherwise the compact suffix for the same
+> kind (`_tenant_isolation` → `_tenant`, `_trusted_service_access` →
+> `_trusted_access`). The table part is never shortened, a table too long even for
+> the compact form raises at import time, and `policies.installed_policy_name` is
+> the single mapping used by catalog comparisons. Revision `2026110318` withdraws
+> the truncated name and re-applies the registry. `test_policy_name_length.py`
+> gates the limit statically; `test_live_policy_installation.py` proves the
+> declared and stored names are identical.
 
 Deliverables under review:
 

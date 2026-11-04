@@ -18,10 +18,11 @@ import ast
 import importlib.util
 import re
 import sys
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import ModuleType
-from typing import Any, Sequence
+from typing import Any
 
 import sqlalchemy as sa
 

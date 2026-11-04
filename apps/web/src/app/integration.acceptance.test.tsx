@@ -1067,8 +1067,8 @@ describe("employee workspace integration acceptance", () => {
       const downloadButton = [...document.querySelectorAll<HTMLButtonElement>(".content-ops__section button")].find((button) => button.textContent?.includes("Download selected version"));
       expect(downloadButton).toBeTruthy();
       downloadButton?.click();
-      await waitFor(() => pageText().includes("Downloaded v1."));
     });
+    await waitFor(() => pageText().includes("Downloaded v1."));
     const downloadRequest = requests.find((item) => item.path.startsWith(`/api/v1/content/assets/${uploadedAsset.id}/download?`));
     expect(downloadRequest).toMatchObject({ method: "GET", authorization: "Bearer acceptance-access" });
     const downloadUrl = new URL(downloadRequest?.path ?? "", window.location.origin);

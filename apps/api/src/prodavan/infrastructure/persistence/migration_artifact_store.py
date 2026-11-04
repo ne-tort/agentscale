@@ -126,9 +126,10 @@ import hashlib
 import inspect
 import logging
 import re
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any, Mapping, Protocol, Sequence, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -421,11 +422,19 @@ class SqlArtifactContentStore:
 
         Derived from the store's declared backend unless the host states it: only the
         collapsing ``s3`` backend cannot tell "no such object" from "backend failed".
+
+        Reading this property never resolves the lazy global store: with no store bound it
+        answers ``True`` (the conservative default, and the truthful one for the local
+        backend ``ensure_file_store`` falls back to).  A *bound* store is consulted, because
+        that is the exact object the read will use.
         """
 
         if self._missing_is_confirmed is not None:
             return self._missing_is_confirmed
-        store = self._store()
+        return self._absence_is_confirmable(self._file_store)
+
+    @staticmethod
+    def _absence_is_confirmable(store: object | None) -> bool:
         backend = getattr(store, "backend_name", None)
         if isinstance(backend, str):
             return backend.strip().lower() not in _COLLAPSING_BACKENDS
@@ -997,7 +1006,14 @@ class SqlArtifactContentStore:
         try:
             payload = await _maybe_await(store.get_bytes(key))
         except FileNotFoundError as exc:
-            if self.missing_is_confirmed:
+            # The *resolved* store decides, not the constructor argument: with no store bound
+            # the read resolved one lazily, and that object's backend is the one that failed.
+            confirmed = (
+                self._missing_is_confirmed
+                if self._missing_is_confirmed is not None
+                else self._absence_is_confirmable(store)
+            )
+            if confirmed:
                 raise _refuse(
                     ArtifactRefusalCode.CONTENT_ABSENT,
                     "the object this reference names is not present in the object store",

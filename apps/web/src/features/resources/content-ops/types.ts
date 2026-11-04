@@ -1,5 +1,13 @@
 export type ContentVisibility = "company" | "private";
-export type AclPrincipalKind = "employee" | "company" | "platform";
+/**
+ * Every principal kind the Content API's ACL model can return.
+ *
+ * The read path must accept all of them: `safeAclEntry` rejects an unknown kind, and
+ * it runs on `listAcl`, so a kind this union omits makes an entire asset's access list
+ * unreadable — including entries the operator never touched. `cabinet`, `project` and
+ * `role` are returned for scoped and role grants (`ContentPrincipalKind`).
+ */
+export type AclPrincipalKind = "employee" | "company" | "platform" | "cabinet" | "project" | "role";
 export type AclPermission = "read" | "write" | "admin";
 
 export interface ContentAsset {

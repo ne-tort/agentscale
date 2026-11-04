@@ -448,6 +448,12 @@ class Replay:
     dropped_constraints: dict[str, str] = field(default_factory=dict)
     dropped_sql_objects: dict[str, str] = field(default_factory=dict)
     statements: list[str] = field(default_factory=list)
+    #: ``ALTER TABLE ... ADD COLUMN`` pairs, in call order.  A revision may extend a
+    #: table another revision created (``2026110319`` adds the equipment anchors to
+    #: tables ``2026110305`` owns), and parity is about the *cumulative* schema, so the
+    #: columns are kept here and folded in by :func:`cumulative_table`.
+    added_columns: list[tuple[str, sa.Column]] = field(default_factory=list)
+    dropped_columns: list[tuple[str, str]] = field(default_factory=list)
 
     # -- aliases that read better at the call site -------------------------
     @property
@@ -474,6 +480,53 @@ class _OfflineContext:
     """Minimal stand-in for ``op.get_context()``: offline mode, no connection."""
 
     as_sql = True
+
+
+class _CatalogStub:
+    """Answers the catalog *reads* a revision performs, from the declarative metadata.
+
+    Three shapes are supported, because that is what the registry helpers ask:
+
+    * ``to_regclass(:relation)`` - the relation is present when the model declares it;
+    * ``pg_attribute`` - the column list of that model table;
+    * ``pg_policy`` - the two policy names the registry declares for that table.
+
+    Anything else returns no rows, so an unexpected query cannot silently agree with
+    an assertion it was never written to answer.
+    """
+
+    def execute(self, statement: object, params: Mapping[str, object] | None = None):
+        from prodavan.infrastructure.persistence.models import Base
+        from prodavan.infrastructure.persistence.rls import policies
+
+        sql = " ".join(str(statement).split()).lower()
+        params = params or {}
+        relation = params.get("relation") or params.get("table") or params.get("name")
+        table = Base.metadata.tables.get(relation) if isinstance(relation, str) else None
+
+        rows: list[tuple[object, ...]] = []
+        if "pg_attribute" in sql:
+            rows = [] if table is None else [(column,) for column in table.columns.keys()]
+        elif "pg_policy" in sql:
+            spec = next((item for item in policies.CANONICAL_TABLE_POLICIES if item.table == relation), None)
+            rows = [] if spec is None else [(name,) for name in spec.policy_names]
+        elif "to_regclass" in sql:
+            rows = [(relation if table is not None else None,)]
+        return _StubResult(rows)
+
+
+class _StubResult:
+    def __init__(self, rows: list[tuple[object, ...]]) -> None:
+        self._rows = rows
+
+    def all(self) -> list[tuple[object, ...]]:
+        return list(self._rows)
+
+    def scalar(self) -> object:
+        return self._rows[0][0] if self._rows else None
+
+    def scalar_one(self) -> object:
+        return self.scalar()
 
 
 class _FakeOp:
@@ -520,6 +573,14 @@ class _FakeOp:
         self._replay.detached_uniques[name] = UniqueSpec(
             name=name, columns=tuple(columns), table=table_name
         )
+
+    def add_column(self, table_name: str, column: object, **kwargs: object) -> None:
+        if not isinstance(column, sa.Column):
+            raise AssertionError(f"{self._replay.revision}: add_column got a non-Column {column!r}")
+        self._replay.added_columns.append((table_name, column))
+
+    def drop_column(self, table_name: str, column_name: str, **kwargs: object) -> None:
+        self._replay.dropped_columns.append((table_name, column_name))
 
     def create_foreign_key(
         self,
@@ -584,10 +645,14 @@ class _FakeOp:
 
     # -- context -----------------------------------------------------------
     def get_bind(self):  # noqa: ANN201 - mirrors Alembic's signature
-        raise AssertionError(
-            f"{self._replay.revision}.{self._replay.phase}: the cross-review replay is "
-            "database-free; a revision must not require a live bind"
-        )
+        # Some revisions verify what they just installed by reading the catalog
+        # (``2026110318`` checks the policy names, ``2026110319`` checks that every
+        # existing canonical relation carries its declared pair).  That is a *read*,
+        # not a DDL statement, so answering it from metadata keeps the replay
+        # database-free: no connection, no server, no migration run.  The stub reports
+        # "exists and is policied" for every model table, which is exactly what those
+        # checks assert about a correctly migrated schema.
+        return _CatalogStub()
 
     def get_context(self) -> _OfflineContext:
         return _OfflineContext()
@@ -598,6 +663,8 @@ _OP_ATTRIBUTES = (
     "create_index",
     "create_unique_constraint",
     "create_foreign_key",
+    "add_column",
+    "drop_column",
     "drop_table",
     "drop_index",
     "drop_constraint",

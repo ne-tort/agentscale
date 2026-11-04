@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .route_inventory import RouteRecord, request_parameter_classes
+from .route_inventory import RouteRecord
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,8 +35,9 @@ class PublicRoute:
     ``"exact"``
         the route key is listed verbatim (a fixed path);
     ``"prefix"``
-        the route key is ``"<METHOD> <prefix>"`` and matches every path below
-        that prefix, e.g. all of ``/auth/broker/*``.
+        the entry covers every path equal to ``path`` or below it. ``path`` must
+        therefore end where a segment ends: ``"/api/v1/auth"`` covers
+        ``/api/v1/auth/login`` but not ``/api/v1/authentication``.
     """
 
     method: str
@@ -53,7 +54,7 @@ class PublicRoute:
         if record.method != self.method:
             return False
         if self.match == "prefix":
-            return record.path.startswith(self.path)
+            return record.path == self.path or record.path.startswith(self.path + "/")
         return record.path == self.path
 
 
@@ -127,14 +128,24 @@ PUBLIC_ROUTES: tuple[PublicRoute, ...] = (
         path="/api/v1/auth",
         match="prefix",
         justification=(
-            "The auth surface must be reachable before a caller holds any token — "
-            "that is its purpose. Every handler in ``api/v1/auth.py`` either "
-            "establishes a credential (``login``, ``refresh``, ``broker/*``) or "
-            "reports the service's own configuration/health (``config``, "
-            "``health``); none of them reads a tenant row. ``logout`` revokes the "
-            "caller-supplied refresh/access tokens and needs no session of its own. "
-            "The dict returned by ``config`` is ``AuthService.public_config`` and by "
-            "construction omits issuer/token/revoke URLs."
+            "Discovery and status half of the auth surface, reachable before the "
+            "caller holds any credential — that is its purpose. ``config`` returns "
+            "``AuthService.public_config`` (by construction no issuer/token/revoke "
+            "URLs), ``health`` reports only whether the identity provider answers, "
+            "and ``broker/{idp}/start`` plus ``broker/callback`` are the OIDC "
+            "round trip itself. None of them reads a tenant row."
+        ),
+    ),
+    PublicRoute(
+        method="POST",
+        path="/api/v1/auth",
+        match="prefix",
+        justification=(
+            "Credential-establishing half of the auth surface: ``login``, "
+            "``refresh`` and ``logout`` take the credential *in the body* and "
+            "answer from the identity provider. They must work before a bearer "
+            "token exists, and they read no tenant row — the session they return "
+            "is the one the caller just proved they own."
         ),
     ),
     # ---- non-browser ingress with its own credential ------------------------
@@ -182,19 +193,19 @@ PUBLIC_ROUTES: tuple[PublicRoute, ...] = (
 
 #: How each public route's justification is checked against the code.
 #:
-#: The value is the ``module:function`` (or ``module:`` for a whole prefix)
-#: FastAPI reports for the handler. A registered public route must still be
-#: served by that code: if the handler is moved or renamed, the justification
-#: above describes something that no longer exists and the test says so instead
-#: of silently trusting a stale comment.
+#: Keyed by :attr:`PublicRoute.key`; the value is the ``module:function`` — or,
+#: for a prefix entry, the ``module:`` — FastAPI reports for the handler. A
+#: registered public route must still be served by that code: if the handler is
+#: moved or renamed, the justification above describes something that no longer
+#: exists and the test says so instead of silently trusting a stale comment.
 PUBLIC_ROUTE_HANDLERS: dict[str, str] = {
-    "GET /health": "prodavan.api.v1.health:health_check",
-    "GET /api/v1/health": "prodavan.api.v1.health:health_check",
-    "GET /docs": "fastapi.applications:swagger_ui_html",
+    "GET /health": "prodavan.api.v1.health:",
+    "GET /api/v1/health": "prodavan.api.v1.health:",
+    "GET /docs": "fastapi.applications:swagger_ui_",
     "GET /redoc": "fastapi.applications:redoc_html",
     "GET /openapi.json": "fastapi.applications:openapi",
     "GET /api/v1/auth": "prodavan.api.v1.auth:",
-    "POST /api/v1/projects/{project_id}/webhooks/http": (
+    "POST /api/v1/auth": "prodavan.api.v1.auth:",    "POST /api/v1/projects/{project_id}/webhooks/http": (
         "prodavan.api.v1.projects:ingress_signed_webhook"
     ),
     "POST /api/v1/projects/{project_id}/webhooks/telegram": (
@@ -234,8 +245,11 @@ class TenantSelectorGap:
 UNVALIDATED_TENANT_SELECTORS: tuple[TenantSelectorGap, ...] = (
     # -- admin surface: authenticated by ``require_platform_admin`` ----------
     TenantSelectorGap("POST", "/api/v1/admin/ai-keys", "body.company_ids", "F-01"),
+    # Different failure mode: a guard *is* called, but on a path that skips it.
+    # Recorded as its own finding so the bypass is not averaged in with "the
+    # admin may do this anyway".
     TenantSelectorGap(
-        "PUT", "/api/v1/admin/ai-keys/{key_id}/companies", "body.company_ids", "F-01"
+        "PUT", "/api/v1/admin/ai-keys/{key_id}/companies", "body.company_ids", "F-05"
     ),
     TenantSelectorGap("POST", "/api/v1/admin/ai-models", "body.owner_company_id", "F-01"),
     TenantSelectorGap("POST", "/api/v1/admin/cabinets", "body.company_id", "F-01"),
@@ -273,6 +287,24 @@ UNVALIDATED_TENANT_SELECTORS: tuple[TenantSelectorGap, ...] = (
 )
 
 
+#: Routes where a guard *is* reachable from the handler but does **not** validate
+#: the selector — the reachability search cannot tell the difference, so the
+#: caveat is written down instead of letting the route look protected.
+#:
+#: This is the honest limit of a syntactic audit: it sees that
+#: ``require_access`` is called, not whether the call is reached or bypassed.
+REACHABILITY_CAVEATS: dict[str, str] = {
+    "PUT /api/v1/admin/ai-keys/{key_id}/companies": (
+        "AiKeysService.set_companies -> cascade_company_key_revoked -> "
+        "ProjectCommand.pause(..., skip_access=True). The ``require_access`` the "
+        "index finds lives inside ``pause`` and is explicitly skipped at that call "
+        "site; nothing validates the caller against ``body.company_ids``. The only "
+        "check on each supplied id is existence (``_replace_bindings`` raises 422 "
+        "for an unknown company), which is not authorization."
+    ),
+}
+
+
 #: Project-scoped routes that reach a project access decision through a service
 #: the audit follows *by hand* rather than by syntax.
 #:
@@ -305,6 +337,7 @@ __all__ = [
     "PUBLIC_ROUTES",
     "PUBLIC_ROUTE_HANDLERS",
     "PublicRoute",
+    "REACHABILITY_CAVEATS",
     "REVIEWED_INDIRECT_TENANT_PROOFS",
     "TenantSelectorGap",
     "UNVALIDATED_TENANT_SELECTORS",

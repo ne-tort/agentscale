@@ -22,20 +22,20 @@ from prodavan.infrastructure.persistence.migration_artifact_store import (
     ArtifactRefusalCode,
     SqlArtifactContentStore,
 )
+
 from .artifact_fixtures import (
     ARTIFACT_BYTES,
     ARTIFACT_KEY,
     ARTIFACT_URI,
     CONTENT_URI,
     DEFINITION,
-    FakeByteStore,
-    OTHER_TENANT,
-    RecordingSessionFactory,
     TENANT,
     VERSION,
+    CollapsingByteStore,
+    FakeByteStore,
+    RecordingSessionFactory,
     catalogue,
     content_asset,
-    content_blob,
     legacy_version,
 )
 
@@ -196,6 +196,46 @@ async def test_the_host_may_override_the_missing_object_contract() -> None:
         artifact_uri=ARTIFACT_URI,
         max_bytes=1024,
     ) is None
+
+
+async def test_a_lazily_resolved_store_decides_the_absence_contract_not_the_field() -> None:
+    """With no store bound the read resolves one lazily -- and *that* store's backend counts.
+
+    This is the failure mode a naive implementation has: the port would consult its own
+    (``None``) ``file_store`` field, conclude "no collapsing backend", and turn a transient
+    S3 outage into a confirmed absence -- i.e. quarantine a healthy row.
+    """
+
+    from prodavan.infrastructure.files import manager as file_manager
+
+    collapsing = CollapsingByteStore(objects={})
+    collapsing.fail_with = RuntimeError("connection reset by peer")
+    # ``ensure_file_store`` returns a manager it considers *started*, i.e. one whose
+    # ``_primary`` is set; the double must look like that or the lazy path would create a
+    # second, real manager instead of using the store this test is about.
+    collapsing._primary = collapsing  # type: ignore[attr-defined]
+    previous = file_manager.get_file_store_optional()
+    file_manager.set_file_store(collapsing)  # type: ignore[arg-type]
+    try:
+        port = SqlArtifactContentStore(
+            session_factory=RecordingSessionFactory(catalogue()),
+            file_store=None,
+        )
+        # The property itself must not resolve (and therefore must not start) the store.
+        assert port.missing_is_confirmed is True
+
+        with pytest.raises(ArtifactContentRefused) as refusal:
+            await port.read_artifact(
+                tenant_id=TENANT,
+                app_definition_id=DEFINITION,
+                app_version_id=VERSION,
+                artifact_uri=ARTIFACT_URI,
+                max_bytes=1024,
+            )
+    finally:
+        file_manager.set_file_store(previous)
+
+    assert refusal.value.code is ArtifactRefusalCode.STORE_MISSING_UNCONFIRMED
 
 
 async def test_a_backend_error_that_is_not_a_miss_is_never_reported_as_absence() -> None:

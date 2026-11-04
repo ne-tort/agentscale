@@ -31,6 +31,9 @@ from prodavan.application.migration.m04e_definition_version.backfill import (
     export_m05_evidence,
 )
 from prodavan.application.migration.m04e_ports import (
+    EVIDENCE_LEDGER_TABLES,
+    EVIDENCE_STORE_LEDGER_DDL,
+    EVIDENCE_STORE_REQUIRED_DDL,
     EVIDENCE_STORE_SCHEMA_GAPS,
     GATE_ACTIVE_TYPED_PARENT_SCOPE,
     GATE_M04E_01_DEFINITION_FOUNDATION,
@@ -66,15 +69,18 @@ from .acceptance_fixtures import (
     SECRET_MARKER,
     SHA_A,
     SHA_B,
+    SHA_C,
     SNAPSHOT_DIGEST,
     SOURCE_SCHEMA,
     TENANT,
+    _NeverOpenedFactory,
     cabinet_anchor_row,
     cabinet_grant_row,
     cabinet_row,
     company_row,
     context,
     definition_row,
+    dialect_session,
     expected_source_digest,
     promotion_row,
     registry_row,
@@ -747,12 +753,81 @@ async def test_candidate_proof_refuses_an_already_mapped_target_that_disagrees()
 
 
 # ---------------------------------------------------------------------------
-# 5. EvidenceStore — exact key, absence -> None, no silent empty ledger
+# 5. EvidenceStore — the ledger exists; the boundary is the partition, not a DDL gap
 # ---------------------------------------------------------------------------
+#
+# These cases used to assert that ``find_existing`` / ``find_observation`` /
+# ``record_blocked`` / ``classify_and_commit_page`` *raise*
+# ``EvidenceStoreUnavailable`` with ``EVIDENCE_STORE_SCHEMA_GAPS``, because no
+# registered table could carry a per-source ledger. Revision ``2026110315`` created
+# ``m04e_definition_version_{mappings,quarantine,checkpoints,audit}``, so that
+# expectation is now wrong: a store that refused would be refusing over tables that
+# exist. What still has to be pinned *here* is the shape of the boundary:
+#
+# * the store is a real object over the four registered tables (section 6 proves none
+#   of the four methods can exist without a database);
+# * it refuses a non-PostgreSQL session unless a test mirror is explicitly allowed, so
+#   a composition root cannot write the ledger without the RLS binding;
+# * the schema-gap list no longer claims the tables are missing, and the required-DDL
+#   list is empty while the reviewed spec of the four objects is preserved.
+#
+# The behaviour of the four methods — page commit, replay, conflict, CAS conflict,
+# quarantine and audit balance — is exercised against a real SQLite mirror of the four
+# registered tables in ``test_m04e_evidence_store.py``.
 
 
-async def test_evidence_store_never_answers_find_existing_with_none() -> None:
-    fake, factory = session()
+def test_the_ledger_tables_are_the_four_the_models_register() -> None:
+    from prodavan.infrastructure.persistence.models import Base
+    from prodavan.infrastructure.persistence.models.m04e_ledger import M04E_LEDGER_TABLES
+
+    assert set(EVIDENCE_LEDGER_TABLES) == set(M04E_LEDGER_TABLES)
+    for table in EVIDENCE_LEDGER_TABLES:
+        assert table in Base.metadata.tables, f"{table} is not in the metadata"
+
+
+def test_the_store_is_built_over_the_registered_tables_not_over_a_promise() -> None:
+    store = SqlM04EEvidenceStore(session_factory=_NeverOpenedFactory())
+
+    assert store.IS_FAIL_CLOSED_BOUNDARY is False
+    assert store.ledger_tables == EVIDENCE_LEDGER_TABLES
+    # The DDL the port used to demand is in the schema, so nothing is left to demand.
+    # Keeping the list (empty) is what makes the *absence* of a gap explicit.
+    assert EVIDENCE_STORE_REQUIRED_DDL == ()
+    # The reviewed spec of those four objects is preserved verbatim: the ledger
+    # revision's own contract test parses it as the specification it must satisfy.
+    assert len(EVIDENCE_STORE_LEDGER_DDL) == 4
+    assert {entry.split(" ", 1)[0] for entry in EVIDENCE_STORE_LEDGER_DDL} == set(
+        EVIDENCE_LEDGER_TABLES
+    )
+
+
+def test_the_remaining_gaps_name_the_promotion_table_not_a_missing_ledger() -> None:
+    """The three surviving gaps are facts about ``..._promotion_evidence``.
+
+    They used to be mixed with four "no table carries X" entries. Those four are gone
+    because the tables exist; asserting the survivors keeps a future reader from
+    re-introducing a phantom missing-table blocker next to a working store.
+    """
+
+    assert len(EVIDENCE_STORE_SCHEMA_GAPS) == 3
+    for gap in EVIDENCE_STORE_SCHEMA_GAPS:
+        assert gap.startswith("m04e_promotion_"), gap
+    rendered = " ".join(EVIDENCE_STORE_SCHEMA_GAPS)
+    assert "ck_m04e_promotion_outcome" in rendered
+    # The ledger is not missing, and the gap list must not pretend otherwise.
+    for phantom in (
+        "m04e_backfill_mapping_ledger_missing",
+        "m04e_backfill_observation_ledger_missing",
+        "m04e_backfill_checkpoint_ledger_missing",
+        "m04e_backfill_audit_ledger_missing",
+    ):
+        assert phantom not in rendered, phantom
+
+
+async def test_the_store_refuses_a_non_postgresql_session_unless_a_mirror_is_allowed() -> None:
+    """A SQLite session without RLS must not silently become the production ledger."""
+
+    fake, factory = dialect_session("sqlite")
 
     with pytest.raises(M04EPortRefused) as raised:
         await SqlM04EEvidenceStore(session_factory=factory).find_existing(
@@ -760,75 +835,80 @@ async def test_evidence_store_never_answers_find_existing_with_none() -> None:
             source_id=DEFINITION_ID, source_schema_version=SOURCE_SCHEMA,
         )
 
-    error = raised.value
-    assert error.code is M04EPortReason.STORE_MAPPING_LEDGER_MISSING
-    assert error.refusal.blockers == EVIDENCE_STORE_SCHEMA_GAPS
-    assert error.refusal.partition == (TENANT, DEFINITION_ID)
-    # Fail-closed without a read: no query ran, so no empty result can be mistaken
-    # for "this source was never mapped".
+    assert raised.value.code is M04EPortReason.TRANSACTION_ISOLATION_INSUFFICIENT
+    assert "PostgreSQL" in raised.value.refusal.detail
+    # Refused before any statement: no read ran without a proven partition.
     assert fake.statements == []
 
 
-async def test_evidence_store_refuses_every_unrepresentable_operation() -> None:
-    fake, factory = session()
-    port = SqlM04EEvidenceStore(session_factory=factory)
+async def test_the_store_refuses_an_observation_that_is_not_exactly_one_digest() -> None:
+    """``find_observation`` answers an exact key; a malformed key is not "absent".
+
+    ``ck_m04e_quarantine_single_observation`` admits exactly one observed digest. A
+    caller naming both — or neither — asks a question the ledger cannot contain, so the
+    store refuses instead of returning ``None``, which would read as "this observation
+    was never recorded" and license a second quarantine row.
+    """
+
+    fake, factory = dialect_session("postgresql")
+    store = SqlM04EEvidenceStore(session_factory=factory)
+
+    for kwargs in (
+        {"observed_source_digest": None, "observed_artifact_digest": None},
+        {"observed_source_digest": SHA_A, "observed_artifact_digest": SHA_B},
+    ):
+        with pytest.raises(M04EPortRefused) as raised:
+            await store.find_observation(
+                context=context(), source_kind=LEGACY_VERSION_SOURCE_KIND,
+                source_id="aver_0001", source_schema_version=SOURCE_SCHEMA, **kwargs,
+            )
+        assert raised.value.code is M04EPortReason.STORE_OUTCOME_UNREPRESENTABLE
+        assert "exactly one observed digest" in raised.value.refusal.detail
+    assert fake.statements == []
+
+
+async def test_the_store_refuses_a_checkpoint_from_another_partition() -> None:
+    """The cursor is part of the partition, never a free-floating argument."""
+
+    fake, factory = dialect_session("postgresql")
+    store = SqlM04EEvidenceStore(session_factory=factory)
+    foreign = checkpoint(
+        partition=(OTHER_TENANT, DEFINITION_ID),
+        source_snapshot_id=context().source_snapshot_id,
+        source_schema_version=context().source_schema_version,
+        source_snapshot_digest=context().source_snapshot_digest,
+        canonical_schema_version=context().canonical_schema_version,
+    )
+
+    with pytest.raises(M04EPortRefused) as raised:
+        await store.record_blocked(
+            context=context(), checkpoint=foreign,
+            reason_code="upstream_owner_scope_gate_unproven",
+        )
+
+    assert raised.value.code is M04EPortReason.PARTITION_MISMATCH
+    assert fake.statements == []
+
+
+async def test_the_store_refuses_a_page_whose_gates_belong_to_another_correlation() -> None:
+    """Gate evidence is re-checked by the store, not only by ``run_page``."""
+
+    _fake, factory = dialect_session("postgresql")
+    store = SqlM04EEvidenceStore(session_factory=factory)
     gates = UpstreamGateEvidence(
         tenant_id=TENANT, app_definition_id=DEFINITION_ID,
         source_snapshot_digest=SNAPSHOT_DIGEST, transaction_id="pg:1",
-        correlation_id=CORRELATION_ID, m04_gate_digest=SHA_A,
-        m04e_gate_digest=SHA_B, active_scope_digest="sha256:" + "c" * 64,
-    )
-    accepted = CandidateDecision(
-        candidate=definition_candidate(context(), definition_row()),
-        status=EvidenceStatus.ACCEPTED, reason_code=None, proof=None,
-    )
-    quarantined = CandidateDecision(
-        candidate=version_candidate(context(), version_row(), definition_row()),
-        status=EvidenceStatus.QUARANTINED, reason_code="source_lifecycle_unproven",
-        proof=None,
+        correlation_id="corr-other", m04_gate_digest=SHA_A,
+        m04e_gate_digest=SHA_B, active_scope_digest=SHA_C,
     )
 
-    with pytest.raises(M04EPortRefused) as observation:
-        await port.find_observation(
-            context=context(), source_kind=LEGACY_VERSION_SOURCE_KIND,
-            source_id="aver_0001", source_schema_version=SOURCE_SCHEMA,
-            observed_source_digest=SHA_A, observed_artifact_digest=None,
-        )
-    assert observation.value.code is M04EPortReason.STORE_OBSERVATION_LEDGER_MISSING
-
-    with pytest.raises(M04EPortRefused) as blocked:
-        await port.record_blocked(
-            context=context(), checkpoint=checkpoint(),
-            reason_code="upstream_owner_scope_gate_unproven",
-            blocker_evidence=("MIG-M04-01",),
-        )
-    assert blocked.value.code is M04EPortReason.STORE_BLOCKED_EVIDENCE_UNREPRESENTABLE
-
-    with pytest.raises(M04EPortRefused) as committed:
-        await port.classify_and_commit_page(
+    with pytest.raises(M04EPortRefused) as raised:
+        await store.classify_and_commit_page(
             context=context(), gates=gates, expected_checkpoint=checkpoint(),
-            decisions=(quarantined,), page_exhausted=True,
+            decisions=(), page_exhausted=True,
         )
-    assert committed.value.code is M04EPortReason.STORE_CHECKPOINT_LEDGER_MISSING
 
-    with pytest.raises(M04EPortRefused) as accepted_page:
-        await port.classify_and_commit_page(
-            context=context(), gates=gates, expected_checkpoint=checkpoint(),
-            decisions=(accepted,), page_exhausted=False,
-        )
-    assert accepted_page.value.code is M04EPortReason.STORE_ACCEPTED_OUTCOME_UNREPRESENTABLE
-    # The refusal must name the outcome it cannot represent. Case is not part of the
-    # contract: the detail mirrors the schema-gap vocabulary and the CHECK constraint
-    # name (``ck_m04e_promotion_outcome`` can never store an ACCEPTED mapping), so the
-    # previous case-sensitive lowercase literal failed on emphasis alone, not on the
-    # finding it is meant to pin.
-    assert "accepted" in accepted_page.value.refusal.detail.lower()
-    # …and name the constraint that makes it impossible, so a future DDL that widens
-    # ck_m04e_promotion_outcome is a visible change to this refusal rather than an
-    # unnoticed one.
-    assert "ck_m04e_promotion_outcome" in accepted_page.value.refusal.detail
-    # No write was attempted: the refusal is a boundary, not a partial commit.
-    assert fake.statements == []
+    assert raised.value.code is M04EPortReason.GATE_CONTEXT_INVALID
 
 
 async def test_evidence_store_reads_the_partition_promotion_record_exactly() -> None:
@@ -862,17 +942,21 @@ async def test_evidence_store_returns_none_only_for_an_absent_partition_record()
     ) is None
 
 
-async def test_evidence_store_reports_the_wiring_blockers_it_cannot_resolve() -> None:
-    _fake, factory = session()
-    boundary = SqlM04EEvidenceStore(session_factory=factory)
+def test_the_wiring_blockers_no_longer_claim_an_unimplemented_store() -> None:
+    """``m04e_evidence_store_port_unimplemented`` was true only until the store existed.
 
-    assert boundary.IS_FAIL_CLOSED_BOUNDARY is True
-    assert boundary.blockers == EVIDENCE_STORE_SCHEMA_GAPS
-    assert any("checkpoint" in gap for gap in boundary.blockers)
-    assert any("m04e_definition_version_mappings" in item for item in boundary.required_ddl)
-    assert any(
-        "m04e_evidence_store_port_unimplemented" in item for item in M04E_PORT_WIRING_BLOCKERS
+    Keeping it would report a blocker for a port that is implemented, which is how a
+    diagnostic resource starts lying. What legitimately remains is the privilege review
+    of the migration role and the two-state promotion CHECK.
+    """
+
+    assert not any(
+        "m04e_evidence_store_port_unimplemented" in item
+        for item in M04E_PORT_WIRING_BLOCKERS
     )
+    rendered = " ".join(M04E_PORT_WIRING_BLOCKERS)
+    assert "m04e_backfill_tenant_context_binding_unreviewed" in rendered
+    assert "m04e_positive_promotion_gate_unrepresentable" in rendered
 
 
 # ---------------------------------------------------------------------------
@@ -913,9 +997,15 @@ def test_builders_return_named_blockers_instead_of_a_stub() -> None:
     assert store_blockers[0].startswith("m04e_backfill_session_factory_missing")
     assert store_blockers[1:] == EVIDENCE_STORE_SCHEMA_GAPS
 
+    # Was ``store_port is None`` with the schema gaps: that encoded "the ledger cannot
+    # exist". The four tables are registered and revision ``2026110315`` creates them,
+    # so the builder now returns a usable store — and still returns the *review* items,
+    # because the M04E-01 promotion gate cannot record an accepted outcome yet. A
+    # builder that dropped them would report the stage as unblocked.
     store_port, store_blockers = build_m04e_evidence_store(session_factory=factory)
-    assert store_port is None
+    assert isinstance(store_port, SqlM04EEvidenceStore)
     assert store_blockers == EVIDENCE_STORE_SCHEMA_GAPS
+    assert store_port.required_ddl == ()
 
 
 @pytest.mark.parametrize(
@@ -966,14 +1056,18 @@ async def test_no_payload_or_manifest_text_reaches_a_refusal_or_a_proof() -> Non
     texts = [decision.refusal.evidence_text(), *decision.refusal.as_blocker_evidence()]
     assert texts and all(SECRET_MARKER not in text for text in texts)
 
-    _fake, store_factory = session()
-    with pytest.raises(M04EPortRefused) as raised:
-        await SqlM04EEvidenceStore(session_factory=store_factory).find_existing(
-            context=context(), source_kind=LEGACY_DEFINITION_SOURCE_KIND,
-            source_id=DEFINITION_ID, source_schema_version=SOURCE_SCHEMA,
-        )
-    assert SECRET_MARKER not in str(raised.value)
-    assert all(SECRET_MARKER not in blocker for blocker in raised.value.refusal.blockers)
+    # Was "the store refuses and its refusal must not quote the payload". The store now
+    # answers, so the redaction claim has to be made about what it can *hold*: the four
+    # ledger tables have no column capable of carrying a payload, a manifest or a
+    # description, and a refusal names only codes and digests. Asserted on the columns
+    # rather than on one emitted statement, so a future column is caught everywhere.
+    from prodavan.infrastructure.persistence.models import Base
+
+    for table in EVIDENCE_LEDGER_TABLES:
+        columns = {column.name for column in Base.metadata.tables[table].columns}
+        for forbidden in ("display_name", "description", "manifest", "payload", "body"):
+            assert forbidden not in columns, f"{table} exposes a raw {forbidden!r} column"
+    assert all(SECRET_MARKER not in gap for gap in EVIDENCE_STORE_SCHEMA_GAPS)
 
     fake, proof_factory = session()
     gates = await accepted_gate(fake, proof_factory)

@@ -14,16 +14,16 @@ in-memory fallback:
 ``m04e_definition_version_promotion_evidence``.
 ``CandidateProofPort`` — :class:`SqlM04ECandidateProof` over the legacy rows plus
 ``m04e_dynamic_app_definitions`` / ``m04e_dynamic_app_versions``.
-``EvidenceStore`` — :class:`SqlM04EEvidenceStore` **refuses** by name: no
-registered M04E per-source ledger exists (see below).
+``EvidenceStore`` — :class:`SqlM04EEvidenceStore` over the four registered
+ledger tables revision ``2026110315`` created (see its own section below).
 
-Why the evidence store refuses instead of approximating
-=======================================================
+Why the evidence store is a ledger and not the promotion table
+=============================================================
 
 ``EvidenceStore.classify_and_commit_page`` needs, in **one** transaction: a
-per-source first-mapping ledger, quarantine/conflict observations with the
-*observed* digest, redacted audit, and a durable cursor advanced by CAS. The
-three registered M04E tables (revision ``2026110302``) cannot carry any of it:
+per-source first-mapping ledger, quarantine/conflict observations carrying the
+*observed* digest, redacted audit, and a durable cursor advanced by CAS. The two
+older M04E tables (revision ``2026110302``) cannot carry any of it:
 
 * ``m04e_dynamic_app_definitions`` / ``m04e_dynamic_app_versions`` are canonical
   identity rows keyed by ``(id, tenant_id)`` / ``(id, definition_id)``; neither has
@@ -32,24 +32,24 @@ three registered M04E tables (revision ``2026110302``) cannot carry any of it:
 * ``m04e_definition_version_promotion_evidence`` is a **per-partition** record
   (``uq_m04e_promotion_revision`` = ``(tenant_id, definition_id, revision_id)``)
   whose ``outcome`` is constrained to ``('blocked', 'quarantined')``
-  (``ck_m04e_promotion_outcome``), so it cannot record an accepted mapping, and
-  its ``source_digest``/``target_digest``/``current_version_resolution_digest``/
+  (``ck_m04e_promotion_outcome``), so it cannot record an accepted mapping, and its
+  ``source_digest``/``target_digest``/``current_version_resolution_digest``/
   ``artifact_equality_digest`` are ``NOT NULL`` sha256 gate proofs that a blocked
   page has no truthful value for.
 
-Two tempting workarounds are **rejected** rather than implemented, because both
-invent a schema: (a) packing a per-source ledger and a cursor into the
-``gate_evidence`` JSONB column of a promotion record, and (b) treating the target
-foundation rows as the mapping ledger and synthesising the checkpoint /
-correlation fields ``BackfillRecord`` requires. A store that answered
-``find_existing`` with ``None`` because it cannot see its own ledger would license
-a second append for an already-mapped source identity — the opposite of the
-fail-closed rule. :class:`SqlM04EEvidenceStore` therefore raises
-:class:`EvidenceStoreUnavailable` carrying
-:data:`EVIDENCE_STORE_SCHEMA_GAPS`, and the four port entries stay blockers in
-``composition.py`` until a reviewed DDL adds
-``m04e_definition_version_mappings`` + ``..._checkpoints`` (mirroring
-``scope_owner_mappings`` / ``scope_owner_quarantine`` / ``scope_owner_audit``).
+Two tempting workarounds stay **rejected**, because both invent a schema: (a)
+packing a per-source ledger and a cursor into the ``gate_evidence`` JSONB column of
+a promotion record, and (b) treating the target foundation rows as the mapping
+ledger and synthesising the checkpoint/correlation fields ``BackfillRecord``
+requires. A store that answered ``find_existing`` with ``None`` because it could
+not see its own ledger would license a second append for an already-mapped source
+identity — the opposite of the fail-closed rule. The reviewed replacement is the
+four-table ledger ``m04e_definition_version_{mappings,quarantine,checkpoints,audit}``
+(mirroring ``scope_owner_mappings`` / ``scope_owner_quarantine`` /
+``scope_owner_audit``), which is what :class:`SqlM04EEvidenceStore` reads and
+writes. The promotion table keeps its own job: it is the ``MIG-M04E-01`` gate
+record, still per-partition and still two-state, which is why that gate still
+refuses by name (see :data:`EVIDENCE_STORE_SCHEMA_GAPS`).
 
 Transaction, tenant and redaction rules shared by every adapter
 ==============================================================
@@ -89,19 +89,24 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
+import uuid
 from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import Any, Final
 
+import sqlalchemy as sa
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from prodavan.application.migration.m04e_definition_version.backfill import (
+    DefinitionVersionEvidenceBackfill,
     BackfillBatch,
     BackfillCheckpoint,
     BackfillContext,
+    BackfillOutcome,
     BackfillRecord,
     CandidateDecision,
     CandidateProof,
@@ -113,6 +118,12 @@ from prodavan.application.migration.m04e_definition_version.backfill import (
     SourceRowState,
     UpstreamGateEvidence,
     UpstreamGatePort,
+)
+from prodavan.infrastructure.persistence.models.m04e_ledger import (
+    M04EDefinitionVersionAuditRow as EVIDENCE_AUDIT_TABLE_MODEL,
+    M04EDefinitionVersionCheckpointRow as EVIDENCE_CHECKPOINT_TABLE_MODEL,
+    M04EDefinitionVersionMappingRow as EVIDENCE_MAPPING_TABLE_MODEL,
+    M04EDefinitionVersionQuarantineRow as EVIDENCE_QUARANTINE_TABLE_MODEL,
 )
 
 # ---------------------------------------------------------------------------
@@ -247,6 +258,18 @@ class M04EPortReason(StrEnum):
     STORE_CHECKPOINT_LEDGER_MISSING = "m04e_backfill_checkpoint_ledger_missing"
     STORE_BLOCKED_EVIDENCE_UNREPRESENTABLE = "m04e_backfill_blocked_evidence_unrepresentable"
     STORE_ACCEPTED_OUTCOME_UNREPRESENTABLE = "m04e_promotion_accepted_outcome_unrepresentable"
+    # -- durable ledger (revision 2026110315), raised by SqlM04EEvidenceStore ----
+    #: The source identity is already mapped with a different classification. A first
+    #: mapping is immutable; only a changed digest (an observation) may be recorded.
+    STORE_FIRST_MAPPING_CONFLICT = "m04e_backfill_first_mapping_conflict"
+    #: The ledger refused a write it cannot make truthfully (a head it could not
+    #: create, a reason code it could not store).
+    STORE_LEDGER_WRITE_REFUSED = "m04e_backfill_ledger_write_refused"
+    #: The requested classification has no representation in the ledger at all.
+    STORE_OUTCOME_UNREPRESENTABLE = "m04e_backfill_outcome_unrepresentable"
+    #: The page itself is malformed (wrong phase, repeated identity, out of order,
+    #: missing reason) — a question about a page, not evidence about a row.
+    STORE_DECISION_INVALID = "m04e_backfill_decision_invalid"
 
 
 @dataclass(frozen=True, slots=True)
@@ -1898,37 +1921,73 @@ class SqlM04ECandidateProof(_SessionReads):
 
 
 # ---------------------------------------------------------------------------
-# EvidenceStore boundary — refuses, with the reviewed schema gaps
+# EvidenceStore — the durable per-source ledger (revision ``2026110315``)
 # ---------------------------------------------------------------------------
+#
+# The four tables this adapter writes are registered models
+# (``infrastructure/persistence/models/m04e_ledger.py``) created by revision
+# ``2026110315_m04e_ledger.py``:
+#
+# * ``m04e_definition_version_mappings`` — the *first* mapping ever recorded for one
+#   exact source identity ``(tenant_id, definition_id, source_kind, source_id,
+#   source_schema_version)``, unique on that key, so a second row for an
+#   already-mapped source cannot exist even if a writer asked for one;
+# * ``m04e_definition_version_quarantine`` — one changed-digest *observation*,
+#   unique on the source identity plus both observed digests with
+#   ``NULLS NOT DISTINCT``, so ``find_observation`` is an exact lookup;
+# * ``m04e_definition_version_checkpoints`` — the durable cursor of one
+#   ``(tenant_id, definition_id, phase)`` stream: one head row, a globally unique
+#   ``checkpoint_token`` and the monotonicity trigger;
+# * ``m04e_definition_version_audit`` — the append-only, redacted per-page event
+#   with balanced counters.
+#
+# What the store guarantees, and how
+# ---------------------------------
+# * **One transaction per call.** ``classify_and_commit_page`` opens exactly one
+#   transaction: classification rows, quarantine observations, the checkpoint
+#   advance and the audit event commit or roll back together. There is no
+#   "write evidence, then advance the cursor" path.
+# * **CAS on the observed cursor.** The head row is locked ``FOR UPDATE`` (a no-op
+#   on SQLite) and the advance carries ``AND sequence = :observed AND
+#   checkpoint_token = :observed``. ``rowcount == 0`` is *not* an exception: it is
+#   the reviewed "stale cursor" answer, returned as the durable head after the
+#   page's writes are rolled back.
+# * **Replay does not move the cursor.** A page whose classifications all replay
+#   writes nothing — no mapping row, no observation, no audit event, no CAS — and
+#   returns the stored rows plus the stored head.
+# * **A changed digest is never a rewrite.** A different ``source_digest`` (or
+#   different verified artifact bytes) for an already-mapped source appends a
+#   quarantine observation and returns the *first* mapping's source digest with
+#   ``status=conflict``; the mapping row is never ``UPDATE``d. Replaying the same
+#   observation returns the recorded row with ``outcome=replay``.
+# * **Append-only.** No statement here is an ``UPDATE``/``DELETE`` against
+#   ``..._mappings``, ``..._quarantine`` or ``..._audit``. The single ``UPDATE`` is
+#   the checkpoint CAS on the one mutable head; the ORM guards and the
+#   ``trg_m04e_ledger_append_only_*`` triggers back it up.
+# * **Redaction.** Only identifiers, reason codes, sha256 digests, cursor tokens and
+#   counters are written. ``proof_evidence`` receives *named digests*;
+#   ``blocker_evidence`` receives short, single-line guidance strings that the
+#   backfill contract itself produces.
 
-EVIDENCE_STORE_SCHEMA_GAPS: Final[tuple[str, ...]] = (
-    "m04e_backfill_mapping_ledger_missing: no registered table carries the M04E "
-    "per-source mapping key (tenant_id, app_definition_id, source_kind, source_id, "
-    "source_schema_version) with the first source and canonical digest; "
-    "m04e_dynamic_app_definitions/m04e_dynamic_app_versions have no source_kind, "
-    "source_schema_version, reason_code, correlation_id or checkpoint column",
-    "m04e_backfill_observation_ledger_missing: no registered table carries an "
-    "observed_source_digest / observed_artifact_digest pair, so a changed-digest "
-    "conflict cannot be replayed exactly (find_observation has no storage)",
-    "m04e_backfill_checkpoint_ledger_missing: no registered table carries the durable "
-    "cursor (phase, after_source_id, sequence, phase_complete) or a CAS token for the "
-    "M04E definition/version stream, so classify_and_commit_page cannot advance a "
-    "cursor atomically with the evidence",
-    "m04e_backfill_audit_ledger_missing: no registered table carries redacted per-page "
-    "audit evidence (event_kind, reason_code, correlation_id, checkpoint, actor)",
-    "m04e_promotion_evidence_is_per_partition: uq_m04e_promotion_revision is "
-    "(tenant_id, definition_id, revision_id); it records one promotion revision for a "
-    "partition, not one row per mapped source identity",
-    "m04e_promotion_accepted_outcome_unrepresentable: ck_m04e_promotion_outcome permits "
-    "only ('blocked','quarantined'), so the only registered M04E evidence table cannot "
-    "record an ACCEPTED mapping",
-    "m04e_promotion_blocked_digests_unrepresentable: source_digest, target_digest, "
-    "current_version_resolution_digest and artifact_equality_digest are NOT NULL "
-    "sha256 gate proofs; a blocked page has no truthful value for them and inventing "
-    "one would fabricate gate evidence",
+#: The four registered ledger tables, exactly as the models name them.
+EVIDENCE_MAPPING_LEDGER_TABLE: Final = "m04e_definition_version_mappings"
+EVIDENCE_QUARANTINE_LEDGER_TABLE: Final = "m04e_definition_version_quarantine"
+EVIDENCE_CHECKPOINT_LEDGER_TABLE: Final = "m04e_definition_version_checkpoints"
+EVIDENCE_AUDIT_LEDGER_TABLE: Final = "m04e_definition_version_audit"
+
+EVIDENCE_LEDGER_TABLES: Final[tuple[str, ...]] = (
+    EVIDENCE_MAPPING_LEDGER_TABLE,
+    EVIDENCE_QUARANTINE_LEDGER_TABLE,
+    EVIDENCE_CHECKPOINT_LEDGER_TABLE,
+    EVIDENCE_AUDIT_LEDGER_TABLE,
 )
 
-EVIDENCE_STORE_REQUIRED_DDL: Final[tuple[str, ...]] = (
+#: The four objects the port used to *require* and revision ``2026110315`` created.
+#: Kept verbatim (and renamed from ``EVIDENCE_STORE_REQUIRED_DDL``): the ledger
+#: revision's own contract test parses these column lists as the specification it
+#: must satisfy, so the text stays the reviewed spec rather than being deleted along
+#: with the blocker it used to explain.
+EVIDENCE_STORE_LEDGER_DDL: Final[tuple[str, ...]] = (
     "m04e_definition_version_mappings (tenant_id, definition_id, source_kind, source_id, "
     "source_schema_version, source_digest, canonical_digest, canonical_identity, phase, "
     "status, reason_code, proof_evidence, artifact_digest, verified_artifact_digest, "
@@ -1946,50 +2005,446 @@ EVIDENCE_STORE_REQUIRED_DDL: Final[tuple[str, ...]] = (
     "privileges, UPDATE/DELETE denied)",
 )
 
+#: DDL the ``EvidenceStore`` port still lacks. **Empty**: the four ledger objects
+#: above exist, are registered in ``Base.metadata`` and are what
+#: :class:`SqlM04EEvidenceStore` reads and writes, so nothing is missing from the
+#: schema for this boundary any more. The constant is kept (rather than deleted) so
+#: a caller that reports "required DDL" has an honest, empty answer instead of a
+#: stale list, and so the next gap has an obvious place to be recorded.
+EVIDENCE_STORE_REQUIRED_DDL: Final[tuple[str, ...]] = ()
 
-class SqlM04EEvidenceStore(_SessionReads):
-    """Fail-closed ``EvidenceStore`` boundary: it reads exact keys and never writes.
+#: What still stops the *surrounding* M04E stage from claiming a page commit, now
+#: that the evidence boundary itself is implemented. Each entry is a fact about a
+#: table this task is not allowed to change, not about the ledger:
+#:
+#: * ``m04e_definition_version_promotion_evidence`` is still keyed
+#:   ``(tenant_id, definition_id, revision_id)`` — one promotion revision per
+#:   partition, not one row per mapped source — so it remains the *gate* record, not
+#:   a per-source ledger;
+#: * its ``ck_m04e_promotion_outcome`` still admits only ``('blocked',
+#:   'quarantined')``, so ``SqlM04EUpstreamGate`` refuses ``MIG-M04E-01`` and no page
+#:   reaches the store in production until a reviewed revision can record an
+#:   accepted foundation promotion (the ledger *can* record ``accepted`` for its own
+#:   rows — that is exactly why it exists);
+#: * its four NOT NULL sha256 gate proofs are still unrepresentable for a blocked
+#:   page, for the same reason.
+#:
+#: The first two used to be phrased as *missing ledger* gaps. That phrasing is gone:
+#: the ledger exists, and repeating "no table carries the mapping key" would now be
+#: false. What remains is the promotion-evidence/two-state-CHECK gap, which is a data
+#: migration on a table owned by revision ``2026110302``.
+EVIDENCE_STORE_SCHEMA_GAPS: Final[tuple[str, ...]] = (
+    "m04e_promotion_evidence_is_per_partition: uq_m04e_promotion_revision is "
+    "(tenant_id, definition_id, revision_id); it records one promotion revision for a "
+    "partition, not one row per mapped source identity. The per-source ledger is "
+    "m04e_definition_version_mappings and is not this table; the M04E-01 gate still "
+    "reads the promotion record",
+    "m04e_promotion_accepted_outcome_unrepresentable: ck_m04e_promotion_outcome permits "
+    "only ('blocked','quarantined') on "
+    "m04e_definition_version_promotion_evidence, so the M04E-01 gate cannot observe an "
+    "accepted foundation promotion even though the ledger can record an accepted "
+    "mapping. Closing it rewrites an applied CHECK (a data migration, not a schema fix)",
+    "m04e_promotion_blocked_digests_unrepresentable: source_digest, target_digest, "
+    "current_version_resolution_digest and artifact_equality_digest are NOT NULL "
+    "sha256 gate proofs on the promotion-evidence table; a blocked page has no truthful "
+    "value for them and inventing one would fabricate gate evidence",
+)
 
-    See the module docstring for why no truthful implementation exists over the
-    three registered M04E tables. Every mutating/reading method of the port raises
-    :class:`EvidenceStoreUnavailable` with the gap that blocks it, so a host that
-    wires this object cannot believe a page was committed, and
-    ``DefinitionVersionEvidenceBackfill.run_page`` aborts with the partition's
-    checkpoint untouched.
+#: ``sha256:`` digest shape, identical to the backfill contract's own predicate.
+_SHA256_RE: Final = re.compile(r"^sha256:[0-9a-f]{64}$")
 
-    The one exact-key read the schema *does* support —
-    :meth:`latest_promotion_evidence` — is implemented: it returns the partition's
-    newest durable promotion record, or ``None`` when the partition has none, and it
-    can never observe another partition's row.
+#: Longest guidance string a redacted ``blocker_evidence`` entry may carry.
+_MAX_BLOCKER_LENGTH: Final = 400
+
+#: Reasons a replayed observation may carry. Anything else recorded in the quarantine
+#: ledger is not an observation of a changed digest, and answering it from
+#: ``find_observation`` would fake a conflict replay.
+_CONFLICT_REASONS: Final[frozenset[str]] = frozenset({
+    "source_digest_changed", "artifact_digest_changed",
+})
+
+#: ``status`` column value -> the ``BackfillOutcome`` it records.
+_OUTCOME_BY_STATUS: Final[Mapping[str, BackfillOutcome]] = {
+    "accepted": BackfillOutcome.ACCEPTED,
+    "replay": BackfillOutcome.REPLAY,
+    "quarantined": BackfillOutcome.QUARANTINED,
+    "conflict": BackfillOutcome.CONFLICT,
+    "blocked": BackfillOutcome.BLOCKED,
+}
+
+#: The classification a *fresh* mapping row records for one decision status.
+#: ``replay`` is absent on purpose: a replayed classification creates no row.
+_FIRST_MAPPING_OUTCOME: Final[Mapping[EvidenceStatus, BackfillOutcome]] = {
+    EvidenceStatus.ACCEPTED: BackfillOutcome.ACCEPTED,
+    EvidenceStatus.QUARANTINED: BackfillOutcome.QUARANTINED,
+    EvidenceStatus.CONFLICT: BackfillOutcome.CONFLICT,
+}
+
+
+class _PageCasLost(RuntimeError):
+    """Internal: the checkpoint CAS matched no row. Never leaves the store."""
+
+
+def _ledger_id(prefix: str) -> str:
+    """``prefix_`` plus 24 hex characters — the models' ``String(80)`` id shape."""
+
+    return f"{prefix}_{uuid.uuid4().hex[:24]}"
+
+
+def _checkpoint_token() -> str:
+    """A fresh, globally unique CAS token for exactly one cursor advance."""
+
+    return f"m04e-cp:{uuid.uuid4().hex}"
+
+
+def _start_marker(phase: str) -> str:
+    """The cursor's own spelling when ``after_source_id`` is still empty.
+
+    The ledger's ``checkpoint`` columns are non-empty by CHECK, and "no source
+    consumed yet" is a real state that must be written down rather than as an empty
+    string. ``m04e-start:<phase>`` says exactly that and cannot collide with a source
+    identity, which the reader requires to be a non-empty id.
     """
 
-    IS_FAIL_CLOSED_BOUNDARY: Final = True
+    return f"m04e-start:{phase}"
+
+
+def _source_predicate(
+    table: Any, *, tenant_id: str, definition_id: str, source_kind: str,
+    source_id: str, source_schema_version: str,
+) -> Any:
+    """The exact five-column source key as a SQL predicate."""
+
+    return sa.and_(
+        table.c.tenant_id == tenant_id,
+        table.c.definition_id == definition_id,
+        table.c.source_kind == source_kind,
+        table.c.source_id == source_id,
+        table.c.source_schema_version == source_schema_version,
+    )
+
+
+def _observation_predicate(
+    table: Any, *, tenant_id: str, definition_id: str, source_kind: str,
+    source_id: str, source_schema_version: str,
+    observed_source_digest: str | None, observed_artifact_digest: str | None,
+) -> Any:
+    """The exact observation key.
+
+    ``uq_m04e_quarantine_observation`` is ``NULLS NOT DISTINCT``, so an absent digest
+    is a *value* for uniqueness. The predicate spells ``IS NULL`` explicitly instead
+    of relying on ``= NULL``, which never matches.
+    """
+
+    def _equals(column: Any, value: str | None) -> Any:
+        return column.is_(None) if value is None else column == value
+
+    return sa.and_(
+        _source_predicate(
+            table,
+            tenant_id=tenant_id, definition_id=definition_id, source_kind=source_kind,
+            source_id=source_id, source_schema_version=source_schema_version,
+        ),
+        _equals(table.c.observed_source_digest, observed_source_digest),
+        _equals(table.c.observed_artifact_digest, observed_artifact_digest),
+    )
+
+
+def _checkpoint_from_row(row: Mapping[str, Any]) -> BackfillCheckpoint:
+    """Rebuild the contract's checkpoint value from one durable head row."""
+
+    return BackfillCheckpoint(
+        partition=(str(row["tenant_id"]), str(row["definition_id"])),
+        phase=str(row["phase"]),
+        after_source_id=(
+            str(row["after_source_id"]) if row.get("after_source_id") is not None else None
+        ),
+        sequence=int(row["sequence"]),
+        source_snapshot_id=str(row["source_snapshot_id"]),
+        source_schema_version=str(row["source_schema_version"]),
+        source_snapshot_digest=str(row["source_snapshot_digest"]),
+        canonical_schema_version=str(row["canonical_schema_version"]),
+        writer_generation=(
+            int(row["writer_generation"]) if row.get("writer_generation") is not None else None
+        ),
+        phase_complete=bool(row["phase_complete"]),
+    )
+
+
+def _status_of(outcome: BackfillOutcome) -> EvidenceStatus:
+    """The ``EvidenceStatus`` a row written with ``outcome`` reports back."""
+
+    return {
+        BackfillOutcome.ACCEPTED: EvidenceStatus.ACCEPTED,
+        BackfillOutcome.QUARANTINED: EvidenceStatus.QUARANTINED,
+        BackfillOutcome.CONFLICT: EvidenceStatus.CONFLICT,
+    }[outcome]
+
+
+def _proof_evidence(decision: CandidateDecision) -> dict[str, str]:
+    """Named sha256 proof digests for one accepted classification.
+
+    Mirrors ``run_page``'s own expectation exactly: ``owner`` / ``active_scope``,
+    plus ``same_definition`` / ``immutable_artifact`` / ``artifact_content`` for a
+    version, plus the four current-version proofs when one is linked. Only digests
+    reach the column — no payload, manifest body, description or secret.
+    """
+
+    proof = decision.proof
+    if proof is None:
+        return {}
+    evidence: dict[str, str] = {
+        "owner": proof.owner_proof_digest,
+        "active_scope": proof.active_scope_proof_digest,
+    }
+    candidate = decision.candidate
+    if candidate.phase == "version":
+        evidence["same_definition"] = proof.same_definition_proof_digest or ""
+        evidence["immutable_artifact"] = proof.artifact_immutability_proof_digest or ""
+        evidence["artifact_content"] = decision.verified_artifact_digest or ""
+    if proof.current_version_id:
+        evidence["current_version"] = proof.current_version_proof_digest or ""
+        evidence["current_same_definition"] = (
+            proof.current_version_same_definition_digest or ""
+        )
+        evidence["current_artifact_immutability"] = (
+            proof.current_version_immutable_artifact_digest or ""
+        )
+        evidence["current_artifact_content"] = decision.verified_current_artifact_digest or ""
+    return evidence
+
+
+def _quarantine_guidance(reason_code: str | None) -> tuple[str, ...]:
+    """The backfill contract's own guidance for a quarantine reason.
+
+    The mapping ledger stores the *reason code*; the guidance is a pure function of
+    it (``DefinitionVersionEvidenceBackfill._quarantine_guidance``). Calling that
+    function (rather than copying its table) means a replayed quarantine returns
+    exactly the guidance the first page returned, and the two can never drift.
+    """
+
+    return DefinitionVersionEvidenceBackfill._quarantine_guidance(reason_code)
+
+
+def _payload_artifact_uri(candidate: EvidenceCandidate) -> str | None:
+    """The artifact URI the candidate itself carries (a version only)."""
+
+    if candidate.phase != "version":
+        return None
+    uri = candidate.payload.get("artifact_uri")
+    return uri if isinstance(uri, str) and uri.strip() else None
+
+
+def _payload_artifact_digest(candidate: EvidenceCandidate) -> str | None:
+    """The source artifact digest the candidate itself carries (a version only)."""
+
+    if candidate.phase != "version":
+        return None
+    digest = candidate.payload.get("artifact_digest")
+    return digest if isinstance(digest, str) and digest.strip() else None
+
+
+def _record_from_mapping_row(
+    row: Mapping[str, Any], *, checkpoint: BackfillCheckpoint,
+    outcome: BackfillOutcome, state: Mapping[str, Any] | None = None,
+) -> BackfillRecord:
+    """Rebuild one ``BackfillRecord`` from a mapping ledger row, exactly.
+
+    Everything the backfill contract compares is carried verbatim: the source
+    identity and digest the row was written with, the canonical identity/digest it
+    recorded (``None`` for a non-accepted row, which is what the contract demands),
+    the artifact identity and the named proof digests.
+
+    ``outcome=REPLAY`` reports the status the row *itself* records: a replayed
+    acceptance is still an acceptance, a replayed quarantine still a quarantine. That
+    is what ``run_page`` compares against, and collapsing it to a single "replay"
+    status would lose the classification the row stands for.
+
+    ``state`` is the page's own view of the same candidate. The ledger deliberately
+    keeps **no** artifact URI (the URI is a location, not evidence) and no
+    current-version artifact bytes, so a replayed record can only report those from
+    the page that replays it — which is exactly what the first page returned, because
+    the source digest (which covers both payload fields) is unchanged.
+    """
+
+    identity = tuple(str(part) for part in (row.get("canonical_identity") or ()))
+    if outcome is BackfillOutcome.REPLAY:
+        status = _status_of(_OUTCOME_BY_STATUS.get(str(row["status"]), BackfillOutcome.QUARANTINED))
+    else:
+        status = _status_of(outcome)
+    artifact_digest = row.get("artifact_digest")
+    reason_code = str(row["reason_code"]) if row.get("reason_code") is not None else None
+    return BackfillRecord(
+        source_kind=str(row["source_kind"]),
+        source_id=str(row["source_id"]),
+        schema_version=str(row["source_schema_version"]),
+        source_digest=str(row["source_digest"]),
+        canonical_digest=(
+            str(row["canonical_digest"]) if row.get("canonical_digest") is not None else None
+        ),
+        canonical_identity=identity,
+        checkpoint=checkpoint,
+        status=status,
+        reason_code=reason_code,
+        correlation_id=str(row["correlation_id"]),
+        tenant_id=str(row["tenant_id"]),
+        app_definition_id=str(row["definition_id"]),
+        phase=str(row["phase"]),
+        source_snapshot_digest=checkpoint.source_snapshot_digest,
+        proof_evidence=tuple(sorted(
+            (str(name), str(value))
+            for name, value in (row.get("proof_evidence") or {}).items()
+        )),
+        artifact_uri=(
+            state.get("artifact_uri") if state is not None else None
+        ),
+        artifact_digest=str(artifact_digest) if artifact_digest is not None else None,
+        verified_artifact_digest=(
+            str(row["verified_artifact_digest"])
+            if row.get("verified_artifact_digest") is not None else None
+        ),
+        current_artifact_digest=(
+            state.get("current_artifact_digest") if state is not None else None
+        ),
+        writer_generation=checkpoint.writer_generation,
+        outcome=outcome,
+        blocker_evidence=(
+            _quarantine_guidance(reason_code)
+            if status is EvidenceStatus.QUARANTINED else ()
+        ),
+    )
+
+
+def _record_from_observation_row(
+    row: Mapping[str, Any], *, checkpoint: BackfillCheckpoint, reason_code: str,
+) -> BackfillRecord:
+    """Rebuild the conflict record one quarantine observation stands for.
+
+    The *original* source digest is the one the first mapping recorded (the
+    quarantine row carries it), the observed digest is the one this observation
+    recorded, and the canonical identity and digest stay empty: a conflicted source
+    exposes no canonical claim.
+    """
+
+    return BackfillRecord(
+        source_kind=str(row["source_kind"]),
+        source_id=str(row["source_id"]),
+        schema_version=str(row["source_schema_version"]),
+        source_digest=str(row["source_digest"]),
+        canonical_digest=None,
+        canonical_identity=(),
+        checkpoint=checkpoint,
+        status=EvidenceStatus.CONFLICT,
+        reason_code=reason_code,
+        correlation_id=str(row["correlation_id"]),
+        tenant_id=str(row["tenant_id"]),
+        app_definition_id=str(row["definition_id"]),
+        phase=str(row["phase"]),
+        source_snapshot_digest=checkpoint.source_snapshot_digest,
+        observed_source_digest=(
+            str(row["observed_source_digest"])
+            if row.get("observed_source_digest") is not None else None
+        ),
+        observed_artifact_digest=(
+            str(row["observed_artifact_digest"])
+            if row.get("observed_artifact_digest") is not None else None
+        ),
+        blocker_evidence=tuple(str(item) for item in (row.get("blocker_evidence") or ())),
+        writer_generation=checkpoint.writer_generation,
+        outcome=BackfillOutcome.CONFLICT,
+    )
+
+
+class SqlM04EEvidenceStore(_SessionReads):
+    """Durable ``EvidenceStore`` over the four registered M04E ledger tables.
+
+    See the section comment above for the invariants. The class holds no state
+    between calls and no session: every method opens its own transaction through the
+    injected ``async_sessionmaker`` and proves the transaction-local tenant context
+    before reading or writing a row.
+
+    ``allow_non_postgresql`` exists for the **test harness only**: the SQLite mirror in
+    ``tests/migration/m04e_ports`` reproduces the four tables (JSONB -> JSON) so the
+    page commit, replay, CAS conflict, quarantine and audit balance are executable,
+    but SQLite has neither transaction-local GUCs nor RLS. The flag defaults to off,
+    so a production composition root cannot run the ledger without the RLS binding:
+    the first call raises a named refusal instead.
+    """
+
+    #: This is not a refusal-only boundary any more: it reads and writes the ledger.
+    IS_FAIL_CLOSED_BOUNDARY: Final = False
 
     def __init__(
         self,
         *,
         session_factory: async_sessionmaker[AsyncSession],
         require_serializable: bool = False,
+        allow_non_postgresql: bool = False,
     ) -> None:
         super().__init__(
             session_factory=session_factory, require_serializable=require_serializable,
         )
+        self._allow_non_postgresql = allow_non_postgresql
 
     @property
     def blockers(self) -> tuple[str, ...]:
-        """Named reasons this boundary cannot be a production ``EvidenceStore``."""
+        """Named gaps that still stop a *production* page commit from running."""
 
         return EVIDENCE_STORE_SCHEMA_GAPS
 
     @property
     def required_ddl(self) -> tuple[str, ...]:
+        """DDL this boundary still lacks — empty; the ledger exists."""
+
         return EVIDENCE_STORE_REQUIRED_DDL
+
+    @property
+    def ledger_tables(self) -> tuple[str, ...]:
+        return EVIDENCE_LEDGER_TABLES
+
+    # -- transaction -------------------------------------------------------
+
+    @asynccontextmanager
+    async def _page(self, context: BackfillContext) -> AsyncIterator[AsyncSession]:
+        """One transaction with a proven tenant context (or a proven mirror)."""
+
+        require_usable_context(context)
+        async with self._session_factory() as session:
+            dialect = self._dialect_name(session)
+            if dialect != "postgresql" and not self._allow_non_postgresql:
+                raise M04EPortRefused(_refusal(
+                    M04EPortReason.TRANSACTION_ISOLATION_INSUFFICIENT,
+                    "the M04E ledger requires PostgreSQL transaction-local tenant context "
+                    "and row security; no other dialect can prove the partition",
+                    context=context,
+                ))
+            async with session.begin():
+                if dialect == "postgresql":
+                    await bind_m04e_transaction_context(
+                        session, context, require_serializable=self._require_serializable,
+                    )
+                yield session
+
+    @staticmethod
+    def _dialect_name(session: AsyncSession) -> str:
+        bind = session.get_bind()
+        return str(getattr(getattr(bind, "dialect", None), "name", "")) or "unknown"
+
+    # -- reads -------------------------------------------------------------
 
     async def latest_promotion_evidence(
         self, *, context: BackfillContext,
     ) -> PromotionEvidence | None:
-        """Exact-key read of the partition's newest durable promotion record."""
+        """Exact-key read of the partition's newest durable promotion record.
 
+        This is *not* part of the ``EvidenceStore`` port: it reads
+        ``m04e_definition_version_promotion_evidence``, the per-partition
+        ``MIG-M04E-01`` gate record, and is kept here because the store is the one
+        object a caller holds for the partition. The per-source ledger below is a
+        different table with a different key.
+        """
+
+        require_usable_context(context)
         async with self._read(context) as session:
             rows = _rows(await session.execute(
                 _SELECT_PROMOTION_EVIDENCE_SQL,
@@ -2026,11 +2481,35 @@ class SqlM04EEvidenceStore(_SessionReads):
         self, *, context: BackfillContext, source_kind: str, source_id: str,
         source_schema_version: str,
     ) -> BackfillRecord | None:
-        raise self._unavailable(
-            context,
-            M04EPortReason.STORE_MAPPING_LEDGER_MISSING,
-            "no M04E per-source mapping ledger exists; returning None would license a "
-            "second mapping for an already-mapped source identity",
+        """The first mapping ever recorded for this exact source identity.
+
+        ``None`` means the identity is genuinely unmapped: the lookup is the exact
+        five-column key of ``uq_m04e_mapping_source`` inside this partition, so a row
+        for the same source under another tenant/definition — or under another source
+        schema version — cannot be mistaken for it.
+
+        The record reports the stored *classification* (``accepted`` /
+        ``quarantined`` / ``conflict``) with the immutable source digest; ``run_page``
+        is the side that decides whether this page replays or conflicts.
+        """
+
+        self._require_source_key(
+            context, source_kind=source_kind, source_id=source_id,
+            source_schema_version=source_schema_version,
+        )
+        async with self._page(context) as session:
+            row = await self._first_mapping(
+                session, context,
+                source_kind=source_kind, source_id=source_id,
+                source_schema_version=source_schema_version,
+            )
+            if row is None:
+                return None
+            checkpoint = await self._durable_checkpoint(
+                session, context, phase=str(row["phase"]),
+            )
+        return _record_from_mapping_row(
+            row, checkpoint=checkpoint, outcome=self._stored_outcome(row),
         )
 
     async def find_observation(
@@ -2038,89 +2517,1082 @@ class SqlM04EEvidenceStore(_SessionReads):
         source_schema_version: str, observed_source_digest: str | None,
         observed_artifact_digest: str | None,
     ) -> BackfillRecord | None:
-        raise self._unavailable(
-            context,
-            M04EPortReason.STORE_OBSERVATION_LEDGER_MISSING,
-            "no M04E changed-digest observation ledger exists; a conflict replay cannot "
-            "be looked up exactly",
+        """The exact changed-digest observation previously recorded, if any.
+
+        Exactly one of the two observed digests must be named: the table's
+        ``ck_m04e_quarantine_single_observation`` admits nothing else, and a caller
+        naming both (or neither) asks an unanswerable question, so it is refused
+        rather than answered with ``None``.
+        """
+
+        self._require_source_key(
+            context, source_kind=source_kind, source_id=source_id,
+            source_schema_version=source_schema_version,
         )
+        if (observed_source_digest is None) == (observed_artifact_digest is None):
+            raise M04EPortRefused(_refusal(
+                M04EPortReason.STORE_OUTCOME_UNREPRESENTABLE,
+                "an observation names exactly one observed digest (source xor artifact)",
+                context=context,
+            ))
+        for digest in (observed_source_digest, observed_artifact_digest):
+            if digest is not None and not _SHA256_RE.fullmatch(digest):
+                raise M04EPortRefused(_refusal(
+                    M04EPortReason.STORE_OUTCOME_UNREPRESENTABLE,
+                    "an observed digest must be a sha256 digest",
+                    context=context,
+                ))
+        async with self._page(context) as session:
+            row = await self._observation_row(
+                session, context, source_kind=source_kind, source_id=source_id,
+                source_schema_version=source_schema_version,
+                observed_source_digest=observed_source_digest,
+                observed_artifact_digest=observed_artifact_digest,
+            )
+            if row is None:
+                return None
+            reason_code = str(row["reason_code"])
+            if reason_code not in _CONFLICT_REASONS:
+                raise M04EPortRefused(_refusal(
+                    M04EPortReason.STORE_OUTCOME_UNREPRESENTABLE,
+                    "the recorded observation is not a changed source/artifact digest",
+                    context=context,
+                ))
+            checkpoint = await self._durable_checkpoint(
+                session, context, phase=str(row["phase"]),
+            )
+        return _record_from_observation_row(
+            row, checkpoint=checkpoint, reason_code=reason_code,
+        )
+
+    # -- blocked evidence --------------------------------------------------
 
     async def record_blocked(
         self, *, context: BackfillContext, checkpoint: BackfillCheckpoint,
         reason_code: str, blocker_evidence: Sequence[str] = (),
     ) -> BackfillRecord:
-        raise self._unavailable(
-            context,
-            M04EPortReason.STORE_BLOCKED_EVIDENCE_UNREPRESENTABLE,
-            "the only registered M04E evidence table constrains outcome to "
-            "('blocked','quarantined') but requires four NOT NULL sha256 gate digests that "
-            "a blocked page cannot truthfully supply",
+        """Append one redacted ``page_blocked`` audit event; never move the cursor.
+
+        A blocked page has no classification to write, so no mapping and no
+        quarantine row is created: the audit event *is* the evidence — zero counters
+        and a non-empty reason code, which is exactly what
+        ``ck_m04e_audit_counters_balance`` and
+        ``ck_m04e_audit_blocked_requires_reason`` require. The checkpoint the caller
+        holds is echoed back untouched, which is what ``run_page`` compares.
+        """
+
+        self._require_checkpoint_lineage(context, checkpoint)
+        if not isinstance(reason_code, str) or not reason_code.strip():
+            raise M04EPortRefused(_refusal(
+                M04EPortReason.STORE_LEDGER_WRITE_REFUSED,
+                "a blocked page must name a redacted reason code",
+                context=context,
+            ))
+        evidence = self._redacted_blockers(blocker_evidence)
+        async with self._page(context) as session:
+            stored = await self._checkpoint_row(session, context, phase=checkpoint.phase)
+            sequence = int(stored["sequence"]) if stored is not None else checkpoint.sequence
+            await session.execute(sa.insert(EVIDENCE_AUDIT_TABLE_MODEL.__table__).values(
+                id=_ledger_id("m04eaudit"),
+                event_id=_digest({
+                    "tenant_id": context.tenant_id,
+                    "app_definition_id": context.app_definition_id,
+                    "correlation_id": context.correlation_id,
+                    "transaction_id": context.transaction_id,
+                    "event_kind": "page_blocked",
+                    "phase": checkpoint.phase,
+                    "sequence": sequence,
+                    "reason_code": reason_code,
+                }),
+                tenant_id=context.tenant_id,
+                definition_id=context.app_definition_id,
+                phase=checkpoint.phase,
+                event_kind="page_blocked",
+                reason_code=reason_code,
+                correlation_id=context.correlation_id,
+                checkpoint=checkpoint.after_source_id or _start_marker(checkpoint.phase),
+                sequence=sequence,
+                actor=context.actor,
+                transaction_id=context.transaction_id,
+                record_count=0,
+                accepted_count=0,
+                replay_count=0,
+                quarantined_count=0,
+                conflict_count=0,
+                blocker_evidence=list(evidence),
+            ))
+        return BackfillRecord(
+            source_kind="m04e_backfill",
+            source_id="blocked",
+            schema_version=context.source_schema_version,
+            source_digest=context.source_snapshot_digest,
+            canonical_digest=None,
+            canonical_identity=(),
+            checkpoint=checkpoint,
+            status=EvidenceStatus.BLOCKED,
+            reason_code=reason_code,
+            correlation_id=context.correlation_id,
+            tenant_id=context.tenant_id,
+            app_definition_id=context.app_definition_id,
+            phase=checkpoint.phase,
+            source_snapshot_digest=context.source_snapshot_digest,
+            transaction_id=context.transaction_id,
+            writer_generation=context.writer_generation,
+            outcome=BackfillOutcome.BLOCKED,
+            blocker_evidence=evidence,
         )
+
+    # -- the page commit ----------------------------------------------------
 
     async def classify_and_commit_page(
         self, *, context: BackfillContext, gates: UpstreamGateEvidence,
         expected_checkpoint: BackfillCheckpoint, decisions: Sequence[CandidateDecision],
         page_exhausted: bool,
     ) -> BackfillBatch:
-        accepted = any(
-            isinstance(decision, CandidateDecision)
-            and decision.status is EvidenceStatus.ACCEPTED
-            for decision in decisions
+        """Append evidence + audit and CAS the cursor in **one** transaction.
+
+        The order inside the transaction is what makes the invariants hold:
+
+        1. the head row is locked and re-read; a head that is not the cursor the
+           caller expected is a *stale cursor*, answered with the durable head and
+           **no write at all**;
+        2. each decision is classified against the ledger (first mapping, exact
+           observation, canonical-identity duplicate) and the resulting rows are
+           appended — never updated;
+        3. the audit event is appended with counters derived from those rows;
+        4. the checkpoint is advanced by CAS on the observed ``sequence`` **and**
+           ``checkpoint_token``; a zero-row CAS rolls the whole page back and returns
+           the durable head.
+
+        A stale cursor is reported as ``BackfillBatch((), durable_head, ...)``: the
+        reviewed answer is "nothing was written and here is where the stream really
+        is", not an exception raised from inside a committed transaction.
+        """
+
+        self._require_checkpoint_lineage(context, expected_checkpoint)
+        self._require_gates(context, gates)
+        ordered = self._ordered_decisions(context, expected_checkpoint, decisions)
+        try:
+            async with self._page(context) as session:
+                batch = await self._commit_page(
+                    session, context=context, expected_checkpoint=expected_checkpoint,
+                    decisions=ordered, page_exhausted=page_exhausted,
+                )
+        except _PageCasLost:
+            async with self._page(context) as session:
+                durable = await self._durable_checkpoint(
+                    session, context, phase=expected_checkpoint.phase,
+                )
+            return BackfillBatch((), durable, durable.phase_complete)
+        return batch
+
+    async def _commit_page(
+        self, session: AsyncSession, *, context: BackfillContext,
+        expected_checkpoint: BackfillCheckpoint, decisions: Sequence[CandidateDecision],
+        page_exhausted: bool,
+    ) -> BackfillBatch:
+        """The body of one page commit, inside the caller's transaction."""
+
+        head = await self._lock_checkpoint_row(
+            session, context, phase=expected_checkpoint.phase,
         )
-        raise self._unavailable(
-            context,
-            M04EPortReason.STORE_ACCEPTED_OUTCOME_UNREPRESENTABLE if accepted else
-            M04EPortReason.STORE_CHECKPOINT_LEDGER_MISSING,
-            "no durable M04E cursor/CAS or per-source ledger exists, so a page cannot "
-            "commit its mappings, quarantine, redacted audit and checkpoint atomically"
-            + (
-                "; additionally ck_m04e_promotion_outcome cannot record an ACCEPTED mapping"
-                if accepted else ""
+        token = _checkpoint_token()
+        if head is not None and str(head["phase"]) != expected_checkpoint.phase:
+            # The cursor already moved on to the next phase (definition ->
+            # version). The durable head is the answer, and the page is either a
+            # replay of rows it already wrote or a stale request; both are decided by
+            # ``_stale_or_replay_page`` so a retried page is not silently dropped.
+            return await self._stale_or_replay_page(
+                session, context=context, durable=_checkpoint_from_row(head),
+                decisions=decisions, token=token,
+            )
+        if head is None:
+            if expected_checkpoint.sequence != 0 or expected_checkpoint.after_source_id:
+                raise M04EPortRefused(_refusal(
+                    M04EPortReason.STORE_CHECKPOINT_LEDGER_MISSING,
+                    "no durable checkpoint head exists for this partition/phase; the "
+                    "requested cursor cannot be replayed",
+                    context=context,
+                ))
+            observed_sequence = 0
+            observed_token: str | None = None
+            durable = self._fresh_checkpoint(context, phase=expected_checkpoint.phase)
+        else:
+            observed_sequence = int(head["sequence"])
+            observed_token = str(head["checkpoint_token"])
+            durable = _checkpoint_from_row(head)
+
+        if (
+            observed_sequence != expected_checkpoint.sequence
+            or durable.after_source_id != expected_checkpoint.after_source_id
+            or durable.phase_complete != expected_checkpoint.phase_complete
+        ):
+            return await self._stale_or_replay_page(
+                session, context=context, durable=durable, decisions=decisions,
+                token=token,
+            )
+
+        records, consumed, wrote = await self._classify(
+            session, context=context, checkpoint=durable, decisions=decisions,
+            token=token,
+        )
+        next_checkpoint = self._next_checkpoint(
+            context, current=durable, decisions=decisions, consumed=consumed,
+            page_exhausted=page_exhausted,
+        )
+        if next_checkpoint == durable and not wrote:
+            # An all-replay page (or an empty page that moves nothing) writes
+            # nothing: no row, no audit event, no CAS.
+            return BackfillBatch(tuple(records), durable, durable.phase_complete)
+
+        # A page that appended something — even only an observation about an
+        # already-consumed row — is accounted for by one audit event. The cursor only
+        # moves when the page consumed a slot; a page of observations audits what it
+        # wrote and leaves the head exactly where it is.
+        checkpoint_changed = next_checkpoint != durable
+        counters = self._counters(records)
+        await session.execute(sa.insert(EVIDENCE_AUDIT_TABLE_MODEL.__table__).values(
+            id=_ledger_id("m04eaudit"),
+            event_id=_digest({
+                "tenant_id": context.tenant_id,
+                "app_definition_id": context.app_definition_id,
+                "correlation_id": context.correlation_id,
+                "transaction_id": context.transaction_id,
+                "event_kind": "page_committed",
+                "phase": durable.phase,
+                "sequence": observed_sequence,
+                "checkpoint_token": token,
+            }),
+            tenant_id=context.tenant_id,
+            definition_id=context.app_definition_id,
+            phase=durable.phase,
+            event_kind="page_committed",
+            reason_code=None,
+            correlation_id=context.correlation_id,
+            checkpoint=token if checkpoint_changed else str(observed_token or ""),
+            sequence=observed_sequence,
+            actor=context.actor,
+            transaction_id=context.transaction_id,
+            record_count=counters["record_count"],
+            accepted_count=counters["accepted_count"],
+            replay_count=counters["replay_count"],
+            quarantined_count=counters["quarantined_count"],
+            conflict_count=counters["conflict_count"],
+            blocker_evidence=[],
+        ))
+
+        table = EVIDENCE_CHECKPOINT_TABLE_MODEL.__table__
+        if not checkpoint_changed:
+            # A page of observations audits what it appended and leaves the head as it
+            # was. There is nothing to CAS: no cursor slot was consumed.
+            return BackfillBatch(
+                tuple(records), durable, durable.phase_complete,
+            )
+        if head is None:
+            created = await session.execute(sa.insert(table).values(
+                id=_ledger_id("m04ecp"),
+                tenant_id=context.tenant_id,
+                definition_id=context.app_definition_id,
+                phase=next_checkpoint.phase,
+                after_source_id=next_checkpoint.after_source_id,
+                sequence=next_checkpoint.sequence,
+                phase_complete=next_checkpoint.phase_complete,
+                source_snapshot_id=context.source_snapshot_id,
+                source_schema_version=context.source_schema_version,
+                source_snapshot_digest=context.source_snapshot_digest,
+                canonical_schema_version=context.canonical_schema_version,
+                writer_generation=context.writer_generation,
+                checkpoint_token=token,
+            ))
+            if int(created.rowcount or 0) != 1:
+                raise M04EPortRefused(_refusal(
+                    M04EPortReason.STORE_LEDGER_WRITE_REFUSED,
+                    "the durable checkpoint head could not be created",
+                    context=context,
+                ))
+        else:
+            advanced = await session.execute(
+                sa.update(table)
+                .where(
+                    sa.and_(
+                        table.c.tenant_id == context.tenant_id,
+                        table.c.definition_id == context.app_definition_id,
+                        table.c.phase == durable.phase,
+                        table.c.sequence == observed_sequence,
+                        table.c.checkpoint_token == observed_token,
+                    )
+                )
+                .values(
+                    after_source_id=next_checkpoint.after_source_id,
+                    sequence=next_checkpoint.sequence,
+                    phase=next_checkpoint.phase,
+                    phase_complete=next_checkpoint.phase_complete,
+                    checkpoint_token=token,
+                )
+            )
+            if int(advanced.rowcount or 0) != 1:
+                # Lost the CAS: roll the page's evidence back and report the head.
+                raise _PageCasLost()
+        stamped = tuple(replace(record, checkpoint=next_checkpoint) for record in records)
+        return BackfillBatch(stamped, next_checkpoint, next_checkpoint.phase_complete)
+
+    # -- internals: stale cursor / replay -----------------------------------
+
+    async def _stale_or_replay_page(
+        self, session: AsyncSession, *, context: BackfillContext,
+        durable: BackfillCheckpoint, decisions: Sequence[CandidateDecision],
+        token: str,
+    ) -> BackfillBatch:
+        """Decide a page whose cursor is not the one the ledger observed.
+
+        Two legitimate answers exist, and only one of them may write:
+
+        * **a retried page** — the caller committed page N and crashed before
+          persisting the returned cursor, so it retries from N-1. Every decision in the
+          page is about a row the ledger already mapped. Replays return the stored
+          records; a changed digest appends an *observation* about an already-consumed
+          row. Neither moves the cursor, so both are safe under a head another writer
+          owns and both are returned. This is the only path on which a changed digest
+          can be reached at all: the cursor only ever moves forward, so a mapped row is
+          re-read only from a cursor that is behind it.
+        * **a genuinely stale request** — some decision would append a *first mapping*,
+          i.e. consume a cursor slot the head has already passed. Committing that would
+          place new evidence under a position another writer owns, so the page returns
+          no records and the durable head, and writes nothing.
+
+        The distinction is decided by a dry run first: nothing is written until the page
+        is known to be a retry.
+        """
+
+        if not decisions:
+            return BackfillBatch((), durable, durable.phase_complete)
+        _records, consumed, wrote = await self._classify(
+            session, context=context, checkpoint=durable, decisions=decisions,
+            token=token, dry_run=True,
+        )
+        if consumed:
+            # A first mapping would land under a cursor that has already moved on.
+            return BackfillBatch((), durable, durable.phase_complete)
+        # Every decision is about an already-consumed row. Append what is missing (an
+        # observation) and report the page without moving the cursor.
+        records, _consumed, _wrote = await self._classify(
+            session, context=context, checkpoint=durable, decisions=decisions,
+            token=token,
+        )
+        return BackfillBatch(tuple(records), durable, durable.phase_complete)
+
+    # -- internals: rows ----------------------------------------------------
+
+    async def _first_mapping(
+        self, session: AsyncSession, context: BackfillContext, *,
+        source_kind: str, source_id: str, source_schema_version: str,
+    ) -> Mapping[str, Any] | None:
+        rows = _rows(await session.execute(
+            sa.select(EVIDENCE_MAPPING_TABLE_MODEL.__table__)
+            .where(_source_predicate(
+                EVIDENCE_MAPPING_TABLE_MODEL.__table__,
+                tenant_id=context.tenant_id,
+                definition_id=context.app_definition_id,
+                source_kind=source_kind, source_id=source_id,
+                source_schema_version=source_schema_version,
+            ))
+            .limit(1)
+        ))
+        return rows[0] if rows else None
+
+    async def _observation_row(
+        self, session: AsyncSession, context: BackfillContext, *,
+        source_kind: str, source_id: str, source_schema_version: str,
+        observed_source_digest: str | None, observed_artifact_digest: str | None,
+    ) -> Mapping[str, Any] | None:
+        rows = _rows(await session.execute(
+            sa.select(EVIDENCE_QUARANTINE_TABLE_MODEL.__table__)
+            .where(_observation_predicate(
+                EVIDENCE_QUARANTINE_TABLE_MODEL.__table__,
+                tenant_id=context.tenant_id,
+                definition_id=context.app_definition_id,
+                source_kind=source_kind, source_id=source_id,
+                source_schema_version=source_schema_version,
+                observed_source_digest=observed_source_digest,
+                observed_artifact_digest=observed_artifact_digest,
+            ))
+            .limit(1)
+        ))
+        return rows[0] if rows else None
+
+    async def _checkpoint_row(
+        self, session: AsyncSession, context: BackfillContext, *, phase: str,
+    ) -> Mapping[str, Any] | None:
+        """The head row of one ``(tenant, definition, phase)`` stream, if any.
+
+        The definition→version transition advances the *same* head row, so a drained
+        definition stream reads as its version head: a caller holding the
+        definition-phase cursor is not told "no ledger" once the phase moved.
+        """
+
+        table = EVIDENCE_CHECKPOINT_TABLE_MODEL.__table__
+        rows = _rows(await session.execute(
+            sa.select(table)
+            .where(sa.and_(
+                table.c.tenant_id == context.tenant_id,
+                table.c.definition_id == context.app_definition_id,
+                table.c.phase == phase,
+            ))
+            .limit(1)
+        ))
+        if rows:
+            return rows[0]
+        if phase == "definition":
+            return await self._checkpoint_row(session, context, phase="version")
+        return None
+
+    async def _durable_checkpoint(
+        self, session: AsyncSession, context: BackfillContext, *, phase: str,
+    ) -> BackfillCheckpoint:
+        row = await self._checkpoint_row(session, context, phase=phase)
+        return (
+            _checkpoint_from_row(row) if row is not None
+            else self._fresh_checkpoint(context, phase=phase)
+        )
+
+    async def _lock_checkpoint_row(
+        self, session: AsyncSession, context: BackfillContext, *, phase: str,
+    ) -> Mapping[str, Any] | None:
+        """``SELECT ... FOR UPDATE`` of the head row (compiles away on SQLite).
+
+        One row per ``(tenant, definition)`` is enough: the definition→version
+        transition updates the same head, so locking by partition (without the phase
+        predicate) is what makes a concurrent phase transition visible as a stale
+        cursor instead of a lost update.
+        """
+
+        table = EVIDENCE_CHECKPOINT_TABLE_MODEL.__table__
+        rows = _rows(await session.execute(
+            sa.select(table)
+            .where(sa.and_(
+                table.c.tenant_id == context.tenant_id,
+                table.c.definition_id == context.app_definition_id,
+            ))
+            .order_by(table.c.phase)
+            .with_for_update()
+        ))
+        if not rows:
+            return None
+        matching = [row for row in rows if str(row["phase"]) == phase]
+        return matching[0] if matching else rows[0]
+
+    # -- internals: classification -----------------------------------------
+
+    def _ordered_decisions(
+        self, context: BackfillContext, checkpoint: BackfillCheckpoint,
+        decisions: Sequence[CandidateDecision],
+    ) -> tuple[CandidateDecision, ...]:
+        """Validate and order one page's classifications.
+
+        The store refuses a page that is not about its own partition, whose
+        candidates are outside the checkpoint lineage, that repeats a source
+        identity, that carries a status the ledger cannot store (``blocked`` is a page
+        event, not a classification) or that is not strictly ascending after the
+        cursor. A page that cannot be ordered correctly must abort rather than commit
+        a cursor that skips or re-reads rows.
+        """
+
+        if isinstance(decisions, (str, bytes)) or not isinstance(decisions, Sequence):
+            raise M04EPortRefused(_refusal(
+                M04EPortReason.STORE_DECISION_INVALID,
+                "decisions must be a sequence of CandidateDecision",
+                context=context,
+            ))
+        previous: str | None = None
+        seen: set[tuple[str, str, str]] = set()
+        for decision in decisions:
+            if not isinstance(decision, CandidateDecision):
+                raise M04EPortRefused(_refusal(
+                    M04EPortReason.STORE_DECISION_INVALID,
+                    "every page entry must be a CandidateDecision",
+                    context=context,
+                ))
+            candidate = decision.candidate
+            if (candidate.tenant_id, candidate.app_definition_id) != (
+                context.tenant_id, context.app_definition_id,
+            ):
+                raise M04EPortRefused(_refusal(
+                    M04EPortReason.PARTITION_MISMATCH,
+                    "a candidate belongs to another tenant/definition partition",
+                    context=context,
+                ))
+            if candidate.phase != checkpoint.phase:
+                raise M04EPortRefused(_refusal(
+                    M04EPortReason.PARTITION_MISMATCH,
+                    "a candidate belongs to another backfill phase than the cursor",
+                    context=context,
+                ))
+            if (
+                candidate.schema_version != context.source_schema_version
+                or candidate.canonical_schema_version != context.canonical_schema_version
+            ):
+                raise M04EPortRefused(_refusal(
+                    M04EPortReason.PARTITION_MISMATCH,
+                    "a candidate is outside the checkpoint schema lineage",
+                    context=context,
+                ))
+            if decision.status not in _FIRST_MAPPING_OUTCOME and (
+                decision.status is not EvidenceStatus.REPLAY
+            ):
+                raise M04EPortRefused(_refusal(
+                    M04EPortReason.STORE_OUTCOME_UNREPRESENTABLE,
+                    "a blocked page is audit evidence, not a per-source classification; "
+                    "use record_blocked",
+                    context=context,
+                ))
+            if decision.status is not EvidenceStatus.ACCEPTED and (
+                decision.status is not EvidenceStatus.REPLAY
+            ) and (
+                not isinstance(decision.reason_code, str) or not decision.reason_code.strip()
+            ):
+                # ``ck_m04e_mapping_non_accepted_requires_reason``: every non-accepted
+                # row must name a redacted reason. Refusing here keeps that a named
+                # answer instead of an IntegrityError from deep inside the page.
+                # A ``REPLAY`` is exempt: it appends nothing, and a replay of an
+                # accepted row legitimately carries no reason at all.
+                raise M04EPortRefused(_refusal(
+                    M04EPortReason.STORE_DECISION_INVALID,
+                    "every quarantined or conflicted classification must name a redacted "
+                    "reason code",
+                    context=context,
+                ))
+            key = (candidate.source_kind, candidate.source_id, candidate.schema_version)
+            if key in seen:
+                raise M04EPortRefused(_refusal(
+                    M04EPortReason.STORE_DECISION_INVALID,
+                    "a page repeats one source identity",
+                    context=context,
+                ))
+            seen.add(key)
+            if previous is not None and candidate.source_id <= previous:
+                raise M04EPortRefused(_refusal(
+                    M04EPortReason.STORE_DECISION_INVALID,
+                    "the page is not strictly ascending by source identity",
+                    context=context,
+                ))
+            previous = candidate.source_id
+        return tuple(decisions)
+
+    async def _classify(
+        self, session: AsyncSession, *, context: BackfillContext,
+        checkpoint: BackfillCheckpoint, decisions: Sequence[CandidateDecision],
+        token: str, dry_run: bool = False,
+    ) -> tuple[list[BackfillRecord], list[str], bool]:
+        """Turn classifications into ledger rows (append-only).
+
+        Returns the records, the source identities that consumed a cursor slot, and
+        whether anything was actually written. The three are different questions: an
+        observation is written but consumes nothing, a replay is neither, and a first
+        mapping is both.
+
+        ``dry_run`` answers "what would this page do" without writing a row. It exists
+        for the stale-cursor path, where the store must decide between "this is about
+        rows I already hold" and "this would append a first mapping under a cursor
+        somebody else owns" before touching the ledger.
+        """
+
+        records: list[BackfillRecord] = []
+        consumed: list[str] = []
+        wrote = False
+        seen: set[tuple[str, ...]] = set()
+        for decision in decisions:
+            record, consumes, appended = await self._classify_one(
+                session, context=context, checkpoint=checkpoint,
+                decision=decision, seen=seen, token=token, dry_run=dry_run,
+            )
+            if decision.candidate.canonical_identity:
+                seen.add(decision.candidate.canonical_identity)
+            if consumes:
+                consumed.append(decision.candidate.source_id)
+            wrote = wrote or appended
+            records.append(record)
+        return records, consumed, wrote
+
+    async def _classify_one(
+        self, session: AsyncSession, *, context: BackfillContext,
+        checkpoint: BackfillCheckpoint, decision: CandidateDecision,
+        seen: set[tuple[str, ...]], token: str, dry_run: bool = False,
+    ) -> tuple[BackfillRecord, bool, bool]:
+        """One decision against the ledger.
+
+        Returns the record, whether it consumed a cursor slot, and whether a row was
+        appended for it.
+        """
+
+        candidate = decision.candidate
+        existing = await self._first_mapping(
+            session, context,
+            source_kind=candidate.source_kind, source_id=candidate.source_id,
+            source_schema_version=candidate.schema_version,
+        )
+        verified = decision.verified_artifact_digest
+        state = {
+            "artifact_uri": _payload_artifact_uri(candidate),
+            "current_artifact_digest": decision.verified_current_artifact_digest,
+        }
+
+        if existing is not None:
+            stored_source_digest = str(existing["source_digest"])
+            stored_verified = existing.get("verified_artifact_digest")
+            # 1. A changed source digest: append (or replay) an exact observation.
+            #    The first mapping stays byte-identical — that is the point of the
+            #    conflict branch.
+            if stored_source_digest != candidate.source_digest:
+                return await self._conflict_record(
+                    session, context=context, checkpoint=checkpoint,
+                    decision=decision, recorded_source_digest=stored_source_digest,
+                    observed_source_digest=candidate.source_digest,
+                    observed_artifact_digest=None,
+                    reason_code="source_digest_changed", token=token, dry_run=dry_run,
+                )
+            # 2. Same source digest, different verified artifact bytes: an immutable
+            #    artifact conflict, recorded as an artifact observation.
+            if (
+                stored_verified is not None
+                and verified is not None
+                and str(stored_verified) != verified
+            ):
+                return await self._conflict_record(
+                    session, context=context, checkpoint=checkpoint,
+                    decision=decision, recorded_source_digest=stored_source_digest,
+                    observed_source_digest=None,
+                    observed_artifact_digest=verified,
+                    reason_code="artifact_digest_changed", token=token, dry_run=dry_run,
+                )
+            stored_outcome = self._stored_outcome(existing)
+            if self._is_exact_replay(
+                existing, decision=decision, stored_outcome=stored_outcome,
+            ):
+                if stored_outcome is BackfillOutcome.CONFLICT and (
+                    str(existing["reason_code"] or "") not in _CONFLICT_REASONS
+                ):
+                    # A stored conflict *without* an observation behind it (a
+                    # canonical-identity conflict) is re-reported as itself and
+                    # consumes its slot. ``run_page`` only accepts ``outcome=replay``
+                    # beside ``status=conflict`` for a changed-digest reason, and
+                    # inventing one here would be the store lying about its own row.
+                    return _record_from_mapping_row(
+                        existing, checkpoint=checkpoint, outcome=BackfillOutcome.CONFLICT,
+                        state=state,
+                    ), True, False
+                # An exact replay of the recorded classification: nothing is written
+                # and the cursor does not move.
+                return _record_from_mapping_row(
+                    existing, checkpoint=checkpoint, outcome=BackfillOutcome.REPLAY,
+                    state=state,
+                ), False, False
+            raise M04EPortRefused(_refusal(
+                M04EPortReason.STORE_FIRST_MAPPING_CONFLICT,
+                "the source identity is already mapped with a different classification; "
+                "a first mapping is immutable and a changed digest is an observation",
+                context=context,
+                blockers=(
+                    f"m04e_ledger_status={existing['status']}",
+                    f"m04e_incoming_status={decision.status.value}",
+                ),
+            ))
+
+        # 3. A first mapping for a source identity the ledger has never seen.
+        if (
+            checkpoint.after_source_id is not None
+            and candidate.source_id <= checkpoint.after_source_id
+        ):
+            # The cursor has already passed this identity and the ledger holds no
+            # mapping for it. Recording one now would move the cursor *backwards*
+            # over rows another page already consumed, so it is refused rather than
+            # silently re-opened.
+            raise M04EPortRefused(_refusal(
+                M04EPortReason.STORE_DECISION_INVALID,
+                "a candidate is at or before the durable cursor and has no first mapping; "
+                "the page cannot re-open a cursor position the ledger has consumed",
+                context=context,
+            ))
+        return await self._append_first_mapping(
+            session, context=context, checkpoint=checkpoint, decision=decision,
+            seen=seen, artifact_uri=state["artifact_uri"], verified=verified,
+            current_digest=state["current_artifact_digest"], token=token, dry_run=dry_run,
+        )
+
+    async def _conflict_record(
+        self, session: AsyncSession, *, context: BackfillContext,
+        checkpoint: BackfillCheckpoint, decision: CandidateDecision,
+        recorded_source_digest: str, observed_source_digest: str | None,
+        observed_artifact_digest: str | None, reason_code: str, token: str,
+        dry_run: bool = False,
+    ) -> tuple[BackfillRecord, bool, bool]:
+        """Append or replay one exact observation and return its conflict record."""
+
+        candidate = decision.candidate
+        existing_observation = await self._observation_row(
+            session, context,
+            source_kind=candidate.source_kind, source_id=candidate.source_id,
+            source_schema_version=candidate.schema_version,
+            observed_source_digest=observed_source_digest,
+            observed_artifact_digest=observed_artifact_digest,
+        )
+        observation = existing_observation
+        if observation is None:
+            values: Mapping[str, Any] = {
+                "id": _ledger_id("m04equar"),
+                "tenant_id": context.tenant_id,
+                "definition_id": context.app_definition_id,
+                "phase": candidate.phase,
+                "source_kind": candidate.source_kind,
+                "source_id": candidate.source_id,
+                "source_schema_version": candidate.schema_version,
+                "source_digest": recorded_source_digest,
+                "observed_source_digest": observed_source_digest,
+                "observed_artifact_digest": observed_artifact_digest,
+                # The store's own reason: it compared the digests itself and never
+                # takes the caller's word for which one changed.
+                "reason_code": reason_code,
+                "blocker_evidence": list(self._redacted_blockers(decision.blocker_evidence)),
+                "checkpoint": token,
+                "status": "open",
+                "correlation_id": context.correlation_id,
+            }
+            if not dry_run:
+                await session.execute(
+                    sa.insert(EVIDENCE_QUARANTINE_TABLE_MODEL.__table__).values(**dict(values))
+                )
+            observation = values
+        record = _record_from_observation_row(
+            observation, checkpoint=checkpoint, reason_code=reason_code,
+        )
+        # An observation is *new evidence about an already-consumed row*, so it never
+        # takes a cursor slot: the row was consumed when its first mapping was written.
+        # Reporting it as consumed would advance the cursor over a row a concurrent page
+        # may still be reading.
+        if existing_observation is not None:
+            # The observation was already recorded: the page re-reports it as a replay
+            # with the originally recorded evidence, and nothing new is written.
+            return replace(
+                record, outcome=BackfillOutcome.REPLAY, status=EvidenceStatus.CONFLICT,
+            ), False, False
+        return record, False, not dry_run
+
+    async def _append_first_mapping(
+        self, session: AsyncSession, *, context: BackfillContext,
+        checkpoint: BackfillCheckpoint, decision: CandidateDecision,
+        seen: set[tuple[str, ...]], artifact_uri: str | None, verified: str | None,
+        current_digest: str | None, token: str, dry_run: bool = False,
+    ) -> tuple[BackfillRecord, bool, bool]:
+        """Insert the first mapping row for one source identity."""
+
+        candidate = decision.candidate
+        outcome = _FIRST_MAPPING_OUTCOME.get(decision.status, BackfillOutcome.QUARANTINED)
+        reason = decision.reason_code
+        identity = candidate.canonical_identity
+        if outcome is BackfillOutcome.ACCEPTED and identity in seen:
+            # Two sources cannot both own one canonical row. ``run_page`` already
+            # downgrades this to a ``duplicate_canonical_identity`` conflict before it
+            # calls the store; a caller that did not cannot be honoured here, because
+            # recording it as a conflict under a different reason would answer a
+            # decision the caller never made.
+            raise M04EPortRefused(_refusal(
+                M04EPortReason.STORE_FIRST_MAPPING_CONFLICT,
+                "two sources in one page claim the same canonical identity; the page "
+                "must classify the second as a duplicate_canonical_identity conflict",
+                context=context,
+            ))
+        canonical_digest = (
+            candidate.canonical_digest if outcome is BackfillOutcome.ACCEPTED else None
+        )
+        if outcome is BackfillOutcome.ACCEPTED and canonical_digest is None:
+            raise M04EPortRefused(_refusal(
+                M04EPortReason.STORE_OUTCOME_UNREPRESENTABLE,
+                "an accepted classification requires a canonical identity and digest",
+                context=context,
+            ))
+        proof = _proof_evidence(decision) if outcome is BackfillOutcome.ACCEPTED else {}
+        artifact_digest = _payload_artifact_digest(candidate)
+        if not dry_run:
+            await session.execute(sa.insert(EVIDENCE_MAPPING_TABLE_MODEL.__table__).values(
+                id=_ledger_id("m04emap"),
+                tenant_id=context.tenant_id,
+                definition_id=context.app_definition_id,
+                source_kind=candidate.source_kind,
+                source_id=candidate.source_id,
+                source_schema_version=candidate.schema_version,
+                phase=candidate.phase,
+                status=outcome.value,
+                source_digest=candidate.source_digest,
+                canonical_digest=canonical_digest,
+                canonical_identity=list(identity),
+                reason_code=reason,
+                proof_evidence=proof,
+                artifact_digest=artifact_digest,
+                verified_artifact_digest=verified,
+                # The page token this row was committed under. The head row carries the
+                # same value, which is the join key a reviewer uses.
+                checkpoint=token,
+                correlation_id=context.correlation_id,
+            ))
+        return BackfillRecord(
+            source_kind=candidate.source_kind,
+            source_id=candidate.source_id,
+            schema_version=candidate.schema_version,
+            source_digest=candidate.source_digest,
+            canonical_digest=canonical_digest,
+            canonical_identity=identity,
+            checkpoint=checkpoint,
+            status=_status_of(outcome),
+            reason_code=reason,
+            correlation_id=context.correlation_id,
+            tenant_id=context.tenant_id,
+            app_definition_id=context.app_definition_id,
+            phase=candidate.phase,
+            source_snapshot_digest=context.source_snapshot_digest,
+            proof_evidence=tuple(sorted(proof.items())),
+            artifact_uri=artifact_uri,
+            artifact_digest=artifact_digest,
+            verified_artifact_digest=verified,
+            current_artifact_digest=current_digest,
+            transaction_id=context.transaction_id,
+            writer_generation=context.writer_generation,
+            outcome=outcome,
+            blocker_evidence=(
+                _quarantine_guidance(reason)
+                if outcome is BackfillOutcome.QUARANTINED else ()
             ),
+        ), True, not dry_run
+
+    # -- internals: cursor --------------------------------------------------
+
+    def _next_checkpoint(
+        self, context: BackfillContext, *, current: BackfillCheckpoint,
+        decisions: Sequence[CandidateDecision], consumed: Sequence[str],
+        page_exhausted: bool,
+    ) -> BackfillCheckpoint:
+        """The cursor the backfill contract expects for this page.
+
+        Mirrors ``run_page``'s own derivation exactly: one sequence step per consumed
+        source identity; an exhausted ``definition`` stream whose *last* row was
+        consumed transitions to ``version`` with an empty cursor and one extra step;
+        an exhausted ``version`` stream completes without moving past its last
+        consumed row. A page that replays everything moves nothing — the caller
+        returns early in that case, so this function is only reached when something
+        actually moved.
+        """
+
+        phase = current.phase
+        after = current.after_source_id
+        sequence = current.sequence + len(consumed)
+        complete = False
+        last_row = decisions[-1].candidate.source_id if decisions else None
+        last_consumed = consumed[-1] if consumed else None
+        tail_reached = not decisions or (
+            last_consumed is not None and last_consumed == last_row
+        )
+        if page_exhausted:
+            if phase == "definition":
+                if tail_reached:
+                    phase, after = "version", None
+                    sequence += 1
+            elif tail_reached:
+                after = last_consumed if last_consumed is not None else current.after_source_id
+                complete = True
+        if last_consumed is not None and phase == current.phase:
+            after = last_consumed
+        return BackfillCheckpoint(
+            partition=current.partition,
+            phase=phase,
+            after_source_id=after,
+            sequence=sequence,
+            source_snapshot_id=current.source_snapshot_id,
+            source_schema_version=current.source_schema_version,
+            source_snapshot_digest=current.source_snapshot_digest,
+            canonical_schema_version=current.canonical_schema_version,
+            writer_generation=current.writer_generation,
+            phase_complete=complete,
+        )
+
+    def _fresh_checkpoint(
+        self, context: BackfillContext, *, phase: str,
+    ) -> BackfillCheckpoint:
+        """The cursor of a stream that has no durable head yet."""
+
+        return BackfillCheckpoint(
+            partition=(context.tenant_id, context.app_definition_id),
+            phase=phase,
+            after_source_id=None,
+            sequence=0,
+            source_snapshot_id=context.source_snapshot_id,
+            source_schema_version=context.source_schema_version,
+            source_snapshot_digest=context.source_snapshot_digest,
+            canonical_schema_version=context.canonical_schema_version,
+            writer_generation=context.writer_generation,
+        )
+
+    def _require_checkpoint_lineage(
+        self, context: BackfillContext, checkpoint: BackfillCheckpoint,
+    ) -> None:
+        if not isinstance(checkpoint, BackfillCheckpoint):
+            raise M04EPortRefused(_refusal(
+                M04EPortReason.PARTITION_MISMATCH,
+                "a BackfillCheckpoint is required",
+                context=context,
+            ))
+        if checkpoint.partition != (context.tenant_id, context.app_definition_id):
+            raise M04EPortRefused(_refusal(
+                M04EPortReason.PARTITION_MISMATCH,
+                "the checkpoint belongs to another partition",
+                context=context,
+            ))
+        if (
+            checkpoint.source_snapshot_id != context.source_snapshot_id
+            or checkpoint.source_schema_version != context.source_schema_version
+            or checkpoint.source_snapshot_digest != context.source_snapshot_digest
+            or checkpoint.canonical_schema_version != context.canonical_schema_version
+            or checkpoint.writer_generation != context.writer_generation
+        ):
+            raise M04EPortRefused(_refusal(
+                M04EPortReason.PARTITION_MISMATCH,
+                "the checkpoint is bound to another snapshot or schema lineage",
+                context=context,
+            ))
+
+    @staticmethod
+    def _require_gates(context: BackfillContext, gates: UpstreamGateEvidence) -> None:
+        if not isinstance(gates, UpstreamGateEvidence) or not gates.valid:
+            raise M04EPortRefused(_refusal(
+                M04EPortReason.GATE_CONTEXT_INVALID,
+                "a page commit requires valid upstream gate evidence",
+                context=context, gate_name=GATE_M04E_01_DEFINITION_FOUNDATION,
+            ))
+        if (
+            gates.tenant_id != context.tenant_id
+            or gates.app_definition_id != context.app_definition_id
+            or gates.source_snapshot_digest != context.source_snapshot_digest
+            or gates.correlation_id != context.correlation_id
+        ):
+            raise M04EPortRefused(_refusal(
+                M04EPortReason.GATE_CONTEXT_INVALID,
+                "the gate evidence belongs to another partition, snapshot or correlation",
+                context=context, gate_name=GATE_M04E_01_DEFINITION_FOUNDATION,
+            ))
+
+    @staticmethod
+    def _require_source_key(
+        context: BackfillContext, *, source_kind: str, source_id: str,
+        source_schema_version: str,
+    ) -> None:
+        if not all(
+            isinstance(value, str) and value.strip()
+            for value in (source_kind, source_id, source_schema_version)
+        ):
+            raise M04EPortRefused(_refusal(
+                M04EPortReason.STORE_DECISION_INVALID,
+                "the source identity and schema version are required",
+                context=context,
+            ))
+
+    @staticmethod
+    def _stored_outcome(row: Mapping[str, Any]) -> BackfillOutcome:
+        return _OUTCOME_BY_STATUS.get(str(row["status"]), BackfillOutcome.QUARANTINED)
+
+    @staticmethod
+    def _is_exact_replay(
+        row: Mapping[str, Any], *, decision: CandidateDecision,
+        stored_outcome: BackfillOutcome,
+    ) -> bool:
+        """Is this decision a replay of exactly what the row records?
+
+        Same source digest (the caller already compared it), same verified artifact
+        bytes, same reason code, and either the caller says ``REPLAY`` or its status
+        is the one the row already carries. Anything else must not be silently
+        accepted as a replay, which is why this predicate is the only path that
+        returns a stored row instead of appending one.
+        """
+
+        stored_verified = row.get("verified_artifact_digest")
+        if (str(stored_verified) if stored_verified is not None else None) != (
+            decision.verified_artifact_digest
+        ):
+            return False
+        stored_reason = row.get("reason_code")
+        if (str(stored_reason) if stored_reason is not None else None) != decision.reason_code:
+            return False
+        if decision.status is EvidenceStatus.REPLAY:
+            return True
+        return stored_outcome == _FIRST_MAPPING_OUTCOME.get(
+            decision.status, BackfillOutcome.QUARANTINED
         )
 
     @staticmethod
-    def _unavailable(
-        context: BackfillContext, code: M04EPortReason, detail: str,
-    ) -> EvidenceStoreUnavailable:
-        return EvidenceStoreUnavailable(PortRefusal(
-            code=code,
-            detail=detail,
-            partition=(
-                (context.tenant_id, context.app_definition_id)
-                if isinstance(context, BackfillContext) else None
-            ),
-            correlation_id=(
-                context.correlation_id if isinstance(context, BackfillContext) else None
-            ),
-            blockers=EVIDENCE_STORE_SCHEMA_GAPS,
-        ))
+    def _counters(records: Sequence[BackfillRecord]) -> dict[str, int]:
+        """Audit counters derived from the rows actually written, never from input."""
+
+        counters = {
+            "accepted_count": 0, "replay_count": 0,
+            "quarantined_count": 0, "conflict_count": 0,
+        }
+        for record in records:
+            if record.outcome is BackfillOutcome.ACCEPTED:
+                counters["accepted_count"] += 1
+            elif record.outcome is BackfillOutcome.REPLAY:
+                counters["replay_count"] += 1
+            elif record.outcome is BackfillOutcome.QUARANTINED:
+                counters["quarantined_count"] += 1
+            elif record.outcome is BackfillOutcome.CONFLICT:
+                counters["conflict_count"] += 1
+        counters["record_count"] = sum(
+            counters[key] for key in (
+                "accepted_count", "replay_count", "quarantined_count", "conflict_count",
+            )
+        )
+        return counters
+
+    @staticmethod
+    def _redacted_blockers(blocker_evidence: Sequence[str]) -> tuple[str, ...]:
+        """Keep only short, single-line guidance strings.
+
+        The backfill contract's guidance and gate names pass; anything that looks
+        like a payload (a newline, an over-long body) is dropped rather than stored.
+        A quarantine row's ``blocker_evidence`` is evidence a reviewer reads — it must
+        never become a body excerpt.
+        """
+
+        kept: list[str] = []
+        for item in blocker_evidence or ():
+            if not isinstance(item, str):
+                continue
+            text = " ".join(item.split())
+            if not text or text != item.strip() or len(text) > _MAX_BLOCKER_LENGTH:
+                continue
+            kept.append(text)
+        return tuple(kept)
 
 
 # ---------------------------------------------------------------------------
 # Wiring
 # ---------------------------------------------------------------------------
 
-#: Blockers a composition root must keep until DDL-backed stores are reviewed.
+#: Review items a composition root must keep reporting while they are open. They are
+#: *not* missing tables: the evidence store below exists and writes the ledger.
 M04E_PORT_WIRING_BLOCKERS: Final[tuple[str, ...]] = (
-    "m04e_evidence_store_port_unimplemented: "
-    + "; ".join(EVIDENCE_STORE_SCHEMA_GAPS),
     "m04e_backfill_tenant_context_binding_unreviewed: the adapters apply and read back "
     "the transaction-local tenant GUCs and set app.migration_role='true'; the database "
     "GRANT/append-only privilege review for that role is still open",
     "m04e_positive_promotion_gate_unrepresentable: ck_m04e_promotion_outcome admits only "
-    "('blocked','quarantined'), so SqlM04EUpstreamGate refuses by name until a reviewed "
-    "revision can record an accepted M04E foundation promotion",
+    "('blocked','quarantined'), so SqlM04EUpstreamGate refuses MIG-M04E-01 by name until "
+    "a reviewed revision can record an accepted M04E foundation promotion; no page "
+    "reaches the ledger in production until then",
 )
 
 
 @dataclass(frozen=True, slots=True)
 class M04ESqlPorts:
-    """The three M04E ports that are implemented, ready for the composition root.
+    """The M04E reader/gate/proof ports, ready for the composition root.
 
-    The evidence store is deliberately absent: compose
-    :func:`build_m04e_evidence_store` and honour its blocker instead of substituting
-    an in-memory store.
+    The evidence store is a separate port with its own builder —
+    :func:`build_m04e_evidence_store` — because it carries the ledger's own review
+    blockers and must never be substituted by an in-memory store.
     """
 
     reader: CandidateReader
@@ -2169,11 +3641,22 @@ def build_m04e_sql_ports(
 
 def build_m04e_evidence_store(
     *, session_factory: async_sessionmaker[AsyncSession] | None,
+    require_serializable: bool = False,
 ) -> tuple[EvidenceStore | None, tuple[str, ...]]:
     """Return the durable evidence store, or ``(None, blockers)``.
 
-    Shaped like ``composition.build_m06_durable_evidence_ports`` so the composition
-    root reports a named blocker rather than pretending the stage is wired.
+    The store **is** built when a session factory exists: the four ledger tables are
+    registered in ``Base.metadata`` and created by revision ``2026110315``, so the
+    missing-table gaps that used to make this boundary impossible are closed and
+    :data:`EVIDENCE_STORE_REQUIRED_DDL` is empty.
+
+    What is still returned alongside the object are the review items in
+    :data:`EVIDENCE_STORE_SCHEMA_GAPS` (the per-partition promotion record, its
+    two-state CHECK and its NOT NULL gate proofs). They stop the M04E-01 *gate*, not
+    the ledger: returning ``None`` here would throw away a working store and pretend
+    the ledger did not exist, while returning the store with no blockers would claim a
+    page can commit in production today. Both lists are reported so the caller can see
+    the object it got and the review it still owes.
     """
 
     if session_factory is None:
@@ -2182,8 +3665,10 @@ def build_m04e_evidence_store(
             "PostgreSQL; there is no in-memory store on the production path",
             *EVIDENCE_STORE_SCHEMA_GAPS,
         )
-    boundary = SqlM04EEvidenceStore(session_factory=session_factory)
-    return None, boundary.blockers
+    store = SqlM04EEvidenceStore(
+        session_factory=session_factory, require_serializable=require_serializable,
+    )
+    return store, store.blockers
 
 
 __all__ = [
@@ -2193,6 +3678,12 @@ __all__ = [
     "COMPANY_TABLE",
     "CONTEXT_ROLE",
     "CandidateProofDecision",
+    "EVIDENCE_AUDIT_LEDGER_TABLE",
+    "EVIDENCE_CHECKPOINT_LEDGER_TABLE",
+    "EVIDENCE_LEDGER_TABLES",
+    "EVIDENCE_MAPPING_LEDGER_TABLE",
+    "EVIDENCE_QUARANTINE_LEDGER_TABLE",
+    "EVIDENCE_STORE_LEDGER_DDL",
     "EVIDENCE_STORE_REQUIRED_DDL",
     "EVIDENCE_STORE_SCHEMA_GAPS",
     "EvidenceStoreUnavailable",

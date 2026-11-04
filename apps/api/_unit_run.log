@@ -1,0 +1,240 @@
+........................................................................ [  3%]
+........................................................................ [  6%]
+........................................................................ [ 10%]
+........................................................................ [ 13%]
+........................................................................ [ 17%]
+........................................................................ [ 20%]
+........................................................................ [ 24%]
+........................................................................ [ 27%]
+........................................................................ [ 31%]
+........................................................................ [ 34%]
+........................................................................ [ 38%]
+........................................................................ [ 41%]
+........................................................................ [ 45%]
+........................................................................ [ 48%]
+........................................................................ [ 52%]
+........................................................................ [ 55%]
+........................................................................ [ 59%]
+........................................................................ [ 62%]
+........................................................................ [ 66%]
+........................................................................ [ 69%]
+........................................................................ [ 72%]
+........................................................................ [ 76%]
+........................................................................ [ 79%]
+........................................................................ [ 83%]
+........................................................................ [ 86%]
+........................................................................ [ 90%]
+........................................................................ [ 93%]
+........................................................................ [ 97%]
+........................................................                 [100%]
+============================== warnings summary ===============================
+..\..\..\..\..\AppData\Local\Programs\Python\Python313\Lib\site-packages\starlette\testclient.py:53
+  C:\Users\qwerty\AppData\Local\Programs\Python\Python313\Lib\site-packages\starlette\testclient.py:53: DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead.
+    _PortalFactoryType = Callable[[], AbstractContextManager[anyio.abc.BlockingPortal]]
+
+tests/unit/test_agent_max_turns.py::test_send_body_carries_max_turns_when_limited
+tests/unit/test_agent_max_turns.py::test_send_body_omits_max_turns_when_unlimited
+  C:\Users\qwerty\AppData\Local\Programs\Python\Python313\Lib\asyncio\base_events.py:744: RuntimeWarning: coroutine method 'aclose' of '_bridge_mocks.<locals>._StreamResponse.aiter_lines.<locals>._gen' was never awaited
+    self._ready.clear()
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/unit/test_auth_test_token.py::test_mint_test_access_token_platform_admin
+tests/unit/test_auth_test_token.py::test_mint_test_access_token_employee_email
+tests/unit/test_jwt_validator.py::test_test_mode_accepts_hs256
+  C:\Users\qwerty\AppData\Roaming\Python\Python313\site-packages\jwt\api_jwt.py:149: InsecureKeyLengthWarning: The HMAC key is 30 bytes long, which is below the minimum recommended length of 32 bytes for SHA256. See RFC 7518 Section 3.2.
+    return self._jws.encode(
+
+tests/unit/test_auth_test_token.py::test_mint_test_access_token_platform_admin
+tests/unit/test_auth_test_token.py::test_mint_test_access_token_employee_email
+tests/unit/test_jwt_validator.py::test_test_mode_accepts_hs256
+  C:\Users\qwerty\AppData\Roaming\Python\Python313\site-packages\jwt\api_jwt.py:370: InsecureKeyLengthWarning: The HMAC key is 30 bytes long, which is below the minimum recommended length of 32 bytes for SHA256. See RFC 7518 Section 3.2.
+    decoded = self.decode_complete(
+
+tests/unit/test_chat_sidebar_service.py::test_set_selection_creates_row
+  C:\Users\qwerty\git\agentscale\wt-migration\apps\api\src\prodavan\application\agent\chat_sidebar_service.py:182: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    self._session.add(row)
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/unit/test_chat_sidebar_service.py::test_set_pin_adds_and_removes
+  C:\Users\qwerty\git\agentscale\wt-migration\apps\api\src\prodavan\application\agent\chat_sidebar_service.py:428: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    self._session.add(
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/unit/test_documents_editing.py::test_docx_template_render
+  C:\Users\qwerty\AppData\Local\Programs\Python\Python313\Lib\site-packages\docxcompose\properties.py:18: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+    import pkg_resources
+
+tests/unit/test_module_instance_service.py::test_fork_instance_copies_meta_and_data_when_missing
+  C:\Users\qwerty\git\agentscale\wt-migration\apps\api\src\prodavan\application\modules\module_instance_service.py:138: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    self._session.add(child)
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/unit/test_openclaw_bridge.py::test_iter_send_events_forwards_images_in_body
+  C:\Users\qwerty\AppData\Local\Programs\Python\Python313\Lib\asyncio\base_events.py:744: RuntimeWarning: coroutine method 'aclose' of 'test_iter_send_events_forwards_images_in_body.<locals>._StreamResponse.aiter_lines.<locals>._gen' was never awaited
+    self._ready.clear()
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/unit/test_pod_active_session.py::test_pod_create_without_session_resolves_active_chat
+tests/unit/test_pod_active_session.py::test_pod_create_without_session_falls_back_to_main
+tests/unit/test_pod_active_session.py::test_pod_explicit_session_wins_over_resolution
+tests/unit/test_ux_reliability_fixes.py::test_cabinet_delete_data_row_commits
+  C:\Users\qwerty\git\agentscale\wt-migration\apps\api\src\prodavan\application\modules\module_action_executor.py:1911: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    for action in await self._list_actions(module_id=module_id):
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/unit/test_pod_active_session.py::test_pod_create_without_session_resolves_active_chat
+tests/unit/test_pod_active_session.py::test_pod_create_without_session_falls_back_to_main
+tests/unit/test_pod_active_session.py::test_pod_explicit_session_wins_over_resolution
+tests/unit/test_ux_reliability_fixes.py::test_cabinet_delete_data_row_commits
+  C:\Users\qwerty\git\agentscale\wt-migration\apps\api\src\prodavan\application\modules\module_action_executor.py:2201: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    for action in await self._list_actions(module_id=module_id):
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/unit/test_pod_active_session.py::test_pod_create_without_session_resolves_active_chat
+tests/unit/test_pod_active_session.py::test_pod_create_without_session_falls_back_to_main
+tests/unit/test_pod_active_session.py::test_pod_explicit_session_wins_over_resolution
+  C:\Users\qwerty\git\agentscale\wt-migration\apps\api\src\prodavan\application\modules\module_action_executor.py:2129: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    for action in await self._list_actions(module_id=module_id):
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/unit/test_pod_active_session.py::test_pod_create_without_session_resolves_active_chat
+tests/unit/test_pod_active_session.py::test_pod_create_without_session_falls_back_to_main
+tests/unit/test_pod_active_session.py::test_pod_explicit_session_wins_over_resolution
+  C:\Users\qwerty\git\agentscale\wt-migration\apps\api\src\prodavan\application\modules\module_action_executor.py:1782: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    for action in await self._list_actions(module_id=module_id):
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/unit/test_pod_active_session.py::test_pod_create_without_session_resolves_active_chat
+tests/unit/test_pod_active_session.py::test_pod_create_without_session_falls_back_to_main
+tests/unit/test_pod_active_session.py::test_pod_explicit_session_wins_over_resolution
+  C:\Users\qwerty\git\agentscale\wt-migration\apps\api\src\prodavan\application\modules\module_action_executor.py:1885: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    for action in await self._list_actions(module_id=module_id):
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/unit/test_pod_active_session.py::test_pod_create_without_session_resolves_active_chat
+tests/unit/test_pod_active_session.py::test_pod_create_without_session_falls_back_to_main
+tests/unit/test_pod_active_session.py::test_pod_explicit_session_wins_over_resolution
+tests/unit/test_pod_reconcile_resume_recovery.py::test_resume_recovery_retry_reuses_durable_event_identity
+tests/unit/test_pod_reconcile_resume_recovery.py::test_resume_recovery_clears_stale_pod_error_after_bootstrap
+tests/unit/test_pod_reconcile_resume_recovery.py::test_resume_recovery_retries_registration_after_crash
+tests/unit/test_ux_reliability_fixes.py::test_cabinet_delete_data_row_commits
+  C:\Users\qwerty\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\stash.py:108: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    del self._storage[key]
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/unit/test_pod_active_session.py::test_pod_invoke_action_resolves_session
+  C:\Users\qwerty\git\agentscale\wt-migration\apps\api\tests\unit\test_pod_active_session.py:210: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    await svc.invoke_action(
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/unit/test_pod_reconcile_resume_recovery.py::test_resume_recovery_retry_reuses_durable_event_identity
+tests/unit/test_pod_reconcile_resume_recovery.py::test_resume_recovery_clears_stale_pod_error_after_bootstrap
+tests/unit/test_pod_reconcile_resume_recovery.py::test_resume_recovery_retries_registration_after_crash
+  C:\Users\qwerty\git\agentscale\wt-migration\apps\api\src\prodavan\application\relations\query.py:93: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    return q.scalar_one_or_none() is not None
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/unit/test_pod_reconcile_resume_recovery.py::test_resume_recovery_retry_reuses_durable_event_identity
+tests/unit/test_pod_reconcile_resume_recovery.py::test_resume_recovery_clears_stale_pod_error_after_bootstrap
+tests/unit/test_pod_reconcile_resume_recovery.py::test_resume_recovery_retries_registration_after_crash
+  C:\Users\qwerty\git\agentscale\wt-migration\apps\api\src\prodavan\application\relations\query.py:83: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    return q.scalar_one_or_none() is not None
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/unit/test_pod_reconcile_resume_recovery.py::test_resume_recovery_retry_reuses_durable_event_identity
+tests/unit/test_pod_reconcile_resume_recovery.py::test_resume_recovery_clears_stale_pod_error_after_bootstrap
+tests/unit/test_pod_reconcile_resume_recovery.py::test_resume_recovery_retries_registration_after_crash
+  C:\Users\qwerty\git\agentscale\wt-migration\apps\api\src\prodavan\application\relations\query.py:47: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    return q.scalar_one_or_none() is not None
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/unit/test_pod_reconcile_resume_recovery.py::test_resume_recovery_retry_reuses_durable_event_identity
+tests/unit/test_pod_reconcile_resume_recovery.py::test_resume_recovery_clears_stale_pod_error_after_bootstrap
+tests/unit/test_pod_reconcile_resume_recovery.py::test_resume_recovery_retries_registration_after_crash
+  C:\Users\qwerty\git\agentscale\wt-migration\apps\api\src\prodavan\application\cabinets\access.py:63: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    await self._entitlements.require_membership(employee.id, inst.owner_company_id)
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/unit/test_pod_reconcile_resume_recovery.py::test_resume_bootstrap_failure_keeps_marker_for_reconcile_retry
+tests/unit/test_pod_reconcile_resume_recovery.py::test_resume_bootstrap_when_pod_is_not_running_keeps_marker_for_retry
+  C:\Users\qwerty\git\agentscale\wt-migration\apps\api\src\prodavan\application\project_service\lifecycle_emitter.py:27: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    await self._platform.emit(
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/unit/test_pod_service_command.py::test_sync_desired_running_creates_and_starts_pod
+tests/unit/test_pod_service_command.py::test_lazy_start_emits_project_started
+  C:\Users\qwerty\git\agentscale\wt-migration\apps\api\src\prodavan\application\pod_service\command.py:491: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    self._session.add(pod)
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/unit/test_pod_service_events.py::test_pause_emits_pod_before_project_event
+  C:\Users\qwerty\git\agentscale\wt-migration\apps\api\src\prodavan\application\project_service\command.py:766: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    if await self._get_live_pod(row.id) is None:
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/unit/test_project_auto_index_tabular.py::test_project_update_runs_auto_index_and_returns_refreshed_body
+tests/unit/test_project_auto_index_tabular.py::test_project_update_skips_actions_when_run_actions_false
+tests/unit/test_ux_reliability_fixes.py::test_cabinet_delete_data_row_commits
+tests/unit/test_ux_reliability_fixes.py::test_cabinet_delete_recomputes_equipment
+tests/unit/test_ux_reliability_fixes.py::test_cabinet_delete_recompute_failure_does_not_break_delete
+  C:\Users\qwerty\git\agentscale\wt-migration\apps\api\src\prodavan\application\projects\workspace_sync_policy.py:333: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    docs = {str(slug): body for slug, body in q.all()}
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/unit/test_project_provider_change.py::test_force_sync_bypasses_cabinet_flag
+  C:\Users\qwerty\git\agentscale\wt-migration\apps\api\src\prodavan\application\projects\workspace_sync_policy.py:105: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    logger.debug("turn-in-progress check failed project_id=%s", project_id, exc_info=True)
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/unit/test_tenant_infra_bridge.py::test_mint_verify_and_revoke
+tests/unit/test_tenant_infra_bridge.py::test_cache_service_roundtrip
+tests/unit/test_tenant_infra_bridge.py::test_pod_surface_allowlist_blocks_admin
+tests/unit/test_tenant_infra_complete.py::test_cache_requires_ttl_and_enforces_max_keys
+tests/unit/test_tenant_infra_complete.py::test_shared_memory_cache_survives_new_service_instances
+tests/unit/test_tenant_infra_complete.py::test_launch_scopes_include_all_infra_planes
+tests/unit/test_tenant_infra_complete.py::test_userdb_memory_create_insert_select
+tests/unit/test_tenant_infra_complete.py::test_events_publish_poll_and_backlog
+  C:\Users\qwerty\AppData\Roaming\Python\Python313\site-packages\jwt\api_jwt.py:149: InsecureKeyLengthWarning: The HMAC key is 18 bytes long, which is below the minimum recommended length of 32 bytes for SHA256. See RFC 7518 Section 3.2.
+    return self._jws.encode(
+
+tests/unit/test_tenant_infra_bridge.py::test_mint_verify_and_revoke
+  C:\Users\qwerty\AppData\Roaming\Python\Python313\site-packages\jwt\api_jwt.py:370: InsecureKeyLengthWarning: The HMAC key is 18 bytes long, which is below the minimum recommended length of 32 bytes for SHA256. See RFC 7518 Section 3.2.
+    decoded = self.decode_complete(
+
+tests/unit/test_tenant_infra_bridge.py::test_non_strict_mode_uses_fallback_secret
+  C:\Users\qwerty\AppData\Roaming\Python\Python313\site-packages\jwt\api_jwt.py:149: InsecureKeyLengthWarning: The HMAC key is 22 bytes long, which is below the minimum recommended length of 32 bytes for SHA256. See RFC 7518 Section 3.2.
+    return self._jws.encode(
+
+tests/unit/test_tenant_infra_bridge.py::test_non_strict_mode_uses_fallback_secret
+  C:\Users\qwerty\AppData\Roaming\Python\Python313\site-packages\jwt\api_jwt.py:370: InsecureKeyLengthWarning: The HMAC key is 22 bytes long, which is below the minimum recommended length of 32 bytes for SHA256. See RFC 7518 Section 3.2.
+    decoded = self.decode_complete(
+
+tests/unit/test_ux_reliability_fixes.py::test_cabinet_delete_data_row_commits
+  C:\Users\qwerty\git\agentscale\wt-migration\apps\api\src\prodavan\application\cabinets\cabinet_module_service.py:584: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    if q.scalar_one_or_none() is None:
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+2072 passed, 74 warnings in 53.95s

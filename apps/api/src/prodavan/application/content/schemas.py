@@ -137,7 +137,17 @@ class BeginVersionBody(BaseModel):
     )
 
 
-class VersionResource(BaseModel):
+class VersionRead(BaseModel):
+    """A version as returned by *read* endpoints (detail and history).
+
+    Deliberately has no ``storage_key``: the internal object-store key is only
+    handed out where a client has to write the bytes itself — the
+    ``begin version`` presigned-upload response (see :class:`VersionResource`).
+    Read endpoints used to reuse that model, so every detail/page carried
+    ``storage_key: null``; a null-only field is still a published wire contract
+    and it invites clients to depend on a key the API never intends to serve.
+    """
+
     model_config = ConfigDict(extra="forbid")
 
     id: str
@@ -149,8 +159,16 @@ class VersionResource(BaseModel):
     object_metadata: dict[str, Any] = Field(default_factory=dict)
     sealed: bool = False
     created_at: str | None = None
-    # Compatibility: retained for tests/integration/test_content.py and the
-    # module upload adapters. Removed once those callers stop reading it.
+
+
+class VersionResource(VersionRead):
+    """A version as returned by *write* endpoints (begin/upload/finalize).
+
+    Adds ``storage_key`` for callers that emulate the presigned PUT themselves
+    (tests/integration/test_content.py, module upload adapters). Removed once
+    those callers stop reading it.
+    """
+
     storage_key: str | None = None
 
 
@@ -166,7 +184,7 @@ class BeginVersionResponse(BaseModel):
 class VersionList(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    items: list[VersionResource] = Field(default_factory=list)
+    items: list[VersionRead] = Field(default_factory=list)
     next_cursor: str | None = None
     has_more: bool = False
     limit: int = Field(default=50, ge=1, le=VERSION_PAGE_MAX)

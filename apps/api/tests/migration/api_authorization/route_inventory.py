@@ -170,6 +170,58 @@ def route_inventory(app: Any) -> tuple[RouteRecord, ...]:
     return tuple(sorted(records.values(), key=lambda record: (record.path, record.method)))
 
 
+def route_inventory_independently(app: Any) -> tuple[RouteRecord, ...]:
+    """The same inventory, derived a second way, for cross-checking.
+
+    :func:`route_inventory` asks each ``_IncludedRouter`` for its *effective*
+    contexts — the framework's own answer, prefix included. That is the best
+    source, but if the walk silently skipped a wrapper the audit would be
+    quietly narrower than the API. This second walk does the path arithmetic
+    itself: it recurses through ``original_router.routes`` and joins the
+    ``include_context.prefix`` of every level. A route only one of the two walks
+    produces is a missing route, not a formatting difference.
+    """
+
+    records: dict[str, RouteRecord] = {}
+
+    def add(context: Any, prefix: str) -> None:
+        path = getattr(context, "path", None) or ""
+        if not path.startswith(prefix):
+            path = prefix + path
+        methods = {str(m).upper() for m in (getattr(context, "methods", None) or ())}
+        if "GET" in methods:
+            methods.discard("HEAD")
+        endpoint = getattr(context, "endpoint", None)
+        module = getattr(endpoint, "__module__", "") or ""
+        for method in sorted(methods & set(_HTTP_METHODS)):
+            record = RouteRecord(
+                path=path,
+                method=method,
+                name=str(getattr(context, "name", "") or ""),
+                module=module,
+                endpoint_name=getattr(endpoint, "__name__", "") if endpoint else "",
+                dependant=getattr(context, "dependant", None),
+                endpoint=endpoint,
+                framework=endpoint is None or module.startswith(FRAMEWORK_MODULES),
+            )
+            records.setdefault(record.key, record)
+
+    def walk(routes: Iterable[Any], prefix: str) -> None:
+        for route in routes:
+            include = getattr(route, "include_context", None)
+            if include is not None:
+                walk(route.original_router.routes, prefix + (include.prefix or ""))
+                continue
+            children = getattr(route, "routes", None)
+            if children is not None and not hasattr(route, "endpoint"):
+                walk(children, prefix + (getattr(route, "prefix", "") or ""))
+                continue
+            add(route, prefix)
+
+    walk(app.routes, "")
+    return tuple(sorted(records.values(), key=lambda record: (record.path, record.method)))
+
+
 # --------------------------------------------------------------------------- #
 # request parameters
 # --------------------------------------------------------------------------- #
@@ -332,6 +384,7 @@ class _ModuleIndex:
     #: ``name -> absolute module`` for a package that re-exports through a
     #: module-level ``_LAZY`` table (``{"X": (".sub", "X")}``).
     lazy: dict[str, str] = field(default_factory=dict)
+
 
 class SourceIndex:
     """Parsed ``src/prodavan`` tree, indexed for receiver-aware call following."""

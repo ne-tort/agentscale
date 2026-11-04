@@ -23,19 +23,19 @@ from prodavan.infrastructure.persistence.migration_artifact_store import (
     ArtifactRefusalCode,
     SqlArtifactContentStore,
 )
+
 from .artifact_fixtures import (
     ARTIFACT_BYTES,
-    ARTIFACT_DIGEST,
     ARTIFACT_KEY,
     ARTIFACT_URI,
     CONTENT_KEY,
     CONTENT_URI,
     DEFINITION,
-    FakeByteStore,
     OTHER_DIGEST,
-    RecordingSessionFactory,
     TENANT,
     VERSION,
+    FakeByteStore,
+    RecordingSessionFactory,
     catalogue,
     content_asset,
     content_blob,

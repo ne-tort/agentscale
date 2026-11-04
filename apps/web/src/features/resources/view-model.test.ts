@@ -55,9 +55,11 @@ describe("resource workspace view model", () => {
     expect(canPlanMaterialization(enabled, "project-ops")).toBe(true);
     expect(canSyncMaterialization(enabled, resourceWorkspaceFixture.materialization)).toBe(true);
     expect(canSyncMaterialization(disabled, resourceWorkspaceFixture.materialization)).toBe(false);
+    // A plan is `ready` or `blocked`; only a ready plan may be applied. `failed`,
+    // `applying` and `stale` are apply outcomes and cannot appear on a plan, so the
+    // negative cases are the two states the plan API actually has.
     expect(canSyncMaterialization(enabled, { ...resourceWorkspaceFixture.materialization!, status: "blocked" })).toBe(false);
-    expect(canSyncMaterialization(enabled, { ...resourceWorkspaceFixture.materialization!, status: "failed" })).toBe(false);
-    expect(canSyncMaterialization(enabled, { ...resourceWorkspaceFixture.materialization!, status: "applying" })).toBe(false);
+    expect(canSyncMaterialization(enabled, { ...resourceWorkspaceFixture.materialization!, status: "ready" })).toBe(true);
   });
 
   it("keeps generation and diff counts inspectable", () => {

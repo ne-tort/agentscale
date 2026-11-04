@@ -48,11 +48,11 @@ from prodavan.application.content.contracts import (
     VERSION_TTL_MAX,
     VERSION_TTL_MIN,
     ContentErrorCode,
+    asset_projections_match,
     canonical_asset_request,
     canonical_asset_row,
     digest_of,
     normalize_tags,
-    projections_match,
 )
 from prodavan.application.content.pagination import decode_cursor, encode_cursor
 from prodavan.application.content.scope import (
@@ -261,7 +261,10 @@ class AssetService:
             )
             existing = await self._session.get(ContentAssetRow, asset_id)
             if existing is not None:
-                if not projections_match(canonical_asset_row(existing), requested):
+                # ``asset_projections_match`` ignores ``mime``: that column is
+                # rewritten by every version upload/finalize, so it describes the
+                # current blob rather than the create request (see contracts).
+                if not asset_projections_match(canonical_asset_row(existing), requested):
                     raise AppError(
                         code=ContentErrorCode.IDEMPOTENCY_REPLAY,
                         title="Idempotency replay",

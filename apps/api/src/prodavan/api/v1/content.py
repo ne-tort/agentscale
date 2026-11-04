@@ -77,6 +77,7 @@ from prodavan.application.content.schemas import (
     ReplaceAclBody,
     VersionAbortResult,
     VersionList,
+    VersionRead,
     VersionResource,
 )
 from prodavan.application.content.scope import resolve_actor_scope
@@ -343,7 +344,7 @@ async def list_asset_versions(
     return VersionList.model_validate({**payload, "limit": limit})
 
 
-@router.get("/assets/{asset_id}/versions/{version_id}", response_model=VersionResource)
+@router.get("/assets/{asset_id}/versions/{version_id}", response_model=VersionRead)
 async def get_asset_version(
     asset_id: str,
     version_id: str,
@@ -351,7 +352,7 @@ async def get_asset_version(
     session: SessionDep,
     work: WorkContextDep,
     employee: EmployeeDep = None,
-) -> VersionResource:
+) -> VersionRead:
     scope = await resolve_actor_scope(
         session,
         principal=principal,
@@ -366,7 +367,7 @@ async def get_asset_version(
         employee=employee,
         scope=scope,
     )
-    return VersionResource.model_validate(payload)
+    return VersionRead.model_validate(payload)
 
 
 @router.post("/assets/{asset_id}/versions", response_model=BeginVersionResponse)

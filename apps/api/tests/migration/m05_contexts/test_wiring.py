@@ -18,8 +18,6 @@ from __future__ import annotations
 
 from dataclasses import fields
 
-import pytest
-
 from prodavan.application.migration.composition import (
     ChainDependencies,
     MigrationStage,
@@ -30,7 +28,6 @@ from prodavan.application.migration.composition import (
 from prodavan.application.migration.m05_contexts import (
     M05_UPSTREAM_EVIDENCE_M04E_EXPORT_MISSING,
     SqlAuthSessionOwnership,
-    build_m05_tenant_context,
     build_partition_m05_contexts,
 )
 from prodavan.application.migration.m05_instance_runtime.instance_persistence import (
@@ -60,6 +57,7 @@ from tests.migration.partition_chain.partition_fixtures import (
     runtime_context,
     shadow_ports,
 )
+
 from . import fixtures as fx
 
 M05_SERVICES = (

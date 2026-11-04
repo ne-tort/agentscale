@@ -374,6 +374,51 @@ class _AlterRecorder:
     def execute(self, statement: Any, **kw: Any) -> None:
         self.executed.append(str(statement))
 
+    def get_bind(self):  # noqa: ANN201 - mirrors Alembic's signature
+        # The revision verifies the policies it just installed against the catalog.
+        # This replay is database-free and only needs the schema operations, so the
+        # verification is answered with "exists and carries its declared pair"; the
+        # real check runs on a live server in ``tests/migration/rls`` and in the
+        # round-trip exercised by ``tests/migration/equipment_anchors``.
+        return _VerifiedBind()
+
+
+class _VerifiedBind:
+    """Minimal bind that reports every model table as present, policied and anchored."""
+
+    def execute(self, statement: Any, params: dict[str, Any] | None = None):
+        from prodavan.infrastructure.persistence.models import Base
+
+        sql = " ".join(str(statement).split())
+        relation = (params or {}).get("relation") or (params or {}).get("table")
+
+        class _Result:
+            def __init__(self, rows: list[tuple[Any, ...]]) -> None:
+                self._rows = rows
+
+            def all(self) -> list[tuple[Any, ...]]:
+                return list(self._rows)
+
+            def scalar(self) -> Any:
+                return self._rows[0][0] if self._rows else None
+
+            def scalar_one(self) -> Any:
+                return self.scalar()
+
+        from prodavan.infrastructure.persistence.rls import policies
+
+        if relation not in Base.metadata.tables:
+            return _Result([(None,)] if "to_regclass" in sql else [])
+        model = Base.metadata.tables[relation]
+        if "pg_attribute" in sql:
+            return _Result([(column,) for column in model.columns.keys()])
+        if "to_regclass" in sql:
+            return _Result([(relation,)])
+        if "pg_policy" in sql:
+            spec = next((item for item in policies.CANONICAL_TABLE_POLICIES if item.table == relation), None)
+            return _Result([] if spec is None else [(name,) for name in spec.policy_names])
+        return _Result([])
+
 
 def _anchor_replay() -> _AlterRecorder:
     spec = importlib.util.spec_from_file_location("_equipment_anchors_replay", ANCHOR_REVISION_PATH)
@@ -401,7 +446,12 @@ def _with_anchors(tables: dict[str, sa.Table], indexes: list[tuple[Any, ...]]) -
 
     anchors = _anchor_replay()
     for table_name, column in anchors.added_columns:
-        tables[table_name].append_column(column.copy())
+        # Rebuilt rather than ``Column.copy()`` (deprecated in SQLAlchemy 1.4+): the
+        # anchor columns carry no server default, so name/type/nullability is the whole
+        # declaration, and rebuilding keeps the replayed objects independent.
+        tables[table_name].append_column(
+            sa.Column(column.name, column.type, nullable=column.nullable)
+        )
     for key in anchors.created_foreign_keys:
         tables[key["table"]].append_constraint(
             sa.ForeignKeyConstraint(

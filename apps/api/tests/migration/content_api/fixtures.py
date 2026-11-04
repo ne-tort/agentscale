@@ -121,7 +121,16 @@ class Member:
 
 
 def provision_tenant(client: TestClient, *, name: str, admin_sub: str) -> Tenant:
-    """Create a company through the real API and derive its admin session."""
+    """Create a company through the real API and derive its admin session.
+
+    The admin's identity is whatever the invite flow assigned — the company API
+    returns ``admin_employee.keycloak_sub`` — not a sub invented by the test.
+    A made-up sub authenticates fine at the JWT layer but resolves to no
+    employee row, so every downstream call failed closed with 403 "No employee
+    record for subject" (which is the correct answer for an unknown subject).
+    ``admin_sub`` is kept so callers can tell tenants apart in logs/trace ids;
+    it does not decide which employee the token maps to.
+    """
     created = client.post(
         "/api/v1/companies",
         headers=platform_headers(),
@@ -135,7 +144,8 @@ def provision_tenant(client: TestClient, *, name: str, admin_sub: str) -> Tenant
     body = created.json()
     company_id = body["company"]["id"]
     admin = body["admin_employee"]
-    headers = bearer(admin_sub, email=admin.get("email"), roles=["employee"])
+    assert admin.get("keycloak_sub"), f"invite must persist keycloak_sub ({admin_sub})"
+    headers = bearer(admin["keycloak_sub"], email=admin.get("email"), roles=["employee"])
     cab = client.post(
         "/api/v1/cabinets",
         headers=headers,

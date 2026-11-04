@@ -193,10 +193,15 @@ def test_association_tables_match_the_model_exactly(upgrade) -> None:  # noqa: A
         for key in ("columns", "primary_key", "unique", "checks"):
             assert declared[key] == modelled[key], f"{table_name}: {key}"
 
-        def shapes(signature: dict[str, Any]) -> set[tuple[Any, ...]]:
-            return {(local, remote, ondelete) for _name, local, remote, ondelete in signature["foreign_keys"]}
-
-        assert shapes(declared) == shapes(modelled), table_name
+        key_shapes = {
+            (local, remote, ondelete)
+            for _name, local, remote, ondelete in declared["foreign_keys"]
+        }
+        model_key_shapes = {
+            (local, remote, ondelete)
+            for _name, local, remote, ondelete in modelled["foreign_keys"]
+        }
+        assert key_shapes == model_key_shapes, table_name
 
     # A key the model *does* name must carry that very name in the migration; keys the
     # model leaves unnamed get PostgreSQL's derived name, which is not a drift.

@@ -87,14 +87,12 @@ VERSIONS_DIR: Path = H.VERSIONS_DIR
 #: lands without this file being extended: the chain review must be re-run, not
 #: silently widened.
 #:
-#: ``2026110317``-``2026110319`` are deliberately **not** in this range yet.  Two of
-#: them own no table (``2026110317`` creates one platform table, ``2026110318`` is a
-#: policy rename), so nothing here is lost; ``2026110319`` does own two tables, but
-#: replaying it needs ``op.add_column``/``op.drop_column`` in ``harness._FakeOp``,
-#: which is the MIG-EQ-ANCHORS-01 task's change to make, not a silent widening on
-#: this side.  Until then the equipment parity checks below report the 0319 delta
-#: as model drift, which is the honest reading of a chain list that stops at 0316.
-CHAIN: tuple[str, ...] = tuple(f"20261103{number:02d}" for number in range(1, 17))
+#: The range now reaches ``2026110319``.  MIG-EQ-ANCHORS-01 extended
+#: ``harness._FakeOp`` with ``add_column``/``drop_column`` (the equipment anchors are
+#: ``ALTER TABLE`` operations on tables ``2026110305`` owns), so ``2026110319`` can be
+#: replayed like any other revision and the cumulative-schema checks below see both
+#: its own two tables and the columns it adds.
+CHAIN: tuple[str, ...] = tuple(f"20261103{number:02d}" for number in range(1, 20))
 CHAIN_ROOT = "2026110202"
 
 #: Revisions of the chain that own tables.
@@ -111,6 +109,10 @@ TABLE_OWNING_REVISIONS: tuple[str, ...] = (
     "2026110315",
     # MIG-DDL-CUTOVER-01: the cutover ledger and its live source tail.
     "2026110316",
+    # MIG-EQ-ANCHORS-01: the two equipment association tables.  The same revision also
+    # *extends* three tables ``2026110305`` owns with the project/cabinet anchors, which
+    # the column/FK/index parity tests fold in from ``Replay.added_columns``.
+    "2026110319",
 )
 
 #: Revisions that install RLS policies by walking the shared registry.
@@ -123,6 +125,11 @@ POLICY_REVISIONS: tuple[str, ...] = (
     # ``2026110316`` is the re-apply for the two M06 cutover tables: it creates them
     # and installs their policies in the same step.
     "2026110316",
+    # ``2026110318`` (MIG-RLS-LIVE-01) reinstalls the registry under the corrected
+    # policy names; ``2026110319`` is the re-apply for its own association tables and
+    # for the three tables whose predicates now read the anchor columns directly.
+    "2026110318",
+    "2026110319",
 )
 
 #: ``ALTER TABLE t ADD CONSTRAINT n UNIQUE (a, b)`` emitted as raw SQL.  Revision
@@ -361,6 +368,33 @@ def model_foreign_key_shapes(table: str):
         (spec.local, spec.remote, spec.ondelete, spec.deferrable, spec.initially)
         for spec in H.foreign_key_specs(model_table)
     }
+
+
+def declared_column_specs(table: str) -> tuple[object, ...]:
+    """Columns of ``table`` as PostgreSQL holds them after ``upgrade head``.
+
+    The creating revision's columns, in their declared order, followed by the columns
+    later revisions ``ADD`` - ``ALTER TABLE ... ADD COLUMN`` appends, so the model
+    must declare its new columns last for this to match.  A schema review that only
+    looked at the creating revision would report every added column as model drift
+    and would silently accept a model that forgot them.
+    """
+
+    creator = table_owners()[table]
+    specs = list(H.column_specs(upgrade(creator).tables[table]))
+    for revision in CHAIN:
+        for target, column in upgrade(revision).added_columns:
+            if target != table:
+                continue
+            specs.append(
+                H.ColumnSpec(
+                    name=column.name,
+                    type=H.compile_type(column.type),
+                    nullable=bool(column.nullable),
+                    default=H.render_default(column),
+                )
+            )
+    return tuple(specs)
 
 
 def model_indexes(table: str) -> list[tuple[str, tuple[str, ...], bool, str | None]]:
@@ -638,12 +672,14 @@ def test_column_parity_with_models() -> None:
     problems: list[str] = []
     metadata = H.model_metadata()
     for table, revision in sorted(table_owners().items()):
-        declared = upgrade(revision).tables[table]
         model_table = metadata.tables.get(table)
         if model_table is None:
             continue  # covered by the registration test
-        if H.column_specs(declared) != H.column_specs(model_table):
-            problems.append(H._column_diff(table, declared, model_table))
+        if declared_column_specs(table) != H.column_specs(model_table):
+            problems.append(
+                f"{table}: migration {declared_column_specs(table)} vs model {H.column_specs(model_table)}"
+                f" (creating revision {revision}, plus add_column from later revisions)"
+            )
     assert not problems, "column parity drift (name/type/nullable/server_default/order):\n" + "\n".join(problems)
 
 
@@ -930,15 +966,32 @@ def test_table_downgrades_mirror_upgrades() -> None:
         }
         pre_existing_policies = set(created_policies) - owned_policies
         dropped_policies = set(down.dropped_sql_objects) & set(created_policies)
-        if dropped_policies != owned_policies:
+
+        # A re-apply revision may also *re-scope* a table it does not create: 
+        # ``2026110319`` switches the equipment predicates to the project/cabinet
+        # columns it adds, so its downgrade must withdraw those policies before
+        # ``DROP COLUMN`` (PostgreSQL refuses to drop a column a policy reads) and
+        # re-create them under the pre-anchor predicate.  Dropping such a policy is
+        # legitimate only when both halves happen: the revision drops a column of
+        # that table *and* recreates a policy for it in the same downgrade.
+        columns_dropped = {table_name for table_name, _column in down.dropped_columns}
+        recreated_policies = _created_policy_names(down.statements)
+        re_scoped = {
+            name
+            for name in dropped_policies & pre_existing_policies
+            if created_policies[name].table in columns_dropped and name in recreated_policies
+        }
+        unexpected_dropped = dropped_policies - re_scoped
+        if unexpected_dropped != owned_policies:
             problems.append(
-                f"{revision}: policies not dropped {sorted(owned_policies - dropped_policies)} "
-                f"policies dropped but never introduced here {sorted(dropped_policies - owned_policies)}"
+                f"{revision}: policies not dropped {sorted(owned_policies - unexpected_dropped)} "
+                f"policies dropped but never introduced here "
+                f"{sorted(unexpected_dropped - owned_policies)}"
             )
-        if dropped_policies & pre_existing_policies:
+        if (dropped_policies & pre_existing_policies) - re_scoped:
             problems.append(
                 f"{revision}: downgrade would drop pre-existing policies "
-                f"{sorted(dropped_policies & pre_existing_policies)}"
+                f"{sorted((dropped_policies & pre_existing_policies) - re_scoped)}"
             )
 
         explicit_created = (
@@ -956,6 +1009,18 @@ def test_table_downgrades_mirror_upgrades() -> None:
                 f"dropped without creating {sorted(explicit_dropped - explicit_created)}"
             )
     assert not problems, "downgrade symmetry drift:\n" + "\n".join(problems)
+
+
+def _created_policy_names(statements: list[str]) -> set[str]:
+    """``CREATE POLICY`` names emitted as raw SQL, for statements the replay records."""
+
+    return {
+        match.group("name")
+        for statement in statements
+        for match in re.finditer(
+            r"CREATE\s+POLICY\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s+ON", statement, re.IGNORECASE
+        )
+    }
 
 
 def test_policy_revision_downgrade_removes_exactly_its_policies() -> None:

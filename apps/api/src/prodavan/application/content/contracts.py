@@ -268,6 +268,29 @@ def projections_match(stored: Mapping[str, Any], requested: Mapping[str, Any]) -
     return all(stored[key] == requested[key] for key in requested)
 
 
+#: Projection keys that describe *current blob state*, not the create request.
+#:
+#: ``assets.mime`` is rewritten by every version upload and finalize
+#: (``asset.mime = mime`` / ``head.content_type``), so after a single upload it no
+#: longer says what the create body said — it usually says nothing there, because
+#: ``mime`` is optional at create time. Keeping it in the replay identity meant a
+#: perfectly legitimate retry of ``POST /content/assets`` was answered with
+#: ``409 IDEMPOTENCY_REPLAY`` merely because a version had been uploaded in
+#: between. Replay therefore compares the fields that only the create request can
+#: set: tenant, owner scope, visibility, title and tags.
+_ASSET_REPLAY_IGNORED_KEYS = frozenset({"mime"})
+
+
+def asset_projections_match(stored: Mapping[str, Any], requested: Mapping[str, Any]) -> bool:
+    """Replay comparison for ``POST /content/assets`` (see the note above)."""
+    comparable = {
+        key: value for key, value in requested.items() if key not in _ASSET_REPLAY_IGNORED_KEYS
+    }
+    if set(stored) != set(requested):
+        return False
+    return all(stored[key] == value for key, value in comparable.items())
+
+
 def digest_of(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
@@ -407,6 +430,7 @@ __all__ = [
     "canonical_asset_row",
     "canonical_alias_request",
     "canonical_alias_row",
+    "asset_projections_match",
     "projections_match",
     "digest_of",
     "asset_visible_to_tenants",

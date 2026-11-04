@@ -34,6 +34,7 @@ from prodavan.application.migration.partition_chain import (
 from prodavan.infrastructure.persistence.migration_artifact_store import (
     SqlArtifactContentStore,
 )
+
 from ..partition_chain.partition_fixtures import (
     GENERATION,
     RecordingSessionFactory,

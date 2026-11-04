@@ -19,8 +19,9 @@ reproduces the S3 backend's documented behaviour (every failure becomes
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any, Mapping
+from typing import Any
 
 TENANT = "tenant-artifact"
 OTHER_TENANT = "tenant-foreign"

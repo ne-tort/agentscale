@@ -55,6 +55,7 @@ from prodavan.application.migration.partition_runner import (
     SqlPartitionEvidenceSource,
     run_partition_stage,
 )
+
 from .partition_fixtures import GENERATION, complete_overrides, key
 
 URL_ENV = "PRODAVAN_PARTITION_TEST_DATABASE_URL"

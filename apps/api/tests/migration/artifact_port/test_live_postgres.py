@@ -32,6 +32,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from prodavan.application.migration.partition_chain import (
     PARTITION_M04E_ARTIFACTS_UNAVAILABLE,
+    PartitionChainKey,
     build_partition_chain,
 )
 from prodavan.infrastructure.persistence.migration_artifact_store import (
@@ -39,21 +40,22 @@ from prodavan.infrastructure.persistence.migration_artifact_store import (
     ArtifactRefusalCode,
     SqlArtifactContentStore,
 )
+
+from ..partition_chain.partition_fixtures import GENERATION, complete_overrides
 from .artifact_fixtures import (
     ARTIFACT_BYTES,
     ARTIFACT_DIGEST,
     ARTIFACT_KEY,
     ARTIFACT_URI,
-    AsyncByteStore,
     CONTENT_KEY,
     CONTENT_URI,
     DEFINITION,
     OTHER_TENANT,
     TENANT,
     VERSION,
+    AsyncByteStore,
     digest_of,
 )
-from ..partition_chain.partition_fixtures import GENERATION, complete_overrides, key
 
 URL_ENV = "PRODAVAN_PARTITION_TEST_DATABASE_URL"
 
@@ -187,10 +189,18 @@ async def _seed_legacy(engine, *, tenant: str = TENANT, uri: str = ARTIFACT_URI)
 
 
 def _port(factory, objects: dict[str, bytes] | None = None) -> SqlArtifactContentStore:
-    return SqlArtifactContentStore(
-        session_factory=factory,
-        file_store=AsyncByteStore(objects=dict(objects or {ARTIFACT_KEY: ARTIFACT_BYTES})),
-    )
+    """A port over an in-memory byte store.
+
+    ``objects`` is compared with ``None`` rather than tested for truth: an **empty** dict is
+    a meaningful argument here ("the store holds nothing"), and ``objects or default`` would
+    silently turn the confirmed-absence test green-for-the-wrong-reason by supplying the
+    artifact it was supposed to be missing.
+    """
+
+    store = AsyncByteStore(objects={} if objects is None else dict(objects))
+    if objects is None:
+        store.objects = {ARTIFACT_KEY: ARTIFACT_BYTES}
+    return SqlArtifactContentStore(session_factory=factory, file_store=store)
 
 
 async def test_a_matching_artifact_is_read_from_a_live_database(engine, factory) -> None:
@@ -420,11 +430,16 @@ async def test_the_tenant_guc_is_really_applied_and_read_back_on_this_server(
 async def test_the_partition_planner_composes_a_port_that_reads_this_database(
     engine, factory,
 ) -> None:
-    """End to end: ``build_partition_chain`` -> the composed port -> real bytes."""
+    """End to end: ``build_partition_chain`` -> the composed port -> real bytes.
+
+    The partition key and the seeded rows must name the same identity, so the planner is
+    given the *fixture's* partition rather than the suite-wide placeholder one.
+    """
 
     await _seed_legacy(engine)
+    partition = PartitionChainKey(tenant_id=TENANT, app_definition_id=DEFINITION)
     plan = build_partition_chain(
-        key=key(),
+        key=partition,
         session_factory=factory,
         writer_generation=GENERATION,
         **complete_overrides(m04e_artifacts=None).chain_kwargs(),
@@ -434,12 +449,20 @@ async def test_the_partition_planner_composes_a_port_that_reads_this_database(
     port = plan.dependencies.m04e_artifacts
     assert isinstance(port, SqlArtifactContentStore)
 
-    # The planner has no object store of its own, so the host supplies one on the instance
-    # it was given -- the same way a deployment binds ``FileStoreManager`` to the resource.
-    port._file_store = AsyncByteStore(objects={ARTIFACT_KEY: ARTIFACT_BYTES})
-    read = await port.read_artifact_verified(
-        tenant_id=key().tenant_id,
-        app_definition_id=key().app_definition_id,
+    # The composed port has no object store bound: it resolves one lazily on the first byte
+    # read, and a test must not trigger that against the real storage root.  Resolution and
+    # identity proof need no store, so the database half is proven here...
+    resolved = await port.resolve_artifact_uri(
+        tenant_id=partition.tenant_id,
+        app_definition_id=partition.app_definition_id,
+        app_version_id=VERSION,
+    )
+    assert resolved == ARTIFACT_URI
+
+    # ...and the byte half is proven through the same class with a store the test owns.
+    read = await _port(factory).read_artifact_verified(
+        tenant_id=partition.tenant_id,
+        app_definition_id=partition.app_definition_id,
         app_version_id=VERSION,
         artifact_uri=ARTIFACT_URI,
         max_bytes=1024 * 1024,

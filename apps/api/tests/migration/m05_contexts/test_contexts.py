@@ -30,8 +30,8 @@ from prodavan.application.migration.m05_contexts import (
     M05_UPSTREAM_EVIDENCE_M04_SCOPE_MISSING,
     M05_UPSTREAM_EVIDENCE_M04E_EXPORT_MISSING,
     M05_UPSTREAM_EVIDENCE_PARTITION_MISMATCH,
-    M05InstanceCounts,
     M05ContextBuild,
+    M05InstanceCounts,
     ReviewedM05RuntimeGate,
     SqlAuthSessionOwnership,
     build_m04_scope_gate,
@@ -51,8 +51,8 @@ from prodavan.application.migration.tenant_context import (
     M05_RUNTIME_RELATIONS,
     RlsTrustedTenantContextAdapter,
 )
-from . import fixtures as fx
 
+from . import fixtures as fx
 
 # ---------------------------------------------------------------------------
 # The result type itself

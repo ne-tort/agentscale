@@ -50,6 +50,7 @@ from .route_inventory import (
     is_authenticated,
     request_parameter_classes,
     route_inventory,
+    route_inventory_independently,
 )
 
 #: Query/body/header names by which a caller can select a tenant. The path
@@ -98,11 +99,6 @@ def source_index() -> SourceIndex:
     return SourceIndex()
 
 
-@pytest.fixture(scope="module")
-def public_keys() -> frozenset[str]:
-    return frozenset(entry.key for entry in registry.PUBLIC_ROUTES)
-
-
 def _tenant_selectors(record: RouteRecord) -> tuple[str, ...]:
     """Client-controlled tenant selectors this route reads."""
 
@@ -124,26 +120,39 @@ def _scoping_path_parameters(record: RouteRecord) -> tuple[str, ...]:
     return tuple(sorted(set(params.path) & SCOPING_PATH_PARAMETERS))
 
 
-def _is_public(record: RouteRecord, public_keys: frozenset[str]) -> bool:
+def _is_public(record: RouteRecord) -> bool:
+    """Does any allow-list entry cover this route?
+
+    Per-entry (:meth:`PublicRoute.covers`) rather than by key, so a prefix entry
+    protects its whole subtree — ``/api/v1/auth`` covers ``/auth/login`` without
+    the registry having to enumerate six paths that would then each need
+    updating when one is added.
+    """
+
     return any(entry.covers(record) for entry in registry.PUBLIC_ROUTES)
 
 
 def _unvalidated_selectors(
     record: RouteRecord, index: SourceIndex
 ) -> tuple[str, ...]:
-    """Selectors used without a reachable guard, on a non-platform route.
+    """Client-supplied tenant selectors this route uses without validating them.
 
-    A platform-admin route is excluded on purpose: ``require_platform_admin``
-    already proves the caller may act across every tenant, so a second
-    per-tenant check is a policy question (recorded in ``findings.md`` F-01 as
-    informational), not a tenant-boundary defect.
+    Platform-admin routes are **included** on purpose. ``require_platform_admin``
+    proves the caller may cross tenants, but it says nothing about the
+    ``company_id`` in the body: the route still reads its tenant from the request
+    rather than from a resolved context, and that is the property under audit.
+    Those routes are recorded as informational findings (F-01/F-02) — the
+    distinction between "admin may do this" and "this is unchecked" is made in
+    ``findings.md``, not by hiding them from the scan.
     """
 
     dependencies = dependency_names(record.dependant)
-    if PLATFORM_ADMIN_DEPENDENCY in dependencies:
-        return ()
     if set(dependencies) & TENANT_DEPENDENCIES:
         return ()
+    if record.key in registry.REACHABILITY_CAVEATS:
+        # A guard is syntactically reachable but does not validate this selector
+        # (see the caveat's own text); the route is still an open gap.
+        return _tenant_selectors(record)
     if index.guard_reached(record):
         return ()
     return _tenant_selectors(record)
@@ -201,14 +210,14 @@ def test_inventory_records_the_authentication_dependencies_it_uses(routes) -> No
 # --------------------------------------------------------------------------- #
 
 
-def test_every_anonymous_route_is_in_the_public_allow_list(routes, public_keys) -> None:
+def test_every_anonymous_route_is_in_the_public_allow_list(routes) -> None:
     """The core contract: nothing answers without a principal unless approved."""
 
     offenders = []
     for record in routes:
         if is_authenticated(dependency_names(record.dependant)):
             continue
-        if _is_public(record, public_keys):
+        if _is_public(record):
             continue
         offenders.append(f"{record.key}  ({record.source})")
     assert offenders == [], (
@@ -217,19 +226,32 @@ def test_every_anonymous_route_is_in_the_public_allow_list(routes, public_keys) 
     )
 
 
-def test_every_public_allow_list_entry_is_still_actually_public(routes, public_keys) -> None:
+def test_every_public_allow_list_entry_is_still_actually_public(routes) -> None:
     """A stale public entry would be a hole nobody notices: the route is guarded,
     the reviewer believes an open route exists, and the next change to it is
-    judged against the wrong premise."""
+    judged against the wrong premise.
 
-    anonymous = {
-        record.key for record in routes
-        if not is_authenticated(dependency_names(record.dependant))
-    }
-    stale = sorted(key for key in public_keys if key not in anonymous)
+    Matched per entry (:meth:`PublicRoute.covers`) rather than by key, because a
+    prefix entry legitimately covers many paths — and because a prefix entry must
+    go stale as a whole, not one child at a time.
+    """
+
+    stale = []
+    for entry in registry.PUBLIC_ROUTES:
+        covered = [record for record in routes if entry.covers(record)]
+        if not covered:
+            stale.append(f"{entry.key}: no route is served at this path any more")
+            continue
+        guarded = [
+            record.key
+            for record in covered
+            if is_authenticated(dependency_names(record.dependant))
+        ]
+        if len(guarded) == len(covered):
+            stale.append(f"{entry.key}: every covered route now authenticates: {guarded}")
     assert stale == [], (
-        "registry.PUBLIC_ROUTES lists routes that are authenticated (or no longer "
-        f"served): {stale}"
+        "registry.PUBLIC_ROUTES contains entries that are no longer public "
+        "(or no longer served):\n  " + "\n  ".join(stale)
     )
 
 
@@ -316,9 +338,16 @@ def test_every_recorded_tenant_selector_gap_is_still_open(routes, source_index) 
         if gap.selector not in _tenant_selectors(record):
             closed.append(f"{gap.key}: no longer takes {gap.selector}")
             continue
-        if not _unvalidated_selectors(record, source_index):
-            closed.append(f"{gap.key}: now guarded (indexed_proof="
-                          f"{source_index.guard_reached(record)!r})")
+        # ``guard_reached`` directly, not ``_unvalidated_selectors``: the latter
+        # excludes platform-admin routes from *reporting*, which is not the same
+        # thing as the route having gained a guard.
+        if gap.key in registry.REACHABILITY_CAVEATS:
+            # The index reports a guard here on purpose, and the caveat explains
+            # why that guard does not validate the selector.
+            continue
+        guard = source_index.guard_reached(record)
+        if guard:
+            closed.append(f"{gap.key}: now guarded (indexed_proof={guard!r})")
     assert closed == [], (
         "registry.UNVALIDATED_TENANT_SELECTORS lists gaps that no longer exist; "
         "remove them and the matching section of findings.md:\n  " + "\n  ".join(closed)
@@ -331,19 +360,27 @@ def test_every_recorded_tenant_selector_gap_is_still_open(routes, source_index) 
     ids=lambda gap: f"{gap.key}::{gap.selector}",
 )
 def test_every_gap_names_a_finding(gap) -> None:
-    """A gap without a findings entry is a gap nobody owns."""
+    """A gap without a findings entry is a gap nobody owns.
+
+    Both halves are required: the section exists, and that section names this
+    method+path *and* the selector. A finding that lists a route without saying
+    which value is unvalidated leaves the owner guessing.
+    """
 
     findings = _findings_text()
     assert f"## {gap.finding}" in findings, (
         f"{gap.key}: finding {gap.finding} has no section in findings.md"
     )
-    assert gap.key in findings, (
-        f"{gap.key}: findings.md does not mention this route"
+    method, _, path = gap.key.partition(" ")
+    row = "| " + " | ".join((method, f"`{path}`", f"`{gap.selector}`"))
+    assert row in findings, (
+        f"{gap.key}: findings.md section {gap.finding} has no row\n  {row}\n"
+        "naming this route and selector"
     )
 
 
 def test_every_scoped_route_registers_its_indirect_proof_or_a_guard(
-    routes, source_index, public_keys
+    routes, source_index
 ) -> None:
     """A route below ``/companies/{company_id}``, ``/projects/{project_id}`` or
     ``/cabinets/{cabinet_id}`` either guards that scope, or says where the guard
@@ -421,31 +458,69 @@ def test_platform_admin_surface_is_authenticated_everywhere(routes) -> None:
     )
 
 
+def test_reachability_caveats_describe_a_real_situation(routes, source_index) -> None:
+    """A caveat exists because the index finds a guard that does not validate.
+
+    Two ways it can rot: the route disappears (nothing to caveat any more), or
+    the guard stops being reachable at all (the route is now an ordinary,
+    plainly unguarded gap and the caveat is noise). Both fail here.
+    """
+
+    by_key = {record.key: record for record in routes}
+    problems: list[str] = []
+    for key, explanation in registry.REACHABILITY_CAVEATS.items():
+        record = by_key.get(key)
+        if record is None:
+            problems.append(f"{key}: route no longer exists")
+            continue
+        if not explanation.strip():
+            problems.append(f"{key}: caveat has no explanation")
+            continue
+        if source_index.guard_reached(record) is None:
+            problems.append(
+                f"{key}: the index no longer finds any guard, so this is a plain gap; "
+                "drop the caveat"
+            )
+    assert problems == [], "registry.REACHABILITY_CAVEATS is stale:\n  " + "\n  ".join(problems)
+
+
+@pytest.mark.parametrize(
+    "key", registry.REACHABILITY_CAVEATS, ids=lambda key: key
+)
+def test_every_caveat_route_is_recorded_as_a_gap(key) -> None:
+    """The point of a caveat is that the route is still unprotected."""
+
+    recorded = {gap.key for gap in registry.UNVALIDATED_TENANT_SELECTORS}
+    assert key in recorded, (
+        f"{key}: has a reachability caveat but is not in "
+        "registry.UNVALIDATED_TENANT_SELECTORS, so the audit would report it as covered"
+    )
+
+
 # --------------------------------------------------------------------------- #
 # 4. the surface is covered by something, not just by this file
 # --------------------------------------------------------------------------- #
 
 
-def test_inventory_matches_the_routers_the_app_declares(app, routes) -> None:
-    """Cross-check the walk against FastAPI's own view of the app.
+def test_inventory_matches_an_independent_walk(app, routes) -> None:
+    """Cross-check the walk against a second, differently-written one.
 
-    ``app.routes`` is not usable directly (the wrappers hide children), so the
-    check uses the app's OpenAPI schema for the *documented* subset: every path
-    the schema advertises must be in the inventory with the same methods. A
-    wrapper the walker missed, or a route registered behind an opaque mount,
-    shows up as a difference here.
+    ``route_inventory`` trusts the framework's ``effective_route_contexts``;
+    ``route_inventory_independently`` rebuilds the prefixed paths from
+    ``original_router.routes`` by hand. If the two disagree, one of them missed
+    a wrapper — and a missing wrapper is exactly how an audit ends up certifying
+    a surface it never looked at. (The app's OpenAPI schema is not usable as the
+    second opinion here: building it raises a pydantic ``ForwardRef`` error for
+    a ``Response`` annotation in this environment, which is a documentation
+    defect, not an authorization one.)
     """
 
-    documented = app.openapi()
-    inventory = {(record.path, record.method.lower()) for record in routes}
-    missing = []
-    for path, operations in documented.get("paths", {}).items():
-        for method in operations:
-            if method.startswith("x-") or method == "parameters":
-                continue
-            if (path, method.lower()) not in inventory:
-                missing.append(f"{method.upper()} {path}")
-    assert missing == [], f"routes in the OpenAPI schema but not in the inventory: {missing}"
+    independent = {record.key for record in route_inventory_independently(app)}
+    inventory = {record.key for record in routes}
+    only_primary = sorted(inventory - independent)
+    only_independent = sorted(independent - inventory)
+    assert only_primary == [], f"routes only the effective-context walk found: {only_primary}"
+    assert only_independent == [], f"routes only the manual walk found: {only_independent}"
 
 
 # --------------------------------------------------------------------------- #
@@ -483,7 +558,7 @@ __all__ = [
     "test_every_public_allow_list_entry_is_still_actually_public",
     "test_every_scoped_route_registers_its_indirect_proof_or_a_guard",
     "test_inventory_covers_the_routers_the_app_mounts",
-    "test_inventory_matches_the_routers_the_app_declares",
+    "test_inventory_matches_an_independent_walk",
     "test_no_unreviewed_tenant_selector_bypasses_a_guard",
     "test_platform_admin_surface_is_authenticated_everywhere",
 ]

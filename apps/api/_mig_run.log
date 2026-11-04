@@ -1,0 +1,885 @@
+........................................................................ [  1%]
+........................................................................ [  3%]
+........................................................................ [  5%]
+........................................................................ [  6%]
+........................................................................ [  8%]
+........................................................................ [ 10%]
+........................................................................ [ 11%]
+........................................................................ [ 13%]
+.................................................................F...... [ 15%]
+.........................................sssssssssss.................... [ 17%]
+........................................................................ [ 18%]
+.ssssssss............................................................... [ 20%]
+...................................EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE [ 22%]
+EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE......................................... [ 23%]
+...........EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE...................... [ 25%]
+....................................sssssss............................. [ 27%]
+........................................................................ [ 29%]
+.....................................................................sss [ 30%]
+ssssssss................................................................ [ 32%]
+........................................................................ [ 34%]
+........................................................................ [ 35%]
+........................................................................ [ 37%]
+........................................................................ [ 39%]
+........................................................................ [ 41%]
+........................................................................ [ 42%]
+........................................................................ [ 44%]
+........................................................................ [ 46%]
+........................................................................ [ 47%]
+........................................................................ [ 49%]
+.......................................................sssssssssss...... [ 51%]
+........................................................................ [ 53%]
+........................................................................ [ 54%]
+........................................................................ [ 56%]
+........................................................................ [ 58%]
+...................................................sssssssss............ [ 59%]
+........................................................................ [ 61%]
+..............................................s......................... [ 63%]
+........................................................................ [ 64%]
+....................................ssss................................ [ 66%]
+...................................................ssssss.ssssssssssssss [ 68%]
+ssssssssssssssssss...................................................... [ 70%]
+........................................................................ [ 71%]
+........................................................................ [ 73%]
+...sssssssss............................................................ [ 75%]
+........................................................................ [ 76%]
+........xssssss........................sssssssssssssssssssssssssssssssss [ 78%]
+ssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss [ 80%]
+ssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss [ 82%]
+sssssssssssssssssssssssssssssssssssssssssss............................. [ 83%]
+........................................................................ [ 85%]
+........................................................................ [ 87%]
+........................................................................ [ 88%]
+........................................................................ [ 90%]
+........................................................................ [ 92%]
+........................................................................ [ 94%]
+...FF........FF.FF.F.......................................FFFFFFFFF.... [ 95%]
+........................................................................ [ 97%]
+........................................................................ [ 99%]
+..................................                                       [100%]
+=================================== ERRORS ====================================
+__ ERROR at setup of test_private_asset_is_invisible_to_a_same_tenant_member __
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"dbb5ca9670a64443a2ddecbe68afc2df"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+_________ ERROR at setup of test_employee_grant_opens_a_private_asset _________
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"bfe3e3b0a24d4d988e4d0a84c8b9cef8"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+__________ ERROR at setup of test_write_grant_confers_metadata_patch __________
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"192f384ad1be4a8391cda12448d7c3ab"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+_________ ERROR at setup of test_role_grant_matches_membership_roles __________
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"b488d09103f24d77a483a9faf158bed0"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+_______ ERROR at setup of test_company_grant_matches_the_owning_tenant ________
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"0dbd344042af419f8c6dd9902c354e2a"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+___ ERROR at setup of test_cabinet_grant_is_accepted_for_the_owning_tenant ____
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"9b8438fa8b5f4b90a0a7d1bfbf2ca707"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+________ ERROR at setup of test_cross_tenant_company_grant_is_rejected ________
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"138e57481c964a498396f42c23c08d02"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+________ ERROR at setup of test_cross_tenant_cabinet_grant_is_rejected ________
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"cc6e3705047f479aab37c130447cfda4"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+__ ERROR at setup of test_employee_grant_for_a_foreign_employee_is_rejected ___
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"6dd9f9437c174358af73eb53972082a1"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+_____ ERROR at setup of test_platform_grant_by_a_tenant_admin_is_rejected _____
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"a1a7ee65d924403289a9651f9da58179"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+____________ ERROR at setup of test_duplicate_entries_are_rejected ____________
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"227f71adcd2344b1ac1c1402bdd40d9e"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+_ ERROR at setup of test_unsupported_principal_kind_is_rejected_by_the_schema _
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"853e731aee7644079bd619dfa56e003c"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+______ ERROR at setup of test_unprivileged_member_cannot_rewrite_the_acl ______
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"4cb98c1a3fe142db8284c4e44ed48325"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+______ ERROR at setup of test_read_grant_holder_cannot_escalate_the_acl _______
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"aa1c7d5e73994d6499b679a919c54fde"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+______ ERROR at setup of test_platform_admin_can_rewrite_any_tenant_acl _______
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"22ae4ddf19424520a2a79c378df9be13"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+______ ERROR at setup of test_replacing_the_acl_revokes_previous_grants _______
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"5d606f438e674e2ba37a34a66da3ced8"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+_______ ERROR at setup of test_acl_payload_is_stable_for_the_web_client _______
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"56f2f0703f4945cc8432eefba26ee866"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+____ ERROR at setup of test_alias_acl_is_managed_separately_from_asset_acl ____
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"8deb99e5767243d9a071edf0834b595d"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+____________ ERROR at setup of test_cross_tenant_alias_acl_is_404 _____________
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"08f2af9aff9f46b6b98d997e8bf89d7b"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+___________ ERROR at setup of test_create_alias_normalises_the_slug ___________
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"17d1e086785648b1aa89347244d618ee"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+____ ERROR at setup of test_alias_slug_conflict_is_409_for_the_same_tenant ____
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"0c891b6979bc48e79846f7b98d178096"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+_ ERROR at setup of test_alias_slug_reuse_across_tenants_does_not_leak_existence _
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"6cb20bbc5d90403db0f91cf865a75d47"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+_______________ ERROR at setup of test_get_alias_by_id_and_slug _______________
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"fe7fc1f5bac944119ce3eee301884f2e"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+___________ ERROR at setup of test_patch_alias_metadata_and_disable ___________
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"8e05576965f04af98b87cc3a7e22f37a"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+________ ERROR at setup of test_bind_sealed_version_and_resolve_bytes _________
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"aa59e3be64b84431a5074452ebb44387"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+_ ERROR at setup of test_bind_without_a_version_uses_the_latest_sealed_version _
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"8965edbe437d44a88dc280ddba9b053f"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+__________ ERROR at setup of test_bind_unsealed_version_is_not_ready __________
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"0c5badd364294dc1bccc9b637c7df556"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+__ ERROR at setup of test_bind_asset_without_any_sealed_version_is_not_ready __
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"017c26fcb9d84f228bd4e5a92e9ae409"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+_ ERROR at setup of test_rebinding_keeps_history_and_supersedes_the_previous_binding _
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"3adf3791d9944b359046739b1d3b0c97"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+________ ERROR at setup of test_rebinding_the_same_version_is_a_replay ________
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"950ae996bb0247a8925c910693782b88"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+______ ERROR at setup of test_unbind_stops_resolution_but_keeps_history _______
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"22b5a7a2d0064ce1a3842b34230e3412"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+___________ ERROR at setup of test_cross_tenant_binding_is_rejected ___________
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"59c4c6bbc3c741e4b02619758e9a498c"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+__________ ERROR at setup of test_cross_tenant_alias_mutation_is_404 __________
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"dc1f479c03854930afce49fe8e57dfc5"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+____ ERROR at setup of test_delete_disables_the_alias_and_retains_evidence ____
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"64d7d259ff61493f99d0f7a7a285c5cd"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+__ ERROR at setup of test_disabled_alias_keeps_metadata_listing_and_history ___
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"73e226bfcffe4ae0b20ca009d02d70ee"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+________ ERROR at setup of test_binding_a_disabled_alias_is_a_conflict ________
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"14a102e455d84f3e8422566508cadefe"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+__ ERROR at setup of test_re_enabling_an_alias_restores_the_retained_binding __
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"c909898c0f244aeeb95cc1f9fb1674e6"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+_________ ERROR at setup of test_private_alias_visibility_is_refused __________
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"7d4d40b1b8fa41d7b2d855d391f0dc18"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+__ ERROR at setup of test_alias_list_selector_is_mandatory_and_tenant_scoped __
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"b0c2becee63149a599effad95343cd80"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+___________ ERROR at setup of test_asset_list_selector_is_mandatory ___________
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"ca117397b23c4c8988deb254a0d1797d"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+__________ ERROR at setup of test_cross_tenant_alias_history_is_404 ___________
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"85d7719d92604fbba920f40d384969d5"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+____ ERROR at setup of test_create_asset_is_owned_by_the_validated_tenant _____
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"23f2973fe0994afb80a58c5b64237fa2"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+___________ ERROR at setup of test_client_cannot_supply_owner_scope ___________
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"ea4e450bf16c407d83471ccb8a4795e4"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+_ ERROR at setup of test_company_tenant_cannot_create_a_platform_owned_asset __
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"bf21593832e94ad6a82c1410f020dfca"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+___ ERROR at setup of test_platform_admin_can_create_a_platform_owned_asset ___
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"ebcb8b61f24145fc9470b5fd8dcad8c5"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+______ ERROR at setup of test_read_asset_returns_latest_version_identity ______
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"b7eb7c0ceee34e728c719e9de1bf57e3"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+___ ERROR at setup of test_list_assets_is_scoped_to_readable_tenant_assets ____
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"27a124a05641413fbaca8f7cf5fc983f"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+_______ ERROR at setup of test_list_assets_for_a_foreign_company_is_404 _______
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"65bfe3b5d6de40c7b18e066bead74af5"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+______ ERROR at setup of test_list_assets_paginates_with_a_stable_cursor ______
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"e4a9b4c0d8df403ebe53df0eef72974a"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+_____________ ERROR at setup of test_malformed_cursor_is_rejected _____________
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"c3e35617b09b46ddb5da031b34a642a5"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+__________ ERROR at setup of test_patch_asset_updates_metadata_only ___________
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"3f117b1084dd43909df1aba408bb2770"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+__________ ERROR at setup of test_patch_asset_rejects_unknown_field ___________
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"f258348e7d2d4f979b157fbd40e9a5be"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+___________ ERROR at setup of test_cross_tenant_read_is_404_not_403 ___________
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"a3ba400746c04f9cb97d5803043fe42f"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+_______________ ERROR at setup of test_unknown_asset_id_is_404 ________________
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"3b242d19b4e8451092b2793927a47190"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+________________ ERROR at setup of test_missing_bearer_is_401 _________________
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"78d19e4661474e508298fd84fab02503"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+____________ ERROR at setup of test_invalid_visibility_is_rejected ____________
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"d6b74342aba148dc9893119167e84170"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+______ ERROR at setup of test_create_asset_requires_an_employee_session _______
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"8c5c3a342f8f4c7082be111d23e7f553"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+____________ ERROR at setup of test_link_asset_to_project_and_list ____________
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"555411bd57e540cbadcfbd8e8ebd4856"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+______ ERROR at setup of test_linking_the_same_target_twice_is_a_replay _______
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"62928b3a30384eb99f62a881d87ce548"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+_____ ERROR at setup of test_same_target_bound_to_another_asset_conflicts _____
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"bb478b7f10ca4009990b013c789431a3"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+__________ ERROR at setup of test_explicit_replace_repoints_the_edge __________
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"a3d63e97a2984bf9a90031ffe52a1717"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+_____ ERROR at setup of test_documents_link_kind_is_not_caller_assignable _____
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"349fb06de7fb43f7adfb43e7ffb24575"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+______ ERROR at setup of test_link_to_a_project_of_another_tenant_is_404 ______
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"3b9a920f7ae84a2285916713a6a3462a"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+___________ ERROR at setup of test_link_to_a_missing_project_is_404 ___________
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"25c244cdec064774bcb6f9bf61a1de32"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+___________ ERROR at setup of test_cross_tenant_asset_links_are_404 ___________
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"38001466ed0243ff8dd9e2a45462bac4"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+_______________ ERROR at setup of test_unlink_removes_the_edge ________________
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"d0fd0397e7c84d9aaeb206c6ff58d7a7"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+__ ERROR at setup of test_unlink_of_a_link_belonging_to_another_asset_is_404 __
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"6b41e694b75d473cba0e454d173754df"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+_ ERROR at setup of test_platform_owned_asset_may_link_into_any_tenant_the_caller_owns _
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"a4b085d40f514ddab81e391b3c455be1"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+_______ ERROR at setup of test_archive_fails_closed_and_keeps_the_asset _______
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"544ea4794eee467babbb63e7c5fd7f74"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+_ ERROR at setup of test_dependents_report_is_admin_scoped_and_reports_evidence _
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"22729f38abdb44979f51c3f7b5fb9d71"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+_____ ERROR at setup of test_dependents_of_a_foreign_tenant_asset_is_404 ______
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"0c34e5595f944f599da785da62e6d8ca"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+____ ERROR at setup of test_dependents_report_counts_alias_binding_history ____
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"1f73172be85449c0b6aa4e4c58837991"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+______________ ERROR at setup of test_tenant_admin_cannot_purge _______________
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"154dac6ee978473abb1b4ac9d4792209"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+_ ERROR at setup of test_platform_admin_purge_refuses_assets_with_binding_history _
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"e4cc2fd1cb2e4f59b1cb7d0188fbed07"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+_______ ERROR at setup of test_purge_of_a_linked_asset_requires_cascade _______
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"4619662b6d3744d18851724353f1675d"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+________ ERROR at setup of test_platform_admin_can_purge_a_clean_asset ________
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"1e8a904bf3064242bc4b4fa77729b685"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+______ ERROR at setup of test_asset_create_replays_the_same_key_and_body ______
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"fbae50cda3e0455a8488c358dd5439b1"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+____ ERROR at setup of test_asset_create_with_a_changed_body_is_a_conflict ____
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"a55f7dacafce41149a71ff2e26e96de9"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+___ ERROR at setup of test_asset_create_with_a_different_key_is_a_new_asset ___
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"6692add367a94e36a4f2ac975ac50479"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+___ ERROR at setup of test_asset_create_without_a_key_is_never_deduplicated ___
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"052aa14f33d84d5dae20a62e085cbf2a"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+________ ERROR at setup of test_over_long_idempotency_key_is_rejected _________
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"f926238f6a8446609ae2b5c3ce74368a"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+_ ERROR at setup of test_asset_replay_reports_state_written_after_the_first_call _
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"955472708c98441192b3de3872e6af19"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+_ ERROR at setup of test_alias_create_replays_the_same_key_and_rejects_a_changed_body _
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"6abd17db3a73415aa6b4a33d4a6e3316"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+_ ERROR at setup of test_alias_slug_conflict_is_independent_of_the_idempotency_key _
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"9177908796e94aaea556ff4645ea140a"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+___ ERROR at setup of test_idempotency_key_is_scoped_to_the_creating_actor ____
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"a0257bd7b9954dabb5f91ce25d3782d6"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+_ ERROR at setup of test_abort_removes_a_staged_version_and_frees_the_number __
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"cc467aedd4f747d9a8ebff9b98992f3c"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+_____ ERROR at setup of test_abort_keeps_sealed_versions_and_refuses_them _____
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"9ffd3ba6d5d14ce8ad099c9dd273b42d"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+__ ERROR at setup of test_abort_after_a_failed_upload_leaves_nothing_behind ___
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"b9dc6a7988b044938daeb1a82629f706"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+___ ERROR at setup of test_abort_of_a_version_owned_by_another_asset_is_404 ___
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"ce4beefc8826426080d4034fba33bcd6"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+______________ ERROR at setup of test_cross_tenant_abort_is_404 _______________
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"f8cd098a56704697b57388608b186b5e"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+_ ERROR at setup of test_read_only_member_cannot_abort_a_private_asset_upload _
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"2b07aecd9a9f4b469a04ad7d7c654d5a"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+_______ ERROR at setup of test_begin_version_opens_an_unsealed_version ________
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"643c89c9b6274d9abbade96bea9fe748"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+____ ERROR at setup of test_version_numbers_increase_and_are_never_reused _____
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"2c2e206686234c16b36a2b1a5394167a"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+_______________ ERROR at setup of test_upload_seals_the_digest ________________
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"fdc8b3e36daf4aa4a6f2694eb9db0ccf"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+___ ERROR at setup of test_second_upload_into_a_sealed_version_is_rejected ____
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"4d818bc111cb402db02cefa650786088"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+_ ERROR at setup of test_digest_declared_at_begin_must_match_the_uploaded_bytes _
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"d22b64babc7d427491a5a99f8d644299"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+_ ERROR at setup of test_expected_digest_header_must_match_the_uploaded_bytes _
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"5781f56fdb02464e998887cd0c8eab13"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+___ ERROR at setup of test_malformed_expected_digest_is_a_validation_error ____
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"8765a7b1bcf9414a8839566456d9545d"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+__________ ERROR at setup of test_finalize_seals_a_presigned_upload ___________
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"c651ac0c6c72481f974868bd2371be6c"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+_________ ERROR at setup of test_finalize_without_bytes_is_not_ready __________
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"8b1399d3a72d409fafb1c1af7cb206f7"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+_____ ERROR at setup of test_finalize_detects_bytes_changed_after_upload ______
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"423218c976424488a3c21da176011db4"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+_______ ERROR at setup of test_version_history_is_ordered_and_paginated _______
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"22694778f5284dd38cb97ba4677b65e8"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+___________ ERROR at setup of test_version_of_another_asset_is_404 ____________
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"7354aa0dbff549ae9e7f14188506dc0d"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+__________ ERROR at setup of test_cross_tenant_version_access_is_404 __________
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"38c3697c527248e4a1691847af54482c"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+__________ ERROR at setup of test_download_requires_a_sealed_version __________
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"408877d446904170989bdabc7c2f2e28"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+_____ ERROR at setup of test_download_streams_exact_version_with_headers ______
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"48b9e092053a4326825432ebcd3eaaa2"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+____ ERROR at setup of test_download_defaults_to_the_latest_sealed_version ____
+E   AssertionError: {"type":"https://prodavan.dev/errors/CONFLICT","title":"Conflict","status":409,"code":"CONFLICT","detail":"company name already exists","message":"company name already exists","trace_id":"7a0cd115e7fb4a289eac1c65e88bbcb8"}
+---------------------------- Captured stderr setup ----------------------------
+WARNING:prodavan.core.infra.k8s_manager:k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+----------------------------- Captured log setup ------------------------------
+WARNING  prodavan.core.infra.k8s_manager:k8s_manager.py:66 k8s: in-cluster credentials unavailable (dev kubeconfig not wired)
+================================== FAILURES ===================================
+C:\Users\qwerty\git\agentscale\wt-migration\apps\api\src\prodavan\infrastructure\files\manager.py:40: AttributeError: 'CollapsingByteStore' object has no attribute '_primary'
+C:\Users\qwerty\git\agentscale\wt-migration\apps\api\tests\migration\web_contract_parity\test_content_payload_parity.py:53: AssertionError: assert {'id', 'owner_company_id'} <= {'id', 'owner... 'visibility'}
+C:\Users\qwerty\git\agentscale\wt-migration\apps\api\tests\migration\web_contract_parity\test_content_payload_parity.py:67: AssertionError: content-ops rejects principal kinds ['cabinet', 'project', 'role'] that the ACL model emits (accepted: ['company', 'employee', 'platform'])
+C:\Users\qwerty\git\agentscale\wt-migration\apps\api\tests\migration\web_contract_parity\test_dynamic_payload_parity.py:65: AssertionError: normalizeDefinitionSummary reads 'kind' as ['kind'], but definition emits only ['app_id', 'created_at', 'current_version_id', 'description', 'display_name', 'id', 'lifecycle', 'scope', 'tenant_id', 'type', 'updated_at']
+C:\Users\qwerty\git\agentscale\wt-migration\apps\api\tests\migration\web_contract_parity\test_dynamic_payload_parity.py:80: AssertionError: DynamicModuleDefinition requires ['createdBy', 'ownerCabinetId', 'ownerCompanyId', 'routes'] but the normalizer never reads them
+C:\Users\qwerty\git\agentscale\wt-migration\apps\api\tests\migration\web_contract_parity\test_dynamic_payload_parity.py:80: AssertionError: DynamicModuleGrant requires ['capabilityId', 'decision', 'definitionId', 'id', 'scope'] but the normalizer never reads them
+C:\Users\qwerty\git\agentscale\wt-migration\apps\api\tests\migration\web_contract_parity\test_dynamic_payload_parity.py:80: AssertionError: DynamicModuleInstance requires ['scope'] but the normalizer never reads them
+C:\Users\qwerty\git\agentscale\wt-migration\apps\api\tests\migration\web_contract_parity\test_dynamic_payload_parity.py:116: AssertionError: dynamic.ts accepts status ['approved', 'disabled', 'validated'] that the dynamic-apps serializer never emits (served: ['archived', 'draft', 'published', 'revoked'])
+C:\Users\qwerty\git\agentscale\wt-migration\apps\api\tests\migration\web_contract_parity\web_contract.py:31: AssertionError: web contract source is missing: C:\Users\qwerty\git\agentscale\wt-migration\apps\web\src\features\resources\wire.ts
+C:\Users\qwerty\git\agentscale\wt-migration\apps\api\tests\migration\web_contract_parity\web_contract.py:31: AssertionError: web contract source is missing: C:\Users\qwerty\git\agentscale\wt-migration\apps\web\src\features\resources\wire.ts
+C:\Users\qwerty\git\agentscale\wt-migration\apps\api\tests\migration\web_contract_parity\web_contract.py:31: AssertionError: web contract source is missing: C:\Users\qwerty\git\agentscale\wt-migration\apps\web\src\features\resources\wire.ts
+C:\Users\qwerty\git\agentscale\wt-migration\apps\api\tests\migration\web_contract_parity\web_contract.py:31: AssertionError: web contract source is missing: C:\Users\qwerty\git\agentscale\wt-migration\apps\web\src\features\resources\wire.ts
+C:\Users\qwerty\git\agentscale\wt-migration\apps\api\tests\migration\web_contract_parity\web_contract.py:31: AssertionError: web contract source is missing: C:\Users\qwerty\git\agentscale\wt-migration\apps\web\src\features\resources\wire.ts
+C:\Users\qwerty\git\agentscale\wt-migration\apps\api\tests\migration\web_contract_parity\web_contract.py:31: AssertionError: web contract source is missing: C:\Users\qwerty\git\agentscale\wt-migration\apps\web\src\features\resources\wire.ts
+C:\Users\qwerty\git\agentscale\wt-migration\apps\api\tests\migration\web_contract_parity\test_resource_payload_parity.py:96: AssertionError: ResourceLifecycle is ['blocked', 'draft', 'published', 'retired']; the API emits ['active', 'archived', 'draft', 'quarantined']
+C:\Users\qwerty\git\agentscale\wt-migration\apps\api\tests\migration\web_contract_parity\test_resource_payload_parity.py:104: AssertionError: MaterializationStatus is ['applied', 'applying', 'blocked', 'failed', 'planned', 'stale']; the plan API emits ['blocked', 'ready']
+C:\Users\qwerty\git\agentscale\wt-migration\apps\api\tests\migration\web_contract_parity\test_resource_payload_parity.py:112: AssertionError: plan entries can be ['planned'] but the screen accepts ['skipped']
+============================== warnings summary ===============================
+..\..\..\..\..\AppData\Local\Programs\Python\Python313\Lib\site-packages\starlette\testclient.py:53
+  C:\Users\qwerty\AppData\Local\Programs\Python\Python313\Lib\site-packages\starlette\testclient.py:53: DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead.
+    _PortalFactoryType = Callable[[], AbstractContextManager[anyio.abc.BlockingPortal]]
+
+tests/migration/content_api/test_acl_and_tenant_isolation.py: 19 warnings
+tests/migration/content_api/test_alias_bindings.py: 15 warnings
+tests/migration/content_api/test_alias_state_transitions.py: 7 warnings
+tests/migration/content_api/test_asset_lifecycle.py: 16 warnings
+tests/migration/content_api/test_asset_links.py: 11 warnings
+tests/migration/content_api/test_delete_evidence.py: 8 warnings
+tests/migration/content_api/test_idempotency.py: 9 warnings
+tests/migration/content_api/test_version_abort.py: 6 warnings
+tests/migration/content_api/test_version_immutability.py: 16 warnings
+  C:\Users\qwerty\AppData\Roaming\Python\Python313\site-packages\jwt\api_jwt.py:149: InsecureKeyLengthWarning: The HMAC key is 30 bytes long, which is below the minimum recommended length of 32 bytes for SHA256. See RFC 7518 Section 3.2.
+    return self._jws.encode(
+
+tests/migration/content_api/test_acl_and_tenant_isolation.py: 19 warnings
+tests/migration/content_api/test_alias_bindings.py: 15 warnings
+tests/migration/content_api/test_alias_state_transitions.py: 7 warnings
+tests/migration/content_api/test_asset_lifecycle.py: 16 warnings
+tests/migration/content_api/test_asset_links.py: 11 warnings
+tests/migration/content_api/test_delete_evidence.py: 8 warnings
+tests/migration/content_api/test_idempotency.py: 9 warnings
+tests/migration/content_api/test_version_abort.py: 6 warnings
+tests/migration/content_api/test_version_immutability.py: 16 warnings
+  C:\Users\qwerty\AppData\Roaming\Python\Python313\site-packages\jwt\api_jwt.py:370: InsecureKeyLengthWarning: The HMAC key is 30 bytes long, which is below the minimum recommended length of 32 bytes for SHA256. See RFC 7518 Section 3.2.
+    decoded = self.decode_complete(
+
+tests/migration/m06_cutover/test_models_schema.py: 4 warnings
+tests/migration/m06_cutover/test_ports_repository.py: 22 warnings
+  C:\Users\qwerty\AppData\Local\Programs\Python\Python313\Lib\site-packages\aiosqlite\core.py:105: DeprecationWarning: The default datetime adapter is deprecated as of Python 3.12; see the sqlite3 documentation for suggested replacement recipes
+    result = function()
+
+tests/migration/postgres_integration/test_alembic_cycle.py::test_wave_revisions_above_the_downgrade_target_form_a_linear_chain
+  C:\Users\qwerty\AppData\Local\Programs\Python\Python313\Lib\site-packages\alembic\config.py:592: DeprecationWarning: No path_separator found in configuration; falling back to legacy splitting on spaces, commas, and colons for prepend_sys_path.  Consider adding path_separator=os to Alembic config.
+    util.warn_deprecated(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/migration/artifact_port/test_absent_artifact.py::test_a_lazily_resolved_store_decides_the_absence_contract_not_the_field
+FAILED tests/migration/web_contract_parity/test_content_payload_parity.py::test_client_required_fields_are_on_the_model
+FAILED tests/migration/web_contract_parity/test_content_payload_parity.py::test_acl_principal_kinds_accepted_by_the_client_cover_the_server
+FAILED tests/migration/web_contract_parity/test_dynamic_payload_parity.py::test_client_reads_only_fields_the_serializer_emits
+FAILED tests/migration/web_contract_parity/test_dynamic_payload_parity.py::test_required_client_fields_are_served[DynamicModuleDefinition]
+FAILED tests/migration/web_contract_parity/test_dynamic_payload_parity.py::test_required_client_fields_are_served[DynamicModuleGrant]
+FAILED tests/migration/web_contract_parity/test_dynamic_payload_parity.py::test_required_client_fields_are_served[DynamicModuleInstance]
+FAILED tests/migration/web_contract_parity/test_dynamic_payload_parity.py::test_definition_status_values_are_a_served_subset
+FAILED tests/migration/web_contract_parity/test_resource_payload_parity.py::test_wire_normalizer_reads_only_served_fields[normalizeMaterializationPlan]
+FAILED tests/migration/web_contract_parity/test_resource_payload_parity.py::test_wire_normalizer_reads_only_served_fields[normalizeResourceRecord]
+FAILED tests/migration/web_contract_parity/test_resource_payload_parity.py::test_wire_normalizer_reads_only_served_fields[normalizeResourceVersion]
+FAILED tests/migration/web_contract_parity/test_resource_payload_parity.py::test_screen_dto_fields_are_produced_by_the_normalizer[ResourceRecord]
+FAILED tests/migration/web_contract_parity/test_resource_payload_parity.py::test_screen_dto_fields_are_produced_by_the_normalizer[ResourceVersion]
+FAILED tests/migration/web_contract_parity/test_resource_payload_parity.py::test_screen_dto_fields_are_produced_by_the_normalizer[MaterializationPlan]
+FAILED tests/migration/web_contract_parity/test_resource_payload_parity.py::test_resource_lifecycle_vocabulary_is_served_exactly
+FAILED tests/migration/web_contract_parity/test_resource_payload_parity.py::test_plan_status_vocabulary_is_served_exactly
+FAILED tests/migration/web_contract_parity/test_resource_payload_parity.py::test_entry_status_vocabulary_is_served
+ERROR tests/migration/content_api/test_acl_and_tenant_isolation.py::test_private_asset_is_invisible_to_a_same_tenant_member
+ERROR tests/migration/content_api/test_acl_and_tenant_isolation.py::test_employee_grant_opens_a_private_asset
+ERROR tests/migration/content_api/test_acl_and_tenant_isolation.py::test_write_grant_confers_metadata_patch
+ERROR tests/migration/content_api/test_acl_and_tenant_isolation.py::test_role_grant_matches_membership_roles
+ERROR tests/migration/content_api/test_acl_and_tenant_isolation.py::test_company_grant_matches_the_owning_tenant
+ERROR tests/migration/content_api/test_acl_and_tenant_isolation.py::test_cabinet_grant_is_accepted_for_the_owning_tenant
+ERROR tests/migration/content_api/test_acl_and_tenant_isolation.py::test_cross_tenant_company_grant_is_rejected
+ERROR tests/migration/content_api/test_acl_and_tenant_isolation.py::test_cross_tenant_cabinet_grant_is_rejected
+ERROR tests/migration/content_api/test_acl_and_tenant_isolation.py::test_employee_grant_for_a_foreign_employee_is_rejected
+ERROR tests/migration/content_api/test_acl_and_tenant_isolation.py::test_platform_grant_by_a_tenant_admin_is_rejected
+ERROR tests/migration/content_api/test_acl_and_tenant_isolation.py::test_duplicate_entries_are_rejected
+ERROR tests/migration/content_api/test_acl_and_tenant_isolation.py::test_unsupported_principal_kind_is_rejected_by_the_schema
+ERROR tests/migration/content_api/test_acl_and_tenant_isolation.py::test_unprivileged_member_cannot_rewrite_the_acl
+ERROR tests/migration/content_api/test_acl_and_tenant_isolation.py::test_read_grant_holder_cannot_escalate_the_acl
+ERROR tests/migration/content_api/test_acl_and_tenant_isolation.py::test_platform_admin_can_rewrite_any_tenant_acl
+ERROR tests/migration/content_api/test_acl_and_tenant_isolation.py::test_replacing_the_acl_revokes_previous_grants
+ERROR tests/migration/content_api/test_acl_and_tenant_isolation.py::test_acl_payload_is_stable_for_the_web_client
+ERROR tests/migration/content_api/test_acl_and_tenant_isolation.py::test_alias_acl_is_managed_separately_from_asset_acl
+ERROR tests/migration/content_api/test_acl_and_tenant_isolation.py::test_cross_tenant_alias_acl_is_404
+ERROR tests/migration/content_api/test_alias_bindings.py::test_create_alias_normalises_the_slug
+ERROR tests/migration/content_api/test_alias_bindings.py::test_alias_slug_conflict_is_409_for_the_same_tenant
+ERROR tests/migration/content_api/test_alias_bindings.py::test_alias_slug_reuse_across_tenants_does_not_leak_existence
+ERROR tests/migration/content_api/test_alias_bindings.py::test_get_alias_by_id_and_slug
+ERROR tests/migration/content_api/test_alias_bindings.py::test_patch_alias_metadata_and_disable
+ERROR tests/migration/content_api/test_alias_bindings.py::test_bind_sealed_version_and_resolve_bytes
+ERROR tests/migration/content_api/test_alias_bindings.py::test_bind_without_a_version_uses_the_latest_sealed_version
+ERROR tests/migration/content_api/test_alias_bindings.py::test_bind_unsealed_version_is_not_ready
+ERROR tests/migration/content_api/test_alias_bindings.py::test_bind_asset_without_any_sealed_version_is_not_ready
+ERROR tests/migration/content_api/test_alias_bindings.py::test_rebinding_keeps_history_and_supersedes_the_previous_binding
+ERROR tests/migration/content_api/test_alias_bindings.py::test_rebinding_the_same_version_is_a_replay
+ERROR tests/migration/content_api/test_alias_bindings.py::test_unbind_stops_resolution_but_keeps_history
+ERROR tests/migration/content_api/test_alias_bindings.py::test_cross_tenant_binding_is_rejected
+ERROR tests/migration/content_api/test_alias_bindings.py::test_cross_tenant_alias_mutation_is_404
+ERROR tests/migration/content_api/test_alias_bindings.py::test_delete_disables_the_alias_and_retains_evidence
+ERROR tests/migration/content_api/test_alias_state_transitions.py::test_disabled_alias_keeps_metadata_listing_and_history
+ERROR tests/migration/content_api/test_alias_state_transitions.py::test_binding_a_disabled_alias_is_a_conflict
+ERROR tests/migration/content_api/test_alias_state_transitions.py::test_re_enabling_an_alias_restores_the_retained_binding
+ERROR tests/migration/content_api/test_alias_state_transitions.py::test_private_alias_visibility_is_refused
+ERROR tests/migration/content_api/test_alias_state_transitions.py::test_alias_list_selector_is_mandatory_and_tenant_scoped
+ERROR tests/migration/content_api/test_alias_state_transitions.py::test_asset_list_selector_is_mandatory
+ERROR tests/migration/content_api/test_alias_state_transitions.py::test_cross_tenant_alias_history_is_404
+ERROR tests/migration/content_api/test_asset_lifecycle.py::test_create_asset_is_owned_by_the_validated_tenant
+ERROR tests/migration/content_api/test_asset_lifecycle.py::test_client_cannot_supply_owner_scope
+ERROR tests/migration/content_api/test_asset_lifecycle.py::test_company_tenant_cannot_create_a_platform_owned_asset
+ERROR tests/migration/content_api/test_asset_lifecycle.py::test_platform_admin_can_create_a_platform_owned_asset
+ERROR tests/migration/content_api/test_asset_lifecycle.py::test_read_asset_returns_latest_version_identity
+ERROR tests/migration/content_api/test_asset_lifecycle.py::test_list_assets_is_scoped_to_readable_tenant_assets
+ERROR tests/migration/content_api/test_asset_lifecycle.py::test_list_assets_for_a_foreign_company_is_404
+ERROR tests/migration/content_api/test_asset_lifecycle.py::test_list_assets_paginates_with_a_stable_cursor
+ERROR tests/migration/content_api/test_asset_lifecycle.py::test_malformed_cursor_is_rejected
+ERROR tests/migration/content_api/test_asset_lifecycle.py::test_patch_asset_updates_metadata_only
+ERROR tests/migration/content_api/test_asset_lifecycle.py::test_patch_asset_rejects_unknown_field
+ERROR tests/migration/content_api/test_asset_lifecycle.py::test_cross_tenant_read_is_404_not_403
+ERROR tests/migration/content_api/test_asset_lifecycle.py::test_unknown_asset_id_is_404
+ERROR tests/migration/content_api/test_asset_lifecycle.py::test_missing_bearer_is_401
+ERROR tests/migration/content_api/test_asset_lifecycle.py::test_invalid_visibility_is_rejected
+ERROR tests/migration/content_api/test_asset_lifecycle.py::test_create_asset_requires_an_employee_session
+ERROR tests/migration/content_api/test_asset_links.py::test_link_asset_to_project_and_list
+ERROR tests/migration/content_api/test_asset_links.py::test_linking_the_same_target_twice_is_a_replay
+ERROR tests/migration/content_api/test_asset_links.py::test_same_target_bound_to_another_asset_conflicts
+ERROR tests/migration/content_api/test_asset_links.py::test_explicit_replace_repoints_the_edge
+ERROR tests/migration/content_api/test_asset_links.py::test_documents_link_kind_is_not_caller_assignable
+ERROR tests/migration/content_api/test_asset_links.py::test_link_to_a_project_of_another_tenant_is_404
+ERROR tests/migration/content_api/test_asset_links.py::test_link_to_a_missing_project_is_404
+ERROR tests/migration/content_api/test_asset_links.py::test_cross_tenant_asset_links_are_404
+ERROR tests/migration/content_api/test_asset_links.py::test_unlink_removes_the_edge
+ERROR tests/migration/content_api/test_asset_links.py::test_unlink_of_a_link_belonging_to_another_asset_is_404
+ERROR tests/migration/content_api/test_asset_links.py::test_platform_owned_asset_may_link_into_any_tenant_the_caller_owns
+ERROR tests/migration/content_api/test_delete_evidence.py::test_archive_fails_closed_and_keeps_the_asset
+ERROR tests/migration/content_api/test_delete_evidence.py::test_dependents_report_is_admin_scoped_and_reports_evidence
+ERROR tests/migration/content_api/test_delete_evidence.py::test_dependents_of_a_foreign_tenant_asset_is_404
+ERROR tests/migration/content_api/test_delete_evidence.py::test_dependents_report_counts_alias_binding_history
+ERROR tests/migration/content_api/test_delete_evidence.py::test_tenant_admin_cannot_purge
+ERROR tests/migration/content_api/test_delete_evidence.py::test_platform_admin_purge_refuses_assets_with_binding_history
+ERROR tests/migration/content_api/test_delete_evidence.py::test_purge_of_a_linked_asset_requires_cascade
+ERROR tests/migration/content_api/test_delete_evidence.py::test_platform_admin_can_purge_a_clean_asset
+ERROR tests/migration/content_api/test_idempotency.py::test_asset_create_replays_the_same_key_and_body
+ERROR tests/migration/content_api/test_idempotency.py::test_asset_create_with_a_changed_body_is_a_conflict
+ERROR tests/migration/content_api/test_idempotency.py::test_asset_create_with_a_different_key_is_a_new_asset
+ERROR tests/migration/content_api/test_idempotency.py::test_asset_create_without_a_key_is_never_deduplicated
+ERROR tests/migration/content_api/test_idempotency.py::test_over_long_idempotency_key_is_rejected
+ERROR tests/migration/content_api/test_idempotency.py::test_asset_replay_reports_state_written_after_the_first_call
+ERROR tests/migration/content_api/test_idempotency.py::test_alias_create_replays_the_same_key_and_rejects_a_changed_body
+ERROR tests/migration/content_api/test_idempotency.py::test_alias_slug_conflict_is_independent_of_the_idempotency_key
+ERROR tests/migration/content_api/test_idempotency.py::test_idempotency_key_is_scoped_to_the_creating_actor
+ERROR tests/migration/content_api/test_version_abort.py::test_abort_removes_a_staged_version_and_frees_the_number
+ERROR tests/migration/content_api/test_version_abort.py::test_abort_keeps_sealed_versions_and_refuses_them
+ERROR tests/migration/content_api/test_version_abort.py::test_abort_after_a_failed_upload_leaves_nothing_behind
+ERROR tests/migration/content_api/test_version_abort.py::test_abort_of_a_version_owned_by_another_asset_is_404
+ERROR tests/migration/content_api/test_version_abort.py::test_cross_tenant_abort_is_404
+ERROR tests/migration/content_api/test_version_abort.py::test_read_only_member_cannot_abort_a_private_asset_upload
+ERROR tests/migration/content_api/test_version_immutability.py::test_begin_version_opens_an_unsealed_version
+ERROR tests/migration/content_api/test_version_immutability.py::test_version_numbers_increase_and_are_never_reused
+ERROR tests/migration/content_api/test_version_immutability.py::test_upload_seals_the_digest
+ERROR tests/migration/content_api/test_version_immutability.py::test_second_upload_into_a_sealed_version_is_rejected
+ERROR tests/migration/content_api/test_version_immutability.py::test_digest_declared_at_begin_must_match_the_uploaded_bytes
+ERROR tests/migration/content_api/test_version_immutability.py::test_expected_digest_header_must_match_the_uploaded_bytes
+ERROR tests/migration/content_api/test_version_immutability.py::test_malformed_expected_digest_is_a_validation_error
+ERROR tests/migration/content_api/test_version_immutability.py::test_finalize_seals_a_presigned_upload
+ERROR tests/migration/content_api/test_version_immutability.py::test_finalize_without_bytes_is_not_ready
+ERROR tests/migration/content_api/test_version_immutability.py::test_finalize_detects_bytes_changed_after_upload
+ERROR tests/migration/content_api/test_version_immutability.py::test_version_history_is_ordered_and_paginated
+ERROR tests/migration/content_api/test_version_immutability.py::test_version_of_another_asset_is_404
+ERROR tests/migration/content_api/test_version_immutability.py::test_cross_tenant_version_access_is_404
+ERROR tests/migration/content_api/test_version_immutability.py::test_download_requires_a_sealed_version
+ERROR tests/migration/content_api/test_version_immutability.py::test_download_streams_exact_version_with_headers
+ERROR tests/migration/content_api/test_version_immutability.py::test_download_defaults_to_the_latest_sealed_version
+17 failed, 3750 passed, 335 skipped, 1 xfailed, 242 warnings, 107 errors in 45.03s

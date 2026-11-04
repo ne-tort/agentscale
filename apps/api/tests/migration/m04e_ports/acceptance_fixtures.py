@@ -14,6 +14,7 @@ from __future__ import annotations
 import hashlib
 import re
 from collections.abc import Mapping
+from types import SimpleNamespace
 from typing import Any
 
 from prodavan.application.migration.m04e_definition_version.backfill import (
@@ -518,6 +519,69 @@ def session(
     return fake, FakeSessionFactory(fake)
 
 
+class _DialectBind:
+    """The ``session.get_bind()`` surface the ledger store reads a dialect from."""
+
+    def __init__(self, name: str) -> None:
+        self.dialect = SimpleNamespace(name=name)
+
+
+def dialect_session(
+    dialect: str = "postgresql", data: Mapping[str, list[dict[str, Any]]] | None = None,
+    **kwargs: Any,
+) -> tuple[FakeSession, FakeSessionFactory]:
+    """A fake session that also answers ``get_bind().dialect.name``.
+
+    The ledger store proves its dialect before touching a row: on PostgreSQL it must
+    bind the transaction-local tenant context (which the fake records as statements),
+    and on any other dialect it must refuse unless a mirror is explicitly allowed.
+    Without this surface the fake could express neither verdict, and the store would
+    fail with an ``AttributeError`` instead of a named refusal — a test that passes
+    because the fixture is incomplete rather than because the port is right.
+
+    The ledger tables are *not* routed here: this fake answers dialect/context probes
+    and nothing else. Row-level ledger behaviour belongs to the SQLite mirror in
+    ``test_m04e_evidence_store.py``, because a table-map fake would let a broken
+    predicate pass — the store's own exact-key reads have to be evaluated by a real
+    database, not by a dictionary lookup that happens to match.
+    """
+
+    fake = FakeSession(data, **kwargs)
+    fake.get_bind = lambda: _DialectBind(dialect)  # type: ignore[attr-defined]
+
+    async def _execute(statement: Any, params: Mapping[str, Any] | None = None) -> Any:
+        sql = str(statement)
+        bound = dict(params or {})
+        fake.statements.append((sql, bound))
+        if "set_config(" in sql:
+            fake.applied = bound
+            return Result()
+        if "current_setting('app.tenant_id', true)" in sql:
+            readback = dict(fake.readback)
+            if readback["tenant_id"] is None and fake.applied is not None:
+                readback["tenant_id"] = fake.applied.get("tenant_id")
+            return Result((readback,))
+        raise AssertionError(
+            "the dialect-only fake answers context probes only; ledger behaviour is "
+            f"exercised against the SQLite mirror, not here: {sql}"
+        )
+
+    fake.execute = _execute  # type: ignore[method-assign]
+    return fake, FakeSessionFactory(fake)
+
+
+class _NeverOpenedFactory:
+    """A session factory that fails the test if anything opens a session.
+
+    Used by the construction-only assertions: building a store is pure wiring, so a
+    constructor that connected would be a defect this test sees instead of a latent one
+    waiting for production.
+    """
+
+    def __call__(self) -> Any:  # pragma: no cover - only runs on a regression
+        raise AssertionError("constructing an adapter must not open a session")
+
+
 def expected_source_digest(candidate: EvidenceCandidate) -> str:
     """Recompute the source digest independently of the production helper."""
 
@@ -563,6 +627,7 @@ __all__ = [
     "TRANSACTION_ID",
     "cabinet_anchor_row",
     "cabinet_grant_row",
+    "dialect_session",
     "cabinet_row",
     "company_row",
     "context",

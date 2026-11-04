@@ -132,8 +132,16 @@ describe("Content operations acceptance contract", () => {
     const malformedListService = createContentOpsService({ fetcher: vi.fn(async () => jsonResponse({ items: "not-an-array" })) });
     await expect(malformedListService.listAssets("company-1")).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
 
-    const malformedAssetService = createContentOpsService({ fetcher: vi.fn(async () => jsonResponse({ items: [{ id: "missing-company" }] })) });
-    await expect(malformedAssetService.listAssets("company-1")).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
+    // A row with no readable `owner_company_id` is dropped, not surfaced: it cannot be
+    // proven to belong to the requested company, and the panel renders only attributed
+    // rows. Dropping is safe here precisely because *no* company is claimed — the row
+    // is never rendered as somebody else's asset. What must never pass silently is a
+    // row that is attributed to the requested company but is otherwise malformed.
+    const unattributableAssetService = createContentOpsService({ fetcher: vi.fn(async () => jsonResponse({ items: [{ id: "missing-company" }] })) });
+    await expect(unattributableAssetService.listAssets("company-1")).resolves.toEqual([]);
+
+    const unattributedIdService = createContentOpsService({ fetcher: vi.fn(async () => jsonResponse({ items: [{ ...asset, id: 42 }] })) });
+    await expect(unattributedIdService.listAssets("company-1")).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
   });
 
   it("reads and replaces the complete asset ACL using the confirmed entries envelope", async () => {

@@ -11,19 +11,38 @@ export function resourceKindGlyph(kind: ResourceKind): string {
   return kind === "prompt" ? "Aa" : kind === "file" ? "⌁" : "↗";
 }
 
+const LIFECYCLE_LABELS: Readonly<Record<ResourceRecord["lifecycle"], string>> = {
+  draft: "Draft",
+  active: "Active",
+  archived: "Archived",
+  quarantined: "Quarantined",
+};
+
 export function resourceLifecycleLabel(status: ResourceRecord["lifecycle"]): string {
-  return status === "published" ? "Published" : status === "draft" ? "Draft" : status === "retired" ? "Retired" : "Blocked";
+  return LIFECYCLE_LABELS[status];
 }
 
+/** `active` serves traffic, `draft` is being edited, the other two are non-serving. */
+export function resourceLifecycleTone(status: ResourceRecord["lifecycle"]): "positive" | "warning" | "danger" | "neutral" {
+  switch (status) {
+    case "active": return "positive";
+    case "draft": return "warning";
+    case "quarantined": return "danger";
+    case "archived": return "neutral";
+  }
+}
+
+const PLAN_STATUS_LABELS: Readonly<Record<MaterializationPlan["status"], string>> = {
+  ready: "Plan ready",
+  blocked: "Blocked",
+};
+
 export function materializationStatusLabel(status: MaterializationPlan["status"]): string {
-  return status === "applied" ? "Applied" : status === "applying" ? "Syncing" : status === "planned" ? "Plan ready" : status === "stale" ? "Stale" : status === "failed" ? "Failed" : "Blocked";
+  return PLAN_STATUS_LABELS[status];
 }
 
 export function materializationStatusTone(status: MaterializationPlan["status"]): "positive" | "warning" | "danger" | "neutral" {
-  if (status === "applied") return "positive";
-  if (status === "failed" || status === "blocked") return "danger";
-  if (status === "stale" || status === "applying") return "warning";
-  return "neutral";
+  return status === "ready" ? "positive" : status === "blocked" ? "danger" : "neutral";
 }
 
 export function selectVisibleResources(resources: readonly ResourceRecord[], search: string, kind: ResourceKindFilter): ResourceRecord[] {
@@ -61,7 +80,7 @@ export function canPlanMaterialization(capabilities: ResourceServiceCapabilities
 }
 
 export function canSyncMaterialization(capabilities: ResourceServiceCapabilities, plan?: MaterializationPlan): boolean {
-  return capabilities.syncMaterialization && Boolean(plan) && (plan?.status === "planned" || plan?.status === "stale");
+  return capabilities.syncMaterialization && Boolean(plan) && plan?.status === "ready";
 }
 
 export function formatGeneration(desired?: number, applied?: number): string {

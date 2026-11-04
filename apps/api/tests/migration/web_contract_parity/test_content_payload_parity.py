@@ -50,7 +50,10 @@ def test_client_required_fields_are_on_the_model() -> None:
     """Fields the adapter demands (``safeAsset``/``safeVersion`` throw without them)."""
     _, asset_required = content_fields()["asset"]
     _, version_required = content_fields()["version"]
-    assert {"id", "owner_company_id"} <= asset_required
+    # ``owner_company_id`` is nullable in the response model (a platform-owned asset has
+    # none), so it must stay optional on the client too.
+    assert "id" in asset_required
+    assert "owner_company_id" not in asset_required
     assert {"id", "asset_id", "version"} <= version_required
 
 

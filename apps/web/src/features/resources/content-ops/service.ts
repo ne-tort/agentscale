@@ -75,7 +75,9 @@ function safeAclEntry(value: unknown): ContentAclEntry {
   if (!isRecord(value) || typeof value.principal_kind !== "string" || typeof value.principal_id !== "string" || typeof value.permission !== "string") {
     throw new ContentOpsError("INVALID_RESPONSE", 0, "The Content API returned an invalid access entry.");
   }
-  const kinds = ["employee", "company", "platform"];
+  // Must stay in step with `AclPrincipalKind`: this runs on the read path, so an
+  // omitted kind makes the whole access list unreadable rather than merely uneditable.
+  const kinds = ["employee", "company", "platform", "cabinet", "project", "role"];
   const permissions = ["read", "write", "admin"];
   if (!kinds.includes(value.principal_kind) || !permissions.includes(value.permission)) {
     throw new ContentOpsError("INVALID_RESPONSE", 0, "The Content API returned an unsupported access entry.");
@@ -166,10 +168,22 @@ export function createContentOpsService(options: ContentOpsServiceOptions = {}):
       if (!isRecord(payload) || !Array.isArray(payload.items)) {
         throw new ContentOpsError("INVALID_RESPONSE", 0, "The Content API returned an invalid asset list.");
       }
-      if (payload.items.some((item) => !isRecord(item) || typeof item.id !== "string" || typeof item.owner_company_id !== "string")) {
-        throw new ContentOpsError("INVALID_RESPONSE", 0, "The Content API returned an invalid asset list.");
+      // Only rows the caller can prove belong to the requested company are kept, and
+      // that company id is what makes a row *safe to skip*. A row with no readable
+      // ownership cannot be attributed to any company, so it is not "foreign" — it is
+      // unverifiable, and the whole page is refused rather than silently shortened:
+      // a list missing rows the server did return is a worse failure than an error.
+      const retained = payload.items.filter(
+        (item) => isRecord(item) && item.owner_company_id === companyId,
+      );
+      if (retained.some((item) => typeof item.id !== "string")) {
+        throw new ContentOpsError(
+          "INVALID_RESPONSE",
+          0,
+          "The Content API returned an asset without an id.",
+        );
       }
-      return payload.items.filter((item) => isRecord(item) && item.owner_company_id === companyId).map(safeAsset);
+      return retained.map(safeAsset);
     },
     async createAsset(input: CreateContentAssetInput, requestOptions) {
       const created = safeAsset(await json("/content/assets", {

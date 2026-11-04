@@ -40,12 +40,12 @@ from prodavan.infrastructure.persistence.rls import policies
 from prodavan.infrastructure.persistence.rls.policies import (
     CANONICAL_TABLE_POLICIES,
     POLICY_NAME_MAX_LENGTH,
-    RlsRegistryError,
-    TablePolicySpec,
     TENANT_POLICY_COMPACT_SUFFIX,
     TENANT_POLICY_SUFFIX,
     TRUSTED_POLICY_COMPACT_SUFFIX,
     TRUSTED_POLICY_SUFFIX,
+    RlsRegistryError,
+    TablePolicySpec,
     installed_policy_name,
 )
 

@@ -85,17 +85,18 @@ Fail-closed rules honoured here
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Final, Mapping
+from typing import TYPE_CHECKING, Any, Final
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from prodavan.application.migration.evidence_ports import digest as evidence_digest
 from prodavan.application.migration.evidence_ports import (
-    is_sha256,
     backfill_checkpoint_digest,
+    is_sha256,
 )
+from prodavan.application.migration.evidence_ports import digest as evidence_digest
 from prodavan.application.migration.m04e_definition_version.backfill import (
     M05EvidenceExport,
 )
@@ -476,7 +477,7 @@ class SqlAuthSessionOwnership(RuntimeSessionOwnershipPort):
     ``partition_stage_failed`` and commits nothing.
     """
 
-    def __init__(self, *, session_factory: "SessionFactory") -> None:
+    def __init__(self, *, session_factory: SessionFactory) -> None:
         if session_factory is None:
             raise ValueError("auth-session ownership needs an async session factory")
         self._session_factory = session_factory
@@ -506,7 +507,7 @@ class SqlAuthSessionOwnership(RuntimeSessionOwnershipPort):
         return str(rows[0][0]) == session_id
 
 
-def build_m05_identity_sessions(*, session_factory: "SessionFactory | None") -> M05ContextBuild:
+def build_m05_identity_sessions(*, session_factory: SessionFactory | None) -> M05ContextBuild:
     """The durable ``RuntimeSessionOwnershipPort``, or the code that says why there is none."""
 
     if session_factory is None:
@@ -528,7 +529,7 @@ def build_m05_identity_sessions(*, session_factory: "SessionFactory | None") -> 
 
 def build_m05_identity_evidence(
     *,
-    session_factory: "SessionFactory | None",
+    session_factory: SessionFactory | None,
     tenant_context: Any | None,
     sessions: RuntimeSessionOwnershipPort | None,
 ) -> M05ContextBuild:
@@ -1093,7 +1094,7 @@ class M05ContextInputs:
     #: run, so a host that forgets it gets ``m05_runtime_context_not_authenticated`` instead
     #: of an implicit ``True``.
     authenticated: bool | None = None
-    session_factory: "SessionFactory | None" = None
+    session_factory: SessionFactory | None = None
     m04_scope_row: object | None = None
     m04e_export: M05EvidenceExport | None = None
     m05_runtime: M05RuntimeGateEvidence | None = None
@@ -1134,9 +1135,9 @@ class M05PartitionContexts:
 
 def build_partition_m05_contexts(
     *,
-    key: "PartitionChainKey",
+    key: PartitionChainKey,
     inputs: M05ContextInputs | None,
-    session_factory: "SessionFactory | None" = None,
+    session_factory: SessionFactory | None = None,
 ) -> M05PartitionContexts:
     """Build all four M05 contexts of **one** partition.
 
