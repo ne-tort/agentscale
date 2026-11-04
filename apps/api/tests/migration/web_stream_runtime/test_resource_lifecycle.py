@@ -372,6 +372,14 @@ async def test_stream_facade_receives_the_authorized_command() -> None:
 # ---------------------------------------------------------------------------
 
 
+def test_state_attribute_matches_the_route_constant() -> None:
+    """The resource clears exactly the attribute the route reads."""
+    from prodavan.core.infra.web_stream_resource import RUNTIME_STATE_ATTR
+
+    assert RUNTIME_STATE_ATTR == web_stream.RUNTIME_STATE_ATTR
+    assert RESOURCE_NAME == "web_stream_runtime"
+
+
 def test_flag_defaults_to_off_and_accepts_the_documented_env_names() -> None:
     """Off by default — the migration must not switch the route on by accident."""
     from prodavan.config.settings import Settings

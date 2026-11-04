@@ -21,7 +21,6 @@ from prodavan.core.infra.sandbox_client import sandbox_client_resource_from_sett
 from prodavan.core.infra.storage_metrics_sampler_resource import StorageMetricsSamplerResource
 from prodavan.core.infra.trigger_worker_resource import TriggerWorkerResource
 from prodavan.core.infra.web_stream_resource import (
-    WebStreamLifespanManager,
     web_stream_runtime_resource_from_settings,
 )
 from prodavan.core.lifespan.manager import LifespanManager
@@ -42,7 +41,11 @@ def build_lifespan_manager() -> LifespanManager:
         backend = "local"
     from prodavan.core.infra.worker_manager import worker_manager_from_settings
 
-    manager = WebStreamLifespanManager()
+    # One manager for both surfaces. ``LifespanManager.lifespan`` forwards the
+    # ASGI app to resources exposing ``bind_app`` before startup, so app-bound
+    # resources (the web stream runtime publishes itself on ``app.state``) work
+    # without a bespoke subclass here.
+    manager = LifespanManager()
     manager.register(DatabaseEngineResource())
     # Durable Resource API apply port (MIG-RES-APPLYPORT-01): publishes the
     # AtomicMaterializationApplyPort through

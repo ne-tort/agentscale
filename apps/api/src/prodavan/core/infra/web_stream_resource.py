@@ -29,8 +29,7 @@ fail-closed with ``web_stream_app_handle_unbound`` recorded here.
 from __future__ import annotations
 
 import logging
-from collections.abc import AsyncIterator, Callable
-from contextlib import asynccontextmanager
+from collections.abc import Callable
 from typing import Any
 
 from prodavan.application.web_facade_adapter.runtime_factory import (
@@ -211,25 +210,15 @@ class WebStreamResource(LifespanResource):
             logger.debug("web stream runtime: state already cleared")
 
 
-class WebStreamLifespanManager(LifespanManager):
-    """``LifespanManager`` that hands the ASGI app to app-bound resources.
-
-    Startup/shutdown order, error handling and health reporting stay exactly the
-    base class's; only the app reference is forwarded, because ``startup()`` has
-    no other way to reach ``app.state``.
-    """
-
-    @asynccontextmanager
-    async def lifespan(self, app: Any) -> AsyncIterator[None]:
-        self.bind_app(app)
-        async with super().lifespan(app):
-            yield
-
-    def bind_app(self, app: Any) -> None:
-        for resource in self.resources:
-            binder = getattr(resource, "bind_app", None)
-            if callable(binder):
-                binder(app)
+#: Backwards-compatible name for the app-binding manager.
+#:
+#: ``LifespanManager.lifespan`` now forwards the ASGI app to every resource that
+#: exposes ``bind_app`` before startup runs, so the earlier subclass became
+#: redundant. The alias is kept so imports and the wiring line keep working, and
+#: so a future reader finds the same name the route/resource docs mention. Do not
+#: re-add an override here: two implementations of app binding would drift, and
+#: the base class is the one every surface (API and pod) uses.
+WebStreamLifespanManager = LifespanManager
 
 
 __all__ = [

@@ -466,7 +466,12 @@ class LegacyChatStreamServices:
                 principal=principal,
                 employee=employee,
                 model=request.model_id,
-                turn_id=request.turn_id,
+                # ``ChatRunRequest`` (web_facade contract) carries no turn id, so
+                # the transport ``ChatStreamCommand.turn_id`` cannot reach the
+                # turn reservation yet (web-cutover-implementation.md blocker 6).
+                # Passing ``None`` keeps the legacy default ID rather than
+                # inventing an idempotency key the client did not prove.
+                turn_id=None,
             ):
                 yield event
             # The session is closed on every exit path (completion, upstream

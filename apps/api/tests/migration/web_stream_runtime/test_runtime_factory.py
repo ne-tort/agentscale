@@ -218,6 +218,9 @@ async def test_session_factory_resolver_opens_its_own_unit_of_work() -> None:
         async def execute(self, statement: object) -> object:
             raise RuntimeError("acceptance fixture has no database")
 
+        async def get(self, entity: object, ident: object) -> object:
+            raise RuntimeError("acceptance fixture has no database")
+
     factory = FakeSessionFactory(ExplodingSession(runs=[], pairs=[]))
     resolver = SessionFactoryChatSessionResolver(factory)
 
