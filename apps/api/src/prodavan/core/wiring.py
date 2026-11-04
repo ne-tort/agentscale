@@ -62,8 +62,8 @@ def build_lifespan_manager() -> LifespanManager:
     manager.register(web_stream_runtime_resource_from_settings())
     # Durable Agent Run loops (MIG-AR-HOST-01): inert unless one of the
     # AGENT_RUN_{WORKER,CONSUMER}_ENABLED flags is on and the execution adapter
-    # has registered its composition. Registered right after the DB resource so
-    # storage is started before any loop can take a session.
+    # has registered its composition. Registered after the DB resource, so storage
+    # is started before any loop can take a session (and stopped after it).
     manager.register(AgentRunWorkerResource())
     manager.register(k8s_manager_from_settings())
     # agent-sandbox SDK client (inert unless pod_runtime_mode=sandbox; Wave 2

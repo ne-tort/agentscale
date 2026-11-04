@@ -36,6 +36,7 @@ first schema of the connection's ``search_path``); see that module.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import os
 import socket
@@ -282,6 +283,86 @@ async def _drop_schema(admin: AsyncEngine, name: str) -> None:
         )
 
 
+def _clean_database_problem(url: str) -> str | None:
+    """Return why ``url`` cannot host an alembic cycle, or ``None`` when it can.
+
+    The alembic environment resolves ``settings.database_url`` and works in the
+    first schema of the connection's ``search_path`` — it cannot be pointed at a
+    throwaway schema the way :func:`pg_schema` can.  Downgrading somebody's
+    development database is not an acceptable side effect of a test run, so the
+    target must prove it is empty first and is *skipped* (with the reason)
+    otherwise.
+    """
+
+    async def _probe() -> tuple[set[str], bool]:
+        engine = create_async_engine(url, poolclass=NullPool)
+        try:
+            async with engine.connect() as conn:
+                tables = set(
+                    (
+                        await conn.execute(
+                            text(
+                                "SELECT tablename FROM pg_tables WHERE schemaname = 'public'"
+                            )
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                versioned = await conn.scalar(
+                    text("SELECT to_regclass('public.alembic_version') IS NOT NULL")
+                )
+            return tables, bool(versioned)
+        finally:
+            await engine.dispose()
+
+    tables, versioned = asyncio.run(_probe())
+    if versioned:
+        return (
+            "the database already has an alembic_version table, so it is not a clean "
+            "database and would be downgraded by this cycle"
+        )
+    present = sorted(tables & set(Base.metadata.tables))
+    if present:
+        return (
+            f"the database already has {len(present)} ORM table(s) in public "
+            f"({', '.join(present[:5])}{'…' if len(present) > 5 else ''}), so it is not clean"
+        )
+    return None
+
+
+@pytest.fixture(scope="session")
+def migration_database_url(pg_dsn: str) -> str:
+    """A *clean* database the alembic upgrade/downgrade cycle may own.
+
+    Prefers ``PRODAVAN_TEST_MIGRATION_DATABASE_URL`` (an empty, throwaway
+    database).  Falls back to ``PRODAVAN_TEST_DATABASE_URL`` only after proving
+    that database has no ``alembic_version`` and no ORM tables in ``public``;
+    otherwise the migration test skips instead of mutating a real database.
+    """
+    dedicated = (os.getenv(MIGRATION_DATABASE_URL_ENV) or "").strip()
+    if dedicated:
+        url = _as_asyncpg_url(dedicated)
+        if not _tcp_reachable(url):
+            pytest.skip(
+                f"{MIGRATION_DATABASE_URL_ENV} is set but nothing listens at "
+                f"{make_url(url).render_as_string(hide_password=True)}"
+            )
+        problem = _clean_database_problem(url)
+        if problem is not None:
+            pytest.skip(f"{MIGRATION_DATABASE_URL_ENV} is not usable: {problem}")
+        return url
+
+    problem = _clean_database_problem(pg_dsn)
+    if problem is not None:
+        pytest.skip(
+            f"{TEST_DATABASE_URL_ENV} cannot host the alembic cycle: {problem}. "
+            f"Create an empty database and set {MIGRATION_DATABASE_URL_ENV} to run "
+            "test_alembic_cycle.py."
+        )
+    return pg_dsn
+
+
 @pytest_asyncio.fixture
 async def pg_schema(pg_dsn: str) -> AsyncIterator[SchemaHarness]:
     """A fresh PostgreSQL schema built from the ORM metadata, dropped afterwards."""
@@ -312,6 +393,7 @@ __all__ = [
     "TEST_DATABASE_URL_ENV",
     "database_url_from_env",
     "engine_for",
+    "migration_database_url",
     "pg_dsn",
     "pg_schema",
 ]

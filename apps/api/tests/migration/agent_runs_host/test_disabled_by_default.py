@@ -196,8 +196,8 @@ async def test_partial_dependencies_block_only_the_incomplete_loop() -> None:
 
 
 @pytest.mark.asyncio
-async def test_worker_composition_failure_is_reported_not_raised() -> None:
-    """``AgentRunWorker`` refuses an incomplete bundle; the host must absorb it."""
+async def test_partial_worker_bundle_reports_the_missing_member() -> None:
+    """The worker round names the first missing dependency instead of guessing."""
     partial = AgentRunHostDependencies(execution_port=object(), runs=object())
     resource = AgentRunWorkerResource(
         config=enabled_config(worker=True, consumer=False),
@@ -209,6 +209,37 @@ async def test_worker_composition_failure_is_reported_not_raised() -> None:
     result = await resource.run_worker_round_once()
     assert result["skipped"] is True
     assert result["reason"] == host.BLOCKER_JOURNAL_UNWIRED
+    await resource.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_worker_constructor_refusal_is_absorbed() -> None:
+    """``AgentRunWorker`` rejects an unusable port; the host must not raise.
+
+    ``object()`` satisfies "not None" but has none of the fenced port methods, so
+    the worker refuses to be built.  That refusal is a composition error the host
+    reports and idles on — never an exception that escapes the tick and kills the
+    loop.
+    """
+    unusable = AgentRunHostDependencies(
+        execution_port=object(),
+        runs=object(),
+        journal=object(),
+        runner=object(),
+    )
+    assert unusable.worker_blockers == ()
+    resource = AgentRunWorkerResource(
+        config=enabled_config(worker=True, consumer=False),
+        dependencies=unusable,
+        session_factory=FakeSessionFactory(),
+        lock=FakeLock(),
+    )
+    await resource.startup()
+    result = await resource.run_worker_round_once()
+    assert result["skipped"] is True
+    assert result["reason"] == host.BLOCKER_COMPOSITION_FAILED
+    # The refusal is remembered: a broken composition is not retried per tick.
+    assert (await resource.run_worker_round_once())["reason"] == host.BLOCKER_COMPOSITION_FAILED
     await resource.shutdown()
 
 

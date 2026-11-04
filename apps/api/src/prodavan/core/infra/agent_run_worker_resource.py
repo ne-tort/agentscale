@@ -140,7 +140,7 @@ BLOCKER_EXECUTION_PORT_UNWIRED = "agent_run_execution_port_unwired"
 BLOCKER_RUN_SOURCE_UNWIRED = "agent_run_run_input_source_unwired"
 BLOCKER_JOURNAL_UNWIRED = "agent_run_provider_attempt_journal_unwired"
 BLOCKER_TURN_RUNNER_UNWIRED = "agent_run_turn_runner_unwired"
-BLOCKER_WORKER_COMPOSITION_FAILED = "agent_run_worker_composition_failed"
+BLOCKER_COMPOSITION_FAILED = "agent_run_worker_composition_failed"
 
 REASON_OK = "ok"
 REASON_IDLE = "idle"
@@ -167,6 +167,23 @@ SAFE_RESULT_KEYS: frozenset[str] = frozenset(
         "wrote_run_state",
         "statuses",
     }
+)
+
+#: Same vocabulary in a fixed order, so a snapshot is byte-stable in logs and in
+#: a support transcript instead of following set iteration order.
+SAFE_RESULT_KEY_ORDER: tuple[str, ...] = (
+    "skipped",
+    "reason",
+    "ticks",
+    "claimed",
+    "delivered",
+    "retried",
+    "rejected",
+    "quarantined",
+    "lease_lost",
+    "repaired",
+    "wrote_run_state",
+    "statuses",
 )
 
 
@@ -399,7 +416,7 @@ def _iso(value: datetime | None) -> str | None:
 def _redacted(result: dict[str, Any]) -> dict[str, Any]:
     """Keep only the closed counter vocabulary, whatever a tick returned."""
     safe: dict[str, Any] = {}
-    for key in SAFE_RESULT_KEYS:
+    for key in SAFE_RESULT_KEY_ORDER:
         if key not in result:
             continue
         value = result[key]
@@ -519,7 +536,11 @@ class AgentRunWorkerResource(LifespanResource):
         self._injected_run_worker = run_worker
         self._dispatcher: Any = dispatcher
         self._run_worker: Any = run_worker
-        self._composition_error: str | None = None
+        # A composition failure is remembered per loop: a broken consumer
+        # composition must not silently disable a healthy worker (and vice versa),
+        # but it must not be retried on every tick either.
+        self._dispatcher_error: str | None = None
+        self._worker_error: str | None = None
         self._blocker_logged: set[str] = set()
 
     # -- LifespanResource --------------------------------------------------
@@ -539,6 +560,11 @@ class AgentRunWorkerResource(LifespanResource):
                 self._config.worker_enabled,
                 self._config.consumer_enabled,
             )
+            return
+        if self._started:
+            # Lifespan startup runs once, but an admin tool may call it directly;
+            # a second call must not orphan the tasks of the first.
+            logger.warning("agent run host: startup ignored — already started")
             return
 
         self._stop = asyncio.Event()
@@ -580,7 +606,8 @@ class AgentRunWorkerResource(LifespanResource):
                 )
         self._dispatcher = self._injected_dispatcher
         self._run_worker = self._injected_run_worker
-        self._composition_error = None
+        self._dispatcher_error = None
+        self._worker_error = None
         self._stop = None
         self._started = False
         logger.info("agent run host: stopped")
@@ -628,7 +655,7 @@ class AgentRunWorkerResource(LifespanResource):
 
         dispatcher = self._intent_dispatcher()
         if dispatcher is None:
-            reason = self._composition_error or BLOCKER_WORKER_COMPOSITION_FAILED
+            reason = self._dispatcher_error or BLOCKER_COMPOSITION_FAILED
             return {"skipped": True, "reason": reason, "claimed": 0}
 
         batch = self._consumer.batch_max
@@ -667,7 +694,7 @@ class AgentRunWorkerResource(LifespanResource):
 
         worker = self._worker_instance()
         if worker is None:
-            reason = self._composition_error or BLOCKER_WORKER_COMPOSITION_FAILED
+            reason = self._worker_error or BLOCKER_COMPOSITION_FAILED
             return {"skipped": True, "reason": reason, "claimed": 0, "ticks": 0}
 
         from prodavan.application.agent_runs.worker import run_worker_once
@@ -851,7 +878,7 @@ class AgentRunWorkerResource(LifespanResource):
                 max_attempts=DEFAULT_DISPATCH_MAX_ATTEMPTS,
             )
         except Exception as exc:  # noqa: BLE001 - a broken composition idles, never crashes
-            self._composition_error = BLOCKER_WORKER_COMPOSITION_FAILED
+            self._dispatcher_error = BLOCKER_COMPOSITION_FAILED
             logger.warning(
                 "agent run intent dispatcher composition failed error=%s",
                 type(exc).__qualname__,
@@ -863,7 +890,7 @@ class AgentRunWorkerResource(LifespanResource):
     def _worker_instance(self) -> Any:
         if self._run_worker is not None:
             return self._run_worker
-        if self._composition_error is not None:
+        if self._worker_error is not None:
             return None
         deps = self._deps
         if deps is None:
@@ -880,7 +907,7 @@ class AgentRunWorkerResource(LifespanResource):
                 clock=self._clock,
             )
         except Exception as exc:  # noqa: BLE001 - WorkerUnavailable included
-            self._composition_error = BLOCKER_WORKER_COMPOSITION_FAILED
+            self._worker_error = BLOCKER_COMPOSITION_FAILED
             logger.warning(
                 "agent run worker composition failed error=%s", type(exc).__qualname__
             )

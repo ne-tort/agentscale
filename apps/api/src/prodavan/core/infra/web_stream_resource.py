@@ -147,10 +147,12 @@ class WebStreamResource(LifespanResource):
             runtime = (
                 self._runtime_factory() if self._runtime_factory is not None else build_web_stream_runtime()
             )
+            _web_stream_module().install_web_stream_runtime(self._app, runtime)
         except Exception:  # noqa: BLE001 - startup must not crash-loop the API
             self._startup_blocker = BLOCKER_COMPOSITION_FAILED
             self._runtime = None
             self._blockers = ()
+            self._installed = False
             logger.exception(
                 "web stream runtime: composition failed; route stays fail-closed (%s)",
                 BLOCKER_COMPOSITION_FAILED,
@@ -160,7 +162,6 @@ class WebStreamResource(LifespanResource):
         self._runtime = runtime
         self._blockers = tuple(runtime_blockers(runtime))
         self._startup_blocker = None
-        _web_stream_module().install_web_stream_runtime(self._app, runtime)
         self._installed = True
         if self._blockers:
             # Installed on purpose: a partially composed runtime still refuses

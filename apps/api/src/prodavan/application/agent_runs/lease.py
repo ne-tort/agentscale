@@ -81,13 +81,17 @@ LEASE_STORAGE_BLOCKER = "agent_run_lease_storage_missing"
 LEASE_REQUEUE_BLOCKER = "agent_run_requeue_transition_unwired"
 """Blocker for releasing a claimed run back to ``queued`` (needs a requeue event)."""
 
-RETRY_DUE_STATUS = "retry_due"
-"""Reserved durable status for a run whose retry window has opened.
+RETRY_DUE_STATUS = AgentRunStatus.RETRY_DUE.value
+"""Durable status for a run whose retry window has opened.
 
-``AgentRunStatus`` has no retry member yet (the durable retry scheduler is a
-separate migration slice).  The lease tier accepts the reserved value so the
-scheduler can land without changing claim semantics, but it never *writes* it:
-only the retry scheduler may move a run into ``retry_due``.
+``AgentRunStatus`` now carries ``RETRY_DUE`` as a first-class member, so
+``agent_run.start`` accepts ``retry_due -> running`` and the claim predicate no
+longer needs to exclude the status. The value is kept as a module constant
+because the lease tier compares plain strings from the database, not enum
+members.
+
+Only the retry scheduler may move a run into ``retry_due``; the lease tier
+accepts the value but never writes it.
 """
 
 CLAIMABLE_STATUSES: frozenset[str] = frozenset(

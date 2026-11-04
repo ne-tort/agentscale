@@ -522,7 +522,13 @@ def validate_run_transition(
     operation: RunTransitionOperation,
 ) -> None:
     allowed: dict[RunTransitionOperation, tuple[tuple[AgentRunStatus, AgentRunStatus], ...]] = {
-        RunTransitionOperation.START: ((AgentRunStatus.QUEUED, AgentRunStatus.RUNNING),),
+        RunTransitionOperation.START: (
+            (AgentRunStatus.QUEUED, AgentRunStatus.RUNNING),
+            # A run parked with a durable ``retry_at`` is restarted by the same
+            # operation; without this pair the retry path had no expressible
+            # start transition and the claim predicate had to exclude the status.
+            (AgentRunStatus.RETRY_DUE, AgentRunStatus.RUNNING),
+        ),
         RunTransitionOperation.WAIT_FOR_APPROVAL: (
             (AgentRunStatus.QUEUED, AgentRunStatus.WAITING_APPROVAL),
             (AgentRunStatus.RUNNING, AgentRunStatus.WAITING_APPROVAL),
@@ -531,14 +537,17 @@ def validate_run_transition(
         RunTransitionOperation.SUCCEED: ((AgentRunStatus.RUNNING, AgentRunStatus.SUCCEEDED),),
         RunTransitionOperation.FAIL: (
             (AgentRunStatus.QUEUED, AgentRunStatus.FAILED),
+            (AgentRunStatus.RETRY_DUE, AgentRunStatus.FAILED),
             (AgentRunStatus.RUNNING, AgentRunStatus.FAILED),
         ),
         RunTransitionOperation.CANCEL: (
             (AgentRunStatus.QUEUED, AgentRunStatus.CANCELLED),
+            (AgentRunStatus.RETRY_DUE, AgentRunStatus.CANCELLED),
             (AgentRunStatus.RUNNING, AgentRunStatus.CANCELLED),
         ),
         RunTransitionOperation.TIMEOUT: (
             (AgentRunStatus.QUEUED, AgentRunStatus.FAILED),
+            (AgentRunStatus.RETRY_DUE, AgentRunStatus.FAILED),
             (AgentRunStatus.RUNNING, AgentRunStatus.FAILED),
         ),
     }

@@ -105,6 +105,7 @@ from prodavan.application.agent_runs.execution import (
     ProviderOutcome,
 )
 from prodavan.application.agent_runs.lease import (
+    CLAIMABLE_STATUSES,
     LEASE_REQUEUE_BLOCKER,
     WRITABLE_WHILE_RUNNING,
     DurableRunLeaseManager,
@@ -129,17 +130,25 @@ ACTOR_BLOCKER = "agent_run_control_plane_actor_unresolved"
 """A run with no resolvable employee actor cannot be written by the control plane."""
 
 RETRY_DUE_BLOCKER = "agent_run_retry_due_start_transition_unwired"
-"""``retry_due`` is reserved and claimable in policy, but not startable today.
+"""**Resolved.** Historically ``retry_due`` was claimable in policy but not
+startable, because ``RunTransitionCommand`` could only express ``AgentRunStatus``
+members and ``agent_run.start`` accepted only ``queued`` → ``running``.
 
-``RunTransitionCommand`` can only express ``AgentRunStatus`` values and accepts
-``queued`` → ``running`` for ``agent_run.start``, so a ``retry_due`` row has no
-valid start transition.  The adapter therefore narrows its claim predicate to
-``queued`` in SQL (rather than selecting rows it cannot start and burning a fence
-generation on every poll) until the retry scheduler's requeue lands.
+``AgentRunStatus`` now carries ``RETRY_DUE`` and the transition table accepts
+``retry_due -> running`` for start (plus fail/cancel/timeout from it), so the
+adapter claims both statuses. The constant is kept because promotion records and
+readiness documents reference the code, and because the *retry scheduler* that
+moves a run into ``retry_due`` is still a separate slice — the adapter can now
+start such a run but nothing has to produce that state yet.
 """
 
-STARTABLE_STATUSES: frozenset[str] = frozenset({AgentRunStatus.QUEUED.value})
-"""Run statuses this adapter can commit a claim (start transition) for."""
+STARTABLE_STATUSES: frozenset[str] = CLAIMABLE_STATUSES
+"""Run statuses this adapter can commit a claim (start transition) for.
+
+Equal to the lease policy's ``CLAIMABLE_STATUSES`` on purpose: the narrowing that
+used to exist here was a workaround for a missing transition, and keeping a
+second, narrower set would let the two definitions drift again.
+"""
 
 DEFAULT_FAILURE_CODE = "agent_run.provider_failed"
 RECONCILED_FAILURE_CODE = "agent_run.reconciled_failed"

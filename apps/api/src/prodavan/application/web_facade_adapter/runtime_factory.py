@@ -27,7 +27,7 @@ fabricates replay identity: a pair that cannot be proven refuses.
 from __future__ import annotations
 
 import logging
-from collections.abc import AsyncIterator, Callable, Iterable
+from collections.abc import AsyncIterator, Iterable
 from typing import Any
 from uuid import UUID
 
@@ -199,8 +199,8 @@ class DurableRunSequenceIndex:
         self._pairs = frozenset(pairs)
         self._live_tail = bool(live_tail) and run_id is not None
         self._reverse: dict[UUID, tuple[str, int]] = {
-            uuid5_from_run(sorted_run, sequence): (sorted_run, sequence)
-            for sorted_run, sequence in self._pairs
+            uuid5_from_run(bound_run, sequence): (bound_run, sequence)
+            for bound_run, sequence in self._pairs
         }
         self._observed: set[tuple[str, int]] = set()
 
@@ -350,6 +350,12 @@ class DurableRunIndexProvider:
                     AgentControlPlaneEventRow.run_id.is_not(None),
                     AgentControlPlaneEventRow.aggregate_type == RUN_AGGREGATE_TYPE,
                 )
+                # Deterministic truncation: the same session snapshot always
+                # yields the same evidence window.
+                .order_by(
+                    AgentControlPlaneEventRow.run_id,
+                    AgentControlPlaneEventRow.sequence,
+                )
                 .limit(self._max_events)
             )
         ).all()
@@ -494,7 +500,7 @@ def build_web_stream_runtime(
     index_provider: Any = UNSET,
     chat_stream: Any = UNSET,
     sessions: Any = UNSET,
-    scopes: Callable[[Principal, EmployeeRow | None], Any] = UNSET,
+    scopes: Any = UNSET,
     max_runs: int = DEFAULT_MAX_RUNS,
     max_events: int = DEFAULT_MAX_EVENTS,
 ) -> WebStreamRuntime:

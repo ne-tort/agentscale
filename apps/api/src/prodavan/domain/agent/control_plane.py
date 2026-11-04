@@ -17,6 +17,10 @@ from pydantic import BaseModel, ConfigDict, Field
 
 class AgentRunStatus(StrEnum):
     QUEUED = "queued"
+    #: The retry window has opened; the run is claimable again but has not been
+    #: restarted yet. Distinct from ``queued`` so a retry is visible in the
+    #: aggregate and so ``agent_run.start`` can accept it explicitly.
+    RETRY_DUE = "retry_due"
     RUNNING = "running"
     WAITING_APPROVAL = "waiting_approval"
     SUCCEEDED = "succeeded"

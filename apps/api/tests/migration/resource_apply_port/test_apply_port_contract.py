@@ -530,21 +530,18 @@ async def test_gate_refuses_operations_without_resource_provenance() -> None:
 
 async def test_gate_reports_a_generation_gap_but_lets_the_cas_report_a_late_plan() -> None:
     """A plan that skips generations is refused; a *late* plan is the CAS conflict."""
-    operation = ()
     gap = ResourceApplyEvidenceGate(
         evidence=doubles.StaticEvidenceSource(payload=doubles.evidence(head_generation=0))
     )
     assert "generation_gap" in await gap.blockers(
-        plan=_plan(expected_generation=3, operations=operation), at=AT
+        plan=_plan(expected_generation=3), at=AT
     )
     late = ResourceApplyEvidenceGate(
         evidence=doubles.StaticEvidenceSource(payload=doubles.evidence(head_generation=5))
     )
     # Late plans are answered by the head CAS (CONFLICT stale_generation_cas) so the
     # caller learns it lost a race, instead of a generic block.
-    assert await late.blockers(
-        plan=_plan(expected_generation=3, operations=operation), at=AT
-    ) == ()
+    assert await late.blockers(plan=_plan(expected_generation=3), at=AT) == ()
 
 
 async def test_optional_evidence_requirements_refuse_when_switched_on() -> None:
@@ -686,17 +683,30 @@ async def test_rollback_refuses_an_expired_approval(port) -> None:
 
 
 async def test_approved_rollback_claims_the_next_generation(port) -> None:
+    """A rollback is a *forward* generation: history is never rewritten or rewound."""
     instance, executor = port
-    executor.head_generation = 1
+    executor.head_generation = 2
     instance.evidence = doubles.StaticEvidenceSource(
         approvals={"apr_applyport": doubles.approved()}
     )
     result = await instance.rollback(_rollback_command())
     assert result.outcome is MaterializationApplyOutcome.APPLIED
     assert result.reason_code == "rolled_back"
-    assert executor.head_generation == 2, "rollback advances, never rewinds, history"
-    assert executor.commands[-1].rollback_of_generation is None
+    assert executor.head_generation == 3
     assert executor.commands[-1].target_generation == 1
+    assert executor.commands[-1].expected_generation == 2
+
+
+async def test_rollback_against_a_stale_generation_is_refused(port) -> None:
+    instance, executor = port
+    executor.head_generation = 4
+    instance.evidence = doubles.StaticEvidenceSource(
+        approvals={"apr_applyport": doubles.approved()}
+    )
+    result = await instance.rollback(_rollback_command())
+    assert result.outcome is MaterializationApplyOutcome.BLOCKED
+    assert result.reason_code == "generation_conflict"
+    assert executor.head_generation == 4
 
 
 async def test_rollback_crash_is_a_redacted_block(port) -> None:
@@ -715,7 +725,7 @@ async def test_rollback_crash_is_a_redacted_block(port) -> None:
 # --------------------------------------------------------------------------- #
 
 
-def test_composition_builds_a_real_port_without_stubs() -> None:
+async def test_composition_builds_a_real_port_without_stubs() -> None:
     """The factory wires the durable executor; no collaborator is an in-memory stub."""
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
@@ -732,11 +742,11 @@ def test_composition_builds_a_real_port_without_stubs() -> None:
         assert instance.evidence is not None
         assert instance.clock is not None
     finally:
-        # Creating an engine opens no connection; dispose is bookkeeping only.
-        pass
+        # No connection was opened; dispose only releases the pool bookkeeping.
+        await engine.dispose()
 
 
-def test_composition_accepts_an_injected_effect_and_rollback_port() -> None:
+async def test_composition_accepts_an_injected_effect_and_rollback_port() -> None:
     from dataclasses import dataclass
 
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -753,15 +763,18 @@ def test_composition_accepts_an_injected_effect_and_rollback_port() -> None:
             raise AssertionError("not exercised by this artifact")
 
     engine = create_async_engine("postgresql+asyncpg://user:pass@localhost:5432/scratch")
-    factory = async_sessionmaker(engine, expire_on_commit=False)
-    effects = _Effects()
-    instance = build_resource_materialization_apply_port(
-        session_factory=factory,
-        effects=effects,
-        rollback_effects=effects,
-    )
-    assert instance.application.executor.effects is effects
-    assert instance.application.executor.rollback_effects is effects
+    try:
+        factory = async_sessionmaker(engine, expire_on_commit=False)
+        effects = _Effects()
+        instance = build_resource_materialization_apply_port(
+            session_factory=factory,
+            effects=effects,
+            rollback_effects=effects,
+        )
+        assert instance.application.executor.effects is effects
+        assert instance.application.executor.rollback_effects is effects
+    finally:
+        await engine.dispose()
 
 
 def test_operations_must_be_typed_resource_operations() -> None:
