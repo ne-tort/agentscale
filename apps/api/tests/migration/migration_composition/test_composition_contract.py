@@ -165,6 +165,12 @@ def _registry_codes(stage: MigrationStage) -> set[str]:
     return {port.blocker_code for port in unimplemented_ports(stage)}
 
 
+def _folded(name: str) -> str:
+    """Case- and separator-insensitive form, so ``GateVerifier`` matches ``gate_verifier``."""
+
+    return "".join(character for character in name if character.isalnum()).lower()
+
+
 # ---------------------------------------------------------------------------
 # 1. static contract: what the composition may and may not depend on
 # ---------------------------------------------------------------------------
@@ -202,7 +208,7 @@ def test_composition_never_wires_the_application_adapter_as_scope_port() -> None
 
 
 def test_no_builder_dependency_is_defaulted() -> None:
-    """Every dependency is stated by the host; a default can only ever be ``None``.
+    """Every dependency is stated by the host; a default can only ever be a bounded scalar.
 
     The review's §7 recommendation is explicit: no ``=None`` arguments, because
     ``build_sql_resolve_plugin_instance_port(upstream=None)`` silently builds a deny-everything
@@ -222,17 +228,36 @@ def test_no_builder_dependency_is_defaulted() -> None:
         )
         parameters = [*arguments.posonlyargs, *arguments.args, *arguments.kwonlyargs]
         assert parameters, f"{function.name} declares no dependencies"
-        defaults = arguments.kwonly_defaults or []
-        assert len(defaults) <= len(arguments.kwonlyargs)
-        # ``kwonly_defaults`` lists defaults for the *trailing* keyword-only arguments only.
-        defaulted = arguments.kwonlyargs[len(arguments.kwonlyargs) - len(defaults):] if defaults else ()
-        for argument, default in zip(defaulted, defaults):
-            assert default is not None, (
+        # ``kw_defaults`` is aligned with ``kwonlyargs``; ``None`` means "no default at all".
+        assert len(arguments.kw_defaults) == len(arguments.kwonlyargs), function.name
+        for argument, default in zip(arguments.kwonlyargs, arguments.kw_defaults):
+            if default is None:
+                continue
+            assert not (isinstance(default, ast.Constant) and default.value is None), (
                 f"{function.name}({argument.arg}=None): a dependency defaulted to None would let "
                 "a deny-everything object graph look wired"
             )
-            assert isinstance(default, ast.Constant), (
-                f"{function.name}({argument.arg}) may only default to a bounded scalar"
+            assert isinstance(default, ast.Constant) and isinstance(default.value, int), (
+                f"{function.name}({argument.arg}) may only default to a bounded integer"
+            )
+
+
+def test_no_live_builder_signature_defaults_a_port() -> None:
+    """Cross-check the AST rule against the live signatures: defaults are scalars only."""
+
+    import inspect
+
+    scalars = {"page_size", "max_command_bytes"}
+    for builder in STAGE_BUILDERS.values():
+        signature = inspect.signature(builder)
+        for name, parameter in signature.parameters.items():
+            if parameter.default is inspect.Parameter.empty:
+                continue
+            assert name in scalars, (
+                f"{builder.__name__}.{name} has a default but is not a bounded scalar"
+            )
+            assert isinstance(parameter.default, int) and not isinstance(
+                parameter.default, bool
             )
 
 
@@ -328,28 +353,114 @@ def test_every_stage_has_a_builder() -> None:
 
 
 EXPECTED_GAP_CODES = {
-    "m04_tenant_scope_context_port_unimplemented",   # G7 — first break for M04
-    "m04e_evidence_store_port_unimplemented",        # G4
-    "m04e_upstream_gate_port_unimplemented",         # G6
-    "m04e_candidate_proof_port_unimplemented",       # G6
-    "m04e_candidate_reader_port_unimplemented",      # G6
-    "m04e_m05_handoff_port_unimplemented",           # G1 — first break for M04E
-    "m05_trusted_tenant_context_port_unimplemented",  # G7
-    "m05_promotion_record_port_unimplemented",       # G2
-    "m06_partition_handoff_read_port_unimplemented",  # G3
-    "cutover_repository_unimplemented",              # G5
-    "cutover_gate_verifier_unimplemented",           # G5
-    "cutover_legacy_owner_verifier_unimplemented",   # G5
-    "cutover_rollback_verifier_unimplemented",       # G5
-    "cutover_canonical_repair_verifier_unimplemented",  # G5
+    # G3 — the M06 stage builder does not accept the evidence ports yet
+    # (``ShadowGatewayPorts.handoff_partitions`` carries it, but no builder parameter does),
+    # so it stays registered. Everything else has an implementation and left this table.
+    "m06_partition_handoff_read_port_unimplemented",
 }
+
+#: Ports that left the registry once a reviewed implementation landed, each pinned to the
+#: module and class that implements it. The tests below import every target, so a stale
+#: "implemented" claim fails here instead of quietly weakening the chain:
+#:
+#: * G7 tenant-context binders -> ``application/migration/tenant_context.py``
+#: * G1/G2/G4 evidence ports   -> ``application/migration/evidence_ports.py``
+#: * G6 M04E gates/proofs/reader -> ``application/migration/m04e_ports.py``
+#: * G5 cutover repository + four verifiers -> ``application/migration/m06_cutover/ports.py``
+IMPLEMENTED_PORTS: dict[str, str] = {
+    "TenantScopeContextPort":
+        "prodavan.application.migration.tenant_context:RlsTenantScopeContextAdapter",
+    "TrustedTenantContextPort":
+        "prodavan.application.migration.tenant_context:RlsTrustedTenantContextAdapter",
+    "EvidenceStore":
+        "prodavan.application.migration.evidence_ports:SqlM04EBackfillEvidenceStore",
+    "M05HandoffPort":
+        "prodavan.application.migration.evidence_ports:SqlM05HandoffEvidenceStore",
+    "M05PromotionRecordPort":
+        "prodavan.application.migration.evidence_ports:SqlM05PromotionEvidenceStore",
+    "UpstreamGatePort": "prodavan.application.migration.m04e_ports:SqlM04EUpstreamGate",
+    "CandidateProofPort": "prodavan.application.migration.m04e_ports:SqlM04ECandidateProof",
+    "CandidateReader": "prodavan.application.migration.m04e_ports:SqlM04ECandidateReader",
+    "CutoverRepository":
+        "prodavan.application.migration.m06_cutover.ports:SqlCutoverRepository",
+    "GateVerifier": "prodavan.application.migration.m06_cutover.ports:SqlGateVerifier",
+    "LegacyOwnerVerifier":
+        "prodavan.application.migration.m06_cutover.ports:SqlLegacyOwnerVerifier",
+    "RollbackVerifier":
+        "prodavan.application.migration.m06_cutover.ports:SqlRollbackVerifier",
+    "CanonicalRepairVerifier":
+        "prodavan.application.migration.m06_cutover.ports:SqlCanonicalRepairVerifier",
+}
+
+
+def _imported_target(path: str) -> object:
+    """``module:Class`` -> the class, imported for real."""
+
+    import importlib
+
+    module_name, _, symbol = path.partition(":")
+    module = importlib.import_module(module_name)
+    return getattr(module, symbol)
 
 
 def test_registry_lists_exactly_the_reviewed_gaps() -> None:
     assert {port.blocker_code for port in UNIMPLEMENTED_PORTS} == EXPECTED_GAP_CODES
-    assert {port.review_ref for port in UNIMPLEMENTED_PORTS} == {
-        "G1", "G2", "G3", "G4", "G5", "G6", "G7",
+    assert {port.review_ref for port in UNIMPLEMENTED_PORTS} == {"G3"}
+
+
+@pytest.mark.parametrize("port", sorted(IMPLEMENTED_PORTS), ids=str)
+def test_every_implemented_port_really_exists_and_left_the_registry(port: str) -> None:
+    """A port is removed from the registry only because a real implementation exists.
+
+    Two independent facts, both required: the implementing class is importable, and the port
+    is no longer registered as unimplemented. Either one alone would let the registry drift.
+    """
+
+    assert _imported_target(IMPLEMENTED_PORTS[port]) is not None
+    assert port not in {entry.port for entry in UNIMPLEMENTED_PORTS}
+
+
+def test_the_one_registered_port_still_has_an_implementation_but_no_builder_parameter() -> None:
+    """``PartitionHandoffReadPort``: implemented, yet still registered — and that is the truth.
+
+    ``SqlPartitionHandoffReadStore`` exists, but ``build_m06_grants_gateway_stage`` takes
+    ``ShadowGatewayPorts`` (which carries the port) rather than the port itself, so the stage
+    builder cannot be handed one. The registry entry therefore still describes reality; it is
+    removed in the same change that adds the builder parameter, not by this test.
+    """
+
+    target = _imported_target(
+        "prodavan.application.migration.evidence_ports:SqlPartitionHandoffReadStore"
+    )
+    assert target is not None
+    assert "PartitionHandoffReadPort" in {entry.port for entry in UNIMPLEMENTED_PORTS}
+    import inspect
+
+    parameters = set(inspect.signature(build_m06_grants_gateway_stage).parameters)
+    assert "handoff_partitions" not in parameters
+
+
+def test_registry_never_names_a_port_a_stage_builder_accepts() -> None:
+    """A registered port must not also be a builder parameter.
+
+    Names differ in case (``GateVerifier`` class vs ``gate_verifier`` argument), so both sides
+    are compared case- and separator-folded. If a builder starts accepting a registered port,
+    the entry is stale: the host can now supply it, so the stage is wireable.
+    """
+
+    tree = _composition_tree()
+    accepted = {
+        _folded(argument.arg)
+        for function in _public_builders(tree)
+        for argument in [*function.args.args, *function.args.kwonlyargs]
     }
+    stale = [entry.port for entry in UNIMPLEMENTED_PORTS if _folded(entry.port) in accepted]
+    assert stale == [], f"registered ports a builder already accepts: {stale}"
+
+
+def test_registry_has_one_entry_per_port() -> None:
+    names = [entry.port for entry in UNIMPLEMENTED_PORTS]
+    assert len(names) == len(set(names))
 
 
 @pytest.mark.parametrize("port", UNIMPLEMENTED_PORTS, ids=lambda port: port.blocker_code)
@@ -370,12 +481,14 @@ def test_every_gap_points_at_a_live_declaration(port) -> None:
 def test_registry_is_partitioned_by_stage() -> None:
     for stage in MigrationStage:
         assert {port.stage for port in unimplemented_ports(stage)} <= {stage}
-    # Every stage needs at least one port this repository cannot provide: no stage of the
-    # chain is a production binding today, M04 included.
-    assert all(unimplemented_ports(stage) for stage in MigrationStage)
-    assert {port.stage for port in UNIMPLEMENTED_PORTS if port.review_ref == "G1"} == {
-        MigrationStage.M04E_DEFINITION_VERSION
-    }
+    # Every registered port is owned by exactly one stage.
+    assert len({port.port for port in UNIMPLEMENTED_PORTS}) == len(UNIMPLEMENTED_PORTS)
+    # The one remaining gap belongs to M06, and only to M06.
+    assert {port.stage for port in UNIMPLEMENTED_PORTS} == {MigrationStage.M06_GRANTS_GATEWAY}
+    # Every other stage is fully implemented: its ports exist, so a supplied graph is wireable.
+    assert {
+        stage for stage in MigrationStage if not unimplemented_ports(stage)
+    } == set(MigrationStage) - {MigrationStage.M06_GRANTS_GATEWAY}
 
 
 # ---------------------------------------------------------------------------
@@ -388,7 +501,9 @@ def test_m04_stage_assembles_the_durable_scope_adapter() -> None:
         session_factory=fx.session_factory(), tenant_context=fx.tenant_scope_context(),
     )
     assert assembly.stage is MigrationStage.M04_SCOPE
-    assert assembly.blocker_codes == ("m04_tenant_scope_context_port_unimplemented",)
+    # The tenant binder has an implementation, so a supplied graph is a complete binding.
+    assert assembly.blocker_codes == ()
+    assert assembly.wired is True
 
     adapter = assembly.service("resolve_scope_port")
     assert isinstance(adapter, SqlAlchemyScopeBackfillAdapter)
@@ -398,13 +513,16 @@ def test_m04_stage_assembles_the_durable_scope_adapter() -> None:
     assert hasattr(adapter, "resolve_active") and hasattr(adapter, "load_checkpoint")
 
 
-def test_m04_stage_is_not_wired_without_a_reviewed_tenant_context() -> None:
-    """The binder lives outside ``src/prodavan``, so even a supplied object is not certified."""
+def test_m04_stage_is_not_wired_without_a_tenant_context() -> None:
+    """The binder is mandatory: a session factory alone would read without RLS context."""
 
     assembly = build_m04_scope_stage(
-        session_factory=fx.session_factory(), tenant_context=fx.tenant_scope_context(),
+        session_factory=fx.session_factory(), tenant_context=None,
     )
     assert assembly.wired is False
+    assert assembly.services == ()
+    assert _codes(assembly) == {"m04_required_port_missing"}
+    assert {blocker.port for blocker in assembly.blockers} == {"TenantScopeContextPort"}
 
 
 def test_m04_scope_port_is_not_the_application_adapter() -> None:
@@ -421,7 +539,7 @@ def test_m04_stage_refuses_without_its_dependencies() -> None:
     assert assembly.services == ()
     assert assembly.wired is False
     assert _codes(assembly) == {
-        "m04_session_factory_missing", "m04_tenant_scope_context_port_unimplemented",
+        "m04_session_factory_missing", "m04_required_port_missing",
     }
     assert {blocker.port for blocker in assembly.blockers} == {
         "async_sessionmaker", "TenantScopeContextPort",
@@ -457,16 +575,32 @@ def _m04e_complete(**overrides: object) -> StageAssembly:
     return build_m04e_definition_version_stage(**arguments)  # type: ignore[arg-type]
 
 
-def test_m04e_stage_builds_the_backfill_but_stays_blocked_on_the_gaps() -> None:
+def test_m04e_stage_builds_the_backfill_and_is_wireable_when_supplied() -> None:
     assembly = _m04e_complete()
     assert isinstance(assembly.service("evidence_backfill"), DefinitionVersionEvidenceBackfill)
     assert assembly.service("server_definition_version_repository") is not None
     assert assembly.service("m05_handoff_port") is not None
 
-    # Constructed, but not a production binding: five unimplemented ports of this stage.
-    assert assembly.wired is False
-    assert _codes(assembly) == _registry_codes(MigrationStage.M04E_DEFINITION_VERSION)
-    assert "m04e_m05_handoff_port_unimplemented" in _codes(assembly)
+    # All five trusted ports plus artifacts and the server facade: a complete binding.
+    assert assembly.wired is True
+    assert assembly.blocker_codes == ()
+
+
+def test_m04e_stage_names_every_absent_port() -> None:
+    """Each trusted port the host omits is one blocker naming it, never a silent skip."""
+
+    for argument, port in (
+        ("reader", "CandidateReader"),
+        ("store", "EvidenceStore"),
+        ("gates", "UpstreamGatePort"),
+        ("proofs", "CandidateProofPort"),
+        ("m05_handoff", "M05HandoffPort"),
+    ):
+        assembly = _m04e_complete(**{argument: None})
+        assert assembly.wired is False, port
+        assert _codes(assembly) == {"m04e_required_port_missing"}, port
+        assert {blocker.port for blocker in assembly.blockers} == {port}
+    assert _m04e_complete(store=None).service("evidence_backfill") is None
 
 
 def test_m04e_stage_refuses_without_artifact_content_port() -> None:
@@ -497,9 +631,16 @@ def test_m04e_stage_reports_each_absent_port_separately() -> None:
     )
     assert assembly.services == ()
     codes = _codes(assembly)
-    for code in _registry_codes(MigrationStage.M04E_DEFINITION_VERSION):
-        assert code in codes
-    assert {"m04e_artifact_content_port_missing", "m04e_server_definition_repository_missing"} <= codes
+    assert codes == {
+        "m04e_required_port_missing",
+        "m04e_artifact_content_port_missing",
+        "m04e_server_definition_repository_missing",
+    }
+    # One blocker per omitted trusted port: nothing collapses into a single generic refusal.
+    assert {blocker.port for blocker in assembly.blockers if blocker.port} == {
+        "CandidateReader", "EvidenceStore", "UpstreamGatePort", "CandidateProofPort",
+        "M05HandoffPort", "ArtifactContentPort", "ServerDefinitionVersionRepository",
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -529,11 +670,8 @@ def test_m05_stage_assembles_import_and_exact_resolution() -> None:
     assert assembly.service("identity_evidence") is not None
     assert assembly.service("audit_sink") is not None
 
-    assert assembly.wired is False
-    assert _codes(assembly) == {
-        "m05_trusted_tenant_context_port_unimplemented",
-        "m05_promotion_record_port_unimplemented",
-    }
+    assert assembly.wired is True
+    assert assembly.blocker_codes == ()
 
 
 def test_m05_stage_refuses_without_upstream_evidence() -> None:
@@ -555,9 +693,22 @@ def test_m05_stage_refuses_an_unusable_runtime_context() -> None:
 
 def test_m05_stage_refuses_without_tenant_context() -> None:
     assembly = _m05_complete(tenant_context=None)
-    assert "m05_trusted_tenant_context_port_unimplemented" in _codes(assembly)
+    assert "m05_required_port_missing" in _codes(assembly)
+    assert {blocker.port for blocker in assembly.blockers
+            if blocker.code == "m05_required_port_missing"} == {"TrustedTenantContextPort"}
     assert assembly.service("m05_unit_of_work") is None
     assert assembly.service("import_service") is None
+    assert assembly.wired is False
+
+
+def test_m05_stage_refuses_without_a_promotion_record_port() -> None:
+    """No promotion-record writer means no ``AcceptedPartitionEvidence`` can reach M06."""
+
+    assembly = _m05_complete(promotion_records=None)
+    assert assembly.service("promotion_service") is None
+    assert {blocker.port for blocker in assembly.blockers
+            if blocker.code == "m05_required_port_missing"} == {"M05PromotionRecordPort"}
+    assert assembly.wired is False
 
 
 def test_m05_stage_refuses_an_unbounded_page_size() -> None:
@@ -654,7 +805,7 @@ def test_durable_evidence_ports_bind_one_store_to_both_contracts() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_cutover_stage_constructs_but_never_claims_to_be_wired() -> None:
+def test_cutover_stage_is_wired_when_every_port_with_an_implementation_is_supplied() -> None:
     assembly = build_cutover_stage(
         repository=fx.InertPort("cutover-repository"),
         gate_verifier=fx.InertPort("gate-verifier"),
@@ -663,9 +814,42 @@ def test_cutover_stage_constructs_but_never_claims_to_be_wired() -> None:
         canonical_repair_verifier=fx.InertPort("repair-verifier"),
     )
     assert isinstance(assembly.service("cutover_command_service"), CutoverCommandService)
+    assert assembly.blocker_codes == ()
+    assert assembly.wired is True
+
+
+@pytest.mark.parametrize("missing", [
+    "repository", "gate_verifier", "legacy_owner_verifier", "rollback_verifier",
+    "canonical_repair_verifier",
+])
+def test_cutover_stage_names_each_omitted_port(missing: str) -> None:
+    """A partial graph is never "merely not yet": the omitted port is named."""
+
+    arguments = {
+        "repository": fx.InertPort("cutover-repository"),
+        "gate_verifier": fx.InertPort("gate-verifier"),
+        "legacy_owner_verifier": fx.InertPort("legacy-owner-verifier"),
+        "rollback_verifier": fx.InertPort("rollback-verifier"),
+        "canonical_repair_verifier": fx.InertPort("repair-verifier"),
+    }
+    arguments[missing] = None
+    assembly = build_cutover_stage(**arguments)  # type: ignore[arg-type]
     assert assembly.wired is False
-    assert _codes(assembly) == _registry_codes(MigrationStage.CUTOVER)
-    assert len(_codes(assembly)) == 5
+    assert _codes(assembly) == {"cutover_required_port_missing"}
+    assert len(assembly.blockers) == 1
+    assert assembly.blockers[0].port == {
+        "repository": "CutoverRepository",
+        "gate_verifier": "GateVerifier",
+        "legacy_owner_verifier": "LegacyOwnerVerifier",
+        "rollback_verifier": "RollbackVerifier",
+        "canonical_repair_verifier": "CanonicalRepairVerifier",
+    }[missing]
+    # With a repository the service is constructible even when a verifier is absent: the port
+    # exists, so its fail-closed refusals stay reachable and testable.
+    if missing != "repository":
+        assert isinstance(assembly.service("cutover_command_service"), CutoverCommandService)
+    else:
+        assert assembly.service("cutover_command_service") is None
 
 
 def test_cutover_stage_refuses_without_a_repository() -> None:
@@ -674,7 +858,12 @@ def test_cutover_stage_refuses_without_a_repository() -> None:
         rollback_verifier=None, canonical_repair_verifier=None,
     )
     assert assembly.services == ()
-    assert _codes(assembly) == _registry_codes(MigrationStage.CUTOVER)
+    assert assembly.wired is False
+    assert _codes(assembly) == {"cutover_required_port_missing"}
+    assert {blocker.port for blocker in assembly.blockers} == {
+        "CutoverRepository", "GateVerifier", "LegacyOwnerVerifier", "RollbackVerifier",
+        "CanonicalRepairVerifier",
+    }
 
 
 def test_cutover_stage_refuses_an_unbounded_command_size() -> None:
@@ -685,6 +874,7 @@ def test_cutover_stage_refuses_an_unbounded_command_size() -> None:
     )
     assert assembly.service("cutover_command_service") is None
     assert "cutover_max_command_bytes_invalid" in _codes(assembly)
+    assert assembly.wired is False
 
 
 # ---------------------------------------------------------------------------
@@ -731,20 +921,27 @@ def test_chain_keeps_every_stage_in_order() -> None:
     assert [assembly.stage for assembly in chain.stages] == list(MigrationStage)
 
 
-def test_chain_is_never_wired_while_the_gaps_are_open() -> None:
-    """A fully supplied object graph is still not a process: cutover stays unreachable."""
+def test_chain_is_wired_except_for_the_one_remaining_gap() -> None:
+    """A fully supplied graph is a complete binding for four stages, never for M06.
+
+    M06 keeps ``PartitionHandoffReadPort`` in the registry because its builder does not take
+    the evidence ports yet, so ``DependencyGates`` still resolves to ``None`` there. Every
+    other stage is wired, which is exactly what closing G1/G2/G4/G5/G6/G7 means.
+    """
 
     chain = assemble_migration_chain(_chain_dependencies())
     assert chain.wired is False
     assert set(chain.blocker_codes) == EXPECTED_GAP_CODES
-    # The first blocked stage is M04: the tenant-context binder is not in this repository.
     first = chain.first_blocker
     assert isinstance(first, AssemblyBlocker)
-    assert first.stage is MigrationStage.M04_SCOPE
-    assert first.code == "m04_tenant_scope_context_port_unimplemented"
-    assert "m04e_m05_handoff_port_unimplemented" in chain.by_stage(
-        MigrationStage.M04E_DEFINITION_VERSION
-    ).blocker_codes
+    assert first.stage is MigrationStage.M06_GRANTS_GATEWAY
+    assert first.code == "m06_partition_handoff_read_port_unimplemented"
+    blocked = {assembly.stage for assembly in chain.stages if not assembly.wired}
+    assert blocked == {MigrationStage.M06_GRANTS_GATEWAY}
+    assert all(
+        assembly.wired for assembly in chain.stages
+        if assembly.stage is not MigrationStage.M06_GRANTS_GATEWAY
+    )
 
 
 def test_chain_with_nothing_supplied_still_reports_every_stage() -> None:
@@ -783,11 +980,18 @@ def test_chain_with_nothing_supplied_still_reports_every_stage() -> None:
     assert chain.wired is False
     codes = set(chain.blocker_codes)
     assert EXPECTED_GAP_CODES <= codes
+    # Each stage names its own missing dependencies instead of one anonymous refusal.
     assert {
         "m04_session_factory_missing",
+        "m04_required_port_missing",
+        "m04e_required_port_missing",
         "m05_upstream_evidence_missing",
+        "m05_required_port_missing",
         "m06_shadow_gateway_ports_missing",
+        "cutover_required_port_missing",
     } <= codes
+    # Every stage refuses all of its services, and no stage silently reports itself wired.
+    assert all(not assembly.wired for assembly in chain.stages)
 
 
 def test_chain_rejects_a_gap_in_the_stage_list() -> None:

@@ -75,6 +75,35 @@ class EmployeeSearchQueryService:
                 detail=f"namespace not allowed for employee search: {ns}",
             )
 
+        # A pagination cursor is client-supplied input whose meaning depends on
+        # the sort that produced it. Refuse an unbindable cursor here, before any
+        # backend call, instead of forwarding it and trusting the search adapter
+        # to reject it: the facade is the trust boundary for employee input, and
+        # a backend that answered such a request would paginate on an undefined
+        # key order.
+        if search_after is not None:
+            if int(from_) != 0:
+                raise AppError(
+                    code="VALIDATION_ERROR",
+                    title="Validation Error",
+                    status=422,
+                    detail="from must be zero when search_after is supplied",
+                )
+            if not sort:
+                raise AppError(
+                    code="VALIDATION_ERROR",
+                    title="Validation Error",
+                    status=422,
+                    detail="sort is required when search_after is supplied",
+                )
+            if not search_after or len(search_after) != len(sort):
+                raise AppError(
+                    code="VALIDATION_ERROR",
+                    title="Validation Error",
+                    status=422,
+                    detail="search_after must contain one value for each sort field",
+                )
+
         # Equipment catalogs are indexed as platform-owned documents even though
         # their SoT and project/cabinet visibility are tenant-bound. Admit only
         # the exact ready indexes exposed by the project's equipment SoT. Do not
@@ -120,13 +149,6 @@ class EmployeeSearchQueryService:
                 )
             platform_equipment_catalog = True
 
-        if search_after and from_:
-            raise AppError(
-                code="VALIDATION_ERROR",
-                title="Validation Error",
-                status=422,
-                detail="from must be zero when search_after is supplied",
-            )
         result = await get_search_index_service().search(
             namespace=ns,
             index=idx,

@@ -5,8 +5,10 @@ from dataclasses import replace
 
 from prodavan.application.migration.m04_scope.scope_migration import (
     MigrationEvidenceContext,
+    ScopeActorMembershipEvidence,
     ScopeMigrationCoordinator,
     ScopeParentEvidence,
+    ScopeRlsEvidence,
 )
 from prodavan.application.scope_registry.contracts import (
     OwnerState,
@@ -62,6 +64,9 @@ def plugin_anchors() -> ScopeAnchors:
         scope_id="plugin-1",
         tenant_id=TENANT,
         cabinet_id=CABINET,
+        # ScopeAnchors requires a plugin scope to name its installation anchor:
+        # scope_id must equal plugin_instance_id or the typed identity is invalid.
+        plugin_instance_id="plugin-1",
     )
 
 
@@ -160,14 +165,51 @@ def parent_evidence(anchors: ScopeAnchors) -> ScopeParentEvidence:
         active_cabinet_memberships=1 if anchors.cabinet_id else 0,
         project_matches=1 if anchors.project_id else 0,
         active_registry_matches=1,
+        # Parent evidence is transaction-bound evidence: M04-02 quarantines a bundle
+        # whose cardinality proof does not name the transaction it was read in.
+        transaction_id=TX_ID,
         tenant_id=TENANT,
         cabinet_id=CABINET if anchors.cabinet_id else None,
+        # Only a company grant proves cabined membership; a bare membership row is
+        # not compatible evidence for a cabinet/project scope.
+        cabinet_membership_kind="cabinet_company_grant" if anchors.cabinet_id else None,
         membership_tenant_id=TENANT if anchors.cabinet_id else None,
         membership_cabinet_id=CABINET if anchors.cabinet_id else None,
         project_id=PROJECT if anchors.project_id else None,
         project_tenant_id=TENANT if anchors.project_id else None,
         project_cabinet_id=CABINET if anchors.project_id else None,
         active_registry_anchors=anchors,
+    )
+
+
+def rls_evidence(anchors: ScopeAnchors) -> ScopeRlsEvidence:
+    return ScopeRlsEvidence(
+        transaction_id=TX_ID,
+        tenant_id=anchors.tenant_id,
+        cabinet_id=anchors.cabinet_id,
+        project_id=anchors.project_id,
+        row_security_enabled=True,
+        row_security_forced=True,
+        database_role="prodavan_app",
+        security_review_id="rls-review-1",
+        policy_names=("tenant_scope_policy",),
+        tenant_policy_enforced=True,
+        using_policy_enforced=True,
+        with_check_policy_enforced=True,
+        missing_context_denies=True,
+        role_not_bypass_rls=True,
+        typed_parent_policy_enforced=True,
+    )
+
+
+def actor_membership_evidence(anchors: ScopeAnchors) -> ScopeActorMembershipEvidence:
+    return ScopeActorMembershipEvidence(
+        transaction_id=TX_ID,
+        actor_id="user-1",
+        tenant_id=anchors.tenant_id,
+        relationship_kind="employee_membership",
+        relationship_matches=1,
+        active=True,
     )
 
 
@@ -179,6 +221,8 @@ def registry_read(
     proof: ParentCompatibilityProof | None = None,
     parents: ScopeParentEvidence | None = None,
     ids: ScopeRegistryEvidenceIds | None = None,
+    rls: ScopeRlsEvidence | None = None,
+    actor: ScopeActorMembershipEvidence | None = None,
 ) -> ScopeRegistryRead:
     return ScopeRegistryRead(
         transaction_id=TX_ID,
@@ -200,6 +244,10 @@ def registry_read(
         source_snapshot_schema_version="scope-source-v1",
         source_snapshot_digest=DIGEST,
         partition_canonical_digest="sha256:" + "b" * 64,
+        rls_evidence=rls if rls is not None else rls_evidence(anchors),
+        actor_membership_evidence=(
+            actor if actor is not None else actor_membership_evidence(anchors)
+        ),
     )
 
 

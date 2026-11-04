@@ -204,7 +204,17 @@ def test_desired_payload_is_frozen_and_digest_binds_provenance(provenance, evide
     assert revision.spec["nested"]["values"] == (1, 2)
     with pytest.raises((AttributeError, TypeError)):
         revision.spec["nested"]["values"] = ()
-    changed = replace(revision, provenance=replace(provenance, source_revision="rev-9"))
+    # The digest is an integrity tag over the whole revision, provenance
+    # included; it is derived at construction and re-verified whenever a digest
+    # is supplied (a durable load). dataclasses.replace() carries the old digest
+    # forward while rewriting the fields it derives from, so it must be
+    # rejected rather than silently re-derived -- otherwise a caller could
+    # rewrite a loaded revision's spec and receive a freshly valid digest.
+    with pytest.raises(ValueError, match="desired revision digest mismatch"):
+        replace(revision, provenance=replace(provenance, source_revision="rev-9"))
+    changed = DesiredRevision("project/runtime-7", 1, revision.spec,
+                              replace(provenance, source_revision="rev-9"), evidence,
+                              operations=(operation,))
     assert changed.digest != revision.digest
 
 
@@ -289,9 +299,27 @@ def test_stale_generation_conflicts_before_runtime_side_effect(provenance, evide
     item = desired(provenance, evidence, operation)
     prepared = run(service.prepare(item, idempotency_key="fence"))
     checked = run(service.validate(prepared, at=NOW))
+    # A concurrent apply wins the CAS between prepare and apply: the store
+    # refuses the claim for the stale expected generation. The plan was still
+    # valid at validation time, so the claim is attempted -- and the conflict
+    # must stop the run before any runtime side effect.
+    store.claim_override = ClaimResult(ClaimStatus.CONFLICT, reason_code="generation_conflict")
     result = run(service.apply(checked))
     assert result.outcome is ApplyOutcome.CONFLICT
+    assert result.reason_code == "generation_conflict"
     assert store.claim_count == 1 and runtime.calls == []
+
+
+def test_generation_drifted_since_prepare_conflicts_before_claim(provenance, evidence, operation, ports):
+    store, _, runtime, _, service = ports
+    item = desired(provenance, evidence, operation)
+    prepared = run(service.prepare(item, idempotency_key="drift"))
+    checked = run(service.validate(prepared, at=NOW))
+    # Another writer committed generation 1 after prepare bound generation 0.
+    store.state = RuntimeRevisionState(item.resource_key, generation=1)
+    result = run(service.apply(checked))
+    assert result.outcome is ApplyOutcome.CONFLICT and result.reason_code == "generation_conflict"
+    assert store.claim_count == 0 and runtime.calls == []
 
 
 def test_required_failure_is_write_barrier_and_failed_attempt_is_persisted(provenance, evidence, ports):

@@ -284,7 +284,8 @@ class DesiredRevision:
             "operations": [op.canonical() for op in sorted(operations, key=lambda item: (item.operation_id, item.target_ref))],
             "provenance": self.provenance.canonical(), "owner_id": owner,
         })
-        if self.digest and self.digest != calculated:
+        supplied = self.digest
+        if supplied and supplied != calculated:
             raise ValueError("desired revision digest mismatch")
         object.__setattr__(self, "spec", spec)
         object.__setattr__(self, "operations", operations)

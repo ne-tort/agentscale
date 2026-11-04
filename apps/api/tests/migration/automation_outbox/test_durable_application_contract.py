@@ -671,7 +671,10 @@ async def test_delivery_worker_retries_with_same_receiver_key_then_persists_rece
 
 
 def test_acceptance_cases_cover_transaction_failure_retry_repair_and_legacy_fence() -> None:
-    assert any("transaction failure" in case and "no receipt" in case for case in ACCEPTANCE_CASES)
+    assert any(
+        "transaction failure" in case and "no accepted receipt" in case
+        for case in ACCEPTANCE_CASES
+    )
     assert any("atomic" in case and "roll back" in case for case in ACCEPTANCE_CASES)
     assert any("queue outage" in case and "original enqueue key" in case for case in ACCEPTANCE_CASES)
     assert any("legacy worker" in case and "fence" in case for case in ACCEPTANCE_CASES)

@@ -83,8 +83,9 @@ def test_builder_reports_a_missing_repository_without_inventing_one():
         rollback_verifier=None, canonical_repair_verifier=None,
     )
     assert assembly.services == ()
-    assert assembly.blockers == ()
     assert assembly.wired is False
+    assert {blocker.port for blocker in assembly.blockers} == set(IMPLEMENTED_CUTOVER_PORTS)
+    assert set(assembly.blocker_codes) == {"cutover_required_port_missing"}
 
 
 def test_bundle_builds_all_five_ports_over_one_factory():

@@ -66,12 +66,24 @@ def test_platform_event_idempotency_matches_orm_and_service_contract() -> None:
 
 def test_concurrent_idempotent_insert_isolated_before_replay_lookup() -> None:
     source = inspect.getsource(PlatformEventService.emit)
+    # Anchor on the savepoint first, then on the conflict handler's own lookup.
+    # Indexing the bare tokens from offset 0 measured the *optimistic* pre-check
+    # (`select(...)` before the INSERT) against the savepoint and so compared two
+    # unrelated statements; it could not distinguish the replay lookup that must
+    # run after the isolated INSERT from the fast-path read that legitimately
+    # precedes it. The property the contract needs is that the INSERT and its
+    # flush sit inside the savepoint and that the replay lookup is in the
+    # IntegrityError handler, i.e. strictly after that flush.
     savepoint = source.index("async with self._session.begin_nested()")
-    add = source.index("self._session.add(row)")
-    flush = source.index("await self._session.flush()")
-    lookup = source.index("select(PlatformEventRow).where(")
+    add = source.index("self._session.add(row)", savepoint)
+    flush = source.index("await self._session.flush()", add)
+    handler = source.index("except IntegrityError:", flush)
+    lookup = source.index("select(PlatformEventRow).where(", handler)
 
-    assert savepoint < add < flush < lookup
+    assert savepoint < add < flush < handler < lookup
+    # Exactly one isolated insert attempt: a concurrent loser cannot reach the
+    # replay lookup on a transaction that has already lost its savepoint.
+    assert source.count("async with self._session.begin_nested()") == 1
 
 
 def test_resume_serializes_marker_check_before_generation_increment() -> None:

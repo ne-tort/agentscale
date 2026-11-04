@@ -10,8 +10,8 @@ from prodavan.application.migration.m04_scope.scope_migration import (
     MigrationEvidenceContext,
     ResolveScopePort,
     ScopeMigrationCoordinator,
-    ScopeParentEvidence,
     ScopeResolution,
+    ScopeResolutionEvidence,
     ScopeResolver,
 )
 from prodavan.application.scope_registry.contracts import (
@@ -450,6 +450,14 @@ class _TransactionBoundScopePort(ResolveScopePort):
             raise _AdapterBlocked("m04_scope_gate_evidence_missing")
         if not read.evidence_ids.registry_id or not read.evidence_ids.tenant_anchor_id:
             raise _AdapterBlocked("scope_owner_anchor_evidence_missing")
+        # An ACTIVE resolution needs catalog-verified, forced RLS evidence and the
+        # actor's own tenant membership from this same transaction. Without them the
+        # M04-02 boundary denies, so the read is blocked here with the exact reason
+        # instead of surfacing a misleading DENY downstream.
+        if read.rls_evidence is None:
+            raise _AdapterBlocked("scope_rls_review_evidence_missing")
+        if read.actor_membership_evidence is None:
+            raise _AdapterBlocked("scope_actor_membership_evidence_missing")
         if (
             read.mapping_source_kind != read.entry.provenance.source_kind
             or read.mapping_source_id != read.entry.provenance.source_id
@@ -507,7 +515,7 @@ class _TransactionBoundScopePort(ResolveScopePort):
         *,
         context: MigrationEvidenceContext,
         anchors: ScopeAnchors,
-    ) -> tuple[ScopeRegistryEntry, ParentCompatibilityProof, ScopeParentEvidence] | None:
+    ) -> ScopeResolutionEvidence | None:
         if context.transaction_id != self.transaction_id or self._read is None:
             raise _AdapterBlocked("scope_resolver_transaction_mismatch")
         if self._read.match_count != 1:
@@ -520,7 +528,21 @@ class _TransactionBoundScopePort(ResolveScopePort):
             or read.entry.anchors != anchors
         ):
             return None
-        return read.entry, read.parent_proof, read.parent_evidence
+        # M04-02 revalidates this bundle itself; handing it an incomplete one would
+        # downgrade every active resolution to a DENY, so the missing evidence is
+        # reported as an explicit block instead of a silent "no scope".
+        if read.rls_evidence is None:
+            raise _AdapterBlocked("scope_rls_review_evidence_missing")
+        if read.actor_membership_evidence is None:
+            raise _AdapterBlocked("scope_actor_membership_evidence_missing")
+        return ScopeResolutionEvidence(
+            entry=read.entry,
+            parent_proof=read.parent_proof,
+            parent_compatibility_transaction_id=read.transaction_id,
+            parent_evidence=read.parent_evidence,
+            rls_evidence=read.rls_evidence,
+            actor_membership_evidence=read.actor_membership_evidence,
+        )
 
     async def record(self, record: QuarantineRecord) -> None:
         raise _AdapterBlocked("read_only_scope_adapter_cannot_write_quarantine")

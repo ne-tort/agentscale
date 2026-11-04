@@ -1,8 +1,10 @@
 """Acceptance contract for the durable cutover repository (CAS + append-only lineage)."""
 
+import json
 from datetime import timedelta
 
 import pytest
+from sqlalchemy.exc import IntegrityError
 
 from prodavan.application.migration.m06_cutover import ports as cutover_ports
 from prodavan.application.migration.m06_cutover.cutover import (
@@ -437,6 +439,66 @@ async def test_repository_state_survives_a_second_repository_instance(env):
     assert (await second.load(PARTITION)) == (await first.load(PARTITION))
     record = await second.evidence_by_id("cmd-owner")
     assert record is not None and record.evidence_id == "cmd-owner"
+
+
+async def test_a_tampered_lineage_payload_is_refused_not_decoded(env):
+    """Editing the stored JSON breaks the record's own immutable digest."""
+
+    await seed_cutover_ready_partition(env)
+    repository = SqlCutoverRepository(session_factory=env.session_factory)
+    await service(repository).bind_legacy_owner(
+        partition=PARTITION, actor="operator", command_id="cmd-owner",
+        lease=lease(3), evidence=legacy_owner(3), now=NOW,
+    )
+    await env.execute(
+        f"UPDATE {CUTOVER_LEDGER_TABLE} SET record_payload = :payload WHERE id = :id",
+        payload='{"schema": "m06-partition-cutover-evidence.v1"}', id="cmd-owner",
+    )
+    with pytest.raises(cutover_ports.CutoverRepositoryCorrupt) as excinfo:
+        await repository.evidence_by_id("cmd-owner")
+    assert "cutover_evidence_payload_invalid" in excinfo.value.blockers
+
+
+async def test_earlier_revisions_are_never_rewritten(env):
+    """Append-only: the revision-1 row keeps its own payload after revision 2 lands."""
+
+    await seed_cutover_ready_partition(env)
+    repository = SqlCutoverRepository(session_factory=env.session_factory)
+    commands = service(repository)
+    first = await commands.bind_legacy_owner(
+        partition=PARTITION, actor="operator", command_id="cmd-owner",
+        lease=lease(3), evidence=legacy_owner(3), now=NOW,
+    )
+    await commands.enter_shadow(
+        partition=PARTITION, actor="operator", command_id="cmd-shadow",
+        lease=lease(4), now=NOW,
+    )
+    rows = await env.rows(CUTOVER_LEDGER_TABLE)
+    assert [(row["revision"], row["resulting_state"]) for row in rows] == [
+        (1, "legacy_active"), (2, "shadow"),
+    ]
+    assert state_from_payload(json.loads(rows[0]["state_payload"])) == first
+
+
+async def test_same_action_and_correlation_cannot_be_appended_twice(env):
+    """``(partition, action, correlation)`` is an idempotency key at the storage level."""
+
+    await seed_cutover_ready_partition(env)
+    repository = SqlCutoverRepository(session_factory=env.session_factory)
+    await service(repository).bind_legacy_owner(
+        partition=PARTITION, actor="operator", command_id="cmd-owner",
+        lease=lease(3), evidence=legacy_owner(3), now=NOW,
+    )
+    rows = await env.rows(CUTOVER_LEDGER_TABLE)
+    assert len(rows) == 1
+    first = dict(rows[0])
+    assert first["correlation_id"] == first["id"] == "cmd-owner"
+    duplicate = first | {"id": "cmd-owner-copy", "revision": 2,
+                         "prior_record_id": first["id"],
+                         "prior_record_digest": first["record_digest"]}
+    with pytest.raises(IntegrityError):
+        await env.insert(CUTOVER_LEDGER_TABLE, **duplicate)
+    assert await env.count(CUTOVER_LEDGER_TABLE) == 1
 
 
 def _placeholder_state(record, *, revision: int = 1) -> PartitionCutover:

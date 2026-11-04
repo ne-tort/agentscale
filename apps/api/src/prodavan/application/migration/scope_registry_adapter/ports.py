@@ -5,7 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import AsyncContextManager, Protocol
 
-from prodavan.application.migration.m04_scope.scope_migration import ScopeParentEvidence
+from prodavan.application.migration.m04_scope.scope_migration import (
+    ScopeActorMembershipEvidence,
+    ScopeParentEvidence,
+    ScopeRlsEvidence,
+)
 from prodavan.application.scope_registry.contracts import (
     ParentCompatibilityProof,
     RlsContext,
@@ -69,6 +73,12 @@ class ScopeRegistryRead:
     source_snapshot_schema_version: str | None = None
     source_snapshot_digest: str | None = None
     partition_canonical_digest: str | None = None
+    # Reviewed RLS and actor-membership evidence for this exact transaction.
+    # `ResolveScopePort` (M04-02) refuses an ACTIVE resolution without both, so the
+    # owner read must return them from the same unit of work; an absent bundle is a
+    # blocked result, never an implicit pass.
+    rls_evidence: ScopeRlsEvidence | None = None
+    actor_membership_evidence: ScopeActorMembershipEvidence | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,7 +105,11 @@ class OwnerRegistryScopeRepositoryPort(Protocol):
     async def read_scope(
         self, *, anchors: ScopeAnchors, transaction_id: str
     ) -> ScopeRegistryRead:
-        """Read exact registry, parent, membership and evidence rows in one UoW."""
+        """Read exact registry, parent, membership and evidence rows in one UoW.
+
+        The result must additionally carry the catalog-verified RLS review evidence
+        and the actor's tenant membership evidence for that same transaction.
+        """
         ...
 
 

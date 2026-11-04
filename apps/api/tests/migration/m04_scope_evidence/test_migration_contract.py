@@ -767,9 +767,35 @@ def test_table_is_registered_in_the_rls_registry_next_to_the_promotion_tables() 
         f"{EVIDENCE_TABLE}_trusted_service_access",
     )
 
-    # Declared "next to" the other promotion-evidence tables, not appended at the end.
+    # Declared inside the M04/M04E block - together with the promotion-evidence
+    # family it belongs to - rather than appended at the end of the registry.
+    #
+    # The earlier form of this assertion pinned the entry to ``index(m04e_definition_
+    # version_promotion_evidence) + 1``.  That slot now belongs to the four-table M04E
+    # backfill ledger block of ``2026110315``, which was declared contiguously after
+    # the same anchor by ``MIG-DDL-M04E-LEDGER-01``; two entries cannot both be the
+    # immediate successor of one anchor.  The reviewed intent is "grouped with the
+    # M04/M04E tables, not appended", so assert that instead of a neighbour index.
     order = [entry.table for entry in policies.CANONICAL_TABLE_POLICIES]
-    assert order.index(EVIDENCE_TABLE) == order.index("m04e_definition_version_promotion_evidence") + 1
+    position = order.index(EVIDENCE_TABLE)
+    m04_family = [
+        index
+        for index, table in enumerate(order)
+        if table.startswith(("scope_owner_", "scope_registry", "m04e_", "m04_scope_"))
+    ]
+    assert position == max(m04_family), (
+        "the M04 scope evidence table must close the M04/M04E declaration block, "
+        f"got {order[position]} at {position} of {m04_family}"
+    )
+    first_non_m04 = min(
+        (index for index, table in enumerate(order) if not table.startswith(("scope_owner_", "scope_registry", "m04e_", "m04_scope_"))),
+        default=len(order),
+    )
+    assert position + 1 == first_non_m04, (
+        "the M04 scope evidence table must be declared before the M05/M06/runtime groups, "
+        f"not appended after them (position {position}, first foreign entry {first_non_m04})"
+    )
+    assert position < len(order) - 1, "appending the entry at the end of the registry is not 'next to' its family"
 
     # The tenant predicate is deny-by-default and reads the transaction-local GUC.
     predicate = policies.tenant_predicate(spec)

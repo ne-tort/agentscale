@@ -124,10 +124,12 @@ async def test_cross_tenant_or_narrower_context_assertions_block():
     anchors = cabinet_anchors()
     transaction = FakeTransaction(registry_read(anchors), accepted_gate())
     context = trusted_context(anchors)
+    # RlsContext is a frozen pydantic model, not a dataclass: `dataclasses.replace`
+    # raises TypeError and never produced the cross-tenant context this case needs.
     context = replace(
         context,
         tenant_id="tenant-other",
-        rls_context=replace(context.rls_context, tenant_id="tenant-other"),
+        rls_context=context.rls_context.model_copy(update={"tenant_id": "tenant-other"}),
     )
     manager = FakeTransactionManager(transaction)
 
@@ -176,7 +178,9 @@ async def test_ambiguous_scope_rows_block_without_selecting_first_match():
 @pytest.mark.asyncio
 async def test_project_tenant_cabinet_mismatch_is_quarantined_not_resolved():
     anchors = project_anchors()
-    invalid_proof = replace(parent_proof(anchors), project_cabinet_compatible=False)
+    invalid_proof = parent_proof(anchors).model_copy(
+        update={"project_cabinet_compatible": False}
+    )
     transaction = FakeTransaction(
         registry_read(anchors, proof=invalid_proof), accepted_gate()
     )
@@ -203,7 +207,10 @@ async def test_multiple_active_cabinet_memberships_do_not_resolve_to_one():
     )
 
     assert result.outcome is ScopeAdapterOutcome.QUARANTINED
-    assert result.reason_code == "parent_compatibility_unproven"
+    # M04-02 reports the exact incompatibility it proved; a generic
+    # `parent_compatibility_unproven` is reserved for a bundle whose specific parent
+    # cardinalities are all sound but whose proof does not cover the scope.
+    assert result.reason_code == "cabinet_membership_ambiguous"
     assert result.entry is None
 
 
