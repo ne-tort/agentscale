@@ -18,6 +18,7 @@ from prodavan.application.agent_runs.dispatcher import (
     IntentKind,
     ReservationStatus,
 )
+from prodavan.application.agent_runs.handler import EXECUTABLE_INTENT_KINDS
 from prodavan.domain.agent.control_plane import AgentRunStatus
 
 from .acceptance_fixtures import (
@@ -30,13 +31,11 @@ from .acceptance_fixtures import (
 
 
 def dispatcher_for(consumer: MemoryIntentStore, harness, *, target=None) -> EnqueueIntentDispatcher:
-    from prodavan.application.agent_runs.handler import build_run_intent_handlers
-
     return EnqueueIntentDispatcher(
         consumer=consumer,
         resolver=FixedResolver(target or make_target()),
         execution=None,
-        handlers=build_run_intent_handlers(pipeline=harness.pipeline, clock=harness.clock),
+        handlers={kind: harness.handler for kind in EXECUTABLE_INTENT_KINDS},
     )
 
 

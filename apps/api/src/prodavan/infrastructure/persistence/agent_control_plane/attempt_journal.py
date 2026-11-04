@@ -183,6 +183,38 @@ def _positive(value: int, name: str) -> int:
     return value
 
 
+#: Column widths of the identity strings.  The contract validates looser bounds
+#: (``tenant_id``/``run_id``/``provider`` up to 96 characters) than the columns
+#: allow (40), so the store refuses an over-long identity *before* PostgreSQL
+#: raises a truncation error — a typed refusal instead of a driver-level 500.
+_TEXT_WIDTHS: dict[str, int] = {
+    "attempt_id": 64,
+    "idempotency_key": 160,
+    "tenant_id": 40,
+    "project_id": 40,
+    "run_id": 40,
+    "provider": 40,
+    "session_id": 40,
+    "provider_request_id": 160,
+}
+
+
+def _column_text(value: str, name: str) -> str:
+    """A non-empty string that fits its column (never truncated, always refused)."""
+    text = _required(value, name, max_length=_TEXT_WIDTHS[name] * 4)
+    width = _TEXT_WIDTHS[name]
+    if len(text) > width:
+        raise AttemptRejected(
+            AttemptRefusal.INVALID_RECORD,
+            f"{name} does not fit its {width}-character column",
+        )
+    return text
+
+
+def _optional_column_text(value: str | None, name: str) -> str | None:
+    return None if value is None else _column_text(value, name)
+
+
 @lru_cache(maxsize=None)
 def _legal_targets(current: AttemptState) -> frozenset[AttemptState]:
     """Every state the application matrix lets ``current`` become.
@@ -236,26 +268,28 @@ def start_values(attempt: ProviderAttempt) -> dict[str, Any]:
     metadata, extra_dropped = redact_metadata(attempt.metadata)
     _assert_secret_free(metadata)
     return {
-        "attempt_id": attempt.attempt_id,
-        "idempotency_key": attempt.idempotency_key,
-        "tenant_id": attempt.tenant_id,
-        "project_id": attempt.project_id,
-        "run_id": attempt.run_id,
+        "attempt_id": _column_text(attempt.attempt_id, "attempt_id"),
+        "idempotency_key": _column_text(attempt.idempotency_key, "idempotency_key"),
+        "tenant_id": _column_text(attempt.tenant_id, "tenant_id"),
+        "project_id": _column_text(attempt.project_id, "project_id"),
+        "run_id": _column_text(attempt.run_id, "run_id"),
         "generation": attempt.generation,
         "attempt": attempt.attempt,
         "sequence": attempt.sequence,
-        "provider": attempt.provider,
+        "provider": _column_text(attempt.provider, "provider"),
         "request_digest": attempt.request_digest,
         "lease_token_digest": attempt.lease_token_digest,
         "state": attempt.state.value,
         "started_at": attempt.started_at,
-        "session_id": attempt.session_id,
+        "session_id": _optional_column_text(attempt.session_id, "session_id"),
         "model_digest": attempt.model_digest,
         "prompt_digest": attempt.prompt_digest,
         "deadline_at": attempt.deadline_at,
         "finished_at": attempt.finished_at,
         "failure_code": attempt.failure_code,
-        "provider_request_id": attempt.provider_request_id,
+        "provider_request_id": _optional_column_text(
+            attempt.provider_request_id, "provider_request_id"
+        ),
         "metadata_json": dict(metadata),
         "metadata_dropped": attempt.metadata_dropped + extra_dropped,
     }
@@ -320,7 +354,7 @@ def finish_values(
 
     request_id: str | None = None
     if provider_request_id is not None:
-        request_id = _required(provider_request_id, "provider_request_id", max_length=160)
+        request_id = _column_text(provider_request_id, "provider_request_id")
 
     values: dict[str, Any] = {
         "state": target.value,
@@ -362,15 +396,20 @@ def start_insert_statement(*, attempt: ProviderAttempt) -> Insert:
 
 
 def read_statement(*, attempt_id: str, tenant_id: str | None = None) -> Select:
-    """``SELECT`` one attempt by primary key, optionally tenant-narrowed."""
+    """``SELECT`` one attempt by primary key, optionally tenant-narrowed.
+
+    A filter wider than its column cannot match a row and is refused rather than
+    silently returning ``None``: a caller passing the wrong identity should see a
+    refusal, not an absence that looks like "no attempt".
+    """
     statement = select(AgentRunProviderAttemptRow).where(
         AgentRunProviderAttemptRow.attempt_id
-        == _required(attempt_id, "attempt_id", max_length=64)
+        == _required(attempt_id, "attempt_id", max_length=_TEXT_WIDTHS["attempt_id"])
     )
     if tenant_id is not None:
         statement = statement.where(
             AgentRunProviderAttemptRow.tenant_id
-            == _required(tenant_id, "tenant_id", max_length=40)
+            == _required(tenant_id, "tenant_id", max_length=_TEXT_WIDTHS["tenant_id"])
         )
     return statement
 
@@ -386,7 +425,7 @@ def unresolved_statement(*, run_id: str, tenant_id: str | None = None) -> Select
         select(AgentRunProviderAttemptRow)
         .where(
             AgentRunProviderAttemptRow.run_id
-            == _required(run_id, "run_id", max_length=40),
+            == _required(run_id, "run_id", max_length=_TEXT_WIDTHS["run_id"]),
             AgentRunProviderAttemptRow.state.in_(UNRESOLVED_STATE_VALUES),
         )
         .order_by(
@@ -399,7 +438,7 @@ def unresolved_statement(*, run_id: str, tenant_id: str | None = None) -> Select
     if tenant_id is not None:
         statement = statement.where(
             AgentRunProviderAttemptRow.tenant_id
-            == _required(tenant_id, "tenant_id", max_length=40)
+            == _required(tenant_id, "tenant_id", max_length=_TEXT_WIDTHS["tenant_id"])
         )
     return statement
 
@@ -467,7 +506,8 @@ def finish_statement(
     return (
         update(row)
         .where(
-            row.attempt_id == _required(attempt_id, "attempt_id", max_length=64),
+            row.attempt_id
+            == _required(attempt_id, "attempt_id", max_length=_TEXT_WIDTHS["attempt_id"]),
             row.state == expected.value,
         )
         .values(**values)
@@ -666,13 +706,14 @@ class SqlAlchemyProviderAttemptJournal:
         before any SQL.  After the CAS, ``rowcount == 0`` is *classified from the
         stored row* instead of being returned as a vague zero:
 
-        * stored state is the requested target, or any other terminal state ->
-          ``ALREADY_TERMINAL`` (the outcome is already on record);
-        * stored state is ``unknown`` and the caller wanted a ``known_*`` outcome ->
-          ``UNKNOWN_REQUIRES_RECONCILIATION``;
         * the row is gone -> ``INVALID_RECORD`` (the journal cannot confirm it);
-        * anything else -> ``ILLEGAL_TRANSITION`` (the attempt moved somewhere the
-          caller did not expect).
+        * the stored state is the requested target, or any other terminal state ->
+          ``ALREADY_TERMINAL`` (an outcome is already on record, and the detail
+          names which one);
+        * the stored state is ``unknown`` and the caller wanted a ``known_*``
+          outcome -> ``UNKNOWN_REQUIRES_RECONCILIATION``;
+        * anything else (including a row that is still where the caller left it,
+          which means the read and the write disagree) -> ``ILLEGAL_TRANSITION``.
 
         Only ``rowcount == 1`` is returned as :meth:`CasUpdate.matched`; a lost
         race is therefore never reported as success.
@@ -724,7 +765,9 @@ class SqlAlchemyProviderAttemptJournal:
     ) -> ProviderAttempt | None:
         statement = select(AgentRunProviderAttemptRow).where(
             AgentRunProviderAttemptRow.idempotency_key
-            == _required(idempotency_key, "idempotency_key", max_length=160)
+            == _required(
+                idempotency_key, "idempotency_key", max_length=_TEXT_WIDTHS["idempotency_key"]
+            )
         )
         row = (await session.execute(statement)).scalars().one_or_none()
         return None if row is None else attempt_from_row(row)
@@ -776,6 +819,11 @@ def _refuse_lost_finish(
         raise AttemptRejected(
             AttemptRefusal.UNKNOWN_REQUIRES_RECONCILIATION,
             "an ambiguous provider outcome must be reconciled, never re-marked",
+        )
+    if stored.state is attempt.state:
+        raise AttemptRejected(
+            AttemptRefusal.ILLEGAL_TRANSITION,
+            f"attempt is unchanged at {stored.state.value} but the transition did not apply",
         )
     raise AttemptRejected(
         AttemptRefusal.ILLEGAL_TRANSITION,

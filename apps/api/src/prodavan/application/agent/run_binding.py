@@ -77,6 +77,11 @@ Call sites (exact; the owner of those files wires them — nothing here imports
    the natural stable ``frame_key``; the returned ``sequence`` then replaces the
    session-local ``seq`` that leaves on the wire::
 
+       binding = await bridge.resolve_turn(
+           key=TurnBindingKey(project_id, session_id, stable_turn_id),
+           tenant_id=project.company_id,
+           actor_id=employee.id,
+       )
        frame = await bridge.append_stream_frame(
            binding=binding,
            frame_key=f"agent-event:{seq}",
@@ -86,12 +91,19 @@ Call sites (exact; the owner of those files wires them — nothing here imports
        yield {**normalized.to_dict(), "seq": frame.sequence,
               "run_id": binding.run_id}
 
+   ``_iter_send_events`` already receives ``turn_id``, so it does **not** need
+   the binding threaded through ``DetachedTurn`` (which would mean editing
+   ``detached_turn.py``): :meth:`DurableRunBindingBridge.resolve_turn` re-derives
+   it from ``(project, session, turn)`` through the durable row. Resolve it once
+   per turn (right after the ``user_message`` persistence) and reuse it for the
+   rest of the stream.
+
 3. ``session_service._detached_events`` — in the block that marks the
    ``AgentTurnRow`` ``completed``/``failed`` (and in the ``CancelledError``
-   branch)::
+   branch):: 
 
        await bridge.finish_turn(
-           binding=binding,
+           binding=binding,  # resolved as in (2)
            outcome=TurnOutcome.SUCCEEDED,  # FAILED / CANCELLED
            failure_code=turn.error_code,
        )
@@ -217,6 +229,7 @@ CODE_CONCURRENT_ACTIVE_RUN = "RUN_BINDING_CONCURRENT_ACTIVE_RUN"
 BLOCKER_TURN_UNBOUND = "legacy_chat_turn_run_unbound"
 BLOCKER_TENANT_SCOPE = "legacy_chat_turn_tenant_scope_denied"
 BLOCKER_TURN_TERMINAL = "legacy_chat_turn_run_terminal"
+BLOCKER_TURN_STATUS = "legacy_chat_turn_run_status_unsupported"
 BLOCKER_STREAM_FRAME_CONTRACT = "agent_run_stream_frame_write_contract_missing"
 BLOCKER_SEQUENCE = "run_aggregate_sequence_unavailable"
 BLOCKER_STORE = "run_binding_store_unavailable"
@@ -539,7 +552,6 @@ class SqlAlchemyRunBindingStore:
         from prodavan.infrastructure.persistence.agent_control_plane.models import (
             AgentControlPlaneEventRow,
         )
-
         try:
             async with self._session_factory() as session:
                 value = await session.scalar(
@@ -561,6 +573,57 @@ class SqlAlchemyRunBindingStore:
             ) from exc
         return int(value) if value is not None else None
 
+    async def read_active_run(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        tenant_id: str,
+        exclude_binding_key: str,
+    ) -> DurableRunState | None:
+        """The session's other live run, if any (ambiguity guard for bind_turn).
+
+        One session must not carry two simultaneously active runs: the canonical
+        stream index would then have to guess which run a frame belongs to.
+        """
+        from prodavan.infrastructure.persistence.agent_control_plane.models import (
+            AgentControlPlaneRunScopeRow,
+        )
+        from prodavan.infrastructure.persistence.models.agent_control_plane import AgentRunRow
+
+        try:
+            async with self._session_factory() as session:
+                row = (
+                    await session.execute(
+                        select(AgentRunRow.id, AgentRunRow.status)
+                        .join(
+                            AgentControlPlaneRunScopeRow,
+                            AgentControlPlaneRunScopeRow.run_id == AgentRunRow.id,
+                        )
+                        .where(
+                            AgentRunRow.project_id == project_id,
+                            AgentRunRow.session_id == session_id,
+                            AgentRunRow.idempotency_key != exclude_binding_key,
+                            AgentRunRow.status.in_(
+                                tuple(status.value for status in LIVE_RUN_STATUSES)
+                            ),
+                            AgentControlPlaneRunScopeRow.tenant_id == tenant_id,
+                        )
+                        .order_by(AgentRunRow.created_at.desc(), AgentRunRow.id.desc())
+                        .limit(1)
+                    )
+                ).first()
+        except Exception as exc:  # noqa: BLE001 - redacted into a stable code
+            logger.warning("active run read failed error=%s", type(exc).__name__)
+            raise RunBindingError(
+                CODE_STORE_UNAVAILABLE,
+                BLOCKER_STORE,
+                detail="the session's active run could not be read",
+            ) from exc
+        if row is None:
+            return None
+        return DurableRunState(run_id=str(row[0]), status=str(row[1]))
+
 
 def frame_idempotency_key(
     *,
@@ -569,15 +632,56 @@ def frame_idempotency_key(
     turn_id: str,
     frame_key: str,
 ) -> str:
-    """Content-derived, sequence-free key of one durable stream frame.
+    """Content-derived, sequence-free *event* key of one durable stream frame.
 
     Sequence-free on purpose: a re-delivered frame must resolve to the sequence
     already allocated for it, so the key may not contain the sequence it is about
-    to claim. ``EventEnvelope.idempotency_key`` and
+    to claim. It is the event/transition idempotency key, so
+    ``uq_acp_events_tenant_idempotency`` itself makes a second event row for the
+    same frame impossible. ``EventEnvelope.idempotency_key`` and
     ``AgentControlPlaneEventRow.idempotency_key`` both cap at 128 characters,
     hence the digest form.
     """
     return "chat-frame:" + _digest("frame", tenant_id, session_id, turn_id, frame_key)
+
+
+def frame_command_key(
+    *,
+    tenant_id: str,
+    session_id: str,
+    turn_id: str,
+    frame_key: str,
+    expected_sequence: int,
+) -> str:
+    """Command (receipt) key of one *attempt* to write a stream frame.
+
+    Deliberately sequence-bound while the event key is not, because the two keys
+    guard two different things:
+
+    * the sequence-free event key makes "at most one event row per frame"
+      enforceable by ``uq_acp_events_tenant_idempotency`` — that is redelivery
+      idempotency;
+    * an ``aggregate_sequence_conflict`` *does* leave a durable command receipt
+      (the repository records ``conflict`` results), so reusing the content key
+      as the command key would make that frame permanently unrecoverable: the
+      retry carries a new expected cursor, hence a new digest, hence
+      ``idempotency_key_payload_conflict`` forever. Keying the attempt by the
+      cursor it claims makes the retry a fresh command while the round-tripped
+      event key still cannot duplicate the frame.
+
+    (A contract-level rejection such as an unsupported operation raises before
+    any receipt is written, so it needs no special handling.)
+    """
+    if expected_sequence < 1:
+        raise ValueError("expected_sequence must be positive")
+    return "chat-frame-attempt:" + _digest(
+        "frame-attempt",
+        tenant_id,
+        session_id,
+        turn_id,
+        frame_key,
+        str(expected_sequence),
+    )
 
 
 def build_stream_frame_write(
@@ -602,11 +706,22 @@ def build_stream_frame_write(
     """
     if expected_sequence < 1:
         raise ValueError("expected_sequence must be positive")
-    key = frame_idempotency_key(
+    # Two different keys on purpose (see the two helpers): the event key is
+    # content-derived so the frame can never be recorded twice, while the
+    # command key is attempt-scoped so a stale-sequence retry is a fresh command
+    # instead of a poisoned replay.
+    transition_key = frame_idempotency_key(
         tenant_id=binding.tenant_id,
         session_id=binding.session_id,
         turn_id=binding.turn_id,
         frame_key=frame_key,
+    )
+    command_key = frame_command_key(
+        tenant_id=binding.tenant_id,
+        session_id=binding.session_id,
+        turn_id=binding.turn_id,
+        frame_key=frame_key,
+        expected_sequence=expected_sequence,
     )
     sequence = expected_sequence + 1
     status = binding.status.value
@@ -634,12 +749,12 @@ def build_stream_frame_write(
             "project_id": linkage.project_id,
             "session_id": linkage.session_id,
             "trace_id": linkage.trace_id,
-            "command_idempotency_key": key,
+            "command_idempotency_key": command_key,
         },
     }
     command = ControlPlaneWriteCommand(
         operation=STREAM_FRAME_OPERATION,
-        command_idempotency_key=key,
+        command_idempotency_key=command_key,
         linkage=linkage,
         run_id=binding.run_id,
         aggregates=(
@@ -662,12 +777,6 @@ def build_stream_frame_write(
             "output_payload": None,
         },
     )
-    transition_key = _frame_transition_key(
-        tenant_id=binding.tenant_id,
-        run_id=binding.run_id,
-        sequence=sequence,
-        command_key=key,
-    )
     event = EventEnvelope(
         event_id=_frame_event_id(
             tenant_id=binding.tenant_id,
@@ -682,7 +791,7 @@ def build_stream_frame_write(
         aggregate_id=binding.run_id,
         run_id=binding.run_id,
         session_id=binding.session_id,
-        correlation_id=_frame_correlation_id(key),
+        correlation_id=_frame_correlation_id(transition_key),
         idempotency_key=transition_key,
         sequence=sequence,
         payload=body,
@@ -809,7 +918,11 @@ class DurableRunBindingBridge:
           the stream index ambiguous.
         """
         tenant = _required(tenant_id, "tenant_id", max_length=64)
-        actor = _required(actor_id, "actor_id", max_length=128)
+        # 64, not 128: this actor is projected into
+        # ``agent_runs.requested_by_employee_id`` (String(40)) via
+        # ``AgentRunCreate.requested_by_employee_id`` (max_length=64), so an
+        # over-long value must fail here rather than as a late domain error.
+        actor = _required(actor_id, "actor_id", max_length=64)
         trace = (trace_id or "").strip() or f"chat-turn:{key.session_id}:{key.turn_id}"
         scope = await self._read_scope(key)
         self._require_scope(scope, tenant_id=tenant)
@@ -819,27 +932,37 @@ class DurableRunBindingBridge:
             binding = await self._binding_from_state(
                 key=key, tenant_id=tenant, state=state, trace_id=trace, actor_id=actor
             )
-            if binding.terminal or binding.status is not AgentRunStatus.QUEUED:
+            # Only a queued run may be started. Every other durable status is
+            # returned as it is: a terminal turn is terminal, and a status the
+            # chat turn cannot legitimately drive (``retry_due`` belongs to the
+            # automation worker, ``waiting_approval`` to a pending decision) is
+            # reported, not overwritten. The frame path then refuses that turn by
+            # name instead of advancing a run in the wrong state.
+            if binding.status is not AgentRunStatus.QUEUED:
                 return binding
             return await self._start(binding=binding)
 
         await self._refuse_if_other_active_run(key=key, tenant_id=tenant)
 
         control_plane = self._control_plane(tenant)
-        created = await control_plane.submit_run(
-            AgentRunCreate(
-                project_id=key.project_id,
-                session_id=key.session_id,
-                requested_by_employee_id=actor,
-                idempotency_key=key.run_command_key,
-                # Metadata only: the prompt never enters the run record.
-                input_payload={
-                    "turn_id": key.turn_id,
-                    "session_id": key.session_id,
-                    "entrypoint": entrypoint[:128],
-                },
-            ),
-            linkage=self._linkage(key=key, tenant_id=tenant, actor_id=actor, trace_id=trace),
+        created = await self._atomic(
+            control_plane.submit_run(
+                AgentRunCreate(
+                    project_id=key.project_id,
+                    session_id=key.session_id,
+                    requested_by_employee_id=actor,
+                    idempotency_key=key.run_command_key,
+                    # Metadata only: the prompt never enters the run record.
+                    input_payload={
+                        "turn_id": key.turn_id,
+                        "session_id": key.session_id,
+                        "entrypoint": entrypoint[:128],
+                    },
+                ),
+                linkage=self._linkage(
+                    key=key, tenant_id=tenant, actor_id=actor, trace_id=trace
+                ),
+            )
         )
         if created.status is ControlPlaneWriteStatus.BLOCKED:
             raise RunBindingError(
@@ -860,7 +983,7 @@ class DurableRunBindingBridge:
             binding = await self._binding_from_state(
                 key=key, tenant_id=tenant, state=state, trace_id=trace, actor_id=actor
             )
-            if binding.terminal or binding.status is not AgentRunStatus.QUEUED:
+            if binding.status is not AgentRunStatus.QUEUED:
                 return binding
             return await self._start(binding=binding)
         if created.status not in {
@@ -938,7 +1061,7 @@ class DurableRunBindingBridge:
         if binding.status not in FRAMING_RUN_STATUSES:
             raise RunBindingError(
                 CODE_STATUS_UNSUPPORTED,
-                BLOCKER_STREAM_FRAME_CONTRACT,
+                BLOCKER_TURN_STATUS,
                 detail="frames are only appended to a running run",
             )
 
@@ -1001,13 +1124,13 @@ class DurableRunBindingBridge:
         if binding.status not in LIVE_RUN_STATUSES:
             raise RunBindingError(
                 CODE_STATUS_UNSUPPORTED,
-                BLOCKER_TURN_UNBOUND,
+                BLOCKER_TURN_STATUS,
                 detail="the turn's run status cannot be terminated",
             )
         if outcome is TurnOutcome.SUCCEEDED and binding.status is not AgentRunStatus.RUNNING:
             raise RunBindingError(
                 CODE_STATUS_UNSUPPORTED,
-                BLOCKER_TURN_UNBOUND,
+                BLOCKER_TURN_STATUS,
                 detail="only a running run can succeed",
             )
         expected = await self._require_sequence(
@@ -1022,7 +1145,7 @@ class DurableRunBindingBridge:
         )
         command_key = binding.key.finish_command_key(outcome)
         if outcome is TurnOutcome.SUCCEEDED:
-            result = await control_plane.succeed_run(
+            pending = control_plane.succeed_run(
                 run_id=binding.run_id,
                 linkage=linkage,
                 expected_sequence=expected,
@@ -1030,7 +1153,7 @@ class DurableRunBindingBridge:
                 output_payload=output_payload,
             )
         elif outcome is TurnOutcome.FAILED:
-            result = await control_plane.fail_run(
+            pending = control_plane.fail_run(
                 run_id=binding.run_id,
                 linkage=linkage,
                 expected_sequence=expected,
@@ -1040,7 +1163,7 @@ class DurableRunBindingBridge:
                 reason=reason,
             )
         else:
-            result = await control_plane.cancel_run(
+            pending = control_plane.cancel_run(
                 run_id=binding.run_id,
                 linkage=linkage,
                 expected_sequence=expected,
@@ -1048,6 +1171,7 @@ class DurableRunBindingBridge:
                 command_idempotency_key=command_key,
                 reason=reason,
             )
+        result = await self._atomic(pending)
         return await self._settle_terminal(result=result, fallback=binding)
 
     # -- internals ------------------------------------------------------------
@@ -1176,16 +1300,18 @@ class DurableRunBindingBridge:
     async def _start(self, *, binding: TurnRunBinding) -> TurnRunBinding:
         """Move a queued run to running (idempotent) so frames have a live owner."""
         control_plane = self._control_plane(binding.tenant_id)
-        result = await control_plane.start_run(
-            run_id=binding.run_id,
-            linkage=self._linkage(
-                key=binding.key,
-                tenant_id=binding.tenant_id,
-                actor_id=binding.actor_id,
-                trace_id=binding.trace_id,
-            ),
-            expected_sequence=binding.run_sequence,
-            command_idempotency_key=binding.key.start_command_key(),
+        result = await self._atomic(
+            control_plane.start_run(
+                run_id=binding.run_id,
+                linkage=self._linkage(
+                    key=binding.key,
+                    tenant_id=binding.tenant_id,
+                    actor_id=binding.actor_id,
+                    trace_id=binding.trace_id,
+                ),
+                expected_sequence=binding.run_sequence,
+                command_idempotency_key=binding.key.start_command_key(),
+            )
         )
         if result.status is ControlPlaneWriteStatus.BLOCKED:
             raise RunBindingError(
@@ -1284,7 +1410,7 @@ class DurableRunBindingBridge:
         except ValueError as exc:
             raise RunBindingError(
                 CODE_STATUS_UNSUPPORTED,
-                BLOCKER_TURN_UNBOUND,
+                BLOCKER_TURN_STATUS,
                 detail="the durable run carries an unknown status",
             ) from exc
         sequence = await self._require_sequence(run_id=state.run_id, tenant_id=tenant_id)
@@ -1402,6 +1528,41 @@ class DurableRunBindingBridge:
         )
 
 
+def build_run_binding_bridge(
+    *,
+    session_factory: SessionFactory,
+    queue_name: str = "agent-control-plane",
+    producer: str = "agent-run-binding",
+    clock: Clock | None = None,
+    stream_frames_enabled: bool = False,
+) -> DurableRunBindingBridge:
+    """Compose the production bridge over the real repository and read store.
+
+    Both halves are built from the same process session factory, so a caller
+    (``session_service``) needs no extra dependency beyond what it already has.
+    The import is lazy to keep this module free of an infrastructure import at
+    import time — the same pattern ``api/migration_agent_runs/dependencies.py``
+    uses for its repository.
+
+    ``stream_frames_enabled`` stays ``False`` until the control-plane write
+    contract accepts ``agent_run.stream_frame`` (see the module docstring): with
+    it off, a frame attempt refuses by name instead of writing evidence the
+    canonical index could not prove.
+    """
+    from prodavan.infrastructure.persistence.agent_control_plane import (
+        SqlAlchemyAgentControlPlaneRepository,
+    )
+
+    return DurableRunBindingBridge(
+        transaction=SqlAlchemyAgentControlPlaneRepository(session_factory=session_factory),
+        store=SqlAlchemyRunBindingStore(session_factory),
+        queue_name=queue_name,
+        producer=producer,
+        clock=clock,
+        stream_frames_enabled=stream_frames_enabled,
+    )
+
+
 def _bounded_failure_code(value: str | None) -> str:
     cleaned = (value or "agent_run.failed").strip() or "agent_run.failed"
     return cleaned[:128]
@@ -1433,14 +1594,6 @@ def _plain(value: Any) -> Any:
     return value
 
 
-def _frame_transition_key(
-    *, tenant_id: str, run_id: str, sequence: int, command_key: str
-) -> str:
-    return "chat-frame-transition:" + _digest(
-        "transition", tenant_id, RUN_AGGREGATE_TYPE, run_id, str(sequence), command_key
-    )
-
-
 def _frame_event_id(
     *, tenant_id: str, run_id: str, sequence: int, transition_key: str
 ) -> UUID:
@@ -1462,6 +1615,7 @@ __all__ = [
     "BLOCKER_STREAM_FRAME_CONTRACT",
     "BLOCKER_TENANT_SCOPE",
     "BLOCKER_TURN_TERMINAL",
+    "BLOCKER_TURN_STATUS",
     "BLOCKER_TURN_UNBOUND",
     "CODE_ATOMIC_WRITE_REJECTED",
     "CODE_CONCURRENT_ACTIVE_RUN",
@@ -1490,6 +1644,8 @@ __all__ = [
     "TurnBindingKey",
     "TurnOutcome",
     "TurnRunBinding",
+    "build_run_binding_bridge",
     "build_stream_frame_write",
+    "frame_command_key",
     "frame_idempotency_key",
 ]

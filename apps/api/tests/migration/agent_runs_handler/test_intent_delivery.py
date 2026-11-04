@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from prodavan.application.agent_runs.dispatcher import (
     EnqueueIntentDispatcher,
     IntentDispatchAction,
@@ -19,6 +21,7 @@ from prodavan.application.agent_runs.dispatcher import (
     IntentScopeViolation,
     build_execution_handlers,
 )
+from prodavan.application.agent_runs.handler import EXECUTABLE_INTENT_KINDS
 from prodavan.domain.agent.control_plane import AgentRunStatus
 
 from .acceptance_fixtures import (
@@ -43,15 +46,17 @@ def dispatcher_for(
     max_attempts: int = 8,
     handlers=None,
 ) -> EnqueueIntentDispatcher:
-    from prodavan.application.agent_runs.handler import build_run_intent_handlers
-
+    """Dispatcher over the harness's own handler instance (same counters/logs)."""
+    registry = (
+        handlers
+        if handlers is not None
+        else {kind: harness.handler for kind in EXECUTABLE_INTENT_KINDS}
+    )
     return EnqueueIntentDispatcher(
         consumer=consumer,
         resolver=resolver or FixedResolver(make_target()),
         execution=None,
-        handlers=handlers
-        if handlers is not None
-        else build_run_intent_handlers(pipeline=harness.pipeline, clock=harness.clock),
+        handlers=registry,
         max_attempts=max_attempts,
     )
 
@@ -92,7 +97,7 @@ async def test_created_intent_executes_one_turn_and_is_delivered() -> None:
 
     # The provider attempt journal saw the start and the terminal outcome.
     assert harness.attempt_port.start_calls == 1
-    assert [state.value for _, state in harness.attempt_port.finishes] == ["succeeded"]
+    assert [state.value for _, state in harness.attempt_port.finishes] == ["known_succeeded"]
 
     # Settlement dropped the run lease, so the run cannot look held.
     assert harness.lease.lease_owner is None
@@ -141,6 +146,56 @@ async def test_handler_claims_the_run_address_on_the_intent_not_a_neighbour() ->
     assert scope.expected_status is AgentRunStatus.QUEUED
 
 
+async def test_dispatcher_composition_registers_the_real_handler() -> None:
+    """The host cannot upgrade a legacy registry in place; this is the seam."""
+    from prodavan.application.agent_runs.handler import (
+        build_intent_dispatcher_with_run_handler,
+    )
+
+    harness = build_harness()
+    consumer = MemoryIntentStore(intents=[make_intent()])
+    dispatcher = build_intent_dispatcher_with_run_handler(
+        consumer=consumer,
+        resolver=FixedResolver(make_target()),
+        pipeline=harness.pipeline,
+        clock=harness.clock,
+    )
+
+    assert dispatcher.registered_kinds == frozenset({IntentKind.RUN_CREATED})
+
+    # A dispatcher composed the documented way (``build_execution_handlers`` over
+    # any port) already owns ``agent_run.created`` and cannot be upgraded in
+    # place — ``register`` refuses a duplicate kind, which is exactly why the
+    # composition helper exists.
+    legacy = dispatcher_for(
+        MemoryIntentStore(), harness, handlers=build_execution_handlers(object())
+    )
+    assert legacy.registered_kinds == frozenset({IntentKind.RUN_CREATED})
+    with pytest.raises(ValueError):
+        legacy.register(IntentKind.RUN_CREATED, harness.handler)
+
+    report = await dispatcher.dispatch_batch(owner_id="worker-a", limit=5)
+    assert report.delivered == 1
+    assert harness.run.status == AgentRunStatus.SUCCEEDED.value
+    assert harness.runner.calls == 1
+
+
+async def test_dispatcher_composition_rejects_a_non_consumer() -> None:
+    from prodavan.application.agent_runs.handler import (
+        build_intent_dispatcher_with_run_handler,
+    )
+
+    harness = build_harness()
+    with pytest.raises(TypeError):
+        build_intent_dispatcher_with_run_handler(
+            consumer=object(), resolver=FixedResolver(make_target()), pipeline=harness.pipeline
+        )
+    with pytest.raises(TypeError):
+        build_intent_dispatcher_with_run_handler(
+            consumer=MemoryIntentStore(), resolver=object(), pipeline=harness.pipeline
+        )
+
+
 async def test_registry_registers_only_executable_kinds() -> None:
     from prodavan.application.agent_runs import (
         EXECUTABLE_INTENT_KINDS,
@@ -181,19 +236,43 @@ async def test_handler_refuses_a_kind_it_does_not_execute() -> None:
 
 
 async def test_delivery_logs_contain_no_secret_and_no_prompt() -> None:
+    from dataclasses import replace
+
+    from prodavan.application.agent_runs.handler import build_run_intent_handler
+
     harness = build_harness(input_payload={"text": f"please summarise {SECRET_MARKER}"})
-    intent = make_intent(payload_extra={"prompt": SECRET_MARKER, "api_key": SECRET_MARKER})
-    consumer = MemoryIntentStore(intents=[intent])
+    # Phase 1: a normal delivery (the worker/adapter log a heartbeat-free success).
+    consumer = MemoryIntentStore(intents=[make_intent(payload_extra={"prompt": SECRET_MARKER})])
     dispatcher = dispatcher_for(consumer, harness)
+
+    # Phase 2: a blocked delivery, which is the path that definitely logs.
+    blocked_harness = build_harness()
+    blocked = build_run_intent_handler(
+        pipeline=replace(blocked_harness.pipeline, runner=None), clock=blocked_harness.clock
+    )
+    blocked_dispatcher = dispatcher_for(
+        MemoryIntentStore(intents=[make_intent(lease_token=SECRET_MARKER)]),
+        blocked_harness,
+        handlers={IntentKind.RUN_CREATED: blocked},
+    )
 
     with capture_handler_logs() as logs:
         await dispatcher.dispatch_batch(owner_id="worker-a", limit=5)
+        await blocked_dispatcher.dispatch_batch(owner_id="worker-a", limit=5)
 
     assert harness.run.status == AgentRunStatus.SUCCEEDED.value
+    assert logs.records, "the blocked path must log its named blocker"
     assert SECRET_MARKER not in logs.text
     assert SECRET_MARKER not in json.dumps(harness.handler.report())
+    assert SECRET_MARKER not in json.dumps(blocked.report())
     assert SECRET_MARKER not in " ".join(consumer.audit_records)
     assert "intent-lease-token" not in json.dumps(harness.handler.report())
+    # The audit vocabulary is closed: only fixed reason codes and counters.
+    for record in consumer.audit_records:
+        for token in record.split():
+            key, _, value = token.partition("=")
+            assert key in {"action", "reason", "kind", "attempts"}
+            assert value and len(value) <= 64
 
 
 async def test_scope_violation_is_refused_terminally_without_execution() -> None:

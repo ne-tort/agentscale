@@ -112,7 +112,38 @@ Blockers this module does not hide
   terminally instead of letting them retry for a day.
 * ``agent_run_intent_host_registration_pending`` — exporting the factory is not
   wiring it: the host resource (``core/infra/agent_run_worker_resource.py``,
-  another task's zone) must still register these handlers on its dispatcher.
+  another task's zone) must still build its dispatcher with this registry.
+  ``EnqueueIntentDispatcher.register`` refuses to overwrite an existing kind, and
+  ``intent_consumer.build_intent_dispatcher`` hardcodes
+  ``handlers=build_execution_handlers(execution)``, so a dispatcher composed that
+  way cannot be upgraded in place.
+  :func:`build_intent_dispatcher_with_run_handler` is the in-zone composition that
+  takes the two ports the host already owns (consumer + scope resolver) and
+  returns a dispatcher whose registry is this handler.
+
+Host wiring (what the other zone has to pass)
+---------------------------------------------
+``IntentExecutionPipeline`` is deliberately port-shaped so the application tier
+never imports infrastructure; the host composes it once at startup::
+
+    pipeline = IntentExecutionPipeline(
+        lease_store=SqlAlchemyRunLeaseStore(session_factory=...),
+        execution_factory=lambda leases: ControlPlaneAgentRunExecutionAdapter(
+            leases=leases, control_plane=control_plane, runs=run_read_port
+        ),
+        runs=run_read_port,                      # AgentControlPlaneReadPort
+        journal=ProviderAttemptJournal(port=attempt_port),
+        runner=SessionAgentTurnRunner(owner_id=...),
+    )
+    dispatcher = build_intent_dispatcher_with_run_handler(
+        consumer=SqlAlchemyIntentConsumer(session_factory=..., queue_name=...),
+        resolver=SqlAlchemyIntentScopeResolver(session_factory=...),
+        pipeline=pipeline,
+    )
+
+The adapter is constructed per dispatch *with the narrowed lease store*, which is
+what makes the claim addressable; a host that passes a pre-built adapter instead
+would reintroduce the "claims whatever run is next" gap.
 """
 
 from __future__ import annotations
@@ -131,10 +162,13 @@ from prodavan.application.agent_runs.dispatcher import (
     ClaimedIntent,
     DispatchContext,
     DispatchHandler,
+    EnqueueIntentDispatcher,
+    IntentConsumerPort,
     IntentDispatchAction,
     IntentDispatchOutcome,
     IntentDispatchReason,
     IntentKind,
+    IntentScopeResolverPort,
     ResolvedIntentTarget,
     delivered,
     quarantined,
@@ -185,7 +219,6 @@ BLOCKER_EXECUTION_FACTORY_FAILED = "agent_run_intent_execution_factory_failed"
 BLOCKER_RUN_SOURCE_UNWIRED = "agent_run_intent_run_input_source_unwired"
 BLOCKER_JOURNAL_UNWIRED = "agent_run_intent_attempt_journal_unwired"
 BLOCKER_TURN_RUNNER_UNWIRED = "agent_run_intent_turn_runner_unwired"
-BLOCKER_WORKER_REFUSED = "agent_run_intent_worker_unavailable"
 BLOCKER_WORKER_CONFIG_INVALID = "agent_run_intent_worker_config_invalid"
 
 #: Tick statuses that mean "the addressed run got its one settlement write", i.e.
@@ -551,6 +584,9 @@ class AgentRunIntentHandler:
     async def __call__(self, context: DispatchContext) -> IntentDispatchOutcome:
         if not isinstance(context, DispatchContext):
             raise TypeError("the intent handler requires a DispatchContext")
+        # ``last_blocker`` describes the most recent dispatch, so a dependency that
+        # was assembled later does not keep the handler looking blocked forever.
+        self._report.last_blocker = None
         if context.kind not in EXECUTABLE_INTENT_KINDS:
             # Nothing here may interpret a kind it does not execute: retrying it
             # would walk a handoff nobody owns towards a poison pill, so the
@@ -897,6 +933,61 @@ def build_terminal_refusal_handlers(
     return registry
 
 
+def build_intent_dispatcher_with_run_handler(
+    *,
+    consumer: IntentConsumerPort,
+    resolver: IntentScopeResolverPort,
+    pipeline: IntentExecutionPipeline | None = None,
+    execution: AgentRunExecutionPort | None = None,
+    owner_prefix: str = DEFAULT_OWNER_PREFIX,
+    lease_policy: LeasePolicy | None = None,
+    max_attempts: int = DEFAULT_MAX_ATTEMPTS,
+    retry_backoff_seconds: float = DEFAULT_RETRY_BACKOFF_SECONDS,
+    max_retry_backoff_seconds: float = DEFAULT_MAX_RETRY_BACKOFF_SECONDS,
+    retry_delay_seconds: float = DEFAULT_RETRY_DELAY_SECONDS,
+    clock: Callable[[], datetime] | None = None,
+) -> EnqueueIntentDispatcher:
+    """Compose a dispatcher whose registry contains this handler.
+
+    Needed because ``EnqueueIntentDispatcher.register`` refuses to overwrite a
+    kind: a dispatcher already composed with ``build_execution_handlers`` (which
+    registers the legacy, non-addressable ``AgentRunExecutionHandler`` for
+    ``agent_run.created``) cannot be upgraded in place.  A host therefore builds
+    the dispatcher with the right registry from the start, from the two ports it
+    already owns (the durable consumer and the scope resolver); this function is
+    that composition and nothing else — every policy default stays the
+    dispatcher's own.
+
+    ``execution`` is the port exposed on :class:`DispatchContext` for handlers
+    that need it directly; this handler never reads it (it addresses the run
+    through the pipeline), so it is optional.
+    """
+    if not callable(getattr(consumer, "claim", None)) or not callable(
+        getattr(consumer, "record_outcome", None)
+    ):
+        raise TypeError("consumer must implement IntentConsumerPort")
+    if not callable(getattr(resolver, "resolve", None)):
+        raise TypeError("resolver must implement IntentScopeResolverPort")
+    return EnqueueIntentDispatcher(
+        consumer=consumer,
+        resolver=resolver,
+        execution=execution,
+        handlers=build_run_intent_handlers(
+            pipeline=pipeline,
+            owner_prefix=owner_prefix,
+            lease_policy=lease_policy,
+            max_attempts=max_attempts,
+            retry_backoff_seconds=retry_backoff_seconds,
+            max_retry_backoff_seconds=max_retry_backoff_seconds,
+            retry_delay_seconds=retry_delay_seconds,
+            clock=clock,
+        ),
+        max_attempts=max_attempts,
+        retry_backoff_seconds=retry_backoff_seconds,
+        max_retry_backoff_seconds=max_retry_backoff_seconds,
+    )
+
+
 __all__ = [
     "AddressableRunScope",
     "AgentRunIntentHandler",
@@ -908,7 +999,6 @@ __all__ = [
     "BLOCKER_RUN_SOURCE_UNWIRED",
     "BLOCKER_TURN_RUNNER_UNWIRED",
     "BLOCKER_WORKER_CONFIG_INVALID",
-    "BLOCKER_WORKER_REFUSED",
     "DEFAULT_OWNER_PREFIX",
     "DEFAULT_RETRY_DELAY_SECONDS",
     "EXECUTABLE_INTENT_KINDS",
@@ -917,6 +1007,7 @@ __all__ = [
     "IntentHandlerReport",
     "IntentHandlerUnavailable",
     "TerminalIntentRefusalHandler",
+    "build_intent_dispatcher_with_run_handler",
     "build_run_intent_handler",
     "build_run_intent_handlers",
     "build_terminal_refusal_handlers",

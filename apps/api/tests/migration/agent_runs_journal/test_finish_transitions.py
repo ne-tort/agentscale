@@ -253,7 +253,12 @@ async def test_a_finish_that_lost_the_race_to_the_same_state_is_already_terminal
     assert script.kinds == ["execute", "execute"]
 
 
-async def test_a_finish_that_lost_the_race_to_another_outcome_is_illegal() -> None:
+async def test_a_finish_that_lost_the_race_to_another_outcome_is_already_terminal() -> None:
+    """Another worker decided the attempt differently: the outcome is on record.
+
+    ``ALREADY_TERMINAL`` is the honest answer — and it names the state that won,
+    so an operator can see *what* was recorded instead of guessing.
+    """
     attempt = record()
     winner = record(AttemptState.KNOWN_FAILED, failure_code=FAILURE_CODE)
     script = Script(
@@ -264,8 +269,28 @@ async def test_a_finish_that_lost_the_race_to_another_outcome_is_illegal() -> No
     with pytest.raises(AttemptRejected) as rejected:
         await store_for(script).finish_attempt(attempt, outcome=AttemptOutcome.SUCCEEDED, at=NOW)
 
-    assert rejected.value.reason is AttemptRefusal.ILLEGAL_TRANSITION
+    assert rejected.value.reason is AttemptRefusal.ALREADY_TERMINAL
     assert "known_failed" in rejected.value.detail
+
+
+async def test_a_finish_that_lost_the_race_without_any_state_change_is_illegal() -> None:
+    """The row is still where the caller left it, yet the CAS matched nothing.
+
+    That cannot be explained by the journal, so it is a refusal (never a silent
+    success): a ``0`` from a statement whose predicate describes the current row
+    means the read and the write disagree.
+    """
+    attempt = record()
+    unchanged = record()
+    script = Script(
+        Step("execute", FakeResult(rowcount=0)),
+        Step("execute", FakeResult(rows=(row_of(unchanged),))),
+    )
+
+    with pytest.raises(AttemptRejected) as rejected:
+        await store_for(script).finish_attempt(attempt, outcome=AttemptOutcome.SUCCEEDED, at=NOW)
+
+    assert rejected.value.reason is AttemptRefusal.ILLEGAL_TRANSITION
 
 
 async def test_a_finish_that_lost_the_race_to_unknown_requires_reconciliation() -> None:

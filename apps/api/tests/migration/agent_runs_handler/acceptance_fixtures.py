@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -40,7 +40,6 @@ from prodavan.application.agent_runs.attempts import ProviderAttemptJournal
 from prodavan.application.agent_runs.dispatcher import (
     ClaimedIntent,
     IntentDispatchOutcome,
-    IntentDispatchReason,
     IntentKind,
     IntentScopeViolation,
     ReservationStatus,
@@ -71,7 +70,6 @@ PROJECT = "project-handler"
 SESSION = "session-handler"
 EMPLOYEE = "employee-handler"
 RUN = "agr_handler"
-OTHER_RUN = "agr_handler_other"
 QUEUE = "agent-control-plane"
 DEDUP_KEY = "13=tenant-handler:10=agent_run:11=agr_handler:1=1"
 LINKAGE_KEY = "create-run-handler"
@@ -491,8 +489,12 @@ def make_target(
 # --------------------------------------------------------------------------- #
 
 
+SELECTOR_CAPTURE_LOGGER = "prodavan.application.agent_runs"
+"""Package logger: the handler, the adapter and the worker all propagate here."""
+
+
 class ListHandler(logging.Handler):
-    """Collect records so "no secret in a handler log line" can be asserted."""
+    """Collect records so "no secret in a log line" can be asserted."""
 
     def __init__(self) -> None:
         super().__init__(level=logging.DEBUG)
@@ -511,9 +513,14 @@ class ListHandler(logging.Handler):
 
 @contextmanager
 def capture_handler_logs() -> Iterator[ListHandler]:
-    """Capture ``prodavan.application.agent_runs.handler`` records only."""
+    """Capture everything ``application/agent_runs`` logs, not the root logger.
+
+    The handler, the execution adapter and the run worker all live under that
+    package, so a stray ``logger.info(payload)`` anywhere on the delivery path is
+    caught by the same assertion.
+    """
     handler = ListHandler()
-    target = logging.getLogger("prodavan.application.agent_runs.handler")
+    target = logging.getLogger(SELECTOR_CAPTURE_LOGGER)
     previous = target.level
     target.addHandler(handler)
     target.setLevel(logging.DEBUG)
@@ -525,25 +532,11 @@ def capture_handler_logs() -> Iterator[ListHandler]:
 
 
 # --------------------------------------------------------------------------- #
-# Convenience assertions helpers
+# Convenience builders
 # --------------------------------------------------------------------------- #
 
 
-def default_kind() -> IntentKind:
-    return IntentKind.RUN_CREATED
-
-
-def default_retry_reason() -> IntentDispatchReason:
-    return IntentDispatchReason.EXECUTION_UNWIRED
-
-
-def new_handler(pipeline: IntentExecutionPipeline | None = None, **kwargs: Any) -> AgentRunIntentHandler:
-    return build_run_intent_handler(pipeline=pipeline, **kwargs)
-
-
 def policy_with_ttl(*, seconds: float = 60.0) -> LeasePolicy:
+    """Lease policy the handler wires into ``WorkerConfig`` (must exceed 2 beats)."""
     return LeasePolicy(ttl=timedelta(seconds=seconds))
 
-
-def callable_factory(fn: Callable[[Any], Any]) -> Callable[[Any], Any]:
-    return fn

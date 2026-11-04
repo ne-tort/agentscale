@@ -28,7 +28,9 @@ from prodavan.application.agent.run_binding import (
     RunBindingScope,
     TurnBindingKey,
     TurnOutcome,
+    TurnRunBinding,
     build_stream_frame_write,
+    frame_command_key,
     frame_idempotency_key,
 )
 from prodavan.application.agent_control_plane import (
@@ -66,8 +68,9 @@ TERMINAL = {
 
 #: Exactly the lifecycle operations today's repository accepts, with the event
 #: name and the source status set it requires (see
-#: ``repository._validate_atomic_write``).
-_LIFECYCLE: dict[str, tuple[str, object]] = {
+#: ``repository._validate_atomic_write``). ``None`` means "creation": no expected
+#: source status is allowed.
+_LIFECYCLE: dict[str, tuple[str, set[AgentRunStatus] | None]] = {
     "agent_run.create": ("agent_run.created", None),
     "agent_run.start": ("agent_run.started", {AgentRunStatus.QUEUED}),
     "agent_run.succeed": ("agent_run.succeeded", {AgentRunStatus.RUNNING}),
@@ -79,10 +82,15 @@ _LIFECYCLE: dict[str, tuple[str, object]] = {
 class DoublesAtomicPort:
     """One object acting as the control-plane atomic port **and** its store.
 
-    ``stream_frames_supported`` mirrors the production contract of
-    ``SqlAlchemyAgentControlPlaneRepository._validate_atomic_write``: when it is
-    ``False`` (today's behaviour) a status-preserving ``agent_run.stream_frame``
-    write is rejected with ``ValueError`` before anything is persisted.
+    ``stream_frames_supported`` models
+    ``SqlAlchemyAgentControlPlaneRepository._validate_atomic_write``:
+
+    * ``True`` (the default here) is the contract *after* the extension named in
+      the ``run_binding`` module docstring — a status-preserving
+      ``agent_run.stream_frame`` write commits like any other transition;
+    * ``False`` is today's repository: the write is rejected with ``ValueError``
+      before anything is persisted, which the bridge must report as a named
+      blocker instead of dropping the frame.
     """
 
     def __init__(self, *, stream_frames_supported: bool = True) -> None:
@@ -322,7 +330,10 @@ def _conflict(reason: str) -> ControlPlaneWriteResult:
 
 @pytest.fixture
 def port() -> DoublesAtomicPort:
-    return DoublesAtomicPort()
+    """A port seeded with the active project/session of the routed turn."""
+    seeded = DoublesAtomicPort()
+    seeded.seed_project()
+    return seeded
 
 
 def bridge(port: DoublesAtomicPort, *, frames: bool = False) -> DurableRunBindingBridge:
@@ -637,15 +648,26 @@ async def test_finish_is_terminal_and_idempotent_and_frames_are_refused(port) ->
     failed = await component.finish_turn(
         binding=binding, outcome=TurnOutcome.FAILED, failure_code="TURN_ERROR"
     )
-    writes_after_finish = len(port.writes)
+    receipts_after_finish = len(port.receipts)
+    # The documented contract: the returned (terminal) binding is replayed
+    # without a second write.
     repeat = await component.finish_turn(
-        binding=binding, outcome=TurnOutcome.FAILED, failure_code="TURN_ERROR"
+        binding=failed, outcome=TurnOutcome.FAILED, failure_code="TURN_ERROR"
     )
 
     assert failed.terminal and failed.status is AgentRunStatus.FAILED
-    assert repeat.terminal
-    assert len(port.writes) == writes_after_finish
+    assert repeat.terminal and repeat.status is AgentRunStatus.FAILED
+    assert len(port.receipts) == receipts_after_finish
     assert port.runs[binding.run_id]["status"] == AgentRunStatus.FAILED.value
+
+    # A *stale* (pre-finish) binding is also safe: the CAS conflict is resolved
+    # from the durable row, never by creating a second run.
+    stale = await component.finish_turn(
+        binding=binding, outcome=TurnOutcome.FAILED, failure_code="TURN_ERROR"
+    )
+    assert stale.status is AgentRunStatus.FAILED
+    assert stale.run_sequence == port.aggregates[(RUN_AGGREGATE_TYPE, binding.run_id)][0]
+    assert len(port.runs) == 1
 
     with pytest.raises(RunBindingError) as terminal:
         await component.append_stream_frame(
@@ -684,10 +706,8 @@ async def test_write_failure_maps_to_a_named_error_without_fallback(port) -> Non
 # -- pure write builder -------------------------------------------------------
 
 
-def test_stream_frame_key_is_sequence_free_so_replay_is_stable(port) -> None:
-    binding = __import__(
-        "prodavan.application.agent.run_binding", fromlist=["TurnRunBinding"]
-    ).TurnRunBinding(
+def test_stream_frame_keys_separate_event_identity_from_attempt_identity(port) -> None:
+    binding = TurnRunBinding(
         run_id="agr_fixture",
         project_id=PROJECT,
         session_id=SESSION,
@@ -706,7 +726,10 @@ def test_stream_frame_key_is_sequence_free_so_replay_is_stable(port) -> None:
         tenant_id=TENANT, session_id=SESSION, turn_id="turn-a", frame_key="agent-event:1"
     )
     assert len(key) <= 128
-    assert "3" not in key.split(":", 1)[1]
+    # A different frame never collides with it.
+    assert key != frame_idempotency_key(
+        tenant_id=TENANT, session_id=SESSION, turn_id="turn-a", frame_key="agent-event:2"
+    )
 
     first = build_stream_frame_write(
         binding=binding,
@@ -728,7 +751,24 @@ def test_stream_frame_key_is_sequence_free_so_replay_is_stable(port) -> None:
         queue_name="agent-control-plane-test",
         producer="agent-run-binding-test",
     )
-    # Same frame identity, different cursor: the event identity moves with the
-    # sequence, while the *frame key* (the redelivery guard) does not.
-    assert first.command.command_idempotency_key == second.command.command_idempotency_key
+
+    # The *event* key is content-derived and sequence-free, so the database
+    # unique constraint makes a second row for the same frame impossible — this
+    # is what makes frame redelivery idempotent.
+    assert first.events[0].idempotency_key == second.events[0].idempotency_key == key
+    assert first.transition_idempotency_keys == second.transition_idempotency_keys == (key,)
+    # The *command* key is attempt-scoped, so a stale-sequence retry is a fresh
+    # command instead of a permanently poisoned receipt.
+    assert first.command.command_idempotency_key != second.command.command_idempotency_key
+    assert first.command.command_idempotency_key == frame_command_key(
+        tenant_id=TENANT,
+        session_id=SESSION,
+        turn_id="turn-a",
+        frame_key="agent-event:1",
+        expected_sequence=2,
+    )
     assert first.events[0].sequence == 3 and second.events[0].sequence == 4
+    # The frame payload is not in the command details or the event payload.
+    for write in (first, second):
+        assert "text" not in write.command.details
+        assert "text" not in write.events[0].payload
