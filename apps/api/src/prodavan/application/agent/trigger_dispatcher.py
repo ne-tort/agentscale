@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from prodavan.application.admin.subscription_gate import CompanySubscriptionGate
 from prodavan.application.agent.session_service import AgentSessionService
 from prodavan.application.pod_service import PodCommand
+from prodavan.application.pod_service.ports.pod_runtime import PodRuntimePort
 from prodavan.application.project_service import ProjectAccessPolicy
 from prodavan.application.projects.trigger_service import ProjectTriggerService
 from prodavan.domain.agent import PLATFORM_EVENT_USER_MESSAGE, AgentSessionStatus
@@ -30,13 +31,18 @@ _RUNTIME_EVENT_KINDS = frozenset({"system.schedule", "webhook.http"})
 
 
 class AgentTriggerDispatcher:
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(self, session: AsyncSession, *, runtime: PodRuntimePort | None = None) -> None:
         self._session = session
         self._sessions = AgentSessionService(session)
         self._projects = ProjectAccessPolicy(session)
         self._subscription = CompanySubscriptionGate(session)
         self._triggers = ProjectTriggerService(session)
-        self._pods = PodCommand(session)
+        # Reuse the caller's runtime when one is injected (reconcile holds an
+        # explicit adapter): deriving a second adapter from global settings here
+        # would dispatch through a different backend than the caller reconciles
+        # against, and would fail outright where settings name a runtime whose
+        # client is unavailable.
+        self._pods = PodCommand(session, runtime=runtime)
 
     async def dispatch_next(
         self,

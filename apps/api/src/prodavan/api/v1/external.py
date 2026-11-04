@@ -12,7 +12,7 @@ principal), so the same surface serves apps and people.
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Header, Query
 from pydantic import BaseModel, Field
@@ -822,7 +822,10 @@ async def list_webhook_deliveries(
     principal: PrincipalDep,
     session: AsyncSession = SessionDep,
     employee: EmployeeRow | None = _EmployeeDep,
-    limit: int = Query(default=100, ge=1, le=200),
+    # ``Query(...)`` may only supply metadata through ``Annotated``: as a bare
+    # default it stayed a ``Query`` instance and reached the service as the
+    # ``limit`` argument, so ``min(limit, 200)`` raised TypeError on every call.
+    limit: Annotated[int, Query(ge=1, le=200)] = 100,
 ) -> dict:
     _require_employee(employee)
     company_id = await _employee_company_id(session, employee)

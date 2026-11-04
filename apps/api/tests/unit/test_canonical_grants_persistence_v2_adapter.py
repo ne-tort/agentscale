@@ -1,17 +1,18 @@
-"""Source acceptance tests for the exclusive M06 V2 audit persistence zone.
+"""Acceptance tests for the exclusive M06 V2 audit persistence zone.
 
-Migration verification is intentionally frozen; this file is not executed here.
+These tests are executed: the migration verification freeze is lifted.
 """
 from __future__ import annotations
 
+import inspect
 from dataclasses import replace
 from datetime import UTC, datetime
-import inspect
 
 import pytest
 
 from prodavan.application.audit_integrity import AuditEventClass, AuditLinkedEvent, AuditOutcomeEvidence
-from prodavan.application.audit_outcome_adapter import AuditOutcomeAdapter, AuditOutcomeEvidence as AdapterOutcomeEvidence, AuditTransactionEvidenceV2
+from prodavan.application.audit_outcome_adapter import AuditOutcomeAdapter, AuditTransactionEvidenceV2
+from prodavan.application.audit_outcome_adapter import AuditOutcomeEvidence as AdapterOutcomeEvidence
 from prodavan.application.audit_outcomes import AuditDecision, AuditOutcome, AuditResult
 from prodavan.application.canonical_grants_persistence_v2_adapter import (
     CanonicalGrantsPersistenceV2Adapter,
@@ -19,7 +20,6 @@ from prodavan.application.canonical_grants_persistence_v2_adapter import (
 )
 from prodavan.application.canonical_grants_promotion import AuditResult as ProjectionResult
 from prodavan.application.canonical_grants_promotion import RedactedAuditOutcome
-
 
 DIGEST = "sha256:" + "a" * 64
 STAMP = datetime(2026, 1, 1, tzinfo=UTC)
@@ -188,14 +188,32 @@ async def test_trusted_append_rejects_broken_linked_digest_before_port_call():
 async def test_quarantine_never_calls_trusted_port():
     trusted, quarantine = Trusted(), Quarantine()
     adapter = CanonicalGrantsPersistenceV2Adapter(trusted=trusted, quarantine=quarantine)
-    quarantined = outcome(decision=AuditDecision.QUARANTINE, result_status=AuditResult.ERROR, error_code="review")
-    integrity = AuditOutcomeEvidence(quarantined, "project", "project-1", linked(AuditEventClass.AUTH, decision=AuditDecision.QUARANTINE, result_status=AuditResult.ERROR, error_code="review"), linked(AuditEventClass.FINAL_RESULT, decision=AuditDecision.QUARANTINE, result_status=AuditResult.ERROR, error_code="review"))
+    # The durable quarantine record is keyed by the canonical ``reason_code`` --
+    # the same field ``AuditIntegrityService.append`` uses -- while ``error_code``
+    # describes the execution error.  The fixture used to keep the helper's
+    # default ``reason_code="allowed"`` while asserting the quarantine reason was
+    # "review" (i.e. the *error* code), so the only way to satisfy it was to key
+    # quarantine on the execution error and drop the canonical reason.  The two
+    # fields are now deliberately distinct so the assertion pins the right one.
+    quarantined = outcome(
+        decision=AuditDecision.QUARANTINE,
+        result_status=AuditResult.ERROR,
+        reason_code="quarantine_review",
+        error_code="tool_error",
+    )
+    integrity = AuditOutcomeEvidence(
+        quarantined,
+        "project",
+        "project-1",
+        linked(AuditEventClass.AUTH, decision=AuditDecision.QUARANTINE, result_status=AuditResult.ERROR, error_code="tool_error"),
+        linked(AuditEventClass.FINAL_RESULT, decision=AuditDecision.QUARANTINE, result_status=AuditResult.ERROR, error_code="tool_error"),
+    )
 
     result = await adapter.append(integrity)
 
     assert result is integrity
     assert trusted.items == []
-    assert quarantine.items == [(integrity, "review")]
+    assert quarantine.items == [(integrity, "quarantine_review")]
 
 
 @pytest.mark.asyncio

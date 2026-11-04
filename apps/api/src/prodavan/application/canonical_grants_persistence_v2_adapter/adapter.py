@@ -72,7 +72,10 @@ class CanonicalGrantsPersistenceV2Adapter:
             raise TypeError("trusted append accepts only AuditTransactionEvidenceV2")
         if evidence.VERSION != "2":
             raise ValueError("unsupported audit transaction evidence version")
-        if evidence.decision not in (AuditDecision.ALLOW, AuditDecision.DENY):
+        # The V2 envelope exposes the decision only through its outcome; reading
+        # a top-level ``decision`` attribute raised AttributeError on every
+        # trusted append, so the fail-closed allow/deny gate never ran.
+        if evidence.outcome.decision not in (AuditDecision.ALLOW, AuditDecision.DENY):
             raise ValueError("trusted audit append accepts only allow or deny")
         outcome = evidence.outcome
         redacted = evidence.redacted

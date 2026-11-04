@@ -1,6 +1,6 @@
 """Source-level acceptance checks for M05 plugin instance/runtime fencing."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -8,17 +8,17 @@ from prodavan.application.plugin_instances import (
     FencingToken,
     LeaseCasDecision,
     LeaseCasRequest,
+    OwnerCasDecision,
     PluginInstanceDecisionReason,
     PluginInstanceFencingService,
     PluginInstanceIdentity,
     PluginInstanceRecord,
     PluginInstanceState,
     PluginInstanceWriteRequest,
-    OwnerCasDecision,
     WriterCasRequest,
 )
 
-NOW = datetime(2026, 1, 1, tzinfo=timezone.utc)
+NOW = datetime(2026, 1, 1, tzinfo=UTC)
 DIGEST = "sha256:" + "a" * 64
 
 
@@ -66,19 +66,19 @@ def request(**changes):
 
 
 class FakeRepository:
+    """Exactly the ``PluginInstanceRepository`` port; no read fallback and no inference.
+
+    The read/CAS members used to sit on ``FakeQuarantine`` below, which left the
+    service calling ``get_exact`` on a repository that could not answer: every
+    fencing assertion in this file failed with ``AttributeError`` instead of
+    exercising the decision table.  Quarantine is a separate, append-only sink.
+    """
+
     def __init__(self, row=None):
         self.row = row
         self.lookups = []
         self.lease_requests = []
         self.writer_requests = []
-
-
-class FakeQuarantine:
-    def __init__(self):
-        self.records = []
-
-    async def record_quarantine(self, record, *, reason):
-        self.records.append((record, reason))
 
     async def get_exact(self, identity):
         self.lookups.append(identity)
@@ -91,6 +91,14 @@ class FakeQuarantine:
     async def advance_writer(self, request):
         self.writer_requests.append(request)
         return OwnerCasDecision(False, PluginInstanceDecisionReason.WRITER_CAS_CONFLICT)
+
+
+class FakeQuarantine:
+    def __init__(self):
+        self.records = []
+
+    async def record_quarantine(self, record, *, reason):
+        self.records.append((record, reason))
 
 
 @pytest.mark.parametrize(

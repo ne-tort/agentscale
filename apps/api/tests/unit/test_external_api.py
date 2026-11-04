@@ -595,8 +595,12 @@ async def test_webhook_manual_retry_resets_only_exhausted_delivery() -> None:
             session=session,
             employee=await session.get(EmployeeRow, "emp_1"),
         )
-        assert response == {"id": delivery.id, "status": "pending"}
+        # The route commits, which expires the identity map. Reading an expired
+        # attribute synchronously here would trigger lazy IO outside the
+        # greenlet context (MissingGreenlet), so the row is re-read first — that
+        # also proves the reset was persisted, not merely applied in memory.
         await session.refresh(delivery)
+        assert response == {"id": delivery.id, "status": "pending"}
         await session.refresh(sub)
         assert delivery.status == "pending"
         assert delivery.attempts == 0

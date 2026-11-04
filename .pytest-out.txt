@@ -1,0 +1,348 @@
+F................F........F.F........F..F..............F...FF....F..FF.. [100%]
+================================== FAILURES ===================================
+_______________ test_tools_list_contains_catalog_and_sot_tools ________________
+
+    def test_tools_list_contains_catalog_and_sot_tools() -> None:
+        listed = mcp_server._handle({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+        assert listed is not None
+        names = {t["name"] for t in listed["result"]["tools"]}
+        assert "equipment_catalog_search" in names
+        assert "equipment_catalog_sources" in names
+        assert "request_lines_upsert" in names
+        # WAVE7: ����� ����� ������, �� ������
+        assert "found_groups_upsert" in names
+        assert "found_groups_list" in names
+        assert not any(n.startswith("found_offers_") for n in names)
+        # v2.1.0: delete-�����������; ������ ������� ������ �� �����������
+        assert "request_lines_delete" in names
+        assert "found_groups_delete" in names
+        upsert = next(t for t in listed["result"]["tools"] if t["name"] == "request_lines_upsert")
+        assert "status" not in upsert["inputSchema"]["properties"]
+>       assert (
+            mcp_server._handle({"jsonrpc": "2.0", "id": 9, "method": "initialize"})["result"][
+                "serverInfo"
+            ]["version"]
+            == "3.2.0"
+        )
+E       AssertionError: assert '3.3.0' == '3.2.0'
+E         
+E         - 3.2.0
+E         ?   ^
+E         + 3.3.0
+E         ?   ^
+
+tests\unit\test_prodavan_equipment_mcp.py:29: AssertionError
+______________________ test_tools_list_contains_v2_tools ______________________
+
+    def test_tools_list_contains_v2_tools() -> None:
+        listed = mcp_server._handle({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+        names = {t["name"] for t in listed["result"]["tools"]}
+        for name in (
+            "part_cards_list",
+            "part_card_upsert",
+            "part_card_delete",
+            "ready_builds_list",
+            "ready_build_get",
+            "ready_build_upsert",
+            "ready_build_slot_upsert",
+            "ready_build_attach",
+        ):
+            assert name in names
+        # ������ ������ (������ �������������, ������) ������
+        assert "ready_builds_catalog" not in names
+        assert "build_group_upsert" not in names
+        assert "build_group_item_upsert" not in names
+        # ������� ����������� �� ��������
+        assert "equipment_builds_delete" in names
+        assert "found_groups_upsert" in names
+        # WAVE14: �������
+        for name in (
+            "tenders_list",
+            "tender_get",
+            "tender_upsert",
+            "tender_delete",
+            "tender_positions_upsert",
+            "tender_attach",
+        ):
+            assert name in names
+        # ��������� ��������� / ��������� ������� (web_shops + web_products, TTL 72�)
+        for name in (
+            "web_shops_list",
+            "web_products_list",
+            "web_product_add",
+            "web_product_delete",
+        ):
+            assert name in names
+        # ������ �� ��������: �������� ���������� + �������� �� + ������� �����
+        for name in (
+            "tender_readiness",
+            "tender_report_send",
+            "mail_profiles_list",
+        ):
+            assert name in names
+>       assert len(names) == 36
+E       AssertionError: assert 37 == 36
+E        +  where 37 = len({'equipment_builds_delete', 'equipment_builds_get', 'equipment_builds_list', 'equipment_builds_upsert', 'equipment_catalog_search', 'equipment_catalog_sources', ...})
+
+tests\unit\test_prodavan_equipment_mcp.py:621: AssertionError
+_________ test_exact_canonical_grant_allows_and_keeps_mcp_correlation _________
+
+    @pytest.mark.asyncio
+    async def test_exact_canonical_grant_allows_and_keeps_mcp_correlation():
+        gateway = service([grant()])
+>       result = await gateway.authorize(request(), now=NOW)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\unit\test_canonical_grants_gateway.py:96: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+src\prodavan\application\canonical_grants\service.py:64: in authorize
+    fencing_decision = await self._fencing.authorize_positive_write(request.fencing.write_request(identity))
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <test_canonical_grants_gateway.Fencing object at 0x000001B46E00D2B0>
+request = PluginInstanceWriteRequest(identity=PluginInstanceIdentity(plugin_instance_id='plugin-1', definition_id='definition-1'...=3), lease_owner='writer-1', lease_id='lease-1', now=datetime.datetime(2026, 1, 1, 0, 0, tzinfo=datetime.timezone.utc))
+
+    async def authorize_positive_write(self, request):
+>       return PositiveWriteDecision(True, PluginInstanceDecisionReason.ALLOWED, PluginInstanceRecord(IdentityRecord.identity, request.subject_id, request.session_id, PluginInstanceState.ACTIVE, request.fencing, request.lease_owner, request.lease_id, request.now + timedelta(minutes=5)))
+                                                                                                      ^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: 'Identity' object has no attribute 'identity'
+
+tests\unit\test_canonical_grants_gateway.py:55: AttributeError
+_____ test_operation_resource_domain_constraints_and_lifecycle_are_exact ______
+
+    @pytest.mark.asyncio
+    async def test_operation_resource_domain_constraints_and_lifecycle_are_exact():
+        gateway = service([grant(expires_at=NOW + timedelta(minutes=1))])
+>       assert (await gateway.authorize(request(operation="write"), now=NOW)).reason is CanonicalGrantReason.OPERATION_NOT_GRANTED
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\unit\test_canonical_grants_gateway.py:111: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+src\prodavan\application\canonical_grants\service.py:64: in authorize
+    fencing_decision = await self._fencing.authorize_positive_write(request.fencing.write_request(identity))
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <test_canonical_grants_gateway.Fencing object at 0x000001B46E0187D0>
+request = PluginInstanceWriteRequest(identity=PluginInstanceIdentity(plugin_instance_id='plugin-1', definition_id='definition-1'...=3), lease_owner='writer-1', lease_id='lease-1', now=datetime.datetime(2026, 1, 1, 0, 0, tzinfo=datetime.timezone.utc))
+
+    async def authorize_positive_write(self, request):
+>       return PositiveWriteDecision(True, PluginInstanceDecisionReason.ALLOWED, PluginInstanceRecord(IdentityRecord.identity, request.subject_id, request.session_id, PluginInstanceState.ACTIVE, request.fencing, request.lease_owner, request.lease_id, request.now + timedelta(minutes=5)))
+                                                                                                      ^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: 'Identity' object has no attribute 'identity'
+
+tests\unit\test_canonical_grants_gateway.py:55: AttributeError
+______________ test_task_failure_after_max_attempts_is_terminal _______________
+
+    @pytest.mark.asyncio
+    async def test_task_failure_after_max_attempts_is_terminal() -> None:
+        repo, clock, queue = FakeRepository(), FakeClock(), FakeQueue()
+        app = service(repo, clock, FakeVerifier(), queue, FakeTransport())
+        run = TaskRun(id="task-1", task_name="sync", payload={}, attempts=2, status=TaskRunStatus.LEASED)
+        repo.tasks[run.id] = run
+    
+        run.lease_until = clock.value + timedelta(seconds=15)
+        run.leased_by = "worker-a"
+        run.lease_generation = 1
+        run.lease_token = "0123456789abcdef"
+        claim = TaskClaim(run=run, lease=LeaseToken(owner_id="worker-a", generation=1, token=run.lease_token, lease_until=run.lease_until))
+        retry = await app.fail_task_run(claim=claim, error=RuntimeError("permanent"))
+>       assert retry is False
+E       assert True is False
+
+tests\unit\test_automation_service.py:359: AssertionError
+___________________ test_delivery_succeeds_and_clears_lease ___________________
+
+    @pytest.mark.asyncio
+    async def test_delivery_succeeds_and_clears_lease() -> None:
+        repo, clock, queue, transport = FakeRepository(), FakeClock(), FakeQueue(), FakeTransport()
+        app = service(repo, clock, FakeVerifier(), queue, transport)
+        delivery = DeliverySchedule(id="delivery-1", destination="https://example.test", payload={}, available_at=clock.value)
+    
+        delivered = await app.deliver(delivery=delivery, worker_id="worker-a")
+    
+>       assert delivered is True
+E       assert False is True
+
+tests\unit\test_automation_service.py:414: AssertionError
+______________ test_project_requires_parent_compatibility_proof _______________
+
+    @pytest.mark.asyncio
+    async def test_project_requires_parent_compatibility_proof():
+        scope = anchors(ScopeKind.PROJECT)
+        adapter = FakeRegistry(
+            entry(scope),
+            ParentCompatibilityProof(
+                tenant_exists=True,
+                tenant_retained=True,
+                cabinet_exists=True,
+                cabinet_tenant_compatible=True,
+                cabinet_membership_active=True,
+                project_exists=True,
+                project_tenant_compatible=True,
+                project_cabinet_compatible=False,
+                project_policy_eligible=True,
+            ),
+        )
+        decision = await ScopeRegistryService(adapter).authorize_positive_write(anchors=scope, context=context(scope))
+>       assert decision.reason_code == "project_parent_invalid"
+E       AssertionError: assert 'parent_compatibility_invalid' == 'project_parent_invalid'
+E         
+E         - project_parent_invalid
+E         + parent_compatibility_invalid
+
+tests\unit\test_scope_registry.py:176: AssertionError
+___________ test_plugin_instance_registration_requires_parent_proof ___________
+
+    @pytest.mark.asyncio
+    async def test_plugin_instance_registration_requires_parent_proof():
+        scope = anchors(ScopeKind.PLUGIN_INSTANCE)
+        adapter = FakeRegistry(entry(scope))
+>       decision = await ScopeRegistryService(adapter).register_active_scope(
+            entry=entry(scope), context=context(scope)
+        )
+
+tests\unit\test_scope_registry.py:227: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <prodavan.application.scope_registry.service.ScopeRegistryService object at 0x000001B46DF90B50>
+
+    async def register_active_scope(
+        self,
+        *,
+        entry: ScopeRegistryEntry,
+        context: RlsContext | None,
+        assertion: ScopeAssertion | None = None,
+    ) -> PositiveWriteDecision:
+        """Validate and persist one active registry row through the trusted port."""
+        if entry.owner_state is not OwnerState.ACTIVE:
+            reason = f"scope_{entry.owner_state.value}"
+            await self._port.record(self._quarantine_for(entry.anchors, reason, entry))
+            return PositiveWriteDecision(False, reason, entry, reason)
+        if context is None:
+            reason = "missing_rls_context"
+        elif context.tenant_id != entry.anchors.tenant_id:
+            reason = "rls_tenant_mismatch"
+        elif context.cabinet_id != entry.anchors.cabinet_id:
+            reason = "rls_cabinet_mismatch"
+        elif context.project_id != entry.anchors.project_id:
+            reason = "rls_project_mismatch"
+        elif assertion is not None:
+            reason = self._assertion_mismatch(assertion, entry.anchors)
+        else:
+            reason = None
+        proof = await self._port.prove(entry.anchors) if reason is None else None
+        if reason is None:
+            valid = (
+                proof.valid_for_plugin(entry.anchors)
+                if entry.anchors.scope_kind is ScopeKind.PLUGIN_INSTANCE
+                else proof.valid_for_scope(entry.anchors.scope_kind)
+            )
+            if not valid:
+                reason = self._parent_reason(entry.anchors.scope_kind, proof)
+        if reason is not None:
+            await self._port.record(self._quarantine_for(entry.anchors, reason, entry))
+>           return PositiveWriteDecision(False, reason, entry, reason)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           TypeError: BaseModel.__init__() takes 1 positional argument but 5 were given
+
+src\prodavan\application\scope_registry\service.py:133: TypeError
+_______ test_pipeline_allows_only_after_identity_scope_grant_and_quota ________
+
+    def test_pipeline_allows_only_after_identity_scope_grant_and_quota() -> None:
+        audit = Audit()
+        adapter = EchoAdapter()
+        gateway = service(adapter=adapter, audit=audit)
+    
+        decision, result = gateway.invoke(request(), now=NOW)
+    
+>       assert decision.allowed is True
+E       AssertionError: assert False is True
+E        +  where False = GatewayDecision(decision=<CapabilityDecision.DENY: 'deny'>, code=<DecisionCode.GRANT_MISSING: 'grant_missing'>, reason=None, grant_id=None).allowed
+
+tests\unit\test_capability_gateway_service.py:94: AssertionError
+_____________ test_missing_adapter_is_denied_after_authorization ______________
+
+    def test_missing_adapter_is_denied_after_authorization() -> None:
+        gateway = service()
+    
+        decision, result = gateway.invoke(request(), now=NOW)
+    
+>       assert decision.code is DecisionCode.ADAPTER_MISSING
+E       AssertionError: assert <DecisionCode.GRANT_MISSING: 'grant_missing'> is <DecisionCode.ADAPTER_MISSING: 'adapter_missing'>
+E        +  where <DecisionCode.GRANT_MISSING: 'grant_missing'> = GatewayDecision(decision=<CapabilityDecision.DENY: 'deny'>, code=<DecisionCode.GRANT_MISSING: 'grant_missing'>, reason=None, grant_id=None).code
+E        +  and   <DecisionCode.ADAPTER_MISSING: 'adapter_missing'> = DecisionCode.ADAPTER_MISSING
+
+tests\unit\test_capability_gateway_service.py:150: AssertionError
+______________ test_manifest_contract_matches_declarative_app_v1 ______________
+
+    def test_manifest_contract_matches_declarative_app_v1() -> None:
+        with pytest.raises(ValidationError, match="manifest version"):
+>           AppVersion(
+                id="version-1",
+                app_definition_id="definition-1",
+                manifest_version="1.0.0",
+                artifact_digest="sha256:" + "a" * 64,
+                manifest={"protocol": "1.0", "version": "2.0.0", "requestedCapabilities": [], "entrypoints": {"ui": {}}},
+                created_at=NOW,
+            )
+E           pydantic_core._pydantic_core.ValidationError: 1 validation error for AppVersion
+E             Value error, manifest appId is invalid [type=value_error, input_value={'id': 'version-1', 'app_...=datetime.timezone.utc)}, input_type=dict]
+E               For further information visit https://errors.pydantic.dev/2.14/v/value_error
+
+tests\unit\test_dynamic_apps_domain.py:70: ValidationError
+
+During handling of the above exception, another exception occurred:
+
+    def test_manifest_contract_matches_declarative_app_v1() -> None:
+>       with pytest.raises(ValidationError, match="manifest version"):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AssertionError: Regex pattern did not match.
+E        Regex: 'manifest version'
+E        Input: "1 validation error for AppVersion\n  Value error, manifest appId is invalid [type=value_error, input_value={'id': 'version-1', 'app_...=datetime.timezone.utc)}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.14/v/value_error"
+
+tests\unit\test_dynamic_apps_domain.py:69: AssertionError
+____________ test_published_version_requires_publication_timestamp ____________
+
+    def test_published_version_requires_publication_timestamp() -> None:
+        with pytest.raises(ValidationError, match="published_at"):
+>           AppVersion(
+                id="version-1",
+                app_definition_id="definition-1",
+                manifest_version="1.0.0",
+                artifact_digest="sha256:" + "a" * 64,
+                manifest={},
+                status=AppLifecycleStatus.PUBLISHED,
+                created_at=NOW,
+            )
+E           pydantic_core._pydantic_core.ValidationError: 1 validation error for AppVersion
+E             Value error, manifest protocol must be 1.0 [type=value_error, input_value={'id': 'version-1', 'app_...=datetime.timezone.utc)}, input_type=dict]
+E               For further information visit https://errors.pydantic.dev/2.14/v/value_error
+
+tests\unit\test_dynamic_apps_domain.py:96: ValidationError
+
+During handling of the above exception, another exception occurred:
+
+    def test_published_version_requires_publication_timestamp() -> None:
+>       with pytest.raises(ValidationError, match="published_at"):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AssertionError: Regex pattern did not match.
+E        Regex: 'published_at'
+E        Input: "1 validation error for AppVersion\n  Value error, manifest protocol must be 1.0 [type=value_error, input_value={'id': 'version-1', 'app_...=datetime.timezone.utc)}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.14/v/value_error"
+
+tests\unit\test_dynamic_apps_domain.py:95: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/unit/test_prodavan_equipment_mcp.py::test_tools_list_contains_catalog_and_sot_tools
+FAILED tests/unit/test_prodavan_equipment_mcp.py::test_tools_list_contains_v2_tools
+FAILED tests/unit/test_canonical_grants_gateway.py::test_exact_canonical_grant_allows_and_keeps_mcp_correlation
+FAILED tests/unit/test_canonical_grants_gateway.py::test_operation_resource_domain_constraints_and_lifecycle_are_exact
+FAILED tests/unit/test_automation_service.py::test_task_failure_after_max_attempts_is_terminal
+FAILED tests/unit/test_automation_service.py::test_delivery_succeeds_and_clears_lease
+FAILED tests/unit/test_scope_registry.py::test_project_requires_parent_compatibility_proof
+FAILED tests/unit/test_scope_registry.py::test_plugin_instance_registration_requires_parent_proof
+FAILED tests/unit/test_capability_gateway_service.py::test_pipeline_allows_only_after_identity_scope_grant_and_quota
+FAILED tests/unit/test_capability_gateway_service.py::test_missing_adapter_is_denied_after_authorization
+FAILED tests/unit/test_dynamic_apps_domain.py::test_manifest_contract_matches_declarative_app_v1
+FAILED tests/unit/test_dynamic_apps_domain.py::test_published_version_requires_publication_timestamp
+12 failed, 60 passed in 0.77s

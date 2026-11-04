@@ -1,6 +1,6 @@
 """Source acceptance checks for the M05 trusted plugin-instance adapter."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from prodavan.application.plugin_instances import (
     FencingToken,
@@ -14,7 +14,7 @@ from prodavan.application.plugin_instances import (
 )
 from prodavan.application.plugin_instances_adapter import TrustedPluginInstanceRepository, TrustedPluginInstanceService
 
-NOW = datetime(2026, 1, 1, tzinfo=timezone.utc)
+NOW = datetime(2026, 1, 1, tzinfo=UTC)
 DIGEST = "sha256:" + "a" * 64
 
 
@@ -44,6 +44,41 @@ def request(**changes):
     }
     values.update(changes)
     return PluginInstanceWriteRequest(**values)
+
+
+def lease_request(**changes):
+    """A complete lease CAS request -- the adapter rejects a partial one.
+
+    ``LeaseCasRequest`` binds the composite instance identity plus caller
+    subject/session and the exact lease snapshot: a CAS that only named
+    ``instance_id`` could not prove which installation it fenced.
+    """
+    values = {
+        "identity": identity(),
+        "subject_id": "subject-1",
+        "session_id": "session-1",
+        "expected": FencingToken(3, 7),
+        "lease_owner": "worker-1",
+        "lease_id": "lease-1",
+        "lease_until": NOW + timedelta(minutes=5),
+    }
+    values.update(changes)
+    return LeaseCasRequest(**values)
+
+
+def writer_request(**changes):
+    """A complete writer CAS request with the same exact-binding fields."""
+    values = {
+        "identity": identity(),
+        "subject_id": "subject-1",
+        "session_id": "session-1",
+        "expected": FencingToken(3, 7),
+        "lease_owner": "worker-1",
+        "lease_id": "lease-1",
+        "lease_until": NOW + timedelta(minutes=5),
+    }
+    values.update(changes)
+    return WriterCasRequest(**values)
 
 
 class RuntimeSource:
@@ -141,17 +176,15 @@ async def test_mismatched_row_is_quarantined_without_fallback():
 async def test_cas_success_requires_complete_same_instance_snapshot():
     source = RuntimeSource(row(), lease_row=row(lease_id="lease-2"), writer_row=row(writer_generation=8))
     repository = TrustedPluginInstanceRepository(source, source)
-    lease = await repository.acquire_lease(
-        LeaseCasRequest("instance-1", "worker-1", "lease-2", FencingToken(3, 7), NOW + timedelta(minutes=5))
-    )
+    lease = await repository.acquire_lease(lease_request(lease_id="lease-2"))
     assert lease.acquired
-    writer = await repository.advance_writer(WriterCasRequest("instance-1", "worker-1", FencingToken(3, 7)))
+    writer = await repository.advance_writer(writer_request())
     assert writer.changed
 
 
 async def test_writer_cas_requires_same_runtime_and_exactly_next_writer_snapshot():
     quarantine = Quarantine()
-    request_value = WriterCasRequest("instance-1", "worker-1", FencingToken(3, 7))
+    request_value = writer_request()
     for returned in (row(runtime_generation=4, writer_generation=8), row(writer_generation=9)):
         source = RuntimeSource(row(), writer_row=returned)
         repository = TrustedPluginInstanceRepository(source, source, quarantine)
@@ -168,11 +201,9 @@ async def test_writer_cas_requires_same_runtime_and_exactly_next_writer_snapshot
 async def test_cas_missing_result_is_conflict_not_inferred_success():
     source = RuntimeSource(None)
     repository = TrustedPluginInstanceRepository(source, source)
-    lease = await repository.acquire_lease(
-        LeaseCasRequest("instance-1", "worker-1", "lease-2", FencingToken(3, 7), NOW + timedelta(minutes=5))
-    )
+    lease = await repository.acquire_lease(lease_request(lease_id="lease-2"))
     assert lease == LeaseCasDecision(False, PluginInstanceDecisionReason.LEASE_CAS_CONFLICT)
-    writer = await repository.advance_writer(WriterCasRequest("instance-1", "worker-1", FencingToken(3, 7)))
+    writer = await repository.advance_writer(writer_request())
     assert writer == OwnerCasDecision(False, PluginInstanceDecisionReason.WRITER_CAS_CONFLICT)
 
 
