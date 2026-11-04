@@ -50,10 +50,6 @@ MANAGED_MODELS = (
     M04EDefinitionVersionAuditRow,
 )
 
-#: The installed policy set this revision is accountable for. Policies of earlier
-#: installers (2026110307 / 0310 / 0312 / 0314) must never be withdrawn here.
-_POLICY_OWNED_TABLES = frozenset(LEDGER_TABLES)
-
 #: Static boundary of this artifact: nothing was executed to produce it.
 BOUNDARY = {
     "execution": "not run",
@@ -187,8 +183,6 @@ def revision_literal(path: Path) -> str | None:
 
 
 def distinct_revision_literals(path: Path) -> tuple[str | None, str | None]:
-    import ast
-
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     revision: str | None = None
     down: str | None = None
@@ -551,7 +545,6 @@ __all__ = [
     "ROW_FACTORIES",
     "RecordedOps",
     "SPEC_TABLES",
-    "_POLICY_OWNED_TABLES",
     "audit_row",
     "chain_from_head",
     "checkpoint_row",

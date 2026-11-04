@@ -234,30 +234,14 @@ UNIMPLEMENTED_PORTS: tuple[UnimplementedPort, ...] = (
     #   ``PartitionHandoffReadPort`` → ``application/migration/evidence_ports.py``.
     #
     # What is still genuinely absent is listed below.
-    UnimplementedPort(
-        stage=MigrationStage.M04E_DEFINITION_VERSION,
-        port="UpstreamGatePort",
-        declared_in="application/migration/m04e_definition_version/backfill.py:265",
-        blocker_code="m04e_upstream_gate_port_unimplemented",
-        review_ref="G6",
-        detail="re-proving retained owner/active typed scope/M04 gates inside the page transaction is unimplemented",
-    ),
-    UnimplementedPort(
-        stage=MigrationStage.M04E_DEFINITION_VERSION,
-        port="CandidateProofPort",
-        declared_in="application/migration/m04e_definition_version/backfill.py:271",
-        blocker_code="m04e_candidate_proof_port_unimplemented",
-        review_ref="G6",
-        detail="per-candidate owner/scope/same-definition/current/artifact proof is unimplemented",
-    ),
-    UnimplementedPort(
-        stage=MigrationStage.M04E_DEFINITION_VERSION,
-        port="CandidateReader",
-        declared_in="application/migration/m04e_definition_version/backfill.py:258",
-        blocker_code="m04e_candidate_reader_port_unimplemented",
-        review_ref="G6",
-        detail="no pinned-source page reader for M04E candidates exists",
-    ),
+    #
+    # Retired from this list after implementation landed (do not re-add):
+    #   ``UpstreamGatePort``, ``CandidateProofPort``, ``CandidateReader`` →
+    #   ``application/migration/m04e_ports.py``
+    #   (SqlM04EUpstreamGate, SqlM04ECandidateProof, SqlM04ECandidateReader).
+    # The M06 stage builder does not accept the evidence ports yet, so
+    # ``PartitionHandoffReadPort`` keeps its entry until that wiring lands; a
+    # registry entry for an implemented port would refuse a graph that works.
     UnimplementedPort(
         stage=MigrationStage.M06_GRANTS_GATEWAY,
         port="PartitionHandoffReadPort",
@@ -265,8 +249,8 @@ UNIMPLEMENTED_PORTS: tuple[UnimplementedPort, ...] = (
         blocker_code="m06_partition_handoff_read_port_unimplemented",
         review_ref="G3",
         detail=(
-            "superseded: SqlPartitionHandoffReadStore in evidence_ports.py implements this "
-            "port; the entry is retained only until the M06 stage builder accepts it"
+            "implemented by SqlPartitionHandoffReadStore in evidence_ports.py; the entry stays "
+            "only until the M06 stage builder takes the port as a dependency"
         ),
     ),
     UnimplementedPort(

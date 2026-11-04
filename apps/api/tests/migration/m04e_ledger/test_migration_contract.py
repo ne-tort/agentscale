@@ -63,6 +63,7 @@ import pytest
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import make_transient_to_detached
+from sqlalchemy.schema import CreateTable
 
 import prodavan.infrastructure.persistence.models as models
 from prodavan.application.migration.m04e_definition_version.backfill import BackfillOutcome
@@ -552,7 +553,7 @@ def test_the_observation_key_is_null_safe(revision: tuple[Any, RecordedOps]) -> 
         constraint = _unique_constraint(table, OBSERVATION_KEY_CONSTRAINT)
         assert constraint.dialect_options["postgresql"]["nulls_not_distinct"] is True
         assert (
-            str(sa.schema.CreateTable(table).compile(dialect=_DIALECT)).count(
+            str(CreateTable(table).compile(dialect=_DIALECT)).count(
                 "UNIQUE NULLS NOT DISTINCT"
             )
             == 1
