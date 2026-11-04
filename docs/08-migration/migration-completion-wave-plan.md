@@ -62,13 +62,40 @@ Design invariants worth keeping:
 | Cross-review of DDL + seams | Independent read-only review of the chain and of M04→M04E→M05→M06 ports. |
 | Dynamic-module screens ↔ API | Verify the web service contract matches the implemented router. |
 | Equipment tenant anchors | `project_id`/`cabinet_id` and associative tables if the domain needs them. |
+| Host dependency bundle assembly | `AgentRunWorkerResource` exposes `register_host_dependency_provider` but nothing registers the bundle yet, so both loops idle with `agent_run_host_dependencies_unwired`. Needed: execution port (done), run source, attempt journal, turn runner. |
+| Legacy chat ↔ durable run binding | The real chat path writes only `agent_events`; the canonical SSE index reads `agent_runs` + `agent_control_plane_events`, so canonical frame identity is unprovable until a run binding exists. |
+
+## Boundary decisions recorded in this session
+
+- **`LifespanManager.lifespan` forwards the ASGI app** to resources exposing
+  `bind_app`, before startup. A per-zone subclass would have left the pod surface on
+  the old behaviour, so the seam lives in the shared manager instead.
+- **`run_row_id` is `run_window_prefix(...) + digest`.** The earlier derivation
+  hashed only the window, so a run id never matched its own `LIKE '<prefix>%'`
+  admission scan and two tenants could collide on one primary key.
+- **`Retry_due` is a first-class `AgentRunStatus`.** It was listed in
+  `CLAIMABLE_STATUSES` with no enum member and no start transition, so a retryable
+  run could never be claimed again.
+- **Retained agent tables stay outside RLS** (see gaps below), and
+  `agent_run_provider_attempts` is covered by the registry like the rest of the new
+  schema.
 
 ## Known, named gaps (not oversights)
 
 - **RLS on retained agent tables is absent.** `agent_runs` and
   `agent_control_plane_*` have live callers; installing policies before every caller
   sets the tenant GUC would break production traffic. Only the new
-  `agent_run_leases` is covered.
+  `agent_run_leases` and `agent_run_provider_attempts` are covered.
+- **`claim` and `agent_run.start` are two transactions.** `ControlPlaneAtomicWrite`
+  opens its own session, so the order is lease → start with compensation, and a
+  crash between the steps leaves an expiring lease. Needs a control-plane port that
+  accepts an external transaction.
+- **No `requeue` transition**, therefore `release_lease` is deliberately not
+  implemented — a release without the aggregate transition would desynchronise
+  status from lease.
+- **Unknown-outcome cases are parked but not journalled** in the reconcile journal.
+- **Legacy control frames (`_session`, `_turn_complete`)** are rejected by the
+  canonical adapter (502, fail-closed) rather than translated.
 - **No production promotion anywhere.** Every package keeps its promotion record
   `blocked`; canonical positive writes stay disabled until gates, RLS review and an
   explicit decision.

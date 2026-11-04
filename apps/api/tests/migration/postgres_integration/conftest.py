@@ -226,8 +226,15 @@ class SchemaHarness:
 
     # -------------------------------------------------------------- writing
     async def execute(self, sql: str, params: dict | None = None) -> None:
+        """Run one statement and commit it immediately."""
         async with self.engine.begin() as conn:
             await conn.execute(text(sql), params or {})
+
+    async def execute_all(self, statements: list[tuple[str, dict | None]]) -> None:
+        """Run several statements in **one** transaction, in order."""
+        async with self.engine.begin() as conn:
+            for sql, params in statements:
+                await conn.execute(text(sql), params or {})
 
     @contextlib.asynccontextmanager
     async def transaction(

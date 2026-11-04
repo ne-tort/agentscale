@@ -37,7 +37,7 @@ from ._seeds import (
     plugin_scope_registry_values,
     seed_definition_parents,
 )
-from ._support import sqlstate_of
+from ._support import sqlstate_of, violated_constraint
 
 pytestmark = pytest.mark.integration
 
@@ -105,7 +105,7 @@ async def test_an_instance_without_its_registry_row_fails_at_commit(pg_schema):
             await trans.commit()
 
     assert sqlstate_of(failure.value) == "23503", "a missing cycle partner must be a FK violation"
-    assert "fk_m05_instance_registry_tenant_link" in str(failure.value)
+    assert violated_constraint(failure.value) == "fk_m05_instance_registry_tenant_link"
     assert await pg_schema.count("m05_plugin_instances") == 0
 
 
@@ -122,7 +122,7 @@ async def test_a_registry_row_without_its_instance_fails_at_commit(pg_schema):
             await trans.commit()
 
     assert sqlstate_of(failure.value) == "23503"
-    assert "fk_m05_registry_instance_tenant_link" in str(failure.value)
+    assert violated_constraint(failure.value) == "fk_m05_registry_instance_tenant_link"
     assert await pg_schema.count("scope_registry") == 0
 
 
@@ -179,14 +179,21 @@ async def test_set_constraints_immediate_makes_the_same_violation_fail_earlier(p
 
 async def test_the_reciprocal_constraints_are_deferrable_and_initially_deferred(pg_schema):
     """Schema-level proof that the deferral survived into this database."""
+    # Named placeholders instead of ``= ANY(:names)``: ``text()`` carries no column
+    # types, so a Python list would be bound as an opaque parameter and PostgreSQL
+    # could not tell it is a ``text[]``.
+    placeholders = ", ".join(f":name{index}" for index in range(len(RECIPROCAL_FK_NAMES)))
+    params = {
+        f"name{index}": name for index, name in enumerate(RECIPROCAL_FK_NAMES)
+    }
     rows = await pg_schema.rows(
-        """
+        f"""
         SELECT c.conname, c.condeferrable, c.condeferred, c.convalidated
         FROM pg_constraint c
-        WHERE c.conname = ANY(:names)
+        WHERE c.conname IN ({placeholders})
         ORDER BY c.conname
         """,
-        {"names": list(RECIPROCAL_FK_NAMES)},
+        params,
     )
     found = {
         name: {"condeferrable": deferrable, "condeferred": deferred, "convalidated": validated}

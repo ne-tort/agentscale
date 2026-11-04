@@ -87,6 +87,7 @@ from prodavan.application.resource_materialization.contracts import (
 )
 from prodavan.application.resource_materialization.durable.contracts import (
     ApplyPlan,
+    AttemptSnapshot,
     DurableApplyResult,
     DurableRollbackCommand,
     HeadPhase,
@@ -195,6 +196,7 @@ class OperationGrounding:
             and self.resource_lifecycle == ResourceLifecycle.ACTIVE.value
             and self.resource_active_version is not None
             and self.version_number is not None
+            and self.resource_active_version == self.version_number
             and self.version_exists
             and self.version_status == VersionStatus.PUBLISHED.value
             and self.binding_present
@@ -467,7 +469,7 @@ class SqlAlchemyResourceApplyEvidenceReader:
                 AgentRunRow.project_id == project_id,
                 ApprovalRequestRow.status == _APPROVED,
             )
-            .order_by(ApprovalRequestRow.decided_at.desc().nullslast())
+            .order_by(ApprovalRequestRow.decided_at.desc().nulls_last())
             .limit(1)
         )
         if row is None:
@@ -585,6 +587,13 @@ class ResourceApplyEvidenceGate:
                 out.append("resource_not_active")
             if grounding.resource_active_version is None:
                 out.append("resource_active_version_missing")
+            elif (
+                grounding.version_number is not None
+                and grounding.resource_active_version != grounding.version_number
+            ):
+                # The resource was republished between planning and applying: the
+                # frozen plan would materialize a superseded version.
+                out.append("resource_active_version_drift")
             if grounding.version_number is None:
                 out.append("resource_version_evidence_missing")
             elif not grounding.version_exists:
@@ -813,7 +822,7 @@ class ResourceMaterializationApplyPort:
 
     async def history(
         self, *, project_id: str, limit: int = 50
-    ) -> tuple:
+    ) -> tuple[AttemptSnapshot, ...]:
         return await self.application.history(project_id=project_id, limit=limit)
 
     async def generation(self, *, project_id: str) -> int:

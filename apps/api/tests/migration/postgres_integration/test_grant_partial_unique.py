@@ -27,7 +27,13 @@ from ._seeds import (
     seed_definition_parents,
     seed_tenant_scope_registry,
 )
-from ._support import advisory_gate, blocked_backends, hold_until_advisory, sqlstate_of
+from ._support import (
+    advisory_gate,
+    blocked_backends,
+    hold_until_advisory,
+    sqlstate_of,
+    violated_constraint,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -82,7 +88,7 @@ async def test_two_active_grants_with_the_same_identity_collide(pg_schema):
         await _insert_grant(pg_schema, second)
 
     assert sqlstate_of(failure.value) == "23505"
-    assert INDEX_NAME in str(failure.value)
+    assert violated_constraint(failure.value) == INDEX_NAME
     assert await pg_schema.count("dynamic_app_capability_grants") == 1
     active = await pg_schema.scalar(
         "SELECT count(*) FROM dynamic_app_capability_grants WHERE revoked_at IS NULL"
@@ -134,7 +140,7 @@ async def test_concurrent_identical_grants_have_exactly_one_winner(pg_schema):
     survivors = await pg_schema.rows(
         "SELECT id, idempotency_key FROM dynamic_app_capability_grants"
     )
-    assert survivors == [(first["id"], "grant-race-a")]
+    assert [tuple(row) for row in survivors] == [(first["id"], "grant-race-a")]
 
 
 # --------------------------------------------------------------------------- #
@@ -166,7 +172,7 @@ async def test_a_revoked_grant_frees_the_identity(pg_schema):
     active = await pg_schema.rows(
         "SELECT id FROM dynamic_app_capability_grants WHERE revoked_at IS NULL"
     )
-    assert active == [(third["id"],)]
+    assert [tuple(row) for row in active] == [(third["id"],)]
 
 
 async def test_a_failed_second_grant_leaves_the_first_active(pg_schema):
@@ -179,13 +185,11 @@ async def test_a_failed_second_grant_leaves_the_first_active(pg_schema):
     with pytest.raises(IntegrityError):
         await _insert_grant(pg_schema, second)
 
-    row = (
-        await pg_schema.rows(
-            "SELECT id, revoked_at, grant_generation, writer_generation "
-            "FROM dynamic_app_capability_grants"
-        )
-    )[0]
-    assert row == (first["id"], None, 1, 1)
+    rows = await pg_schema.rows(
+        "SELECT id, revoked_at, grant_generation, writer_generation "
+        "FROM dynamic_app_capability_grants"
+    )
+    assert [tuple(row) for row in rows] == [(first["id"], None, 1, 1)]
 
     # And the identity is still free only after an explicit revocation.
     await pg_schema.execute(REVOKE_GRANT, {"id": first["id"]})

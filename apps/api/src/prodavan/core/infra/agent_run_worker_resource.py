@@ -79,7 +79,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -130,9 +130,15 @@ WORKER_DEFAULT_BATCH_MAX = 5
 #: refusal, which is the window a rollout of the execution adapter fits into.
 DEFAULT_DISPATCH_MAX_ATTEMPTS = 288
 
+#: Intent lease sizing (see :func:`_consumer_lease_seconds`).  The adapter caps a
+#: lease at 900 s; the base matches its own default for a small batch.
+_BASE_CONSUMER_LEASE_SEC = 30.0
+_MAX_CONSUMER_LEASE_SEC = 900.0
+
 #: How long shutdown waits for a loop to finish its current tick before it is
-#: cancelled.  Must exceed ``WorkerConfig.shutdown_grace`` (20 s) so a tick that
-#: is draining an in-flight turn can settle it instead of being cut off.
+#: cancelled.  The worker is drained first (``WorkerConfig.shutdown_grace`` is
+#: 20 s), so this window must stay above that: a tick that is settling an
+#: in-flight turn has to be allowed to finish, not cut off mid-write.
 SHUTDOWN_TIMEOUT_SEC = 30.0
 
 BLOCKER_DEPENDENCIES_UNWIRED = "agent_run_host_dependencies_unwired"
@@ -140,7 +146,7 @@ BLOCKER_EXECUTION_PORT_UNWIRED = "agent_run_execution_port_unwired"
 BLOCKER_RUN_SOURCE_UNWIRED = "agent_run_run_input_source_unwired"
 BLOCKER_JOURNAL_UNWIRED = "agent_run_provider_attempt_journal_unwired"
 BLOCKER_TURN_RUNNER_UNWIRED = "agent_run_turn_runner_unwired"
-BLOCKER_COMPOSITION_FAILED = "agent_run_worker_composition_failed"
+BLOCKER_COMPOSITION_FAILED = "agent_run_host_composition_failed"
 
 REASON_OK = "ok"
 REASON_IDLE = "idle"
@@ -233,6 +239,18 @@ def _flag(source: Any, name: str, default: bool = False) -> bool:
     if isinstance(value, str):
         return value.strip().lower() in {"1", "true", "yes", "on"}
     return bool(value)
+
+
+def _consumer_lease_seconds(batch_max: int) -> float:
+    """Lease that a whole claim batch can plausibly finish inside.
+
+    ``SqlAlchemyIntentConsumer.claim`` stamps **one** ``lease_until`` on every
+    row of a batch.  If the batch takes longer than that lease, its tail expires
+    mid-dispatch, and an expired ``dispatching`` row is quarantined rather than
+    retried — so an under-sized lease quietly destroys deliverable work.  The
+    formula is budget per intent plus headroom, clamped to the adapter's maximum.
+    """
+    return float(min(_MAX_CONSUMER_LEASE_SEC, _BASE_CONSUMER_LEASE_SEC + 3 * batch_max))
 
 
 @dataclass(frozen=True, slots=True)
@@ -476,6 +494,7 @@ class _LoopState:
             "running": self.running,
             "blocked": self.blocked,
             "blockers": list(self.blockers),
+            "lock_key": self.lock_key,
             "interval_sec": self.interval_sec,
             "batch_max": self.batch_max,
             "started_at": _iso(self.started_at),
@@ -549,6 +568,7 @@ class AgentRunWorkerResource(LifespanResource):
         # but it must not be retried on every tick either.
         self._dispatcher_error: str | None = None
         self._worker_error: str | None = None
+        self._provider_error_logged = False
         self._blocker_logged: set[str] = set()
 
     # -- LifespanResource --------------------------------------------------
@@ -572,7 +592,7 @@ class AgentRunWorkerResource(LifespanResource):
         if self._started:
             # Lifespan startup runs once, but an admin tool may call it directly;
             # a second call must not orphan the tasks of the first.
-            logger.warning("agent run host: startup ignored — already started")
+            logger.warning("agent run host: startup ignored, already started")
             return
 
         self._stop = asyncio.Event()
@@ -598,12 +618,14 @@ class AgentRunWorkerResource(LifespanResource):
             self._started = False
             return
         stop.set()
-        for loop in self._loops():
-            await self._await_loop(loop)
-        # A cancelled tick may still hold a run lease.  ``AgentRunWorker.shutdown``
-        # is idempotent: it sets the same stop signal and drains whatever is left,
-        # so the lease is released instead of being left to its TTL.  A blocked
-        # loop never claimed anything, so there is no lease to drain.
+        # Order matters for the lease, not for tidiness.  A tick that is currently
+        # driving a provider turn lives inside the loop task, so the loop may only
+        # be cancelled *after* the worker was given its grace window: cancelling
+        # first would cut the turn off and leave the run to its lease TTL.
+        # ``AgentRunWorker.shutdown`` is idempotent — it sets the same stop signal
+        # and drains whatever is still active, releasing the lease when the adapter
+        # supports it.  A blocked loop never claimed anything, so there is nothing
+        # to drain there.
         worker = self._run_worker
         if worker is not None and self._worker.enabled and not self._worker.blocked:
             try:
@@ -612,6 +634,8 @@ class AgentRunWorkerResource(LifespanResource):
                 logger.warning(
                     "agent run worker drain failed error=%s", type(exc).__qualname__
                 )
+        for loop in self._loops():
+            await self._await_loop(loop)
         self._dispatcher = self._injected_dispatcher
         self._run_worker = self._injected_run_worker
         self._dispatcher_error = None
@@ -656,7 +680,9 @@ class AgentRunWorkerResource(LifespanResource):
 
     async def drain_consumer_once(self) -> dict[str, Any]:
         """One bounded consumer round under the advisory lock."""
+        self._ensure_dependencies()
         blockers = self._blockers_for(self._consumer)
+        self._consumer.blockers = blockers
         if blockers:
             self._log_blocker(self._consumer)
             return {"skipped": True, "reason": blockers[0], "claimed": 0}
@@ -695,7 +721,9 @@ class AgentRunWorkerResource(LifespanResource):
 
     async def run_worker_round_once(self) -> dict[str, Any]:
         """One bounded run-worker round (claim → execute → settle) under the lock."""
+        self._ensure_dependencies()
         blockers = self._blockers_for(self._worker)
+        self._worker.blockers = blockers
         if blockers:
             self._log_blocker(self._worker)
             return {"skipped": True, "reason": blockers[0], "claimed": 0, "ticks": 0}
@@ -824,6 +852,16 @@ class AgentRunWorkerResource(LifespanResource):
 
     # -- dependency resolution --------------------------------------------
 
+    def _ensure_dependencies(self) -> None:
+        """Resolve lazily so a directly driven round behaves like a lifespan one.
+
+        ``startup`` resolves once; a round invoked by an admin tool or a test
+        without startup must not fall through to "nothing is wired" just because
+        nobody called startup first.
+        """
+        if self._deps is None:
+            self._resolve_dependencies()
+
     def _resolve_dependencies(self) -> None:
         if self._deps is not None:
             return
@@ -832,9 +870,12 @@ class AgentRunWorkerResource(LifespanResource):
             self._deps = provider()
         except Exception as exc:  # noqa: BLE001 - composition failure must stay closed
             self._deps = None
-            logger.warning(
-                "agent run host: dependency provider failed error=%s", type(exc).__qualname__
-            )
+            if not self._provider_error_logged:
+                self._provider_error_logged = True
+                logger.warning(
+                    "agent run host: dependency provider failed error=%s",
+                    type(exc).__qualname__,
+                )
 
     def _blockers_for(self, loop: _LoopState) -> tuple[str, ...]:
         deps = self._deps
@@ -855,7 +896,7 @@ class AgentRunWorkerResource(LifespanResource):
             return
         self._blocker_logged.add(key)
         logger.warning(
-            "agent run %s loop idle — dependencies not assembled blocker=%s",
+            "agent run %s loop idle - dependencies not assembled blocker=%s",
             loop.name,
             loop.blockers[0],
         )
@@ -885,7 +926,15 @@ class AgentRunWorkerResource(LifespanResource):
                 session_factory=self._factory(),
                 queue_name=self._queue_name,
                 execution=deps.execution_port,
-                settings=IntentConsumerSettings(),
+                # One claim hands out one lease for the whole batch, so the lease
+                # must outlive the work of that batch: the default 30 s is sized
+                # for a single request-sized trigger, not for 25 handler calls.
+                # An expired ``dispatching`` row is quarantined, so under-sizing
+                # this would park legitimate intents.
+                settings=IntentConsumerSettings(
+                    lease_seconds=_consumer_lease_seconds(self._consumer.batch_max),
+                    max_attempts=DEFAULT_DISPATCH_MAX_ATTEMPTS,
+                ),
                 max_attempts=DEFAULT_DISPATCH_MAX_ATTEMPTS,
             )
         except Exception as exc:  # noqa: BLE001 - a broken composition idles, never crashes
@@ -941,6 +990,7 @@ __all__ = [
     "AgentRunHostDependencies",
     "AgentRunHostSettings",
     "AgentRunWorkerResource",
+    "BLOCKER_COMPOSITION_FAILED",
     "BLOCKER_DEPENDENCIES_UNWIRED",
     "BLOCKER_EXECUTION_PORT_UNWIRED",
     "BLOCKER_JOURNAL_UNWIRED",
@@ -950,8 +1000,13 @@ __all__ = [
     "INTENT_QUEUE_NAME",
     "LOOP_CONSUMER",
     "LOOP_WORKER",
+    "REASON_IDLE",
     "REASON_LOCK_HELD",
+    "REASON_OK",
+    "REASON_SKIPPED",
     "REASON_TICK_FAILED",
+    "SAFE_RESULT_KEYS",
+    "SAFE_RESULT_KEY_ORDER",
     "SHUTDOWN_TIMEOUT_SEC",
     "WORKER_LOCK_KEY",
     "agent_run_host_settings_from_settings",

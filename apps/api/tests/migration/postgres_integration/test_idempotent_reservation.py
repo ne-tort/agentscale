@@ -34,7 +34,7 @@ from prodavan.application.agent_control_plane import ControlPlaneWriteStatus
 from prodavan.domain.agent.control_plane import AgentRunCreate
 
 from ._seeds import CONTROL_PLANE_TABLES, NOW, control_plane, linkage, seed_scope
-from ._support import advisory_gate, blocked_backends, hold_until_advisory
+from ._support import advisory_gate, blocked_backends, hold_until_advisory, sqlstate_of
 
 pytestmark = pytest.mark.integration
 
@@ -113,7 +113,8 @@ async def test_concurrent_duplicate_submit_yields_one_applied_and_one_replay(pg_
         "agent_control_plane_enqueue_intents": 1,
         "agent_control_plane_commands": 1,
     }
-    assert await pg_schema.rows("SELECT status FROM agent_control_plane_commands") == [("applied",)]
+    receipt_rows = await pg_schema.rows("SELECT status FROM agent_control_plane_commands")
+    assert [tuple(row) for row in receipt_rows] == [("applied",)]
 
     # The queue intent points at the single committed event, not at two events.
     intent_event = await pg_schema.scalar(
@@ -192,7 +193,7 @@ async def test_receipt_primary_key_arbitrates_the_race(pg_schema):
 
         async def loser() -> None:
             async with pg_schema.transaction() as conn:
-                await conn.execute(INSERT_RECEIPT, {**receipt, "status": "in_progress"})
+                await conn.execute(INSERT_RECEIPT, receipt)
 
         winner_task = asyncio.create_task(winner())
         await holder_written.wait()
@@ -211,14 +212,13 @@ async def test_receipt_primary_key_arbitrates_the_race(pg_schema):
         with pytest.raises(IntegrityError) as failure:
             await loser_task
 
-    sqlstate = getattr(failure.value.orig, "sqlstate", None) or getattr(
-        failure.value.orig, "pgcode", None
+    assert sqlstate_of(failure.value) == "23505", (
+        f"expected a unique violation, got {sqlstate_of(failure.value)}"
     )
-    assert sqlstate == "23505", f"expected a unique violation, got {sqlstate}"
 
     # Exactly one committed receipt, and it is the winner's.
     rows = await pg_schema.rows(
         "SELECT scope_key, status FROM agent_control_plane_commands"
     )
-    assert rows == [(scope_key, "in_progress")]
+    assert [tuple(row) for row in rows] == [(scope_key, "in_progress")]
     assert await pg_schema.count("agent_control_plane_events") == 0

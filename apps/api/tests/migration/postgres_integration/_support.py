@@ -208,6 +208,21 @@ def sqlstate_of(error: Exception) -> str | None:
     return getattr(original, "sqlstate", None) or getattr(original, "pgcode", None)
 
 
+def violated_constraint(error: Exception) -> str:
+    """The constraint/index a server-side violation named, if any.
+
+    Preferred over matching the exception text: PostgreSQL translates messages
+    with ``lc_messages``, but the structured ``constraint_name`` field is not
+    translated.  Falls back to the message so a driver that does not expose the
+    field still yields something a test can assert on.
+    """
+    original = getattr(error, "orig", error)
+    structured = getattr(original, "constraint_name", None)
+    if structured:
+        return str(structured)
+    return str(original)
+
+
 __all__ = [
     "DEFAULT_TIMEOUT",
     "Gate",
@@ -218,5 +233,6 @@ __all__ = [
     "sha256_digest",
     "sha256_of_text",
     "sqlstate_of",
+    "violated_constraint",
     "wait_until",
 ]

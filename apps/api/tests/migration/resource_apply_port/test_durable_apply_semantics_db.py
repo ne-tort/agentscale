@@ -36,7 +36,7 @@ import uuid
 from dataclasses import dataclass
 
 import pytest
-from sqlalchemy import func, select, text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from prodavan.application.migration.runtime_materialization.state_machine import (
@@ -182,12 +182,16 @@ async def harness(request):
         )
         port = build_resource_materialization_apply_port(
             session_factory=factory,
-            # The empty-plan claims do not need resource grounding; the populated-plan
-            # claim deliberately disables it to reach the executor's own effect-port
-            # refusal instead of stopping at the gate.
+            # These claims target the *executor*: the head CAS, the attempt receipt,
+            # the audit transaction and the monotonic rollback. The gate is driven by a
+            # static evidence double here, which cannot track a moving head, so its
+            # generation-gap pre-check is disabled; the gate's own matrix is covered in
+            # ``test_apply_port_contract.py``. Resource grounding is switched off for the
+            # one claim that must reach the executor's effect-port refusal instead of
+            # stopping at the gate.
             policy=ResourceApplyEvidencePolicy(
                 require_resource_grounding=options.require_grounding,
-                require_generation_epoch=True,
+                require_generation_epoch=False,
             ),
             rollback_effects=options.rollback_effects,  # type: ignore[arg-type]
         )
@@ -356,7 +360,7 @@ async def test_late_plan_with_an_older_generation_is_refused(harness) -> None:
 
 @pytest.mark.parametrize(
     "harness",
-    [HarnessOptions(require_grounding=False, rollback_effects=object())],
+    [HarnessOptions(require_grounding=False)],
     indirect=True,
 )
 async def test_populated_plan_without_an_effect_port_is_blocked(harness) -> None:

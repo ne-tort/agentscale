@@ -201,17 +201,16 @@ async def _fetch(dsn: str, sql: str, params: dict | None = None):
 
 
 async def _public_tables(dsn: str) -> set[str]:
-    rows = None
+    """Table names in ``public`` — the schema the alembic env targets."""
     engine = create_async_engine(dsn, poolclass=NullPool)
     try:
         async with engine.connect() as conn:
             result = await conn.execute(
                 text("SELECT tablename FROM pg_tables WHERE schemaname = 'public'")
             )
-            rows = {row[0] for row in result.all()}
+            return {row[0] for row in result.all()}
     finally:
         await engine.dispose()
-    return rows
 
 
 async def _stamped_revision(dsn: str) -> str | None:
@@ -286,7 +285,7 @@ async def test_upgrade_downgrade_upgrade_cycle(migration_database_url: str):
             f"missing={sorted(upgraded - re_upgraded)} extra={sorted(re_upgraded - upgraded)}"
         )
         assert await _public_policy_count(dsn) > 0
-    except BaseException:
+    except Exception:
         # Best-effort recovery: a database left at the downgrade target would no
         # longer look clean, so the *next* run would skip instead of retrying.
         try:

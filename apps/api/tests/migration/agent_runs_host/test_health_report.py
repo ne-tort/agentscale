@@ -101,6 +101,7 @@ async def test_serving_loop_reports_last_tick_and_counters() -> None:
     consumer = resource.report()["loops"][LOOP_CONSUMER]
     assert consumer["running"] is True
     assert consumer["blocked"] is False
+    assert consumer["lock_key"] == "prodavan.agent_run.intent_consumer"
     assert consumer["last_tick_at"] == NOW.isoformat()
     assert consumer["started_at"] == NOW.isoformat()
     assert consumer["last_result"]["claimed"] == 2

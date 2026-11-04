@@ -27,7 +27,6 @@ from prodavan.application.resource_materialization.apply_adapter import (
     ApprovalEvidence,
     OperationGrounding,
     ResourceApplyEvidence,
-    ResourceApplyEvidenceSource,
 )
 from prodavan.application.resource_materialization.composition import (
     ResourceMaterializationApplication,
@@ -233,9 +232,20 @@ class RecordingExecutor:
             return self.scripted.pop(0)
         stored = self.receipts.get(plan.idempotency_key)
         if stored is not None:
+            # The real ledger resolves a replay *before* any CAS and answers with the
+            # stored receipt's outcome, reported as ``REPLAY`` when it granted
+            # authority. A stored refusal replays as ``FAILED``.
             return DurableApplyResult(
-                outcome=stored.outcome,
-                reason_code="idempotent_replay",
+                outcome=(
+                    MaterializationApplyOutcome.REPLAY
+                    if stored.outcome is MaterializationApplyOutcome.APPLIED
+                    else MaterializationApplyOutcome.BLOCKED
+                ),
+                reason_code=(
+                    "idempotent_replay"
+                    if stored.outcome is MaterializationApplyOutcome.APPLIED
+                    else "replayed_failure"
+                ),
                 attempt=stored.attempt,
                 head=self._head(),
                 replayed=True,

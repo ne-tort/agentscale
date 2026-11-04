@@ -492,6 +492,7 @@ async def test_gate_grounds_every_operation_in_durable_resource_state() -> None:
         ({"lifecycle": "archived"}, "resource_not_active"),
         ({"lifecycle": "quarantined"}, "resource_not_active"),
         ({"active_version": None}, "resource_active_version_missing"),
+        ({"active_version": 7}, "resource_active_version_drift"),
         ({"version_exists": False}, "resource_version_missing"),
         ({"version_status": "draft"}, "resource_version_not_published"),
         ({"version_status": "retired"}, "resource_version_not_published"),

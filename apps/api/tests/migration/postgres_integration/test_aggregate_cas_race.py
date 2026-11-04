@@ -167,7 +167,6 @@ async def test_a_second_cancel_with_a_fresh_sequence_cannot_be_replayed(pg_schem
 # --------------------------------------------------------------------------- #
 async def test_aggregate_cursor_is_a_compare_and_set_on_one_row(pg_schema):
     """Forced interleaving: one winner, one zero-row update, no phantom cursor."""
-    scope = await seed_scope(pg_schema)
     run_id = "agr_cursor_cas"
     await pg_schema.execute(
         "INSERT INTO agent_control_plane_aggregates "
@@ -235,7 +234,6 @@ async def test_aggregate_cursor_is_a_compare_and_set_on_one_row(pg_schema):
 
 async def test_cursor_cas_does_not_touch_other_aggregates(pg_schema):
     """The predicate is (type, id) scoped, so a parallel aggregate is untouched."""
-    scope = await seed_scope(pg_schema)
     await pg_schema.execute(
         "INSERT INTO agent_control_plane_aggregates "
         "(aggregate_type, aggregate_id, last_sequence, status) VALUES "
@@ -253,7 +251,8 @@ async def test_cursor_cas_does_not_touch_other_aggregates(pg_schema):
                 "target_status": "cancelled",
             },
         )
-    assert result.rowcount == 1
+        rowcount = result.rowcount
+    assert rowcount == 1
     rows = await pg_schema.rows(
         "SELECT aggregate_id, last_sequence FROM agent_control_plane_aggregates "
         "ORDER BY aggregate_id"

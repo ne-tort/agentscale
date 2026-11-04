@@ -187,6 +187,7 @@ class ResourceApplyResource(LifespanResource):
             # Explicitly clear instead of trusting the initial module state: a
             # previous install in the same process must not survive a disabled flag.
             self._install(None)
+            self._installed = False
             logger.info(
                 "resource_apply: disabled; POST materialization/apply stays 503 "
                 "RESOURCE_APPLY_UNAVAILABLE and CRUD is unaffected"
@@ -198,6 +199,7 @@ class ResourceApplyResource(LifespanResource):
             )
         except Exception as exc:  # noqa: BLE001 - the refusal below is explicit
             self._install(None)
+            self._installed = False
             self._install_error = _safe_reason(exc)
             logger.exception("resource_apply: durable apply port could not be composed")
             if self._strict:
@@ -207,11 +209,13 @@ class ResourceApplyResource(LifespanResource):
                 ) from exc
             return
         self._install(provider)
+        self._installed = True
         self._install_error = None
         logger.info("resource_apply: durable apply port published")
 
     async def shutdown(self) -> None:
         self._install(None)
+        self._installed = False
         self._provider = None
         logger.info("resource_apply: durable apply port withdrawn")
 

@@ -187,12 +187,20 @@ async def test_partial_dependencies_block_only_the_incomplete_loop() -> None:
     consumer usable, instead of silently running a half-composed worker.
     """
     deps = AgentRunHostDependencies(execution_port=object())
+    assert deps.any_wired is True
     assert deps.consumer_blockers == ()
     assert deps.worker_blockers == (
         host.BLOCKER_RUN_SOURCE_UNWIRED,
         host.BLOCKER_JOURNAL_UNWIRED,
         host.BLOCKER_TURN_RUNNER_UNWIRED,
     )
+
+
+def test_empty_bundle_counts_as_unwired() -> None:
+    """The fail-closed default is not "everything is fine, just empty"."""
+    empty = AgentRunHostDependencies()
+    assert empty.any_wired is False
+    assert unavailable_host_dependencies().any_wired is False
 
 
 @pytest.mark.asyncio
@@ -261,6 +269,56 @@ async def test_dependency_provider_failure_degrades_to_blocked() -> None:
     result = await resource.drain_consumer_once()
     assert result["reason"] == BLOCKER_DEPENDENCIES_UNWIRED
     await resource.shutdown()
+
+
+# ---------------------------------------------------------------------------
+# Composition: what the loops are actually wired to
+# ---------------------------------------------------------------------------
+
+
+def test_dispatcher_composition_registers_the_run_created_handler() -> None:
+    """With a port assembled, the consumer registry is no longer empty.
+
+    This is the difference between "the queue has a consumer" and "the queue has
+    a consumer that can start a run".  While ``execution_port`` is ``None`` the
+    registry is empty and every intent would be retried, which is why the host
+    refuses to claim at all in that state.
+    """
+    from prodavan.application.agent_runs.dispatcher import IntentKind
+
+    resource = AgentRunWorkerResource(
+        config=enabled_config(worker=False, consumer=True, consumer_batch_max=25),
+        dependencies=AgentRunHostDependencies(execution_port=wired_dependencies().execution_port),
+        session_factory=FakeSessionFactory(),
+        lock=FakeLock(),
+    )
+    dispatcher = resource._intent_dispatcher()
+    assert dispatcher is not None
+    assert dispatcher.registered_kinds == frozenset({IntentKind.RUN_CREATED})
+    assert dispatcher.max_attempts == host.DEFAULT_DISPATCH_MAX_ATTEMPTS
+
+
+def test_dispatcher_is_not_composed_without_a_port() -> None:
+    resource = AgentRunWorkerResource(
+        config=enabled_config(),
+        dependencies=AgentRunHostDependencies(),
+        session_factory=FakeSessionFactory(),
+        lock=FakeLock(),
+    )
+    assert resource._intent_dispatcher() is None
+
+
+def test_consumer_lease_covers_the_whole_claim_batch() -> None:
+    """One claim stamps one lease on every row; the lease must cover the batch.
+
+    An expired ``dispatching`` row is quarantined instead of retried, so an
+    under-sized lease destroys deliverable intents rather than delaying them.
+    """
+    for batch in (1, 5, 25, 100, 200):
+        lease = host._consumer_lease_seconds(batch)
+        assert lease > 3 * batch
+        assert lease <= 900.0
+    assert host._consumer_lease_seconds(25) < host._consumer_lease_seconds(200)
 
 
 # ---------------------------------------------------------------------------
