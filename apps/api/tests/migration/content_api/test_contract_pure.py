@@ -109,18 +109,49 @@ def test_alias_visibility_mirrors_asset_visibility() -> None:
 
 @pytest.mark.parametrize(
     "kind",
-    ["employee", "company", "platform", "cabinet", "project", "role"],
+    ["employee", "company", "cabinet", "project", "role"],
 )
 def test_every_documented_principal_kind_is_accepted(kind: str) -> None:
     assert kind in SUPPORTED_PRINCIPAL_KINDS
     problem = acl_grant_shallow_problem(
         principal_kind=kind,
-        principal_id="platform" if kind == "platform" else ("member" if kind == "role" else "co_a"),
+        principal_id="member" if kind == "role" else "co_a",
         permission="read",
         resource_tenant_id="co_a",
         actor_is_platform_admin=False,
     )
     assert problem is None
+
+
+def test_platform_principal_kind_is_accepted_only_from_a_platform_admin() -> None:
+    """``platform`` is a documented kind but never grantable by a tenant admin.
+
+    It was wrongly folded into the parametrised "every kind is accepted" case, which asked
+    for a successful grant with ``actor_is_platform_admin=False`` — the exact situation
+    ``CONTENT_ACL_PLATFORM_GRANT_FORBIDDEN`` exists to refuse (see
+    ``test_platform_principal_grant_requires_a_platform_admin``).
+    """
+    assert "platform" in SUPPORTED_PRINCIPAL_KINDS
+    assert (
+        acl_grant_shallow_problem(
+            principal_kind="platform",
+            principal_id="platform",
+            permission="read",
+            resource_tenant_id="co_a",
+            actor_is_platform_admin=False,
+        )
+        == ContentErrorCode.CONTENT_ACL_PLATFORM_GRANT_FORBIDDEN.value
+    )
+    assert (
+        acl_grant_shallow_problem(
+            principal_kind="platform",
+            principal_id="platform",
+            permission="read",
+            resource_tenant_id="co_a",
+            actor_is_platform_admin=True,
+        )
+        is None
+    )
 
 
 def test_unknown_principal_kind_is_rejected() -> None:

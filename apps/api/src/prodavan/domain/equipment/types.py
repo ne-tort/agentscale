@@ -45,4 +45,3 @@ class BudgetStatus(StrEnum):
     RESERVED = "reserved"
     COMMITTED = "committed"
     RELEASED = "released"
-PY

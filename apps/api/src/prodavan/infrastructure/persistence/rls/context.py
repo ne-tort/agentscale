@@ -71,6 +71,13 @@ TENANT_GUCS: Final[tuple[str, ...]] = (
 #: :func:`trusted_service_transaction` sets this flag.
 SERVICE_GUCS: Final[tuple[str, ...]] = (*TENANT_GUCS, TRUSTED_SERVICE_SETTING)
 
+#: GUC name -> column the readback selects it as (``current_setting('app.tenant_id', ...)``
+#: is aliased ``tenant_id``).  The GUC name is *not* usable as a readback key: doing so
+#: silently returns ``None`` for every setting, which turned the "restore the previous
+#: values" step into "overwrite them with blanks" and also fed the restore statement
+#: parameters that did not match its placeholders.
+_READBACK_KEY: Final[dict[str, str]] = {name: name.removeprefix("app.") for name in TENANT_GUCS}
+
 ResolutionSource = Literal[
     "session_cookie",
     "bearer_jwt_verified",
@@ -605,7 +612,21 @@ def _verify_readback(
 
 
 def _previous_values(readback: Mapping[str, object]) -> dict[str, str]:
-    return {name: str(readback.get(name) or "") for name in TENANT_GUCS}
+    """Capture the settings that were live before this context was applied.
+
+    Keyed by GUC name (``app.tenant_id``) because that is what
+    :meth:`TenantContext.previous_value` and the audit evidence speak; the values are
+    read through :data:`_READBACK_KEY`, since the readback row is keyed by column
+    alias and would otherwise yield ``None`` for every setting.
+    """
+
+    return {name: str(readback.get(_READBACK_KEY[name]) or "") for name in TENANT_GUCS}
+
+
+def _restore_parameters(previous: Mapping[str, str]) -> dict[str, str]:
+    """Bind parameters for ``_RESTORE_SQL``: its placeholders are the column aliases."""
+
+    return {_READBACK_KEY[name]: previous.get(name, "") for name in TENANT_GUCS}
 
 
 def _context_from(
@@ -688,7 +709,7 @@ async def trusted_tenant_context(
         # with it, so there is nothing to restore on this path.
         raise
     else:
-        await executor._one(_RESTORE_SQL, previous)
+        await executor._one(_RESTORE_SQL, _restore_parameters(previous))
         if _previous_values(await executor._one(_READBACK_SQL)) != dict(previous):
             raise RlsContextError("context_restore_failed", "previous tenant context was not restored")
 
@@ -758,7 +779,7 @@ async def trusted_service_transaction(
             except BaseException:
                 raise
             else:
-                await executor._one(_RESTORE_SERVICE_SQL, previous)
+                await executor._one(_RESTORE_SERVICE_SQL, _restore_parameters(previous))
                 restored = (await executor._one(_READBACK_SQL)).get("trusted_service")
                 if str(restored or "") not in ("", "None"):
                     raise RlsContextError(
@@ -810,7 +831,7 @@ def trusted_tenant_context_sync(
     except BaseException:
         raise
     else:
-        executor._one(_RESTORE_SQL, previous)
+        executor._one(_RESTORE_SQL, _restore_parameters(previous))
         if _previous_values(executor._one(_READBACK_SQL)) != dict(previous):
             raise RlsContextError("context_restore_failed", "previous tenant context was not restored")
 

@@ -26,11 +26,21 @@ foreign targets, RLS coverage) plus the fragile spots named in the review
 (retained project key, M05 anchor-key ownership, deferred cycle, validation gate,
 downgrade symmetry).
 
-Three tests carry a **strict** ``xfail`` (B1, M1, M3 of the review).  A strict
-xfail means "the invariant is documented as violated by the current chain, and the
-fix is a new revision, not an edit of an applied one".  When the owning fix lands
-those tests turn into ``XPASS`` and fail on purpose, so the marker cannot rot into
-a permanent excuse.
+The three findings that used to carry a **strict** ``xfail`` (B1, M1, M3 of the
+review) are now fixed in the chain and in the RLS registry, so their markers are
+gone and the assertions run live:
+
+* B1 — ``2026110312`` / ``2026110314`` / ``2026110315`` re-apply the registry after
+  the late table-adding revisions, so ``upgrade head`` leaves no tenant table
+  unpolicied;
+* M1 — ``runtime_revision_heads`` / ``runtime_materialization_attempts`` /
+  ``runtime_materialization_audit`` are registered (owner ``2026110306``) and the
+  ``runtime_`` prefix makes the coverage report able to name them;
+* M3 — ``2026110310`` withdraws exactly the delta it introduced
+  (``agent_run_leases``) instead of doing nothing.
+
+They are kept as assertions rather than notes so a regression fails instead of
+re-appearing silently.
 """
 
 from __future__ import annotations
@@ -45,8 +55,6 @@ from functools import lru_cache
 from pathlib import Path
 from types import ModuleType
 from typing import Iterator
-
-import pytest
 
 from prodavan.infrastructure.persistence.rls import policies
 
@@ -755,15 +763,6 @@ def test_uncovered_relations_is_empty_for_the_chain_tables() -> None:
     assert policies.uncovered_relations(table_owners()) == ()
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "M1 (ddl-chain-cross-review.md): runtime_revision_heads, runtime_materialization_attempts and "
-        "runtime_materialization_audit carry project_id but are neither registered nor excluded, and no "
-        "CANONICAL_TABLE_PREFIXES entry matches their names, so uncovered_relations() reports an empty set "
-        "vacuously. The fix is a new revision/registry entry, not an edit of 2026110306."
-    ),
-)
 def test_every_scoped_chain_table_is_registered_or_explicitly_excluded() -> None:
     registered = set(policies.registry_tables())
     excluded = policies.excluded_table_names()
@@ -783,14 +782,6 @@ def test_every_scoped_chain_table_is_registered_or_explicitly_excluded() -> None
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "B1 (ddl-chain-cross-review.md): agent_run_provider_attempts is created by 2026110311, after both "
-        "policy passes (2026110307 and 2026110310). A fresh `upgrade head` leaves a tenant table without "
-        "RLS. The fix is a new revision after 2026110311 that re-applies policies.upgrade_guard_sql()."
-    ),
-)
 def test_every_registered_table_is_policied_after_its_creating_revision() -> None:
     owners = table_owners()
     installers = policy_installers()
@@ -814,17 +805,39 @@ def test_every_registered_table_is_policied_after_its_creating_revision() -> Non
     assert not problems, "tables that would be left without RLS after `upgrade head`:\n" + "\n".join(problems)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "M3 (ddl-chain-cross-review.md): 2026110310 re-applies the whole registry but its downgrade is a "
-        "no-op, so the policy delta it creates for agent_run_leases is never removed."
-    ),
-)
 def test_policy_reinstallation_revision_rolls_back_its_own_delta() -> None:
-    installed = set(upgrade("2026110310").sql_objects)
+    """A re-apply revision must withdraw exactly the policies it introduced.
+
+    M3 of the review: ``2026110310`` re-applies the whole registry but its downgrade
+    was a no-op, so the delta it introduced for ``agent_run_leases`` was never
+    removed.  The corrected rule is not "drop everything it re-applied" - a re-apply
+    is an idempotent no-op for policies that already existed, and dropping those would
+    unprotect tables this revision never installed anything for.  The delta is the
+    policy set of the tables created between the previous installer and this one.
+    """
+
+    installed = {name for name, sql_object in upgrade("2026110310").sql_objects.items() if sql_object.kind == "policy"}
     dropped = set(downgrade("2026110310").dropped_sql_objects)
-    assert dropped == installed, f"2026110310 downgrade leaves installed policies behind: {sorted(installed - dropped)}"
+
+    previous_installers = [revision for revision in POLICY_REVISIONS if revision < "2026110310"]
+    assert previous_installers, "2026110310 must not be the first policy installer"
+    delta_tables = {
+        table
+        for table, owner in table_owners().items()
+        if previous_installers[-1] < owner <= "2026110310"
+    }
+    assert delta_tables == {"agent_run_leases"}, f"unexpected delta tables for 2026110310: {sorted(delta_tables)}"
+
+    expected = set()
+    for table in delta_tables:
+        spec = next(spec for spec in policies.CANONICAL_TABLE_POLICIES if spec.table == table)
+        expected.update(spec.policy_names)
+
+    assert expected <= installed, f"2026110310 did not install {sorted(expected - installed)}"
+    assert dropped == expected, (
+        f"2026110310 downgrade leaves installed policies behind: {sorted(expected - dropped)} "
+        f"/ withdraws policies it did not introduce: {sorted(dropped - expected)}"
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -852,8 +865,42 @@ def test_table_downgrades_mirror_upgrades() -> None:
                 f"{revision}: created-but-not-dropped indexes {sorted(set(up.indexes) - set(down.dropped_indexes))} "
                 f"dropped-but-not-created {sorted(set(down.dropped_indexes) - set(up.indexes))}"
             )
-        explicit_created = set(up.detached_foreign_keys) | set(up.detached_uniques) | set(up.sql_objects)
-        explicit_dropped = set(down.dropped_constraints) | set(down.dropped_sql_objects)
+
+        # A table-owning revision may *also* be a registry re-apply (``2026110315``
+        # creates the M04E ledger and then re-installs the whole registry, because a
+        # table-adding revision that leaves its own policies to "the next pass" ships
+        # an unprotected table).  Re-applying an existing policy is an idempotent
+        # no-op, so the symmetric delta is the policy set of the tables this revision
+        # creates - not every policy the re-apply re-emits.  Dropping the pre-existing
+        # ones on downgrade would unprotect tables this revision never installed.
+        created_policies = {
+            name: sql_object for name, sql_object in up.sql_objects.items() if sql_object.kind == "policy"
+        }
+        owned_policies = {
+            name for name, sql_object in created_policies.items() if sql_object.table in set(up.tables)
+        }
+        pre_existing_policies = set(created_policies) - owned_policies
+        dropped_policies = set(down.dropped_sql_objects) & set(created_policies)
+        if dropped_policies != owned_policies:
+            problems.append(
+                f"{revision}: policies not dropped {sorted(owned_policies - dropped_policies)} "
+                f"policies dropped but never introduced here {sorted(dropped_policies - owned_policies)}"
+            )
+        if dropped_policies & pre_existing_policies:
+            problems.append(
+                f"{revision}: downgrade would drop pre-existing policies "
+                f"{sorted(dropped_policies & pre_existing_policies)}"
+            )
+
+        explicit_created = (
+            set(up.detached_foreign_keys)
+            | set(up.detached_uniques)
+            | {name for name in up.sql_objects if name not in created_policies}
+        )
+        explicit_dropped = (
+            set(down.dropped_constraints)
+            | {name for name in down.dropped_sql_objects if name not in created_policies}
+        )
         if explicit_created != explicit_dropped:
             problems.append(
                 f"{revision}: not dropped {sorted(explicit_created - explicit_dropped)} "

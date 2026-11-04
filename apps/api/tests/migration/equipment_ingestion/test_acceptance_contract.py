@@ -211,6 +211,16 @@ def test_normalizer_rejects_bad_currency_availability_and_provenance():
     with pytest.raises(ValueError, match="provenance"):
         CatalogOffer("offer", "snap", "supplier-a", "source-a", "row", NOW,
                      "RUB", "1.00", "in_stock", {}, "bad", "art")
+    # The rejection is about registry membership, not about a narrow allow-list
+    # of the currencies this migration happens to handle today: an assigned code
+    # the product never quotes must still be storable evidence.
+    for code in ("USD", "EUR", "KZT", "CNY", "AED"):
+        assert replace(valid_offer(snapshot_id="snap", artifact_id="art"),
+                       currency=code).currency == code
+    # ...and shape alone is not membership (``ZZZ`` is shaped like a code).
+    for code in ("ZZZ", "rub", "Rub", "RUBB", "", None):
+        with pytest.raises(ValueError, match="currency"):
+            replace(valid_offer(snapshot_id="snap", artifact_id="art"), currency=code)
 
 
 def test_offer_identity_separates_source_and_supplier():

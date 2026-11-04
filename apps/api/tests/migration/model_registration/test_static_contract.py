@@ -31,6 +31,18 @@ CANDIDATE_MODELS = {
         "PluginInstanceRegistryLinkRow": "m05_plugin_instance_registry_links",
         "M05PluginInstancePromotionEvidenceRow": "m05_plugin_instance_promotion_evidence",
     },
+    # Added after the first acceptance draft: the M04 scope-promotion evidence row and the
+    # four M04E ledger tables are part of the current registration surface and must be
+    # single-owned and exported exactly like the older candidates.
+    "m04_scope_evidence.py": {
+        "M04ScopePromotionEvidenceRow": "m04_scope_promotion_evidence",
+    },
+    "m04e_ledger.py": {
+        "M04EDefinitionVersionMappingRow": "m04e_definition_version_mappings",
+        "M04EDefinitionVersionQuarantineRow": "m04e_definition_version_quarantine",
+        "M04EDefinitionVersionCheckpointRow": "m04e_definition_version_checkpoints",
+        "M04EDefinitionVersionAuditRow": "m04e_definition_version_audit",
+    },
 }
 
 # Single-owner canonical grant surface (MIG-OWNERSHIP-CLEANUP-01). All six
@@ -298,6 +310,35 @@ def test_candidate_tables_have_one_source_owner_and_are_registered() -> None:
             assert class_name in exports
 
 
+def test_no_two_models_declare_the_same_tablename() -> None:
+    """Every ``__tablename__`` is declared exactly once across the whole models package.
+
+    This is the invariant that catches a revived duplicate (like the retired
+    ``dynamic_app_grants.py``) *before* SQLAlchemy's ``extend_existing`` can silently make
+    one declaration shadow the other. It scans the source text, not the registry, so a
+    duplicate fails even if neither class is imported by ``__init__``.
+    """
+    declarations: dict[str, list[tuple[str, str]]] = {}
+    for path in sorted(MODELS_DIR.rglob("*.py")):
+        for class_name, table_name in _class_tables(path).items():
+            declarations.setdefault(table_name, []).append((path.name, class_name))
+
+    duplicates = {
+        table: owners for table, owners in declarations.items() if len(owners) > 1
+    }
+    assert duplicates == {}, f"duplicate __tablename__ declarations: {duplicates}"
+
+    # Sanity guard: a broken/short directory walk must not make the duplicate check
+    # vacuously pass. Every candidate and canonical table has to be seen by the scan.
+    expected = {
+        table
+        for models in (*CANDIDATE_MODELS.values(), CANONICAL_MODELS)
+        for table in models.values()
+    }
+    assert expected <= set(declarations)
+    assert len(declarations) > 50
+
+
 def test_candidate_foreign_key_targets_have_matching_unique_keys() -> None:
     tables, unique_keys = _all_model_contracts()
     for filename, models in CANDIDATE_MODELS.items():
@@ -353,9 +394,16 @@ def test_project_cabinet_and_company_anchors_are_independent_and_typed() -> None
     assert (("cabinet_id", "tenant_id", "tenant_type"),
             ("scope_owner_cabinet_anchors.cabinet_id", "scope_owner_cabinet_anchors.tenant_id",
              "scope_owner_cabinet_anchors.tenant_type")) in project_fks
-    assert (("cabinet_id", "tenant_id", "tenant_type"),
-            ("scope_owner_cabinet_anchors.cabinet_id", "scope_owner_cabinet_anchors.tenant_id",
-             "scope_owner_cabinet_anchors.tenant_type")) in cabinet_fks
+    # The cabinet anchor is the *parent* of the project anchor; it can only carry its own
+    # typed tenant tuple. Asserting a self-referencing composite FK here was a copy-paste of
+    # the project assertion and described a relation the model never had (and must not
+    # have: it would be a cycle back onto the same row).
+    assert (("tenant_id", "tenant_type"),
+            ("scope_owner_tenant_anchors.tenant_id",
+             "scope_owner_tenant_anchors.tenant_type")) in cabinet_fks
+    assert not any(
+        remote[0].startswith("scope_owner_cabinet_anchors.") for _, remote in cabinet_fks
+    )
     assert (("tenant_id",), ("companies.id",)) in cabinet_fks
     assert (("cabinet_id",), ("cabinet_instances.id",)) in cabinet_fks
     assert ("id", "company_id", "cabinet_id") in _all_model_contracts()[1]["projects"]

@@ -26,7 +26,15 @@ async def _draft_app(svc, *, app_id: str = "equipment-review"):
     return created.data["id"]
 
 
-async def _upload(svc, definition_id: str, *, version: str = "1.0.0", digest: str = DIGEST_1, key=None):
+async def _upload(
+    svc,
+    definition_id: str,
+    *,
+    version: str = "1.0.0",
+    digest: str = DIGEST_1,
+    key=None,
+    app_id: str = "equipment-review",
+):
     return await svc.create_version(
         context=context(
             operation=DynamicAppOperation.CREATE_VERSION,
@@ -34,7 +42,7 @@ async def _upload(svc, definition_id: str, *, version: str = "1.0.0", digest: st
         ),
         definition_id=definition_id,
         request=CreateVersionRequest(
-            manifest=manifest(version=version), artifact_digest=digest
+            manifest=manifest(version=version, app_id=app_id), artifact_digest=digest
         ),
     )
 
@@ -213,7 +221,13 @@ async def test_publish_version_from_another_definition_is_not_found():
     svc, _, _, _ = service()
     definition_id = await _draft_app(svc, app_id="equipment-review")
     other_id = await _draft_app(svc, app_id="offers-console")
-    other_version = await _upload(svc, other_id, key="version-other")
+    # The manifest must carry *its own* definition's appId: ``create_version`` rejects a
+    # manifest whose appId disagrees with the definition (422). Building the "other"
+    # version with the default appId would fail on that rule instead of reaching the
+    # cross-definition lookup this test is about.
+    other_version = await _upload(
+        svc, other_id, key="version-other", app_id="offers-console"
+    )
 
     with pytest.raises(Exception) as error:
         await svc.publish_version(

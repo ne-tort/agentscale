@@ -22,6 +22,39 @@ _CURRENCY_RE = re.compile(r"^[A-Z]{3}$")
 _REASON_CODE_RE = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
 _ALLOWED_AVAILABILITY = frozenset({"in_stock", "out_of_stock", "backorder", "unknown"})
 
+# Assigned ISO 4217 codes. Shape alone is not enough: ``ZZZ`` matches the
+# three-uppercase-letter pattern, yet no rounding policy and no settlement can
+# ever exist for it, so an offer priced in it is unusable evidence. Registry
+# membership is checked at the evidence boundary and such a row is quarantined
+# instead of being accepted. Withdrawn codes (``HRK``, ``SLL``, ...) are
+# deliberately absent: a feed still emitting one is stale source data.
+_ISO_4217_CODES = frozenset({
+    "AED", "AFN", "ALL", "AMD", "ANG", "AOA", "ARS", "AUD", "AWG", "AZN",
+    "BAM", "BBD", "BDT", "BGN", "BHD", "BIF", "BMD", "BND", "BOB", "BOV",
+    "BRL", "BSD", "BTN", "BWP", "BYN", "BZD", "CAD", "CDF", "CHE", "CHF",
+    "CHW", "CLF", "CLP", "CNY", "COP", "COU", "CRC", "CUP", "CVE",
+    "CZK", "DJF", "DKK", "DOP", "DZD", "EGP", "ERN", "ETB", "EUR", "FJD",
+    "FKP", "GBP", "GEL", "GHS", "GIP", "GMD", "GNF", "GTQ", "GYD", "HKD",
+    "HNL", "HTG", "HUF", "IDR", "ILS", "INR", "IQD", "IRR", "ISK", "JMD",
+    "JOD", "JPY", "KES", "KGS", "KHR", "KMF", "KPW", "KRW", "KWD", "KYD",
+    "KZT", "LAK", "LBP", "LKR", "LRD", "LSL", "LYD", "MAD", "MDL", "MGA",
+    "MKD", "MMK", "MNT", "MOP", "MRU", "MUR", "MVR", "MWK", "MXN", "MXV",
+    "MYR", "MZN", "NAD", "NGN", "NIO", "NOK", "NPR", "NZD", "OMR", "PAB",
+    "PEN", "PGK", "PHP", "PKR", "PLN", "PYG", "QAR", "RON", "RSD", "RUB",
+    "RWF", "SAR", "SBD", "SCR", "SDG", "SEK", "SGD", "SHP", "SLE", "SOS",
+    "SRD", "SSP", "STN", "SVC", "SYP", "SZL", "THB", "TJS", "TMT", "TND",
+    "TOP", "TRY", "TTD", "TWD", "TZS", "UAH", "UGX", "USD", "USN", "UYI",
+    "UYU", "UYW", "UZS", "VED", "VES", "VND", "VUV", "WST", "XAF", "XAG",
+    "XAU", "XBA", "XBB", "XBC", "XBD", "XCD", "XDR", "XOF", "XPD", "XPF",
+    "XPT", "XSU", "XTS", "XUA", "XXX", "YER", "ZAR", "ZMW", "ZWG",
+})
+
+
+def _valid_currency(value: Any) -> bool:
+    """True only for an assigned ISO 4217 code, not merely a shaped one."""
+    return (isinstance(value, str) and bool(_CURRENCY_RE.fullmatch(value))
+            and value in _ISO_4217_CODES)
+
 
 def _json_default(value: Any) -> Any:
     if isinstance(value, Decimal):
@@ -285,8 +318,8 @@ class CatalogOffer:
         if not all((self.offer_id, self.snapshot_id, self.supplier_id, self.source_id,
                     self.artifact_id, self.provenance_digest)):
             raise ValueError("offer identity, source/artifact reference and provenance are required")
-        if not isinstance(self.currency, str) or not _CURRENCY_RE.fullmatch(self.currency):
-            raise ValueError("currency must be an uppercase three-letter code")
+        if not _valid_currency(self.currency):
+            raise ValueError("currency must be an assigned ISO 4217 code")
         if not isinstance(self.availability, str) or self.availability not in _ALLOWED_AVAILABILITY:
             raise ValueError("unsupported availability value")
         if self.price is not None:
@@ -937,7 +970,7 @@ class EquipmentIngestionService:
             return "offer_identity_not_deterministic"
         if offer.observed_at != observed_at:
             return "offer_observed_at_mismatch"
-        if not _CURRENCY_RE.fullmatch(offer.currency):
+        if not _valid_currency(offer.currency):
             return "currency_invalid"
         if offer.availability not in _ALLOWED_AVAILABILITY:
             return "availability_invalid"

@@ -64,6 +64,27 @@ class RunEventType(StrEnum):
     HEARTBEAT = "heartbeat"
 
 
+def event_type_name(value: RunEventType | str) -> str:
+    """Wire name of a run event type, accepting both shapes this type takes.
+
+    ``ApiModel`` sets ``use_enum_values=True``, so a *validated*
+    ``RunStreamEvent.type`` is already the plain string (``"run_started"``) and
+    reading ``.value`` off it raises ``AttributeError``. A model built without
+    validation (``model_construct``) or a caller passing the enum member still
+    hands over a ``RunEventType``. Both are legitimate, so every reader goes
+    through this one function instead of assuming either shape — the mistake
+    that made the very first canonical SSE frame blow up.
+
+    ``use_enum_values`` itself stays: it defines the outward JSON contract.
+    Anything that is neither an enum member nor a non-empty string is refused
+    with ``ValueError`` so the transport can map it to a stable problem code.
+    """
+    name = getattr(value, "value", value)
+    if not isinstance(name, str) or not name.strip():
+        raise ValueError(f"run event type must be an enum member or a name, got {type(value).__name__}")
+    return name
+
+
 class CurrentUser(ApiModel):
     id: str
     email: str | None = None
@@ -164,4 +185,4 @@ class SseEventEnvelope(ApiModel):
 
     @classmethod
     def from_run_event(cls, event: RunStreamEvent) -> "SseEventEnvelope":
-        return cls(id=f"{event.run_id}:{event.seq}", event=event.type.value, data=event)
+        return cls(id=f"{event.run_id}:{event.seq}", event=event_type_name(event.type), data=event)

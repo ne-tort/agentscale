@@ -32,6 +32,7 @@ from .acceptance_fixtures import (
     CABINET_A,
     CABINET_B,
     PROJECT_B,
+    SUBJECT_A,
     TENANT_A,
     TENANT_B,
     AsyncSessionFactory,
@@ -189,14 +190,21 @@ def test_matching_assertion_is_accepted_but_is_not_the_authority() -> None:
         ) as context:
             # Exactly the resolved value was written, once, in this transaction.
             assert context.tenant_id == TENANT_A
-    apply_sql = " ".join(
-        "SELECT set_config('app.tenant_id', :tenant_id, true) AS tenant_id, "
-        "set_config('app.cabinet_id', :cabinet_id, true) AS cabinet_id, "
-        "set_config('app.project_id', :project_id, true) AS project_id, "
-        "set_config('app.user_id', :user_id, true) AS user_id, "
-        "set_config('app.role', :role, true) AS role".split()
-    )
-    assert pg.statements.count(apply_sql) == 1
+            # The applied parameters are the resolved identity, not the assertion.
+            assert pg.set_config_params == [
+                {
+                    "tenant_id": TENANT_A,
+                    "cabinet_id": CABINET_A,
+                    "project_id": "",
+                    "user_id": SUBJECT_A,
+                    "role": "tenant_admin",
+                }
+            ]
+            assert pg.gucs["app.tenant_id"] == TENANT_A
+    # The exit restores the previous values: the apply/restore pair shares its SQL text
+    # and differs only in bind parameters, so the count is 2 with one apply first.
+    assert len(pg.set_config_params) == 2
+    assert pg.set_config_params[1]["tenant_id"] == ""
 
 
 def test_assertion_object_cannot_be_substituted_by_a_mapping() -> None:
@@ -246,12 +254,21 @@ def test_session_cannot_pass_a_bare_mapping_as_a_principal() -> None:
 
 
 def test_expired_resolution_is_denied() -> None:
+    # Two layers refuse an expired resolution: issuing one for an already elapsed TTL
+    # and applying one that expires between resolution and the transaction.
+    with pytest.raises(RlsContextError) as issuance:
+        build_principal(ttl=timedelta(minutes=-1))
+    assert _error_reason(issuance) == "tenant_context_expired"
+
     session = FakeSyncSession(FakePostgres())
-    principal = build_principal(ttl=timedelta(minutes=-1))
+    principal = build_principal(ttl=timedelta(minutes=1))
+    after_expiry = lambda: datetime.now(timezone.utc) + timedelta(minutes=2)  # noqa: E731
     with session.begin(), pytest.raises(RlsContextError) as exc_info:
-        with trusted_tenant_context_sync(session, principal=principal):
+        with trusted_tenant_context_sync(session, principal=principal, clock=after_expiry):
             pytest.fail("expired principal must not be applied")
     assert _error_reason(exc_info) == "tenant_context_expired"
+    # Nothing was written before the expiry check refused the context.
+    assert session.pg.statements == []
 
 
 def test_project_scope_without_cabinet_is_rejected() -> None:

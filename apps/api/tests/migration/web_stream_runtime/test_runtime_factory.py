@@ -114,8 +114,15 @@ def test_facade_adapter_requires_chat_run_scope() -> None:
 
 
 async def test_durable_index_provider_indexes_pairs_from_agent_runs_and_events() -> None:
+    # The run is terminal on purpose: membership here must come from the durable
+    # snapshot alone. The earlier version of this test used a *running* run and
+    # still expected ``has(RUN, 3) is False`` — that models a state the index
+    # deliberately does not model: a live bound run may append events after the
+    # snapshot, so the pair is a member (see ``DurableRunSequenceIndex`` docs and
+    # ``test_durable_index_claims_live_tail_only_for_one_bound_live_run``). The
+    # live-tail case is asserted separately below.
     factory = FakeSessionFactory(
-        FakeAsyncSession(runs=[(RUN, "running")], pairs=[(RUN, 1), (RUN, 2)])
+        FakeAsyncSession(runs=[(RUN, "succeeded")], pairs=[(RUN, 1), (RUN, 2)])
     )
     index = await DurableRunIndexProvider(factory)(_scope())
 
@@ -123,11 +130,41 @@ async def test_durable_index_provider_indexes_pairs_from_agent_runs_and_events()
     assert index.project_id == PROJECT
     assert index.session_id == SESSION
     assert index.run_id == RUN
+    assert index.live_tail is False
     assert index.has(RUN, 1) is True
     assert index.has(RUN, 3) is False
     assert index.has("other-run", 1) is False
     # A negative sequence is never a member, whatever the durable rows say.
     assert index.has(RUN, -1) is False
+
+    # Same rows, but the bound run is still producing: the provider must pass
+    # that fact on, and only for that one run.
+    live_factory = FakeSessionFactory(
+        FakeAsyncSession(runs=[(RUN, "running")], pairs=[(RUN, 1), (RUN, 2)])
+    )
+    live_index = await DurableRunIndexProvider(live_factory)(_scope())
+
+    assert live_index.run_id == RUN
+    assert live_index.live_tail is True
+    assert live_index.has(RUN, 3) is True
+    assert live_index.has("other-run", 3) is False
+
+
+async def test_unavailable_index_double_names_the_same_part_as_the_real_provider() -> None:
+    """One missing part ⇒ one client-facing code, whichever layer noticed it.
+
+    ``UnavailableRunIndexProvider`` (no index at all) and
+    ``DurableRunIndexProvider`` (index unreadable) answer for the same part, so
+    the code family must match. ``streams`` cannot import ``runtime_factory``
+    (the import goes the other way), so the literals are duplicated there and
+    pinned here.
+    """
+    with pytest.raises(AppError) as caught:
+        await UnavailableRunIndexProvider()(_scope())
+
+    assert caught.value.status == 503
+    assert caught.value.code == CODE_RUN_INDEX == "WEB_CHAT_STREAM_RUN_INDEX_UNAVAILABLE"
+    assert caught.value.extra["blocker"] == BLOCKER_RUN_INDEX == "durable_run_sequence_index_missing"
 
 
 async def test_durable_index_provider_refuses_a_session_without_runs() -> None:

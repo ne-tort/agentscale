@@ -17,6 +17,7 @@ Nothing here is executed during the verification freeze.  The fixtures provide:
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
@@ -112,6 +113,17 @@ class _Result:
         return self._row.get("relation")
 
 
+#: ``set_config('app.trusted_service', '<literal>', true)`` - the literal matters:
+#: the apply writes ``'true'`` and the restore writes ``''``, and a fake that
+#: ignored the literal could never observe the flag being cleared.
+_TRUSTED_SERVICE_LITERAL = re.compile(r"set_config\('app\.trusted_service', '([^']*)', true\)")
+
+
+def _trusted_service_literal(sql: str) -> str | None:
+    match = _TRUSTED_SERVICE_LITERAL.search(sql)
+    return match.group(1) if match else None
+
+
 @dataclass
 class FakePostgres:
     """Shared connection state: GUCs, role flags and injectable faults."""
@@ -129,6 +141,11 @@ class FakePostgres:
     #: Fault injection: corrupt the values on the Nth ``set_config`` call.
     corrupt_on_call: int | None = None
     set_config_calls: int = 0
+    #: Parameters of every ``set_config`` statement, in call order.  Statement text
+    #: alone cannot distinguish "apply the resolved scope" from "restore the previous
+    #: scope" (they are the same SQL with different bind values), so the recorded
+    #: parameters are what a test must assert on.
+    set_config_params: list[dict[str, Any]] = field(default_factory=list)
     statements: list[str] = field(default_factory=list)
 
     def reset_transaction(self) -> None:
@@ -160,7 +177,8 @@ class FakePostgres:
         if "set_config('app.tenant_id'" in normalized:
             self.set_config_calls += 1
             assert params is not None
-            applied = self._apply(params, trusted_service="app.trusted_service" in normalized)
+            self.set_config_params.append(dict(params))
+            applied = self._apply(params, trusted_service=_trusted_service_literal(normalized))
             if self.ignore_apply:
                 return _Result(applied)
             if self.corrupt_on_call == self.set_config_calls:
@@ -171,10 +189,10 @@ class FakePostgres:
         raise AssertionError(f"unexpected statement in fake PostgreSQL: {normalized}")
 
     @staticmethod
-    def _apply(params: dict[str, Any], *, trusted_service: bool) -> dict[str, Any]:
+    def _apply(params: dict[str, Any], *, trusted_service: str | None) -> dict[str, Any]:
         applied = {name: params.get(name, "") for name in SETTING_OF_PARAMETER}
-        if trusted_service:
-            applied["trusted_service"] = "true"
+        if trusted_service is not None:
+            applied["trusted_service"] = trusted_service
         return applied
 
 

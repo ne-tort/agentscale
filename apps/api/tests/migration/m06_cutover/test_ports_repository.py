@@ -1,6 +1,5 @@
 """Acceptance contract for the durable cutover repository (CAS + append-only lineage)."""
 
-from dataclasses import replace
 from datetime import timedelta
 
 import pytest
@@ -28,7 +27,7 @@ from prodavan.application.migration.m06_cutover.ports import (
     state_payload,
 )
 
-from .acceptance_fixtures import NOW, PARTITION, gate, legacy_owner, lease
+from .acceptance_fixtures import NOW, PARTITION, gate, lease, legacy_owner
 from .ports_fixtures import (
     seed_fence,
     seed_gate_rows,
@@ -111,11 +110,12 @@ async def test_repository_refuses_every_operation_until_the_schema_exists(
     repository = SqlCutoverRepository(session_factory=env_without_cutover_tables.session_factory)
     with pytest.raises(CutoverRepositoryBlocked):
         await repository.evidence_by_id("any-command")
+    record = _placeholder_record()
     with pytest.raises(CutoverRepositoryBlocked):
         await repository.transition(
             expected_revision=0,
-            state=PartitionCutover(PARTITION, revision=1),
-            evidence=_placeholder_record(),
+            state=_placeholder_state(record),
+            evidence=record,
             lease=lease(3),
             expected_source_change_sequence=None,
         )
@@ -260,15 +260,13 @@ async def test_stale_expected_revision_is_refused(env):
         lease=lease(4), now=NOW,
     )
     state = await repository.load(PARTITION)
-    record = await repository.evidence_by_id("cmd-shadow")
-    assert state is not None and record is not None
-    advanced = replace(
-        state, revision=state.revision + 1, last_evidence_id=record.evidence_id,
-        lineage_head_digest=record.record_digest,
-    )
-    # The ledger already holds revision 2, so a caller that believes it is at revision 1 loses.
+    assert state is not None and state.revision == 2
+    # A caller that still believes it is at revision 1 (the ledger already holds 2) loses the
+    # CAS even though its own record/state pair is structurally consistent.
+    stale_record = _placeholder_record(writer_epoch=4)
+    stale_state = _placeholder_state(stale_record, revision=2)
     assert await repository.transition(
-        expected_revision=1, state=advanced, evidence=record, lease=lease(4),
+        expected_revision=1, state=stale_state, evidence=stale_record, lease=lease(4),
         expected_source_change_sequence=None,
     ) is False
     assert (await repository.load(PARTITION)) == state
@@ -279,7 +277,7 @@ def test_lease_rules_are_explicit():
         PARTITION, state=CutoverState.SHADOW, writer_epoch=4, lease_holder="cutover-4",
         fencing_token="fence-4", canonical_shadow_reads=True, revision=2,
     )
-    record = _placeholder_record()
+    record = _placeholder_record(writer_epoch=5)
     later = PartitionCutover(
         PARTITION, state=CutoverState.SHADOW, writer_epoch=5, lease_holder="cutover-5",
         fencing_token="fence-5", canonical_shadow_reads=True, revision=3,
@@ -295,10 +293,13 @@ def test_lease_rules_are_explicit():
     assert cutover_ports._lease_is_live(current, foreign, record, later) is True
     assert cutover_ports._lease_is_live(current, replayed_token, record, later) is False
     # The live fence may only be re-used by the identical holder: that is what promotion does.
-    assert cutover_ports._lease_is_live(current, live, record, current) is True
+    live_record = _placeholder_record(writer_epoch=4)
+    assert cutover_ports._lease_is_live(current, live, live_record, current) is True
     divergent_holder = WriterLease(PARTITION, "other-holder", 4, NOW + timedelta(minutes=10),
                                    "fence-4")
-    assert cutover_ports._lease_is_live(current, divergent_holder, record, current) is False
+    assert cutover_ports._lease_is_live(
+        current, divergent_holder, live_record, current
+    ) is False
     stale = WriterLease(PARTITION, "cutover-3", 3, NOW + timedelta(minutes=10), "fence-3")
     assert cutover_ports._lease_is_live(current, stale, record, current) is False
 
@@ -438,12 +439,22 @@ async def test_repository_state_survives_a_second_repository_instance(env):
     assert record is not None and record.evidence_id == "cmd-owner"
 
 
-def _placeholder_record():
+def _placeholder_state(record, *, revision: int = 1) -> PartitionCutover:
+    """The resulting state a caller would hand to ``transition`` for ``record``."""
+
+    return PartitionCutover(
+        PARTITION, state=record.resulting_state, writer_epoch=record.writer_epoch,
+        lease_holder="cutover-3", fencing_token=record.lease_fencing_token,
+        canonical_shadow_reads=True, revision=revision,
+        last_evidence_id=record.evidence_id, lineage_head_digest=record.record_digest,
+    )
+
+
+def _placeholder_record(*, writer_epoch: int = 3):
     """A minimal, self-consistent lineage record for structural (non-CAS) assertions."""
 
     from prodavan.application.migration.m06_cutover.cutover import (
         _lineage_payload_digest,
-        PromotionEvidence,
     )
 
     payload = {
@@ -455,7 +466,7 @@ def _placeholder_record():
         "prior_decision_owner": "legacy", "resulting_decision_owner": "legacy",
         "prior_write_owner": "legacy", "resulting_write_owner": "legacy",
         "prior_record_id": None, "prior_record_digest": None,
-        "canonical_positive_writes": False, "writer_epoch": 3,
+        "canonical_positive_writes": False, "writer_epoch": writer_epoch,
         "lease_fencing_token": "fence-3", "gate_evidence": [],
         "parity_report_digest": None, "canonical_snapshot_digest": None,
         "source_snapshot_digest": None, "final_delta_checkpoint": None,
@@ -465,7 +476,8 @@ def _placeholder_record():
         evidence_id="placeholder", partition=PARTITION, action=cutover_ports.CutoverAction.SHADOW,
         actor="operator", occurred_at=NOW, prior_state=CutoverState.LEGACY_ACTIVE,
         resulting_state=CutoverState.SHADOW, prior_read_owner="legacy",
-        resulting_read_owner="legacy", writer_epoch=3, lease_fencing_token="fence-3",
+        resulting_read_owner="legacy", writer_epoch=writer_epoch,
+        lease_fencing_token="fence-3",
         parity_report_digest=None, canonical_snapshot_digest=None, source_snapshot_digest=None,
         final_delta_checkpoint=None, final_delta_source_change_sequence=None,
         reason="placeholder", record_digest=_lineage_payload_digest(payload),

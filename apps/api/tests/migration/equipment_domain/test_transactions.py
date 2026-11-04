@@ -302,7 +302,11 @@ async def test_export_transaction_preserves_selected_membership_and_reconciled_t
     assert transaction.export.lines[0].manual_override is True
     assert transaction.export.currency_totals == (("RUB", transaction.export.lines[0].total),)
     assert transaction.export.idempotency_key
-    assert decisions.selections[0].manual_override is True
+    # ``SelectionTransaction`` is the fence around the decision, not the decision
+    # itself, so the override marker lives on the wrapped ``HumanSelection`` (see
+    # ``test_selection_transaction_carries_manual_override_and_exact_generation_fence``).
+    # Reading it off the transaction reached for a field the fence never mirrors.
+    assert decisions.selections[0].selection.manual_override is True
 
 
 @pytest.mark.asyncio

@@ -23,8 +23,10 @@ What is covered:
 
 from __future__ import annotations
 
+import ast
 import importlib.util
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -112,6 +114,80 @@ def _load_revision() -> ModuleType:
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+@dataclass(frozen=True)
+class _RevisionHeader:
+    """Chain metadata of one revision file, parsed from source (never imported)."""
+
+    revision: str
+    down_revision: str | tuple[str, ...] | None
+    path: Path
+
+    @property
+    def parents(self) -> tuple[str, ...]:
+        if self.down_revision is None:
+            return ()
+        if isinstance(self.down_revision, str):
+            return (self.down_revision,)
+        return tuple(self.down_revision)
+
+
+@dataclass(frozen=True)
+class _RevisionGraph:
+    """Revision headers keyed by id, plus every file that claims each id.
+
+    ``claims`` exists because ``headers`` cannot represent the defect this test
+    looks for: two files declaring the same ``revision`` id collapse onto one
+    dictionary key, so uniqueness has to be checked on the raw files.
+    """
+
+    headers: dict[str, _RevisionHeader]
+    claims: dict[str, tuple[Path, ...]]
+
+    def head_ids(self) -> tuple[str, ...]:
+        referenced = {parent for header in self.headers.values() for parent in header.parents}
+        return tuple(sorted(set(self.headers) - referenced))
+
+    def children_of(self, revision: str) -> tuple[str, ...]:
+        return tuple(sorted(
+            child for child, header in self.headers.items() if revision in header.parents
+        ))
+
+
+def _revision_graph() -> _RevisionGraph:
+    """Every declared revision in ``alembic/versions``, parsed from source.
+
+    Read with :mod:`ast` instead of a text search: ``'revision = "…"'`` occurs
+    inside ``down_revision = "…"``, so a substring scan reports every *child* of
+    a revision as a competing claim on that revision's id.
+    """
+    headers: dict[str, _RevisionHeader] = {}
+    claims: dict[str, list[Path]] = {}
+    for path in sorted(VERSIONS_DIR.glob("*.py")):
+        values: dict[str, Any] = {}
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in tree.body:
+            if not isinstance(node, ast.Assign) or len(node.targets) != 1:
+                continue
+            target = node.targets[0]
+            if not isinstance(target, ast.Name):
+                continue
+            if target.id not in {"revision", "down_revision"}:
+                continue
+            values[target.id] = ast.literal_eval(node.value)
+        revision = values.get("revision")
+        if not isinstance(revision, str):
+            continue
+        headers[revision] = _RevisionHeader(
+            revision=revision, down_revision=values.get("down_revision"), path=path,
+        )
+        claims.setdefault(revision, []).append(path)
+    assert headers, f"no revision files found in {VERSIONS_DIR}"
+    return _RevisionGraph(
+        headers=headers,
+        claims={revision: tuple(paths) for revision, paths in claims.items()},
+    )
 
 
 def _record(module: ModuleType) -> tuple[_DdlRecorder, _DdlRecorder]:
@@ -241,12 +317,25 @@ def test_revision_is_chained_after_canonical_grants_without_a_second_head() -> N
     assert module.branch_labels is None
     assert module.depends_on is None
 
-    competing_heads = [
-        path.name
-        for path in VERSIONS_DIR.glob("*.py")
-        if path != REVISION_PATH and 'revision = "2026110305"' in path.read_text(encoding="utf-8")
-    ]
-    assert competing_heads == []
+    # "No second head" is a property of the revision *graph*, not of one tip.
+    # This revision sits mid-chain: revisions declared after it (0306…) are its
+    # legitimate descendants, and a later tail does not create a branch. What
+    # would create a branch is a fork — either another file claiming this very
+    # revision id, or a second child of it — so both are checked directly.
+    graph = _revision_graph()
+    assert graph.headers[module.revision].parents == (module.down_revision,), (
+        "the pinned revision must sit directly on its declared parent"
+    )
+    claimants = sorted(
+        path.name for path in graph.claims[module.revision] if path != REVISION_PATH
+    )
+    assert claimants == [], f"revision id {module.revision} is also claimed by {claimants}"
+    children = graph.children_of(module.revision)
+    assert len(children) <= 1, f"{module.revision} has {len(children)} children: {children}"
+    # Exactly one head overall: a fork anywhere above this revision would leave
+    # more than one, and a head is what alembic upgrades to.
+    heads = graph.head_ids()
+    assert len(heads) == 1, f"expected a single alembic head, found {heads}"
 
 
 def test_upgrade_creates_exactly_the_orm_tables_after_their_parents() -> None:

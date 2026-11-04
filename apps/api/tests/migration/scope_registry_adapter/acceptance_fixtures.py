@@ -82,6 +82,12 @@ def trusted_context(anchors: ScopeAnchors | None = None) -> MigrationEvidenceCon
         user_id=rls.user_id,
         role=rls.role,
         rls_context=rls,
+        # MigrationEvidenceContext.usable treats a server-derived context without
+        # a positive writer generation as unusable: a writer that cannot name its
+        # fencing generation cannot prove it is the current owner. Omitting it made
+        # every fixture-backed acceptance case block with
+        # trusted_transaction_context_missing before any adapter logic ran.
+        writer_generation=1,
     )
 
 

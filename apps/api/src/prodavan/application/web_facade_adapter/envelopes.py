@@ -36,6 +36,7 @@ from prodavan.application.web_api.contracts import (
     uuid5_from_run,
 )
 from prodavan.application.web_facade.contracts import SseEventEnvelope as ApplicationSseEventEnvelope
+from prodavan.application.web_facade.contracts import event_type_name
 
 WIRE_SCHEMA_VERSION = 1
 
@@ -53,6 +54,24 @@ EVENT_TYPE_TO_WIRE: dict[str, SseEventType] = {
     "run_cancelled": SseEventType.STATUS,
     "heartbeat": SseEventType.KEEPALIVE,
 }
+
+
+def require_event_type_name(value: object) -> str:
+    """Canonical wire name of an application run-event type, fail-closed.
+
+    The shape-tolerance lives in :func:`prodavan.application.web_facade.
+    contracts.event_type_name` (``use_enum_values=True`` means a validated
+    ``type`` is a plain string, so ``.value`` must never be assumed); this
+    wrapper only turns a non-canonical input into the transport's stable
+    refusal instead of letting ``AttributeError``/``KeyError`` escape as a 500.
+    """
+    try:
+        return event_type_name(value)  # type: ignore[arg-type]
+    except ValueError as exc:
+        raise StreamIdentityError(
+            "UPSTREAM_STREAM_MALFORMED",
+            detail="stream event has no canonical event type",
+        ) from exc
 
 
 class StreamIdentityError(Exception):
@@ -173,7 +192,7 @@ class WireEventEncoder:
         position = StreamPosition(run_id=event.run_id, sequence=event.seq)
         # The application envelope id is the composite cursor, not a wire id.
         expected_application_id = position.application_event_id
-        if envelope.id != expected_application_id or envelope.event != event.type.value:
+        if envelope.id != expected_application_id or envelope.event != require_event_type_name(event.type):
             raise StreamIdentityError(
                 "APPLICATION_ENVELOPE_INCONSISTENT",
                 detail="application envelope id/event disagree with its run/sequence payload",
@@ -205,7 +224,7 @@ class WireEventEncoder:
                 detail="wire event id cannot be proven by the trusted run index",
             )
 
-        wire_type = EVENT_TYPE_TO_WIRE.get(event.type.value)
+        wire_type = EVENT_TYPE_TO_WIRE.get(require_event_type_name(event.type))
         if wire_type is None:
             raise StreamIdentityError(
                 "UPSTREAM_STREAM_MALFORMED",

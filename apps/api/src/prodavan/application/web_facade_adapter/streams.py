@@ -104,12 +104,28 @@ class RunIndexProvider(Protocol):
 
 
 class UnavailableRunIndexProvider:
-    """Fail-closed default: no durable run/sequence index exists yet."""
+    """Fail-closed default: no durable run/sequence index exists yet.
+
+    The refusal belongs to the *run-index part* of the runtime, so it uses that
+    part's canonical code and blocker — the same pair
+    :class:`DurableRunIndexProvider` uses when the durable index cannot be read
+    or does not exist. An older wire-layer code
+    (``STREAM_REPLAY_INDEX_UNAVAILABLE``) was used here before the runtime
+    factory existed; keeping it meant the very same missing part surfaced under
+    two different client-facing codes depending on which layer noticed it first.
+    The encoder keeps that code for its own failure (no trusted index to resolve
+    a wire id), which is a different condition.
+
+    The literals mirror ``runtime_factory.CODE_RUN_INDEX`` /
+    ``runtime_factory.BLOCKER_RUN_INDEX``; ``runtime_factory`` imports this
+    module, so naming them here keeps the import graph acyclic. The acceptance
+    suite asserts the two sides stay equal.
+    """
 
     async def __call__(self, scope: StreamScope) -> RunSequenceIndex:
         _ = scope
         raise AppError(
-            code="STREAM_REPLAY_INDEX_UNAVAILABLE",
+            code="WEB_CHAT_STREAM_RUN_INDEX_UNAVAILABLE",
             title="Chat stream unavailable",
             status=503,
             detail="no trusted run/sequence index is available for web chat replay",

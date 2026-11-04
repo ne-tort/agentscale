@@ -15,7 +15,6 @@ Any raised :class:`AppError` before ``commit`` leaves the transaction untouched.
 from __future__ import annotations
 
 import re
-from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any, Mapping
 
@@ -30,6 +29,7 @@ from prodavan.domain.dynamic_apps import (
     CapabilityDecision,
     CapabilityGrant,
     CapabilityName,
+    GrantActor,
     RequestedCapability,
     RollbackMetadata,
 )
@@ -336,7 +336,10 @@ class DynamicAppCrudService:
                 409,
                 "definition changed concurrently; retry with a fresh read",
             )
-        archived = replace(definition, status=target, updated_at=_now())
+        # ``AppDefinition`` is a frozen pydantic contract, not a dataclass: the new
+        # projection must be derived with ``model_copy`` (``dataclasses.replace`` raises
+        # ``TypeError`` on it).
+        archived = definition.model_copy(update={"status": target, "updated_at": _now()})
         view = _definition_view(archived)
         await self._append_audit(
             context,
@@ -497,14 +500,15 @@ class DynamicAppCrudService:
                 "definition changed concurrently; retry with a fresh read",
             )
 
-        published = replace(
-            version, status=AppLifecycleStatus.PUBLISHED, published_at=published_at
+        published = version.model_copy(
+            update={"status": AppLifecycleStatus.PUBLISHED, "published_at": published_at}
         )
-        serving = replace(
-            definition,
-            status=AppLifecycleStatus.PUBLISHED,
-            current_version_id=version.id,
-            updated_at=published_at,
+        serving = definition.model_copy(
+            update={
+                "status": AppLifecycleStatus.PUBLISHED,
+                "current_version_id": version.id,
+                "updated_at": published_at,
+            }
         )
         view = {
             "definition": _definition_view(serving),

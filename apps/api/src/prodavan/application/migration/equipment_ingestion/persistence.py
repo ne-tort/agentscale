@@ -156,6 +156,14 @@ _SELF_EVIDENT_PAGE_RESULTS = frozenset({
     PageCommitResult.COMMITTED_INCOMPLETE,
 })
 
+#: Page results that can make a run succeed: the page either inserted the final
+#: batch or proved it was already stored. A rolled-back page is absent, because
+#: it produced no success of its own and its counters justify nothing.
+_SUCCESS_PAGE_RESULTS = frozenset({
+    PageCommitResult.COMMITTED,
+    PageCommitResult.REPLAYED,
+})
+
 
 class PersistenceError(Exception):
     """Redacted, fail-closed persistence refusal.
@@ -361,6 +369,13 @@ class PageWrite:
         if self.result is PageCommitResult.PARTIALLY_COMMITTED and (
                 self.run_status is not IngestionRunStatus.PARTIAL):
             raise PersistenceError("partially_committed_page_must_report_partial")
+        if (self.run_status is IngestionRunStatus.PARTIAL
+                and self.checkpoint is not None and self.checkpoint.exhausted):
+            # ``partial`` is a claim that the run stopped with source left to
+            # read. An exhausted checkpoint is durable proof that the source was
+            # consumed to its end, so no resumable work remains and the claim
+            # cannot be justified: such a run is ``succeeded`` or ``failed``.
+            raise PersistenceError("partial_run_requires_unexhausted_checkpoint")
         if self.result is PageCommitResult.COMMITTED_INCOMPLETE and (
                 self.run_status is IngestionRunStatus.SUCCEEDED):
             raise PersistenceError("committed_incomplete_page_cannot_succeed")
@@ -717,10 +732,17 @@ class EquipmentIngestionPersistence:
             # request.
             stored = await self.resume(scope)
         decision = decide_page_write(requested=run, outcome=outcome, stored=stored)
-        if decision.terminal and decision.run_status is IngestionRunStatus.SUCCEEDED:
+        if (decision.terminal and decision.run_status is IngestionRunStatus.SUCCEEDED
+                and outcome.result in _SUCCESS_PAGE_RESULTS):
             # A success needs the last batch accounted for as durable evidence:
             # every offer either inserted by this transaction or already stored
             # with identical evidence. A short count means a batch was skipped.
+            #
+            # Only a page that produced the success is checked. A rolled-back
+            # page reporting an already-succeeded run wrote nothing, so it cannot
+            # have lost a batch: the success it reports was justified when the
+            # decisive page committed, and demanding the counters of an outcome
+            # that wrote no offers would turn a correct refusal into an error.
             self._require_last_batch_committed(snapshot=snapshot, outcome=outcome)
         return decision
 

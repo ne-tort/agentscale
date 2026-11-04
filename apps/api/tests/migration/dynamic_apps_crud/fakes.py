@@ -8,7 +8,6 @@ These are fixtures only. They are never bound in a production path: the v1 route
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import replace
 from datetime import UTC, datetime
 
 from prodavan.application.dynamic_apps_definition import (
@@ -139,8 +138,12 @@ class FakeRepository:
         row = self.definitions.get(definition_id)
         if row is None or row.tenant_id != tenant_id or row.status is not expected_status:
             return False
-        self.definitions[definition_id] = replace(
-            row, status=status, current_version_id=current_version_id, updated_at=now()
+        self.definitions[definition_id] = row.model_copy(
+            update={
+                "status": status,
+                "current_version_id": current_version_id,
+                "updated_at": now(),
+            }
         )
         return True
 
@@ -192,8 +195,9 @@ class FakeRepository:
             or row.status is not expected_status
         ):
             return False
-        self.versions[version_id] = replace(
-            row, status=status, published_at=published_at
+        # ``AppVersion`` is a frozen pydantic contract; ``dataclasses.replace`` refuses it.
+        self.versions[version_id] = row.model_copy(
+            update={"status": status, "published_at": published_at}
         )
         return True
 

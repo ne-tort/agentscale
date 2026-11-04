@@ -34,6 +34,8 @@ PARENTS = {
     "project_runtime_revisions": [
         {"id": "rr_a", "project_id": PROJECT_A},
         {"id": "rr_b", "project_id": PROJECT_B},
+        # No reachable parent project: fail-closed, never "unknown = allow".
+        {"id": "rr_orphan", "project_id": "prj_orphan"},
     ],
     "scope_registry": [
         {"id": "scope_a", "tenant_id": TENANT_A, "owner_state": "active"},
@@ -111,15 +113,89 @@ def _rows_by_table() -> dict[str, list[dict[str, object]]]:
             ],
             "dynamic_app_capability_writer_epochs": [{"tenant_id": TENANT_A}],
             "m06_canonical_grant_promotion_evidence": [{"tenant_id": TENANT_A}],
-            "project_runtime_revisions": [
-                {"project_id": PROJECT_A},
-                {"project_id": PROJECT_B},
-                {"project_id": "prj_orphan"},
+            # Parents of the runtime/materialization chains.  ``id`` is required: the
+            # typed hops join on the parent primary key, so a row that omits it is an
+            # unreachable parent rather than a representative sample.
+            "runtime_revision_heads": [
+                {"id": "head_a", "project_id": PROJECT_A},
+                {"id": "head_b", "project_id": PROJECT_B},
+            ],
+            "runtime_materialization_attempts": [
+                {"id": "attempt_a", "project_id": PROJECT_A},
+                {"id": "attempt_b", "project_id": PROJECT_B},
+            ],
+            "runtime_materialization_audit": [
+                {"id": "maudit_a", "project_id": PROJECT_A},
+                {"id": "maudit_b", "project_id": PROJECT_B},
             ],
             "materialization_entries": [
-                {"revision_id": "rr_a"},
-                {"revision_id": "rr_b"},
-                {"revision_id": "rr_missing"},
+                {"id": "entry_a", "revision_id": "rr_a"},
+                {"id": "entry_b", "revision_id": "rr_b"},
+                {"id": "entry_missing", "revision_id": "rr_missing"},
+            ],
+            # --- M04 scope evidence (2026110313) ---
+            "m04_scope_promotion_evidence": [
+                {"id": "scope_ev_a", "tenant_id": TENANT_A},
+                {"id": "scope_ev_b", "tenant_id": TENANT_B},
+            ],
+            # --- M04E backfill ledger (2026110315) ---
+            "m04e_definition_version_mappings": [
+                {"id": "map_ev_a", "tenant_id": TENANT_A},
+                {"id": "map_ev_b", "tenant_id": TENANT_B},
+            ],
+            "m04e_definition_version_quarantine": [
+                {"id": "q_ev_a", "tenant_id": TENANT_A},
+                {"id": "q_ev_b", "tenant_id": TENANT_B},
+            ],
+            "m04e_definition_version_checkpoints": [
+                {"id": "cp_ev_a", "tenant_id": TENANT_A},
+                {"id": "cp_ev_b", "tenant_id": TENANT_B},
+            ],
+            "m04e_definition_version_audit": [
+                {"id": "audit_ev_a", "tenant_id": TENANT_A},
+                {"id": "audit_ev_b", "tenant_id": TENANT_B},
+            ],
+            # --- Equipment v2 (2026110305): two complete, disconnected chains ---
+            "equipment_v2_ingestion_runs": [
+                {"id": "run_a", "tenant_id": TENANT_A},
+                {"id": "run_b", "tenant_id": TENANT_B},
+            ],
+            "equipment_v2_catalog_snapshots": [
+                {"id": "snap_a", "ingestion_run_id": "run_a"},
+                {"id": "snap_b", "ingestion_run_id": "run_b"},
+            ],
+            "equipment_v2_catalog_offers": [
+                {"id": "offer_a", "snapshot_id": "snap_a"},
+                {"id": "offer_b", "snapshot_id": "snap_b"},
+            ],
+            "equipment_v2_requests": [
+                {"id": "req_a", "tenant_id": TENANT_A},
+                {"id": "req_b", "tenant_id": TENANT_B},
+            ],
+            "equipment_v2_request_lines": [
+                {"id": "line_a", "request_id": "req_a"},
+                {"id": "line_b", "request_id": "req_b"},
+            ],
+            "equipment_v2_candidate_groups": [
+                {"id": "group_a", "request_line_id": "line_a"},
+                {"id": "group_b", "request_line_id": "line_b"},
+            ],
+            "equipment_v2_budget_allocations": [
+                {"id": "budget_a", "request_id": "req_a"},
+                {"id": "budget_b", "request_id": "req_b"},
+            ],
+            "equipment_v2_tenders": [
+                {"id": "tender_a", "tenant_id": TENANT_A},
+                {"id": "tender_b", "tenant_id": TENANT_B},
+            ],
+            # --- Agent run fence + attempt journal (2026110309, 2026110311) ---
+            "agent_run_leases": [
+                {"id": "lease_a", "tenant_id": TENANT_A},
+                {"id": "lease_b", "tenant_id": TENANT_B},
+            ],
+            "agent_run_provider_attempts": [
+                {"id": "attempt_j_a", "tenant_id": TENANT_A},
+                {"id": "attempt_j_b", "tenant_id": TENANT_B},
             ],
         }
     )

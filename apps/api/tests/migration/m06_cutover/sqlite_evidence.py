@@ -26,7 +26,6 @@ from prodavan.application.migration.m06_cutover.ports import (
     CUTOVER_LEDGER_TABLE,
     CUTOVER_REQUIRED_SCHEMA,
     CUTOVER_SOURCE_TAIL_TABLE,
-    cutover_schema_ddl,
 )
 from prodavan.infrastructure.persistence.models.canonical_grants import (
     CanonicalGrantWriterEpochRow,
@@ -133,6 +132,7 @@ class EvidenceDatabase:
         self.cutover_tables = {
             spec.name: spec_table(spec, self.metadata) for spec in CUTOVER_REQUIRED_SCHEMA
         }
+        self.mirrored = frozenset(table.name for table in self.tables.values())
         self._created: list[str] = []
         self.engine = create_async_engine(
             "sqlite+aiosqlite://",
@@ -144,7 +144,7 @@ class EvidenceDatabase:
         )
 
     async def create(self, *, with_cutover_tables: bool = True,
-                     cutover_tables: Sequence[str] | None = None) -> "EvidenceDatabase":
+                     cutover_tables: Sequence[str] | None = None) -> EvidenceDatabase:
         names = (
             list(cutover_tables)
             if cutover_tables is not None
@@ -153,8 +153,11 @@ class EvidenceDatabase:
         )
         for name in names:
             self.tables[name] = self.cutover_tables[name]
+        model_tables = [table for name, table in self.tables.items() if name in self.mirrored]
         async with self.engine.begin() as connection:
-            await connection.run_sync(self.metadata.create_all)
+            await connection.run_sync(
+                lambda sync: self.metadata.create_all(sync, tables=model_tables)
+            )
             for statement in dialect_neutral_ddl():
                 table_name = statement.split()[2]
                 if table_name in names:

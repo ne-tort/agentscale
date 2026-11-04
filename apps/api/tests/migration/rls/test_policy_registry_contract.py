@@ -165,9 +165,25 @@ def test_exactly_one_tenant_policy_and_one_trusted_policy_per_table() -> None:
 
 def test_no_policy_reads_a_caller_supplied_value() -> None:
     for spec in CANONICAL_TABLE_POLICIES:
-        for statement in create_policy_statements(spec):
-            assert "current_setting(" in statement
+        tenant_statement, trusted_statement = create_policy_statements(spec)
+        for statement in (tenant_statement, trusted_statement):
+            # No DBAPI placeholder, format token or interpolated value - ever.
             assert ":tenant" not in statement and "%s" not in statement and "${" not in statement
+        if tenant_predicate(spec) == "false":
+            # A table without a tenant anchor gets a deny-all tenant policy: it reads no
+            # GUC because there is no value to compare against, and only the trusted
+            # service policy may reach such a table.  Pin the exact statement so "reads
+            # nothing" cannot silently become "reads a guess", and keep proving that the
+            # trusted policy is the only path in.
+            assert spec.tenant is None
+            assert tenant_statement == (
+                f"CREATE POLICY {spec.tenant_policy} ON {spec.table} FOR ALL "
+                "USING (false) WITH CHECK (false)"
+            ), tenant_statement
+            assert "current_setting(" in trusted_statement
+            continue
+        for statement in (tenant_statement, trusted_statement):
+            assert "current_setting(" in statement
             # Every read must be the two-argument (missing_ok) form: unset -> NULL.
             for match in re.finditer(r"current_setting\('([^']+)'([^)]*)\)", statement):
                 assert match.group(2).strip() == ", true", statement
@@ -203,7 +219,11 @@ def test_every_scope_column_exists_on_the_declared_model() -> None:
                 parent = Base.metadata.tables.get(hop.table)
                 assert parent is not None, f"{hop.table} is not registered in Base.metadata"
                 assert hop.key in parent.c, f"{hop.table}.{hop.key} does not exist"
-                assert hop.value_column in parent.c, f"{hop.table}.{hop.value_column} does not exist"
+                # Only the last hop of a chain names a scope value column
+                # (``ScopedColumn`` rejects any other shape), so the intermediate hops
+                # legitimately carry ``None`` here.
+                if hop.value_column is not None:
+                    assert hop.value_column in parent.c, f"{hop.table}.{hop.value_column} does not exist"
 
 
 def test_model_metadata_has_no_uncovered_canonical_table() -> None:
@@ -251,7 +271,13 @@ def test_child_tables_inherit_scope_through_typed_parents() -> None:
 
     predicate = tenant_predicate(revisions)
     assert "EXISTS (SELECT 1 FROM projects AS rls_0" in predicate
-    assert "rls_0.company_id = project_runtime_revisions.project_id" in predicate
+    # The hop joins ``projects.id`` to the child's ``project_id`` (``ParentHop.key``
+    # defaults to the parent primary key) and reads the tenant from
+    # ``projects.company_id``.  Comparing company_id with project_id - as an earlier
+    # version of this assertion did - would bind the tenant to the project identity.
+    assert "rls_0.id = project_runtime_revisions.project_id" in predicate
+    assert "rls_0.company_id = nullif(current_setting('app.tenant_id', true), '')" in predicate
+    assert "rls_0.cabinet_id = nullif(current_setting('app.cabinet_id', true), '')" in predicate
 
 
 def test_mapping_and_quarantine_resolve_through_their_owner() -> None:

@@ -17,6 +17,15 @@ from prodavan.application.migration.m06_cutover.ports import (
     SqlRollbackVerifier,
 )
 
+from .acceptance_fixtures import (
+    OTHER_PARTITION,
+    PARTITION,
+    digest,
+    gate,
+    legacy_owner,
+    repair_evidence,
+    rollback_evidence,
+)
 from .ports_fixtures import (
     M04_TABLE,
     M04E_TABLE,
@@ -28,15 +37,6 @@ from .ports_fixtures import (
     seed_legacy_owner_row,
 )
 from .sqlite_evidence import EvidenceDatabase
-from .acceptance_fixtures import (
-    OTHER_PARTITION,
-    PARTITION,
-    digest,
-    gate,
-    legacy_owner,
-    repair_evidence,
-    rollback_evidence,
-)
 
 TENANT = PARTITION.tenant_id
 DEFINITION = PARTITION.app_definition_id
@@ -356,7 +356,7 @@ async def test_repair_verifier_refuses_a_parent_lineage_mismatch(env):
 
 async def test_repair_verifier_refuses_when_no_writer_fence_exists(env):
     _, repair = await _repair_ready_env(env)
-    await env.execute(f"DELETE FROM dynamic_app_capability_writer_epochs")
+    await env.execute("DELETE FROM dynamic_app_capability_writer_epochs")
     assert not await SqlCanonicalRepairVerifier(
         session_factory=env.session_factory
     ).verify(evidence=repair)

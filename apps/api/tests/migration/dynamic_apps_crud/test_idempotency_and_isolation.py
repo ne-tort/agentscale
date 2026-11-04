@@ -228,23 +228,28 @@ async def test_same_app_id_may_exist_in_two_tenants():
 
 
 async def test_missing_tenant_context_fails_closed():
-    svc, _, _, _ = service()
-    ctx = MutationContext(
-        identity=ActorIdentity(tenant_id=" ", actor_id="emp_admin"),
-        idempotency_key="key-1",
-        operation=DynamicAppOperation.CREATE_DEFINITION,
-    )
+    svc, repository, audit, _ = service()
 
-    with pytest.raises(Exception) as error:
-        await svc.create_definition(
-            context=ctx,
-            request=CreateDefinitionRequest(app_id="equipment-review", display_name="Eq"),
-        )
-    assert error.value.code == "TENANT_CONTEXT_REQUIRED"
+    # A blank tenant cannot even be represented: ``ActorIdentity`` is the first fail-closed
+    # gate, so constructing a context with ``tenant_id=" "`` raises before any service call.
+    # (The previous version of this test built such an identity and expected the *service*
+    # to reject it — an unreachable state, since the identity refuses to exist at all.)
+    with pytest.raises(ValueError):
+        ActorIdentity(tenant_id=" ", actor_id="emp_admin")
+    with pytest.raises(ValueError):
+        ActorIdentity(tenant_id=TENANT_A, actor_id="  ")
 
+    # Read paths have no identity object, so the service-level guard is what refuses them.
     with pytest.raises(Exception) as list_error:
         await svc.list_definitions(identity_tenant_id="")
     assert list_error.value.code == "TENANT_CONTEXT_REQUIRED"
+
+    with pytest.raises(Exception) as get_error:
+        await svc.get_definition(identity_tenant_id=" ", app_id="equipment-review")
+    assert get_error.value.code == "TENANT_CONTEXT_REQUIRED"
+
+    assert repository.definitions == {}
+    assert audit.appended == []
 
 
 # ------------------------------------------------------------------- permissions
@@ -255,9 +260,16 @@ def test_tenant_context_carries_only_server_resolved_identity():
     source = (API_ROOT / "src/prodavan/api/v1/dynamic_apps.py").read_text(encoding="utf-8")
     assert "require_company_actor" in source
     assert "company.id" in source
-    # The path segment must never be forwarded to the service as the write tenant.
+    # The path segment must never be forwarded to the service as the write tenant. The
+    # resolution moved into ``resolve_tenant_context``, so the invariant is expressed as
+    # "the write tenant is company.id, never company_id" in whichever form it appears.
     assert "tenant_id=company_id" not in source
-    assert "ActorIdentity(tenant_id=company.id" in source
+    assert "ActorIdentity(tenant_id=company_id" not in source
+    assert "TenantContext(tenant_id=company.id" in source
+    assert "ActorIdentity(tenant_id=tenant.tenant_id" in source
+    # Every mutating route must go through that resolution before building a context.
+    assert "tenant = await resolve_tenant_context(" in source
+    assert source.count("tenant = await resolve_tenant_context(") >= 7
 
 
 def test_every_mutating_route_requires_an_idempotency_header():

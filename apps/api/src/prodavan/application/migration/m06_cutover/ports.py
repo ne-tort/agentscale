@@ -68,16 +68,16 @@ carries neither is not ready.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, AsyncIterator
+from typing import Any
 
-from sqlalchemy import inspect as sa_inspect, select, text
+from sqlalchemy import inspect as sa_inspect
+from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -162,7 +162,7 @@ CANONICAL_REPAIR_BLOCK = "canonical_repair"
 class CutoverPortBlocked(RuntimeError):
     """A cutover port cannot decide, because its reviewed storage contract is unmet."""
 
-    def __init__(self, blockers: Sequence[str], *, tables: Sequence["TableSpec"] = ()) -> None:
+    def __init__(self, blockers: Sequence[str], *, tables: Sequence[TableSpec] = ()) -> None:
         unique = tuple(dict.fromkeys(str(item) for item in blockers))
         if not unique:
             raise ValueError("a blocked cutover port needs at least one blocker")
@@ -657,6 +657,12 @@ class SqlCutoverRepository:
     ) -> None:
         self._session_factory = session_factory
         self._schema = tuple(schema)
+
+    @property
+    def session_factory(self) -> async_sessionmaker[AsyncSession]:
+        """The factory every object built over this repository shares."""
+
+        return self._session_factory
 
     @property
     def required_schema(self) -> tuple[TableSpec, ...]:

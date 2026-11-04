@@ -17,6 +17,7 @@ from prodavan.application.web_facade.contracts import (
     ChatRunRequest as FacadeChatRunRequest,
     CurrentUser as FacadeCurrentUser,
     RunStreamEvent as FacadeRunStreamEvent,
+    event_type_name,
 )
 
 
@@ -214,7 +215,7 @@ class SseEventEnvelope(_Contract):
             payload["block"] = event.block.model_dump(mode="json")
         return cls(
             event_id=uuid5_from_run(event.run_id, event.seq),
-            event_type=event_map[event.type.value],
+            event_type=event_map[event_type_name(event.type)],
             occurred_at=datetime.now(timezone.utc),
             project_id=project_id,
             session_id=session_id,

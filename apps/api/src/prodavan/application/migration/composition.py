@@ -239,6 +239,13 @@ UNIMPLEMENTED_PORTS: tuple[UnimplementedPort, ...] = (
     #   ``UpstreamGatePort``, ``CandidateProofPort``, ``CandidateReader`` →
     #   ``application/migration/m04e_ports.py``
     #   (SqlM04EUpstreamGate, SqlM04ECandidateProof, SqlM04ECandidateReader).
+    #   ``CutoverRepository``, ``GateVerifier``, ``LegacyOwnerVerifier``,
+    #   ``RollbackVerifier``, ``CanonicalRepairVerifier`` →
+    #   ``application/migration/m06_cutover/ports.py`` (MIG-CUTOVER-PORTS-01:
+    #   SqlCutoverRepository + SqlGateVerifier/SqlLegacyOwnerVerifier/
+    #   SqlRollbackVerifier/SqlCanonicalRepairVerifier). The repository itself still
+    #   refuses until its two tables exist (``CUTOVER_REQUIRED_SCHEMA``), which is a
+    #   missing *schema*, reported at call time, not a missing port.
     # The M06 stage builder does not accept the evidence ports yet, so
     # ``PartitionHandoffReadPort`` keeps its entry until that wiring lands; a
     # registry entry for an implemented port would refuse a graph that works.
@@ -252,46 +259,6 @@ UNIMPLEMENTED_PORTS: tuple[UnimplementedPort, ...] = (
             "implemented by SqlPartitionHandoffReadStore in evidence_ports.py; the entry stays "
             "only until the M06 stage builder takes the port as a dependency"
         ),
-    ),
-    UnimplementedPort(
-        stage=MigrationStage.CUTOVER,
-        port="CutoverRepository",
-        declared_in="application/migration/m06_cutover/cutover.py:557",
-        blocker_code="cutover_repository_unimplemented",
-        review_ref="G5",
-        detail="no CAS store for PartitionCutover state plus append-only PromotionEvidence lineage",
-    ),
-    UnimplementedPort(
-        stage=MigrationStage.CUTOVER,
-        port="GateVerifier",
-        declared_in="application/migration/m06_cutover/cutover.py:331",
-        blocker_code="cutover_gate_verifier_unimplemented",
-        review_ref="G5",
-        detail="no ParityRunReport -> GateEvidence/GateLineageEvidence mapper and no verifier",
-    ),
-    UnimplementedPort(
-        stage=MigrationStage.CUTOVER,
-        port="LegacyOwnerVerifier",
-        declared_in="application/migration/m06_cutover/cutover.py:335",
-        blocker_code="cutover_legacy_owner_verifier_unimplemented",
-        review_ref="G5",
-        detail="exclusive legacy owner marker verification is unimplemented",
-    ),
-    UnimplementedPort(
-        stage=MigrationStage.CUTOVER,
-        port="RollbackVerifier",
-        declared_in="application/migration/m06_cutover/cutover.py:339",
-        blocker_code="cutover_rollback_verifier_unimplemented",
-        review_ref="G5",
-        detail="pre-cutover rollback evidence verification is unimplemented",
-    ),
-    UnimplementedPort(
-        stage=MigrationStage.CUTOVER,
-        port="CanonicalRepairVerifier",
-        declared_in="application/migration/m06_cutover/cutover.py:343",
-        blocker_code="cutover_canonical_repair_verifier_unimplemented",
-        review_ref="G5",
-        detail="forward-repair evidence verification is unimplemented",
     ),
 )
 
@@ -964,7 +931,18 @@ MIGRATION_SEQUENCE: tuple[StageSpec, ...] = (
         stage=MigrationStage.CUTOVER,
         service_class="CutoverCommandService",
         produces=("PartitionCutover", "PromotionEvidence", "RollbackRecord"),
-        required_ports=_required_ports(MigrationStage.CUTOVER, ()),
+        required_ports=_required_ports(
+            MigrationStage.CUTOVER,
+            (
+                # Implemented in m06_cutover/ports.py (MIG-CUTOVER-PORTS-01), so they are no
+                # longer registry gaps -- but the stage still cannot run without them.
+                "CutoverRepository",
+                "GateVerifier",
+                "LegacyOwnerVerifier",
+                "RollbackVerifier",
+                "CanonicalRepairVerifier",
+            ),
+        ),
         precondition=StagePrecondition(
             requires_stages=(
                 MigrationStage.M04_SCOPE,
