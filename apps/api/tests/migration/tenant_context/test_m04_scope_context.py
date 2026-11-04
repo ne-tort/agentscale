@@ -665,7 +665,8 @@ async def test_trusted_mode_requires_the_reviewed_trusted_policy() -> None:
 async def test_narrow_pins_scope_and_restores_it_on_exit() -> None:
     pg = FakePostgres()
     session = FakeAsyncSession(pg)
-    port = adapter()
+    # A tenant-wide resolution: the binding carries no cabinet, so a cabinet may be pinned.
+    port = adapter(StubResolver(build_principal(cabinet_id=None)))
 
     async with session.begin():
         binding = await port.bind(
@@ -673,6 +674,8 @@ async def test_narrow_pins_scope_and_restores_it_on_exit() -> None:
             context=evidence_context(cabinet_id=None),
             mode=TenantScopeMode.TENANT_SCOPED,
         )
+        assert binding.cabinet_id is None
+        assert binding.project_id is None
         async with port.narrow(
             session=session, binding=binding, cabinet_id=CABINET_A, project_id=PROJECT_A
         ) as narrowed:

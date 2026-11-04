@@ -1807,7 +1807,8 @@ class SqlM04ECandidateProof(_SessionReads):
                 "definition_app_id": definition["app_id"],
                 "current_version_id": current["id"],
                 "current_version_definition_id": current["app_definition_id"],
-                "manifessed_app_id": manifest.get("appId"),                "manifest_version": current["manifest_version"],
+                "manifest_app_id": manifest.get("appId"),
+                "manifest_version": current["manifest_version"],
                 "manifest_manifest_version": manifest.get("version"),
             }),
             "current_version_immutable_artifact_digest": _digest({
@@ -2039,11 +2040,21 @@ class SqlM04EEvidenceStore(_SessionReads):
         expected_checkpoint: BackfillCheckpoint, decisions: Sequence[CandidateDecision],
         page_exhausted: bool,
     ) -> BackfillBatch:
+        accepted = any(
+            isinstance(decision, CandidateDecision)
+            and decision.status is EvidenceStatus.ACCEPTED
+            for decision in decisions
+        )
         raise self._unavailable(
             context,
+            M04EPortReason.STORE_ACCEPTED_OUTCOME_UNREPRESENTABLE if accepted else
             M04EPortReason.STORE_CHECKPOINT_LEDGER_MISSING,
             "no durable M04E cursor/CAS or per-source ledger exists, so a page cannot "
-            "commit its mappings, quarantine, redacted audit and checkpoint atomically",
+            "commit its mappings, quarantine, redacted audit and checkpoint atomically"
+            + (
+                "; additionally ck_m04e_promotion_outcome cannot record an ACCEPTED mapping"
+                if accepted else ""
+            ),
         )
 
     @staticmethod

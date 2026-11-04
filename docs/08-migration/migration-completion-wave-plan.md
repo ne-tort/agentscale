@@ -80,6 +80,19 @@ Design invariants worth keeping:
   `agent_run_provider_attempts` is covered by the registry like the rest of the new
   schema.
 
+## Evidence-schema decisions (reviewed, not accidental)
+
+The four evidence ports declare five schema blockers. Each is classified below so a
+future reader can tell a missing table from a deliberate trade-off.
+
+| Blocker | Verdict |
+|---|---|
+| `m04_scope_promotion_evidence_missing` | **Fixed** by `2026110313` (new `m04_scope_promotion_evidence` table). This was the only reason `load_partition` could never succeed. |
+| `promotion_outcome_cannot_express_ready` | **Fixed for new rows.** The older promotion tables are CHECK-limited to `blocked|quarantined`, which is why the true status lives in the redacted envelope. The new table admits `ready` directly. Existing tables keep their constraint: rewriting an applied CHECK would be a data migration, not a schema fix. |
+| `m05_promotion_record_carries_no_source_inventory` | **Accepted design.** M05 holds counts only; the M06 inventory is reconstructed from the mapped grant sources of the exact partition, which is what `AcceptedPartitionEvidence.admits` actually compares. Storing a second copy would create two inventories that can drift. |
+| `m05_writer_generation_zero_has_no_m06_epoch` | **Correct fail-closed.** `advance_writer_generation` increments from an expected value, so a *published* instance always has `writer_generation >= 1`; a promotion record at generation 0 contradicts its own lifecycle. The port refuses instead of normalising `0 -> 1`, because normalising would mint a fence token nobody granted. |
+| `m04e_backfill_has_no_checkpoint_or_source_mapping_table` | **Accepted compromise.** The page cursor and first-mapping ledger live in the redacted envelope of the append-only promotion row, with `revision_id` acting as the cursor CAS token through `uq_m04e_promotion_revision`. Append-only and CAS-safe, but a plain-SQL cursor query is impossible; a dedicated table would be better and is a candidate for the next schema wave. |
+
 ## Known, named gaps (not oversights)
 
 - **RLS on retained agent tables is absent.** `agent_runs` and
