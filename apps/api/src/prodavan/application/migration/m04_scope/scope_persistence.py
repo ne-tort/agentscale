@@ -1746,8 +1746,16 @@ class BoundScopePage:
         Active-registry cardinality cannot be satisfied before the row exists, so it
         is re-verified (by the unchanged contract method) after the insert.  Every
         other rule — including the exact anchor comparisons — is identical.
+
+        The plugin-instance guard comes first for the same reason it does in
+        ``invalid_reason_for``: M04-02 does not model that kind at all (it is absent
+        from the scope-kind CHECK and from ``m04_scope_anchor``), so the refusal is
+        terminal. Reporting a parent mismatch instead would invite a caller to retry
+        with different parents, which can never succeed.
         """
 
+        if anchors.scope_kind is ScopeKind.PLUGIN_INSTANCE:
+            return "plugin_instance_scope_denied"
         if evidence.tenant_matches != 1:
             return "tenant_parent_missing" if evidence.tenant_matches == 0 else "tenant_parent_ambiguous"
         if evidence.tenant_deleted:
