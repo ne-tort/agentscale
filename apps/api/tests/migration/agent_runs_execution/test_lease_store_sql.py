@@ -25,6 +25,7 @@ from prodavan.infrastructure.persistence.agent_control_plane import lease_store
 from prodavan.infrastructure.persistence.agent_control_plane.lease_registry import (
     AgentRunLeaseRow,
 )
+from prodavan.infrastructure.persistence.models.agent_control_plane import AgentRunRow
 
 NOW = datetime(2026, 11, 4, 9, 0, tzinfo=UTC)
 DEADLINE = NOW + timedelta(seconds=60)
@@ -162,12 +163,18 @@ def test_acquire_is_one_generation_and_attempt_fenced_update() -> None:
 
     assert sql.startswith("UPDATE agent_run_leases SET ")
     assert "SELECT" not in sql.split("EXISTS")[0]  # no read-then-write before the fence
-    assert "agent_run_leases.lease_generation = 0" in sql
-    assert "agent_run_leases.attempt = 1" in sql
-    assert "agent_run_leases.lease_generation=1" in sql
-    assert "attempt=2" in sql
-    assert "lease_token='token-generation-1'" in sql
-    assert "lease_owner='worker-a'" in sql
+    # The fence is one compare-and-set: the *old* generation and attempt are the
+    # predicate and the *new* ones are the assignment.  Compare the two clauses
+    # separately — a bare substring search for ``lease_generation=1`` can only ever
+    # match the assignment if the rendered spacing is guessed, and if the fence
+    # broke (assignment moved into the predicate) it would still be found there.
+    assignment, predicate = sql.split(" WHERE ", 1)
+    assert "lease_generation = 0" in predicate
+    assert "attempt = 1" in predicate
+    assert "lease_generation=1" in assignment
+    assert "attempt=2" in assignment
+    assert "lease_token='token-generation-1'" in assignment
+    assert "lease_owner='worker-a'" in assignment
 
 
 def test_acquire_requires_the_run_to_still_be_claimable() -> None:
@@ -379,7 +386,10 @@ def test_lease_table_is_the_row_the_persistence_slice_authored() -> None:
 
     foreign_keys = list(table.c.run_id.foreign_keys)
     assert len(foreign_keys) == 1
-    assert foreign_keys[0].references("agent_runs.id")
+    # Compare the resolved target, not a dotted string: ``ForeignKey.references``
+    # takes a ``Table``/``Column``, so passing "agent_runs.id" raised
+    # AttributeError inside SQLAlchemy and the guard never actually ran.
+    assert foreign_keys[0].column is AgentRunRow.__table__.c.id
     assert foreign_keys[0].ondelete == "CASCADE"
 
     checks = {constraint.name for constraint in table.constraints if constraint.name}

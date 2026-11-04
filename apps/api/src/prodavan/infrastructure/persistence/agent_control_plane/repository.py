@@ -257,6 +257,14 @@ class SqlAlchemyAgentControlPlaneRepository(AgentControlPlaneTransactionPort, Ag
                 attempt=1,
             )
             session.add(run)
+            # The scope row holds an immediate FK to ``agent_runs``.  The models
+            # declare foreign keys but no ORM relationships, so the unit of work
+            # has no dependency edge between these mappers and orders them by
+            # table name — ``agent_control_plane_run_scopes`` sorts before
+            # ``agent_runs`` and would be inserted first, violating the FK on
+            # every engine (SQLite and PostgreSQL both reject it).  Flush the
+            # parent row before the child is added.
+            await session.flush()
             session.add(
                 AgentControlPlaneRunScopeRow(
                     run_id=command.run_id,
@@ -381,11 +389,19 @@ class SqlAlchemyAgentControlPlaneRepository(AgentControlPlaneTransactionPort, Ag
             approval.decided_at = now
             approval.updated_at = now
 
-        for event, outbox_event, intent in zip(
-            write.events, write.outbox_events, write.outbox_intents, strict=True
-        ):
-            session.add(_event_row(write, event))
-            session.add(
+        projections = tuple(
+            zip(write.events, write.outbox_events, write.outbox_intents, strict=True)
+        )
+
+        # Three FK levels, written one level at a time.  The ORM has no
+        # relationships between these rows, so the unit of work would order the
+        # mappers by table name: ``..._enqueue_intents`` < ``..._events`` <
+        # ``..._outbox_events``, i.e. every child before its parent, which fails
+        # the FK on any engine.  Each level is flushed before the next is added.
+        session.add_all([_event_row(write, event) for event, _, _ in projections])
+        await session.flush()
+        session.add_all(
+            [
                 AgentControlPlaneOutboxEventRow(
                     event_id=outbox_event.event_id,
                     tenant_id=outbox_event.tenant_id,
@@ -397,15 +413,21 @@ class SqlAlchemyAgentControlPlaneRepository(AgentControlPlaneTransactionPort, Ag
                     occurred_at=outbox_event.occurred_at,
                     idempotency_key=outbox_event.idempotency_key,
                 )
-            )
-            session.add(
+                for _, outbox_event, _ in projections
+            ]
+        )
+        await session.flush()
+        session.add_all(
+            [
                 AgentControlPlaneEnqueueIntentRow(
                     event_id=intent.event_id,
                     queue_name=intent.queue_name,
                     tenant_id=command.linkage.tenant_id,
                     deduplication_key=intent.deduplication_key,
                 )
-            )
+                for _, _, intent in projections
+            ]
+        )
 
         if command.approval_id is not None and approval is None:
             raise RuntimeError("approval write did not create or resolve its approval row")
@@ -416,9 +438,7 @@ class SqlAlchemyAgentControlPlaneRepository(AgentControlPlaneTransactionPort, Ag
 
         event_results = tuple(
             _event_result(event, outbox_event.idempotency_key, intent.deduplication_key)
-            for event, outbox_event, intent in zip(
-                write.events, write.outbox_events, write.outbox_intents, strict=True
-            )
+            for event, outbox_event, intent in projections
         )
         return ControlPlaneWriteResult(
             status=ControlPlaneWriteStatus.APPLIED,

@@ -1,4 +1,11 @@
-"""SQLite-backed repository acceptance tests; authored but not run during freeze."""
+"""SQLite-backed repository acceptance tests for the durable control plane.
+
+The engine is SQLite only because CI has no PostgreSQL; the two properties the
+tests rely on are pinned in the fixture so a SQLite pass means what a PostgreSQL
+pass means: immediate foreign keys (``PRAGMA foreign_keys=ON``) and SQLAlchemy
+issued ``BEGIN``, so a ``SAVEPOINT`` is a nested transaction instead of the outer
+one.
+"""
 
 from __future__ import annotations
 
@@ -89,6 +96,18 @@ async def store():
         cursor = dbapi_connection.cursor()
         cursor.execute("PRAGMA foreign_keys=ON")
         cursor.close()
+        # pysqlite's legacy transaction mode only emits ``BEGIN`` before DML, so a
+        # ``SAVEPOINT`` issued as the first statement of a session *is* the outer
+        # transaction: releasing it commits.  That made the repository's nested
+        # savepoint (the command receipt, written before the effects) durable even
+        # when the inner write failed, which no PostgreSQL deployment can do.  Let
+        # SQLAlchemy drive ``BEGIN`` explicitly so the savepoint nesting the code
+        # relies on behaves the way it does on the real engine.
+        dbapi_connection.isolation_level = None
+
+    @event.listens_for(engine.sync_engine, "begin")
+    def emit_explicit_begin(connection):
+        connection.exec_driver_sql("BEGIN")
 
     async with engine.begin() as connection:
         # Restrict schema creation to the exact tables under test and required parents.
@@ -226,8 +245,17 @@ async def test_create_and_replay_are_durable_and_do_not_duplicate_event_or_queue
             (first.event_results[0].event_id, "agent-control-plane-test"),
         )
     assert event_row is not None and outbox_row is not None and intent_row is not None
-    persisted_event = _event_envelope(event_row).model_dump(mode="json")
-    persisted_event["occurred_at"] = event_row.occurred_at.replace(tzinfo=UTC).isoformat()
+    # The outbox payload is the envelope as *production* serialized it: the write
+    # path dumps an aware ``datetime`` through the model, which pydantic renders as
+    # RFC 3339 with a ``Z`` suffix.  SQLite hands the column back naive, so the
+    # offset is restored here and the timestamp is re-encoded by the model rather
+    # than by ``datetime.isoformat`` — hand-formatting it produced ``+00:00`` and
+    # compared two different encodings of the same instant.
+    persisted_event = (
+        _event_envelope(event_row)
+        .model_copy(update={"occurred_at": event_row.occurred_at.replace(tzinfo=UTC)})
+        .model_dump(mode="json")
+    )
     assert outbox_row.payload == persisted_event
     assert outbox_row.event_id == event_row.event_id
     assert outbox_row.aggregate_type == event_row.aggregate_type

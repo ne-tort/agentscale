@@ -49,6 +49,7 @@ from prodavan.infrastructure.persistence.agent_control_plane.attempt_registry im
     ATTEMPT_STATES,
     AgentRunProviderAttemptRow,
 )
+from prodavan.infrastructure.persistence.models.agent_control_plane import AgentRunRow
 
 from .acceptance_fixtures import (
     DEADLINE,
@@ -172,7 +173,10 @@ def test_the_attempt_fk_cascades_with_the_run() -> None:
 
     foreign_keys = list(table.c.run_id.foreign_keys)
     assert len(foreign_keys) == 1
-    assert foreign_keys[0].references("agent_runs.id")
+    # Compare the resolved target, not a dotted string: ``ForeignKey.references``
+    # takes a ``Table``/``Column``, so passing "agent_runs.id" raised
+    # AttributeError inside SQLAlchemy and the guard never actually ran.
+    assert foreign_keys[0].column is AgentRunRow.__table__.c.id
     assert foreign_keys[0].ondelete == "CASCADE"
 
 

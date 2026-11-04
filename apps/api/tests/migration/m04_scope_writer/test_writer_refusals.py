@@ -15,6 +15,7 @@ docstring.
 from __future__ import annotations
 
 import pytest
+from sqlalchemy import CheckConstraint
 
 from prodavan.application.migration.evidence_ports import (
     MigrationEvidenceBlocked,
@@ -57,11 +58,17 @@ from .acceptance_fixtures import ExplodingSessionFactory, OTHER_TENANT
 
 
 def _check_sqltexts() -> dict[str, str]:
-    """``constraint name -> SQL text`` for every named check of the evidence table."""
+    """``constraint name -> SQL text`` for every named check of the evidence table.
+
+    Only :class:`CheckConstraint` objects carry ``sqltext``: the table also declares named
+    foreign keys (``*_fkey``), which are constraints but not checks and have no SQL predicate
+    to assert on, so they are filtered out by type rather than assumed to expose the
+    attribute.
+    """
     return {
         str(constraint.name): str(constraint.sqltext)
         for constraint in M04ScopePromotionEvidenceRow.__table__.constraints
-        if getattr(constraint, "name", None)
+        if isinstance(constraint, CheckConstraint) and constraint.name
     }
 
 
@@ -87,7 +94,15 @@ def test_plugin_instance_is_not_a_storable_scope_kind():
 
 
 def test_the_m04_02_contract_refuses_the_same_scope():
-    """The writer and the resolver use one refusal vocabulary for the same denial."""
+    """The writer and the resolver use one refusal vocabulary for the same denial.
+
+    The kind is checked *first*, before any tenant or parent leg, exactly as
+    ``ScopeResolver.resolve`` and ``evaluate_active_scope_evidence`` deny it before their
+    context checks. This evidence is deliberately left incomplete — ``tenant_id`` is unset
+    and the membership cabinet does not match — so that a contract that answered
+    ``cross_tenant_parent`` (a reason a caller could "fix" by resending corrected parents)
+    for a scope kind M04-02 cannot store at all would be caught here.
+    """
     parent = ScopeParentEvidence(
         tenant_matches=1,
         cabinet_matches=1,

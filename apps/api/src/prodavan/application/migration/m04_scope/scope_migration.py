@@ -351,6 +351,14 @@ class ScopeParentEvidence:
 
     def invalid_reason_for(self, anchors: ScopeAnchors) -> str | None:
         kind = anchors.scope_kind
+        # Terminal first: M04-02 has no plugin-instance scope at all, so no parent evidence
+        # can ever make one acceptable.  Reporting a parent/tenant reason here would send a
+        # caller off to "correct" evidence that is irrelevant, and would make the reason code
+        # for the same anchors depend on how the (never consulted) parents happen to look.
+        # ``ScopeResolver.resolve`` and :func:`evaluate_active_scope_evidence` deny the kind
+        # before their context checks for exactly the same reason.
+        if kind is ScopeKind.PLUGIN_INSTANCE:
+            return "plugin_instance_scope_denied"
         if self.tenant_matches != 1:
             return "tenant_parent_missing" if self.tenant_matches == 0 else "tenant_parent_ambiguous"
         if self.tenant_deleted:
@@ -397,6 +405,8 @@ class ScopeParentEvidence:
             if self.project_cabinet_id != anchors.cabinet_id:
                 return "project_cabinet_mismatch"
             return self._active_registry_reason(anchors)
+        # Any kind M04-02 does not model gets the same terminal refusal, never a parent reason
+        # (see the plugin-instance guard at the top of this method).
         return "plugin_instance_scope_denied"
 
     def _active_registry_reason(self, anchors: ScopeAnchors) -> str | None:
