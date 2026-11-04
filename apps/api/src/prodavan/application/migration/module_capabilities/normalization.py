@@ -55,6 +55,9 @@ _SUPPORTED_ACTIONS = frozenset({
 _SUPPORTED_MCP = frozenset({"rows_query", "rows_upsert", "rows_delete"})
 _SUPPORTED_EVENTS = frozenset({"project.created", "project.resumed", "project.sync"})
 _ENV_RE = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
+# Platform-owned project binding column; present on every project-aware legacy table
+# and derived rather than caller-mapped (see the columns loop).
+_PLATFORM_PROJECT_COLUMN = "project_ids"
 _SECRET_MARKERS = ("password", "secret", "token", "api_key", "private_key")
 _SECRET_DESCRIPTOR_SUFFIXES = ("_column", "_field", "_name", "_key", "_id")
 
@@ -265,7 +268,10 @@ def _normalize_mcp_servers(
     servers = _mapping(root.get("mcpServers"), "mcp_manifest.mcpServers")
     if not servers:
         raise _Quarantine("empty_mcp_manifest", "mcp_manifest.mcpServers", "at least one MCP server is required")
-    if not isinstance(server_ids, MappingABC):
+    if not isinstance(server_ids, MappingABC) or (servers and not server_ids):
+        # An empty map for a manifest that declares servers is a caller wiring
+        # defect, not a per-server data defect: reporting only the first server as
+        # "identity missing" would hide that no server identity was supplied at all.
         raise _Quarantine("mcp_server_identity_map_missing", "mcp_manifest.mcpServers", "stable MCP server IDs are required")
     result: list[McpServerDeclaration] = []
     for name, raw in servers.items():
@@ -403,7 +409,14 @@ def normalize_legacy_module(
                 raise _Quarantine("unsupported_field_type", f"columns[{index}].type", "unknown field type") from exc
             stable_id = field_ids.get((table_slug, name))
             if not isinstance(stable_id, str) or not stable_id.strip():
-                raise _Quarantine("field_identity_missing", f"columns[{index}].name", f"no stable field ID supplied for {table_slug}.{name}")
+                if name != _PLATFORM_PROJECT_COLUMN:
+                    raise _Quarantine("field_identity_missing", f"columns[{index}].name", f"no stable field ID supplied for {table_slug}.{name}")
+                # `project_ids` is a platform-owned binding column that every
+                # project-aware legacy table declares, and no per-module field map
+                # can name it. It is derived deterministically from the module and
+                # schema identity instead of being caller-mapped; any other column
+                # still requires an explicit stable ID.
+                stable_id = f"field:{module_id}:{table_slug}:{_PLATFORM_PROJECT_COLUMN}"
             required = item.get("required", False)
             if not isinstance(required, bool):
                 raise _Quarantine("invalid_field_required", f"columns[{index}].required", "required must be boolean")
@@ -570,6 +583,15 @@ def normalize_legacy_module(
             enabled = item.get("enabled", True)
             if not isinstance(enabled, bool):
                 raise _Quarantine("invalid_mcp_enabled", f"mcp_tools[{index}].enabled", "enabled must be boolean")
+            # `params_schema` is a declared legacy property of the tool; it must be
+            # validated as an object-typed JSON schema before it is carried into the
+            # typed declaration. The assignment was lost while the property stayed
+            # in the allowed field set, so every tool raised NameError and the whole
+            # module was reported as `normalization_failed`.
+            params_schema = _json_schema(
+                item.get("params_schema", {"type": "object", "properties": {}}),
+                f"mcp_tools[{index}].params_schema",
+            )
             implementation = _mapping(item.get("implementation"), f"mcp_tools[{index}].implementation")
             if set(implementation) - {"table_slug", "query", "upsert_key"}:
                 raise _Quarantine("unsupported_mcp_implementation", f"mcp_tools[{index}].implementation", "unsupported MCP implementation properties")

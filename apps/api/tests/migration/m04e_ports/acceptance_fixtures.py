@@ -501,8 +501,20 @@ class _SessionContext:
         return False
 
 
-def session(**kwargs: Any) -> tuple[FakeSession, FakeSessionFactory]:
-    fake = FakeSession(**kwargs)
+def session(
+    data: Mapping[str, list[dict[str, Any]]] | None = None, **kwargs: Any,
+) -> tuple[FakeSession, FakeSessionFactory]:
+    """``FakeSession`` + its factory, forwarding the same surface and order.
+
+    ``data`` is positional here because :class:`FakeSession` takes the table map as
+    its first positional argument and the contract writes ``session(tables(...))``.
+    An earlier revision of this helper accepted keywords only, which made every call
+    site fail with ``TypeError`` before a single assertion ran — a helper that no
+    longer mirrors the class it wraps hides nothing about the ports, it only breaks
+    the contract's own spelling of the fixture.
+    """
+
+    fake = FakeSession(data, **kwargs)
     return fake, FakeSessionFactory(fake)
 
 

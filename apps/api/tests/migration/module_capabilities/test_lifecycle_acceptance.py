@@ -82,7 +82,13 @@ def test_publish_appends_immutable_snapshot_and_two_lifecycle_transitions() -> N
     assert len(repository.snapshots) == 1
     assert {item.to_state for item in repository.transitions} == {"published"}
     assert repository.transitions[0].from_state == "draft"
-    assert repository.transitions[0].to_state == "1.0.0"
+    # A lifecycle transition records states, so the definition's transition ends in
+    # `published`; the version it pins is carried by
+    # `snapshot.definition.current_version`, not by `to_state`. The earlier
+    # expectation of "1.0.0" here contradicted the set assertion above and would
+    # have made `to_state` a pointer instead of a state.
+    assert repository.transitions[0].to_state == "published"
+    assert result.snapshot.definition.current_version == "1.0.0"
 
 
 def test_changed_digest_replay_is_conflict_and_does_not_authorize_rewrite() -> None:

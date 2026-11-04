@@ -817,7 +817,12 @@ async def test_evidence_store_refuses_every_unrepresentable_operation() -> None:
             decisions=(accepted,), page_exhausted=False,
         )
     assert accepted_page.value.code is M04EPortReason.STORE_ACCEPTED_OUTCOME_UNREPRESENTABLE
-    assert "accepted" in accepted_page.value.refusal.detail
+    # The refusal must name the outcome it cannot represent. Case is not part of the
+    # contract: the detail mirrors the schema-gap vocabulary and the CHECK constraint
+    # name (``ck_m04e_promotion_outcome`` can never store an ACCEPTED mapping), so the
+    # previous case-sensitive lowercase literal failed on emphasis alone, not on the
+    # finding it is meant to pin.
+    assert "accepted" in accepted_page.value.refusal.detail.lower()
     # No write was attempted: the refusal is a boundary, not a partial commit.
     assert fake.statements == []
 

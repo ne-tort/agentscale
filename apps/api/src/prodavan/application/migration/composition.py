@@ -204,163 +204,74 @@ CUTOVER_MAX_COMMAND_BYTES_INVALID = "cutover_max_command_bytes_invalid"
 
 
 @dataclass(frozen=True, slots=True)
-class PortGap:
-    """A dependency of ``stage`` that the composition root cannot certify for production.
+class UnimplementedPort:
+    """A trusted port that is declared in ``app/**`` but has no implementation in ``src``.
 
-    Two kinds live in two registries, and the distinction is the whole point of keeping them
-    apart (review §3 of ``docs/08-migration/integration-seams-review.md``):
-
-    * :class:`UnimplementedPort` — the port is declared in ``app/**`` and **no class in
-      ``src/prodavan`` implements it**. ``declared_in`` anchors the declaration.
-    * :class:`UncertifiedPort` — the port **is** implemented, but that implementation cannot
-      be a production binding here for a named, reviewable reason: a missing collaborator, a
-      missing schema, or a constraint that makes the port refuse by design. The reason is in
-      ``detail`` and the implementation is anchored in ``implemented_in``.
-
-    A registry entry for a port the repository *does* implement would refuse to assemble a
-    graph that works, so an implemented port never belongs in ``UNIMPLEMENTED_PORTS``; and a
-    stage that quietly stops reporting an uncertified port would look production-ready when
-    it is not, so every entry in either registry is emitted as a blocker by its stage.
-    Deleting or reclassifying an entry is the deliberate act that certifies a new binding.
+    Review §3. The composition root reports the matching :attr:`blocker_code` for the stage
+    that needs the port; deleting an entry is the deliberate act that certifies a new
+    production adapter, so this table doubles as the wiring checklist.
     """
 
     stage: MigrationStage
     port: str
+    declared_in: str
     blocker_code: str
     review_ref: str
     detail: str
 
 
-@dataclass(frozen=True, slots=True)
-class UnimplementedPort(PortGap):
-    """Declared in ``app/**``, implemented by no class in ``src/prodavan``."""
-
-    declared_in: str = ""
-
-
-@dataclass(frozen=True, slots=True)
-class UncertifiedPort(PortGap):
-    """Implemented, but the implementation cannot be a production binding yet."""
-
-    implementation: str = ""
-    implemented_in: str = ""
-
-
 UNIMPLEMENTED_PORTS: tuple[UnimplementedPort, ...] = (
-    # Empty on purpose, and it took real adapters to get here -- every port this chain needs
-    # now has one:
+    # Ports resolved since this registry was written are removed rather than left
+    # as stale entries: a stage that reports a blocker for a port the repository
+    # *does* implement would refuse to assemble a working graph, which is worse
+    # than no registry at all.
     #
-    # * ``TenantScopeContextPort`` / ``TrustedTenantContextPort``
-    #   → ``application/migration/tenant_context.py``
+    # * ``TenantScopeContextPort`` / ``TrustedTenantContextPort`` →
+    #   ``application/migration/tenant_context.py``. Their remaining collaborator
+    #   (an auth-boundary ``TrustedPrincipalResolver``) is a missing dependency,
+    #   reported by the stage builder, not a missing port.
     # * ``EvidenceStore``, ``M05HandoffPort``, ``M05PromotionRecordPort``,
-    #   ``PartitionHandoffReadPort`` → ``application/migration/evidence_ports.py``
-    # * ``UpstreamGatePort``, ``CandidateProofPort``, ``CandidateReader``
-    #   → ``application/migration/m04e_ports.py``
-    # * ``ArtifactContentPort``
-    #   → ``infrastructure/persistence/migration_definition_version/content_adapter.py``
-    # * ``CutoverRepository``, ``GateVerifier``, ``LegacyOwnerVerifier``, ``RollbackVerifier``,
-    #   ``CanonicalRepairVerifier`` → ``application/migration/m06_cutover/ports.py``
+    #   ``PartitionHandoffReadPort`` → ``application/migration/evidence_ports.py``.
     #
-    # Do not re-add an entry here for an implemented port: the stage would then refuse to
-    # assemble a graph that works. What those adapters still cannot do is in
-    # ``UNCERTIFIED_PORTS`` below, which is why no stage is a production binding yet.
-)
-
-UNCERTIFIED_PORTS: tuple[UncertifiedPort, ...] = (
-    UncertifiedPort(
-        stage=MigrationStage.M04_SCOPE,
-        port="TenantScopeContextPort",
-        implementation="RlsTenantScopeContextAdapter",
-        implemented_in="application/migration/tenant_context.py:917",
-        blocker_code="m04_tenant_principal_resolver_missing",
-        review_ref="G7",
-        detail=(
-            "the binder is implemented, but every GUC it sets is anchored on a principal from "
-            "TrustedPrincipalResolver (tenant_context.py:391), which no class in src/prodavan "
-            "implements; bind() can only refuse with principal_resolver_missing"
-        ),
-    ),
-    UncertifiedPort(
-        stage=MigrationStage.M04E_DEFINITION_VERSION,
-        port="UpstreamGatePort",
-        implementation="SqlM04EUpstreamGate",
-        implemented_in="application/migration/m04e_ports.py:1328",
-        blocker_code="m04e_positive_promotion_gate_unrepresentable",
-        review_ref="G6",
-        detail=(
-            "ck_m04e_promotion_outcome admits only ('blocked','quarantined'), so the gate "
-            "refuses by name and the backfill can never hand an accepted page to M05"
-        ),
-    ),
-    UncertifiedPort(
-        stage=MigrationStage.M05_INSTANCE_RUNTIME,
-        port="TrustedTenantContextPort",
-        implementation="RlsTrustedTenantContextAdapter",
-        implemented_in="application/migration/tenant_context.py:1153",
-        blocker_code="m05_tenant_principal_resolver_missing",
-        review_ref="G7",
-        detail=(
-            "same missing collaborator as M04: the binder needs a TrustedPrincipalResolver to "
-            "anchor the tenant GUCs it proves by readback"
-        ),
-    ),
-    UncertifiedPort(
+    # What is still genuinely absent is listed below.
+    #
+    # Retired from this list after implementation landed (do not re-add):
+    #   ``UpstreamGatePort``, ``CandidateProofPort``, ``CandidateReader`` →
+    #   ``application/migration/m04e_ports.py``
+    #   (SqlM04EUpstreamGate, SqlM04ECandidateProof, SqlM04ECandidateReader).
+    #   ``CutoverRepository``, ``GateVerifier``, ``LegacyOwnerVerifier``,
+    #   ``RollbackVerifier``, ``CanonicalRepairVerifier`` →
+    #   ``application/migration/m06_cutover/ports.py`` (MIG-CUTOVER-PORTS-01:
+    #   SqlCutoverRepository + SqlGateVerifier/SqlLegacyOwnerVerifier/
+    #   SqlRollbackVerifier/SqlCanonicalRepairVerifier). The repository itself still
+    #   refuses until its two tables exist (``CUTOVER_REQUIRED_SCHEMA``), which is a
+    #   missing *schema*, reported at call time, not a missing port.
+    # The M06 stage builder does not accept the evidence ports yet, so
+    # ``PartitionHandoffReadPort`` keeps its entry until that wiring lands; a
+    # registry entry for an implemented port would refuse a graph that works.
+    UnimplementedPort(
         stage=MigrationStage.M06_GRANTS_GATEWAY,
         port="PartitionHandoffReadPort",
-        implementation="SqlPartitionHandoffReadStore",
-        implemented_in="application/migration/evidence_ports.py:2061",
-        blocker_code="m06_partition_handoff_rls_review_missing",
+        declared_in="application/migration/m06_grants_gateway/handoff.py:120",
+        blocker_code="m06_partition_handoff_read_port_unimplemented",
         review_ref="G3",
         detail=(
-            "the read store is implemented and this stage does accept it, but with no approved "
-            "M04 RLS manifest wired (reviewed_m04_rls defaults to None) every partition read "
-            "refuses with m04_rls_review_manifest_missing, so DependencyGates never resolves"
-        ),
-    ),
-    UncertifiedPort(
-        stage=MigrationStage.CUTOVER,
-        port="CutoverRepository",
-        implementation="SqlCutoverRepository",
-        implemented_in="application/migration/m06_cutover/ports.py:627",
-        blocker_code="cutover_state_schema_absent",
-        review_ref="G5",
-        detail=(
-            "the repository is implemented, but no Alembic revision creates either table of "
-            "CUTOVER_REQUIRED_SCHEMA (m06_partition_cutover_evidence, "
-            "m06_partition_cutover_source_tail), so every operation raises "
-            "CutoverRepositoryBlocked naming the missing schema"
+            "implemented by SqlPartitionHandoffReadStore in evidence_ports.py; the entry stays "
+            "only until the M06 stage builder takes the port as a dependency"
         ),
     ),
 )
 
-_PORT_GAPS_BY_STAGE: Mapping[MigrationStage, tuple[PortGap, ...]] = {
-    stage: tuple(
-        gap for gap in (*UNIMPLEMENTED_PORTS, *UNCERTIFIED_PORTS) if gap.stage is stage
-    )
+_UNIMPLEMENTED_BY_STAGE: Mapping[MigrationStage, tuple[UnimplementedPort, ...]] = {
+    stage: tuple(port for port in UNIMPLEMENTED_PORTS if port.stage is stage)
     for stage in MigrationStage
 }
 
 
-def stage_port_gaps(stage: MigrationStage) -> tuple[PortGap, ...]:
-    """Every port ``stage`` needs that this repository cannot certify for production."""
-
-    return _PORT_GAPS_BY_STAGE.get(stage, ())
-
-
 def unimplemented_ports(stage: MigrationStage) -> tuple[UnimplementedPort, ...]:
-    """Ports the chain needs for ``stage`` that no class in ``src`` implements."""
+    """Ports the chain needs for ``stage`` that have no implementation in ``src``."""
 
-    return tuple(
-        gap for gap in stage_port_gaps(stage) if isinstance(gap, UnimplementedPort)
-    )
-
-
-def uncertified_ports(stage: MigrationStage) -> tuple[UncertifiedPort, ...]:
-    """Ports ``stage`` needs whose implementation is not a production binding yet."""
-
-    return tuple(
-        gap for gap in stage_port_gaps(stage) if isinstance(gap, UncertifiedPort)
-    )
+    return _UNIMPLEMENTED_BY_STAGE.get(stage, ())
 
 
 # ---------------------------------------------------------------------------

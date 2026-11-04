@@ -2,6 +2,8 @@
 
 from datetime import UTC, datetime, timedelta
 
+import hashlib
+
 from prodavan.application.automation_persistence.contracts import LeaseToken, StaleCasOutcome
 from prodavan.application.automation_service.contracts import durable_error
 from prodavan.application.automation_service.outbox import _safe_error
@@ -22,7 +24,12 @@ def test_durable_error_excludes_exception_message_and_is_stable() -> None:
     first = durable_error(RuntimeError("https://internal.example/?token=secret"), code="delivery_failed")
     second = durable_error(RuntimeError("different secret"), code="delivery_failed")
     assert first.code == "automation.error.delivery_failed"
-    assert first.error_class.endswith("RuntimeError")
+    # The durable record carries the class only as a digest — ``DurableError`` has
+    # ``code`` and ``digest`` and no ``error_class`` attribute (see the R-08/R-09
+    # review: stable class/code *digests*, never raw text). Asserting the exact
+    # digest of the qualified class name keeps the check that the failure class is
+    # what the record encodes *and* that the exception message is not part of it.
+    assert first.digest == hashlib.sha256(b"builtins.RuntimeError").hexdigest()
     assert first.digest == second.digest
     assert "secret" not in first.digest
 

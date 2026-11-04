@@ -839,8 +839,43 @@ def test_executor_positive_receipt_must_match_next_generation():
 
     result = run(coordinator.execute(prepared.operation))
 
-    assert result.outcome is RuntimeApiOutcome.CONFLICT
-    assert result.reason_code == "executor_receipt_generation_mismatch"
+    # A positive receipt at any generation other than the fenced next generation
+    # is not representable: RuntimeApiExecutionReceipt pins the generation to
+    # expected_generation + 1 and to its own applied revision at construction, so
+    # the forged object raises inside the executor port before the coordinator
+    # can see it. The run therefore ends as a non-authoritative failure rather
+    # than a conflict with a receipt reason code.
+    assert result.outcome is RuntimeApiOutcome.BLOCKED
+    assert result.reason_code == "atomic_executor_failed"
+    assert result.execution is None
+
+
+def test_execution_receipt_type_refuses_a_positive_result_at_another_generation():
+    """The next-generation fence is an invariant of the receipt type itself."""
+    coordinator, _, _, _, _, request = make_harness()
+    prepared = run(coordinator.prepare(request))
+    assert prepared.operation is not None
+    command_prepared = prepared.operation.prepared
+    applied = make_applied(command_prepared.desired, 4)
+    receipt = RuntimeApiExecutionReceipt(
+        outcome=RuntimeApiOutcome.APPLIED,
+        scope=SCOPE,
+        expected_generation=3,
+        generation=4,
+        plan_digest=command_prepared.plan.plan_digest,
+        runtime_image_digest=IMAGE,
+        bridge_lease=LEASE,
+        reason_code="applied",
+        state_machine_outcome=ApplyOutcome.APPLIED,
+        replayed=False,
+        applied_revision=applied,
+    )
+    with pytest.raises(ValueError, match="must match its applied revision"):
+        replace(receipt, generation=5)
+    with pytest.raises(ValueError, match="advance exactly one generation"):
+        replace(receipt, expected_generation=2)
+    with pytest.raises(ValueError, match="must match its applied revision"):
+        replace(receipt, applied_revision=make_applied(command_prepared.desired, 5))
 
 
 def test_execute_rejects_rebound_idempotency_key():

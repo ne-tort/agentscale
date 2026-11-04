@@ -59,10 +59,12 @@ def test_every_declared_port_method_has_a_matching_signature(implementation, pro
     declared = inspect.signature(getattr(protocol, method))
     implemented = inspect.signature(getattr(implementation, method))
     assert list(declared.parameters) == list(implemented.parameters)
-    assert (
-        inspect.iscoroutinefunction(implemented)
-        is inspect.iscoroutinefunction(getattr(protocol, method))
-    )
+    # ``inspect.iscoroutinefunction`` takes the callable, not its ``Signature``: passing the
+    # signature always answered ``False``, which made this half of the check compare two
+    # ``False`` values and never detect a synchronous implementation of an async port.
+    assert inspect.iscoroutinefunction(getattr(implementation, method)) is (
+        inspect.iscoroutinefunction(getattr(protocol, method))
+    ), f"{implementation.__name__}.{method} is not async like {protocol.__name__}.{method}"
 
 
 def test_port_return_annotations_match_the_contract():
@@ -77,11 +79,75 @@ def test_port_return_annotations_match_the_contract():
     )
 
 
+def _docstring_constants(tree: ast.Module) -> set[int]:
+    """ids of the ``Constant`` nodes that are docstrings, i.e. documentation, not behaviour."""
+
+    docstrings: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(
+            node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
+        ):
+            body = getattr(node, "body", ())
+            if not body:
+                continue
+            first = body[0]
+            if (
+                isinstance(first, ast.Expr)
+                and isinstance(first.value, ast.Constant)
+                and isinstance(first.value.value, str)
+            ):
+                docstrings.add(id(first.value))
+    return docstrings
+
+
+def _executable_strings(tree: ast.Module) -> tuple[str, ...]:
+    """Every string literal the module can act on: docstrings excluded.
+
+    The previous form of this test searched the raw source text, so it failed on the module
+    docstring documenting *that there is no such marker* — a documentation line is not an
+    executable path. What actually matters is whether the module can *produce* a marker.
+    """
+
+    docstrings = _docstring_constants(tree)
+    return tuple(
+        node.value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant)
+        and isinstance(node.value, str)
+        and id(node) not in docstrings
+    )
+
+
 def test_module_declares_no_in_memory_or_test_double_path():
     class_names = {node.name for node in TREE.body if isinstance(node, ast.ClassDef)}
     assert not [name for name in class_names if "InMemory" in name or "Memory" in name]
     assert not [name for name in class_names if "Fixture" in name or "Fake" in name]
-    assert "IS_TEST_DOUBLE" not in SOURCE
+
+    # No executable string can carry the marker: an assignment such as
+    # ``IS_TEST_DOUBLE = "..."``, a keyword argument, or a stored attribute value.
+    markers = [
+        value for value in _executable_strings(TREE) if "IS_TEST_DOUBLE" in value
+    ]
+    assert markers == [], f"an executable string literal declares a test double: {markers}"
+    # ...and no identifier of that name is bound or read, anywhere in the module.
+    for node in ast.walk(TREE):
+        name = getattr(node, "attr", None) or getattr(node, "id", None)
+        assert name != "IS_TEST_DOUBLE", (
+            "the module must not define or read an IS_TEST_DOUBLE marker: the only evidence "
+            "source is a committed row of a registered table"
+        )
+    # A test double also cannot arrive by import: nothing under ``tests`` may be imported.
+    for node in ast.walk(TREE):
+        if isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+        elif isinstance(node, ast.Import):
+            module = ",".join(alias.name for alias in node.names)
+        else:
+            continue
+        assert "tests" not in module.split(".") and "conftest" not in module, (
+            f"the evidence ports must not import a test module: {module}"
+        )
+
     for node in ast.walk(TREE):
         if isinstance(node, ast.Attribute) and node.attr in {"_rows", "_store_cache", "_markers"}:
             raise AssertionError("a process-local evidence cache is not allowed")

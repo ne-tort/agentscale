@@ -151,8 +151,14 @@ class ModuleCapabilityLifecycleService:
             LifecycleTransition(
                 definition_id=definition.definition_id,
                 version=None,
-                from_state=definition.current_version or definition.lifecycle.value,
-                to_state=version.version,
+                from_state=definition.lifecycle.value,
+                # `to_state` is a lifecycle state, not the pinned version: the
+                # definition moves draft -> published and the version it now points
+                # at is recorded by `published_definition.current_version` in the
+                # same snapshot. Writing the version number here made `to_state`
+                # non-enumerable, so a later deprecate ("published" -> "deprecated")
+                # could not be validated against the definition's last state.
+                to_state=DefinitionLifecycle.PUBLISHED.value,
                 actor_id=evidence.actor_id,
                 reason="publish capability definition",
                 evidence_id=evidence.transaction_id,

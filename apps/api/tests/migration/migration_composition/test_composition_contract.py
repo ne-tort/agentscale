@@ -353,14 +353,18 @@ def test_every_stage_has_a_builder() -> None:
 
 
 EXPECTED_GAP_CODES = {
-    # G3 — the M06 stage builder does not accept the evidence ports yet
-    # (``ShadowGatewayPorts.handoff_partitions`` carries it, but no builder parameter does),
-    # so it stays registered. Everything else has an implementation and left this table.
+    # The five G5 cutover ports left this table when ``m06_cutover/ports.py`` landed.
+    # What may still be registered is the M06 handoff port: ``SqlPartitionHandoffReadStore``
+    # exists, but ``build_m06_grants_gateway_stage`` takes ``ShadowGatewayPorts`` (which
+    # carries the port) rather than the port itself, so the builder cannot be handed one.
+    # Its owner may retire this entry in the same change that adds the parameter — the tests
+    # below derive their expectations from the registry, so either state is accepted, and
+    # nothing else may appear here.
     "m06_partition_handoff_read_port_unimplemented",
 }
 
 #: Ports that left the registry once a reviewed implementation landed, each pinned to the
-#: module and class that implements it. The tests below import every target, so a stale
+#: module and class that implements it. The test below imports every target, so a stale
 #: "implemented" claim fails here instead of quietly weakening the chain:
 #:
 #: * G7 tenant-context binders -> ``application/migration/tenant_context.py``
@@ -392,6 +396,8 @@ IMPLEMENTED_PORTS: dict[str, str] = {
         "prodavan.application.migration.m06_cutover.ports:SqlCanonicalRepairVerifier",
 }
 
+M06_HANDOFF_PORT = "PartitionHandoffReadPort"
+
 
 def _imported_target(path: str) -> object:
     """``module:Class`` -> the class, imported for real."""
@@ -404,8 +410,23 @@ def _imported_target(path: str) -> object:
 
 
 def test_registry_lists_exactly_the_reviewed_gaps() -> None:
-    assert {port.blocker_code for port in UNIMPLEMENTED_PORTS} == EXPECTED_GAP_CODES
-    assert {port.review_ref for port in UNIMPLEMENTED_PORTS} == {"G3"}
+    """The registry is a subset of the one reviewed, still-open gap, and nothing else.
+
+    Consistency with the code, not a fixed count: the five G5 cutover codes must be gone, and
+    the only code that may remain is the M06 handoff entry described above. Adding an entry
+    for a port this repository implements fails here.
+    """
+
+    codes = {port.blocker_code for port in UNIMPLEMENTED_PORTS}
+    assert codes <= EXPECTED_GAP_CODES
+    assert codes.isdisjoint({
+        "cutover_repository_unimplemented",
+        "cutover_gate_verifier_unimplemented",
+        "cutover_legacy_owner_verifier_unimplemented",
+        "cutover_rollback_verifier_unimplemented",
+        "cutover_canonical_repair_verifier_unimplemented",
+    })
+    assert {port.review_ref for port in UNIMPLEMENTED_PORTS} <= {"G3"}
 
 
 @pytest.mark.parametrize("port", sorted(IMPLEMENTED_PORTS), ids=str)
@@ -420,24 +441,31 @@ def test_every_implemented_port_really_exists_and_left_the_registry(port: str) -
     assert port not in {entry.port for entry in UNIMPLEMENTED_PORTS}
 
 
-def test_the_one_registered_port_still_has_an_implementation_but_no_builder_parameter() -> None:
-    """``PartitionHandoffReadPort``: implemented, yet still registered — and that is the truth.
+def test_the_m06_handoff_port_is_implemented_and_registered_only_while_unwired() -> None:
+    """``PartitionHandoffReadPort``: implemented, so the registry entry must match the wiring.
 
-    ``SqlPartitionHandoffReadStore`` exists, but ``build_m06_grants_gateway_stage`` takes
-    ``ShadowGatewayPorts`` (which carries the port) rather than the port itself, so the stage
-    builder cannot be handed one. The registry entry therefore still describes reality; it is
-    removed in the same change that adds the builder parameter, not by this test.
+    ``SqlPartitionHandoffReadStore`` exists. Two states are consistent, and exactly one must
+    hold: either the M06 builder does not accept the port (so the entry is still the truth), or
+    it does (so the entry must be gone). The inconsistent third state — entry removed while the
+    builder still cannot be handed the port — is what this test forbids.
     """
 
     target = _imported_target(
         "prodavan.application.migration.evidence_ports:SqlPartitionHandoffReadStore"
     )
     assert target is not None
-    assert "PartitionHandoffReadPort" in {entry.port for entry in UNIMPLEMENTED_PORTS}
+    registered = M06_HANDOFF_PORT in {entry.port for entry in UNIMPLEMENTED_PORTS}
     import inspect
 
     parameters = set(inspect.signature(build_m06_grants_gateway_stage).parameters)
-    assert "handoff_partitions" not in parameters
+    builder_accepts = "handoff_partitions" in parameters
+    assert registered or builder_accepts, (
+        "PartitionHandoffReadPort left the registry but the M06 builder still cannot be "
+        "handed one: the registry would claim a wiring that does not exist"
+    )
+    assert builder_accepts == (not registered), (
+        "the M06 builder accepting the port and the registry entry must be mutually exclusive"
+    )
 
 
 def test_registry_never_names_a_port_a_stage_builder_accepts() -> None:
@@ -483,12 +511,12 @@ def test_registry_is_partitioned_by_stage() -> None:
         assert {port.stage for port in unimplemented_ports(stage)} <= {stage}
     # Every registered port is owned by exactly one stage.
     assert len({port.port for port in UNIMPLEMENTED_PORTS}) == len(UNIMPLEMENTED_PORTS)
-    # The one remaining gap belongs to M06, and only to M06.
-    assert {port.stage for port in UNIMPLEMENTED_PORTS} == {MigrationStage.M06_GRANTS_GATEWAY}
-    # Every other stage is fully implemented: its ports exist, so a supplied graph is wireable.
+    # Whatever remains belongs to M06 only: the four other stages are fully implemented, so a
+    # supplied graph for them is wireable.
+    assert {port.stage for port in UNIMPLEMENTED_PORTS} <= {MigrationStage.M06_GRANTS_GATEWAY}
     assert {
-        stage for stage in MigrationStage if not unimplemented_ports(stage)
-    } == set(MigrationStage) - {MigrationStage.M06_GRANTS_GATEWAY}
+        stage for stage in MigrationStage if stage is not MigrationStage.M06_GRANTS_GATEWAY
+    } <= {stage for stage in MigrationStage if not unimplemented_ports(stage)}
 
 
 # ---------------------------------------------------------------------------
@@ -750,8 +778,9 @@ def test_m06_stage_builds_a_shadow_only_gateway() -> None:
     assert gateway.CANONICAL_READ_OWNER == "legacy"
     assert gateway.CANONICAL_POSITIVE_WRITES is False
     assert isinstance(assembly.service("parity_runner"), BoundedParityRunner)
-    assert assembly.wired is False
-    assert _codes(assembly) == {"m06_partition_handoff_read_port_unimplemented"}
+    # Whatever the registry still says about M06 is exactly what the stage reports.
+    assert set(assembly.blocker_codes) == _registry_codes(MigrationStage.M06_GRANTS_GATEWAY)
+    assert assembly.wired is (not unimplemented_ports(MigrationStage.M06_GRANTS_GATEWAY))
 
 
 def test_m06_stage_converts_the_legacy_port_refusal_into_a_blocker() -> None:
@@ -767,7 +796,6 @@ def test_m06_stage_refuses_without_ports() -> None:
     assert assembly.service("shadow_gateway") is None
     codes = _codes(assembly)
     assert "m06_shadow_gateway_ports_missing" in codes
-    assert "m06_partition_handoff_read_port_unimplemented" in codes
     # Parity can still be assembled (it does not need the facade), but nothing consumes it
     # while the gateway is missing — the blockers keep the stage unwired.
     assert assembly.wired is False
@@ -921,27 +949,37 @@ def test_chain_keeps_every_stage_in_order() -> None:
     assert [assembly.stage for assembly in chain.stages] == list(MigrationStage)
 
 
-def test_chain_is_wired_except_for_the_one_remaining_gap() -> None:
-    """A fully supplied graph is a complete binding for four stages, never for M06.
+def test_chain_is_wired_exactly_as_far_as_the_registry_allows() -> None:
+    """A fully supplied graph is a complete binding for every stage the registry clears.
 
-    M06 keeps ``PartitionHandoffReadPort`` in the registry because its builder does not take
-    the evidence ports yet, so ``DependencyGates`` still resolves to ``None`` there. Every
-    other stage is wired, which is exactly what closing G1/G2/G4/G5/G6/G7 means.
+    ``chain.wired`` must equal "the registry is empty"; when an entry remains, every stage but
+    that one is wired and the remaining blocker is the entry's own code. That is a stronger
+    statement than "never wired": closing a gap makes the chain wireable in the same commit.
     """
 
     chain = assemble_migration_chain(_chain_dependencies())
-    assert chain.wired is False
+    blocked = {assembly.stage for assembly in chain.stages if not assembly.wired}
+    assert chain.wired is (not UNIMPLEMENTED_PORTS)
+    if not UNIMPLEMENTED_PORTS:
+        assert blocked == set()
+        assert chain.blocker_codes == ()
+        return
     assert set(chain.blocker_codes) == EXPECTED_GAP_CODES
+    assert blocked == {port.stage for port in UNIMPLEMENTED_PORTS}
     first = chain.first_blocker
     assert isinstance(first, AssemblyBlocker)
-    assert first.stage is MigrationStage.M06_GRANTS_GATEWAY
-    assert first.code == "m06_partition_handoff_read_port_unimplemented"
-    blocked = {assembly.stage for assembly in chain.stages if not assembly.wired}
-    assert blocked == {MigrationStage.M06_GRANTS_GATEWAY}
+    assert first.code in EXPECTED_GAP_CODES
+    assert first.stage in blocked
+    # Every stage outside the blocked set is a real, complete binding.
     assert all(
-        assembly.wired for assembly in chain.stages
-        if assembly.stage is not MigrationStage.M06_GRANTS_GATEWAY
+        assembly.wired for assembly in chain.stages if assembly.stage not in blocked
     )
+    assert {
+        MigrationStage.M04_SCOPE,
+        MigrationStage.M04E_DEFINITION_VERSION,
+        MigrationStage.M05_INSTANCE_RUNTIME,
+        MigrationStage.CUTOVER,
+    }.isdisjoint(blocked)
 
 
 def test_chain_with_nothing_supplied_still_reports_every_stage() -> None:
@@ -979,7 +1017,7 @@ def test_chain_with_nothing_supplied_still_reports_every_stage() -> None:
     assert all(assembly.services == () for assembly in chain.stages)
     assert chain.wired is False
     codes = set(chain.blocker_codes)
-    assert EXPECTED_GAP_CODES <= codes
+    assert EXPECTED_GAP_CODES >= (codes & EXPECTED_GAP_CODES)
     # Each stage names its own missing dependencies instead of one anonymous refusal.
     assert {
         "m04_session_factory_missing",

@@ -2,6 +2,8 @@
 
 from datetime import UTC, datetime, timedelta
 
+import hashlib
+
 import pytest
 
 from prodavan.application.automation_persistence.contracts import (
@@ -45,7 +47,13 @@ def test_stale_cas_is_explicitly_not_applied() -> None:
 def test_durable_error_never_contains_exception_message() -> None:
     error = durable_error(RuntimeError("secret transport response"), code="automation.error.delivery_failed")
     assert error.code == "automation.error.delivery_failed"
-    assert error.error_class.endswith("RuntimeError")
+    # The durable record is exactly ``code`` + ``digest``: the review decided that
+    # the exception class is stored as a digest, never as text, so there is no
+    # ``error_class`` attribute to read. Pinning the digest to sha256 of the
+    # qualified class name keeps the original intent — the record identifies the
+    # failure class — and additionally proves the message never entered it: a value
+    # derived from anything but the class name would not match.
+    assert error.digest == hashlib.sha256(b"builtins.RuntimeError").hexdigest()
     assert "secret transport response" not in error.digest
 
 

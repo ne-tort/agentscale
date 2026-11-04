@@ -70,7 +70,10 @@ def test_stage_quarantines_identity_mismatch_without_draft_write() -> None:
     assert not result.accepted
     assert result.reasons == ("definition_version_identity_mismatch",)
     assert not store.drafts
-    assert store.quarantines[0]["reasons"] == ["definition_version_identity_mismatch"]
+    # `reasons` is a Sequence[str] on the port; compare it positionally so the
+    # check stays exact (no extra, dropped or reordered codes) without pinning the
+    # concrete sequence type the pipeline happens to pass.
+    assert tuple(store.quarantines[0]["reasons"]) == ("definition_version_identity_mismatch",)
 
 
 def test_stage_quarantines_missing_dependency_and_never_falls_back_to_legacy() -> None:

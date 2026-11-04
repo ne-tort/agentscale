@@ -50,9 +50,15 @@ def test_missing_reference_field_identity_is_quarantined() -> None:
     args["slug_map"]["tables"].append({"slug": "groups", "label": "Groups"})
     args["slug_map"]["columns"].append({"table_slug": "items", "name": "group_id", "type": "ref", "ref": {"table_slug": "groups"}})
     args["schema_ids"]["groups"] = "schema:mod_example:groups"
+    # The ref field itself must be identified first, otherwise the generic
+    # per-column identity check fires and the case never reaches reference
+    # resolution — i.e. it would not exercise the missing `groups.row_id` fallback
+    # this test exists to forbid.
+    args["field_ids"][("items", "group_id")] = "field:mod_example:items:group_id"
     result = normalize_legacy_module(**args)
     assert not result.accepted
     assert result.issues[0].code == "reference_field_identity_missing"
+    assert result.issues[0].path == "columns[1].ref"
 
 
 def test_unsupported_legacy_action_kind_is_quarantined() -> None:

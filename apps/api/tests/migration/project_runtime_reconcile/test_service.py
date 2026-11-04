@@ -479,10 +479,34 @@ def test_failed_health_without_valid_last_known_good_quarantines(scope):
 
 def test_execution_receipt_with_wrong_scope_or_fence_cannot_commit(scope):
     def corrupt(receipt):
-        return replace(receipt, fence_token="stale-fence")
+        # Only the positive APPLY receipt is forged. The containment call that
+        # follows must return a properly bound receipt -- if the port also lied
+        # about the quarantine fence, the correct outcome would be BLOCKED
+        # (containment unconfirmed), not a quarantine this test can credit.
+        return (
+            replace(receipt, fence_token="stale-fence")
+            if receipt.action is ReconcileAction.APPLY
+            else receipt
+        )
 
     app, _, _, store, runtime = service(scope, ObservedRuntime(scope, PodPresence.ABSENT), mutate_receipt=corrupt)
     result = run(app.reconcile(scope=scope, expected_generation=0, idempotency_key="bad-receipt"))
+    assert result.outcome is ReconcileOutcome.QUARANTINED
+    assert result.reason_code == "runtime_unhealthy_quarantined"
+    assert store.record.applied_digest is None
+    assert [call[0] for call in runtime.calls] == [ReconcileAction.APPLY, ReconcileAction.QUARANTINE]
+
+
+def test_positive_receipt_with_foreign_scope_cannot_commit(scope):
+    def corrupt(receipt):
+        return (
+            replace(receipt, scope=replace(scope, project_id="other-project"))
+            if receipt.action is ReconcileAction.APPLY
+            else receipt
+        )
+
+    app, _, _, store, runtime = service(scope, ObservedRuntime(scope, PodPresence.ABSENT), mutate_receipt=corrupt)
+    result = run(app.reconcile(scope=scope, expected_generation=0, idempotency_key="foreign-scope"))
     assert result.outcome is ReconcileOutcome.QUARANTINED
     assert result.reason_code == "runtime_unhealthy_quarantined"
     assert store.record.applied_digest is None

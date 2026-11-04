@@ -187,9 +187,15 @@ async def test_backfill_store_refuses_an_untrusted_context():
     factory = ExplodingSessionFactory()
     store = SqlM04EBackfillEvidenceStore(session_factory=factory, scope=SCOPE)
 
+    # The trusted scope is *tenant*-wide: ``TrustedEvidenceScope`` carries a tenant and a
+    # writer generation, and ``admits_partition`` decides on ``partition[0]`` alone (pinned by
+    # ``test_scope_refuses_a_blank_tenant``). A second application definition inside the same
+    # tenant is therefore inside the trusted scope -- and the ledger lookups are keyed by the
+    # context's own partition, so the store cannot read across definitions anyway. The untrusted
+    # case is the one the scope can actually express: another tenant.
     with pytest.raises(MigrationEvidenceBlocked) as foreign:
         await store.find_existing(
-            context=backfill_context(app_definition_id="definition-other"),
+            context=backfill_context(tenant_id="tenant-other"),
             source_kind="legacy_app_version",
             source_id=VERSION,
             source_schema_version="v1",

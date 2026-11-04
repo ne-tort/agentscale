@@ -21,6 +21,9 @@ from prodavan.domain.dynamic_apps import (
 NOW = datetime(2026, 1, 1, tzinfo=timezone.utc)
 DIGEST = "sha256:" + "a" * 64
 
+#: Distinguishes "caller said nothing" from an explicit ``published_at=None``.
+_UNSET = object()
+
 
 def _definition(*, status=AppLifecycleStatus.PUBLISHED, current_version_id="version-1", tenant_id="tenant-1", app_id="demo-app", scope=None):
     return AppDefinition(
@@ -44,7 +47,22 @@ def _version(
     digest=DIGEST,
     app_id="demo-app",
     manifest_version="1.0.0",
+    published_at=_UNSET,
 ):
+    """Build an ``AppVersion``.
+
+    ``published_at`` is a real field of ``AppVersion`` (``types.AppVersion``) and
+    ``DynamicAppDefinitionService.resolve`` compares it between the selected
+    version and its history row, so the factory must be able to set it. It stays
+    derived from ``status`` when the caller says nothing — a published version
+    without a publication timestamp is rejected by the model itself, and a
+    non-published one must not carry a timestamp. An explicit ``None`` is
+    therefore preserved rather than overridden, so a test can still model the
+    malformed row the service is required to quarantine.
+    """
+
+    if published_at is _UNSET:
+        published_at = NOW if status is AppLifecycleStatus.PUBLISHED else None
     return AppVersion(
         id=version_id,
         app_definition_id=definition_id,
@@ -60,7 +78,7 @@ def _version(
         },
         status=status,
         created_at=NOW,
-        published_at=NOW if status is AppLifecycleStatus.PUBLISHED else None,
+        published_at=published_at,
     )
 
 

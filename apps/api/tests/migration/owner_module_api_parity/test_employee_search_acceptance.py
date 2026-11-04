@@ -17,6 +17,19 @@ from prodavan.application.search_index.service import SearchIndexService
 from prodavan.domain.identity import Principal
 
 
+class StubSession:
+    """Minimal stand-in for the AsyncSession the facade passes to the index.
+
+    A real session exposes ``sync_session``; the search service queues its
+    per-query metric envelope on that session's ``info`` map after commit. A
+    bare ``SimpleNamespace`` is not a session shape: it forces the metric path
+    to fail rather than exercising it.
+    """
+
+    def __init__(self) -> None:
+        self.sync_session = SimpleNamespace(info={})
+
+
 @pytest.mark.asyncio
 async def test_employee_search_scopes_owner_and_project_rows_and_returns_cursor() -> None:
     store = InMemorySearchIndexStore()
@@ -63,7 +76,7 @@ async def test_employee_search_scopes_owner_and_project_rows_and_returns_cursor(
         ),
         patch("prodavan.application.search_index.employee_query.get_search_index_service", return_value=search),
     ):
-        query_service = EmployeeSearchQueryService(SimpleNamespace())
+        query_service = EmployeeSearchQueryService(StubSession())
         first_page = await query_service.query(
             project_id="project-1",
             principal=principal,
@@ -84,10 +97,16 @@ async def test_employee_search_scopes_owner_and_project_rows_and_returns_cursor(
             size=1,
         )
 
-    assert [hit["id"] for hit in first_page["hits"]] == ["owner-row"]
-    assert first_page["next_search_after"] == ["shared"]
-    assert [hit["id"] for hit in second_page["hits"]] == ["project-row"]
-    assert second_page["next_search_after"] == ["project"]
+    # Ascending title order over the two visible rows: "project" < "shared".
+    # Visibility, not document kind, decides membership: the company-owner row
+    # and the current project's row are both visible, while the sibling project
+    # and the foreign company rows are not.
+    assert [hit["id"] for hit in first_page["hits"]] == ["project-row"]
+    assert first_page["next_search_after"] == ["project"]
+    assert first_page["total"] == 2
+    assert [hit["id"] for hit in second_page["hits"]] == ["owner-row"]
+    assert second_page["next_search_after"] == ["shared"]
+    assert second_page["total"] == 2
 
 
 @pytest.mark.asyncio

@@ -133,26 +133,42 @@ SEAM_PORTS: tuple[SeamPort, ...] = (
     SeamPort(
         name="M05HandoffPort",
         declared_in="application/migration/m04e_definition_version/backfill.py",
-        implementations=(),
-        reviewed_gap="G1: no durable M04E->M05 handoff store exists in src or infrastructure",
+        implementations=(
+            (
+                "application/migration/evidence_ports.py",
+                "SqlM05HandoffEvidenceStore",
+            ),
+        ),
     ),
     SeamPort(
         name="M05PromotionRecordPort",
         declared_in="application/migration/m05_instance_runtime/runtime_service.py",
-        implementations=(),
-        reviewed_gap="G2: no append-only M05 promotion/handoff store exists",
+        implementations=(
+            (
+                "application/migration/evidence_ports.py",
+                "SqlM05PromotionEvidenceStore",
+            ),
+        ),
     ),
     SeamPort(
         name="PartitionHandoffReadPort",
         declared_in="application/migration/m06_grants_gateway/handoff.py",
-        implementations=(),
-        reviewed_gap="G3: no reader over accepted partition evidence exists",
+        implementations=(
+            (
+                "application/migration/evidence_ports.py",
+                "SqlPartitionHandoffReadStore",
+            ),
+        ),
     ),
     SeamPort(
         name="EvidenceStore",
         declared_in="application/migration/m04e_definition_version/backfill.py",
-        implementations=(),
-        reviewed_gap="G4: bounded M04E page-commit/checkpoint-CAS store is absent",
+        implementations=(
+            (
+                "application/migration/evidence_ports.py",
+                "SqlM04EBackfillEvidenceStore",
+            ),
+        ),
     ),
     SeamPort(
         name="UpstreamGatePort",
@@ -169,51 +185,68 @@ SEAM_PORTS: tuple[SeamPort, ...] = (
     SeamPort(
         name="CutoverRepository",
         declared_in="application/migration/m06_cutover/cutover.py",
-        implementations=(),
-        reviewed_gap="G5: cutover state/evidence repository is absent",
+        implementations=(
+            ("application/migration/m06_cutover/ports.py", "SqlCutoverRepository"),
+        ),
     ),
     SeamPort(
         name="GateVerifier",
         declared_in="application/migration/m06_cutover/cutover.py",
-        implementations=(),
-        reviewed_gap="G5: full-lineage gate verifier is absent; cutover refuses by design",
+        implementations=(
+            ("application/migration/m06_cutover/ports.py", "SqlGateVerifier"),
+        ),
     ),
     SeamPort(
         name="LegacyOwnerVerifier",
         declared_in="application/migration/m06_cutover/cutover.py",
-        implementations=(),
-        reviewed_gap="G5",
+        implementations=(
+            ("application/migration/m06_cutover/ports.py", "SqlLegacyOwnerVerifier"),
+        ),
     ),
     SeamPort(
         name="RollbackVerifier",
         declared_in="application/migration/m06_cutover/cutover.py",
-        implementations=(),
-        reviewed_gap="G5",
+        implementations=(
+            ("application/migration/m06_cutover/ports.py", "SqlRollbackVerifier"),
+        ),
     ),
     SeamPort(
         name="CanonicalRepairVerifier",
         declared_in="application/migration/m06_cutover/cutover.py",
-        implementations=(),
-        reviewed_gap="G5",
+        implementations=(
+            ("application/migration/m06_cutover/ports.py", "SqlCanonicalRepairVerifier"),
+        ),
     ),
     SeamPort(
         name="EvidenceReadPort",
         declared_in="application/migration/m06_grants_gateway/adapter.py",
-        implementations=(),
-        reviewed_gap="G6: shadow evidence reader is absent (composition field only)",
+        implementations=(
+            (
+                "application/migration/m06_grants_gateway/evidence_store.py",
+                "SqlCanonicalEvidenceStore",
+            ),
+        ),
     ),
     SeamPort(
         name="TrustedEvidenceTransactionPort",
         declared_in="application/migration/m06_grants_gateway/adapter.py",
-        implementations=(),
-        reviewed_gap="G6: trusted evidence transaction is absent (composition field only)",
+        implementations=(
+            (
+                "application/migration/m06_grants_gateway/evidence_store.py",
+                "SqlCanonicalEvidenceStore",
+            ),
+        ),
     ),
     SeamPort(
         name="ResolvePluginInstancePort",
         declared_in="application/migration/m05_instance_runtime/runtime_service.py",
         implementations=(
+            # The fail-closed gate is *declared* in ``runtime_service.py`` next to the
+            # protocol; ``instance_persistence.py`` only imports it to wrap the SQL reader in
+            # ``build_sql_resolve_plugin_instance_port``. Anchoring it at the importer made
+            # ``_class_node`` look for a class the module does not define.
             (
-                "application/migration/m05_instance_runtime/instance_persistence.py",
+                "application/migration/m05_instance_runtime/runtime_service.py",
                 "FailClosedResolvePluginInstance",
             ),
         ),
@@ -289,6 +322,27 @@ REVIEWED_ORPHANS: dict[str, str] = {
     "SqlAlchemyInstanceImportStore": "built inside the same module only",
     "SqlAlchemyInstanceQuarantineStore": "built inside the same module only",
     "SqlAlchemyRedactedAuditSink": "built inside the same module only",
+    # The four durable evidence ports closed review §3 G1-G4, but nothing in ``src`` builds
+    # them yet: no composition stage takes them as a dependency, so a host must instantiate
+    # them itself. That is a wiring task with an owner, not a missing implementation, so it is
+    # recorded here instead of being hidden behind a "no implementation" gap entry.
+    "SqlM05HandoffEvidenceStore":
+        "G1 closed: durable, but no composition root constructs it yet",
+    "SqlM05PromotionEvidenceStore":
+        "G2 closed: durable, but no composition root constructs it yet",
+    "SqlPartitionHandoffReadStore":
+        "G3 closed: the M06 stage takes the port but nothing builds this store yet",
+    "SqlM04EBackfillEvidenceStore":
+        "G4 closed: durable, but the M04E stage builder does not construct it yet",
+    # G5 likewise: ``ports.py`` implements the state store and all four verifiers, but the
+    # only constructor is ``build_cutover_ports`` in that same module; no composition root
+    # calls it (``build_cutover_stage`` takes the ports as host-supplied arguments).
+    "SqlCutoverRepository": "G5 closed: built only by build_cutover_ports in the same module",
+    "SqlGateVerifier": "G5 closed: built only by build_cutover_ports in the same module",
+    "SqlLegacyOwnerVerifier": "G5 closed: built only by build_cutover_ports in the same module",
+    "SqlRollbackVerifier": "G5 closed: built only by build_cutover_ports in the same module",
+    "SqlCanonicalRepairVerifier":
+        "G5 closed: built only by build_cutover_ports in the same module",
 }
 
 

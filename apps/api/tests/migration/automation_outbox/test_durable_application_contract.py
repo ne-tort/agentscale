@@ -676,7 +676,10 @@ def test_acceptance_cases_cover_transaction_failure_retry_repair_and_legacy_fenc
         for case in ACCEPTANCE_CASES
     )
     assert any("atomic" in case and "roll back" in case for case in ACCEPTANCE_CASES)
-    assert any("queue outage" in case and "original enqueue key" in case for case in ACCEPTANCE_CASES)
+    assert any(
+        "queue outage" in case and "original" in case and "enqueue key" in case
+        for case in ACCEPTANCE_CASES
+    )
     assert any("legacy worker" in case and "fence" in case for case in ACCEPTANCE_CASES)
 
 
@@ -700,5 +703,5 @@ ACCEPTANCE_CASES = (
     "shadow permits canonical diagnostics only and never moves the source read owner or delivery writer",
     "target-read and final-delta transitions are evidence-gated; final-delta and blocked state fence both workers",
     "webhook-deliveries and project-triggers have distinct legacy owner marker identities",
-    "legacy worker authority blocks target claim and effect calls before repository claim access",
+    "legacy worker ownership fences target claims and delivery effects before any repository claim access",
 )

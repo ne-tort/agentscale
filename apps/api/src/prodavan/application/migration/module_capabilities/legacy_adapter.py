@@ -86,6 +86,11 @@ _SUPPORTED_UI_WIDGETS = frozenset({
     "target_price_range",
 })
 _UI_DYNAMIC_VALUE_KEYS = frozenset({"op", "value", "field", "eq", "in", "not_empty", "all", "any"})
+# `row_filter` and `row_matches_context_map` are keyed by *data field name*, not by
+# UI vocabulary: `{"owner_kind": "line"}` is a legitimate legacy filter. Treating
+# their keys as ui_json properties rejected every module that filters rows by a
+# declared field, so the field-keyed containers are enumerated explicitly here.
+_UI_FIELD_KEYED_MAPS = frozenset({"row_filter", "row_matches_context_map"})
 _UI_DYNAMIC_VALUE_TOKENS = frozenset({"contextRowId", "true", "false", "null"})
 _SUPPORTED_UI_NESTED_KEYS = _SUPPORTED_UI_ROOT_KEYS | _SUPPORTED_UI_SCALAR_KEYS
 _TYPED_ACTION_OPERATION_ALIASES = {
@@ -207,6 +212,12 @@ def _validate_ui_tree(value: object, path: str, action_ids: set[str], parent_key
                 if parent_key in _UI_DYNAMIC_VALUE_KEYS and (
                     isinstance(key, str) and (key in _UI_DYNAMIC_VALUE_TOKENS or re.fullmatch(r"[a-z][a-z0-9_]{0,63}", key))
                 ):
+                    continue
+                if parent_key in _UI_FIELD_KEYED_MAPS and re.fullmatch(r"[a-z][a-z0-9_]{0,63}", key):
+                    # A field-keyed filter/map: the key is a declared data field and
+                    # the value is its literal or dynamic comparison, so only its own
+                    # subtree is validated further.
+                    _validate_ui_tree(child, child_path, action_ids, key)
                     continue
                 raise _AdapterQuarantine("unsupported_ui_json_property", child_path, f"unsupported nested ui_json key {key}")
             if key == "widget" and isinstance(child, str) and child not in _SUPPORTED_UI_WIDGETS:
@@ -607,6 +618,12 @@ def _restore_scopes(
         schemas=tuple(schemas),
         actions=actions,
         materialize=materialize,
+        # The translated field/action declarations are produced here and must travel
+        # with the payload: dropping them made every adaptation fail with a TypeError
+        # ("missing field_declarations and action_scopes") instead of a typed result,
+        # and silently lost the UI declarations the adapter exists to preserve.
+        field_declarations=field_declarations,
+        action_scopes=action_scopes,
     )
 
 

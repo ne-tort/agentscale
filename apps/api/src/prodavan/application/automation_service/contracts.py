@@ -33,10 +33,29 @@ def __getattr__(name: str) -> Any:
 
 
 def durable_error(exc: BaseException, *, code: str = "delivery_failed") -> "DurableError":
-    """Build the persistence-owned safe error identity without raw exception text."""
+    """Build the persistence-owned safe error identity without raw exception text.
+
+    The result carries the redacted :attr:`~...DurableError.code` and a sha256
+    digest of the exception's qualified class name. Neither the message nor the
+    arguments of ``exc`` are read: two failures of the same class with different
+    secrets must produce the same durable identity.
+
+    ``DurableError`` is fetched here through the module attribute hook above
+    rather than from a module-level global. The class lives in
+    ``automation_persistence.contracts``, which imports this module, so a
+    module-scope name would have to be satisfied at import time and would
+    reintroduce the cycle the hook exists to break. A function-scope import runs
+    only after both modules are complete.
+    """
+    from prodavan.application.automation_persistence.contracts import (
+        DurableError as _DurableError,
+    )
+
     error_class = f"{exc.__class__.__module__}.{exc.__class__.__qualname__}"
     safe_code = code if code.startswith("automation.error.") else f"automation.error.{code}"
-    return DurableError(code=safe_code, digest=sha256(error_class.encode("utf-8")).hexdigest())
+    return _DurableError(
+        code=safe_code, digest=sha256(error_class.encode("utf-8")).hexdigest(),
+    )
 
 
 class TaskRunStatus(StrEnum):
