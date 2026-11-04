@@ -113,6 +113,28 @@ class FakeDispatcher:
             raise self.error
 
 
+ALLOWED_EGRESS = DeliveryEgressPolicyResult(True, True, True, True, True, True, True)
+
+
+class FakeEgressPolicy:
+    """Egress evidence port: the worker must obtain proof before dispatching."""
+
+    def __init__(self, allowed: bool = True) -> None:
+        self.allowed = allowed
+        self.destinations: list[str] = []
+
+    def check(self, *, destination: str) -> DeliveryEgressPolicyResult:
+        self.destinations.append(destination)
+        if self.allowed:
+            return ALLOWED_EGRESS
+        return DeliveryEgressPolicyResult(False, False, False, False, False, False, False)
+
+
+def egress_event(**changes: object) -> OutboxEvent:
+    """Outbox event that carries the destination its egress proof is about."""
+    return event(payload={"total": 10, "destination": "https://example.test/hook"}, **changes)
+
+
 @pytest.mark.asyncio
 async def test_worker_acknowledges_only_after_successful_dispatch() -> None:
     repository = FakeRepository([(event(), state(state=OutboxState.LEASED, leased_by="w", lease_until=NOW + timedelta(minutes=1)))])

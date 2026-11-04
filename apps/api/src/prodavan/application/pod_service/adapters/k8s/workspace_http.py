@@ -19,7 +19,10 @@ import httpx
 from prodavan.application.agent.runtime_auth import runtime_auth_headers
 from prodavan.application.agent.runtime_transport import RuntimeEndpoint
 from prodavan.application.pod_service.ports.workspace import WorkspaceEntry
-from prodavan.application.pod_service.workspace_paths import normalize_workspace_path
+from prodavan.application.pod_service.workspace_paths import (
+    coerce_internal_workspace_path,
+    normalize_workspace_path,
+)
 from prodavan.config.settings import settings
 from prodavan.domain.errors import AppError
 from prodavan.infrastructure.k8s.sandbox.client import K8sSandboxClient
@@ -62,7 +65,15 @@ def _entry_from_dict(raw: dict[str, Any]) -> WorkspaceEntry:
 
 
 class HttpWorkspaceAdapterBase:
-    """HTTP /v1/workspace client; subclasses resolve the RuntimeEndpoint."""
+    """HTTP /v1/workspace client; subclasses resolve the RuntimeEndpoint.
+
+    Path handling: request paths reach this adapter from our own service and
+    planner code, not from an HTTP request body — the API contour already ran
+    the strict validator on user input. So they are coerced softly
+    (``coerce_internal_workspace_path``: leading ``/`` and ``\\`` stripped,
+    ``\\`` -> ``/``) before the strict normalizer runs, which still refuses
+    traversal. Runtime responses keep the strict normalizer only.
+    """
 
     async def _runtime_endpoint(self, runtime_ref: str) -> RuntimeEndpoint:
         raise NotImplementedError
@@ -170,7 +181,7 @@ class HttpWorkspaceAdapterBase:
         return response.json()
 
     async def list_entries(self, *, runtime_ref: str, path: str) -> list[WorkspaceEntry]:
-        rel = normalize_workspace_path(path)
+        rel = coerce_internal_workspace_path(path)
         body = await self._request_json(
             runtime_ref=runtime_ref,
             method="GET",
@@ -184,7 +195,7 @@ class HttpWorkspaceAdapterBase:
         return out
 
     async def create_directory(self, *, runtime_ref: str, path: str) -> None:
-        rel = normalize_workspace_path(path)
+        rel = coerce_internal_workspace_path(path)
         if not rel:
             raise AppError(
                 code="VALIDATION_ERROR",
@@ -271,7 +282,7 @@ class HttpWorkspaceAdapterBase:
             )
 
     async def read_bytes(self, *, runtime_ref: str, path: str, max_bytes: int) -> bytes:
-        rel = normalize_workspace_path(path)
+        rel = coerce_internal_workspace_path(path)
         if not rel:
             raise AppError(
                 code="VALIDATION_ERROR",
@@ -319,7 +330,7 @@ class HttpWorkspaceAdapterBase:
         return response.content
 
     async def stat(self, *, runtime_ref: str, path: str) -> WorkspaceEntry:
-        rel = normalize_workspace_path(path)
+        rel = coerce_internal_workspace_path(path)
         if not rel:
             raise AppError(
                 code="VALIDATION_ERROR",
@@ -346,7 +357,7 @@ class HttpWorkspaceAdapterBase:
         return _entry_from_dict(body)
 
     async def delete(self, *, runtime_ref: str, path: str) -> None:
-        rel = normalize_workspace_path(path)
+        rel = coerce_internal_workspace_path(path)
         if not rel:
             raise AppError(
                 code="VALIDATION_ERROR",
@@ -372,8 +383,8 @@ class HttpWorkspaceAdapterBase:
             raise
 
     async def move(self, *, runtime_ref: str, src: str, dst: str) -> None:
-        s = normalize_workspace_path(src)
-        d = normalize_workspace_path(dst)
+        s = coerce_internal_workspace_path(src)
+        d = coerce_internal_workspace_path(dst)
         if not s or not d:
             raise AppError(
                 code="VALIDATION_ERROR",
@@ -389,8 +400,8 @@ class HttpWorkspaceAdapterBase:
         )
 
     async def copy(self, *, runtime_ref: str, src: str, dst: str) -> None:
-        s = normalize_workspace_path(src)
-        d = normalize_workspace_path(dst)
+        s = coerce_internal_workspace_path(src)
+        d = coerce_internal_workspace_path(dst)
         if not s or not d:
             raise AppError(
                 code="VALIDATION_ERROR",
@@ -407,7 +418,7 @@ class HttpWorkspaceAdapterBase:
 
     async def write_bytes(self, *, runtime_ref: str, path: str, data: bytes) -> None:
         """Prefer HTTP PUT; fall back to mode-specific write when runtime has no write API."""
-        rel = normalize_workspace_path(path)
+        rel = coerce_internal_workspace_path(path)
         if not rel:
             raise AppError(
                 code="VALIDATION_ERROR",

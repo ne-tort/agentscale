@@ -3,13 +3,19 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
 
 from prodavan.application.metrics.consumer.registry import handle_metrics_envelope
 from prodavan.application.metrics.delta import should_emit_sample
 from prodavan.core.events.envelope import metrics_envelope, platform_envelope
+from prodavan.domain.metrics.types import (
+    ENTITY_CABINET,
+    ENTITY_COMPANY,
+    ENTITY_PROJECT,
+    METRIC_PROJECTS_TOTAL,
+)
 
 
 def test_should_emit_sample_on_first_reading() -> None:
@@ -136,6 +142,28 @@ async def test_project_created_redelivery_skips_duplicate_seed() -> None:
     ):
         await handle_metrics_envelope(envelope)
         await handle_metrics_envelope(envelope)
-    counter_store.incr_counter.assert_awaited_once()
+    # Seeding a project deliberately cascades: the project's cabinet aggregate and
+    # its parent company aggregate each move by exactly one. The previous
+    # expectation of a single incr_counter encoded a one-level seed and missed the
+    # company rollup, so a redelivery that double-counted either level went
+    # undetected.
+    assert counter_store.put_link.await_args_list == [
+        call(
+            parent_type=ENTITY_CABINET,
+            parent_id="cab_1",
+            child_type=ENTITY_PROJECT,
+            child_id="prj_1",
+        ),
+        call(
+            parent_type=ENTITY_COMPANY,
+            parent_id="co_1",
+            child_type=ENTITY_CABINET,
+            child_id="cab_1",
+        ),
+    ]
+    assert counter_store.incr_counter.await_args_list == [
+        call(ENTITY_CABINET, "cab_1", METRIC_PROJECTS_TOTAL, 1),
+        call(ENTITY_COMPANY, "co_1", METRIC_PROJECTS_TOTAL, 1),
+    ]
     dedup.claim_event.assert_awaited_once_with("platform_facts:project_created_1")
     dedup.complete_event.assert_awaited_once_with("platform_facts:project_created_1")

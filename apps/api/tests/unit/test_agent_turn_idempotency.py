@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -46,7 +46,15 @@ async def test_persisted_turn_after_restart_is_rehydrated_without_runner(
     assert turn.start_seq == 7
     assert turn.turn_id == "client-turn-1"
     db.add.assert_not_called()
-    db.commit.assert_not_awaited()
+    # A stale `started` ledger row must be closed durably, exactly once, so later
+    # retries replay a terminal turn instead of re-reconciling forever. The
+    # previous `commit.assert_not_awaited()` modelled a read-only replay and
+    # would have let the status transition die with the request transaction,
+    # leaving the row stuck in `started`; the invariant that still holds is that
+    # no *new* turn is reserved (no `add`) and no runner is started.
+    db.commit.assert_awaited_once()
+    assert ledger.status == "failed"
+    assert ledger.finished_at.tzinfo is not None
 
 
 @pytest.mark.asyncio
@@ -55,10 +63,12 @@ async def test_client_turn_id_is_scoped_to_resolved_session(
 ) -> None:
     registry = DetachedTurnRegistry()
     monkeypatch.setattr(session_service_module, "detached_turns", registry)
-    db = AsyncMock()
-    # A prior session may have reserved this client-generated id; only the
-    # (session_id, turn_id) identity is looked up for this new chat.
+    # `AsyncSession.add` is synchronous, so a blanket AsyncMock would turn it into
+    # an un-awaited coroutine and assert nothing about the real call shape.
+    db = MagicMock()
     db.execute = AsyncMock(side_effect=[_scalar_result(0), _scalar_result(None)])
+    db.commit = AsyncMock()
+    db.rollback = AsyncMock()
     started = SimpleNamespace(turn_id="shared-client-turn", session_id="session-2")
     registry.start = AsyncMock(return_value=started)  # type: ignore[method-assign]
     service = AgentSessionService(db)

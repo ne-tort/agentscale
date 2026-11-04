@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from prodavan.application.metrics.adapters.redis_counter_store import build_counter_store
+from prodavan.application.metrics.adapters.redis_metrics_store import build_metrics_store
 from prodavan.application.metrics.consumer.facts_handler import handle_facts_envelope
 from prodavan.application.metrics.consumer.pod_metrics_handler import handle_pod_metrics_envelope
 from prodavan.application.metrics.consumer.presence_handler import handle_presence_envelope
@@ -30,8 +32,6 @@ async def handle_platform_entity_facts(envelope: EventEnvelope) -> None:
     if envelope.event_type != "project.created":
         return
 
-    from prodavan.application.metrics.adapters.redis_metrics_store import build_metrics_store
-
     event_id = (envelope.event_id or "").strip()
     store = build_metrics_store()
     dedup_id = f"platform_facts:{event_id}" if event_id else ""
@@ -51,7 +51,6 @@ async def handle_platform_entity_facts(envelope: EventEnvelope) -> None:
 
 async def _apply_platform_entity_facts(envelope: EventEnvelope) -> None:
     from prodavan.application.metrics.accumulator import MetricsAccumulator
-    from prodavan.application.metrics.adapters.redis_counter_store import build_counter_store
     from prodavan.domain.metrics.types import (
         ENTITY_CABINET,
         ENTITY_COMPANY,

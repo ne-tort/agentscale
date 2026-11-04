@@ -14,12 +14,14 @@ from prodavan.application.equipment_matching.contracts import (
     RequestClassification,
 )
 from prodavan.domain.equipment.commands import (
+    Approval,
     ClassifyRequestCommand,
     CreateCandidateGroupCommand,
     MaterializeOffersCommand,
     RecalculateProcurementCommand,
     SelectOfferCommand,
 )
+from pydantic import ValidationError
 
 
 class RequestPort:
@@ -166,16 +168,26 @@ def test_materialized_offers_reject_cross_snapshot_provenance():
 async def test_select_and_recalculate_require_human_approval():
     matching, _, _, offers, procurement = service()
 
-    with pytest.raises(ValueError, match="requires human approval"):
-        await matching.select(
-            SelectOfferCommand(candidate_group_id="group-1", offer_id="offer-1")
-        )
-    with pytest.raises(ValueError, match="requires human approval"):
-        await matching.recalculate(
-            RecalculateProcurementCommand(request_id="request-1", reason="refresh")
-        )
+    # `approval` — обязательное поле контракта команды, поэтому «выбор или
+    # пересчёт без одобрения» нельзя даже сконструировать: слой команд
+    # отказывает раньше сервиса. Прежнее ожидание `match="requires human
+    # approval"` на конструкторе проверяло ветку политики, до которой такой
+    # объект принципиально не доходит.
+    with pytest.raises(ValidationError, match="approval"):
+        SelectOfferCommand(candidate_group_id="group-1", offer_id="offer-1")
+    with pytest.raises(ValidationError, match="approval"):
+        RecalculateProcurementCommand(request_id="request-1", reason="refresh")
 
-    from prodavan.domain.equipment.commands import Approval
+    # Защита в глубину: если объект пришёл в обход валидации (approval=None),
+    # сервис обязан отказать политикой и не трогать порт.
+    unapproved = SelectOfferCommand(
+        candidate_group_id="group-1",
+        offer_id="offer-1",
+        approval=Approval(approval_id="approval-1", approved_by="human-1"),
+    ).model_copy(update={"approval": None})
+    with pytest.raises(ValueError, match="requires human approval"):
+        await matching.select(unapproved)
+    assert offers.selected is None
 
     await matching.select(
         SelectOfferCommand(

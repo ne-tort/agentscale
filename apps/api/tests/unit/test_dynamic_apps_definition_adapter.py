@@ -119,9 +119,17 @@ async def test_repository_reads_are_scoped_and_history_is_explicit():
     assert "dynamic_app_versions" in str(session.statements[0])
     assert "app_definition_id" in str(session.statements[0])
     assert "manifest_version" in str(session.statements[0])
-    assert "manifest_version" not in str(session.statements[1])
-    assert "created_at" in str(session.statements[1])
-    assert "id" in str(session.statements[1])
+    # История определения обязана быть отфильтрована только по app_definition_id.
+    # Проверять отсутствие `manifest_version` во всём SQL нельзя: колонка всегда
+    # попадает в SELECT-список, поэтому прежняя проверка падала на корректном
+    # запросе. Смотрим именно на предикат WHERE.
+    history_statement = session.statements[1]
+    history_where = str(history_statement.whereclause)
+    assert history_where
+    assert "app_definition_id" in history_where
+    assert "manifest_version" not in history_where
+    assert "created_at" in str(history_statement)
+    assert "id" in str(history_statement)
 
 
 @pytest.mark.asyncio

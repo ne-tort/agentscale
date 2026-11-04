@@ -44,6 +44,21 @@ def normalize_workspace_path(raw: str | None) -> str:
     return str(PurePosixPath(*parts))
 
 
+def coerce_internal_workspace_path(raw: str | None) -> str:
+    """Normalize a path the backend produced itself, not user input.
+
+    ``normalize_workspace_path`` is the strict validator for *user* input: a
+    leading ``/`` there is an attempt to address something outside the
+    workspace and must be a 422. Adapters and planners, however, receive paths
+    from their own code (plan rows, persisted columns, agent output), where a
+    leading separator or a Windows-style ``\\`` is a formatting artefact, not an
+    escape attempt. Strip those first, then run the same strict normalizer so
+    traversal (``..``) and encoded escape attempts are still refused.
+    """
+    text = (raw or "").strip().replace("\\", "/").lstrip("/")
+    return normalize_workspace_path(text)
+
+
 def workspace_abs_path(relative: str) -> str:
     """Absolute POSIX path inside pod for a validated relative path."""
     rel = normalize_workspace_path(relative)

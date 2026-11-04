@@ -74,20 +74,31 @@ def test_workspace_fs_write_replaces_atomically_on_commit(tmp_path: Path, monkey
     import sys
 
     class _Stdin:
-        buffer = io.BytesIO(b"new-content")
+        """One payload per invocation: the CLI consumes its stdin exactly once.
 
-    monkeypatch.setattr(sys, "stdin", _Stdin())
+        ``cmd_write`` reads the whole body from ``sys.stdin.buffer``, so a real
+        k8s exec gives it a fresh stream every call. Sharing one ``BytesIO``
+        across two ``cmd_write`` calls modelled an impossible state — the
+        second call would see EOF and legitimately commit an empty file — so
+        each invocation now gets its own stream.
+        """
+
+        def __init__(self) -> None:
+            self.buffer = io.BytesIO(b"new-content")
+
     original_replace = workspace_fs.os.replace
 
     def _fail_replace(source: str, destination: Path) -> None:
         raise OSError("simulated atomic commit failure")
 
     monkeypatch.setattr(workspace_fs.os, "replace", _fail_replace)
+    monkeypatch.setattr(sys, "stdin", _Stdin())
     with pytest.raises(OSError, match="simulated atomic commit failure"):
         workspace_fs.cmd_write("notes.txt")
 
     assert target.read_bytes() == b"old-content"
     monkeypatch.setattr(workspace_fs.os, "replace", original_replace)
+    monkeypatch.setattr(sys, "stdin", _Stdin())
     workspace_fs.cmd_write("notes.txt")
     assert target.read_bytes() == b"new-content"
 

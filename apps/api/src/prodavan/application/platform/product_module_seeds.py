@@ -4140,7 +4140,8 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "default": "draft",
                 "enum": {
                     # WAVE15: irrelevant — тендер не про технику/не наш профиль;
-                    # ставит агент (tender_upsert) при отбраковке, можно и вручную.
+                    # ставится вручную в таблице тендеров (MCP-инструмента
+                    # записи тендера нет: агент только берёт тендер в работу).
                     "values": ["draft", "active", "submitted", "won", "lost", "cancelled", "irrelevant"],
                     "labels": {
                         "draft": "Черновик",
@@ -8190,21 +8191,9 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
             },
             {
                 "server": "prodavan-equipment",
-                "tool": "tender_upsert",
-                "label": "Запись тендера",
-                "description": "Создание или обновление тендера (состав — tender_positions_upsert)",
-            },
-            {
-                "server": "prodavan-equipment",
-                "tool": "tender_delete",
-                "label": "Удаление тендера",
-                "description": "Удаление тендера (позиции в чатах остаются)",
-            },
-            {
-                "server": "prodavan-equipment",
-                "tool": "tender_positions_upsert",
-                "label": "Позиции тендера",
-                "description": "Создание или обновление позиций тендера (lines_json)",
+                "tool": "tender_take_to_work",
+                "label": "Тендер в работу",
+                "description": "Взять тендер в работу: новый чат с позициями тендера",
             },
             {
                 "server": "prodavan-equipment",

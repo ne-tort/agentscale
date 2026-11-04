@@ -83,7 +83,11 @@ def test_missing_gate_blocks_promotion_evidence():
 
 
 def test_positive_writes_require_reviewed_final_canonical_owner():
-    with pytest.raises(ValueError, match="reviewed canonical_owner"):
+    # Контракт отказывает формулировкой «requires a reviewed final record»:
+    # положительные записи разрешены только финальной ревизованной записи
+    # (которая сама обязана быть canonical_owner). Прежнее ожидание
+    # «reviewed canonical_owner» не совпадало ни с одним сообщением контракта.
+    with pytest.raises(ValueError, match="reviewed final record"):
         promotion(canonical_positive_writes=True)
     final = CanonicalGrantsPromotionService.reviewed_final(
         promotion(outcome=PromotionOutcome.PROMOTABLE), reviewer="security-reviewer", actor="owner"

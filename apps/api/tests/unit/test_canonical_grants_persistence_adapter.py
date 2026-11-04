@@ -14,6 +14,7 @@ from prodavan.application.canonical_grants.contracts import (
 )
 from prodavan.application.canonical_grants_promotion import (
     AuditResult,
+    CanonicalGrantsPromotionService,
     PromotionOutcome,
     PromotionPartitionKey,
     PromotionRecord,
@@ -123,12 +124,27 @@ async def test_adapter_is_fail_closed_for_positive_write_evidence():
     repository = _Repository()
     adapter = CanonicalGrantsPersistenceAdapter(repository)
 
+    # Запись с canonical_positive_writes=True можно получить только через
+    # ревизованный финал: промежуточная запись такого состояния не допускает.
+    # Прежний вызов `promotion(canonical_positive_writes=True)` падал в контракте
+    # продвижения и до адаптера не доходил, поэтому защита адаптера не
+    # проверялась вовсе.
+    reviewed_final = CanonicalGrantsPromotionService.reviewed_final(
+        promotion(), reviewer="security-reviewer", actor="owner"
+    )
+    assert reviewed_final.canonical_positive_writes is True
     with pytest.raises(ValueError, match="positive canonical writes"):
-        await adapter.append_promotion(promotion(canonical_positive_writes=True))
+        await adapter.append_promotion(reviewed_final)
     assert repository.calls == []
 
+    # Карантин не может включить положительные записи даже на уровне контракта.
+    with pytest.raises(ValueError, match="quarantine records cannot enable"):
+        quarantine(canonical_positive_writes=True)
+    # Тем не менее адаптер обязан отказать и подделанной записи (fail-closed).
+    tampered = quarantine()
+    object.__setattr__(tampered, "canonical_positive_writes", True)
     with pytest.raises(ValueError, match="positive canonical writes"):
-        await adapter.append_quarantine(quarantine(canonical_positive_writes=True))
+        await adapter.append_quarantine(tampered)
     assert repository.calls == []
 
 

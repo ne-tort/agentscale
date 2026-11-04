@@ -9,7 +9,10 @@ from typing import Any
 from prodavan.application.pod_service.adapters.k8s.exec_errors import app_error_from_exec_failure
 from prodavan.application.pod_service.adapters.k8s.workspace_exec_cmd import build_workspace_fs_command
 from prodavan.application.pod_service.ports.workspace import PodWorkspacePort, WorkspaceEntry
-from prodavan.application.pod_service.workspace_paths import normalize_workspace_path
+from prodavan.application.pod_service.workspace_paths import (
+    coerce_internal_workspace_path,
+    normalize_workspace_path,
+)
 from prodavan.domain.errors import AppError
 from prodavan.infrastructure.k8s.sandbox.client import K8sSandboxClient
 from prodavan.infrastructure.k8s.sandbox.exec import exec_in_pod
@@ -42,6 +45,17 @@ def _entry_from_dict(raw: dict[str, Any]) -> WorkspaceEntry:
 
 
 class K8sExecWorkspaceAdapter:
+    """kubectl-exec workspace adapter.
+
+    Path handling: request paths are produced by our own service/planner code,
+    not by an HTTP client — user input is validated by the API contour before
+    it reaches the port. A leading ``/`` or a backslash here is a formatting
+    artefact, so request paths are coerced softly
+    (``coerce_internal_workspace_path``) and then still pass the strict
+    normalizer, which rejects traversal. Paths returned by the in-pod CLI are
+    normalized strictly (``_normalize_response_path``).
+    """
+
     def __init__(self, *, client: K8sSandboxClient) -> None:
         self._client = client
 
@@ -117,7 +131,7 @@ class K8sExecWorkspaceAdapter:
         return result.stdout
 
     async def list_entries(self, *, runtime_ref: str, path: str) -> list[WorkspaceEntry]:
-        rel = normalize_workspace_path(path)
+        rel = coerce_internal_workspace_path(path)
         body = await self._run_json(runtime_ref=runtime_ref, args=["list", rel])
         items = body.get("entries") or []
         out: list[WorkspaceEntry] = []
@@ -127,7 +141,7 @@ class K8sExecWorkspaceAdapter:
         return out
 
     async def create_directory(self, *, runtime_ref: str, path: str) -> None:
-        rel = normalize_workspace_path(path)
+        rel = coerce_internal_workspace_path(path)
         if not rel:
             raise AppError(
                 code="VALIDATION_ERROR",
@@ -182,7 +196,7 @@ class K8sExecWorkspaceAdapter:
             )
 
     async def read_bytes(self, *, runtime_ref: str, path: str, max_bytes: int) -> bytes:
-        rel = normalize_workspace_path(path)
+        rel = coerce_internal_workspace_path(path)
         if not rel:
             raise AppError(
                 code="VALIDATION_ERROR",
@@ -197,7 +211,7 @@ class K8sExecWorkspaceAdapter:
         )
 
     async def stat(self, *, runtime_ref: str, path: str) -> WorkspaceEntry:
-        rel = normalize_workspace_path(path)
+        rel = coerce_internal_workspace_path(path)
         if not rel:
             raise AppError(
                 code="VALIDATION_ERROR",
@@ -220,7 +234,7 @@ class K8sExecWorkspaceAdapter:
         return _entry_from_dict(body)
 
     async def delete(self, *, runtime_ref: str, path: str) -> None:
-        rel = normalize_workspace_path(path)
+        rel = coerce_internal_workspace_path(path)
         if not rel:
             raise AppError(
                 code="VALIDATION_ERROR",
@@ -242,8 +256,8 @@ class K8sExecWorkspaceAdapter:
             raise
 
     async def move(self, *, runtime_ref: str, src: str, dst: str) -> None:
-        s = normalize_workspace_path(src)
-        d = normalize_workspace_path(dst)
+        s = coerce_internal_workspace_path(src)
+        d = coerce_internal_workspace_path(dst)
         if not s or not d:
             raise AppError(
                 code="VALIDATION_ERROR",
@@ -254,8 +268,8 @@ class K8sExecWorkspaceAdapter:
         await self._run_bytes(runtime_ref=runtime_ref, args=["mv", s, d])
 
     async def copy(self, *, runtime_ref: str, src: str, dst: str) -> None:
-        s = normalize_workspace_path(src)
-        d = normalize_workspace_path(dst)
+        s = coerce_internal_workspace_path(src)
+        d = coerce_internal_workspace_path(dst)
         if not s or not d:
             raise AppError(
                 code="VALIDATION_ERROR",
@@ -266,7 +280,7 @@ class K8sExecWorkspaceAdapter:
         await self._run_bytes(runtime_ref=runtime_ref, args=["cp", s, d])
 
     async def write_bytes(self, *, runtime_ref: str, path: str, data: bytes) -> None:
-        rel = normalize_workspace_path(path)
+        rel = coerce_internal_workspace_path(path)
         if not rel:
             raise AppError(
                 code="VALIDATION_ERROR",

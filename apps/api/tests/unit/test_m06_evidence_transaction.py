@@ -121,7 +121,13 @@ async def test_quarantine_is_preserved_and_never_promoted_to_allow():
     [
         ({"audit": AppendOnlyAudit("other", "promotion", NOW, DIGEST, "corr-1")}, "event_id"),
         ({"redacted": RedactedProjection(DIGEST, QuarantineAllowResult.ALLOW, None, NOW, "documents.read", "other", "trace-1", "span-1", DIGEST)}, "correlation"),
-        ({"quarantine_or_allow": QuarantineAllowResult.QUARANTINE}, "redacted result"),
+        # Каждый сдвиг проверяется на своём инварианте: расхождение решения с
+        # `quarantine_or_allow` ловит проверка решения, а расхождение с
+        # `redacted.result` — проверка редуцированного результата. Прежний
+        # третий случай менял только `quarantine_or_allow` и ожидал сообщение про
+        # redacted result, то есть проверял не тот инвариант, который нарушал.
+        ({"redacted": RedactedProjection(DIGEST, QuarantineAllowResult.QUARANTINE, "ambiguous_mapping", NOW, "documents.read", "corr-1", "trace-1", "span-1", DIGEST)}, "redacted result"),
+        ({"quarantine_or_allow": QuarantineAllowResult.QUARANTINE}, "decision must match quarantine"),
     ],
 )
 def test_full_envelope_rejects_partial_or_inconsistent_evidence(change, message):

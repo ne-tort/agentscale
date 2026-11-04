@@ -275,6 +275,9 @@ def test_procurement_edit_contract_dispatches_apply_fields() -> None:
     assert action["kind"] == "equipment.procurement_apply"
     assert "row.updated" in action["trigger"]["on"]
     # дрилл-даун из «Закупки»: заголовок с именем поставщика из контекстной строки
+    # (поставщик читается из общей таблицы проекта, поэтому охват — все чаты)
+    supplier_offers = next(v for v in meta["views"] if v["slug"] == "supplier_offers")
+    assert supplier_offers["ui_json"]["data_scope"] == {"chats": "all"}
     assert supplier_offers["ui_json"]["scaffold"]["title_template"]["ru"] == "Товары {seller}"
     # лицо группы: флаг «устарело» для warning-подсветки + колонка hidden
     fg_cols = {c["name"]: c for c in meta["columns"] if c["table_slug"] == "found_groups"}
@@ -666,7 +669,12 @@ def test_procurement_edit_contract_dispatches_apply_fields() -> None:
     assert mcp_seed["table_slug"] == "equipment_mcp"
     assert mcp_seed["body"]["enabled"] is True
     assert mcp_seed["body"]["name"] == "prodavan-equipment"
-    assert mcp_seed["body"]["version"] == "3.2.0"
+    # Версия сида — это версия материализуемого MCP-пакета. Прежнее ожидание
+    # «3.2.0» фиксировало конкретный релиз и отставало от пакета после WAVE14,
+    # поэтому проверяем инвариант: обе версии обязаны совпадать.
+    from prodavan.application.mcp.platform_equipment_mcp import PACKAGE_VERSION
+
+    assert mcp_seed["body"]["version"] == PACKAGE_VERSION
     # WAVE16.3: сид-ящик «price» для отправки мастер-прайса (без пароля —
     # secret_ref проставляется в контуре)
     price_seed = next(s for s in seed_items if s["row_id"] == "mail_sender_price")

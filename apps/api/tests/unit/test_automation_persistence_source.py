@@ -47,7 +47,12 @@ class FakePersistence:
 
     async def retry_task(self, **kwargs: object) -> TaskRun:
         self.retry_calls.append(kwargs)
-        return TaskRun(id=str(kwargs["task_id"]), task_name="sync", payload={})
+        # The port contract keys retries by the fenced claim (see
+        # ``AutomationPersistencePort.retry_task``: ``claim``/``error``/``now``),
+        # not by a bare ``task_id`` — a CAS retry must carry the lease it fences.
+        claim = kwargs["claim"]
+        assert isinstance(claim, TaskClaim)
+        return TaskRun(id=claim.run.id, task_name="sync", payload={})
 
 
 @pytest.mark.asyncio

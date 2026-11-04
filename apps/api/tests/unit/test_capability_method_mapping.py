@@ -4,6 +4,7 @@ Migration verification is intentionally frozen; this file is not executed here.
 """
 
 from types import MappingProxyType
+import ast
 import inspect
 import math
 
@@ -168,7 +169,27 @@ async def test_unknown_broadening_protocol_and_tool_versions_quarantine():
 
 
 def test_service_is_decision_only_and_exposes_no_positive_grant_write_api():
-    source = inspect.getsource(CapabilityMethodMappingService)
-    assert "grant" not in source.lower()
-    assert "append" not in source.lower()
-    assert "write" not in source.lower()
+    # Проверяем структуру класса, а не текст исходника: подстрочный поиск ловил
+    # слово «grant» в докстринге («has no grant ... side effect») и падал на
+    # корректном коде. Смотрим идентификаторы: имена методов, атрибуты, аргументы.
+    tree = ast.parse(inspect.getsource(CapabilityMethodMappingService))
+    identifiers: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            identifiers.add(node.name.casefold())
+        elif isinstance(node, ast.Attribute):
+            identifiers.add(node.attr.casefold())
+        elif isinstance(node, ast.Name):
+            identifiers.add(node.id.casefold())
+        elif isinstance(node, ast.arg):
+            identifiers.add(node.arg.casefold())
+    forbidden_tokens = (
+        "grant", "append", "write", "persist", "save", "insert", "update", "upsert",
+    )
+    offending = sorted(
+        name for name in identifiers if any(token in name for token in forbidden_tokens)
+    )
+    assert offending == []
+    # Единственная публичная точка входа — решение; никакого write-порта.
+    public_api = {name for name in vars(CapabilityMethodMappingService) if not name.startswith("_")}
+    assert public_api == {"decide"}

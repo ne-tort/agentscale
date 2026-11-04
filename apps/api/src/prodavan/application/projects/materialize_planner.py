@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.application.modules.module_binding_service import ModuleBindingService
 from prodavan.application.modules.module_meta_service import ModuleMetaDocumentService
-from prodavan.application.pod_service.workspace_paths import normalize_workspace_path
+from prodavan.application.pod_service.workspace_paths import coerce_internal_workspace_path
 from prodavan.application.projects.prompt_stitch import (
     PromptContribution,
     stitch_prompt_contributions,
@@ -671,7 +671,15 @@ def _row_path_context(body: dict[str, Any], field: str | None) -> dict[str, str]
 
 
 def _join_prompt_file_path(base: str, file_name: str) -> str:
-    """Join prompt_paths.path with a file name → workspace-relative path."""
+    """Join prompt_paths.path with a file name → workspace-relative path.
+
+    ``base`` is a stored ``prompt_paths.path`` column written by our own meta
+    rows, not user input, so it is coerced softly first (leading ``/``/``\\``
+    stripped, ``\\`` → ``/``): a Windows-style or root-anchored spelling of an
+    internal path must still land under ``/workspace``. The strict normalizer
+    runs after the coercion, so ``..`` traversal and encoded escape attempts
+    are still rejected (an unrepresentable base yields no op at all).
+    """
     name = file_name.strip().replace("\\", "/").lstrip("/")
     if not name:
         return ""
@@ -680,7 +688,7 @@ def _join_prompt_file_path(base: str, file_name: str) -> str:
     if not name.endswith(".md"):
         name = f"{name}.md"
     try:
-        base_norm = normalize_workspace_path(base)
+        base_norm = coerce_internal_workspace_path(base)
     except AppError:
         return ""
     if not base_norm:
