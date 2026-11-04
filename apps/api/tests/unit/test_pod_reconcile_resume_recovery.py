@@ -64,11 +64,21 @@ async def test_reconcile_recovers_resume_after_api_process_restart() -> None:
         stale_preparing_query.scalars.return_value.all.return_value = []
         first_query = MagicMock()
         first_query.all.return_value = [(pod, project)]
+        # The marker is released by a conditional UPDATE on the observed resume
+        # generation, so this pass wins the CAS by definition here: rowcount 1.
+        clear_marker = MagicMock()
+        clear_marker.rowcount = 1
         active_query = MagicMock()
         active_query.scalars.return_value.all.return_value = []
         observation_query = MagicMock()
         observation_query.all.return_value = []
-        session.execute.side_effect = [stale_preparing_query, first_query, active_query, observation_query]
+        session.execute.side_effect = [
+            stale_preparing_query,
+            first_query,
+            clear_marker,
+            active_query,
+            observation_query,
+        ]
         session.get = AsyncMock(return_value=None)
 
         result = await service._run_reconcile()

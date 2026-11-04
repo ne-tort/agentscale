@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import exists, or_, select
+from sqlalchemy import exists, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.application.pod_service.command import PodCommand
@@ -319,9 +319,33 @@ class PodReconcileService:
         # "resuming" forever whenever the owner row was missing, so every later
         # reconcile pass re-ran bridge registration for a project that was not
         # resuming. Reconcile itself is serialised by the advisory lock, so no
-        # other pass can be mid-resume on this project while this one commits.
-        project.launch_phase = None
+        # other reconcile pass can be mid-resume on this project while this one
+        # commits.
+        #
+        # The marker is released by a *conditional* update on the generation this
+        # pass actually observed, not by mutating the loaded row and committing.
+        # A user can start a new resume between the bootstrap above and this
+        # commit; clearing unconditionally would then discard the marker of a
+        # resume that is still in flight, and the next pass would treat a
+        # resuming project as resumable again. The predicate makes that a no-op
+        # instead, and it needs no row lock (which the surrounding contract
+        # forbids here).
+        cleared = await self._session.execute(
+            update(ProjectRow)
+            .where(
+                ProjectRow.id == project.id,
+                ProjectRow.resume_generation == resume_generation,
+                ProjectRow.launch_phase.is_not(None),
+            )
+            .values(launch_phase=None)
+            .execution_options(synchronize_session=False)
+        )
         await self._session.commit()
+        if cleared.rowcount == 0:
+            # A newer resume took over; its marker belongs to that pass.
+            return
+        # Keep the in-memory row consistent with what the update just committed.
+        project.launch_phase = None
 
         from prodavan.application.agent.trigger_dispatcher import AgentTriggerDispatcher
         from prodavan.infrastructure.persistence.models.identity import EmployeeRow
