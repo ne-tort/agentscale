@@ -33,6 +33,7 @@ from .fakes import (
     LEASE_TTL,
     NOW,
     RUN_ID,
+    AdvancingClock,
     ExpiringPort,
     FakeAttemptPort,
     FakeClock,
@@ -55,8 +56,9 @@ def build_worker(
     attempts=None,
     config=None,
     port_cls=None,
+    clock=None,
 ):
-    clock = FakeClock()
+    clock = clock or FakeClock()
     port = port or (port_cls or FakeExecutionPort)(clock=clock)
     store = FakeRunStore(port.row)
     attempts = attempts or FakeAttemptPort()
@@ -226,15 +228,23 @@ async def test_heartbeat_after_expiry_fences_the_worker_out() -> None:
     clock = FakeClock()
     port = ExpiringPort(clock=clock)
     worker, port, clock, attempts, _store = build_worker(port=port)
+
+    # ``ScriptedRunner`` *awaits* its ``on_execute`` hook, so the hook must be a
+    # coroutine function.  A plain lambda returning ``clock.advance(...)``'s
+    # datetime raised ``TypeError`` inside the runner, and the worker (correctly)
+    # turned that into an unknown outcome — the lease-expiry path under test was
+    # never reached.
+    async def expire_the_lease_during_the_turn(request, cancel) -> None:
+        clock.advance(LEASE_TTL + timedelta(seconds=1))
+
     # The turn runs long enough for the lease to expire while it works.
-    worker_runner = ScriptedRunner(
-        success(),
-        on_execute=lambda request, cancel: clock.advance(LEASE_TTL + timedelta(seconds=1)),
-    )
+    worker_runner = ScriptedRunner(success(), on_execute=expire_the_lease_during_the_turn)
     worker._runner = worker_runner
 
     tick = await worker.tick()
 
+    # The settlement itself has to ask the lease store: the claim predates the
+    # turn, and by now the deadline is gone.
     assert port.heartbeat_results == [False]
     assert tick.status is WorkerTickStatus.DISCARDED_STALE
     assert not tick.wrote_run_state
@@ -328,15 +338,31 @@ async def test_cancellation_during_execution_cancels_the_turn_and_discards_resul
 
 async def test_cancelled_turn_reports_unknown_not_success() -> None:
     """If the lease is still ours, a cancelled provider call is parked, not succeeded."""
-    port = FakeExecutionPort(clock=FakeClock())
+    # The worker measures its shutdown grace window on the injected clock, so the
+    # clock has to move with wall time here; a frozen FakeClock keeps the drain
+    # loop inside `while ... self._now() < deadline` for ever and the test hangs
+    # instead of settling the turn.
+    clock = AdvancingClock()
+    # "Still ours" is only true when the drain cannot hand the lease back: the
+    # production adapter has no ``release_lease`` extension, so the lease stays
+    # with this worker and the cancelled turn is parked. A port that *does*
+    # release would return the run to the queue before the terminal write and the
+    # worker would (correctly) report a lost CAS instead — that path is covered by
+    # ``test_shutdown_with_release_support_returns_the_run_to_the_queue``.
+    port = FakePortWithoutRelease(clock=clock)
     runner = ScriptedRunner(wait_for_cancel=True)
-    worker, port, _clock, attempts, _store = build_worker(port=port, runner=runner)
+    worker, port, _clock, attempts, _store = build_worker(port=port, runner=runner, clock=clock)
     worker._config = WorkerConfig(
         owner_id="worker-a",
         lease_policy=LeasePolicy(ttl=LEASE_TTL),
-        heartbeat_interval=timedelta(seconds=0.05),
+        # Production-shaped cadence: the 60 s lease outlives the 1 s shutdown
+        # grace, which is the situation under test — a cancelled turn whose lease
+        # the worker still holds. A sub-second heartbeat interval would instead
+        # measure fence freshness against a beat that the drain has already
+        # stopped, turning the assertion into a race on scheduler jitter.
+        heartbeat_interval=timedelta(seconds=10),
         poll_interval=timedelta(seconds=1),
-        shutdown_grace=timedelta(seconds=5),
+        shutdown_grace=timedelta(seconds=1),
     )
 
     async def shutdown() -> None:
@@ -544,8 +570,13 @@ async def test_run_without_session_writes_nothing_to_the_provider() -> None:
 async def test_shutdown_without_release_support_keeps_the_lease() -> None:
     port = FakePortWithoutRelease(clock=FakeClock())
     worker, port, _clock, _attempts, _store = build_worker(port=port)
+    # "Already stopping" has to be said *to the worker*: a local event the worker
+    # never receives does not stop it, and the previous version of this test set
+    # exactly such a detached event while still asserting the drain behaviour.
+    # ``shutdown`` records the signal, so the next claim is handed straight back.
     stop = asyncio.Event()
-    stop.set()  # already stopping: the claim is handed straight back
+    await worker.shutdown(stop=stop)
+    assert stop.is_set()
     tick = await worker.tick()
     assert tick.status is WorkerTickStatus.RELEASED_ON_SHUTDOWN
     assert not tick.wrote_run_state
@@ -558,7 +589,7 @@ async def test_shutdown_with_release_support_returns_the_run_to_the_queue() -> N
     port = FakeExecutionPort(clock=FakeClock())
     worker, port, _clock, _attempts, _store = build_worker(port=port)
     stop = asyncio.Event()
-    stop.set()
+    await worker.shutdown(stop=stop)
     tick = await worker.tick()
     assert tick.status is WorkerTickStatus.RELEASED_ON_SHUTDOWN
     assert port.release_calls == [RUN_ID]

@@ -131,33 +131,37 @@ ACTOR_BLOCKER = "agent_run_control_plane_actor_unresolved"
 """A run with no resolvable employee actor cannot be written by the control plane."""
 
 RETRY_DUE_BLOCKER = "agent_run_retry_due_start_transition_unwired"
-"""``retry_due`` is claimable in policy but this adapter cannot start it.
+"""**Resolved.** Historical code kept here because promotion records cite it.
 
-The transition *table* accepts ``retry_due -> running`` for ``START``
-(:func:`prodavan.application.agent_control_plane.contracts.validate_run_transition`),
-but the transition *entry point* the adapter uses does not: every start goes
-through :meth:`DurableAgentControlPlane.start_run`, which hard-codes
-``expected_status=AgentRunStatus.QUEUED`` when it builds its
-``RunTransitionCommand``.  A ``retry_due`` row therefore always loses the
-control-plane status CAS: the claim would acquire a lease and then fail its
-start, burning a fence generation per poll and parking the queue head behind a
-run that can never start.
+``retry_due`` was claimable in the lease policy while this adapter could not start
+it: the transition table accepted ``retry_due -> running``, but every start went
+through ``DurableAgentControlPlane.start_run``, which hard-coded
+``expected_status=QUEUED``. A claimed ``retry_due`` row therefore always lost the
+status CAS, burning a fence generation per poll.
 
-Closing this needs one of two things outside this module: ``start_run`` taking
-the observed source status (``retry_due -> running``), or the retry scheduler's
-``agent_run.requeue`` transition, after which the run is ``queued`` again and
-this narrowing can be dropped together with the constant.
+``start_run`` now takes the observed status as its CAS precondition and the adapter
+passes ``slot.status``, so both claimable statuses are startable and
+``STARTABLE_STATUSES`` equals ``CLAIMABLE_STATUSES`` again.
+
+What is still missing is the producer: nothing yet moves a run into ``retry_due``
+(the retry scheduler / ``agent_run.requeue``), so in practice a run is restarted
+from ``queued``. The adapter can start either state.
 """
 
-STARTABLE_STATUSES: frozenset[str] = frozenset({AgentRunStatus.QUEUED.value})
+STARTABLE_STATUSES: frozenset[str] = CLAIMABLE_STATUSES
 """Run statuses this adapter can commit a claim (start transition) for.
 
-Deliberately narrower than the lease policy's ``CLAIMABLE_STATUSES``: a status is
-startable only if the control plane can express the start for it.  The lease
-policy says which rows are *eligible* to be claimed; this set says which of them
-this adapter can actually transition, and the SQL claim predicate is narrowed to
-it so an unstartable row neither burns a fence generation nor blocks the queue
-(:data:`RETRY_DUE_BLOCKER`).
+Equal to the lease policy's ``CLAIMABLE_STATUSES`` because the control plane can now
+express the start for every claimable status: ``start_run`` takes the *observed*
+status as its CAS precondition, and the transition table accepts both
+``queued -> running`` and ``retry_due -> running``.
+
+An earlier revision narrowed this to ``{queued}`` for a good reason at the time --
+``start_run`` hard-coded ``QUEUED``, so a claimed ``retry_due`` row always lost the
+status CAS and burned a fence generation per poll. The narrowing was the right
+workaround for that defect, but it left retryable runs unclaimable. With the
+precondition fixed the workaround is gone; keeping a second, narrower set here would
+let the two definitions drift apart again.
 """
 
 DEFAULT_FAILURE_CODE = "agent_run.provider_failed"
@@ -689,6 +693,11 @@ class ControlPlaneAgentRunExecutionAdapter:
             expected_sequence=lease.sequence - 1,
             command_idempotency_key=self._key("claim", lease),
             occurred_at=db_now,
+            # The observed status is the CAS precondition. Passing it explicitly is
+            # what makes a RETRY_DUE run startable: hard-coding QUEUED here meant the
+            # claim acquired a lease and then always lost the status check, burning a
+            # fence generation per poll.
+            observed_status=AgentRunStatus(slot.status),
         )
         return _settled(write)
 

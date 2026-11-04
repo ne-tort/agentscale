@@ -18,6 +18,7 @@ stale worker does not write.
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
@@ -65,6 +66,26 @@ class FakeClock:
         return self.now
 
 
+class AdvancingClock(FakeClock):
+    """``FakeClock`` that also follows wall time.
+
+    ``AgentRunWorker._drain`` bounds the shutdown grace window with the *injected*
+    clock (``self._now() < deadline``), because that clock is the worker's whole
+    time domain.  A frozen clock can therefore never close that window: the drain
+    loop keeps sleeping until the process is killed, and a test that awaits
+    ``shutdown()`` hangs for ever instead of observing the drained turn.  This
+    clock keeps the deterministic base reading *and* moves with real time, which
+    is exactly what the production clock does.
+    """
+
+    def __init__(self, now: datetime = NOW) -> None:
+        super().__init__(now)
+        self._started = time.monotonic()
+
+    def __call__(self) -> datetime:
+        return self.now + timedelta(seconds=time.monotonic() - self._started)
+
+
 def make_lease(
     *,
     generation: int = 1,
@@ -73,12 +94,13 @@ def make_lease(
     until: datetime | None = None,
     owner: str = "worker-a",
     token: str = "token-generation-1",
+    session_id: str | None = SESSION,
 ) -> AgentRunLease:
     return AgentRunLease(
         tenant_id=TENANT,
         project_id=PROJECT,
         run_id=RUN_ID,
-        session_id=SESSION,
+        session_id=session_id,
         owner_id=owner,
         lease_token=token,
         generation=generation,
@@ -171,6 +193,9 @@ class FakeExecutionPort:
             until=lease_until,
             owner=owner_id,
             token=self.row.lease_token,
+            # The lease is cut from the very row that was claimed: a run without
+            # a session cannot produce a lease that pretends to have one.
+            session_id=self.row.session_id,
         )
 
     async def heartbeat(

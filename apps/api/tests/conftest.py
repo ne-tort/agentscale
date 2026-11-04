@@ -25,18 +25,45 @@ DATABASE_URL = os.getenv(
     "postgresql+asyncpg://prodavan_app:prodavan@localhost:5432/prodavan",
 )
 
+_POSTGRES_AVAILABLE: bool | None = None
+"""Session-level memo of :func:`_postgres_available`.
 
-def _postgres_available() -> bool:
-    """TCP reachability only — avoid asyncio.run() (breaks Windows Proactor + TestClient)."""
+The probe is a *TCP connect* to a port that is normally closed.  On this
+machine an IPv4 loopback connection to a closed port is **not refused, it is
+dropped**, so the probe burns its full ``timeout`` (1 s) every single call.  It
+is called from the autouse ``clean_engine_cache`` fixture and from the
+``requires_postgres`` gate; without the memo, a 2000-test run spent ~35 minutes
+inside a reachability check at ~0 % CPU, which looks exactly like a hang.
+Presence of a database does not change during a run, so one probe per process is
+the honest answer.
+"""
+
+
+def _probe_postgres(timeout: float = 1.0) -> bool:
+    """TCP reachability of ``DATABASE_URL`` — one connect, no caching."""
     raw = DATABASE_URL.replace("postgresql+asyncpg://", "postgresql://", 1)
     parsed = urlparse(raw)
     host = parsed.hostname or "localhost"
     port = parsed.port or 5432
     try:
-        with socket.create_connection((host, port), timeout=1.0):
+        with socket.create_connection((host, port), timeout=timeout):
             return True
     except OSError:
         return False
+
+
+def _postgres_available() -> bool:
+    """``True`` when PostgreSQL answers at ``DATABASE_URL`` (memoised, see above)."""
+    global _POSTGRES_AVAILABLE
+    if _POSTGRES_AVAILABLE is None:
+        _POSTGRES_AVAILABLE = _probe_postgres()
+    return _POSTGRES_AVAILABLE
+
+
+def _reset_postgres_available() -> None:
+    """Forget the memo (a test that opens/closes a database itself may need this)."""
+    global _POSTGRES_AVAILABLE
+    _POSTGRES_AVAILABLE = None
 
 
 requires_postgres = pytest.mark.skipif(
@@ -315,11 +342,14 @@ def clean_engine_cache(request: pytest.FixtureRequest):
     # Integration/k8s: always wipe when the test declares @requires_postgres — do not
     # gate on runtime TCP probe (1s timeout flakes under Docker Desktop load and leaves
     # stale keycloak_sub rows while FakeUserAdmin resets subs to kc_fake_1…).
+    # The cheap path predicates come *before* the database probe on purpose: the probe
+    # can cost a full socket timeout, and the overwhelming majority of tests never
+    # touch a client at all.
     needs_wipe = postgres_wipe or (
-        _postgres_available()
-        and uses_client
+        uses_client
         and "/tests/unit/" not in path
         and "/tests/integration/" not in path
+        and _postgres_available()
     )
     if needs_wipe:
         _reset_auth_test_state()

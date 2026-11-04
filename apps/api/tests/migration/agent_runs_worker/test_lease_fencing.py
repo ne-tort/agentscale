@@ -94,7 +94,21 @@ def test_retry_due_is_not_claimable_before_its_retry_time() -> None:
 
 
 def test_live_lease_blocks_a_second_claim_and_expiry_opens_it() -> None:
-    slot = running_slot()
+    """A live lease blocks the claim even of an otherwise claimable row.
+
+    The row is ``queued`` *and* leased: that is the state a release/requeue
+    leaves while the old worker's deadline has not lapsed yet, and it is the only
+    state in which the deadline predicate can decide the claim.  A ``running``
+    row is never claimable at any time — taking over an orphaned lease is the
+    reconciler's job, not a claim-side shortcut (see ``lease`` module notes and
+    ``test_claim_only_accepts_queued_and_retry_due``), so asserting the claim
+    opens for ``running`` at the deadline contradicted the documented design.
+    """
+    slot = queued_slot(
+        lease_owner="worker-a",
+        lease_token="token-generation-1",
+        lease_until=DEADLINE,
+    )
     assert not is_claimable(slot, now=NOW)
     assert is_claimable(slot, now=DEADLINE)
 

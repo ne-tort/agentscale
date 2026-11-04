@@ -208,14 +208,24 @@ class DurableAgentControlPlane:
         expected_sequence: int,
         command_idempotency_key: str,
         occurred_at: datetime | None = None,
+        observed_status: AgentRunStatus | None = None,
     ) -> ControlPlaneWriteResult:
+        """Start (or restart) a run.
+
+        ``observed_status`` is the status the caller actually observed on the row --
+        the CAS precondition, not a guess. It defaults to ``QUEUED`` so existing
+        callers keep their exact semantics, but a run parked in ``RETRY_DUE`` must be
+        started with that status: the transition table already accepts
+        ``retry_due -> running``, and asserting ``queued`` here made a retryable run
+        claimable-but-unstartable, so every poll took a lease and then lost the CAS.
+        """
         return await self.transition_run(
             RunTransitionCommand(
                 run_id=run_id,
                 linkage=linkage,
                 operation=RunTransitionOperation.START,
                 command_idempotency_key=command_idempotency_key,
-                expected_status=AgentRunStatus.QUEUED,
+                expected_status=observed_status or AgentRunStatus.QUEUED,
                 target_status=AgentRunStatus.RUNNING,
                 expected_sequence=expected_sequence,
                 occurred_at=occurred_at,

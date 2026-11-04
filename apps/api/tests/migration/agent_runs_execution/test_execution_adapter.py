@@ -20,6 +20,7 @@ from prodavan.application.agent_runs.execution import (
     ProviderOutcome,
 )
 from prodavan.application.agent_runs.execution_adapter import (
+    CLAIMABLE_STATUSES,
     ACTOR_BLOCKER,
     REQUEUE_BLOCKER,
     RETRY_DUE_BLOCKER,
@@ -845,11 +846,17 @@ async def test_claim_compensation_survives_a_control_plane_that_keeps_failing() 
 
 
 async def test_retry_due_rows_are_not_claimed_until_the_requeue_exists() -> None:
-    """``retry_due`` is claimable in policy but has no expressible start today.
+    """A parked ``retry_due`` run behind a ready one keeps its generation.
 
-    The adapter narrows the claim predicate to ``queued`` in SQL, so a
-    ``retry_due`` run neither burns a fence generation per poll nor blocks the
-    queue behind it.
+    This test used to pin the opposite contract: the adapter narrowed its claim
+    predicate to ``queued`` because ``start_run`` hard-coded
+    ``expected_status=QUEUED``, so a claimed ``retry_due`` row always lost the status
+    CAS and burned a fence generation per poll. ``start_run`` now takes the observed
+    status as its precondition, the transition table already accepted
+    ``retry_due -> running``, and the narrowing is gone.
+
+    What remains worth protecting: claiming is ordered and fenced, so the parked run
+    behind the ready one is untouched.
     """
     harness = Harness()
     platform = harness.platform
@@ -866,16 +873,25 @@ async def test_retry_due_rows_are_not_claimed_until_the_requeue_exists() -> None
     assert lease.run_id == RUN_ID  # the queued run is claimed, not the retry_due one
     assert platform.runs["agr_retry"].status == fakes.RETRY_DUE_STATUS
     assert platform.leases["agr_retry"].generation == 0
-    assert STARTABLE_STATUSES == frozenset({AgentRunStatus.QUEUED.value})
-    assert RETRY_DUE_BLOCKER == "agent_run_retry_due_start_transition_unwired"
+    # Both claimable statuses are startable; the blocker code is retained only as a
+    # reference for promotion records that cite it.
+    assert STARTABLE_STATUSES == CLAIMABLE_STATUSES
+    assert AgentRunStatus.RETRY_DUE.value in STARTABLE_STATUSES
 
 
 async def test_a_startable_check_compensates_a_status_the_control_plane_cannot_start() -> None:
-    """Defence in depth: a slot holding a non-queued status is never started."""
+    """A ``retry_due`` slot now starts, and the lease is not stranded when it cannot.
+
+    The startability guard still exists as defence in depth for a status the control
+    plane genuinely cannot start; what changed is that ``retry_due`` is no longer
+    one of them, because ``start_run`` takes the observed status as its CAS
+    precondition. A ``retry_due`` lease therefore starts normally, and the guard's
+    compensating path is exercised only by a status outside the transition table.
+    """
     harness = Harness()
     platform = harness.platform
     platform.seed()
-    platform.runs[RUN_ID].status = fakes.RETRY_DUE_STATUS  # not expressible as a start
+    platform.runs[RUN_ID].status = fakes.RETRY_DUE_STATUS  # now expressible
 
     lease = AgentRunLease(
         tenant_id=TENANT,
@@ -897,9 +913,14 @@ async def test_a_startable_check_compensates_a_status_the_control_plane_cannot_s
         lease_until=NOW + LEASE_TTL,
     )
 
-    assert await harness.adapter._start(lease) is False  # type: ignore[attr-defined]
-    assert harness.transaction.operations == []
-    assert platform.runs[RUN_ID].status == fakes.RETRY_DUE_STATUS
+    assert await harness.adapter._start(lease) is True  # type: ignore[attr-defined]
+    assert platform.runs[RUN_ID].status == AgentRunStatus.RUNNING.value
+    # The transition that started it carried the status observed on the row: that is
+    # the whole fix -- with a hard-coded QUEUED precondition this start would have
+    # lost the CAS and the lease would have been compensated instead.
+    transition = harness.transaction.transitions[-1]
+    assert transition.expected_status is AgentRunStatus.RETRY_DUE
+    assert transition.target_status is AgentRunStatus.RUNNING
 
 
 async def test_unknown_case_journal_blocker_is_named() -> None:

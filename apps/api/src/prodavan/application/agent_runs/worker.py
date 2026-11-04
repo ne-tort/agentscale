@@ -432,6 +432,11 @@ def plan_settlement(
         kind=SettlementKind.RETRY,
         reason="provider reported a retryable failure with a durable retry time",
         retry_at=retry_at,
+        # A retry is a *failure* attempt state (``known_retryable``), and the
+        # journal refuses a failure transition without a bounded reason code.
+        # The provider's own code is the honest one; the generic run-level code
+        # is only the fallback when the runner withheld it.
+        failure_code=result.failure_code or FAILURE_PROVIDER_FAILED,
         provider_request_id=result.provider_request_id,
     )
 
@@ -765,29 +770,41 @@ class AgentRunWorker:
             )
         active.cancel.cancel("lease_fenced_out")
 
-    def _fence_is_fresh(self, active: _ActiveRun) -> bool:
-        """A write requires positive evidence that the lease is still ours.
+    async def _confirm_fence(self, active: _ActiveRun) -> bool:
+        """Prove the lease is still ours, immediately before a write.
 
-        Only *proof* of supersession fences the worker out here. A cooperative
-        local cancel (shutdown) is **not** proof: the lease may still be valid,
-        and the run must be settled rather than left ``running`` forever. Races
-        that the worker cannot see are caught by the port's CAS, which returns
-        ``False`` and turns the result into `discarded_stale` evidence.
+        The claim is **not** evidence at write time: it happened before the
+        provider call, which can outlast the whole lease TTL, and in the meantime
+        an operator may have cancelled the run or another worker may have claimed
+        it.  Only a heartbeat confirmed within ``heartbeat_interval`` proves
+        ownership, so when the last confirmed beat is missing or older than that
+        the worker performs one confirm beat *now* and:
+
+        * a ``False`` answer, an exception or an expired deadline loses the fence
+          permanently — the result becomes ``discarded_stale`` evidence and no
+          run state is written;
+        * a cooperative local cancel (shutdown) is **not** proof of supersession
+          by itself: if the lease is still ours the run must be settled rather
+          than left ``running`` forever;
+        * races the worker cannot see are still caught by the port's CAS, which
+          returns ``False`` and turns the result into ``discarded_stale``.
         """
         if active.superseded:
             return False
-        if active.last_confirmed_heartbeat is None:
-            # The claim itself proved ownership a moment ago; require the lease
-            # to still be inside its TTL before the first write.
-            return self._now() < active.lease.lease_until
-        return self._now() - active.last_confirmed_heartbeat <= self._config.heartbeat_interval
+        last = active.last_confirmed_heartbeat
+        if last is not None and self._now() - last <= self._config.heartbeat_interval:
+            return True
+        return await self._beat(active)
 
     # -- settlement --------------------------------------------------------
 
     async def _settle(self, active: _ActiveRun, result: ProviderExecutionResult) -> WorkerTick:
         lease = active.lease
+        # Ownership is *proven* before the settlement is planned: a confirmed beat
+        # extends the lease, a refused beat fences the worker out, and the plan is
+        # then made on evidence rather than on the claim that preceded the turn.
+        fence_ok = await self._confirm_fence(active)
         now = self._now()
-        fence_ok = self._fence_is_fresh(active)
         settlement = plan_settlement(
             result,
             now=now,
@@ -883,6 +900,11 @@ class AgentRunWorker:
             failure_code = FAILURE_LEASE_LOST
         if outcome is AttemptOutcome.SUCCEEDED:
             failure_code = None
+        if outcome is AttemptOutcome.RETRYABLE and failure_code is None:
+            # ``known_retryable`` is a failure attempt state: the journal refuses
+            # the transition without a bounded code, so never drop the provider's
+            # own reason on the way in.
+            failure_code = result.failure_code or FAILURE_PROVIDER_FAILED
         try:
             await self._journal.finish(
                 active.attempt,
@@ -1066,8 +1088,15 @@ class AgentRunWorker:
             return
 
     async def shutdown(self, *, stop: asyncio.Event) -> None:
-        """Request a graceful stop and wait for the drain (idempotent)."""
+        """Request a graceful stop and wait for the drain (idempotent).
+
+        The signal is *recorded* on the worker, not merely awaited: after this
+        returns, :meth:`tick` refuses new work and hands a fresh claim straight
+        back, so a host that shuts a worker down outside ``run_forever`` cannot
+        keep claiming runs from the queue.
+        """
         stop.set()
+        self._stop = stop
         await self._drain()
 
 

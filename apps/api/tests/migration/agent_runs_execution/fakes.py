@@ -380,6 +380,11 @@ class AppliedTransition:
     target_status: str
     event_types: tuple[str, ...] = ()
     detail_failure_code: str | None = None
+    #: The CAS precondition the caller asserted. Recorded so a test can prove which
+    #: status the transition was checked against: a start that hard-codes ``queued``
+    #: and one that carries the observed status are otherwise indistinguishable
+    #: after the fact.
+    expected_status: str | None = None
 
 
 class FakeAtomicTransaction:
@@ -462,6 +467,7 @@ class FakeAtomicTransaction:
             run.failure_message = str(details["reason"])
 
         self.events.extend(write.events)
+        expected = command.expected_run_status
         self.transitions.append(
             AppliedTransition(
                 operation=command.operation,
@@ -470,6 +476,7 @@ class FakeAtomicTransaction:
                 target_status=target.value,
                 event_types=tuple(event.event_type for event in write.events),
                 detail_failure_code=None if failure_code is None else str(failure_code),
+                expected_status=None if expected is None else expected.value,
             )
         )
         result = ControlPlaneWriteResult(
