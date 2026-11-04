@@ -112,19 +112,27 @@ Design invariants worth keeping:
 - **Ownership**: canonical grant duplicate declaration removed; registration gates
   updated; `AttributeError("retired")` + `ModuleNotFoundError` fail-closed.
 
+## Done since this section was first written
+
+| Item | Outcome |
+|---|---|
+| Host wiring for both poll loops | `AgentRunWorkerResource` registered in the lifespan, two loops under separate advisory locks, disabled by default. |
+| Execution adapter + lease store | `SqlAlchemyRunLeaseStore` + `ControlPlaneAgentRunExecutionAdapter`; `retry_due` startable end to end. |
+| Host dependency bundle | `agent_run_bundle` builds all five members from the session factory and publishes them on the seam; `wired` is True. |
+| Equipment ingestion persistence | Durable run/snapshot/offer writes with resume and idempotent replay. |
+| Cross-review of DDL + seams | Both reviews landed; every finding either fixed or recorded as a decision. |
+| Legacy chat ↔ durable run binding | `run_binding` bridges `(project, session, turn_id) -> run_id`; stream frames are now an expressible operation. |
+| Dynamic-module screens ↔ API | Router, application layer and web screens all present and green. |
+
 ## Remaining work
 
 | Item | Why it matters |
 |---|---|
-| Host wiring for both poll loops | Consumer and worker are libraries; nothing starts them in a delivered process. Use the `trigger_worker.py` pattern (advisory lock, `drain_once`, lifespan) + settings flags. |
-| Execution adapter + lease store | In progress: `RunLeaseStore` SQL over `agent_run_leases` and `AgentRunExecutionPort` composition. |
-| Equipment ingestion persistence | Durable run/snapshot/offer writes with resume and idempotent replay. |
-| PostgreSQL concurrency suite | Concurrent idempotent reservation, aggregate CAS, transaction abort, claim races, deferrable cycle, partial unique, migration round-trip. |
-| Cross-review of DDL + seams | Independent read-only review of the chain and of M04→M04E→M05→M06 ports. |
-| Dynamic-module screens ↔ API | Verify the web service contract matches the implemented router. |
-| Equipment tenant anchors | `project_id`/`cabinet_id` and associative tables if the domain needs them. |
-| Host dependency bundle assembly | `AgentRunWorkerResource` exposes `register_host_dependency_provider` but nothing registers the bundle yet, so both loops idle with `agent_run_host_dependencies_unwired`. Needed: execution port (done), run source, attempt journal, turn runner. |
-| Legacy chat ↔ durable run binding | The real chat path writes only `agent_events`; the canonical SSE index reads `agent_runs` + `agent_control_plane_events`, so canonical frame identity is unprovable until a run binding exists. |
+| `TrustedPrincipalResolver` | The auth-boundary lookup the tenant-context adapters require. Without it no stage of M04→M06 is a production binding. |
+| Cutover-state tables | `SqlCutoverRepository` is fail-closed because no table exists for cutover state or the live source tail, and the grant evidence table forbids positive writes by CHECK. |
+| Migration composition root in the lifespan | `composition.py` assembles the chain, but `core/wiring.py` never mentions migration, so the chain is still not reachable from a delivered process. |
+| PostgreSQL concurrency suite | Authored and skips without `PRODAVAN_TEST_DATABASE_URL`; proves `SKIP LOCKED`, aggregate CAS, transaction abort and the deferrable cycle on the real engine. |
+| Equipment tenant anchors | `project_id`/`cabinet_id` and the associative tables, if the domain needs them. |
 
 ## Boundary decisions recorded in this session
 
