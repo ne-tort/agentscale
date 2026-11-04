@@ -22,6 +22,19 @@ import {
 
 type EquipmentStage = "requests" | "candidates" | "offers" | "procurement" | "export";
 
+/**
+ * Read-only mount: без admin-сервиса источника Source configuration показывает только
+ * переданный снимок, поэтому любая запись обязана отказать, а не сделать вид, что ушла на сервер.
+ */
+const UNMOUNTED_SOURCES_SERVICE: EquipmentSourcesService = {
+  loadWorkspace: () => Promise.reject(new Error("Equipment source admin service is not mounted in this project route.")),
+  createCatalog: () => Promise.reject(new Error("Equipment source admin service is not mounted in this project route.")),
+  patchCatalog: () => Promise.reject(new Error("Equipment source admin service is not mounted in this project route.")),
+  invoke: () => Promise.reject(new Error("Equipment source admin service is not mounted in this project route.")),
+  uploadFile: () => Promise.reject(new Error("Equipment source admin service is not mounted in this project route.")),
+  uploadSecret: () => Promise.reject(new Error("Equipment source admin service is not mounted in this project route.")),
+};
+
 export interface EquipmentProcurementPageProps {
   service?: EquipmentProjectService;
   heading?: string;
@@ -512,8 +525,8 @@ export function EquipmentProcurementPage({
   sourcesService,
 }: EquipmentProcurementPageProps) {
   const api = useApi();
-  const work = useWorkContext();
-  const projectId = work.projectId;
+  const workset = useWorkContext();
+  const projectId = workset.projectId;
   const service = useMemo(() => injectedService ?? (projectId ? createEquipmentProjectService(api, projectId) : undefined), [api, injectedService, projectId]);
   if (!projectId || !service) {
     return <main className="equipment-page"><div className="equipment-scope-blocker" role="alert"><strong>Project scope unavailable</strong><p>Open equipment from a loaded project. This workspace does not infer cabinet, project, or chat scope.</p></div></main>;
@@ -541,14 +554,19 @@ export interface EquipmentProcurementViewProps {
   initialWorkspace?: EquipmentWorkspace;
   initialScope?: EquipmentWorkspaceScope;
   initialCatalogs?: EquipmentSourceCatalog[];
+  initialWorkspaceView?: "procurement" | "sources";
+  /** Снимок admin-строк каталогу для read-only Source configuration. */
+  initialSourcesWorkspace?: EquipmentCatalogWorkspace;
+  /** Полный admin-сервис источников; с ним Source configuration работает на запись. */
+  sourcesService?: EquipmentSourcesService;
 }
 
-export function EquipmentProcurementView({ service, heading, initialWorkspace, initialScope, initialCatalogs }: EquipmentProcurementViewProps) {
+export function EquipmentProcurementView({ catalogs: initialCatalogs, heading, initialScope, initialSourcesWorkspace, initialWorkspace, initialWorkspaceView, service, sourcesService }: EquipmentProcurementViewProps) {
   const [workspace, setWorkspace] = useState<EquipmentWorkspace | undefined>(initialWorkspace);
   const [scope, setScope] = useState<EquipmentWorkspaceScope | undefined>(initialScope);
   const [catalogs, setCatalogs] = useState<EquipmentSourceCatalog[]>(initialCatalogs ?? []);
   const [activeStage, setActiveStage] = useState<EquipmentStage>("requests");
-  const [activeWorkspaceView, setActiveWorkspaceView] = useState<"procurement" | "sources">("procurement");
+  const [activeWorkspaceView, setActiveWorkspaceView] = useState<"procurement" | "sources">(initialWorkspaceView ?? "procurement");
   const [error, setError] = useState<string>();
   const [exportData, setExportData] = useState<EquipmentProcurementExport>();
   const [exportBusy, setExportBusy] = useState(false);
@@ -620,7 +638,13 @@ export function EquipmentProcurementView({ service, heading, initialWorkspace, i
       {error && <div className="equipment-error" role="alert"><strong>Action blocked</strong><span>{error}</span></div>}
       <WorkspaceSnapshotContext blocker={service.blocker} scope={scope} workspace={workspace} />
       <EquipmentWorkspaceNavigation activeView={activeWorkspaceView} onView={setActiveWorkspaceView} sourceCount={catalogs.length} sourceServiceConnected workspace={workspace} />
-      {activeWorkspaceView === "sources" ? <SourceConfigurationView catalogs={catalogs} scope={scope} /> : <>
+      {activeWorkspaceView === "sources"
+        ? sourcesService
+          ? <EquipmentSourcesPage initialWorkspace={initialSourcesWorkspace} service={sourcesService} />
+          : initialSourcesWorkspace
+            ? <EquipmentSourcesPage initialWorkspace={initialSourcesWorkspace} service={UNMOUNTED_SOURCES_SERVICE} />
+            : <SourceConfigurationView catalogs={catalogs} scope={scope} />
+        : <>
         <StageNavigation activeStage={activeStage} onStage={setActiveStage} workspace={workspace} />
         {activeStage === "requests" && <RequestsStage busy={busyAction === "create-request"} onCreate={createRequest} onStage={setActiveStage} projectId={scope?.projectId} readOnly={readOnly} workspace={workspace} />}
         {activeStage === "candidates" && <CandidatesStage workspace={workspace} />}

@@ -248,10 +248,13 @@ function VersionEditor({ resource, versions, service, busy, onCreateVersion }: {
   }, [resource?.id]);
 
   if (!resource) return <div className="resources-empty"><strong>Choose a resource first</strong><span>A version form is shown after selecting a card.</span></div>;
+  // `payload` is a function declaration (hoisted), so TypeScript cannot carry the
+  // `!resource` narrowing of the parameter into its body; bind the narrowed value.
+  const selected = resource;
 
   function payload(): ResourcePayload {
-    if (resource.kind === "prompt") return { kind: "prompt", body, variables: Array.from(body.matchAll(/\{\{\s*([\w.-]+)\s*\}\}/g), (match) => match[1]).filter((value, index, values) => values.indexOf(value) === index) };
-    if (resource.kind === "file") return { kind: "file", path, contents: body };
+    if (selected.kind === "prompt") return { kind: "prompt", body, variables: Array.from(body.matchAll(/\{\{\s*([\w.-]+)\s*\}\}/g), (match) => match[1]).filter((value, index, values) => values.indexOf(value) === index) };
+    if (selected.kind === "file") return { kind: "file", path, contents: body };
     return { kind: "mcp", server, tools: tools.split(",").map((tool) => tool.trim()).filter(Boolean) };
   }
 
@@ -378,14 +381,19 @@ export function ResourceWorkspace({ service = blockedService, profileId = "", pr
   const blockedWithoutSnapshot = !service.capabilities.readWorkspace && Boolean(profileId);
   if (!snapshot) return <main className="resources-workspace"><div className="resources-page-heading"><div><p className="resources-eyebrow">Agent profile · resources</p><h1>Resource workspace</h1><p className="resources-muted">Loading the authoritative profile snapshot…</p></div><StatusPill tone="warning">{busy === "load" ? "Loading" : "Unavailable"}</StatusPill></div><WorkspaceNav active={activeTab} onSelect={setActiveTab} />{activeTab === "assets" ? <AssetsView companyId={companyId} service={contentOpsService} initialAssets={initialAssets} /> : <><BlockersPanel blockers={RESOURCE_CONTRACT_BLOCKERS} /><div className="resources-empty resources-empty--tall"><strong>{loadError ?? (blockedWithoutSnapshot ? "Resource workspace loading is blocked" : "No workspace snapshot")}</strong><span>{loadError || blockedWithoutSnapshot ? "No data was invented. Wire a reviewed ResourceService to render the profile; Assets remains a separate confirmed Content Service surface." : "Provide a profile id and service boundary to load this workspace."}</span></div></>}</main>;
 
-  const blockers = snapshot.contract.ready ? snapshot.contract.blockers : snapshot.contract.blockers.length ? snapshot.contract.blockers : RESOURCE_CONTRACT_BLOCKERS;
+  const blockers: ResourceContractBlocker[] = snapshot.contract.ready
+    ? snapshot.contract.blockers
+    : snapshot.contract.blockers.length ? snapshot.contract.blockers : [...RESOURCE_CONTRACT_BLOCKERS];
   const selectedResource = snapshot.resources.find((resource) => resource.id === selectedResourceId);
+  // The command handlers below are function declarations, which are hoisted, so the
+  // `!snapshot` narrowing above does not reach them; bind the narrowed value once.
+  const workspace = snapshot;
   function saveProfile(name: string, description: string) {
-    return execute("profile", () => service.updateProfile({ profileId: snapshot.profile.id, name, description, expectedRevision: snapshot.profile.revision }), (profile) => setSnapshot((current) => current ? updateResourceSnapshot(current, { profile }) : current), "Agent profile updated by the service.");
+    return execute("profile", () => service.updateProfile({ profileId: workspace.profile.id, name, description, expectedRevision: workspace.profile.revision }), (profile) => setSnapshot((current) => current ? updateResourceSnapshot(current, { profile }) : current), "Agent profile updated by the service.");
   }
 
   function createResource(input: { kind: ResourceKind; slug: string; title: string; description: string; scope: ResourceScope }) {
-    return execute("create-resource", () => service.createResource({ profileId: snapshot.profile.id, ...input }), (resource) => { setSnapshot((current) => current ? updateResourceSnapshot(current, { resources: [...current.resources, resource] }) : current); setSelectedResourceId(resource.id); setActiveTab("resources"); }, "Resource created and returned by the service.");
+    return execute("create-resource", () => service.createResource({ profileId: workspace.profile.id, ...input }), (resource) => { setSnapshot((current) => current ? updateResourceSnapshot(current, { resources: [...current.resources, resource] }) : current); setSelectedResourceId(resource.id); setActiveTab("resources"); }, "Resource created and returned by the service.");
   }
 
   function createVersion(input: { label: string; changeNote: string; payload: ResourcePayload }): Promise<boolean> {
@@ -399,12 +407,13 @@ export function ResourceWorkspace({ service = blockedService, profileId = "", pr
   }
 
   function planMaterializationForProject(nextProjectId: string) {
-    return execute("plan", () => service.planMaterialization({ profileId: snapshot.profile.id, projectId: nextProjectId, expectedGeneration: snapshot.materialization?.desiredGeneration }), (plan) => setSnapshot((current) => current ? updateResourceSnapshot(current, { materialization: plan }) : current), "Materialization plan returned by the service.");
+    return execute("plan", () => service.planMaterialization({ profileId: workspace.profile.id, projectId: nextProjectId, expectedGeneration: workspace.materialization?.desiredGeneration }), (plan) => setSnapshot((current) => current ? updateResourceSnapshot(current, { materialization: plan }) : current), "Materialization plan returned by the service.");
   }
 
   function syncMaterialization() {
-    if (!snapshot.materialization) return Promise.resolve(false);
-    return execute("sync", () => service.syncMaterialization({ planId: snapshot.materialization!.id, expectedGeneration: snapshot.materialization!.desiredGeneration }), (plan) => setSnapshot((current) => current ? updateResourceSnapshot(current, { materialization: plan }) : current), "Materialization sync result returned by the service.");
+    const materialization = workspace.materialization;
+    if (!materialization) return Promise.resolve(false);
+    return execute("sync", () => service.syncMaterialization({ planId: materialization.id, expectedGeneration: materialization.desiredGeneration }), (plan) => setSnapshot((current) => current ? updateResourceSnapshot(current, { materialization: plan }) : current), "Materialization sync result returned by the service.");
   }
 
   function loadDiff(fromVersion: number, toVersion: number) {

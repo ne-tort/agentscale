@@ -182,12 +182,16 @@ export function ContentOpsPanel({ companyId, service, initialAssets = [], worksp
           setAttempt(current);
         }
       }
-      if (!current.versionId) {
+      // Read the retryable version id into a local before the branch: reassigning
+      // `current` below would reset the `!current.versionId` narrowing for later lines.
+      let versionId = current.versionId;
+      if (!versionId) {
         const version = await service.beginVersion(current.assetId, feedback.mime);
-        current = { ...current, versionId: version.id };
+        versionId = version.id;
+        current = { ...current, versionId };
         setAttempt(current);
       }
-      const saved = await service.uploadVersion(current.assetId, current.versionId, file, feedback.mime);
+      const saved = await service.uploadVersion(current.assetId, versionId, file, feedback.mime);
       setVersions((existing) => sortVersions([...existing.filter((version) => version.id !== saved.id), saved]));
       setSelectedAssetId(current.assetId);
       setSelectedVersionId(saved.id);

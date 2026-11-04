@@ -21,7 +21,36 @@ Invariants enforced by :func:`validate_registry` at import time:
 * every generated predicate compares against ``current_setting(..., true)``
   (unset context is NULL, therefore deny) and never interpolates a value;
 * policy DDL is idempotent (``DROP POLICY IF EXISTS`` before ``CREATE POLICY``)
-  and guarded by ``to_regclass(...)`` so a partial schema cannot raise.
+  and guarded by ``to_regclass(...)`` so a partial schema cannot raise;
+* every rendered policy name fits PostgreSQL's 63-byte identifier limit, so the
+  name stored in ``pg_policy`` is byte-for-byte the name this registry declares
+  (the rule is spelled out below).
+
+Policy names and the 63-byte limit
+----------------------------------
+PostgreSQL truncates an identifier longer than ``NAMEDATALEN - 1`` (63 bytes)
+*silently*: ``CREATE POLICY m04e_definition_version_promotion_evidence_trusted_service_access``
+(65 characters) is stored as ``..._trusted_service_acce``.  Anything comparing
+the stored name with the declared one then never matches, and two distinct
+declared names could truncate to the same stored name - a ``CREATE POLICY``
+collision or, worse, one table's policy silently replaced by another's.
+
+The rule here is deterministic and applies to every table without exception:
+
+1. the name is ``<table>_<full suffix>`` (``tenant_isolation`` /
+   ``trusted_service_access``) when that fits in :data:`POLICY_NAME_MAX_LENGTH`;
+2. otherwise the **compact suffix for the same kind** is used (``tenant`` /
+   ``trusted_access``), which is how ``m04e_definition_version_promotion_evidence``
+   gets ``m04e_definition_version_promotion_evidence_trusted_access`` (57);
+3. the table part is never shortened - a policy name always begins with the
+   exact table it belongs to, so names stay unambiguous;
+4. a table whose name is so long that even the compact form does not fit stops
+   the registry at import time (:class:`RlsRegistryError`).  Truncation is never
+   a fallback: fail closed, never degrade silently.
+
+:func:`installed_policy_name` is the single way to map a rendered name to the
+name PostgreSQL stores; catalog comparisons go through it so the "declared vs
+stored" mismatch cannot come back by hand.
 
 Review notes / deliberate exclusions live in :data:`EXCLUDED_TABLES`.
 """

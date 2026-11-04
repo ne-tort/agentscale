@@ -174,32 +174,31 @@ class WebCall:
     partial: bool = False
 
 
-_HOST_PREFIX_RE = re.compile(r"(\$\{[^}]*\}|[A-Za-z_$][\w$]*)\s*$")
 _METHOD_HINT = re.compile(r"method:\s*['\"](\w+)['\"]")
-_FETCH_RE = re.compile(r"fetch\(\s*`\{?([A-Za-z_$][\w$]*)")
+_FETCH_RE = re.compile(r"fetch(?:er)?\(\s*`(?:\$\{)?([A-Za-z_][\w$]*)")
 
 
 def _mount_prefix() -> str:
     """Recover the URL prefix the content-ops adapter concatenates in front of a literal.
 
-    ``fetcher(`${baseUrl}${path}`)`` with ``baseUrl = options.baseUrl ?? "/api/v1"``
-    means a literal such as ``/content/assets`` is requested at
-    ``/api/v1/content/assets``. The default is read from the source rather than
-    assumed, so a moved default shows up as a parity failure instead of a silent
+    The service requests ``fetcher(`${baseUrl}${path}`)`` and builds ``baseUrl`` from
+    ``options.baseUrl ?? "/api/v1"``, so a literal such as ``/content/assets`` is really
+    requested at ``/api/v1/content/assets``. The default is read from the source rather
+    than assumed, so a moved default shows up as a parity failure instead of a silent
     pass. A service that builds absolute URLs has no such wrapper and yields ``""``.
     """
     text = _read(CONTENT_OPS_SERVICE)
     mount = _FETCH_RE.search(text)
     if mount is None:
         return ""
-    default = re.search(r"baseUrl\s*=\s*options\.baseUrl\s*\?\?\s*\"([^\"]*)\"", text)
-    literal = default.group(1).rstrip("/") if default else ""
+    default = re.search(r"options\.baseUrl\s*\?\?\s*\"([^\"]*)\"", text)
+    literal = default.group(1) if default else ""
     token = mount.group(1)
-    assignment = re.search(
-        rf"\b{re.escape(token)}\s*(?::[^=]+)?=\s*[^;]*?\"([^\"]*)\"", text
-    )
-    if assignment is not None:
-        literal += assignment.group(1)
+    # Only a plain literal initializer replaces the default; a computed one
+    # (``configuredBase.endsWith("/") ? … : …``) keeps the documented default.
+    plain = re.search(rf"\b{re.escape(token)}\s*(?::\s*[^=]+)?=\s*[\"']([^\"']*)[\"']\s*;", text)
+    if plain is not None:
+        literal = plain.group(1)
     return literal.rstrip("/")
 
 
