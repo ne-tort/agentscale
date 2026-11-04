@@ -40,11 +40,11 @@ from prodavan.application.migration.m04e_ports import (
     M04EPortRefused,
     SqlM04EEvidenceStore,
     definition_candidate,
+    version_candidate,
 )
 
 from .acceptance_fixtures import (
     APP_ID,
-    ARTIFACT_URI,
     CORRELATION_ID,
     DEFINITION_ID,
     OTHER_DEFINITION_ID,
@@ -53,15 +53,12 @@ from .acceptance_fixtures import (
     SHA_B,
     SHA_C,
     SHA_D,
-    SNAPSHOT_DIGEST,
-    SOURCE_SCHEMA,
     TENANT,
     context,
     definition_row,
     expected_source_digest,
     version_row,
 )
-from prodavan.application.migration.m04e_ports import version_candidate
 from .sqlite_ledger import (
     AUDIT_TABLE,
     CHECKPOINT_TABLE,
@@ -165,8 +162,9 @@ def accepted(decision_candidate, *, verified: str | None = None) -> CandidateDec
         status=EvidenceStatus.ACCEPTED,
         reason_code=None,
         proof=proof,
-        verified_artifact_digest=verified or str(
-            decision_candidate.payload.get("artifact_digest")
+        verified_artifact_digest=verified or (
+            str(decision_candidate.payload.get("artifact_digest"))
+            if decision_candidate.phase == "version" else None
         ),
     )
 
@@ -177,6 +175,12 @@ def quarantined(decision_candidate, reason: str = "source_lifecycle_unproven"):
         status=EvidenceStatus.QUARANTINED,
         reason_code=reason,
         proof=None,
+        # What ``run_page`` reports for a version: the verified bytes it read. ``None``
+        # for a definition, whose artifact is its current version's.
+        verified_artifact_digest=(
+            str(decision_candidate.payload.get("artifact_digest"))
+            if decision_candidate.phase == "version" else None
+        ),
     )
 
 
@@ -486,7 +490,7 @@ async def test_a_changed_source_digest_is_a_conflict_and_an_observation(ledger) 
     original = version_candidate(context(), version_row(), _definition())
     await store.classify_and_commit_page(
         context=context(), gates=gates(), expected_checkpoint=checkpoint(),
-        decisions=(accepted(original),), page_exhausted=True,
+        decisions=(accepted(original),), page_exhausted=False,
     )
     first_mapping = await ledger.single(MAPPING_TABLE)
     assert first_mapping is not None
@@ -524,18 +528,24 @@ async def test_a_changed_source_digest_is_a_conflict_and_an_observation(ledger) 
     assert record.observed_source_digest == changed.source_digest
     assert record.canonical_digest is None
     assert record.canonical_identity == ()
-    # An observation is evidence about a row the cursor already consumed, so it does
-    # *not* take a second slot: the head stays where the first mapping put it. Advancing
-    # here would drive the cursor over a row another page may still be reading.
+    # An observation *is* a classification of this row, so it consumes one cursor slot —
+    # exactly what ``run_page`` expects (``sequence + len(non-replay records)``).
     assert batch.checkpoint.after_source_id == "aver_0001"
-    assert batch.checkpoint.sequence == 1
+    assert batch.checkpoint.sequence == 2
     head = await ledger.single(CHECKPOINT_TABLE)
     assert head is not None
-    assert head["sequence"] == 1
+    assert head["sequence"] == 2
+    assert head["after_source_id"] == "aver_0001"
     # …and the page still audited what it appended.
     audit_rows = await ledger.rows(AUDIT_TABLE)
     assert [row["event_kind"] for row in audit_rows] == ["page_committed", "page_committed"]
-    assert audit_rows[-1]["conflict_count"] == 1
+    # ``ids`` are random hex, so ``rows`` order is not chronological: sum the counters
+    # of both pages instead of assuming which event came last. The first page recorded
+    # one acceptance; the second recorded one conflict.
+    totals = rows_to_counts(audit_rows)
+    assert totals["conflict_count"] == 1
+    assert totals["accepted_count"] == 1
+    assert totals["record_count"] == 2
 
 
 async def test_a_replayed_observation_returns_the_recorded_evidence(ledger) -> None:
@@ -543,7 +553,7 @@ async def test_a_replayed_observation_returns_the_recorded_evidence(ledger) -> N
     original = version_candidate(context(), version_row(), _definition())
     await store.classify_and_commit_page(
         context=context(), gates=gates(), expected_checkpoint=checkpoint(),
-        decisions=(accepted(original),), page_exhausted=True,
+        decisions=(accepted(original),), page_exhausted=False,
     )
     changed = version_candidate(context(), version_row(artifact_digest=SHA_B), _definition())
     conflict = CandidateDecision(
@@ -574,7 +584,7 @@ async def test_a_replayed_observation_returns_the_recorded_evidence(ledger) -> N
     assert record.status is EvidenceStatus.CONFLICT
     assert record.reason_code == "source_digest_changed"
     assert record.observed_source_digest == changed.source_digest
-    assert replayed.checkpoint.sequence == 1, "a replay-only page does not advance"
+    assert replayed.checkpoint.sequence == 2, "a replay-only page does not advance"
 
     # ``find_observation`` is the exact lookup the backfill uses before deciding.
     found = await store.find_observation(
@@ -598,7 +608,7 @@ async def test_an_artifact_observation_is_recorded_with_a_null_source_digest(led
     original = version_candidate(context(), version_row(), _definition())
     await store.classify_and_commit_page(
         context=context(), gates=gates(), expected_checkpoint=checkpoint(),
-        decisions=(accepted(original),), page_exhausted=True,
+        decisions=(accepted(original),), page_exhausted=False,
     )
     # Same source bytes, different artifact bytes: an immutable-artifact conflict.
     same_source = version_candidate(context(), version_row(), _definition())
@@ -690,31 +700,44 @@ async def test_a_retried_page_returns_the_rows_it_already_wrote(ledger) -> None:
     assert retried.checkpoint == committed.checkpoint
 
 
-async def test_a_concurrent_peer_advance_loses_the_cas_instead_of_overwriting_it(ledger) -> None:
+async def test_a_concurrent_peer_advance_loses_the_cas_instead_of_overwriting_it(
+    ledger, monkeypatch,
+) -> None:
     """The CAS predicate, not cooperation, is what protects the cursor.
 
-    The head is advanced *between* the store's read and its write by a peer holding the
-    same observed cursor. The store's ``UPDATE ... WHERE sequence = :observed AND
-    checkpoint_token = :observed`` then matches no row: the page rolls back and the
-    durable head is returned. Without the CAS the peer's advance would be silently
-    overwritten and two pages would share a cursor position.
+    The race is simulated at the exact point it happens: the row the store reads while
+    locking the head is no longer the row it holds when it writes, because a peer
+    renewed the token in between. Both predicates of the CAS
+    (``sequence = :observed AND checkpoint_token = :observed``) then match nothing, so
+    the page's writes roll back and the durable head is returned.
+
+    Only the *token* is stale, not the sequence — which is the whole point: a
+    sequence-only CAS would happily overwrite a peer that advanced at the same
+    sequence number.
     """
 
     store = store_for(ledger)
     decision = accepted(version_candidate(context(), version_row(), _definition()))
     await store.classify_and_commit_page(
         context=context(), gates=gates(), expected_checkpoint=checkpoint(),
-        decisions=(decision,), page_exhausted=True,
+        decisions=(decision,), page_exhausted=False,
     )
     head = await ledger.single(CHECKPOINT_TABLE)
     assert head is not None
-    # The peer moves the head to a *different* cursor with the same sequence number, so
-    # only the token differs — exactly the case a sequence-only CAS would miss.
-    await ledger.execute(
-        f"UPDATE {CHECKPOINT_TABLE} SET checkpoint_token = :token WHERE id = :id",
-        token="peer-token", id=head["id"],
-    )
     rows_before = await ledger.statement_count()
+
+    original_lock = SqlM04EEvidenceStore._lock_checkpoint_row
+
+    async def stale_lock(self, session, context, *, phase):
+        row = await original_lock(self, session, context=context, phase=phase)
+        if row is None:
+            return row
+        # The token the peer replaced *after* this read; the sequence is unchanged.
+        return {**dict(row), "checkpoint_token": "peer-token"}
+
+    monkeypatch.setattr(
+        SqlM04EEvidenceStore, "_lock_checkpoint_row", stale_lock,
+    )
 
     batch = await store.classify_and_commit_page(
         context=context(), gates=gates(),
@@ -728,9 +751,11 @@ async def test_a_concurrent_peer_advance_loses_the_cas_instead_of_overwriting_it
         page_exhausted=False,
     )
 
+    # The lost CAS is not an exception and not a partial commit.
     assert batch.records == ()
-    assert await ledger.statement_count() == rows_before
-    assert (await ledger.single(CHECKPOINT_TABLE))["checkpoint_token"] == "peer-token"
+    assert batch.checkpoint.sequence == int(head["sequence"])
+    assert await ledger.statement_count() == rows_before, "the whole page rolled back"
+    assert (await ledger.single(CHECKPOINT_TABLE)) == head
 
 
 async def test_a_cursor_the_ledger_never_recorded_is_refused(ledger) -> None:
@@ -905,6 +930,9 @@ async def test_a_candidate_at_or_before_the_cursor_is_refused(ledger) -> None:
     assert head is not None
     rows_before = await ledger.statement_count()
 
+    # A replay of the row at/behind the cursor is fine (that is a retry); a *new*
+    # mapping behind it is not: the cursor would move backwards.
+
     with pytest.raises(M04EPortRefused) as raised:
         await store.classify_and_commit_page(
             context=context(), gates=gates(),
@@ -913,7 +941,24 @@ async def test_a_candidate_at_or_before_the_cursor_is_refused(ledger) -> None:
                 phase_complete=bool(head["phase_complete"]),
             ),
             decisions=(
-                accepted(version_candidate(context(), version_row(), _definition())),
+                # ``aver_0000`` sorts before the cursor ``aver_0001`` and has never
+                # been mapped, so recording it would re-open a consumed position.
+                accepted(version_candidate(
+                    context(),
+                    version_row(
+                        id="aver_0000",
+                        manifest_version="1.0.9",
+                        artifact_digest=SHA_C,
+                        artifact_uri=f"content://{TENANT}/{DEFINITION_ID}/aver_0000",
+                        manifest={
+                            "protocol": "1.0",
+                            "appId": APP_ID,
+                            "version": "1.0.9",
+                            "entryPoints": {},
+                        },
+                    ),
+                    _definition(),
+                )),
             ),
             page_exhausted=False,
         )

@@ -545,6 +545,12 @@ describe("Runs Center user journey", () => {
     expect(calls.filter((path) => path.includes("/run-visible")).length).toBe(initialReads);
     Object.defineProperty(document, "hidden", { configurable: true, value: false });
     await act(async () => { document.dispatchEvent(new Event("visibilitychange")); });
+    // Resuming deliberately does not read on the visibility event itself: the page arms a
+    // zero-delay timer (`schedule(0)`), so the resumed read lands on the next macrotask.
+    // This test drives a fake clock, so the timer has to be advanced -- microtask draining
+    // alone can never fire it and would only prove the assertion is unreachable, not that
+    // visibility recovery is broken.
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
     await waitForPageMicrotasks(() => calls.filter((path) => path.includes("/run-visible")).length > initialReads);
     expect(pageText()).toContain("Run run-visible");
   });

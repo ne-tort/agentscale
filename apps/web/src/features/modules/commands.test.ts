@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ModuleManifest, ModuleViewDefinition } from "./contracts";
-import { actionResultNotice, collectModuleActionParams, moduleRowActionMatches, normalizeProjectSelection, parseModuleCollectionRowAction, parseModuleColumnValue, resolvePrimaryCreateRoute, sameModuleRowBody, validateModuleActionResult, validateModuleRowBody } from "./commands";
+import { actionResultNotice, collectModuleActionParams, moduleRowActionMatches, moduleWriteNotice, normalizeProjectSelection, parseModuleCollectionRowAction, parseModuleColumnValue, resolvePrimaryCreateRoute, sameModuleRowBody, validateModuleActionResult, validateModuleRowBody } from "./commands";
 
 const views: ModuleViewDefinition[] = [
   { slug: "items", table_slug: "items", kind: "collection", ui_json: { version: 1, kind: "collection", primary_action: { kind: "create_row", view: "items_form" }, row_tap: { kind: "open_form", view: "items_form" } } },
@@ -77,5 +77,19 @@ describe("module collection commands", () => {
     expect(() => validateModuleActionResult({ kind: "equipment.budget_export", status: "failed", detail: "No rows" }, "equipment.budget_export")).toThrow("No rows");
     expect(actionResultNotice(validateModuleActionResult({ kind: "equipment.budget_export", file_ref: { asset_id: "asset" } }, "equipment.budget_export"))).toContain("завершено");
     expect(validateModuleActionResult({ ok: true, status: "sent" }, "equipment.mail_send")).toMatchObject({ ok: true, status: "sent" });
+  });
+
+  it("words every create/update readback outcome identically across both write surfaces", () => {
+    const outcomes = ["confirmed", "missing", "unavailable", "mismatch"] as const;
+    // Each outcome must stay distinguishable: collapsing them would hide whether a write is
+    // confirmed, absent, unreadable, or answered with a foreign row.
+    expect(new Set(outcomes.map((outcome) => moduleWriteNotice("create", outcome))).size).toBe(outcomes.length);
+    expect(new Set(outcomes.map((outcome) => moduleWriteNotice("update", outcome))).size).toBe(outcomes.length);
+    expect(moduleWriteNotice("create", "confirmed")).toContain("подтверждена");
+    expect(moduleWriteNotice("create", "missing")).toContain("не подтвердил созданные данные");
+    expect(moduleWriteNotice("create", "unavailable")).toContain("недоступен");
+    expect(moduleWriteNotice("create", "mismatch")).toContain("не повторяйте операцию автоматически");
+    expect(moduleWriteNotice("update", "confirmed")).toContain("подтверждены");
+    expect(moduleWriteNotice("update", "mismatch")).toContain("не повторяйте операцию автоматически");
   });
 });

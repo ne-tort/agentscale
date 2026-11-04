@@ -14,6 +14,8 @@ import { filesModuleFixture, promptModuleFixture } from "../features/modules/fix
 const projectId = "project-71";
 const cabinetId = "cabinet-19";
 const sessionId = "session-8";
+const runId = "run-3";
+const approvalId = "approval-write";
 const employee = { id: "employee-4", display_name: "Ada Lovelace" };
 const tokens = { access_token: "acceptance-access", refresh_token: "acceptance-refresh" };
 const project = {
@@ -114,7 +116,11 @@ function resourceModuleResponse(url: URL, request: CapturedRequest): Response | 
   }
   if (request.method === "GET" && url.pathname === `/api/v1/projects/${projectId}/runtime-modules/mod_mcp/data/mcp_packages`) return jsonResponse({ items: [] });
   if (url.pathname === `/api/v1/cabinets/${cabinetId}/modules/mod_files/bound-projects` || url.pathname === `/api/v1/cabinets/${cabinetId}/modules/mod_mcp/bound-projects`) return jsonResponse({ items: [{ project_id: projectId, name: project.name }] });
-  if (url.pathname === `/api/v1/cabinets/${cabinetId}/content/upload` && request.method === "POST") return jsonResponse({ file_ref: { asset_id: "uploaded-asset", blob_version_id: "uploaded-version", filename: "guide.txt", size: 9 } });
+  // Matches CabinetContentUploadService.upload_for_cabinet exactly, including
+  // ``version_id`` and ``storage_key``: the module form validates a file_ref by
+  // requiring asset_id, version_id, storage_key and filename to be non-empty strings,
+  // so a fixture missing them produced ``file_ref: null`` on the saved row.
+  if (url.pathname === `/api/v1/cabinets/${cabinetId}/content/upload` && request.method === "POST") return jsonResponse({ asset_id: "uploaded-asset", version_id: "uploaded-version", blob_version_id: "uploaded-version", storage_key: "content/uploaded-asset/guide.txt", filename: "guide.txt", size: 9, sha256: "sha-uploaded" });
   if (url.pathname === "/api/v1/content/assets/uploaded-asset/download" && request.method === "GET") return { ...jsonResponse({}, 200), headers: new Headers({ "Content-Type": "text/plain", "Content-Disposition": 'attachment; filename="guide.txt"' }), blob: async () => new Blob(["new guide"], { type: "text/plain" }) } as Response;
   return undefined;
 }
@@ -126,6 +132,8 @@ interface CapturedRequest {
   binaryBody?: Blob;
   contentType?: string;
   authorization?: string;
+  /** Command idempotency key; readback fixtures must echo it back to prove the write. */
+  idempotencyKey?: string;
 }
 
 function jsonResponse(payload: unknown, status = 200): Response {
@@ -185,10 +193,10 @@ function captureRegisteredApi(handler: (url: URL, request: CapturedRequest) => P
 /**
  * Poll until ``assertion`` holds, letting React commit between checks.
  *
- * Every poll runs inside its own ``act`` scope on purpose. Call sites are written as
- * ``await act(async () => { await waitFor(...) })``, and ``act`` defers committed state
- * until its scope exits -- so a poll that only awaited a timer could never observe the
- * re-render it was waiting for. Flushing a nested scope makes the update visible.
+ * Each poll flushes its own nested ``act`` scope. Call sites still write
+ * ``await act(async () => { await waitFor(...) })``; that outer scope defers committed
+ * state until it exits, so the flush has to happen below it, which is what the inner
+ * scope does. Prefer calling ``waitFor`` from outside an ``act`` block.
  */
 async function waitFor(assertion: () => boolean, message = "Timed out waiting for the acceptance condition"): Promise<void> {
   const deadline = Date.now() + 3000;
@@ -214,6 +222,9 @@ function capture(fetcher: (url: URL, request: CapturedRequest) => Promise<Respon
       binaryBody: init?.body instanceof Blob ? init.body : undefined,
       contentType: new Headers(init?.headers).get("Content-Type") ?? undefined,
       authorization: new Headers(init?.headers).get("Authorization") ?? undefined,
+      // Command endpoints carry an Idempotency-Key the client generates at call time;
+      // a readback fixture cannot know it in advance and must echo it back.
+      idempotencyKey: new Headers(init?.headers).get("Idempotency-Key") ?? undefined,
     };
     requests.push(request);
     return await fetcher(url, request);
@@ -282,7 +293,9 @@ function overviewPayload(url: URL): Response | undefined {
 
 function runtimePayload(url: URL): Response | undefined {
   if (url.pathname === `/api/v1/projects/${projectId}/container`) return jsonResponse({ project_id: projectId, status: "running", observed_state: "running", runtime: { phase: "running", observed_state: "running", ready: true } });
-  if (url.pathname === `/api/v1/projects/${projectId}/container/metrics`) return jsonResponse({ metrics_available: true, latest: { cpu_millicores: 120, memory_bytes: 4096, timestamp: "2026-11-01T12:00:00Z" } });
+  // The service refuses metrics whose project_id is not the requested project, so the
+  // fixture has to carry the identity it is answering for.
+  if (url.pathname === `/api/v1/projects/${projectId}/container/metrics`) return jsonResponse({ project_id: projectId, metrics_available: true, latest: { cpu_millicores: 120, memory_bytes: 4096, timestamp: "2026-11-01T12:00:00Z" } });
   if (url.pathname === `/api/v1/projects/${projectId}/container/workspace/entries`) return jsonResponse({ path: url.searchParams.get("path") ?? "", entries: [{ path: "notes.md", name: "notes.md", kind: "file", size: 16, modified_at: "2026-11-01T12:00:00Z" }] });
   if (url.pathname === `/api/v1/projects/${projectId}/container/workspace/preview`) return jsonResponse({ path: "notes.md", name: "notes.md", size: 16, truncated: false, content: "workspace content" });
   if (url.pathname === `/api/v1/projects/${projectId}/attachments`) return jsonResponse({ items: [] });
@@ -440,21 +453,67 @@ describe("employee workspace integration acceptance", () => {
     expect(requests.some((request) => request.path.startsWith("/api/") && !request.path.startsWith("/api/v1/"))).toBe(false);
   });
 
-  it("loads the project, reads and previews Pod files, then confirms session approval readback", async () => {
-    let pendingApprovals = [{ id: "approval-write", name: "write_file", input: { path: "notes.md" } }];
+  it("loads the project, reads and previews Pod files, then confirms a durable approval decision", async () => {
+    // The Runs centre is durable-run backed: the approval lives in the project approval
+    // inbox (not a session's pending list), the decision posts to the approval route,
+    // and confirmation is read back from that run's own event timeline.
+    const approvalSequence = 4;
+    const runSequence = 9;
+    const approvalItem = {
+      project_id: projectId,
+      session_id: sessionId,
+      run_status: "awaiting_approval",
+      approval_sequence: approvalSequence,
+      run_sequence: runSequence,
+      approval: {
+        id: approvalId,
+        run_id: runId,
+        tool_call_id: "toolcall-1",
+        approval_kind: "write_file",
+        status: "pending",
+        requested_payload: { path: "notes.md" },
+        decision_reason: null,
+        decided_by_employee_id: null,
+        requested_at: "2026-11-01T12:00:00Z",
+        expires_at: null,
+        decided_at: null,
+        created_at: "2026-11-01T12:00:00Z",
+      },
+    };
+    let pendingApprovals: unknown[] = [approvalItem];
+    let decisionKey: string | undefined;
     const { requests } = capture((url, request) => {
       const overview = overviewPayload(url);
       if (overview) return overview;
       const runtime = runtimePayload(url);
       if (runtime) return runtime;
+      if (url.pathname === `/api/v1/projects/${projectId}/agent/runs`) return jsonResponse({ items: [] });
+      if (url.pathname === "/api/v1/agent/approvals/inbox") return jsonResponse({ items: pendingApprovals });
+      if (url.pathname === `/api/v1/projects/${projectId}/agent/approvals/${approvalId}/decision` && request.method === "POST") {
+        decisionKey = request.idempotencyKey;
+        pendingApprovals = [];
+        return jsonResponse({ approval_id: approvalId, decision: "approve", duplicate: false });
+      }
+      if (url.pathname === `/api/v1/projects/${projectId}/agent/runs/${runId}/events`) {
+        // Readback only sees the decision once the command happened, and only when the
+        // event carries this command's own idempotency key.
+        const items = decisionKey === undefined ? [] : [{
+          event_id: "event-decision",
+          event_type: "approval_request.approved",
+          schema_version: 1,
+          occurred_at: "2026-11-01T12:00:01Z",
+          producer: "api",
+          run_id: runId,
+          aggregate_type: "approval_request",
+          aggregate_id: approvalId,
+          sequence: approvalSequence + 1,
+          payload: { status: "approved", control_plane: { command_idempotency_key: decisionKey } },
+        }];
+        return jsonResponse({ items });
+      }
       if (url.pathname === `/api/v1/projects/${projectId}/agent/sessions`) return jsonResponse({ items: [session] });
       if (url.pathname === `/api/v1/projects/${projectId}/agent/sessions/${sessionId}`) return jsonResponse(session);
-      if (url.pathname === `/api/v1/projects/${projectId}/agent/sessions/${sessionId}/pending-approvals`) return jsonResponse({ items: pendingApprovals });
       if (url.pathname === `/api/v1/projects/${projectId}/chat/transcript`) return transcriptPayload();
-      if (url.pathname === `/api/v1/projects/${projectId}/agent/sessions/${sessionId}/tool-approvals` && request.method === "POST") {
-        pendingApprovals = [];
-        return jsonResponse({ session_id: sessionId, approval_id: "approval-write", decision: "approve" });
-      }
       throw new Error(`Unexpected request: ${request.method} ${request.path}`);
     });
     window.localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(tokens));
@@ -479,32 +538,53 @@ describe("employee workspace integration acceptance", () => {
     expect(fileEntry).toBeTruthy();
     await act(async () => {
       fileEntry?.click();
-      await waitFor(() => document.querySelector<HTMLTextAreaElement>("textarea[aria-label='Editing notes.md']")?.value === "workspace content");
     });
+    await waitFor(() => document.querySelector<HTMLTextAreaElement>("textarea[aria-label='Editing notes.md']")?.value === "workspace content");
     expect(requests.find((request) => request.path === `/api/v1/projects/${projectId}/container/workspace/preview?path=notes.md`)).toMatchObject({ method: "GET", authorization: "Bearer acceptance-access" });
 
-    await click(`a[href='/projects/${projectId}/runs']`, () => pageText().includes("Approvals inbox"));
-    await waitFor(() => pageText().includes("Writing changes the project workspace."));
-    expect(pageText()).toContain("Session history");
-    expect(pageText()).toContain("Deployment review");
+    await click(`a[href='/projects/${projectId}/runs']`, () => pageText().includes("Runs & approvals"));
+    // The centre opens on the Runs tab; the approval inbox is its own tab.
+    await act(async () => {
+      const approvalsTab = [...document.querySelectorAll<HTMLButtonElement>(".run-tabs button")]
+        .find((button) => button.textContent?.trim().startsWith("Approvals"));
+      if (!approvalsTab) throw new Error("Missing Approvals tab");
+      approvalsTab.click();
+    });
+    await waitFor(() => pageText().includes("write_file"));
+    expect(requests.find((request) => request.path.startsWith("/api/v1/agent/approvals/inbox?"))).toMatchObject({ method: "GET", authorization: "Bearer acceptance-access" });
     expect(requests.find((request) => request.path === `/api/v1/projects/${projectId}/agent/sessions`)).toMatchObject({ method: "GET", authorization: "Bearer acceptance-access" });
-    expect(requests.find((request) => request.path.startsWith(`/api/v1/projects/${projectId}/chat/transcript?session_id=${sessionId}`))).toMatchObject({ method: "GET", authorization: "Bearer acceptance-access" });
-    expect(requests.find((request) => request.path === `/api/v1/projects/${projectId}/agent/sessions/${sessionId}/pending-approvals`)).toMatchObject({ method: "GET", authorization: "Bearer acceptance-access" });
-    const approval = [...document.querySelectorAll<HTMLElement>(".run-approval-card")].find((card) => card.querySelector("h4")?.textContent === "write_file");
+    const approval = [...document.querySelectorAll<HTMLElement>(".run-approval-card")]
+      .find((card) => card.querySelector("h3")?.textContent === "write_file");
     expect(approval).toBeTruthy();
-    const approveButton = [...approval!.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent?.trim() === "Approve action");
+    const approveButton = [...approval!.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent?.trim() === "Approve");
+    expect(approveButton).toBeTruthy();
     await act(async () => {
       approveButton?.click();
-      await waitFor(() => pageText().includes("Approval decision saved; confirmed absent from pending inbox."));
     });
+    // Confirmation must come from the run's own event timeline, not the POST response.
+    await waitFor(() => pageText().includes("confirmed by the durable event timeline"));
     expect(document.querySelector(".run-approval-card")).toBeNull();
-    expect(requests.find((request) => request.path === `/api/v1/projects/${projectId}/agent/sessions/${sessionId}/tool-approvals`)).toMatchObject({
-      method: "POST",
-      body: JSON.stringify({ id: "approval-write", decision: "approve" }),
-      authorization: "Bearer acceptance-access",
+    const decision = requests.find((request) => request.path === `/api/v1/projects/${projectId}/agent/approvals/${approvalId}/decision`);
+    expect(decision).toMatchObject({ method: "POST", authorization: "Bearer acceptance-access" });
+    expect(JSON.parse(decision?.body ?? "{}")).toMatchObject({
+      expected_approval_sequence: approvalSequence,
+      expected_run_sequence: runSequence,
+      decision: "approve",
     });
-    expect(requests.filter((request) => request.path === `/api/v1/projects/${projectId}/agent/sessions/${sessionId}/pending-approvals`)).toHaveLength(3);
+    expect(requests.some((request) => request.path.startsWith(`/api/v1/projects/${projectId}/agent/runs/${runId}/events?`))).toBe(true);
+    // The durable centre never reads a session's pending list; the decision is not
+    // claimed from there.
+    expect(requests.some((request) => request.path.includes("/pending-approvals"))).toBe(false);
     expect(pendingApprovals).toEqual([]);
+
+    // Session history is a separate tab over a separate resource.
+    await act(async () => {
+      const sessionsTab = [...document.querySelectorAll<HTMLButtonElement>(".run-tabs button")]
+        .find((button) => button.textContent?.trim().startsWith("Session history"));
+      if (!sessionsTab) throw new Error("Missing Session history tab");
+      sessionsTab.click();
+    });
+    await waitFor(() => pageText().includes("Deployment review"));
     expect(requests.some((request) => request.path.startsWith("/api/") && !request.path.startsWith("/api/v1/"))).toBe(false);
   });
 
@@ -1232,8 +1312,8 @@ describe("employee workspace integration acceptance", () => {
 
     await act(async () => {
       releaseProject(jsonResponse(project));
-      await waitFor(() => pageText().includes("This folder is empty"));
     });
+    await waitFor(() => pageText().includes("This folder is empty"));
     expect(requests.find((request) => request.path === `/api/v1/projects/${projectId}`)).toMatchObject({ method: "GET", authorization: "Bearer acceptance-access" });
     expect(requests.find((request) => request.path === `/api/v1/projects/${projectId}/container/workspace/entries?path=`)).toMatchObject({ method: "GET", authorization: "Bearer acceptance-access" });
   });
@@ -1257,8 +1337,8 @@ describe("employee workspace integration acceptance", () => {
 
     await act(async () => {
       releaseEntries(jsonResponse({ code: "POD_NOT_RUNNING", title: "Conflict", detail: "pod is not running" }, 409));
-      await waitFor(() => pageText().includes("The Pod is not running. Start the project Pod to access its files."));
     });
+    await waitFor(() => pageText().includes("The Pod is not running. Start the project Pod to access its files."));
 
     expect(document.querySelector(".files-availability[role='status']")).toBeTruthy();
     expect(document.querySelector(".files-availability")?.textContent).toContain("Retry");
@@ -1272,19 +1352,29 @@ describe("employee workspace integration acceptance", () => {
     const { requests } = capture((url) => {
       const overview = overviewPayload(url);
       if (overview) return overview;
+      if (url.pathname === `/api/v1/projects/${projectId}/agent/runs`) return jsonResponse({ items: [] });
+      if (url.pathname === "/api/v1/agent/approvals/inbox") return jsonResponse({ items: [] });
       if (url.pathname === `/api/v1/projects/${projectId}/agent/sessions`) return pendingSessions;
       throw new Error(`Unexpected request: ${url.pathname}${url.search}`);
     });
     window.localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(tokens));
 
     await mountApp(`/projects/${projectId}/runs`);
-    await waitFor(() => pageText().includes("Loading sessions…"));
-    expect(pageText()).toContain("Loading sessions…");
+    await waitFor(() => pageText().includes("Runs & approvals"));
+    // Session history is its own tab; the pending request is only surfaceable there.
+    await act(async () => {
+      const sessionsTab = [...document.querySelectorAll<HTMLButtonElement>(".run-tabs button")]
+        .find((button) => button.textContent?.trim().startsWith("Session history"));
+      if (!sessionsTab) throw new Error("Missing Session history tab");
+      sessionsTab.click();
+    });
+    await waitFor(() => pageText().includes("Loading session history…"));
+    expect(pageText()).toContain("Loading session history…");
 
     await act(async () => {
       releaseSessions(jsonResponse({ code: "SERVICE_UNAVAILABLE", title: "Service Unavailable", detail: "Session history is temporarily unavailable." }, 503));
-      await waitFor(() => pageText().includes("Session history is temporarily unavailable."));
     });
+    await waitFor(() => pageText().includes("Session history is temporarily unavailable."));
     expect(document.querySelector(".run-error[role='alert']")?.textContent).toContain("Session history is temporarily unavailable.");
     expect(requests.some((request) => request.path === `/api/v1/projects/${projectId}/agent/sessions` && request.authorization === "Bearer acceptance-access")).toBe(true);
     expect(requests.some((request) => request.path.startsWith("/api/") && !request.path.startsWith("/api/v1/"))).toBe(false);

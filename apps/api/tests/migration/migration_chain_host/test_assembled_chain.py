@@ -97,11 +97,17 @@ async def test_process_dependencies_build_the_ports_that_can_be_built() -> None:
         "m06_durable_evidence_ports",
         "cutover_ports",
     } <= set(deps.built), f"composition lost a port it used to build: {deps.built}"
+    # Was "``m04e_store`` is ``None``": that encoded the open DDL review. The four ledger
+    # tables are registered and ``build_m04e_evidence_store`` now answers with a store,
+    # so a resolver that dropped it would be discarding a working port. The *review*
+    # codes it still reports are asserted in ``test_the_m04e_gaps_are_still_named``.
+    assert "m04e_evidence_store" in deps.built
     dependencies = deps.dependencies
     # Ports that only need a factory are composed…
     assert dependencies.m04e_reader is not None
     assert dependencies.m04e_gates is not None
     assert dependencies.m04e_proofs is not None
+    assert dependencies.m04e_store is not None
     assert dependencies.m06_parity_observations is not None
     assert dependencies.m06_parity_summaries is not None
     assert dependencies.m06_parity_reports is not None
@@ -113,7 +119,6 @@ async def test_process_dependencies_build_the_ports_that_can_be_built() -> None:
     # …and the ones that cannot are ``None`` with a code, never a stub.
     for absent in (
         "m04_tenant_context",
-        "m04e_store",
         "m04e_artifacts",
         "m04e_server_repository",
         "m04e_m05_handoff",
@@ -125,6 +130,26 @@ async def test_process_dependencies_build_the_ports_that_can_be_built() -> None:
     ):
         assert getattr(dependencies, absent) is None, absent
     assert factory.opened == 0
+
+
+async def test_the_m04e_review_gaps_are_reported_next_to_the_store() -> None:
+    """A process can build the store, and must still report what stops a page.
+
+    ``m04e_evidence_store_port_unimplemented`` is gone (the port is implemented);
+    the promotion-evidence review is not, because ``ck_m04e_promotion_outcome`` still
+    cannot record an accepted foundation promotion. Both halves matter: dropping the
+    codes would claim the stage is ready, and re-adding the "unimplemented" code would
+    report a blocker for a port that exists.
+    """
+
+    res = resource(enabled=True, dependency_builder=full_dependencies)
+    app = build_app()
+
+    async with manager_with(res).lifespan(app):
+        codes = res.composition_blockers
+        assert "m04e_evidence_store_port_unimplemented" not in codes
+        assert "m04e_promotion_accepted_outcome_unrepresentable" in codes
+        assert "m04e_promotion_evidence_is_per_partition" in codes
 
 
 async def test_cutover_stage_is_wired_because_its_ports_are_implemented() -> None:

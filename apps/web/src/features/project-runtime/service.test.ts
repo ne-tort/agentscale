@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createProjectRuntimeService, ProjectRuntimeRequestError } from "./service";
+import type { ProjectRuntimeSnapshot } from "./types";
 
 function jsonResponse(body: unknown, status = 200, statusText?: string): Response {
   return new Response(JSON.stringify(body), {
@@ -128,7 +129,8 @@ describe("ProjectRuntime service contract", () => {
     const requests: Array<{ url: string; method: string; body?: string; headers?: HeadersInit }> = [];
     const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       requests.push({ url: String(input), method: init?.method ?? "GET", body: init?.body as string | undefined, headers: init?.headers });
-      return jsonResponse({ ...project, cabinet_id: "cabinet-9", id: "created-project" }, 201);
+      // The requested cabinet is cabinet-9; answering with cabinet-other must not be accepted.
+      return jsonResponse({ ...project, cabinet_id: "cabinet-other", id: "created-project" }, 201);
     });
     const service = createProjectRuntimeService({ fetchImpl, getAccessToken: () => "create-token" });
 
@@ -273,8 +275,8 @@ describe("ProjectRuntime service contract", () => {
     await expect(service.runAction("project-42", "launch")).rejects.toMatchObject({ code: "PROJECT_ID_MISMATCH" });
   });
 
-  it("does not convert required container, metrics, attachments, keys, chats or running workspace failures into defaults", async () => {
-    const requiredRoutes = [
+  it("aborts the snapshot when a project-scoped read is rejected by authorization", async () => {
+    const guardedRoutes = [
       "/api/v1/projects/project-42/container",
       "/api/v1/projects/project-42/container/metrics?window=1h",
       "/api/v1/projects/project-42/attachments",
@@ -283,19 +285,90 @@ describe("ProjectRuntime service contract", () => {
       "/api/v1/projects/project-42/container/workspace/entries?path=",
     ];
 
-    for (const requiredRoute of requiredRoutes) {
-      const fetchImpl = vi.fn(async (input: RequestInfo | URL) => String(input) === requiredRoute
-        ? jsonResponse({ code: "UPSTREAM_UNAVAILABLE", detail: "required read failed" }, 503)
+    for (const guardedRoute of guardedRoutes) {
+      const fetchImpl = vi.fn(async (input: RequestInfo | URL) => String(input) === guardedRoute
+        ? jsonResponse({ code: "FORBIDDEN", detail: "not allowed for this principal" }, 403)
         : snapshotFetch(input));
       const service = createProjectRuntimeService({ fetchImpl });
 
       await expect(service.load("project-42")).rejects.toMatchObject({
-        message: "required read failed",
-        code: "UPSTREAM_UNAVAILABLE",
-        status: 503,
-        retryable: true,
+        message: "not allowed for this principal",
+        code: "FORBIDDEN",
+        status: 403,
+        retryable: false,
       });
     }
+  });
+
+  // A transient (retryable) failure of one section must not discard the whole snapshot: the
+  // consumers render every section as nullable and retry on their own. Only identity,
+  // contract-shape and authorization failures abort `load` (covered by the tests above and
+  // below). Listing every section separately keeps the degraded value of each one pinned.
+  it("degrades a transient failure of each optional section instead of discarding the project snapshot", async () => {
+    const cases: Array<{ route: string; degraded: (snapshot: ProjectRuntimeSnapshot) => unknown; expected: unknown }> = [
+      {
+        route: "/api/v1/projects/project-42/container",
+        degraded: (snapshot) => snapshot.container,
+        expected: null,
+      },
+      {
+        route: "/api/v1/projects/project-42/container/metrics?window=1h",
+        degraded: (snapshot) => snapshot.metrics,
+        expected: null,
+      },
+      {
+        route: "/api/v1/projects/project-42/attachments",
+        degraded: (snapshot) => snapshot.attachments,
+        expected: [],
+      },
+      {
+        route: "/api/v1/projects/project-42/ai-keys/available",
+        degraded: (snapshot) => snapshot.keys,
+        expected: [],
+      },
+      {
+        route: "/api/v1/cabinets/cabinet%2F9/chats/sidebar",
+        degraded: (snapshot) => snapshot.chats,
+        expected: null,
+      },
+      {
+        route: "/api/v1/projects/project-42/container/workspace/entries?path=",
+        degraded: (snapshot) => snapshot.files,
+        expected: null,
+      },
+    ];
+
+    for (const { route, degraded, expected } of cases) {
+      const fetchImpl = vi.fn(async (input: RequestInfo | URL) => String(input) === route
+        ? jsonResponse({ code: "UPSTREAM_UNAVAILABLE", detail: "section read failed" }, 503)
+        : snapshotFetch(input));
+      const service = createProjectRuntimeService({ fetchImpl });
+
+      const snapshot = await service.load("project-42");
+
+      expect(snapshot.project.id).toBe("project-42");
+      expect(snapshot.project.cabinet_id).toBe("cabinet/9");
+      expect(degraded(snapshot)).toEqual(expected);
+    }
+
+    // Losing the container observation makes the runtime phase unknown, so the live model
+    // list cannot be requested at all: it is reported as unavailable rather than "not running".
+    const containerDown = createProjectRuntimeService({
+      fetchImpl: vi.fn(async (input: RequestInfo | URL) => String(input) === "/api/v1/projects/project-42/container"
+        ? jsonResponse({ code: "UPSTREAM_UNAVAILABLE", detail: "section read failed" }, 503)
+        : snapshotFetch(input)),
+    });
+    const degradedSnapshot = await containerDown.load("project-42");
+    expect(degradedSnapshot.models).toEqual({ models: [], default_model: null, source: "unavailable" });
+  });
+
+  it("keeps a foreign chat sidebar fatal even when that read is otherwise optional", async () => {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => String(input) === "/api/v1/cabinets/cabinet%2F9/chats/sidebar"
+      ? jsonResponse({ cabinet_id: "cabinet-other", projects: [], project_chats: [] })
+      : snapshotFetch(input));
+    const service = createProjectRuntimeService({ fetchImpl });
+
+    await expect(service.load("project-42")).rejects.toMatchObject({ code: "PROJECT_CABINET_MISMATCH" });
   });
 
   it("does not query live workspace or models for a paused project even if stale runtime data says running", async () => {

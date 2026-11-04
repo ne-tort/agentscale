@@ -284,10 +284,12 @@ describe("ProjectRuntime component workflow", () => {
     const service = serviceFor({ listWorkspace, previewWorkspace, downloadWorkspace });
     const onNavigate = vi.fn();
     const { container } = await mount({ service, initialSnapshot: initial, onNavigate });
-    expect(container.textContent).toContain("Создание папок недоступно");
+    // The mkdir limitation is stated by the Files panel, so it can only be asserted once the
+    // files tab is rendered — the overview tab legitimately does not carry that sentence.
     const filesTab = [...container.querySelectorAll<HTMLButtonElement>("nav button")].find((button) => button.textContent?.startsWith("Files"));
     await act(async () => { filesTab?.click(); });
 
+    expect(container.textContent).toContain("Создание папок недоступно");
     expect(onNavigate).toHaveBeenCalledWith("files", projectId);
     const folder = [...container.querySelectorAll<HTMLButtonElement>(".project-runtime-file-row button")].find((button) => button.textContent?.includes("src"));
     await act(async () => { folder?.click(); });

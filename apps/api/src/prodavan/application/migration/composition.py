@@ -232,6 +232,11 @@ UNIMPLEMENTED_PORTS: tuple[UnimplementedPort, ...] = (
     #   reported by the stage builder, not a missing port.
     # * ``EvidenceStore``, ``M05HandoffPort``, ``M05PromotionRecordPort``,
     #   ``PartitionHandoffReadPort`` → ``application/migration/evidence_ports.py``.
+    #   The M04E ``EvidenceStore`` in particular is
+    #   ``m04e_ports.SqlM04EEvidenceStore`` over the four ledger tables
+    #   (``m04e_definition_version_{mappings,quarantine,checkpoints,audit}``), which
+    #   ``build_m04e_evidence_store`` now builds; the codes it still reports are the
+    #   M04E-01 promotion-evidence review items and do not block this port.
     #
     # What is still genuinely absent is listed below.
     #
@@ -490,6 +495,16 @@ def build_m04e_definition_version_stage(
     (``application/migration/m04e_ports.py`` and ``evidence_ports.py``), so they left the
     review §3 registry; an omitted one is reported by this builder as
     ``m04e_required_port_missing`` and the stage is not wired.
+
+    ``store`` is :class:`~prodavan.application.migration.m04e_ports.SqlM04EEvidenceStore`
+    over the four ledger tables revision ``2026110315`` created
+    (``m04e_definition_version_{mappings,quarantine,checkpoints,audit}``): it appends
+    evidence and CASes the cursor. ``build_m04e_evidence_store`` therefore returns a
+    *store* rather than ``None``, and the codes it still reports
+    (``EVIDENCE_STORE_SCHEMA_GAPS``) are the M04E-01 promotion-evidence review items —
+    they hold back the gate, not this stage's port. This builder does not fold them
+    into the stage: a stage blocker must name a missing dependency, and the store is
+    not missing.
 
     Raw data supplies ``server_repository`` because
     ``M04EDefinitionVersionPersistenceAdapter`` is bound to a *caller-owned* ``AsyncSession``

@@ -253,10 +253,20 @@ class M04EPortReason(StrEnum):
     #: Returned code: the partition's legacy definition row is absent.
     PROOF_DEFINITION_ABSENT = "m04e_candidate_proof_definition_absent"
     # -- evidence store -----------------------------------------------------
+    #: Still raised: a page asked to continue from a cursor the ledger never recorded
+    #: (a non-zero sequence with no head row) — the request is unprovable, not stale.
+    STORE_CHECKPOINT_LEDGER_MISSING = "m04e_backfill_checkpoint_ledger_missing"
+    #: Historical codes of the refusal-only boundary, kept in the closed vocabulary
+    #: because a log line or an acceptance artifact from before the ledger existed may
+    #: still name them. Nothing raises them any more: the mapping, observation and audit
+    #: ledgers exist (revision ``2026110315``), and a blocked page now *is* representable
+    #: (``record_blocked``). Removing them would make an old refusal un-greppable.
     STORE_MAPPING_LEDGER_MISSING = "m04e_backfill_mapping_ledger_missing"
     STORE_OBSERVATION_LEDGER_MISSING = "m04e_backfill_observation_ledger_missing"
-    STORE_CHECKPOINT_LEDGER_MISSING = "m04e_backfill_checkpoint_ledger_missing"
     STORE_BLOCKED_EVIDENCE_UNREPRESENTABLE = "m04e_backfill_blocked_evidence_unrepresentable"
+    #: Historical: named the two-state ``ck_m04e_promotion_outcome``. The *ledger*
+    #: records ``accepted`` (``ck_m04e_mapping_status``), so this is no longer raised by
+    #: the store; the promotion table's own limit is reported as a schema gap.
     STORE_ACCEPTED_OUTCOME_UNREPRESENTABLE = "m04e_promotion_accepted_outcome_unrepresentable"
     # -- durable ledger (revision 2026110315), raised by SqlM04EEvidenceStore ----
     #: The source identity is already mapped with a different classification. A first
@@ -2085,6 +2095,19 @@ class _PageCasLost(RuntimeError):
     """Internal: the checkpoint CAS matched no row. Never leaves the store."""
 
 
+@dataclass(frozen=True, slots=True)
+class _PageClassification:
+    """What one page's decisions did to the ledger."""
+
+    records: tuple[BackfillRecord, ...]
+    #: Source identities that took a cursor slot, in page order.
+    consumed: tuple[str, ...]
+    #: Any row was appended (a first mapping or an observation).
+    wrote: bool
+    #: A *new* source identity was mapped — the only thing that can re-open a cursor.
+    first_mappings: int
+
+
 def _ledger_id(prefix: str) -> str:
     """``prefix_`` plus 24 hex characters — the models' ``String(80)`` id shape."""
 
@@ -2732,10 +2755,24 @@ class SqlM04EEvidenceStore(_SessionReads):
                 token=token,
             )
 
-        records, consumed, wrote = await self._classify(
+        page = await self._classify(
             session, context=context, checkpoint=durable, decisions=decisions,
             token=token,
         )
+        records, consumed, wrote = page.records, page.consumed, page.wrote
+        # A completed stream is never reopened: the ledger's
+        # ``trg_m04e_checkpoint_monotonic`` refuses an un-completion and the ORM guard
+        # refuses it too, so the store must not even try. A page that would consume
+        # another slot after completion advances past the drained end of the stream,
+        # which no page can legitimately do; a page that only replays is answered with
+        # the completed head and writes nothing.
+        if durable.phase_complete and consumed:
+            raise M04EPortRefused(_refusal(
+                M04EPortReason.STORE_DECISION_INVALID,
+                "the version stream is already complete; a page cannot reopen an "
+                "exhausted checkpoint",
+                context=context,
+            ))
         next_checkpoint = self._next_checkpoint(
             context, current=durable, decisions=decisions, consumed=consumed,
             page_exhausted=page_exhausted,
@@ -2866,20 +2903,21 @@ class SqlM04EEvidenceStore(_SessionReads):
 
         if not decisions:
             return BackfillBatch((), durable, durable.phase_complete)
-        _records, consumed, wrote = await self._classify(
+        planned = await self._classify(
             session, context=context, checkpoint=durable, decisions=decisions,
             token=token, dry_run=True,
         )
-        if consumed:
-            # A first mapping would land under a cursor that has already moved on.
+        if planned.first_mappings:
+            # A new source identity would land under a cursor that has already moved on.
             return BackfillBatch((), durable, durable.phase_complete)
-        # Every decision is about an already-consumed row. Append what is missing (an
-        # observation) and report the page without moving the cursor.
-        records, _consumed, _wrote = await self._classify(
+        # Every decision is about a row the ledger already mapped. Append what is missing
+        # (an observation) and report the page without moving the cursor: a retry must
+        # not consume a second slot for a row the head has already passed.
+        page = await self._classify(
             session, context=context, checkpoint=durable, decisions=decisions,
             token=token,
         )
-        return BackfillBatch(tuple(records), durable, durable.phase_complete)
+        return BackfillBatch(page.records, durable, durable.phase_complete)
 
     # -- internals: rows ----------------------------------------------------
 
@@ -3061,6 +3099,22 @@ class SqlM04EEvidenceStore(_SessionReads):
                     "reason code",
                     context=context,
                 ))
+            for digest, field in (
+                (decision.verified_artifact_digest, "verified_artifact_digest"),
+                (decision.verified_current_artifact_digest, "verified_current_artifact_digest"),
+            ):
+                if digest is not None and not _SHA256_RE.fullmatch(digest):
+                    # ``ck_m04e_mapping_artifact_sha256`` would reject this row at the
+                    # database, so refuse it here with a name instead: an IntegrityError
+                    # from inside a page names a constraint, not the port decision that
+                    # produced it. The classic case is ``str(None)`` — the string
+                    # ``'None'`` — which is exactly what a caller that forgot to check
+                    # for an absent digest passes.
+                    raise M04EPortRefused(_refusal(
+                        M04EPortReason.STORE_DECISION_INVALID,
+                        f"{field} must be None or a sha256 digest, not {type(digest).__name__}",
+                        context=context,
+                    ))
             key = (candidate.source_kind, candidate.source_id, candidate.schema_version)
             if key in seen:
                 raise M04EPortRefused(_refusal(
@@ -3082,13 +3136,18 @@ class SqlM04EEvidenceStore(_SessionReads):
         self, session: AsyncSession, *, context: BackfillContext,
         checkpoint: BackfillCheckpoint, decisions: Sequence[CandidateDecision],
         token: str, dry_run: bool = False,
-    ) -> tuple[list[BackfillRecord], list[str], bool]:
+    ) -> _PageClassification:
         """Turn classifications into ledger rows (append-only).
 
-        Returns the records, the source identities that consumed a cursor slot, and
-        whether anything was actually written. The three are different questions: an
-        observation is written but consumes nothing, a replay is neither, and a first
-        mapping is both.
+        The result answers three *different* questions, and the difference matters:
+
+        * ``consumed`` — which source identities took a cursor slot (this is what the
+          contract's ``sequence + len(non-replay records)`` counts, so an observation
+          is included, exactly as ``run_page`` includes its ``CONFLICT`` record);
+        * ``wrote`` — whether any row was appended, so the audit event is written when a
+          page appends even without consuming;
+        * ``first_mappings`` — whether a *new* source identity was mapped. Only this can
+          re-open a cursor position, which is what the stale-cursor path must refuse.
 
         ``dry_run`` answers "what would this page do" without writing a row. It exists
         for the stale-cursor path, where the store must decide between "this is about
@@ -3099,9 +3158,10 @@ class SqlM04EEvidenceStore(_SessionReads):
         records: list[BackfillRecord] = []
         consumed: list[str] = []
         wrote = False
+        first_mappings = 0
         seen: set[tuple[str, ...]] = set()
         for decision in decisions:
-            record, consumes, appended = await self._classify_one(
+            record, consumes, appended, first_mapping = await self._classify_one(
                 session, context=context, checkpoint=checkpoint,
                 decision=decision, seen=seen, token=token, dry_run=dry_run,
             )
@@ -3110,18 +3170,24 @@ class SqlM04EEvidenceStore(_SessionReads):
             if consumes:
                 consumed.append(decision.candidate.source_id)
             wrote = wrote or appended
+            if first_mapping:
+                first_mappings += 1
             records.append(record)
-        return records, consumed, wrote
+        return _PageClassification(
+            records=tuple(records), consumed=tuple(consumed),
+            wrote=wrote, first_mappings=first_mappings,
+        )
 
     async def _classify_one(
         self, session: AsyncSession, *, context: BackfillContext,
         checkpoint: BackfillCheckpoint, decision: CandidateDecision,
         seen: set[tuple[str, ...]], token: str, dry_run: bool = False,
-    ) -> tuple[BackfillRecord, bool, bool]:
+    ) -> tuple[BackfillRecord, bool, bool, bool]:
         """One decision against the ledger.
 
-        Returns the record, whether it consumed a cursor slot, and whether a row was
-        appended for it.
+        Returns the record, whether it consumed a cursor slot, whether a row was
+        appended for it, and whether that row was a *first mapping* (the only kind that
+        can re-open a cursor position).
         """
 
         candidate = decision.candidate
@@ -3179,13 +3245,13 @@ class SqlM04EEvidenceStore(_SessionReads):
                     return _record_from_mapping_row(
                         existing, checkpoint=checkpoint, outcome=BackfillOutcome.CONFLICT,
                         state=state,
-                    ), True, False
+                    ), True, False, False
                 # An exact replay of the recorded classification: nothing is written
                 # and the cursor does not move.
                 return _record_from_mapping_row(
                     existing, checkpoint=checkpoint, outcome=BackfillOutcome.REPLAY,
                     state=state,
-                ), False, False
+                ), False, False, False
             raise M04EPortRefused(_refusal(
                 M04EPortReason.STORE_FIRST_MAPPING_CONFLICT,
                 "the source identity is already mapped with a different classification; "
@@ -3264,17 +3330,19 @@ class SqlM04EEvidenceStore(_SessionReads):
         record = _record_from_observation_row(
             observation, checkpoint=checkpoint, reason_code=reason_code,
         )
-        # An observation is *new evidence about an already-consumed row*, so it never
-        # takes a cursor slot: the row was consumed when its first mapping was written.
-        # Reporting it as consumed would advance the cursor over a row a concurrent page
-        # may still be reading.
+        # An observation *is* a classification of this row, so it consumes a cursor
+        # slot — exactly as ``run_page`` counts it (it derives
+        # ``sequence + len(non-replay records)``). Reporting it as free would make the
+        # store's cursor disagree with the contract's expectation and, worse, would let
+        # ``_next_checkpoint`` recompute a cursor from a shorter ``consumed`` list and
+        # silently clear ``phase_complete``.
         if existing_observation is not None:
             # The observation was already recorded: the page re-reports it as a replay
             # with the originally recorded evidence, and nothing new is written.
             return replace(
                 record, outcome=BackfillOutcome.REPLAY, status=EvidenceStatus.CONFLICT,
-            ), False, False
-        return record, False, not dry_run
+            ), False, False, False
+        return record, True, not dry_run, False
 
     async def _append_first_mapping(
         self, session: AsyncSession, *, context: BackfillContext,
@@ -3360,7 +3428,7 @@ class SqlM04EEvidenceStore(_SessionReads):
                 _quarantine_guidance(reason)
                 if outcome is BackfillOutcome.QUARANTINED else ()
             ),
-        ), True, not dry_run
+        ), True, not dry_run, True
 
     # -- internals: cursor --------------------------------------------------
 
@@ -3378,6 +3446,11 @@ class SqlM04EEvidenceStore(_SessionReads):
         consumed row. A page that replays everything moves nothing — the caller
         returns early in that case, so this function is only reached when something
         actually moved.
+
+        The cursor never moves backwards: a page may legitimately classify a row at or
+        before ``after_source_id`` (an observation on a re-read row), and taking that
+        row's identity as the new cursor would re-open positions the ledger already
+        consumed.
         """
 
         phase = current.phase
@@ -3399,6 +3472,13 @@ class SqlM04EEvidenceStore(_SessionReads):
                 complete = True
         if last_consumed is not None and phase == current.phase:
             after = last_consumed
+        if (
+            after is not None
+            and current.after_source_id is not None
+            and after <= current.after_source_id
+            and phase == current.phase
+        ):
+            after = current.after_source_id
         return BackfillCheckpoint(
             partition=current.partition,
             phase=phase,

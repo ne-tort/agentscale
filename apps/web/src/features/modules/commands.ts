@@ -183,6 +183,32 @@ export function sameModuleRowBody(expected: JsonRecord, actual: JsonRecord): boo
   return sameValue(expected, actual);
 }
 
+/**
+ * Outcome of a write followed by a fresh scoped readback. Both write surfaces (the inline
+ * collection add and the form view) must describe the same four outcomes with the same
+ * wording: an operator has to be able to tell "backend confirmed it" from "backend says it is
+ * not there" and from "we could not ask", because only the last two leave the write in doubt.
+ */
+export type ModuleWriteReadbackOutcome = "confirmed" | "missing" | "unavailable" | "mismatch";
+
+const CREATE_WRITE_NOTICES: Record<ModuleWriteReadbackOutcome, string> = {
+  confirmed: "Запись создана и подтверждена повторным чтением backend.",
+  missing: "Неизвестно, создана ли запись: POST завершился, но свежий GET не подтвердил созданные данные. Проверьте список перед повторной отправкой.",
+  unavailable: "Неизвестно, создана ли запись: POST завершился, но свежий GET недоступен. Проверьте список перед повторной отправкой.",
+  mismatch: "Неизвестный результат создания: backend вернул строку с несовпадающими данными. Проверьте список и не повторяйте операцию автоматически.",
+};
+
+const UPDATE_WRITE_NOTICES: Record<ModuleWriteReadbackOutcome, string> = {
+  confirmed: "Изменения сохранены и подтверждены повторным чтением backend.",
+  missing: "Неизвестный результат сохранения: свежий GET не подтвердил актуальные данные строки. Проверьте список перед повторной отправкой.",
+  unavailable: "Неизвестно, сохранены ли изменения: PATCH завершился, но свежий GET недоступен. Проверьте список перед повторной отправкой.",
+  mismatch: "Неизвестный результат сохранения: backend вернул строку с несовпадающими данными. Проверьте список и не повторяйте операцию автоматически.",
+};
+
+export function moduleWriteNotice(kind: "create" | "update", outcome: ModuleWriteReadbackOutcome): string {
+  return (kind === "create" ? CREATE_WRITE_NOTICES : UPDATE_WRITE_NOTICES)[outcome];
+}
+
 export function moduleRowActionMatches(action: ModuleCollectionRowAction, body: JsonRecord): boolean {
   if (!action.when) return true;
   const actual = body[action.when.field as string];

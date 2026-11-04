@@ -247,16 +247,25 @@ def policy_installers() -> frozenset[str]:
 
 
 def spec_columns(table: str) -> tuple[str, ...]:
-    """Columns an ``EVIDENCE_STORE_REQUIRED_DDL`` entry enumerates for ``table``.
+    """Columns the reviewed ledger spec enumerates for ``table``.
 
     The port module is the specification: this helper reads the literal tuple and
     extracts the parenthesised column list that follows the table name, so the test
     compares authored DDL against the contract text rather than against a paraphrase.
+
+    It reads ``EVIDENCE_STORE_LEDGER_DDL``, not ``EVIDENCE_STORE_REQUIRED_DDL``: the
+    latter is now **empty**, because the four tables it used to demand are the four
+    this DDL creates (task ``MIG-M04E-STORE-01`` closed that requirement). The spec
+    text was kept verbatim under the new name so this parity check keeps comparing the
+    authored tables against the reviewed column list instead of silently losing it
+    together with the blocker it used to justify.
     """
 
-    from prodavan.application.migration.m04e_ports import EVIDENCE_STORE_REQUIRED_DDL
+    from prodavan.application.migration.m04e_ports import EVIDENCE_STORE_LEDGER_DDL
 
-    entry = next(item for item in EVIDENCE_STORE_REQUIRED_DDL if item.startswith(f"{table} ("))
+    entry = next(
+        item for item in EVIDENCE_STORE_LEDGER_DDL if item.startswith(f"{table} (")
+    )
     body = entry[len(table) :].lstrip()
     assert body.startswith("("), entry
     depth = 0

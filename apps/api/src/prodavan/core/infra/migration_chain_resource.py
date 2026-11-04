@@ -48,8 +48,13 @@ dependency                     why it cannot exist at startup
                                the flag off no row can exist, a process-scope
                                resolver could only refuse, and the adapters stay
                                absent with the codes below.
-``m04e_store``                 ``build_m04e_evidence_store`` answers ``None`` with
-                               the open DDL gaps until that schema is reviewed.
+``m04e_store``                 **is** composed: ``build_m04e_evidence_store``
+                               answers with :class:`SqlM04EEvidenceStore` over the
+                               four ledger tables revision ``2026110315`` created.
+                               It still reports the promotion-evidence review codes
+                               (the two-state ``ck_m04e_promotion_outcome`` and the
+                               per-partition promotion key), which stop the M04E-01
+                               *gate*, not the store.
 ``m04e_artifacts``,
 ``m04e_server_repository``     both adapters are bound to a *caller-owned*
                                ``AsyncSession`` inside one SERIALIZABLE
@@ -397,9 +402,9 @@ def build_migration_chain_dependencies(
         # of this resource's diagnostics; they are not a stage blocker, because the
         # composition root owns stage wiring, not review status.
         blockers.extend(_code_of(code) for code in m04e_ports.blockers)
-    # ``build_m04e_evidence_store`` answers ``(None, schema gaps)`` today: the
-    # M04E checkpoint/mapping tables are still an open DDL review. The codes are
-    # folded in above, so the stage blocker and its reason stay visible together.
+    # ``build_m04e_evidence_store`` answers with a store: the four ledger tables exist
+    # (revision ``2026110315``), so the codes it still returns are the M04E-01
+    # promotion-evidence review items, not a missing-table blocker.
     store = _pair(
         "m04e_evidence_store",
         lambda: build_m04e_evidence_store(session_factory=factory),

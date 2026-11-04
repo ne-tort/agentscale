@@ -115,7 +115,7 @@ class LedgerMirror:
             self.engine, expire_on_commit=False,
         )
 
-    async def create(self) -> "LedgerMirror":
+    async def create(self) -> LedgerMirror:
         async with self.engine.begin() as connection:
             await connection.run_sync(lambda sync: self.metadata.create_all(sync))
         return self

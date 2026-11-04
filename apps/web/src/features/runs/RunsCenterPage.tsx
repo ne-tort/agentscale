@@ -414,7 +414,7 @@ export function RunsCenterPage() {
       if (outcome.kind === "confirmed") {
         clearActionKey(projectId, item.approval.id, `decision-${decision}`);
         setApprovals((current) => current.filter((approval) => approval.approval.id !== item.approval.id));
-        setNotice(`Approval ${decision === "approve" ? "approval" : "denial"} confirmed by the durable event timeline.`);
+        setNotice(`${decision === "approve" ? "Approval" : "Denial"} confirmed by the durable event timeline.`);
         await Promise.all([loadApprovals(), loadRuns()]);
       } else if (outcome.kind === "conflict") {
         clearActionKey(projectId, item.approval.id, `decision-${decision}`);

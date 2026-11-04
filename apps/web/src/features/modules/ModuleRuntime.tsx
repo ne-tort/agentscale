@@ -19,7 +19,7 @@ import type {
 import { labelText } from "./manifest";
 import { createDefaultModuleRuntimeService, ModuleRuntimeRequestError } from "./service";
 import { aggregateListCount, useModuleAggregateRows, useModuleProfileRows, useModuleTable } from "./hooks";
-import { actionResultNotice, collectModuleActionParams, moduleRowActionMatches, moduleRowContainsBody, normalizeProjectSelection, parseModuleCollectionRowAction, parseModuleColumnValue, resolvePrimaryCreateRoute, sameModuleRowBody, validateModuleActionResult, validateModuleRowBody, type ModuleActionInputField } from "./commands";
+import { actionResultNotice, collectModuleActionParams, moduleRowActionMatches, moduleRowContainsBody, moduleWriteNotice, normalizeProjectSelection, parseModuleCollectionRowAction, parseModuleColumnValue, resolvePrimaryCreateRoute, sameModuleRowBody, validateModuleActionResult, validateModuleRowBody, type ModuleActionInputField, type ModuleWriteReadbackOutcome } from "./commands";
 import "./modules.css";
 
 const defaultService = createDefaultModuleRuntimeService();
@@ -230,19 +230,19 @@ function DataView({ view, manifest, scope, service, route, setRoute, slots, onRe
       try { persisted = await readScopedModuleRow(service, scope, tableSlug, created.row_id, chatsAll); }
       catch {
         setMutationUnknown(true);
-        setMutationNotice("Неизвестно, создана ли запись: POST завершился, но свежий GET недоступен. Проверьте список перед повторной отправкой.");
+        setMutationNotice(moduleWriteNotice("create", "unavailable"));
         return created;
       }
     if (!persisted) {
       setMutationUnknown(true);
-      setMutationNotice("Неизвестно, создана ли запись: POST завершился, но GET не вернул созданную строку.");
+      setMutationNotice(moduleWriteNotice("create", "missing"));
     } else if (persisted.row_id !== created.row_id || !moduleRowContainsBody(body, persisted.body)) {
       setMutationUnknown(true);
-      setMutationNotice("Неизвестный результат создания: backend вернул строку с несовпадающими данными. Проверьте список и не повторяйте операцию автоматически.");
+      setMutationNotice(moduleWriteNotice("create", "mismatch"));
     } else {
         setMutationUnknown(false);
         mutationUnknownRef.current = false;
-        setMutationNotice("Запись создана и подтверждена повторным чтением backend.");
+        setMutationNotice(moduleWriteNotice("create", "confirmed"));
       }
       return created;
     }, event.currentTarget);
@@ -511,12 +511,16 @@ function ModuleFormView({ view, manifest, scope, service, route, setRoute, slots
       const saved = isEdit && row ? await service.patchRow(scope, tableSlug, row.row_id, body) : await (async () => { submitted = true; return service.createRow(scope, tableSlug, body); })();
       if (isEdit && row && saved.row_id !== row.row_id) throw new Error("Backend saved a different module row.");
       let confirmed: ModuleRow | undefined;
+      let readbackUnavailable = false;
       try { confirmed = await readScopedModuleRow(service, scope, tableSlug, saved.row_id, manifest.tables.find((candidate) => candidate.slug === tableSlug)?.scope?.chats === "all"); }
-      catch { /* The write response is retained, but durability cannot be confirmed. */ }
+      catch { readbackUnavailable = true; /* The write response is retained, but durability cannot be confirmed. */ }
       const isConfirmed = Boolean(confirmed && confirmed.row_id === saved.row_id && sameModuleRowBody(saved.body, confirmed.body) && sameModuleRowBody(body, confirmed.body));
-      const notice = isConfirmed
-        ? isEdit ? "Изменения сохранены и подтверждены повторным чтением backend." : "Запись создана и подтверждена повторным чтением backend."
-        : isEdit ? "Неизвестный результат сохранения: свежий GET не подтвердил актуальные данные строки. Проверьте список перед повторной отправкой." : "Неизвестно, создана ли запись: POST завершился, но свежий GET не подтвердил созданные данные. Проверьте список перед повторной отправкой.";
+      // Distinguish "backend answered with a different row" from "backend could not be asked":
+      // both leave the write in doubt, but only the first means a foreign body came back.
+      const outcome: ModuleWriteReadbackOutcome = isConfirmed
+        ? "confirmed"
+        : readbackUnavailable ? "unavailable" : confirmed ? "mismatch" : "missing";
+      const notice = moduleWriteNotice(isEdit ? "update" : "create", outcome);
       setNotice(notice);
       setNoticeUnknown(!isConfirmed);
       if (route.mode === "create" && route.returnTo) setRoute({ ...route.returnTo, mode: "view", notice, ...(!isConfirmed ? { noticeUnknown: true } : {}) });

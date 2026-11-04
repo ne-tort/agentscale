@@ -84,16 +84,32 @@ function asMetrics(value: unknown, expectedProjectId: string): ProjectMetricsRes
 
 function asItems<T>(value: unknown, resource: string): T[] {
   if (!isRecord(value) || !Array.isArray(value.items)) {
-    throw new ProjectRuntimeRequestError(`Сервер вернул некорректный список ${resource}.`);
+    throw new ProjectRuntimeRequestError(`Сервер вернул некорректный список ${resource}.`, { code: "INVALID_API_RESPONSE" });
   }
   return value.items as T[];
 }
 
 function asModels(value: unknown): ProjectModelsResponse {
   if (!isRecord(value) || !Array.isArray(value.models)) {
-    throw new ProjectRuntimeRequestError("Сервер вернул некорректный список моделей.");
+    throw new ProjectRuntimeRequestError("Сервер вернул некорректный список моделей.", { code: "INVALID_API_RESPONSE" });
   }
   return value as unknown as ProjectModelsResponse;
+}
+
+/** A section read that is allowed to be missing from the snapshot. */
+const UNAVAILABLE_MODELS: ProjectModelsResponse = { models: [], default_model: null, source: "unavailable" };
+
+/**
+ * Identity and contract failures must abort the whole snapshot: rendering "no data" for a
+ * response that belongs to another project/cabinet (or that does not match the declared
+ * contract) would hide a fail-closed violation behind an empty section.
+ */
+const FATAL_SECTION_CODES = new Set(["PROJECT_ID_MISMATCH", "PROJECT_CABINET_MISMATCH", "INVALID_API_RESPONSE"]);
+
+function isFatalSectionFailure(error: unknown): boolean {
+  if (!(error instanceof ProjectRuntimeRequestError)) return true;
+  if (error.code && FATAL_SECTION_CODES.has(error.code)) return true;
+  return !error.retryable;
 }
 
 function isWorkspaceRunning(project: ProjectRuntimeProject, container: ProjectContainer): boolean {
@@ -161,6 +177,7 @@ export function createProjectRuntimeService(options: ProjectRuntimeServiceOption
         },
       });
     } catch (error) {
+      if (init.signal?.aborted) throw error;
       throw new ProjectRuntimeRequestError(
         error instanceof Error ? `Не удалось связаться с API: ${error.message}` : "Не удалось связаться с API.",
       );
@@ -232,36 +249,73 @@ export function createProjectRuntimeService(options: ProjectRuntimeServiceOption
     return attachDownloadHeaders(await response.blob(), response);
   }
 
+  /**
+   * Section reads are optional. Their transient unavailability must not discard the whole
+   * project snapshot: every consumer already renders these sections as nullable/empty
+   * (`ProjectRuntimeSnapshot.container/metrics/files/chats: ... | null`) and keeps its own
+   * retry. Identity, contract-shape and authorization failures are still fatal below.
+   */
+  async function optionalSection<T>(read: () => Promise<T>, fallback: T): Promise<T> {
+    try {
+      return await read();
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") throw error;
+      if (isFatalSectionFailure(error)) throw error;
+      return fallback;
+    }
+  }
+
   async function load(projectId: string, requestOptions?: { signal?: AbortSignal }): Promise<ProjectRuntimeSnapshot> {
     const project = await getProject(projectId, requestOptions);
     if (typeof project.cabinet_id !== "string" || !project.cabinet_id) {
       throw new ProjectRuntimeRequestError("Сервер не вернул cabinet_id проекта.");
     }
-    const [container, metrics, attachmentsBody, keysBody, chats] = await Promise.all([
-      getContainer(projectId, requestOptions),
-      getMetrics(projectId, requestOptions),
-      request<unknown>(projectPath(projectId, "/attachments"), { signal: requestOptions?.signal }),
-      request<unknown>(projectPath(projectId, "/ai-keys/available"), { signal: requestOptions?.signal }),
-      request<unknown>(`/cabinets/${encode(project.cabinet_id)}/chats/sidebar`, { signal: requestOptions?.signal }),
+    const cabinetId = project.cabinet_id;
+    const [container, metrics, attachmentsBody, keysBody, chatsBody] = await Promise.all([
+      optionalSection<ProjectContainer | null>(() => getContainer(projectId, requestOptions), null),
+      optionalSection<ProjectMetricsResponse | null>(() => getMetrics(projectId, requestOptions), null),
+      optionalSection<unknown>(() => request<unknown>(projectPath(projectId, "/attachments"), { signal: requestOptions?.signal }), { items: [] }),
+      optionalSection<unknown>(() => request<unknown>(projectPath(projectId, "/ai-keys/available"), { signal: requestOptions?.signal }), { items: [] }),
+      optionalSection<unknown>(() => request<unknown>(`/cabinets/${encode(cabinetId)}/chats/sidebar`, { signal: requestOptions?.signal }), null),
     ]);
-    if (!isRecord(chats) || chats.cabinet_id !== project.cabinet_id) {
+    // The cabinet check stays outside the optional wrapper: a chat sidebar that belongs to
+    // another cabinet is a fail-closed violation, not a temporarily missing section.
+    if (chatsBody !== null && (!isRecord(chatsBody) || chatsBody.cabinet_id !== cabinetId)) {
       throw new ProjectRuntimeRequestError("Сервер вернул список чатов другого кабинета.", { code: "PROJECT_CABINET_MISMATCH" });
     }
-    const files = isWorkspaceRunning(project, container)
-      ? await listWorkspace(projectId, "", requestOptions)
+    const attachments = asItems<ProjectAttachment>(attachmentsBody, "вложений");
+    const keys = asItems<ProjectKey>(keysBody, "AI keys");
+    const running = container !== null && isWorkspaceRunning(project, container);
+    const files = running
+      ? await optionalSection<WorkspaceEntriesResponse | null>(() => listWorkspace(projectId, "", requestOptions), null)
       : null;
-    const models = project.resolved_ai_key_id && !isWorkspaceRunning(project, container)
-      ? { models: [], default_model: null, source: "not_running" }
-      : asModels(await request<unknown>(projectPath(projectId, "/models/live"), { signal: requestOptions?.signal }));
+    let models: ProjectModelsResponse;
+    if (container === null) {
+      // Without the container observation the runtime phase is unknown, so the live model
+      // list cannot be requested: report the section as unavailable instead of guessing.
+      models = UNAVAILABLE_MODELS;
+    } else if (project.resolved_ai_key_id && !running) {
+      models = { models: [], default_model: null, source: "not_running" };
+    } else if (project.resolved_ai_key_id) {
+      // A saved key on a confirmed running runtime makes the live list required: the settings
+      // surface must not present an empty catalog as if backend had confirmed it.
+      models = asModels(await request<unknown>(projectPath(projectId, "/models/live"), { signal: requestOptions?.signal }));
+    } else {
+      const modelsBody = await optionalSection<unknown>(
+        () => request<unknown>(projectPath(projectId, "/models/live"), { signal: requestOptions?.signal }),
+        null,
+      );
+      models = modelsBody === null ? UNAVAILABLE_MODELS : asModels(modelsBody);
+    }
     return {
       project,
       container,
       metrics,
       files,
-      attachments: asItems<ProjectAttachment>(attachmentsBody, "вложений"),
-      keys: asItems<ProjectKey>(keysBody, "AI keys"),
+      attachments,
+      keys,
       models,
-      chats: chats as unknown as ChatSidebarResponse,
+      chats: chatsBody as unknown as ChatSidebarResponse | null,
     };
   }
 

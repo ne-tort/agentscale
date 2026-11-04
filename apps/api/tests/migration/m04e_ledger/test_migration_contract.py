@@ -445,7 +445,15 @@ def test_the_prose_spec_entries_carry_their_required_columns(
 
 
 def test_the_four_spec_objects_are_the_four_authored_tables() -> None:
-    """The ledger closes gaps 1-4 by name; gaps 5-7 stay recorded as deferred."""
+    """The ledger closes gaps 1-4 by name; gaps 5-7 stay recorded as deferred.
+
+    ``EVIDENCE_STORE_REQUIRED_DDL`` is now empty: task ``MIG-M04E-STORE-01``
+    implemented ``SqlM04EEvidenceStore`` over these four tables, so the port no longer
+    *requires* DDL it does not have. The reviewed spec of those four objects is kept
+    under ``EVIDENCE_STORE_LEDGER_DDL`` and is what the parity checks above compare
+    against — deleting it along with the blocker would have dropped the only written
+    record of what these tables were required to contain.
+    """
     assert set(LEDGER_TABLES) == {
         MAPPING_TABLE,
         QUARANTINE_TABLE,
@@ -454,10 +462,17 @@ def test_the_four_spec_objects_are_the_four_authored_tables() -> None:
     }
     assert set(M04E_LEDGER_TABLES) == set(LEDGER_TABLES)
 
-    from prodavan.application.migration.m04e_ports import EVIDENCE_STORE_REQUIRED_DDL
+    from prodavan.application.migration.m04e_ports import (
+        EVIDENCE_STORE_LEDGER_DDL,
+        EVIDENCE_STORE_REQUIRED_DDL,
+    )
 
-    assert len(EVIDENCE_STORE_REQUIRED_DDL) == 4
-    for entry in EVIDENCE_STORE_REQUIRED_DDL:
+    assert EVIDENCE_STORE_REQUIRED_DDL == (), (
+        "the four ledger objects exist; a non-empty requirement list would be a stale "
+        "blocker for a table that is already in the schema"
+    )
+    assert len(EVIDENCE_STORE_LEDGER_DDL) == 4
+    for entry in EVIDENCE_STORE_LEDGER_DDL:
         assert entry.split(" ", 1)[0] in LEDGER_TABLES, entry
 
 

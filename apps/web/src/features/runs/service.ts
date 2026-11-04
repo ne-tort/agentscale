@@ -110,7 +110,9 @@ export function createRunsService(options: RunsServiceOptions = {}): RunsService
     listRuns: (projectId: string, page: RunPageOptions = {}) => cursorPage<AgentRunRecord>(`${runsPath(projectId)}?${queryString({ limit: page.limit ?? 50, offset: page.cursor ? undefined : page.offset, cursor: page.cursor })}`),
     getRun: (projectId: string, runId: string, signal?: AbortSignal) => request<AgentRunRecord>(runPath(projectId, runId), signal ? { signal } : undefined),
     listRunEvents: (projectId: string, runId: string, query: RunEventsOptions = {}, signal?: AbortSignal) => cursorPage<ControlPlaneEvent>(`${runPath(projectId, runId)}/events?${queryString({ limit: query.limit ?? 100, aggregate_type: query.aggregateType, aggregate_id: query.aggregateId, after_sequence: query.afterSequence, cursor: query.cursor })}`, signal),
-    listApprovalInbox: (projectId: string, page: Omit<RunPageOptions, "offset"> = {}) => cursorPage<ApprovalInboxItem>(`${baseUrl}/agent/approvals/inbox?${queryString({ project_id: projectId, limit: page.limit ?? 50, cursor: page.cursor })}`),
+    // `requestResponse` already prefixes `baseUrl`; interpolating it again produced
+    // `/api/v1/api/v1/agent/approvals/inbox`, which never resolves on the backend.
+    listApprovalInbox: (projectId: string, page: Omit<RunPageOptions, "offset"> = {}) => cursorPage<ApprovalInboxItem>(`/agent/approvals/inbox?${queryString({ project_id: projectId, limit: page.limit ?? 50, cursor: page.cursor })}`),
     createRun: (projectId: string, body: CreateRunBody, idempotencyKey: string) => request<AgentRunCreated>(runsPath(projectId), {
       method: "POST",
       headers: { "Idempotency-Key": idempotencyKey },

@@ -68,15 +68,17 @@ describe("module runtime service", () => {
         const rowId = new URL(url, "http://localhost").pathname.split("/").at(-1) ?? "";
         return jsonResponse({ row_id: rowId, body: JSON.parse(String(init.body)).body });
       }
+      // DELETE must be answered before the generic data-page branch below: the backend
+      // returns `{deleted: true, row_id}` for a confirmed delete, not a row page.
+      if (init?.method === "DELETE") {
+        const rowId = new URL(url, "http://localhost").pathname.split("/").at(-1) ?? "";
+        return jsonResponse({ deleted: true, row_id: rowId });
+      }
       if (url.includes("/runtime-modules/") && url.includes("/data/")) {
         const page = Number(new URL(url, "http://localhost").searchParams.get("page") ?? 1);
         const dataByPage = overrides.dataByPage;
         if (Array.isArray(dataByPage)) return jsonResponse(dataByPage[page - 1] ?? { items: [], total: 0, page, page_size: 200 });
         return jsonResponse(overrides.data ?? fixture.page);
-      }
-      if (init?.method === "DELETE") {
-        const rowId = new URL(url, "http://localhost").pathname.split("/").at(-1) ?? "";
-        return jsonResponse({ deleted: true, row_id: rowId });
       }
       throw new Error(`unexpected endpoint ${url}`);
     });
