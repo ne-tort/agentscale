@@ -9,7 +9,6 @@ export type {
   AutomationRequestErrorShape,
   AutomationService,
   AutomationServiceOptions,
-  AutomationsPageProps,
   AutomationsViewProps,
   JsonObject,
   ProjectTrigger,

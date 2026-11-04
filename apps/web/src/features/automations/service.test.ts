@@ -140,7 +140,7 @@ describe("automation service contract", () => {
       fetcher: async () => jsonResponse({ code: "PROJECT_PAUSED", title: "Project paused", detail: "project is paused" }, 409),
     });
 
-    await expect(service.listTriggers("project-1")).rejects.toMatchObject<Partial<AutomationRequestError>>({
+    await expect(service.listTriggers("project-1")).rejects.toMatchObject({
       code: "PROJECT_PAUSED",
       status: 409,
       retryable: false,

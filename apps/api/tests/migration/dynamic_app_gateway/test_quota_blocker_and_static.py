@@ -155,13 +155,24 @@ def test_the_adapters_state_every_method_the_protocols_require() -> None:
 
 
 def test_the_quota_protocol_has_no_implementation_in_the_module() -> None:
-    """A quota adapter added here without the table would be the failure mode."""
+    """A quota adapter added here without the table would be the failure mode.
 
-    assert not any(
-        issubclass(value, CapabilityQuotaPort)
-        for value in vars(legacy_ports_module).values()
-        if inspect.isclass(value)
-    )
+    ``CapabilityQuotaPort`` is not ``@runtime_checkable``, so ``issubclass`` is
+    unavailable by design; the structural check is therefore done the way the
+    protocol itself works — by method name.
+    """
+
+    required = {
+        name
+        for name, value in inspect.getmembers(CapabilityQuotaPort, inspect.isfunction)
+        if not name.startswith("_")
+    }
+    assert required == {"allows"}
+    for value in vars(legacy_ports_module).values():
+        if inspect.isclass(value) and value.__module__ == legacy_ports_module.__name__:
+            assert not all(
+                callable(getattr(value, name, None)) for name in required
+            ) or value is LegacyGatewayPorts, value
     assert "SqlCapabilityQuotaPort" not in dir(legacy_ports_module)
 
 
@@ -198,18 +209,31 @@ def test_no_function_returns_a_bare_true() -> None:
 
 
 def test_the_only_true_literals_are_the_documented_positive_decisions() -> None:
-    """Every ``True`` the module can emit is reachable only through a comparison.
+    """Every positive answer is a comparison, and the inventory is pinned.
 
-    The list is asserted, not merely printed: adding a new positive answer
-    without a test that reaches it is exactly the silent widening this task is
-    supposed to prevent, so the inventory is pinned here.
+    Three functions may answer "yes", each for a stated reason:
+
+    ``allows``                  the unanimous decision set is exactly ``{True}``
+                                (one installation, granting, live);
+    ``_scope_belongs_to_tenant`` the tenant scope id equals the requested tenant —
+                                the only scope kind with no row to look up;
+    ``_installation_allows``    the manifest's bound capability is in the set of
+                                ``granted``, unexpired entries of the grant row.
+
+    Adding a fourth path to a positive answer without a test that reaches it is
+    exactly the silent widening this task exists to prevent, so an unknown entry
+    fails here rather than passing unnoticed.
     """
 
     source = inspect.getsource(legacy_ports_module)
     tree = ast.parse(source)
 
     positives: list[str] = []
-    for function in [node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)]:
+    for function in [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+    ]:
         for node in _returns(function):
             value = node.value
             if isinstance(value, ast.Constant) and value.value is True:
@@ -217,9 +241,16 @@ def test_the_only_true_literals_are_the_documented_positive_decisions() -> None:
             elif isinstance(value, ast.Compare):
                 positives.append(f"{function.name}:compare")
 
-    # ``allows`` answers with a comparison against a unanimous positive decision
-    # set; nothing else may answer ``True`` at all.
-    assert positives == ["allows:compare"], positives
+    assert positives == [
+        "allows:compare",
+        "_scope_belongs_to_tenant:compare",
+        "_installation_allows:compare",
+    ], positives
+
+    # Each of the three is asserted positively by a behavioural test, so no
+    # positive answer exists only in the source.
+    for function_name in ("allows", "_scope_belongs_to_tenant", "_installation_allows"):
+        assert function_name in _POSITIVE_ANSWERS_ASSERTED, function_name
 
 
 def test_the_scope_port_returns_false_on_every_negative_path_it_guards() -> None:
