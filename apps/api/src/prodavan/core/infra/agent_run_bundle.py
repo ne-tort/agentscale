@@ -385,7 +385,7 @@ class _Assembly:
         self._runner_factory = runner_factory
         self._execution_factory_arg = execution_factory
         self._session_factory: Callable[[], Any] | None = None
-        self._repository: Any | None = None
+        self._cached_repository: Any | None = None
         self._repository_built = False
         self._composition: list[str] = []
         self._failures: dict[str, str] = {}
@@ -479,7 +479,7 @@ class _Assembly:
     def _repository(self) -> Any | None:
         """The tenant-scoped control-plane repository, shared by reads and writes."""
         if self._repository_built:
-            return self._repository
+            return self._cached_repository
         self._repository_built = True
         if self._session_factory is None:
             return None
@@ -491,8 +491,8 @@ class _Assembly:
 
             return SqlAlchemyAgentControlPlaneRepository(session_factory=self._session_factory)
 
-        self._repository = self._attempt("repository", build)
-        return self._repository
+        self._cached_repository = self._attempt("repository", build)
+        return self._cached_repository
 
     def _runs(self) -> Any | None:
         """Run projection source; the repository satisfies both read contracts."""
@@ -502,7 +502,6 @@ class _Assembly:
             return self._repository()
         factory = self._runs_factory
         return self._attempt("runs", lambda: factory(self._session_factory))
-
     def _journal(self) -> Any | None:
         if self._session_factory is None or self._journal_factory is None:
             return None

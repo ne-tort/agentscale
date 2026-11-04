@@ -66,7 +66,7 @@ instead of trusting a mock.
 
 Extensions beyond the protocol
 ------------------------------
-``find_unresolved` is the reconciler's question "may this run call the provider
+``find_unresolved`` is the reconciler's question "may this run call the provider
 again?"; the sweep question "which attempts outlived their deadline?" is a
 different predicate over the same table and is exposed as
 ``find_expired_unresolved`` (``state = 'started' AND deadline_at <= now``,
@@ -78,6 +78,12 @@ unresolved attempt.
 argument: the protocol identifies an attempt by its hashed id, and a store that
 answered a cross-tenant id with the row would be a tenancy leak.  With
 ``tenant_id`` supplied a foreign row is reported as *absent*, not as forbidden.
+
+Column widths are enforced before the statement is built (``_TEXT_WIDTHS``).  The
+contract validates looser bounds than the columns allow — ``tenant_id``,
+``run_id`` and ``provider`` up to 96 characters versus 40 — so an over-long
+identity becomes a typed ``INVALID_RECORD`` instead of a truncation error from the
+driver.  Nothing is ever silently truncated on the way in.
 """
 
 from __future__ import annotations

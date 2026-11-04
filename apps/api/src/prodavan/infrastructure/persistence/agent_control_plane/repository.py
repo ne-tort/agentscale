@@ -701,6 +701,14 @@ def _validate_atomic_write(write: ControlPlaneAtomicWrite) -> None:
             (AgentRunStatus.QUEUED.value, AgentRunStatus.FAILED),
             (AgentRunStatus.RUNNING.value, AgentRunStatus.FAILED),
         },
+        # A stream frame is an append to the run's ordered event log while the run
+        # keeps its status. Without this entry a frame has no expressible write, so
+        # the canonical SSE wire could not persist (run_id, sequence) before sending
+        # a frame to the transport, and frame identity would stay unprovable.
+        "agent_run.stream_frame": {
+            (AgentRunStatus.RUNNING.value, AgentRunStatus.RUNNING),
+            (AgentRunStatus.WAITING_APPROVAL.value, AgentRunStatus.WAITING_APPROVAL),
+        },
         "approval_request.create": {
             (AgentRunStatus.QUEUED.value, AgentRunStatus.WAITING_APPROVAL),
             (AgentRunStatus.RUNNING.value, AgentRunStatus.WAITING_APPROVAL),
@@ -727,6 +735,9 @@ def _validate_atomic_write(write: ControlPlaneAtomicWrite) -> None:
         "agent_run.fail": "agent_run.failed",
         "agent_run.cancel": "agent_run.cancelled",
         "agent_run.timeout": "agent_run.timed_out",
+        # Same event name as the operation: a frame is not a lifecycle transition,
+        # so it must not reuse a status-bearing event type.
+        "agent_run.stream_frame": "agent_run.stream_frame",
         "approval_request.create": "agent_run.waiting_approval",
         "approval_request.approve": "agent_run.resumed",
         "approval_request.deny": "agent_run.failed",

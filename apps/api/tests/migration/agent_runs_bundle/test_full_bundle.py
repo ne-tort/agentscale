@@ -25,9 +25,7 @@ from prodavan.application.agent_runs.handler import (
 )
 from prodavan.application.agent_runs.worker import SessionAgentTurnRunner
 from prodavan.core.infra.agent_run_bundle import (
-    DEFAULT_TURN_RUNNER_OWNER,
     MEMBER_ORDER,
-    AgentRunBundle,
     agent_run_host_dependencies_installed,
     build_agent_run_bundle,
     build_agent_run_host_dependencies,
@@ -45,9 +43,6 @@ from prodavan.core.infra.agent_run_worker_resource import (
     _consumer_lease_seconds,
     current_host_dependency_provider,
     unavailable_host_dependencies,
-)
-from prodavan.infrastructure.persistence.agent_control_plane.attempt_journal import (
-    SqlAlchemyProviderAttemptJournal,
 )
 from prodavan.infrastructure.persistence.agent_control_plane.lease_store import (
     SqlAlchemyRunLeaseStore,

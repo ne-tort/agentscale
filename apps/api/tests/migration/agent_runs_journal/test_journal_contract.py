@@ -199,7 +199,7 @@ def test_the_widths_the_store_enforces_are_the_column_widths() -> None:
     """
     table = AgentRunProviderAttemptRow.__table__
 
-    for name, width in attempt_journal._TEXT_WIDTHS.items():  # noqa: SLF001 - the guard is the point
+    for name, width in attempt_journal._TEXT_WIDTHS.items():
         column = table.c[name]
         assert column.type.length == width, f"{name}: store={width} column={column.type.length}"
 

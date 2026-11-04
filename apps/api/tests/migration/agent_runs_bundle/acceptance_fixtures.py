@@ -79,10 +79,44 @@ class ExplodingSessionFactory:
 
 
 class FakeLeaseStore:
-    """Marker lease store; the bundle never calls it, only hands it to the adapter."""
+    """Marker lease store with the full fenced capability surface.
+
+    ``ControlPlaneAgentRunExecutionAdapter.__init__`` duck-types seven methods on the
+    store before it accepts it, so a marker that implements none of them would make
+    the *substitution* look like a composition failure.  The methods raise
+    ``AssertionError`` because assembly must never call them — the adapter only
+    validates their presence here.
+    """
 
     def __init__(self, session_factory: Any = None) -> None:
         self._session_factory = session_factory
+
+    def claim_scope(self) -> Any:  # pragma: no cover - presence check only
+        raise AssertionError("assembly must not open a claim scope")
+
+    async def database_now(self) -> Any:  # pragma: no cover
+        raise AssertionError("assembly must not read the database clock")
+
+    async def select_claim_candidate(self, **_kwargs: Any) -> Any:  # pragma: no cover
+        raise AssertionError("assembly must not select a candidate")
+
+    async def read_slot(self, **_kwargs: Any) -> Any:  # pragma: no cover
+        raise AssertionError("assembly must not read a slot")
+
+    async def cas_acquire(self, **_kwargs: Any) -> int:  # pragma: no cover
+        raise AssertionError("assembly must not acquire")
+
+    async def cas_renew(self, **_kwargs: Any) -> int:  # pragma: no cover
+        raise AssertionError("assembly must not renew")
+
+    async def cas_release(self, **_kwargs: Any) -> int:  # pragma: no cover
+        raise AssertionError("assembly must not release")
+
+    async def cas_park(self, **_kwargs: Any) -> int:  # pragma: no cover
+        raise AssertionError("assembly must not park")
+
+    async def cas_fence(self, **_kwargs: Any) -> int:  # pragma: no cover
+        raise AssertionError("assembly must not fence")
 
 
 class FakeRunSource:

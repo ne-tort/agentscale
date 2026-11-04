@@ -531,9 +531,21 @@ class DurableMaterializationExecutor:
             )
         except Exception:
             receipt = None
-        if receipt is None or not _receipt_matches(receipt, operation_digest=canonical_digest(
-            {"rollback_of_generation": command.target_generation}
-        ), fence=fence):
+        # A rollback receipt proves *shape*, not *success*: an adapter is allowed
+        # to answer with a well-formed receipt whose ``succeeded`` is False and a
+        # reason code.  Checking only the digest would record a refused rollback as
+        # an applied generation, which is the worst possible failure for this path.
+        if (
+            receipt is None
+            or not receipt.succeeded
+            or not _receipt_matches(
+                receipt,
+                operation_digest=canonical_digest(
+                    {"rollback_of_generation": command.target_generation}
+                ),
+                fence=fence,
+            )
+        ):
             attempt = await self._attempts.finish(
                 session,
                 attempt=attempt,

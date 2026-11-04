@@ -71,6 +71,10 @@ class RunTransitionOperation(StrEnum):
     FAIL = "fail"
     CANCEL = "cancel"
     TIMEOUT = "timeout"
+    #: Append one ordered stream frame without changing the run status. The run
+    #: keeps running (or waiting for approval) while its event log grows, which is
+    #: what makes a durable ``(run_id, sequence)`` pair available to the SSE wire.
+    STREAM_FRAME = "stream_frame"
 
 
 class ApprovalTransitionOperation(StrEnum):
@@ -549,6 +553,11 @@ def validate_run_transition(
             (AgentRunStatus.QUEUED, AgentRunStatus.FAILED),
             (AgentRunStatus.RETRY_DUE, AgentRunStatus.FAILED),
             (AgentRunStatus.RUNNING, AgentRunStatus.FAILED),
+        ),
+        # Status-preserving append: the run stays in the state the frame arrived in.
+        RunTransitionOperation.STREAM_FRAME: (
+            (AgentRunStatus.RUNNING, AgentRunStatus.RUNNING),
+            (AgentRunStatus.WAITING_APPROVAL, AgentRunStatus.WAITING_APPROVAL),
         ),
     }
     if (source, target) not in allowed[operation]:

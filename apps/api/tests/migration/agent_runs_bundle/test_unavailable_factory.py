@@ -150,7 +150,7 @@ async def test_a_host_built_from_an_empty_bundle_idles_instead_of_crashing(
 
     assert isinstance(resource, AgentRunWorkerResource)
     assert resource.enabled is True
-    assert resource.health() is False, "enabled but not started yet"
+    assert await resource.health() is False, "enabled but not started yet"
     worker_round = await resource.run_worker_round_once()
     consumer_round = await resource.drain_consumer_once()
 

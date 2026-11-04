@@ -53,10 +53,11 @@ Design rules enforced here
 Call sites (exact; the owner of those files wires them — nothing here imports
 ``session_service`` or ``runtime_factory``, so there is no import cycle):
 
-1. ``session_service.AgentSessionService.start_detached_turn`` — after the
-   durable ``AgentTurnRow`` reservation has been committed (the ``await
-   self._session.commit()`` inside the ``durable_turn_id`` branch) and
-   **before** ``detached_turns.start(...)``::
+1. ``session_service.AgentSessionService.start_detached_turn`` — immediately
+   **before** ``detached_turns.start(...)``, i.e. before any event of the turn
+   can be emitted. The bridge never reads ``agent_turns``, so it does not depend
+   on that reservation; calling it after the reservation commit (when there is
+   one) simply keeps the run and the turn ledger created in the same step::
 
        binding = await bridge.bind_turn(
            key=TurnBindingKey(
@@ -70,7 +71,7 @@ Call sites (exact; the owner of those files wires them — nothing here imports
        )
 
    The replay branches (``remember_completed``) must skip the call: those turns
-   are terminal by construction and ``bind_turn`` would answer ``terminal``.
+   are terminal by construction, and their run is already terminal too.
 
 2. ``session_service._iter_send_events`` — the ``user_message`` frame and both
    ``_append_stream_event`` branches. The legacy ``agent_events.seq`` value is
@@ -100,7 +101,7 @@ Call sites (exact; the owner of those files wires them — nothing here imports
 
 3. ``session_service._detached_events`` — in the block that marks the
    ``AgentTurnRow`` ``completed``/``failed`` (and in the ``CancelledError``
-   branch):: 
+   branch)::
 
        await bridge.finish_turn(
            binding=binding,  # resolved as in (2)
