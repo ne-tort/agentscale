@@ -285,6 +285,60 @@ def downgrade_sql() -> str:
 # --------------------------------------------------------------------------- #
 
 
+def _string_constants(node: ast.AST) -> tuple[str, ...]:
+    """Literal string value(s) of ``revision`` / ``down_revision``.
+
+    ``down_revision`` is a bare id for a linear chain and a tuple for a merge
+    revision; both shapes are read so the graph never depends on the chain ending
+    at the revision under test.
+    """
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return (node.value,)
+    if isinstance(node, (ast.Tuple, ast.List)):
+        parts = [_string_constants(element) for element in node.elts]
+        if all(len(part) == 1 for part in parts):
+            return tuple(part[0] for part in parts)
+    return ()
+
+
+def _revision_graph() -> tuple[dict[str, list[Path]], dict[str, tuple[str, ...]]]:
+    """Read every revision file: ``id -> declaring files`` and ``id -> parents``.
+
+    Only module-level assignments are considered; a revision id mentioned in
+    prose inside a docstring is documentation, not a declaration.
+    """
+    declarations: dict[str, list[Path]] = {}
+    parents: dict[str, tuple[str, ...]] = {}
+    for path in sorted(VERSIONS_DIR.glob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        revision: str | None = None
+        down: tuple[str, ...] = ()
+        for node in tree.body:
+            if isinstance(node, ast.Assign):
+                targets = node.targets
+                value = node.value
+            elif isinstance(node, ast.AnnAssign) and node.value is not None:
+                targets = [node.target]
+                value = node.value
+            else:
+                continue
+            names = {target.id for target in targets if isinstance(target, ast.Name)}
+            constants = _string_constants(value)
+            if "revision" in names and len(constants) == 1:
+                revision = constants[0]
+            elif "down_revision" in names:
+                down = constants
+        if revision is None:
+            continue
+        declarations.setdefault(revision, []).append(path)
+        parents[revision] = down
+    return declarations, parents
+
+
+def _children_of(revision: str, parents: dict[str, tuple[str, ...]]) -> set[str]:
+    return {child for child, down in parents.items() if revision in down}
+
+
 def test_revision_identity_and_linear_chain() -> None:
     module = _revision_module()
     assert module.revision == REVISION

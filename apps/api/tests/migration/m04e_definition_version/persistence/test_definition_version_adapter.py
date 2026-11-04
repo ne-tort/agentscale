@@ -101,6 +101,21 @@ def _version(**overrides):
     return SimpleNamespace(**values)
 
 
+class _MappingView:
+    """Mirror ``sqlalchemy.engine.Result.mappings()``: yield mapping rows only."""
+
+    def __init__(self, rows):
+        self._rows = tuple(rows)
+
+    def all(self):
+        return list(self._rows)
+
+    def one_or_none(self):
+        if len(self._rows) > 1:
+            raise AssertionError("context query must be unique")
+        return self._rows[0] if self._rows else None
+
+
 class _Result:
     def __init__(self, rows=(), mapping_rows=()):
         self._rows = tuple(rows)
@@ -113,12 +128,10 @@ class _Result:
         return list(self._rows)
 
     def mappings(self):
-        return self
-
-    def one_or_none(self):
-        if len(self._mapping_rows) > 1:
-            raise AssertionError("context query must be unique")
-        return self._mapping_rows[0] if self._mapping_rows else None
+        # Returning ``self`` here made ``mappings().all()`` yield the ORM-row list,
+        # so the adapter's ``pg_policies`` read always saw zero rows and every RLS
+        # gate silently returned "not ready" regardless of the fixture state.
+        return _MappingView(self._mapping_rows or self._rows)
 
 
 class _FakeSession:
