@@ -237,7 +237,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
           const selected = [...sidebar.projects.flatMap((project) => project.chats), ...sidebar.project_chats].find((chat) => chat.session_id === selectedId);
           return selected?.title ?? state.sessionTitle;
         })(),
-        selectedSessionId: state.selectedSessionId ?? sidebar.selected_session_id,
+        selectedSessionId: state.selectedSessionId ?? sidebar.selected_session_id ?? undefined,
         loadingSidebar: false,
       };
     }

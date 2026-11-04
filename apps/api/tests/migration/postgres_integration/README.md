@@ -1,8 +1,10 @@
 # PostgreSQL integration suite — migration concurrency (MIG-INT-PG-01)
 
-Артефакты приёмочного сьюта, который **будет** запускаться против реального
-PostgreSQL после снятия verification freeze. Сейчас (baseline `2026-11-04`)
-он написан, но намеренно **не запускался**: см. «Почему сейчас не запускается».
+Приёмочный сьют миграционной волны, который запускается против **реального**
+PostgreSQL — и локально, и в CI (job `postgres-integration`). Baseline
+`2026-11-04`: написан под verification freeze, затем freeze снят, сьют прогнан на
+живом движке и включён в CI (MIG-CI-PG-01), чтобы больше не мог молча
+скипаться. См. «Результат прогона» и «В CI».
 
 Сьют доказывает ровно то, что нельзя доказать на моках и на SQLite: поведение
 схемы и реальных адаптеров под конкуренцией — при живых транзакциях, блокировках
@@ -34,27 +36,29 @@ PostgreSQL после снятия verification freeze. Сейчас (baseline `
 
 Нужен PostgreSQL 13+ (используются `pg_stat_activity`, `FOR UPDATE SKIP LOCKED`,
 partial unique index, deferrable composite FK, session/xact advisory locks; всё
-это есть в 13+). Сьют прогонялся на 16. Пример ниже — 16.
+это есть в 13+). Сьют прогонялся на 16. Пример ниже — 16.15-alpine, **ровно тот
+образ и те же креды, что в CI** (`postgres-integration` в
+[`ci-api.yml`](../../../../../.github/workflows/ci-api.yml)), чтобы локальный и
+CI-прогон отличались только портом.
 
 ```bash
-docker run --rm -d --name pgint \
-  -e POSTGRES_USER=prodavan \
-  -e POSTGRES_PASSWORD=prodavan \
+docker run -d --name pg-test \
+  -e POSTGRES_USER=test \
+  -e POSTGRES_PASSWORD=test \
   -e POSTGRES_DB=prodavan_test \
-  -p 55432:5432 postgres:16
+  -p 55432:5432 postgres:16.15-alpine
+
+docker exec pg-test pg_isready -U test -d prodavan_test
 ```
 
-Одна база для сьюта (схемы создаются и удаляются автоматически):
+Одна база для сьюта (схемы создаются и удаляются автоматически) и вторая —
+**пустая** — для alembic-цикла:
 
 ```bash
-export PRODAVAN_TEST_DATABASE_URL=postgresql+asyncpg://prodavan:prodavan@127.0.0.1:55432/prodavan_test
-```
+docker exec pg-test createdb -U test prodavan_migrate
 
-Отдельная **пустая** база для alembic-цикла (рекомендуется — см. ниже):
-
-```bash
-docker exec pgint createdb -U prodavan prodavan_migrate
-export PRODAVAN_TEST_MIGRATION_DATABASE_URL=postgresql+asyncpg://prodavan:prodavan@127.0.0.1:55432/prodavan_migrate
+export PRODAVAN_TEST_DATABASE_URL=postgresql+asyncpg://test:test@127.0.0.1:55432/prodavan_test
+export PRODAVAN_TEST_MIGRATION_DATABASE_URL=postgresql+asyncpg://test:test@127.0.0.1:55432/prodavan_migrate
 ```
 
 Схему сьют строит сам из ORM-моделей (`Base.metadata`), как и предписывает
@@ -64,11 +68,30 @@ export PRODAVAN_TEST_MIGRATION_DATABASE_URL=postgresql+asyncpg://prodavan:prodav
 Windows: те же `export`-и заменяются на `$env:PRODAVAN_TEST_DATABASE_URL = "..."`.
 DSN принимается и в форме `postgresql://`, драйвер нормализуется к `asyncpg`.
 
+> Alembic-цикл оставляет `prodavan_migrate` на `head` и непустой. Перед повторным
+> полным прогоном её надо пересоздать, иначе два теста `test_alembic_cycle.py`
+> скипнутся (фикстура принимает только доказуемо пустую БД):
+>
+> ```bash
+> docker exec pg-test dropdb -U test prodavan_migrate
+> docker exec pg-test createdb -U test prodavan_migrate
+> ```
+>
+> В CI это делает отдельный шаг job'а (`Create empty migration-cycle database`),
+> поэтому там скипа не бывает.
+
 ## Как запустить
 
 ```bash
 cd apps/api
 pytest tests/migration/postgres_integration -v
+```
+
+Команда, которой проверяется приёмка (и та же, что в CI, — отличается только
+`--junitxml`):
+
+```bash
+pytest tests/migration/postgres_integration -q --no-header --strict-markers -rs
 ```
 
 Только один файл / один критерий:
@@ -84,6 +107,34 @@ DSN, чтобы случайно не указывать на чужую/раб�
 исключение — `test_wave_revisions_above_the_downgrade_target_form_a_linear_chain`
 в `test_alembic_cycle.py`: он читает только script-directory Alembic (никакой БД
 не требует) и потому выполняется всегда.
+
+## В CI
+
+Сьют исполняется job'ом **`postgres-integration`** (`ci-api.yml`, вызывается из
+CI Gate как часть `api`), вместе с остальными backend-тестами. Что делает job:
+
+1. поднимает `postgres:16.15-alpine` service container с healthcheck
+   `pg_isready -U test -d prodavan_test` и публикует порт `5432` на хост раннера
+   (`PG_PORT` в `env` job'а — единственное место, где этот порт задан);
+2. собирает DSN'ы из `PG_HOST`/`PG_PORT`/`PG_USER`/`PG_PASSWORD`: хост
+   переопределяется `PRODAVAN_CI_HOST` (Docker Desktop раннеры публикуют порт на
+   Desktop VM), по умолчанию `127.0.0.1`;
+3. ждёт TCP-доступность опубликованного порта с раннера — healthcheck контейнера
+   этого не доказывает, и без шага сетевая проблема выглядела бы как 39 скипов;
+4. создаёт пустую `prodavan_migrate` (пересоздаёт, если осталась от предыдущего
+   прогона) — это то, что заставляет `test_alembic_cycle.py` исполниться;
+5. запускает `pytest tests/migration/postgres_integration -q --no-header
+   --strict-markers -rs --junitxml=...`;
+6. **падает, если сьют что-то скипнул.** `pytest` выходит с кодом 0 при полностью
+   скипнутом каталоге, а `--strict-markers` этого не меняет, поэтому отдельный шаг
+   `Assert the suite actually executed` читает JUnit-отчёт и требует
+   `skipped == 0` и `collected > 0`. Именно эта проверка превращает «сьют есть» в
+   «сьют доказал»: дефект lease store (возвращал «применено», ничего не записав)
+   виден только на живом движке.
+
+Остальные job'ы (`test` в `ci-api.yml`, nightly, e2e) по-прежнему запускают свои
+наборы без этого DSN — сьют там скипается, и это нормально: исполняет его только
+`postgres-integration`.
 
 ### Изоляция и откат
 
@@ -139,6 +190,15 @@ PRODAVAN_TEST_DATABASE_URL=<pg> pytest tests/migration/postgres_integration -q
 
 + PRODAVAN_TEST_MIGRATION_DATABASE_URL=<пустая БД>
   39 passed                   # полный зелёный, ничего не скипается
+```
+
+Контрольный прогон MIG-CI-PG-01 (`postgres:16.15-alpine`, локальный контейнер на
+`55432`, креды `test/test` — те же, что в CI), команда CI без `--junitxml`:
+
+```text
+pytest tests/migration/postgres_integration -q --no-header --strict-markers -rs
+39 passed, 8 warnings in 250.49s (0:04:10)
+# JUnit-гейт: collected=39 passed=39 skipped=0 failed=0
 ```
 
 ## Что вскрыл реальный движок (расхождения с SQLite)

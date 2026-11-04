@@ -32,7 +32,6 @@ from prodavan.infrastructure.persistence.models.cabinets import (
     CabinetInstanceRow,
 )
 from prodavan.infrastructure.persistence.models.dynamic_apps import (
-    AppDefinitionRow,
     AppGrantRow,
     AppInstanceRow,
     AppVersionRow,
@@ -47,14 +46,8 @@ from prodavan.infrastructure.persistence.models.projects import ProjectRow
 from .conftest import GatewayHarness
 from .seeds import (
     NOW,
-    cabinet,
-    cabinet_assignment,
-    cabinet_grant,
-    company,
-    employee,
     grant,
     membership,
-    project,
     seed_baseline,
     seed_gateway_with_identity,
     seed_identity,
@@ -64,7 +57,6 @@ from .sqlite_mirror import (
     CABINET_A,
     CABINET_B,
     DEFINITION_A,
-    DIGEST_A,
     EMPLOYEE_A,
     EMPLOYEE_B,
     GRANT_A,

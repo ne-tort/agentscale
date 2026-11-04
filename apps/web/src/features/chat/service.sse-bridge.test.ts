@@ -141,7 +141,10 @@ describe("chat stream bridge wiring", () => {
       );
     } });
     const serviceWithPending = service;
-    const target = { ...turn, turnId: "turn-seq", sessionId: undefined };
+    // PendingTurn.sessionId is required: the composer creates the session before the
+    // first turn is queued, so a turn without a session cannot reach the transport.
+    // This case is only about cursor derivation, hence a normal session-scoped turn.
+    const target = { ...turn, turnId: "turn-seq" };
     expect((await drain(serviceWithPending, target)).error).toBeUndefined();
     expect(serviceWithPending.lastEventIdFor("turn-seq")).toBeUndefined();
     expect(headers[0]["Last-Event-ID"]).toBeUndefined();

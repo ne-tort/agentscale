@@ -1,6 +1,6 @@
 import { capabilityMethod } from "../capabilities/gateway";
 import type { CapabilityGateway } from "../capabilities/types";
-import type { JsonValue } from "../../../packages/schemas/declarative-app/v1";
+import type { JsonValue } from "../../../../packages/schemas/declarative-app/v1";
 import type {
   DynamicAppCapabilityContext,
   DynamicAppDetail,

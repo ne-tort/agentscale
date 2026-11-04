@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.pool import StaticPool
 
 from prodavan.infrastructure.persistence.models.cabinets import (
@@ -171,7 +171,7 @@ def dynamic_app_metadata(*, without_unique: frozenset[str] = frozenset()) -> sa.
             "id", "app_definition_id", name="uq_dynamic_app_version_id_definition"
         ),
     )
-    grants = _mirror(
+    _mirror(
         AppGrantRow,
         metadata,
         sa.ForeignKeyConstraint(
@@ -195,7 +195,7 @@ def dynamic_app_metadata(*, without_unique: frozenset[str] = frozenset()) -> sa.
             )
         ),
     )
-    instances = _mirror(
+    _mirror(
         AppInstanceRow,
         metadata,
         sa.ForeignKeyConstraint(

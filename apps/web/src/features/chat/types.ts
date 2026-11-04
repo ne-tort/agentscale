@@ -1,4 +1,4 @@
-import type { ChatSidebarProject, ChatSidebarItem, ChatTranscriptResponse } from "../../api/types";
+import type { ChatSidebarProject, ChatSidebarItem, ChatSidebarResponse, ChatTranscriptResponse } from "../../api/types";
 
 export type ChatEvent = { type: string; data: Record<string, unknown>; at?: string | null; seq?: number; created_at?: string | null };
 
@@ -32,7 +32,9 @@ export type ChatBlock = {
   raw?: ChatEvent;
 };
 
-export type ChatItem = ChatSidebarItem & { created_at?: string; model?: string | null };
+// Сайдбар приходит напрямую из GET /cabinets/{id}/chats/sidebar: никаких полей сверх
+// серверного ответа локально не досоздаётся, поэтому ChatItem = ChatSidebarItem.
+export type ChatItem = ChatSidebarItem;
 export type ChatProject = ChatSidebarProject;
 
 export type ChatStatus = "idle" | "loading" | "uploading" | "streaming" | "stopping" | "error";
@@ -74,7 +76,7 @@ export type ChatState = {
 
 export type ChatAction =
   | { type: "sidebar_loading" }
-  | { type: "sidebar_loaded"; payload: { sidebar: { cabinet_id: string; selected_project_id?: string; selected_session_id?: string; projects: ChatProject[]; project_chats: ChatItem[] }; projectId: string } }
+  | { type: "sidebar_loaded"; payload: { sidebar: ChatSidebarResponse; projectId: string } }
   | { type: "sidebar_failed"; message: string }
   | { type: "select_session"; sessionId?: string; title?: string | null; pinned?: boolean; preserveTurn?: boolean }
   | { type: "start_new_chat"; projectId?: string }

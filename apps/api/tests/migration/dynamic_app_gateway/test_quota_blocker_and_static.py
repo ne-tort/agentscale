@@ -49,7 +49,6 @@ from prodavan.infrastructure.persistence.dynamic_app_gateway import (
 
 from .sqlite_mirror import make_engine
 
-
 # ---------------------------------------------------------------------------
 # The quota blocker
 # ---------------------------------------------------------------------------
@@ -158,21 +157,34 @@ def test_the_quota_protocol_has_no_implementation_in_the_module() -> None:
     """A quota adapter added here without the table would be the failure mode.
 
     ``CapabilityQuotaPort`` is not ``@runtime_checkable``, so ``issubclass`` is
-    unavailable by design; the structural check is therefore done the way the
-    protocol itself works — by method name.
+    unavailable by design; the structural check is therefore the protocol's own
+    test — the method name *and* its keywords.  ``SqlCapabilityScopePort`` also
+    has an ``allows``, so matching on the name alone would either miss a real
+    quota adapter or flag the scope port; ``instance_id`` is what separates them.
     """
 
-    required = {
-        name
-        for name, value in inspect.getmembers(CapabilityQuotaPort, inspect.isfunction)
-        if not name.startswith("_")
-    }
-    assert required == {"allows"}
-    for value in vars(legacy_ports_module).values():
-        if inspect.isclass(value) and value.__module__ == legacy_ports_module.__name__:
-            assert not all(
-                callable(getattr(value, name, None)) for name in required
-            ) or value is LegacyGatewayPorts, value
+    quota_signature = inspect.signature(CapabilityQuotaPort.allows)
+    quota_parameters = set(quota_signature.parameters)
+
+    def shaped_like_quota(candidate: object) -> bool:
+        method = getattr(candidate, "allows", None)
+        if not callable(method):
+            return False
+        return set(inspect.signature(method).parameters) == quota_parameters
+
+    # The discriminator is real: the scope port has ``allows`` too, with a
+    # different keyword set, so this test can tell them apart.
+    assert "instance_id" in quota_parameters
+    assert not shaped_like_quota(SqlCapabilityScopePort)
+
+    offenders = [
+        value
+        for value in vars(legacy_ports_module).values()
+        if inspect.isclass(value)
+        and value.__module__ == legacy_ports_module.__name__
+        and shaped_like_quota(value)
+    ]
+    assert offenders == []
     assert "SqlCapabilityQuotaPort" not in dir(legacy_ports_module)
 
 
@@ -247,10 +259,27 @@ def test_the_only_true_literals_are_the_documented_positive_decisions() -> None:
         "_installation_allows:compare",
     ], positives
 
-    # Each of the three is asserted positively by a behavioural test, so no
-    # positive answer exists only in the source.
-    for function_name in ("allows", "_scope_belongs_to_tenant", "_installation_allows"):
-        assert function_name in _POSITIVE_ANSWERS_ASSERTED, function_name
+    # …and every one of them is a function the behavioural suite reaches with a
+    # real ``True``; an inventory entry nobody asserts positively would be a
+    # positive answer only the source believes in.
+    assert {entry.split(":", 1)[0] for entry in positives} == set(
+        _POSITIVE_ANSWERS_ASSERTED
+    )
+
+
+_POSITIVE_ANSWERS_ASSERTED = (
+    "allows",
+    "_scope_belongs_to_tenant",
+    "_installation_allows",
+)
+"""Which positive answers ``test_scope_port`` reaches with a real ``True``.
+
+``allows`` is asserted directly for all three scope kinds; the two helpers are
+reached through it (a cabinet grant with ``scope='all'`` and a granted entry are
+both ``True`` cases in the behavioural suite).  Keeping the tuple here — next to
+the inventory check that consumes it — means a new positive branch has to be
+added in two places, and the second one is a test.
+"""
 
 
 def test_the_scope_port_returns_false_on_every_negative_path_it_guards() -> None:

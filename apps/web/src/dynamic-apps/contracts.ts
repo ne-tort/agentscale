@@ -6,7 +6,7 @@ import type {
   CapabilityRequest,
   DeclarativeAppManifest,
   GrantSet,
-} from "../../../packages/schemas/declarative-app/v1";
+} from "../../../../packages/schemas/declarative-app/v1";
 import type { CapabilityGateway } from "../capabilities/types";
 
 export type { AppId, AppLifecycleEvent, AppLifecycleState, CapabilityGrant, CapabilityRequest, DeclarativeAppManifest, GrantSet };

@@ -105,7 +105,7 @@ export function CompanyContour({ companyId, service }: CompanyContourProps) {
   const keys = useRows(() => service.listCompanyKeys(companyId), [service, companyId]);
   const models = useRows(() => service.listCompanyModels(companyId), [service, companyId]);
   const keyModels = useRows(async () => keyModelsKeyId ? service.listKeyModels(companyId, keyModelsKeyId) : [], [service, companyId, keyModelsKeyId]);
-  const assignments = useRows(async () => selectedCabinet ? (await service.listAssignments(companyId, selectedCabinet)).map((row) => ({ ...row, id: text(row, "employee_id") || row.id })) : [], [service, companyId, selectedCabinet]);
+  const assignments = useRows(async () => selectedCabinet ? (await service.listAssignments(companyId, selectedCabinet)).map((row): ContourRow => ({ ...row, id: text(row, "employee_id") || row.id })) : [], [service, companyId, selectedCabinet]);
   const availableEmployees = useMemo(() => showDeletedEmployees ? [] : employees.rows.filter((employee) => !assignments.rows.some((assigned) => assigned.id === employee.id || assigned.employee_id === employee.id)), [assignments.rows, employees.rows, showDeletedEmployees]);
   const visibleEditingEmployee = employeeData.companyId === companyId ? editingEmployee : undefined;
 
