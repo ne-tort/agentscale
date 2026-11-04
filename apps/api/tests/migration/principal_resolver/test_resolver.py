@@ -289,6 +289,23 @@ async def test_credential_for_another_correlation_id_is_refused() -> None:
         assert await instance.resolve(correlation_id=CORRELATION) is None
 
 
+async def test_over_long_correlation_id_yields_no_principal() -> None:
+    """The RLS vocabulary caps identity width at 40 characters.
+
+    A correlation id past that cap cannot be sealed into a resolution, and the resolver turns
+    the seal's refusal into ``None`` rather than truncating the id — a truncated correlation
+    would be a *different* correlation id, i.e. forged provenance.
+    """
+
+    long_correlation = "corr_" + "a" * 60
+    async with identity_database() as factory:
+        async with factory() as session:
+            await seed_baseline(session)
+
+        instance = resolver(factory, cred=credential(correlation_id=long_correlation))
+        assert await instance.resolve(correlation_id=long_correlation) is None
+
+
 async def test_disabled_employee_yields_no_principal() -> None:
     async with identity_database() as factory:
         async with factory() as session:

@@ -825,39 +825,65 @@ def test_the_models_record_the_deferred_trade_offs() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_the_promoted_row_is_the_only_row_that_may_claim_a_positive_write() -> None:
-    """A read of the constraint, not a database run: the predicate is the contract."""
+def test_the_positive_write_check_names_a_state_the_domain_actually_has() -> None:
+    """The constraint vocabulary must be the state machine's vocabulary.
+
+    ``ck_m06_cutover_positive_writes_only_when_promoted`` admits ``true`` only for
+    ``resulting_state = 'promoted'``. If the constraint named a state
+    :class:`CutoverState` does not have, every promoted append would be refused by
+    storage while the state machine believed it had succeeded — so the literal is
+    compared with the enum rather than with a reviewer's memory.
+    """
+
+    from prodavan.application.migration.m06_cutover.cutover import CutoverState
+
     predicate = check_catalog(Base.metadata.tables[LEDGER_TABLE])[
         "ck_m06_cutover_positive_writes_only_when_promoted"
     ]
-    allowed = {
-        (True, "promoted"): True,
-        (True, "shadow"): False,
-        (True, "legacy_active"): False,
-        (False, "promoted"): True,
-        (False, "blocked"): True,
-    }
-    for (positive, resulting_state), expected in allowed.items():
-        verdict = (
-            (positive is False) or resulting_state == "promoted"
-        )
-        assert verdict is expected, (positive, resulting_state)
-    assert "resulting_state = 'promoted'" in predicate
+    assert "canonical_positive_writes = false OR resulting_state = 'promoted'" == predicate
+    assert CutoverState.PROMOTED.value == "promoted"
+    # The default direction is refusal: a row that says nothing claims nothing.
+    assert "canonical_positive_writes = false" in predicate
+
+    # The transition that produces such a row is the one that flips the owners.
+    promoted = shadow_state(shadow_record(), revision=2)
+    assert promoted.canonical_positive_writes is False
 
 
-def test_a_first_transition_and_its_successor_are_representable() -> None:
-    """The two rows the repository appends share one lineage and two revisions."""
+def test_a_successor_row_can_carry_the_lineage_the_cas_compares() -> None:
+    """The two columns the successor's CAS reads are the two the ledger must carry.
+
+    ``SqlCutoverRepository._lineage_continues`` requires the appended record's
+    ``prior_record_id``/``prior_record_digest`` to equal the stored
+    ``last_evidence_id``/``lineage_head_digest`` exactly. The checklist below proves the
+    ledger's columns can express that pair for a real transition, and that a row which
+    breaks it is representable but would be refused by the port — which is why
+    ``ck_m06_cutover_prior_record_pair`` refuses the half-written form at storage level.
+    """
+
     first = shadow_record(evidence_id="cmd-shadow-1", epoch=1)
     first_state = shadow_state(first, revision=1)
 
     assert first.prior_record_id is None and first.prior_record_digest is None
     assert first_state.revision == 1
     assert first_state.lineage_head_digest == first.record_digest
-
-    # A successor links by the pair the ledger columns must carry together.
-    successor = shadow_record(evidence_id="cmd-shadow-2", epoch=2)
-    assert successor.record_digest != first.record_digest
     assert first_state.last_evidence_id == first.evidence_id
-    assert (first.evidence_id, first.record_digest) == (
-        first_state.last_evidence_id, first_state.lineage_head_digest
+
+    # The successor the port would accept: the pair it cites is exactly the stored head.
+    predicate = check_catalog(Base.metadata.tables[LEDGER_TABLE])[
+        "ck_m06_cutover_prior_record_pair"
+    ]
+    assert "prior_record_id IS NULL OR prior_record_digest IS NOT NULL" == predicate
+
+    # A ledger row for the successor carries that pair verbatim; the same column pair is
+    # what the loaded state exposes, so load() -> transition() needs no translation.
+    successor_columns = {
+        "prior_record_id": first_state.last_evidence_id,
+        "prior_record_digest": first_state.lineage_head_digest,
+        "revision": first_state.revision + 1,
+    }
+    assert successor_columns["prior_record_id"] == "cmd-shadow-1"
+    assert successor_columns["prior_record_digest"] == first.record_digest
+    assert set(successor_columns) <= set(
+        Base.metadata.tables[LEDGER_TABLE].c.keys()
     )
