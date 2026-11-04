@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from pydantic import ValidationError
 
+from prodavan.application.automation_service.contracts import DeliveryEgressPolicyResult
 from prodavan.application.automation_service.outbox import OutboxWorker
 from prodavan.domain.automation.outbox import (
     OutboxEnqueueIntent,
@@ -137,36 +138,69 @@ def egress_event(**changes: object) -> OutboxEvent:
 
 @pytest.mark.asyncio
 async def test_worker_acknowledges_only_after_successful_dispatch() -> None:
-    repository = FakeRepository([(event(), state(state=OutboxState.LEASED, leased_by="w", lease_until=NOW + timedelta(minutes=1)))])
+    # The worker refuses to dispatch without egress evidence (fail-closed, mirroring
+    # AutomationService.deliver). This worker therefore needs a policy and an event
+    # carrying the destination that policy is about; the earlier fixture passed
+    # neither and asserted a dispatch that the contract forbids.
+    policy = FakeEgressPolicy()
+    repository = FakeRepository([(egress_event(), state(state=OutboxState.LEASED, leased_by="w", lease_until=NOW + timedelta(minutes=1)))])
     dispatcher = FakeDispatcher()
-    worker = OutboxWorker(repository=repository, dispatcher=dispatcher, worker_id="w")
+    worker = OutboxWorker(repository=repository, dispatcher=dispatcher, worker_id="w", egress_policy=policy)
 
     assert await worker.run_once(now=NOW, lease_until=NOW + timedelta(minutes=1), retry_at=NOW + timedelta(minutes=2)) == 1
     assert dispatcher.events == ["evt-1"]
     assert repository.actions == [("delivered", "evt-1")]
+    assert policy.destinations == ["https://example.test/hook"]
+
+
+@pytest.mark.asyncio
+async def test_worker_without_egress_evidence_never_dispatches() -> None:
+    """Missing policy or unverified destination is a retry, never a dispatch."""
+    dispatcher = FakeDispatcher()
+    no_policy = FakeRepository([(egress_event(), state(state=OutboxState.LEASED, leased_by="w", lease_until=NOW + timedelta(minutes=1)))])
+    assert await OutboxWorker(repository=no_policy, dispatcher=dispatcher, worker_id="w").run_once(
+        now=NOW, lease_until=NOW + timedelta(minutes=1), retry_at=NOW + timedelta(minutes=2)
+    ) == 0
+    assert no_policy.actions == [("retry", "evt-1")]
+
+    denied = FakeRepository([(egress_event(), state(state=OutboxState.LEASED, leased_by="w", lease_until=NOW + timedelta(minutes=1)))])
+    assert await OutboxWorker(
+        repository=denied, dispatcher=dispatcher, worker_id="w", egress_policy=FakeEgressPolicy(allowed=False)
+    ).run_once(now=NOW, lease_until=NOW + timedelta(minutes=1), retry_at=NOW + timedelta(minutes=2)) == 0
+    assert denied.actions == [("retry", "evt-1")]
+
+    # A destination-free payload has no egress proof either: unknown is denied.
+    unknown = FakeRepository([(event(), state(state=OutboxState.LEASED, leased_by="w", lease_until=NOW + timedelta(minutes=1)))])
+    assert await OutboxWorker(
+        repository=unknown, dispatcher=dispatcher, worker_id="w", egress_policy=FakeEgressPolicy()
+    ).run_once(now=NOW, lease_until=NOW + timedelta(minutes=1), retry_at=NOW + timedelta(minutes=2)) == 0
+    assert unknown.actions == [("retry", "evt-1")]
+    assert dispatcher.events == []
 
 
 @pytest.mark.asyncio
 async def test_worker_retries_before_dead_lettering() -> None:
-    repository = FakeRepository([(event(), state(state=OutboxState.LEASED, leased_by="w", lease_until=NOW + timedelta(minutes=1), attempts=1))])
-    worker = OutboxWorker(repository=repository, dispatcher=FakeDispatcher(RuntimeError("timeout")), worker_id="w", max_attempts=2)
+    policy = FakeEgressPolicy()
+    repository = FakeRepository([(egress_event(), state(state=OutboxState.LEASED, leased_by="w", lease_until=NOW + timedelta(minutes=1), attempts=1))])
+    worker = OutboxWorker(repository=repository, dispatcher=FakeDispatcher(RuntimeError("timeout")), worker_id="w", max_attempts=2, egress_policy=policy)
 
     assert await worker.run_once(now=NOW, lease_until=NOW + timedelta(minutes=1), retry_at=NOW + timedelta(minutes=2)) == 0
     assert repository.actions == [("retry", "evt-1")]
 
-    repository = FakeRepository([(event(), state(state=OutboxState.LEASED, leased_by="w", lease_until=NOW + timedelta(minutes=1), attempts=2))])
-    worker = OutboxWorker(repository=repository, dispatcher=FakeDispatcher(RuntimeError("timeout")), worker_id="w", max_attempts=2)
+    repository = FakeRepository([(egress_event(), state(state=OutboxState.LEASED, leased_by="w", lease_until=NOW + timedelta(minutes=1), attempts=2))])
+    worker = OutboxWorker(repository=repository, dispatcher=FakeDispatcher(RuntimeError("timeout")), worker_id="w", max_attempts=2, egress_policy=policy)
     await worker.run_once(now=NOW, lease_until=NOW + timedelta(minutes=1), retry_at=NOW + timedelta(minutes=2))
     assert repository.actions == [("dead_letter", "evt-1")]
 
 
 @pytest.mark.asyncio
 async def test_worker_does_not_persist_raw_transport_error() -> None:
-    repository = FakeRepository([(event(), state(state=OutboxState.LEASED, leased_by="w", lease_until=NOW + timedelta(minutes=1)))])
+    repository = FakeRepository([(egress_event(), state(state=OutboxState.LEASED, leased_by="w", lease_until=NOW + timedelta(minutes=1)))])
     await OutboxWorker(
         repository=repository,
         dispatcher=FakeDispatcher(RuntimeError("https://user:secret@example.test/private")),
         worker_id="w",
+        egress_policy=FakeEgressPolicy(),
     ).run_once(now=NOW, lease_until=NOW + timedelta(minutes=1), retry_at=NOW + timedelta(minutes=2))
     assert repository.actions == [("retry", "evt-1")]
     # The fake records only lifecycle calls; the repository contract receives a

@@ -108,9 +108,12 @@ def test_result_mapping_is_exact_and_allow_deny_quarantine_semantics_are_explici
     assert quarantined.result_status is AuditResult.ERROR
     denied = service.outcome(make_outcome(), result="deny", error_code="grant_missing")
     assert denied.result_status is AuditResult.DENY
-    with pytest.raises(ValueError, match="allow outcome"):
+    # The envelope contract names the violated rule by its typed fields
+    # (decision/result_status/error_code); the assertions below pin those exact
+    # messages rather than an older free-form wording ("allow outcome", "match").
+    with pytest.raises(ValueError, match="allow result cannot contain an error_code"):
         make_outcome(error_code="unexpected")
-    with pytest.raises(ValueError, match="match"):
+    with pytest.raises(ValueError, match="deny decision cannot have allow result_status"):
         make_outcome(decision=AuditDecision.DENY)
     with pytest.raises(ValueError, match="map to"):
         service.map_result("error")

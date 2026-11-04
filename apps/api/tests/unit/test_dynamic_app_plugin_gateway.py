@@ -164,7 +164,17 @@ async def test_malformed_method_constraints_are_rejected_at_open():
 async def test_expired_envelope_grant_denies_before_executor():
     executor = Executor()
     row = record()
-    row = replace(row, grants=(replace(row.grants[0], issued_at=NOW - timedelta(hours=1), expires_at=NOW - timedelta(seconds=1)),))
+    # ``AppGrant`` is a frozen pydantic model, not a dataclass, so dataclasses.replace
+    # cannot rebuild it. Re-validate a dumped copy instead of passing unsent values
+    # through a constructor bypass: the envelope must remain self-consistent
+    # (expires_at after issued_at, both timezone-aware) and be already expired.
+    expired_at = NOW - timedelta(seconds=1)
+    expired_issued = NOW - timedelta(hours=1)
+    grant = AppGrant.model_validate(
+        {**row.grants[0].model_dump(), "issued_at": expired_issued, "expires_at": expired_at}
+    )
+    row = replace(row, grants=(grant,))
+    assert row.grants[0].expires_at == expired_at
     service = DynamicAppPluginGatewayService(Repository(row), executors={"storage.kv": executor}, scope=Scope(), quota=Quota())
     opened = await service.open(PluginOpenRequest("tenant-1", "demo-app", "1.0.0", SCOPE, "subject-1"))
     result = await service.invoke(PluginInvokeRequest(opened.handle, "invoice.read"), now=NOW)

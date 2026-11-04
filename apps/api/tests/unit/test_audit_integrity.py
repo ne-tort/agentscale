@@ -1,6 +1,6 @@
 """Source acceptance tests for the exclusive audit integrity zone.
 
-Migration verification is intentionally frozen; this file is not executed here.
+The migration verification freeze is lifted: this file is executed and must stay green.
 """
 from datetime import UTC, datetime
 import inspect
@@ -97,7 +97,16 @@ def test_requires_final_result_identity_and_matching_decision():
 
 @pytest.mark.asyncio
 async def test_quarantine_never_uses_trusted_success_and_requires_durable_port():
-    outcome = make_outcome(decision=AuditDecision.QUARANTINE, result_status=AuditResult.ERROR, error_code="review")
+    # A quarantine envelope whose reason_code still said "allowed" (the default of
+    # this helper, written for an allow outcome) is self-contradictory: the durable
+    # quarantine record must name the reason it was quarantined, and the service
+    # keeps that same code (see test_audit_integrity_adapter for the same rule).
+    outcome = make_outcome(
+        decision=AuditDecision.QUARANTINE,
+        result_status=AuditResult.ERROR,
+        reason_code="review",
+        error_code="review",
+    )
     auth = event(AuditEventClass.AUTH, decision=AuditDecision.QUARANTINE, result_status=AuditResult.ERROR, error_code="review")
     final = event(AuditEventClass.FINAL_RESULT, decision=AuditDecision.QUARANTINE, result_status=AuditResult.ERROR, error_code="review")
     trusted, quarantine = Trusted(), Quarantine()
