@@ -759,6 +759,18 @@ class SqlArtifactContentStore:
                     app_definition_id=app_definition_id,
                     app_version_id=app_version_id,
                 )
+            if str(row.get("version_id")) != app_version_id:
+                # The third axis of the tuple, checked for the same reason as the other two:
+                # ``v.id = :version_id`` bounds the read, but a row that came back for another
+                # version must never be accepted as this version's artifact.
+                raise _refuse(
+                    ArtifactRefusalCode.IDENTITY_MISSING,
+                    "the persisted row belongs to another version than the requested one",
+                    "the exact persisted M04 version row of this identity",
+                    tenant_id=tenant_id,
+                    app_definition_id=app_definition_id,
+                    app_version_id=app_version_id,
+                )
             digests.add(str(row.get("artifact_digest")))
             uris.add(row.get("artifact_uri"))
 

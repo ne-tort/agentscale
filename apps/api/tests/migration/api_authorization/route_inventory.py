@@ -502,9 +502,21 @@ class SourceIndex:
                 return None
             return class_module, f"{class_name}.{called}", method
         node = self.function(module, called)
+        if node is not None:
+            return module, called, node
+        # A bare name is usually a function imported from another module in this
+        # codebase (``require_running_pod_runtime`` lives in
+        # ``application/agent/runtime_guard.py`` and is imported by the workspace
+        # service). Without this hop an ordinary delegation looks unguarded.
+        entry = self._modules.get(module)
+        imported = entry.imports.get(called) if entry is not None else None
+        if imported is None:
+            return None
+        imported_module, imported_name = imported
+        node = self.function(imported_module, imported_name)
         if node is None:
             return None
-        return module, called, node
+        return imported_module, imported_name, node
 
 
 def _callees(node: ast.AST) -> Iterator[tuple[str, str | None]]:

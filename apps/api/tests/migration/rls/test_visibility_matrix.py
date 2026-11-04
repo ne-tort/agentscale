@@ -201,6 +201,47 @@ def _rows_by_table() -> dict[str, list[dict[str, object]]]:
                 {"id": "tender_a", "tenant_id": TENANT_A},
                 {"id": "tender_b", "tenant_id": TENANT_B},
             ],
+            # --- Equipment associations (2026110319, MIG-EQ-ANCHORS-01) ---
+            # Both carry their own tenant/cabinet/project anchors, so they behave
+            # like ``m05_plugin_instances``: the optional cabinet/project columns
+            # accept NULL but never another scope, and a row of another tenant
+            # stays invisible even when the caller names the same candidate group.
+            "equipment_v2_candidate_group_offers": [
+                {
+                    "candidate_group_id": "group_a",
+                    "offer_id": "offer_a",
+                    "tenant_id": TENANT_A,
+                    "cabinet_id": CABINET_A,
+                    "project_id": PROJECT_A,
+                    "ordinal": 1,
+                },
+                {
+                    "candidate_group_id": "group_b",
+                    "offer_id": "offer_b",
+                    "tenant_id": TENANT_B,
+                    "cabinet_id": CABINET_B,
+                    "project_id": PROJECT_B,
+                    "ordinal": 1,
+                },
+            ],
+            "equipment_v2_tender_candidate_groups": [
+                {
+                    "tender_id": "tender_a",
+                    "candidate_group_id": "group_a",
+                    "tenant_id": TENANT_A,
+                    "cabinet_id": CABINET_A,
+                    "project_id": PROJECT_A,
+                    "ordinal": 1,
+                },
+                {
+                    "tender_id": "tender_b",
+                    "candidate_group_id": "group_b",
+                    "tenant_id": TENANT_B,
+                    "cabinet_id": CABINET_B,
+                    "project_id": PROJECT_B,
+                    "ordinal": 1,
+                },
+            ],
             # --- Agent run fence + attempt journal (2026110309, 2026110311) ---
             "agent_run_leases": [
                 {"id": "lease_a", "tenant_id": TENANT_A},

@@ -104,7 +104,6 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from prodavan.application.migration.evidence_ports import (
         ReviewedM04RlsEvidence,
         SqlPartitionHandoffReadStore,
-        TrustedEvidenceScope,
     )
     from prodavan.application.migration.m04_scope.scope_migration import ResolveScopePort
     from prodavan.application.migration.m04e_definition_version.repository import (
@@ -309,25 +308,25 @@ def _method_pair(
 
 def build_shadow_ports(
     *,
-    session_factory: "SessionFactory | None" = None,
+    session_factory: SessionFactory | None = None,
     partition: object | None = None,
     writer_generation: int | None = None,
-    m04_tenant_context: "RlsTenantScopeContextAdapter | None" = None,
-    m05_tenant_context: "RlsTrustedTenantContextAdapter | None" = None,
-    m04e_definition_versions: "ServerDefinitionVersionRepository | None" = None,
-    m05_upstream: "M05UpstreamEvidence | None" = None,
-    handoff_partitions: "SqlPartitionHandoffReadStore | None" = None,
-    reviewed_m04_rls: "ReviewedM04RlsEvidence | None" = None,
+    m04_tenant_context: RlsTenantScopeContextAdapter | None = None,
+    m05_tenant_context: RlsTrustedTenantContextAdapter | None = None,
+    m04e_definition_versions: ServerDefinitionVersionRepository | None = None,
+    m05_upstream: M05UpstreamEvidence | None = None,
+    handoff_partitions: SqlPartitionHandoffReadStore | None = None,
+    reviewed_m04_rls: ReviewedM04RlsEvidence | None = None,
     legacy_ports: object | None = None,
-    legacy_quota: "CapabilityQuotaPort | None" = None,
-    method_mappings: "CapabilityMethodMappingReadPort | None" = None,
+    legacy_quota: CapabilityQuotaPort | None = None,
+    method_mappings: CapabilityMethodMappingReadPort | None = None,
     method_servers: dict[str, str] | None = None,
     method_versions: dict[str, str] | None = None,
-    protocol: "ProtocolCompatibilityReadPort | None" = None,
-    company: "AuthenticatedCompanyPort | None" = _AUTO,
-    canonical_grants: "CanonicalGrantReadPort | None" = _AUTO,
-    evidence_read: "EvidenceReadPort | None" = _AUTO,
-    evidence_transaction: "TrustedEvidenceTransactionPort | None" = _AUTO,
+    protocol: ProtocolCompatibilityReadPort | None = None,
+    company: AuthenticatedCompanyPort | None = _AUTO,
+    canonical_grants: CanonicalGrantReadPort | None = _AUTO,
+    evidence_read: EvidenceReadPort | None = _AUTO,
+    evidence_transaction: TrustedEvidenceTransactionPort | None = _AUTO,
 ) -> ShadowPortsPlan:
     """Compose ``ShadowGatewayPorts`` from the adapters that implement them.
 

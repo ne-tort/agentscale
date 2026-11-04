@@ -182,11 +182,24 @@ function captureRegisteredApi(handler: (url: URL, request: CapturedRequest) => P
   });
 }
 
+/**
+ * Poll until ``assertion`` holds, letting React commit between checks.
+ *
+ * Every poll runs inside its own ``act`` scope on purpose. Call sites are written as
+ * ``await act(async () => { await waitFor(...) })``, and ``act`` defers committed state
+ * until its scope exits -- so a poll that only awaited a timer could never observe the
+ * re-render it was waiting for. Flushing a nested scope makes the update visible.
+ */
 async function waitFor(assertion: () => boolean, message = "Timed out waiting for the acceptance condition"): Promise<void> {
   const deadline = Date.now() + 3000;
-  while (!assertion()) {
+  for (;;) {
+    let satisfied = false;
+    await act(async () => {
+      satisfied = assertion();
+      if (!satisfied) await new Promise((resolve) => window.setTimeout(resolve, 0));
+    });
+    if (satisfied) return;
     if (Date.now() >= deadline) throw new Error(message);
-    await new Promise((resolve) => window.setTimeout(resolve, 0));
   }
 }
 
@@ -237,13 +250,20 @@ async function mountApp(initialPath: string, options: { navigationProbe?: boolea
   });
 }
 
+/**
+ * Click, then wait *outside* the act scope.
+ *
+ * The click has to be flushed before anything observes its result: ``act`` commits at
+ * the end of its scope, so awaiting the condition inside the same scope could never see
+ * the re-render the click caused. Every call site inherits this order.
+ */
 async function click(selector: string, until: () => boolean): Promise<void> {
   await act(async () => {
     const target = document.querySelector<HTMLElement>(selector);
     if (!target) throw new Error(`Missing clickable element: ${selector}`);
     target.click();
-    await waitFor(until);
   });
+  await waitFor(until);
 }
 
 function pageText(): string {
@@ -366,7 +386,7 @@ describe("employee workspace integration acceptance", () => {
     });
 
     await mountApp(`/projects/${projectId}/chat/${sessionId}?model=test-model`);
-    await act(async () => { await waitFor(() => pageText().includes("Sign in to agentscale")); });
+    await waitFor(() => pageText().includes("Sign in to agentscale"));
     expect(requests.some((request) => request.path.startsWith("/api/v1/projects/"))).toBe(false);
 
     const inputs = document.querySelectorAll<HTMLInputElement>(".login-page input");
@@ -374,7 +394,7 @@ describe("employee workspace integration acceptance", () => {
     await setValue(inputs[0], "ada@example.test");
     await setValue(inputs[1], "test-password");
     await click(".login-page button", () => document.querySelector(".login-page button")?.textContent === "Sign in");
-    await act(async () => { await waitFor(() => pageText().includes("Inspect notes.md")); });
+    await waitFor(() => pageText().includes("Inspect notes.md"));
 
     expect(pageText()).toContain("Chats");
     expect(pageText()).toContain("Inspect notes.md");
@@ -404,14 +424,14 @@ describe("employee workspace integration acceptance", () => {
     window.localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(tokens));
 
     await mountApp("/projects");
-    await act(async () => { await waitFor(() => pageText().includes("Restoring your session…")); });
+    await waitFor(() => pageText().includes("Restoring your session…"));
     expect(pageText()).toContain("Restoring your session…");
     expect(requests.some((request) => request.path === "/api/v1/cabinets")).toBe(false);
 
     await act(async () => {
       releaseRestore(jsonResponse(backendIdentityResponse()));
-      await waitFor(() => Boolean(document.querySelector(`a[href='/projects/${projectId}']`)));
     });
+    await waitFor(() => Boolean(document.querySelector(`a[href='/projects/${projectId}']`)));
     expect(pageText()).toContain("Signal Lab");
     expect(pageText()).toContain("ada@example.test");
     expect(JSON.parse(window.localStorage.getItem(AUTH_STORAGE_KEY) ?? "null")).toEqual(tokens);
@@ -440,7 +460,8 @@ describe("employee workspace integration acceptance", () => {
     window.localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(tokens));
 
     await mountApp("/projects");
-    await act(async () => { await waitFor(() => Boolean(document.querySelector(`a[href='/projects/${projectId}']`))); });
+    await waitFor(() => Boolean(document.querySelector(`a[href='/projects/${projectId}']`)));
+    if (!pageText().includes("Signal Lab")) throw new Error("AFTERMOUNT=" + pageText().slice(0, 300));
     expect(pageText()).toContain("Signal Lab");
     expect(requests.some((request) => request.path === `/api/v1/cabinets/${cabinetId}/projects`)).toBe(true);
     expect(requests.some((request) => request.path === `/api/v1/cabinets/${cabinetId}/me/selection`)).toBe(true);
@@ -463,7 +484,7 @@ describe("employee workspace integration acceptance", () => {
     expect(requests.find((request) => request.path === `/api/v1/projects/${projectId}/container/workspace/preview?path=notes.md`)).toMatchObject({ method: "GET", authorization: "Bearer acceptance-access" });
 
     await click(`a[href='/projects/${projectId}/runs']`, () => pageText().includes("Approvals inbox"));
-    await act(async () => { await waitFor(() => pageText().includes("Writing changes the project workspace.")); });
+    await waitFor(() => pageText().includes("Writing changes the project workspace."));
     expect(pageText()).toContain("Session history");
     expect(pageText()).toContain("Deployment review");
     expect(requests.find((request) => request.path === `/api/v1/projects/${projectId}/agent/sessions`)).toMatchObject({ method: "GET", authorization: "Bearer acceptance-access" });
@@ -743,7 +764,7 @@ describe("employee workspace integration acceptance", () => {
     window.localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(tokens));
 
     await mountApp("/projects");
-    await act(async () => { await waitFor(() => pageText().includes("В кабинете пока нет проектов")); });
+    await waitFor(() => pageText().includes("В кабинете пока нет проектов"));
     expect(pageText()).toContain("Создайте проект, чтобы подготовить отдельную рабочую среду агента.");
     expect(requests.some((request) => request.path === `/api/v1/cabinets/${cabinetId}/projects`)).toBe(true);
     expect(requests.some((request) => request.path.startsWith(`/api/v1/projects/${projectId}`))).toBe(false);
@@ -765,7 +786,7 @@ describe("employee workspace integration acceptance", () => {
     window.localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(tokens));
 
     await mountApp("/projects");
-    await act(async () => { await waitFor(() => [...document.querySelectorAll<HTMLButtonElement>(".projects-action")].some((button) => button.textContent === "Запустить")); });
+    await waitFor(() => [...document.querySelectorAll<HTMLButtonElement>(".projects-action")].some((button) => button.textContent === "Запустить"));
     const launchButton = [...document.querySelectorAll<HTMLButtonElement>(".projects-action")].find((button) => button.textContent === "Запустить");
     expect(launchButton).toBeTruthy();
     await act(async () => {
@@ -787,7 +808,7 @@ describe("employee workspace integration acceptance", () => {
     window.localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(tokens));
 
     await mountApp(`/projects/${projectId}/chat/${sessionId}`);
-    await act(async () => { await waitFor(() => pageText().includes("Проект недоступен")); });
+    await waitFor(() => pageText().includes("Проект недоступен"));
     expect(pageText()).toContain("Project does not exist");
     expect(document.querySelector<HTMLAnchorElement>("a[href='/projects']")?.textContent).toBe("Вернуться к проектам");
     expect(requests.some((request) => request.path === `/api/v1/projects/${projectId}` && request.authorization === "Bearer acceptance-access")).toBe(true);
@@ -810,7 +831,7 @@ describe("employee workspace integration acceptance", () => {
     window.localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(tokens));
 
     await mountApp(`/projects/${projectId}/resources`);
-    await act(async () => { await waitFor(() => pageText().includes("Project module bindings unavailable")); });
+    await waitFor(() => pageText().includes("Project module bindings unavailable"));
     expect(document.querySelector(".project-module-resources__feedback--error")?.textContent).toContain("temporarily unavailable");
     await click(".project-module-resources__feedback--error button", () => pageText().includes("No first-party resource modules are bound to this project yet."));
     expect(document.querySelectorAll(".project-module-resources__card")).toHaveLength(3);
@@ -832,7 +853,7 @@ describe("employee workspace integration acceptance", () => {
     window.localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(tokens));
 
     await mountApp(`/projects/${projectId}/resources?module=mod_mcp`);
-    await act(async () => { await waitFor(() => pageText().includes("Общие данные доступны только для чтения")); });
+    await waitFor(() => pageText().includes("Общие данные доступны только для чтения"));
     expect(pageText()).toContain("mcp_packages");
     expect(pageText()).toContain("Нет записей");
     expect(document.querySelector(".module-runtime-inline-add")).toBeNull();
@@ -856,7 +877,7 @@ describe("employee workspace integration acceptance", () => {
     window.localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(tokens));
 
     await mountApp(`/projects/${projectId}/resources`);
-    await act(async () => { await waitFor(() => Boolean(document.querySelector("[data-resource-module='mod_prompts']"))); });
+    await waitFor(() => Boolean(document.querySelector("[data-resource-module='mod_prompts']")));
     expect(pageText()).toContain(`Project scope: ${projectId}`);
     expect(pageText()).toContain("Bound to project");
     expect(pageText()).toContain("Profile and migration blockers");
@@ -889,7 +910,7 @@ describe("employee workspace integration acceptance", () => {
     window.localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(tokens));
 
     await mountApp(`/projects/${projectId}/resources?module=mod_prompts`);
-    await act(async () => { await waitFor(() => pageText().includes("Profiles")); });
+    await waitFor(() => pageText().includes("Profiles"));
     expect(pageText()).not.toContain("Private profile");
     const profileRow = [...document.querySelectorAll<HTMLTableRowElement>(".module-runtime-table tbody tr")].find((row) => row.textContent?.includes("Default"));
     expect(profileRow).toBeTruthy();
@@ -934,7 +955,7 @@ describe("employee workspace integration acceptance", () => {
     window.localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(tokens));
 
     await mountApp(`/projects/${projectId}/resources?module=mod_prompts`);
-    await act(async () => { await waitFor(() => pageText().includes("Profiles")); });
+    await waitFor(() => pageText().includes("Profiles"));
     const profileRow = [...document.querySelectorAll<HTMLTableRowElement>(".module-runtime-table tbody tr")].find((item) => item.textContent?.includes("Default"));
     if (!profileRow) throw new Error("The Default profile row was not returned.");
     await act(async () => { profileRow.querySelector("button")?.click(); await waitFor(() => [...document.querySelectorAll<HTMLTableRowElement>(".module-runtime-table tbody tr")].some((item) => item.textContent?.includes("AGENTS.md"))); });
@@ -999,7 +1020,7 @@ describe("employee workspace integration acceptance", () => {
     window.localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(tokens));
 
     await mountApp(`/projects/${projectId}/resources`);
-    await act(async () => { await waitFor(() => Boolean(document.querySelector(".content-ops__form"))); });
+    await waitFor(() => Boolean(document.querySelector(".content-ops__form")));
     expect(document.querySelector(".project-module-resources__card h3")?.textContent).toBe("Prompts");
     expect(pageText()).toContain("Profile and migration blockers");
     expect(pageText()).toContain("Canonical resource web facade is not confirmed");
@@ -1082,13 +1103,13 @@ describe("employee workspace integration acceptance", () => {
     Object.defineProperty(HTMLAnchorElement.prototype, "click", { configurable: true, value: anchorClick });
 
     await mountApp(`/projects/${projectId}/resources?module=mod_files`);
-    await act(async () => { await waitFor(() => pageText().includes("Files")); });
+    await waitFor(() => pageText().includes("Files"));
     expect(pageText()).toContain("Local bind");
-    await act(async () => { await waitFor(() => Boolean(document.querySelector(".module-runtime-table tbody tr"))); });
+    await waitFor(() => Boolean(document.querySelector(".module-runtime-table tbody tr")));
     const fileRow = [...document.querySelectorAll<HTMLTableRowElement>(".module-runtime-table tbody tr")].find((row) => row.textContent?.includes("Guide"));
     expect(fileRow).toBeTruthy();
     await act(async () => { fileRow?.querySelector("button")?.click(); await waitFor(() => Boolean(document.querySelector(".module-runtime-form"))); });
-    await act(async () => { await waitFor(() => document.querySelector<HTMLInputElement>(".module-runtime-project-picker input[type='checkbox']")?.disabled === false); });
+    await waitFor(() => document.querySelector<HTMLInputElement>(".module-runtime-project-picker input[type='checkbox']")?.disabled === false);
 
     const fileInput = document.querySelector<HTMLInputElement>(".module-runtime-field input[type='file']");
     expect(fileInput).toBeTruthy();
@@ -1097,13 +1118,13 @@ describe("employee workspace integration acceptance", () => {
       Object.defineProperty(fileInput, "files", { configurable: true, value: [file] });
       fileInput?.dispatchEvent(new Event("change", { bubbles: true }));
     });
-    await act(async () => { await waitFor(() => requests.some((request) => request.path === `/api/v1/cabinets/${cabinetId}/content/upload` && request.method === "POST")); });
+    await waitFor(() => requests.some((request) => request.path === `/api/v1/cabinets/${cabinetId}/content/upload` && request.method === "POST"));
     expect(requests.find((request) => request.path === `/api/v1/cabinets/${cabinetId}/content/upload`)).toMatchObject({ method: "POST", authorization: "Bearer acceptance-access" });
 
     await click(".module-runtime-form-actions button[type='submit']", () => requests.some((request) => request.path.endsWith("/runtime-modules/mod_files/data/files/resource-file-1") && request.method === "PATCH"));
     expect(resourceFileRow?.body.file_ref).toMatchObject({ asset_id: "uploaded-asset", blob_version_id: "uploaded-version" });
     expect(requests.some((request) => request.path === `/api/v1/cabinets/${cabinetId}/modules/mod_files/bound-projects` && request.method === "GET")).toBe(true);
-    await act(async () => { await waitFor(() => [...document.querySelectorAll<HTMLTableRowElement>(".module-runtime-table tbody tr")].some((row) => row.textContent?.includes("Guide"))); });
+    await waitFor(() => [...document.querySelectorAll<HTMLTableRowElement>(".module-runtime-table tbody tr")].some((row) => row.textContent?.includes("Guide")));
     const savedFileRow = [...document.querySelectorAll<HTMLTableRowElement>(".module-runtime-table tbody tr")].find((row) => row.textContent?.includes("Guide"));
     if (!savedFileRow) throw new Error("The saved Files module row is unavailable.");
     await act(async () => { savedFileRow.querySelector("button")?.click(); await waitFor(() => Boolean(document.querySelector(".module-runtime-form .module-runtime-file-ref button"))); });
@@ -1133,7 +1154,7 @@ describe("employee workspace integration acceptance", () => {
     window.localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(tokens));
 
     await mountApp(`/projects/${projectId}/resources`);
-    await act(async () => { await waitFor(() => Boolean(document.querySelector(".content-ops__notice--error"))); });
+    await waitFor(() => Boolean(document.querySelector(".content-ops__notice--error")));
 
     expect(document.querySelector(".content-ops__notice--error")?.textContent).toContain("The Content Service encountered an error. Try again.");
     expect(pageText()).not.toContain("Uploaded v");
@@ -1158,7 +1179,7 @@ describe("employee workspace integration acceptance", () => {
     window.localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(tokens));
 
     await mountApp(`/projects/${projectId}/resources`);
-    await act(async () => { await waitFor(() => pageText().includes("The Project API did not return a company_id")); });
+    await waitFor(() => pageText().includes("The Project API did not return a company_id"));
 
     expect(document.querySelector("[role='alert']")?.textContent).toContain("Project company scope unavailable");
     expect(projectLookups).toBe(2);
@@ -1205,7 +1226,7 @@ describe("employee workspace integration acceptance", () => {
     window.localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(tokens));
 
     await mountApp(`/projects/${projectId}/files`);
-    await act(async () => { await waitFor(() => pageText().includes("Загружаем проект…")); });
+    await waitFor(() => pageText().includes("Загружаем проект…"));
     expect(pageText()).toContain("Загружаем проект…");
     expect(pageText()).not.toContain("Live files from the project Pod");
 
@@ -1231,7 +1252,7 @@ describe("employee workspace integration acceptance", () => {
     window.localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(tokens));
 
     await mountApp(`/projects/${projectId}/files`);
-    await act(async () => { await waitFor(() => pageText().includes("Loading workspace…")); });
+    await waitFor(() => pageText().includes("Loading workspace…"));
     expect(pageText()).toContain("Loading workspace…");
 
     await act(async () => {
@@ -1257,7 +1278,7 @@ describe("employee workspace integration acceptance", () => {
     window.localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(tokens));
 
     await mountApp(`/projects/${projectId}/runs`);
-    await act(async () => { await waitFor(() => pageText().includes("Loading sessions…")); });
+    await waitFor(() => pageText().includes("Loading sessions…"));
     expect(pageText()).toContain("Loading sessions…");
 
     await act(async () => {

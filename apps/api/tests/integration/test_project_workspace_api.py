@@ -350,7 +350,7 @@ def test_workspace_upload_acceptance_empty_and_normalized_atomic_replace(
     created = client.put(
         endpoint,
         headers=owner_h,
-        params={"path": "/notes/./atomic.txt"},
+        params={"path": "notes/./atomic.txt"},
         content=b"first",
     )
     assert created.status_code == 200, created.text
@@ -538,11 +538,43 @@ def test_workspace_delete_missing_returns_stable_metadata(
     owner_h, project_id, _ = _launch_project(client)
     endpoint = f"/api/v1/projects/{project_id}/container/workspace/entries"
 
-    deleted = client.delete(endpoint, headers=owner_h, params={"path": r"/missing\\file.txt"})
+    # Backslash separators are a client formatting artefact and are folded to "/";
+    # a leading "/" is *not* (see test_workspace_user_paths_must_be_relative).
+    deleted = client.delete(endpoint, headers=owner_h, params={"path": r"missing\\file.txt"})
 
     assert deleted.status_code == 404, deleted.text
     assert deleted.json()["code"] == "WORKSPACE_NOT_FOUND"
     assert deleted.json()["path"] == "missing/file.txt"
+
+
+@requires_postgres
+def test_workspace_user_paths_must_be_relative(
+    client: TestClient, running_workspace: _MemoryWorkspace
+) -> None:
+    """Absolute-looking user paths are refused, not silently rebased.
+
+    ``normalize_workspace_path`` treats a leading ``/`` on *user input* as an
+    attempt to address a path outside /workspace and answers 422. Only the
+    backend's own paths go through ``coerce_internal_workspace_path``. Earlier
+    versions of the two tests above asserted the lenient reading (``/notes/./x``
+    being folded into ``notes/x``), which is exactly the behaviour the contract
+    forbids — the fail-closed refusal is the property worth pinning.
+    """
+    owner_h, project_id, _ = _launch_project(client)
+    base = f"/api/v1/projects/{project_id}/container/workspace"
+
+    for path in ("/notes/atomic.txt", "/missing/file.txt"):
+        uploaded = client.put(
+            f"{base}/content", headers=owner_h, params={"path": path}, content=b"x"
+        )
+        assert uploaded.status_code == 422, uploaded.text
+        assert uploaded.json()["code"] == "VALIDATION_ERROR"
+
+        deleted = client.delete(f"{base}/entries", headers=owner_h, params={"path": path})
+        assert deleted.status_code == 422, deleted.text
+
+    # Nothing leaked into the workspace behind the refusal.
+    assert "notes/atomic.txt" not in running_workspace.files
 
 
 @requires_postgres

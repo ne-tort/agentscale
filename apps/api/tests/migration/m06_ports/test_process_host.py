@@ -89,7 +89,6 @@ def test_an_uncomposable_plan_still_names_the_quota_gap(monkeypatch) -> None:
     """If the plan itself cannot be built, the absence never goes unnamed."""
 
     import prodavan.application.migration.m06_grants_gateway.ports_assembly as assembly
-
     from prodavan.core.infra.migration_chain_resource import (
         PART_M06_LEGACY_QUOTA_TABLE_MISSING,
     )

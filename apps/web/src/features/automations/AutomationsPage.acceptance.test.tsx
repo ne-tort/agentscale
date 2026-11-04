@@ -139,8 +139,12 @@ describe("project automations acceptance surface", () => {
     vi.spyOn(window, "confirm").mockReturnValue(true);
     await act(async () => button("Удалить").click());
     await flush();
-    expect(container.textContent).not.toContain("Updated digest");
+    // The success notice names the schedule it removed, so a plain "not to contain
+    // the name" would also forbid honest feedback. The claim under test is that the
+    // schedule row itself is gone and the backend list no longer has it.
     expect(schedules).toHaveLength(0);
+    expect(container.querySelector('[aria-label="Расписание Updated digest"]')).toBeNull();
+    expect(container.textContent).toContain("подтверждено backend");
   });
 
   it("creates a project trigger and confirms queue membership without claiming an agent run", async () => {
@@ -201,7 +205,9 @@ describe("project automations acceptance surface", () => {
     expect(container.textContent).toContain("Company-wide список последних записей delivery");
     expect(container.textContent).toContain("Получено от API: 200 из максимум 200 строк");
     expect(container.textContent).toContain("199 строк не связаны с этим project-filtered списком");
-    expect(container.textContent).toContain("Точный размер оставшейся истории API не сообщает");
+    // The caveat is the second sentence of one paragraph, so it is lowercase in the
+    // DOM. Asserting the capitalised form only pinned a copy-paste artefact.
+    expect(container.textContent).toContain("точный размер оставшейся истории API не сообщает");
     expect(container.textContent).toContain("delivery-company-0");
     expect(container.textContent).toContain("Retry недоступен");
 
@@ -309,17 +315,21 @@ describe("project automations acceptance surface", () => {
   it("creates, updates, and deletes an outgoing subscription with list readback", async () => {
     const subscriptions: WebhookSubscription[] = [];
     const liveService = createService({
-      listWebhooks: async () => [...subscriptions],
+      // A real endpoint answers with fresh JSON, never with the object the client
+      // already holds. Aliasing the stored object here let the fixture mutate the
+      // very value React was comparing against, so the post-toggle readback check
+      // compared a field with itself instead of with the previous state.
+      listWebhooks: async () => subscriptions.map((item) => ({ ...item })),
       createWebhook: async (input) => {
         const created: WebhookSubscription = { ...input, id: "webhook-crud", enabled: true };
         subscriptions.push(created);
         return { ...created, secret: "secret-for-copy-only" };
       },
       updateWebhook: async (id, patch) => {
-        const found = subscriptions.find((item) => item.id === id);
-        if (!found) throw new Error("subscription not found");
-        found.enabled = patch.enabled;
-        return { id, enabled: found.enabled };
+        const index = subscriptions.findIndex((item) => item.id === id);
+        if (index < 0) throw new Error("subscription not found");
+        subscriptions[index] = { ...subscriptions[index]!, ...patch };
+        return { id, enabled: subscriptions[index]!.enabled };
       },
       deleteWebhook: async (id) => {
         const index = subscriptions.findIndex((item) => item.id === id);

@@ -466,12 +466,48 @@ def test_policy_reinstallation_is_idempotent_and_owned_by_one_revision() -> None
         assert revisions[0] == "2026110307", f"{policy} must be introduced by 2026110307, got {revisions[0]}"
 
     # Every installer runs the guarded upgrade block, which drops before creating.
+    #
+    # Two drops per *current* name is the floor, not the exact count: since
+    # ``2026110318`` the block also withdraws the policy names an older registry
+    # version left behind (``policies.legacy_policy_names``).  Without that, a
+    # re-apply on an upgraded database would leave the stale policy in place and
+    # the table would end up with three policies.  So the contract asserted here
+    # is: every created name is dropped first, drops are ordered before creates,
+    # and any drop beyond the current pair names a policy this registry no longer
+    # declares (never a live name, which would delete another table's control).
     for revision in POLICY_REVISIONS:
         for spec in policies.CANONICAL_TABLE_POLICIES:
             statements = policies.upgrade_statements(spec)
             drops = [statement for statement in statements if statement.startswith("DROP POLICY IF EXISTS")]
             creates = [statement for statement in statements if statement.startswith("CREATE POLICY")]
-            assert len(drops) == len(creates) == 2, f"{revision}: {spec.table} guard is not drop-then-create"
+            assert len(creates) == 2, f"{revision}: {spec.table} must create exactly two policies"
+            assert len(drops) >= len(creates), f"{revision}: {spec.table} guard is not drop-then-create"
+            last_drop = max(statements.index(drop) for drop in drops)
+            first_create = min(statements.index(create) for create in creates)
+            assert last_drop < first_create, f"{revision}: {spec.table} creates a policy before dropping it"
+
+            dropped_names = {
+                statement.removeprefix("DROP POLICY IF EXISTS ").split(" ON ", 1)[0] for statement in drops
+            }
+            current_names = set(spec.policy_names)
+            assert current_names <= dropped_names, (
+                f"{revision}: {spec.table} does not drop its own current policy names first"
+            )
+            legacy = dropped_names - current_names
+            declared_anywhere = {
+                name for other in policies.CANONICAL_TABLE_POLICIES for name in other.policy_names
+            }
+            assert not (legacy & declared_anywhere), (
+                f"{revision}: {spec.table} would drop {sorted(legacy & declared_anywhere)}, "
+                "which is still declared by another table"
+            )
+            created_names = {
+                statement.removeprefix("CREATE POLICY ").split(" ON ", 1)[0] for statement in creates
+            }
+            assert created_names == current_names, (
+                f"{revision}: {spec.table} creates {sorted(created_names)}, "
+                f"expected {sorted(current_names)}"
+            )
 
 
 # --------------------------------------------------------------------------- #

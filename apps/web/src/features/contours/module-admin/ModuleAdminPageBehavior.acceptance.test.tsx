@@ -147,7 +147,9 @@ describe("module binding owner workflow", () => {
     expect(api.requests.some((request) => request.path === `/api/v1/companies/${companyId}/modules` && request.method === "GET")).toBe(true);
     expect(container.querySelector("[aria-label='Binding hierarchy']")?.textContent).toContain("Platform module");
     expect(container.textContent).toContain("no company-accessible global catalog for ungranted modules");
-    expect(container.textContent).toContain("Platform grants are managed by platform administrators.");
+    // The sentence sits in the middle of a paragraph, so it is lowercase in the DOM;
+    // the capitalised form only ever matched a copy of the copy, not the markup.
+    expect(container.textContent).toContain("platform grants are managed by platform administrators");
     expect([...container.querySelectorAll("h3")].some((heading) => heading.textContent === "Company grants")).toBe(false);
     const search = container.querySelector<HTMLInputElement>("#module-search");
     expect(search).toBeTruthy();
@@ -261,6 +263,12 @@ describe("module binding owner workflow", () => {
     expect(container.querySelector("[aria-label='Binding hierarchy']")?.textContent).toContain("Enable/disable and version actions are unavailable");
     expect(container.textContent).toContain("API contract gap");
     expect(container.textContent).toContain("Create or remove project bindings from project management.");
-    expect([...container.querySelectorAll("button")].some((button) => /bind|revoke/i.test(button.textContent ?? ""))).toBe(false);
+    // Scope the check to the project-bindings section: a catalog row is itself a
+    // button whose description reads "<n> cabinet binds", so matching "/bind/"
+    // across the whole document flagged descriptive copy, not a mutation control.
+    const projectSection = [...container.querySelectorAll(".module-admin__section")]
+      .find((section) => section.querySelector("h3")?.textContent === "Project bindings");
+    expect(projectSection).toBeDefined();
+    expect([...projectSection!.querySelectorAll("button")].some((button) => /bind|revoke|manage/i.test(button.textContent ?? ""))).toBe(false);
   });
 });

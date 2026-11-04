@@ -19,8 +19,13 @@ from prodavan.infrastructure.persistence.rls.policies import (
     CABINET_SETTING,
     CANONICAL_TABLE_POLICIES,
     EXCLUDED_TABLES,
+    POLICY_NAME_MAX_LENGTH,
     PROJECT_SETTING,
+    TENANT_POLICY_COMPACT_SUFFIX,
+    TENANT_POLICY_SUFFIX,
     TENANT_SETTING,
+    TRUSTED_POLICY_COMPACT_SUFFIX,
+    TRUSTED_POLICY_SUFFIX,
     TRUSTED_SERVICE_ROLE,
     TRUSTED_SERVICE_SETTING,
     TablePolicySpec,
@@ -103,6 +108,14 @@ WAVE_TABLES = {
         "m06_partition_cutover_evidence",
         "m06_partition_cutover_source_tail",
     ),
+    # MIG-EQ-ANCHORS-01 (2026110319): the two equipment association tables.  They
+    # are the first canonical tables whose owner revision is *later* than the
+    # registry rename in 2026110318, which is why they are listed here rather than
+    # folded into the 2026110305 group.
+    "2026110319": (
+        "equipment_v2_candidate_group_offers",
+        "equipment_v2_tender_candidate_groups",
+    ),
 }
 
 REVISION_PATH = (
@@ -149,11 +162,38 @@ def test_each_owner_revision_owns_exactly_its_declared_tables() -> None:
 
 
 def test_policy_names_are_unique_per_table_and_per_registry() -> None:
+    """Names follow the deterministic full-or-compact spelling rule.
+
+    The previous version asserted the fully spelled suffix for *every* table
+    (``<table>_trusted_service_access``).  That expectation was wrong, not merely
+    out of date: PostgreSQL stores at most 63 bytes of an identifier, so for
+    ``m04e_definition_version_promotion_evidence`` the 65-character name was
+    silently installed as ``..._trusted_service_acce`` and no comparison against
+    the catalog could ever match (task ``MIG-RLS-LIVE-01``).  The registry now
+    picks the compact suffix for exactly those tables, by length alone, so the
+    declaration equals what the server stores.  The rule is still pinned here -
+    full whenever it fits, compact only when it cannot - so a per-table exception
+    cannot creep in.
+    """
+
     names = [name for spec in CANONICAL_TABLE_POLICIES for name in spec.policy_names]
     assert len(names) == len(set(names))
     for spec in CANONICAL_TABLE_POLICIES:
-        assert spec.tenant_policy == f"{spec.table}_tenant_isolation"
-        assert spec.trusted_policy == f"{spec.table}_trusted_service_access"
+        full_tenant = f"{spec.table}_{TENANT_POLICY_SUFFIX}"
+        full_trusted = f"{spec.table}_{TRUSTED_POLICY_SUFFIX}"
+        assert spec.tenant_policy in (full_tenant, f"{spec.table}_{TENANT_POLICY_COMPACT_SUFFIX}")
+        assert spec.trusted_policy in (
+            full_trusted,
+            f"{spec.table}_{TRUSTED_POLICY_COMPACT_SUFFIX}",
+        )
+        # The compact form is chosen if and only if the full one overflows.
+        assert (spec.tenant_policy == full_tenant) == (len(full_tenant) <= POLICY_NAME_MAX_LENGTH)
+        assert (spec.trusted_policy == full_trusted) == (
+            len(full_trusted) <= POLICY_NAME_MAX_LENGTH
+        )
+        # ... and never at the cost of the identifier limit.
+        assert len(spec.tenant_policy) <= POLICY_NAME_MAX_LENGTH
+        assert len(spec.trusted_policy) <= POLICY_NAME_MAX_LENGTH
 
 
 def test_exactly_one_tenant_policy_and_one_trusted_policy_per_table() -> None:

@@ -77,6 +77,21 @@ class Catalogue:
     role_readback: str = "true"
 
 
+class _Transaction:
+    """``session.begin()`` as a real session exposes it: an *async context manager*.
+
+    It is deliberately not a coroutine: SQLAlchemy's ``AsyncSession.begin()`` returns an
+    object supporting ``async with``, and a double that returned a coroutine would refuse
+    exactly the call shape the production code uses.
+    """
+
+    async def __aenter__(self) -> _Transaction:
+        return self
+
+    async def __aexit__(self, *_exc: object) -> bool:
+        return False
+
+
 class FakeSession:
     """Answers the four SELECTs of the port from a :class:`Catalogue`."""
 
@@ -84,6 +99,7 @@ class FakeSession:
         self._catalogue = catalogue
         self.statements: list[str] = []
         self.context: dict[str, Any] | None = None
+        self.transactions = 0
 
     async def execute(self, statement: Any, parameters: Mapping[str, Any] | None = None):
         sql = str(statement)
@@ -111,8 +127,9 @@ class FakeSession:
             return _Result(self._catalogue.content_blobs)
         raise AssertionError(f"unexpected statement: {sql[:80]}")
 
-    async def begin(self) -> FakeSession:
-        return self
+    def begin(self) -> _Transaction:
+        self.transactions += 1
+        return _Transaction()
 
     async def __aenter__(self) -> FakeSession:
         return self
@@ -195,14 +212,18 @@ class AsyncByteStore(FakeByteStore):
         return FakeByteStore.head(self, key)
 
 
+@dataclass
 class CollapsingByteStore(FakeByteStore):
     """An S3-shaped store: every failure, including a real one, is ``FileNotFoundError``.
 
     ``infrastructure/files/minio_store.py`` raises ``FileNotFoundError(key)`` for *any*
-    boto exception, so on that backend a miss cannot be told from an outage.
+    boto exception, so on that backend a miss cannot be told from an outage.  This class is
+    itself a ``@dataclass`` on purpose: a bare annotation in a non-dataclass subclass is
+    inert, ``FakeByteStore.__init__`` would keep writing ``local``, and the double would
+    quietly stop modelling the backend this test exists for.
     """
 
-    backend_name = "s3"
+    backend_name: str = "s3"
 
     def get_bytes(self, key: str) -> bytes:
         self.reads.append(key)

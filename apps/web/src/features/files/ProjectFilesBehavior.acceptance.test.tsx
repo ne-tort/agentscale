@@ -271,11 +271,16 @@ describe("Project Pod files URL and recovery behavior", () => {
     await act(async () => cancel?.click());
     expect(editor?.value).toBe("unsaved");
 
-    await act(async () => back?.click());
+    // A second browser-back is not reachable: the blocked back attempt is undone
+    // with `replace`, so the history has no earlier entry left to pop. Retrigger
+    // the guard the way a user would — navigate to another project in-app.
+    const switchProject = [...container.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "Switch project");
+    await act(async () => switchProject?.click());
     await waitFor(() => container.textContent?.includes("Discard unsaved changes?") ?? false);
+    expect(container.querySelector("[data-testid='location']")?.textContent).toBe("/projects/project-1/files?selected=notes.txt");
     const discard = [...container.querySelectorAll<HTMLButtonElement>(".files-modal button")].find((button) => button.textContent === "Discard changes");
     await act(async () => discard?.click());
-    await waitFor(() => container.querySelector("[data-testid='location']")?.textContent === "/projects/project-1/files");
+    await waitFor(() => container.querySelector("[data-testid='location']")?.textContent === "/projects/project-2/files");
     expect(container.querySelector(".files-modal")).toBeNull();
   });
 

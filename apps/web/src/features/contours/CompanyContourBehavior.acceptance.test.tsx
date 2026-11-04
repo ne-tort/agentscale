@@ -260,7 +260,11 @@ describe("company employee lifecycle acceptance", () => {
     await setInput(inputFor(container, "Contact email"), "new@example.test");
     await setInput(inputFor(container, "New password"), "another-secret");
     await clickButton(container, "Save employee");
-    await waitFor(() => container.querySelector("[role=alert]")?.textContent?.includes("Password rejected") ?? false);
+    // The fixture's 422 echoes the submitted password inside `detail` — the exact
+    // shape a careless backend produces. Production must therefore surface a
+    // failure *and* drop the message: expecting the echoed detail here asserted
+    // the opposite of the redaction this test also verifies.
+    await waitFor(() => container.querySelector("[role=alert]")?.textContent?.includes("Employee operation failed.") ?? false);
     expect(container.textContent).not.toContain("another-secret");
     expect(inputFor(container, "New password").value).toBe("");
     await setInput(inputFor(container, "New password"), "another-secret");

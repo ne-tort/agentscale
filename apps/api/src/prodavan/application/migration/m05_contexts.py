@@ -362,7 +362,7 @@ def build_m05_runtime_context(
     subject_id: str | None,
     session_id: str | None,
     correlation_id: str | None,
-    authenticated: bool | None = True,
+    authenticated: bool | None = None,
 ) -> M05ContextBuild:
     """Assemble the run's ``TrustedRuntimeContext`` from **server-resolved** values.
 
@@ -1089,7 +1089,10 @@ class M05ContextInputs:
     subject_id: str | None = None
     session_id: str | None = None
     correlation_id: str | None = None
-    authenticated: bool | None = True
+    #: ``None`` is *absence* like every other field: an omitted flag is not an authenticated
+    #: run, so a host that forgets it gets ``m05_runtime_context_not_authenticated`` instead
+    #: of an implicit ``True``.
+    authenticated: bool | None = None
     session_factory: "SessionFactory | None" = None
     m04_scope_row: object | None = None
     m04e_export: M05EvidenceExport | None = None
@@ -1184,22 +1187,35 @@ def build_partition_m05_contexts(
     if sessions.value is not None:
         built.append("m05_identity_sessions")
 
+    scope_gate = build_m04_scope_gate(
+        tenant_id=key.tenant_id,
+        app_definition_id=key.app_definition_id,
+        row=resolved.m04_scope_row,
+    )
     upstream = build_m05_upstream_evidence(
         tenant_id=key.tenant_id,
         app_definition_id=key.app_definition_id,
-        m04_scope=build_m04_scope_gate(
-            tenant_id=key.tenant_id,
-            app_definition_id=key.app_definition_id,
-            row=resolved.m04_scope_row,
-        ).value,
+        m04_scope=scope_gate.value,  # type: ignore[arg-type]
         m04e_export=resolved.m04e_export,
         m05_runtime=resolved.m05_runtime,
         review=resolved.review,
         counts=resolved.instance_counts,
     )
-    # The M04-scope part of the bundle is reported once, by build_m05_upstream_evidence
-    # (it names the same code), so only its blockers are merged here.
-    blockers.extend(upstream.blockers)
+    blockers.extend(scope_gate.blockers)
+    # ``build_m05_upstream_evidence`` names an absent M04 gate as
+    # ``m05_upstream_evidence_m04_scope_missing``.  When this builder already knows *why* the
+    # gate is absent (no stored row, a blocked row, a foreign partition, a malformed digest),
+    # that specific code is the useful one and the generic one is dropped -- one cause, one
+    # entry, and never a report that says "a gate is missing" without saying which evidence
+    # is missing.
+    blockers.extend(
+        blocker
+        for blocker in upstream.blockers
+        if not (
+            scope_gate.blockers
+            and blocker.code == M05_UPSTREAM_EVIDENCE_M04_SCOPE_MISSING
+        )
+    )
     if upstream.value is not None:
         built.append("m05_upstream_evidence")
 
