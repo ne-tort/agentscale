@@ -1,7 +1,6 @@
-"""Acceptance doubles for the two tenant-context ports; authored, never executed.
+"""Acceptance doubles for the two tenant-context ports, exercised by the test run.
 
-The verification freeze forbids running anything, so these helpers exist to make every
-acceptance case *provable by reading*:
+These helpers make every acceptance case provable and runnable:
 
 * :class:`FakePostgres` reproduces exactly the PostgreSQL behaviour the adapters depend
   on: transaction-local GUCs, ``current_setting(name, true)`` returning ``NULL`` when

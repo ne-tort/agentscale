@@ -823,6 +823,10 @@ async def test_evidence_store_refuses_every_unrepresentable_operation() -> None:
     # previous case-sensitive lowercase literal failed on emphasis alone, not on the
     # finding it is meant to pin.
     assert "accepted" in accepted_page.value.refusal.detail.lower()
+    # …and name the constraint that makes it impossible, so a future DDL that widens
+    # ck_m04e_promotion_outcome is a visible change to this refusal rather than an
+    # unnoticed one.
+    assert "ck_m04e_promotion_outcome" in accepted_page.value.refusal.detail
     # No write was attempted: the refusal is a boundary, not a partial commit.
     assert fake.statements == []
 

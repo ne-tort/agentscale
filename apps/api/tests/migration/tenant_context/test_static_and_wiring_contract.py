@@ -1,7 +1,7 @@
 """Static and structural acceptance for the tenant-context port implementations.
 
-Nothing is executed by the migration verification freeze; these tests are meant to be
-run later and to fail if any of the following invariants is broken:
+These checks are executed in the normal test run and fail if any of the following
+invariants is broken:
 
 * every statement that writes a GUC is textually ``set_config(..., true)`` — there is no
   bare ``SET``, no ``SET LOCAL`` and no interpolated value anywhere in the module;
@@ -83,8 +83,148 @@ def _parameter_kinds(callable_object: object) -> tuple[object, ...]:
 
 
 # ---------------------------------------------------------------------------
-# "No SET without LOCAL" — static text proof
+# "No SET without LOCAL" — static proof over the statements the module *executes*
+#
+# The scan must never read the raw file text.  This module legitimately contains the
+# fragment ``set_config('`` outside of any statement: the docstrings, and the f-string in
+# ``_raise_if_settings_drifted`` that checks a literal SQL string for a setting name.  A
+# text scan counts those as statements and reports the module's own guard as a violation,
+# which is why the previous version failed.  The check instead parses the module, visits
+# only the expressions that are handed to a statement-executing call, resolves each to the
+# literals it can evaluate to, and treats an expression it cannot resolve (an f-string or a
+# ``%`` format) as a violation in its own right.
 # ---------------------------------------------------------------------------
+
+#: Functions that hand a statement to the driver.  Every SQL literal of this module reaches
+#: PostgreSQL through one of them, so their call sites — not every string in the file — are
+#: the authoritative thing to inspect.
+EXECUTOR_FUNCTIONS = ("_one", "_maybe_one")
+#: The session method that finally executes a statement (used by the executors themselves).
+EXECUTOR_METHODS = ("execute",)
+#: A session-level assignment of a tenant GUC; the statement must never be emitted.
+_BARE_SET = re.compile(r"\bSET\s+(?:LOCAL\s+)?app\.", re.IGNORECASE)
+
+
+def _assigned_expressions(statements: list[ast.stmt]) -> dict[str, list[ast.AST]]:
+    """``name -> every expression assigned to it`` for the given statements."""
+
+    bindings: dict[str, list[ast.AST]] = {}
+    for statement in statements:
+        for node in ast.walk(statement):
+            if isinstance(node, ast.Assign):
+                targets: list[ast.expr] = list(node.targets)
+                value: ast.expr = node.value
+            elif isinstance(node, ast.AnnAssign) and node.value is not None:
+                targets = [node.target]
+                value = node.value
+            else:
+                continue
+            for target in targets:
+                if isinstance(target, ast.Name):
+                    bindings.setdefault(target.id, []).append(value)
+    return bindings
+
+
+def _module_bindings(tree: ast.Module) -> dict[str, list[ast.AST]]:
+    """Bindings of the module body only (a function local is not a module constant)."""
+
+    bindings: dict[str, list[ast.AST]] = {}
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    bindings.setdefault(target.id, []).append(node.value)
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            if isinstance(node.target, ast.Name):
+                bindings.setdefault(node.target.id, []).append(node.value)
+    return bindings
+
+
+def _resolved_statements(
+    node: ast.AST,
+    bindings: dict[str, list[ast.AST]],
+    seen: frozenset[str] = frozenset(),
+) -> tuple[list[str], bool]:
+    """Resolve a statement expression to the literals it can be; ``True`` = built at runtime."""
+
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return [node.value], False
+    if isinstance(node, (ast.JoinedStr, ast.BinOp)):
+        # An f-string or a ``%``-format: the executed text is not statically known, so the
+        # statement cannot be proven transaction-local by reading the source.
+        return [], True
+    if isinstance(node, ast.IfExp):
+        body, body_dynamic = _resolved_statements(node.body, bindings, seen)
+        other, other_dynamic = _resolved_statements(node.orelse, bindings, seen)
+        return body + other, body_dynamic or other_dynamic
+    if isinstance(node, ast.Name):
+        candidates = bindings.get(node.id)
+        if not candidates or node.id in seen:
+            return [], True
+        values: list[str] = []
+        dynamic = False
+        for candidate in candidates:
+            resolved, candidate_dynamic = _resolved_statements(
+                candidate, bindings, seen | {node.id}
+            )
+            values.extend(resolved)
+            dynamic = dynamic or candidate_dynamic
+        return values, dynamic
+    return [], True
+
+
+def _call_name(node: ast.Call) -> str | None:
+    if isinstance(node.func, ast.Name):
+        return node.func.id
+    return getattr(node.func, "attr", None)
+
+
+def _executed_statements(tree: ast.Module) -> tuple[list[str], list[ast.AST]]:
+    """Every statement the module hands to an executor, as literals, plus dynamic ones."""
+
+    module_bindings = _module_bindings(tree)
+    values: list[str] = []
+    dynamic: list[ast.AST] = []
+    for function in tree.body:
+        if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        if function.name in EXECUTOR_FUNCTIONS:
+            # These *are* the executors: their ``statement`` argument is a parameter whose
+            # value comes from the call sites inspected here, so their own body carries no
+            # statement literal to resolve.
+            continue
+        bindings = {**module_bindings, **_assigned_expressions(function.body)}
+        for node in ast.walk(function):
+            if not isinstance(node, ast.Call):
+                continue
+            name = _call_name(node)
+            if name in EXECUTOR_FUNCTIONS:
+                index = 1  # (session, statement, parameters)
+            elif name in EXECUTOR_METHODS:
+                index = 0  # session.execute(statement, parameters)
+            else:
+                continue
+            if len(node.args) <= index:
+                continue
+            resolved, is_dynamic = _resolved_statements(node.args[index], bindings)
+            values.extend(resolved)
+            if is_dynamic:
+                dynamic.append(node.args[index])
+    return values, dynamic
+
+
+def _transaction_local_violations(
+    statements: list[str], dynamic: list[ast.AST]
+) -> list[str]:
+    """Everything that could let a setting outlive its transaction, in one place."""
+
+    problems = [f"statement built at runtime: {ast.dump(node)}" for node in dynamic]
+    for value in statements:
+        if value.strip().upper().startswith("SET ") or _BARE_SET.search(value):
+            problems.append(f"session-level SET: {value}")
+        if "set_config('" in value and value.count("set_config('") != value.count(", true)"):
+            problems.append(f"set_config is not transaction-local: {value}")
+    return problems
 
 
 def test_no_bare_set_and_no_set_local_in_any_statement() -> None:
@@ -94,23 +234,60 @@ def test_no_bare_set_and_no_set_local_in_any_statement() -> None:
 
 
 def test_every_guc_write_is_transaction_local() -> None:
-    # ``set_config('`` selects the statement literals (a docstring or the guard's own
-    # fragment ``set_config(`` does not carry a quoted setting name).
-    writes = [value for value in _string_constants() if "set_config('" in value]
-    assert writes, "the module must contain the statements that write the settings"
-    for value in writes:
-        assert value.count("set_config('") == value.count(", true)"), value
+    statements, dynamic = _executed_statements(MODULE_TREE)
+
+    assert statements, "the module must hand literal SQL statements to the driver"
+    writes = [value for value in statements if "set_config('" in value]
+    assert writes, "the module must execute the statements that write the settings"
+    assert _transaction_local_violations(statements, dynamic) == []
+
+    # Stronger than counting occurrences: the import-time guard inspects exactly
+    # ``_WRITE_STATEMENTS``, so an executed write that is missing from that tuple would be
+    # emitted without ever passing the guard.  Every executed write must be covered.
+    assert set(writes) == set(module._WRITE_STATEMENTS)
 
 
 def test_no_guc_write_is_built_by_interpolation() -> None:
-    for node in ast.walk(MODULE_TREE):
-        if isinstance(node, ast.JoinedStr):
-            literal = "".join(
-                str(part.value) for part in node.values if isinstance(part, ast.Constant)
+    statements, dynamic = _executed_statements(MODULE_TREE)
+    assert statements, "the scan must find the executed statements, not an empty set"
+    assert dynamic == [], [ast.dump(node) for node in dynamic]
+
+
+def test_the_scan_really_catches_a_violation() -> None:
+    """The scan is not vacuous: a module that breaks the invariant is reported.
+
+    All three detectors are exercised against a synthetic module that does reach the
+    driver with a session-level ``SET``, a non-local ``set_config`` and an interpolated
+    statement.  Without this the scan could be green simply because it found nothing.
+    """
+
+    violating = ast.parse(
+        "\n".join(
+            (
+                "from sqlalchemy import text",
+                "",
+                '_NON_LOCAL_SQL = "SELECT set_config(\'app.tenant_id\', :tenant_id, false)"',
+                '_BARE_SET_SQL = "SET app.tenant_id = \'comp_aaaaaaaaaaaaaaaaaaaa\'"',
+                "",
+                "async def _apply(session, value):",
+                "    await _one(session, _NON_LOCAL_SQL)",
+                "    await _one(session, _BARE_SET_SQL)",
+                (
+                    "    await session.execute("
+                    "text(f\"SELECT set_config('app.role', '{value}', true)\"))"
+                ),
             )
-            assert "set_config" not in literal
-        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Mod):
-            assert "set_config" not in ast.dump(node)
+        )
+    )
+
+    statements, dynamic = _executed_statements(violating)
+    problems = _transaction_local_violations(statements, dynamic)
+
+    assert any("session-level SET" in problem for problem in problems), problems
+    assert any("not transaction-local" in problem for problem in problems), problems
+    assert any("built at runtime" in problem for problem in problems), problems
+    # The literals themselves are reached through the executor call sites.
+    assert any(statement.startswith("SELECT set_config(") for statement in statements)
 
 
 def test_transaction_local_guard_runs_at_import_time() -> None:

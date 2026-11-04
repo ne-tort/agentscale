@@ -1,4 +1,4 @@
-"""Acceptance for the M04 ``TenantScopeContextPort`` implementation; authored, not run.
+"""Acceptance for the M04 ``TenantScopeContextPort`` implementation.
 
 Each test states one acceptance obligation of the task:
 
@@ -234,12 +234,18 @@ async def test_bind_outside_a_transaction_is_refused_without_sql() -> None:
 @pytest.mark.asyncio
 async def test_non_postgres_dialect_is_refused() -> None:
     session = FakeAsyncSession(FakePostgres(), dialect="sqlite")
-    async with session.begin(), pytest.raises(RlsContextError) as exc_info:
-        await adapter().bind(
-            session=session,
-            context=evidence_context(),
-            mode=TenantScopeMode.TENANT_SCOPED,
-        )
+    # ``pytest.raises`` returns a synchronous context manager, so it cannot be chained into
+    # ``async with session.begin()``: that form raised ``TypeError: 'RaisesExc' object does
+    # not support the asynchronous context manager protocol`` and no refusal was ever
+    # observed.  The expectation stays the same, it is just nested inside the open
+    # transaction now.
+    async with session.begin():
+        with pytest.raises(RlsContextError) as exc_info:
+            await adapter().bind(
+                session=session,
+                context=evidence_context(),
+                mode=TenantScopeMode.TENANT_SCOPED,
+            )
     assert reason(exc_info) == "postgresql_required"
     assert session.pg.statements == []
 
@@ -270,12 +276,13 @@ async def test_session_factory_is_refused_and_never_opened() -> None:
 async def test_missing_tenant_is_refused_before_any_sql() -> None:
     pg = FakePostgres()
     session = FakeAsyncSession(pg)
-    async with session.begin(), pytest.raises(RlsContextError) as exc_info:
-        await adapter().bind(
-            session=session,
-            context=unusable_context(tenant_id=""),
-            mode=TenantScopeMode.TENANT_SCOPED,
-        )
+    async with session.begin():
+        with pytest.raises(RlsContextError) as exc_info:
+            await adapter().bind(
+                session=session,
+                context=unusable_context(tenant_id=""),
+                mode=TenantScopeMode.TENANT_SCOPED,
+            )
     assert reason(exc_info) == "trusted_transaction_context_missing"
     assert pg.statements == []
     assert pg.setting("app.tenant_id") is None
@@ -285,12 +292,13 @@ async def test_missing_tenant_is_refused_before_any_sql() -> None:
 async def test_unusable_context_without_resolved_rls_context_is_refused() -> None:
     pg = FakePostgres()
     session = FakeAsyncSession(pg)
-    async with session.begin(), pytest.raises(RlsContextError) as exc_info:
-        await adapter().bind(
-            session=session,
-            context=unusable_context(),
-            mode=TenantScopeMode.TENANT_SCOPED,
-        )
+    async with session.begin():
+        with pytest.raises(RlsContextError) as exc_info:
+            await adapter().bind(
+                session=session,
+                context=unusable_context(),
+                mode=TenantScopeMode.TENANT_SCOPED,
+            )
     assert reason(exc_info) == "trusted_transaction_context_missing"
     assert pg.statements == []
 
@@ -300,12 +308,13 @@ async def test_missing_resolution_leaves_no_context_behind() -> None:
     pg = FakePostgres()
     session = FakeAsyncSession(pg)
     port = adapter(StubResolver(None))
-    async with session.begin(), pytest.raises(RlsContextError) as exc_info:
-        await port.bind(
-            session=session,
-            context=evidence_context(),
-            mode=TenantScopeMode.TENANT_SCOPED,
-        )
+    async with session.begin():
+        with pytest.raises(RlsContextError) as exc_info:
+            await port.bind(
+                session=session,
+                context=evidence_context(),
+                mode=TenantScopeMode.TENANT_SCOPED,
+            )
     assert reason(exc_info) == "principal_not_server_resolved"
     assert pg.setting("app.tenant_id") is None
 
@@ -322,12 +331,13 @@ async def test_cross_tenant_assertion_is_denied_and_writes_nothing() -> None:
     # The transaction claims tenant B; the server resolved tenant A for this correlation.
     port = adapter(StubResolver(build_principal(tenant_id=TENANT_A)))
 
-    async with session.begin(), pytest.raises(RlsContextError) as exc_info:
-        await port.bind(
-            session=session,
-            context=evidence_context(tenant_id=TENANT_B, cabinet_id=CABINET_B),
-            mode=TenantScopeMode.TENANT_SCOPED,
-        )
+    async with session.begin():
+        with pytest.raises(RlsContextError) as exc_info:
+            await port.bind(
+                session=session,
+                context=evidence_context(tenant_id=TENANT_B, cabinet_id=CABINET_B),
+                mode=TenantScopeMode.TENANT_SCOPED,
+            )
     assert reason(exc_info) == "cross_tenant_context"
     assert pg.statements == []
 
@@ -338,12 +348,13 @@ async def test_cross_cabinet_assertion_is_denied() -> None:
     session = FakeAsyncSession(pg)
     port = adapter(StubResolver(build_principal(cabinet_id=CABINET_A)))
 
-    async with session.begin(), pytest.raises(RlsContextError) as exc_info:
-        await port.bind(
-            session=session,
-            context=evidence_context(cabinet_id=CABINET_B),
-            mode=TenantScopeMode.TENANT_SCOPED,
-        )
+    async with session.begin():
+        with pytest.raises(RlsContextError) as exc_info:
+            await port.bind(
+                session=session,
+                context=evidence_context(cabinet_id=CABINET_B),
+                mode=TenantScopeMode.TENANT_SCOPED,
+            )
     assert reason(exc_info) == "cross_tenant_context"
     assert pg.statements == []
 
@@ -354,20 +365,22 @@ async def test_subject_and_role_assertions_must_match_the_principal() -> None:
     session = FakeAsyncSession(pg)
     port = adapter(StubResolver(build_principal(subject_id=SUBJECT_A)))
 
-    async with session.begin(), pytest.raises(RlsContextError) as exc_info:
-        await port.bind(
-            session=session,
-            context=evidence_context(subject_id="emp_bbbbbbbbbbbbbbbbbbbb"),
-            mode=TenantScopeMode.TENANT_SCOPED,
-        )
+    async with session.begin():
+        with pytest.raises(RlsContextError) as exc_info:
+            await port.bind(
+                session=session,
+                context=evidence_context(subject_id="emp_bbbbbbbbbbbbbbbbbbbb"),
+                mode=TenantScopeMode.TENANT_SCOPED,
+            )
     assert reason(exc_info) == "subject_context_mismatch"
 
-    async with session.begin(), pytest.raises(RlsContextError) as exc_info:
-        await port.bind(
-            session=session,
-            context=evidence_context(role="platform_admin"),
-            mode=TenantScopeMode.TENANT_SCOPED,
-        )
+    async with session.begin():
+        with pytest.raises(RlsContextError) as exc_info:
+            await port.bind(
+                session=session,
+                context=evidence_context(role="platform_admin"),
+                mode=TenantScopeMode.TENANT_SCOPED,
+            )
     assert reason(exc_info) == "subject_context_mismatch"
     assert pg.statements == []
 
@@ -378,12 +391,13 @@ async def test_resolver_must_return_the_sealed_principal() -> None:
     session = FakeAsyncSession(pg)
     port = adapter(StubResolver({"tenant_id": TENANT_A}))
 
-    async with session.begin(), pytest.raises(RlsContextError) as exc_info:
-        await port.bind(
-            session=session,
-            context=evidence_context(),
-            mode=TenantScopeMode.TENANT_SCOPED,
-        )
+    async with session.begin():
+        with pytest.raises(RlsContextError) as exc_info:
+            await port.bind(
+                session=session,
+                context=evidence_context(),
+                mode=TenantScopeMode.TENANT_SCOPED,
+            )
     assert reason(exc_info) == "principal_not_server_resolved"
     assert pg.statements == []
 
@@ -394,12 +408,13 @@ async def test_principal_for_another_correlation_is_refused() -> None:
     session = FakeAsyncSession(pg)
     port = adapter(StubResolver(build_principal(correlation_id=CORRELATION_OTHER)))
 
-    async with session.begin(), pytest.raises(RlsContextError) as exc_info:
-        await port.bind(
-            session=session,
-            context=evidence_context(),
-            mode=TenantScopeMode.TENANT_SCOPED,
-        )
+    async with session.begin():
+        with pytest.raises(RlsContextError) as exc_info:
+            await port.bind(
+                session=session,
+                context=evidence_context(),
+                mode=TenantScopeMode.TENANT_SCOPED,
+            )
     assert reason(exc_info) == "principal_not_server_resolved"
     assert pg.statements == []
 
@@ -410,12 +425,13 @@ async def test_expired_principal_is_refused_every_time() -> None:
     session = FakeAsyncSession(pg)
     port = adapter(StubResolver(expired_principal()))
 
-    async with session.begin(), pytest.raises(RlsContextError) as exc_info:
-        await port.bind(
-            session=session,
-            context=evidence_context(),
-            mode=TenantScopeMode.TENANT_SCOPED,
-        )
+    async with session.begin():
+        with pytest.raises(RlsContextError) as exc_info:
+            await port.bind(
+                session=session,
+                context=evidence_context(),
+                mode=TenantScopeMode.TENANT_SCOPED,
+            )
     assert reason(exc_info) == "tenant_context_expired"
     assert pg.statements == []
 
@@ -454,12 +470,13 @@ async def test_readback_mismatch_aborts_before_yielding_evidence() -> None:
     pg = FakePostgres()
     pg.ignore_apply = True
     session = FakeAsyncSession(pg)
-    async with session.begin(), pytest.raises(RlsContextError) as exc_info:
-        await adapter().bind(
-            session=session,
-            context=evidence_context(),
-            mode=TenantScopeMode.TENANT_SCOPED,
-        )
+    async with session.begin():
+        with pytest.raises(RlsContextError) as exc_info:
+            await adapter().bind(
+                session=session,
+                context=evidence_context(),
+                mode=TenantScopeMode.TENANT_SCOPED,
+            )
     assert reason(exc_info) == "context_readback_mismatch"
 
 
@@ -468,12 +485,13 @@ async def test_corrupted_application_is_detected_by_readback() -> None:
     pg = FakePostgres()
     pg.corrupt_on_call = 1
     session = FakeAsyncSession(pg)
-    async with session.begin(), pytest.raises(RlsContextError) as exc_info:
-        await adapter().bind(
-            session=session,
-            context=evidence_context(),
-            mode=TenantScopeMode.TENANT_SCOPED,
-        )
+    async with session.begin():
+        with pytest.raises(RlsContextError) as exc_info:
+            await adapter().bind(
+                session=session,
+                context=evidence_context(),
+                mode=TenantScopeMode.TENANT_SCOPED,
+            )
     assert reason(exc_info) == "context_readback_mismatch"
 
 
@@ -482,12 +500,13 @@ async def test_bypassrls_and_superuser_roles_are_refused() -> None:
     for kwargs in ({"role": "prodavan_platform", "bypass_rls": True}, {"role": "postgres", "superuser": True}):
         pg = FakePostgres(**kwargs)
         session = FakeAsyncSession(pg)
-        async with session.begin(), pytest.raises(RlsContextError) as exc_info:
-            await adapter().bind(
-                session=session,
-                context=evidence_context(),
-                mode=TenantScopeMode.TENANT_SCOPED,
-            )
+        async with session.begin():
+            with pytest.raises(RlsContextError) as exc_info:
+                await adapter().bind(
+                    session=session,
+                    context=evidence_context(),
+                    mode=TenantScopeMode.TENANT_SCOPED,
+                )
         assert reason(exc_info) == "database_role_bypasses_rls"
         assert pg.statements_with("set_config(") == []
 
@@ -496,12 +515,13 @@ async def test_bypassrls_and_superuser_roles_are_refused() -> None:
 async def test_row_security_off_is_refused() -> None:
     pg = FakePostgres(row_security="off")
     session = FakeAsyncSession(pg)
-    async with session.begin(), pytest.raises(RlsContextError) as exc_info:
-        await adapter().bind(
-            session=session,
-            context=evidence_context(),
-            mode=TenantScopeMode.TENANT_SCOPED,
-        )
+    async with session.begin():
+        with pytest.raises(RlsContextError) as exc_info:
+            await adapter().bind(
+                session=session,
+                context=evidence_context(),
+                mode=TenantScopeMode.TENANT_SCOPED,
+            )
     assert reason(exc_info) == "row_security_disabled"
 
 
@@ -603,12 +623,13 @@ async def test_trusted_mode_requires_the_service_role() -> None:
     pg = FakePostgres(role="prodavan_app")
     session = FakeAsyncSession(pg)
 
-    async with session.begin(), pytest.raises(RlsContextError) as exc_info:
-        await adapter().bind(
-            session=session,
-            context=evidence_context(),
-            mode=TenantScopeMode.MIGRATION_TRUSTED,
-        )
+    async with session.begin():
+        with pytest.raises(RlsContextError) as exc_info:
+            await adapter().bind(
+                session=session,
+                context=evidence_context(),
+                mode=TenantScopeMode.MIGRATION_TRUSTED,
+            )
     assert reason(exc_info) == "trusted_service_role_mismatch"
     assert pg.statements_with("set_config(") == []
 
@@ -643,15 +664,16 @@ async def test_trusted_mode_requires_the_reviewed_trusted_policy() -> None:
     session = FakeAsyncSession(pg)
     principal = build_principal(resolution_source="migration_operator", role="migration_role")
 
-    async with session.begin(), pytest.raises(RlsContextError) as exc_info:
-        await RlsTenantScopeContextAdapter(
-            principal_resolver=StubResolver(principal),
-            relations=("m04e_dynamic_app_versions",),
-        ).bind(
-            session=session,
-            context=evidence_context(role="migration_role"),
-            mode=TenantScopeMode.MIGRATION_TRUSTED,
-        )
+    async with session.begin():
+        with pytest.raises(RlsContextError) as exc_info:
+            await RlsTenantScopeContextAdapter(
+                principal_resolver=StubResolver(principal),
+                relations=("m04e_dynamic_app_versions",),
+            ).bind(
+                session=session,
+                context=evidence_context(role="migration_role"),
+                mode=TenantScopeMode.MIGRATION_TRUSTED,
+            )
     assert reason(exc_info) == "trusted_service_policy_missing"
 
 

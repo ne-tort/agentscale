@@ -336,6 +336,14 @@ _WRITE_STATEMENTS: Final[tuple[str, ...]] = (
 #: the trusted-service flag it deliberately keeps separate).
 _SETTINGS: Final[tuple[str, ...]] = (*TENANT_GUCS, TRUSTED_SERVICE_SETTING)
 
+#: GUC name -> the column alias :data:`_READBACK_SQL` selects it as
+#: (``current_setting('app.tenant_id', true) AS tenant_id``).  The GUC name is *not* a usable
+#: readback key: reading the row by GUC name yields ``None`` for every setting, which turned
+#: the "capture the previous values" step into "capture six blanks" and made ``clear`` /
+#: ``narrow`` overwrite the caller's live context with empty values instead of restoring it.
+#: The restore statement's placeholders are those same aliases, so one map serves both.
+_READBACK_KEY: Final[dict[str, str]] = {name: name.removeprefix("app.") for name in _SETTINGS}
+
 
 def _raise_if_not_transaction_local() -> None:
     """Static guard: no session-level ``SET`` may ever be emitted from this module."""
@@ -512,7 +520,13 @@ def _parameters(principal: TrustedPrincipal, *, include_scope: bool) -> dict[str
 
 
 def _previous_values(readback: Mapping[str, object]) -> dict[str, str]:
-    return {name: str(readback.get(name) or "") for name in _SETTINGS}
+    """Capture the settings live before this context was applied, keyed by GUC name.
+
+    The readback row is keyed by column alias, not by GUC name: :data:`_READBACK_KEY` is
+    what makes the capture observe real values instead of ``None``.
+    """
+
+    return {name: str(readback.get(_READBACK_KEY[name]) or "") for name in _SETTINGS}
 
 
 async def _read_previous(session: object) -> dict[str, str]:
@@ -540,7 +554,7 @@ async def _restore(session: object, previous: Mapping[str, str]) -> None:
     await _one(
         session,
         _RESTORE_SQL,
-        {name.removeprefix("app."): previous.get(name, "") for name in _SETTINGS},
+        {_READBACK_KEY[name]: previous.get(name, "") for name in _SETTINGS},
     )
 
 

@@ -1,4 +1,4 @@
-"""Acceptance for the M05 ``TrustedTenantContextPort`` implementation; authored, not run.
+"""Acceptance for the M05 ``TrustedTenantContextPort`` implementation.
 
 The M05 port differs from M04: it accepts raw identities (tenant/subject/session) plus a
 ``trusted`` flag instead of a server-derived context object.  These tests prove that the
@@ -196,8 +196,12 @@ async def test_session_factory_is_refused() -> None:
 async def test_missing_identities_are_refused(field: str) -> None:
     pg = FakePostgres()
     session = FakeAsyncSession(pg)
-    async with session.begin(), pytest.raises(RlsContextError) as exc_info:
-        await _bind(adapter(), session, **{field: ""})
+    async with session.begin():
+        # ``pytest.raises`` is a *synchronous* context manager: chaining it into
+        # ``async with session.begin(), pytest.raises(...)`` raised TypeError instead of
+        # observing the refusal.  Nested, the refusal is caught with the transaction open.
+        with pytest.raises(RlsContextError) as exc_info:
+            await _bind(adapter(), session, **{field: ""})
     assert reason(exc_info) == "tenant_context_missing"
     assert pg.statements == []
 
@@ -208,8 +212,9 @@ async def test_cross_tenant_identity_is_refused_and_writes_nothing() -> None:
     session = FakeAsyncSession(pg)
     port = adapter(StubResolver(build_principal(tenant_id=TENANT_A)))
 
-    async with session.begin(), pytest.raises(RlsContextError) as exc_info:
-        await _bind(port, session, tenant_id=TENANT_B)
+    async with session.begin():
+        with pytest.raises(RlsContextError) as exc_info:
+            await _bind(port, session, tenant_id=TENANT_B)
     assert reason(exc_info) == "cross_tenant_context"
     assert pg.statements == []
     assert pg.setting("app.tenant_id") is None
@@ -221,8 +226,9 @@ async def test_cross_subject_identity_is_refused() -> None:
     session = FakeAsyncSession(pg)
     port = adapter(StubResolver(build_principal(subject_id=SUBJECT_A)))
 
-    async with session.begin(), pytest.raises(RlsContextError) as exc_info:
-        await _bind(port, session, subject_id="emp_bbbbbbbbbbbbbbbbbbbb")
+    async with session.begin():
+        with pytest.raises(RlsContextError) as exc_info:
+            await _bind(port, session, subject_id="emp_bbbbbbbbbbbbbbbbbbbb")
     assert reason(exc_info) == "subject_context_mismatch"
     assert pg.statements == []
 
@@ -231,8 +237,9 @@ async def test_cross_subject_identity_is_refused() -> None:
 async def test_unresolvable_correlation_is_refused() -> None:
     pg = FakePostgres()
     session = FakeAsyncSession(pg)
-    async with session.begin(), pytest.raises(RlsContextError) as exc_info:
-        await _bind(adapter(StubResolver(None)), session, correlation_id=CORRELATION_OTHER)
+    async with session.begin():
+        with pytest.raises(RlsContextError) as exc_info:
+            await _bind(adapter(StubResolver(None)), session, correlation_id=CORRELATION_OTHER)
     assert reason(exc_info) == "principal_not_server_resolved"
     assert pg.statements == []
 
@@ -241,8 +248,9 @@ async def test_unresolvable_correlation_is_refused() -> None:
 async def test_trusted_flag_must_be_an_explicit_bool() -> None:
     pg = FakePostgres()
     session = FakeAsyncSession(pg)
-    async with session.begin(), pytest.raises(RlsContextError) as exc_info:
-        await _bind(adapter(), session, trusted="yes")  # type: ignore[arg-type]
+    async with session.begin():
+        with pytest.raises(RlsContextError) as exc_info:
+            await _bind(adapter(), session, trusted="yes")  # type: ignore[arg-type]
     assert reason(exc_info) == "tenant_context_invalid"
     assert pg.statements == []
 
@@ -252,8 +260,9 @@ async def test_trusted_capability_requires_the_service_role() -> None:
     pg = FakePostgres(role="prodavan_app")
     session = FakeAsyncSession(pg)
 
-    async with session.begin(), pytest.raises(RlsContextError) as exc_info:
-        await _bind(adapter(), session, trusted=True)
+    async with session.begin():
+        with pytest.raises(RlsContextError) as exc_info:
+            await _bind(adapter(), session, trusted=True)
     assert reason(exc_info) == "trusted_service_role_mismatch"
     assert pg.statements_with("set_config(") == []
 
@@ -277,8 +286,9 @@ async def test_trusted_capability_sets_the_flag_with_the_service_role() -> None:
 async def test_role_bypass_is_refused() -> None:
     pg = FakePostgres(role="prodavan_platform", bypass_rls=True)
     session = FakeAsyncSession(pg)
-    async with session.begin(), pytest.raises(RlsContextError) as exc_info:
-        await _bind(adapter(), session)
+    async with session.begin():
+        with pytest.raises(RlsContextError) as exc_info:
+            await _bind(adapter(), session)
     assert reason(exc_info) == "database_role_bypasses_rls"
     assert pg.statements_with("set_config(") == []
 
