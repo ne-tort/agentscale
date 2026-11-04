@@ -124,15 +124,41 @@ Design invariants worth keeping:
 | Legacy chat ↔ durable run binding | `run_binding` bridges `(project, session, turn_id) -> run_id`; stream frames are now an expressible operation. |
 | Dynamic-module screens ↔ API | Router, application layer and web screens all present and green. |
 
-## Remaining work
+## Remaining work — all five items closed
 
-| Item | Why it matters |
+The table below was the open list. Every row is now delivered and verified against a
+live, fully migrated database, so it is kept as a record rather than a backlog.
+
+| Item | Status |
 |---|---|
-| `TrustedPrincipalResolver` | The auth-boundary lookup the tenant-context adapters require. Without it no stage of M04→M06 is a production binding. |
-| Cutover-state tables | `SqlCutoverRepository` is fail-closed because no table exists for cutover state or the live source tail, and the grant evidence table forbids positive writes by CHECK. |
-| Migration composition root in the lifespan | `composition.py` assembles the chain, but `core/wiring.py` never mentions migration, so the chain is still not reachable from a delivered process. |
-| PostgreSQL concurrency suite | Authored and skips without `PRODAVAN_TEST_DATABASE_URL`; proves `SKIP LOCKED`, aggregate CAS, transaction abort and the deferrable cycle on the real engine. |
-| Equipment tenant anchors | `project_id`/`cabinet_id` and the associative tables, if the domain needs them. |
+| `TrustedPrincipalResolver` | **Done.** `principal_resolver.py` ships `AuthBoundaryPrincipalResolver` over the durable `auth_sessions` table (revision `2026110317`), written from `api/deps.py::get_principal` behind `AUTH_SESSION_STORE_ENABLED`. |
+| Cutover-state tables | **Done.** `2026110316` creates `m06_partition_cutover_evidence` and `m06_partition_cutover_source_tail`, so `SqlCutoverRepository` no longer fails closed on missing tables. It still refuses a *positive* cutover, which is the gate, not a schema gap. |
+| Migration composition root in the lifespan | **Done.** `core/wiring.py` registers `MigrationChainResource`; with `MIGRATION_CHAIN_ENABLED=true` the chain is composed by a delivered process (verified by listing the lifespan resources). |
+| PostgreSQL concurrency suite | **Executed.** `tests/migration/postgres_integration` runs 37 passed / 2 skipped against live PostgreSQL: `SKIP LOCKED`, aggregate CAS, transaction abort and the deferrable cycle. |
+| Equipment tenant anchors | **Done.** `2026110319` adds `project_id`/`cabinet_id` to the three `equipment_v2` operational tables plus the two association tables, re-applies the RLS registry and verifies it in the same transaction; the downgrade restores the pre-anchor predicate instead of leaving the tables unpolicied. |
+
+## Verification baseline (measured, not asserted)
+
+On a database created empty and migrated with `alembic upgrade head` to `2026110319`:
+
+| Suite | Result |
+|---|---|
+| `tests/migration tests/unit` | 6187 passed, 0 failed |
+| `tests/integration` | 191 passed, 1 skipped |
+| `tests/migration/rls` | 510 passed |
+| `tests/migration/postgres_integration` | 37 passed, 2 skipped |
+| `apps/web` vitest | 596 passed, 82 files |
+| `apps/web` tsc / vite build | 0 errors / builds |
+| Playwright smoke | 21 passed, 7 skipped (live layer needs credentials) |
+
+## Still not done, and why it needs a human decision
+
+- **No real backfill or cutover has ever run.** Every promotion record stays `blocked`;
+  `DECISION_OWNER` and `CANONICAL_READ_OWNER` remain `legacy` and
+  `CANONICAL_POSITIVE_WRITES` is `False`. Rows in a test database prove the pipeline
+  works; they do not authorise running it against real tenant data.
+- **Which database** the first rehearsal targets is an operator decision, not an
+  engineering one.
 
 ## Boundary decisions recorded in this session
 
@@ -181,8 +207,9 @@ future reader can tell a missing table from a deliberate trade-off.
 - **No production promotion anywhere.** Every package keeps its promotion record
   `blocked`; canonical positive writes stay disabled until gates, RLS review and an
   explicit decision.
-- **Freeze lifted; unit and migration suites are executed.** What is still *not*
-  executed: `alembic upgrade`/`downgrade` against a live database, and the
-  PostgreSQL concurrency suite in `tests/migration/postgres_integration` (it skips
-  without `PRODAVAN_TEST_DATABASE_URL`). Nothing has been applied to any
-  environment.
+- **Alembic has now been exercised against a live database.** `upgrade head` on an
+  empty database applies all 199 revisions to `2026110319` and the result carries 86
+  policies with no name over 63 characters; `downgrade 2026110318` and re-upgrade were
+  run twice on `equipment_anchors` and once on the RLS rename, both deterministic. The
+  PostgreSQL concurrency suite runs rather than skips. Nothing has been applied to any
+  shared environment.
