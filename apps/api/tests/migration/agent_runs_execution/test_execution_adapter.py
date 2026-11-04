@@ -919,8 +919,9 @@ async def test_a_startable_check_compensates_a_status_the_control_plane_cannot_s
     # the whole fix -- with a hard-coded QUEUED precondition this start would have
     # lost the CAS and the lease would have been compensated instead.
     transition = harness.transaction.transitions[-1]
-    assert transition.expected_status is AgentRunStatus.RETRY_DUE
-    assert transition.target_status is AgentRunStatus.RUNNING
+    # The fake records the rendered status string, so compare by value.
+    assert transition.expected_status == AgentRunStatus.RETRY_DUE.value
+    assert transition.target_status == AgentRunStatus.RUNNING.value
 
 
 async def test_unknown_case_journal_blocker_is_named() -> None:
