@@ -68,11 +68,12 @@ Blockers this adapter does not hide
   leaves the run ``running``: the retry scheduler must requeue it, and that
   requeue is not wired yet.
 * ``agent_run_retry_due_start_transition_unwired`` (:data:`RETRY_DUE_BLOCKER`) —
-  ``retry_due`` is in ``CLAIMABLE_STATUSES`` but the control plane can only
-  validate ``queued`` → ``running`` for ``agent_run.start``, so the adapter
-  narrows its claim predicate to ``queued`` in SQL.  A ``retry_due`` run is
-  therefore not claimed (and does not block the queue) until the retry
-  scheduler's requeue — or a ``retry_due`` start — exists.
+  ``retry_due`` is in ``CLAIMABLE_STATUSES`` but the adapter cannot start it:
+  ``DurableAgentControlPlane.start_run`` CASes from ``queued`` only, even though
+  the transition table also permits ``retry_due -> running``.  The adapter
+  therefore narrows its claim predicate to ``queued`` in SQL.  A ``retry_due``
+  run is therefore not claimed (and does not block the queue) until the retry
+  scheduler's requeue — or a ``retry_due`` start on the service API — exists.
 * ``agent_run_unknown_case_journal_unwired`` — the ambiguous attempt is parked
   without a row in the reconciliation journal (``agent_runs/reconcile.py`` owns
   that table and no revision exists).  Parking still blocks re-execution, and
@@ -130,24 +131,33 @@ ACTOR_BLOCKER = "agent_run_control_plane_actor_unresolved"
 """A run with no resolvable employee actor cannot be written by the control plane."""
 
 RETRY_DUE_BLOCKER = "agent_run_retry_due_start_transition_unwired"
-"""**Resolved.** Historically ``retry_due`` was claimable in policy but not
-startable, because ``RunTransitionCommand`` could only express ``AgentRunStatus``
-members and ``agent_run.start`` accepted only ``queued`` → ``running``.
+"""``retry_due`` is claimable in policy but this adapter cannot start it.
 
-``AgentRunStatus`` now carries ``RETRY_DUE`` and the transition table accepts
-``retry_due -> running`` for start (plus fail/cancel/timeout from it), so the
-adapter claims both statuses. The constant is kept because promotion records and
-readiness documents reference the code, and because the *retry scheduler* that
-moves a run into ``retry_due`` is still a separate slice — the adapter can now
-start such a run but nothing has to produce that state yet.
+The transition *table* accepts ``retry_due -> running`` for ``START``
+(:func:`prodavan.application.agent_control_plane.contracts.validate_run_transition`),
+but the transition *entry point* the adapter uses does not: every start goes
+through :meth:`DurableAgentControlPlane.start_run`, which hard-codes
+``expected_status=AgentRunStatus.QUEUED`` when it builds its
+``RunTransitionCommand``.  A ``retry_due`` row therefore always loses the
+control-plane status CAS: the claim would acquire a lease and then fail its
+start, burning a fence generation per poll and parking the queue head behind a
+run that can never start.
+
+Closing this needs one of two things outside this module: ``start_run`` taking
+the observed source status (``retry_due -> running``), or the retry scheduler's
+``agent_run.requeue`` transition, after which the run is ``queued`` again and
+this narrowing can be dropped together with the constant.
 """
 
-STARTABLE_STATUSES: frozenset[str] = CLAIMABLE_STATUSES
+STARTABLE_STATUSES: frozenset[str] = frozenset({AgentRunStatus.QUEUED.value})
 """Run statuses this adapter can commit a claim (start transition) for.
 
-Equal to the lease policy's ``CLAIMABLE_STATUSES`` on purpose: the narrowing that
-used to exist here was a workaround for a missing transition, and keeping a
-second, narrower set would let the two definitions drift again.
+Deliberately narrower than the lease policy's ``CLAIMABLE_STATUSES``: a status is
+startable only if the control plane can express the start for it.  The lease
+policy says which rows are *eligible* to be claimed; this set says which of them
+this adapter can actually transition, and the SQL claim predicate is narrowed to
+it so an unstartable row neither burns a fence generation nor blocks the queue
+(:data:`RETRY_DUE_BLOCKER`).
 """
 
 DEFAULT_FAILURE_CODE = "agent_run.provider_failed"

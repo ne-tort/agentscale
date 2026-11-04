@@ -105,6 +105,13 @@ async def store():
         )
     factory = async_sessionmaker(engine, expire_on_commit=False)
     async with factory() as session, session.begin():
+        # Insert parents before children, level by level, with an explicit flush
+        # between levels.  These models declare foreign keys but no ORM
+        # relationships, so the unit of work has no dependency edge between the
+        # mappers and would emit the INSERTs in an arbitrary order (it picked
+        # ``agent_sessions`` before ``projects``, which SQLite rejects — its
+        # foreign keys are immediate, not deferrable).  PostgreSQL would reject
+        # the same order, so this is fixture ordering, not a schema property.
         session.add_all(
             [
                 CompanyRow(
@@ -125,14 +132,17 @@ async def store():
                     schema_name="control_plane_test",
                     status="active",
                 ),
-                CabinetEmployeeAssignmentRow(
-                    id="cabinet-assignment-acp",
-                    cabinet_id="cabinet-acp",
-                    employee_id=ACTOR,
-                    role="operator",
-                    status="active",
-                ),
             ]
+        )
+        await session.flush()
+        session.add(
+            CabinetEmployeeAssignmentRow(
+                id="cabinet-assignment-acp",
+                cabinet_id="cabinet-acp",
+                employee_id=ACTOR,
+                role="operator",
+                status="active",
+            )
         )
         session.add(
             ProjectRow(
@@ -147,6 +157,7 @@ async def store():
                 container_ref="control-plane-test",
             )
         )
+        await session.flush()
         session.add(MembershipRow(id="membership-acp", company_id=TENANT, employee_id=ACTOR, role="operator"))
         session.add(
             AgentSessionRow(
@@ -158,6 +169,7 @@ async def store():
                 cwd="/workspace",
             )
         )
+        await session.flush()
     yield SqlAlchemyAgentControlPlaneRepository(session_factory=factory), factory, engine
     await engine.dispose()
 
