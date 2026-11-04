@@ -1577,6 +1577,24 @@ class SqlM04ECandidateProof(_SessionReads):
             same_definition_digest: str | None = None
             artifact_immutability_digest: str | None = None
             if version is not None:
+                manifest = dict(version.get("manifest") or {})
+                # The legacy schema only constrains manifest *presence*, so the
+                # manifest's own identity must be compared with the row before a
+                # same-definition proof can exist. ``_valid_candidate_proof`` also
+                # compares ``proof.app_id`` with the manifest's ``appId``, so a
+                # mismatch here would produce a proof the contract rejects; refuse
+                # by name instead.
+                if (
+                    manifest.get("appId") != str(definition["app_id"])
+                    or manifest.get("version") != str(version["manifest_version"])
+                ):
+                    return CandidateProofDecision(None, _refusal(
+                        M04EPortReason.PROOF_CANDIDATE_BINDING_INVALID,
+                        "the version manifest's appId/version do not match the persisted "
+                        "definition and manifest_version, so same-definition identity is "
+                        "not provable",
+                        context=context, gate_name=GATE_M04E_01_DEFINITION_FOUNDATION,
+                    ))
                 key_counts = _rows(await session.execute(
                     _SELECT_VERSION_KEY_COUNTS_SQL,
                     {
@@ -1593,7 +1611,6 @@ class SqlM04ECandidateProof(_SessionReads):
                         "one artifact digest inside the definition",
                         context=context, gate_name=GATE_M04E_01_DEFINITION_FOUNDATION,
                     ))
-                manifest = dict(version.get("manifest") or {})
                 same_definition_digest = _digest({
                     "domain": PROOF_DOMAIN_SAME_DEFINITION,
                     "definition_id": definition["id"],
@@ -1776,12 +1793,13 @@ class SqlM04ECandidateProof(_SessionReads):
                 context=context, gate_name=GATE_M04E_01_DEFINITION_FOUNDATION,
             )
         candidate_status = str(candidate.payload.get("status") or "")
-        if candidate.phase == "version" and candidate_status == "published" and (
-            current_lifecycle != "published"
-        ):
+        if candidate_status == "published" and current_lifecycle != "published":
+            # ``_valid_candidate_proof`` requires a published candidate (definition or
+            # version) to be backed by a published current version; refuse here so the
+            # caller gets a named reason instead of a bare "proof missing".
             return _refusal(
                 M04EPortReason.PROOF_CANDIDATE_BINDING_INVALID,
-                "a published version candidate requires a published current version",
+                "a published candidate requires a published current version",
                 context=context, gate_name=GATE_M04E_01_DEFINITION_FOUNDATION,
             )
         manifest = dict(current.get("manifest") or {})

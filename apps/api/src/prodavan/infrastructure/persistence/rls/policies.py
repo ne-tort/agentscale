@@ -413,6 +413,21 @@ _CANONICAL: tuple[TablePolicySpec, ...] = (
         tenant=ScopedColumn(column="tenant_id"),
         notes="Immutable review evidence; readable in-tenant, writable only by trusted writers.",
     ),
+    # --- M04 accepted scope/RLS evidence (2026110313) ---
+    # MIG-DDL-M04EVID-01 creates this table; the policy itself is installed by the next
+    # registry re-apply revision, because a table-adding revision cannot install its own
+    # policy after the fact (see 2026110312). Membership here keeps the coverage report
+    # honest in the meantime: an unregistered sibling would be reported, not skipped.
+    TablePolicySpec(
+        table="m04_scope_promotion_evidence",
+        owner_revision="2026110313",
+        tenant=ScopedColumn(column="tenant_id"),
+        notes=(
+            "Accepted M04-02 scope/RLS evidence row; the only promotion-evidence table "
+            "whose outcome may read 'ready'. Readable in-tenant, append-only for the "
+            "trusted migration writer."
+        ),
+    ),
     # --- M05 plugin instance registry (2026110303) ---
     TablePolicySpec(
         table="m05_plugin_instances",
@@ -713,6 +728,10 @@ CANONICAL_TABLE_PREFIXES: Final[tuple[str, ...]] = (
     "scope_owner_",
     "scope_registry",
     "m04e_",
+    # ``m04_scope_promotion_evidence`` matched no prefix before MIG-DDL-M04EVID-01:
+    # it is neither ``m04e_`` nor ``scope_``, so a missing RLS decision for it would
+    # have been invisible to the coverage report instead of being named.
+    "m04_scope_",
     "m05_",
     "m06_",
     "dynamic_app_capability_",

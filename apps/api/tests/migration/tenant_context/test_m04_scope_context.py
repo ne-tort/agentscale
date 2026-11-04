@@ -33,7 +33,6 @@ from tests.migration.tenant_context.postgres_double import (
     APPLICATION_TRANSACTION,
     CABINET_A,
     CABINET_B,
-    CORRELATION,
     CORRELATION_OTHER,
     PROJECT_A,
     SUBJECT_A,

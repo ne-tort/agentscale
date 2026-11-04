@@ -22,6 +22,21 @@ single object can satisfy both protocols.  The shared machinery (principal resol
 GUC application, readback, policy manifest, previous-value bookkeeping) lives in
 :class:`_RlsContextAdapter`; the two public classes only adapt the shapes.
 
+What is reused from ``rls.context`` and what is restated
+-------------------------------------------------------
+Reused as-is: the setting names (:data:`TENANT_GUCS` and the individual ``*_SETTING``
+constants), the policy registry (:mod:`...rls.policies`), the sealed
+:class:`TrustedPrincipal` / :class:`CallerAssertion` and every refusal as
+:class:`RlsContextError` with its stable reason code.
+
+Restated (not called): the ``set_config(..., true)`` statements and the readback.  The
+public helpers of ``rls.context`` either wrap a ``with`` block
+(``trusted_tenant_context``) or open and commit their own transaction
+(``trusted_tenant_transaction``), and neither shape fits a port whose ``bind`` must
+apply the context *without* owning the transaction and *without* an exit hook.  The
+duplication is made safe by :func:`_raise_if_settings_drifted`, which fails at import
+time if the literal SQL and the shared constants ever disagree.
+
 Session versus factory (the explicit adapter decision)
 ------------------------------------------------------
 ``rls.context`` exposes the trustworthy primitives as context managers that either
@@ -44,7 +59,9 @@ rather than a thin forwarder — is:
 * because ``bind`` cannot rely on a ``with`` block, the pre-existing values are captured
   on the first bind and restored by :meth:`clear`, so a caller that keeps using the
   transaction after the migration step can put the connection back exactly as it was.
-  ``narrow`` (M04) restores on context-manager exit, as its contract requires;
+  ``narrow`` (M04) restores on context-manager exit, as its contract requires.
+  ``clear`` is additive (no port declares it) and restores what the *same* adapter
+  captured; a port instance is therefore the unit of bookkeeping;
 * a repeated ``bind`` in the same database transaction re-applies the same values,
   returns equal evidence and keeps the *original* captured state, so ``clear`` still
   restores the state that preceded the first bind (idempotency, not a second capture).
@@ -518,10 +535,12 @@ async def _apply_scope(session: object, *, cabinet_id: str | None, project_id: s
 
 
 async def _restore(session: object, previous: Mapping[str, str]) -> None:
+    """Re-apply captured settings by their statement parameter names, transaction-locally."""
+
     await _one(
         session,
         _RESTORE_SQL,
-        {name: previous.get(name, "") for name in _SETTINGS},
+        {name.removeprefix("app."): previous.get(name, "") for name in _SETTINGS},
     )
 
 
@@ -1081,10 +1100,11 @@ class RlsTenantScopeContextAdapter:
             await self._core._restore_previous(session, previous)
 
     async def clear(self, *, session: AsyncSession) -> None:
-        """Restore the settings that preceded the first ``bind`` in this transaction.
+        """Restore the settings that preceded the first ``bind`` of *this* adapter.
 
-        Idempotent: a second call, a different transaction, or a session that never bound
-        anything is a no-op.  The transaction keeps ownership of commit/rollback.
+        Idempotent: a second call, a different database transaction, a session that never
+        bound through this adapter, or a transaction that already ended is a no-op — the
+        transaction keeps ownership of commit/rollback and the settings die with it.
         """
 
         _require_session(session)
@@ -1223,7 +1243,11 @@ class RlsTrustedTenantContextAdapter:
         )
 
     async def clear(self, *, session: AsyncSession) -> None:
-        """Restore the settings that preceded the first ``bind`` in this transaction."""
+        """Restore the settings that preceded the first ``bind`` of *this* adapter.
+
+        Same no-op rules as the M04 adapter: repeated, foreign-transaction, never-bound and
+        already-ended cases restore nothing and emit no SQL.
+        """
 
         _require_session(session)
         recorded = self._core._previous.pop(session, None)

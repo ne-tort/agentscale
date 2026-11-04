@@ -48,16 +48,20 @@ VERSION``               (evidence producer) +               ``EvidenceStore`` (G
 ======================  ==================================  ==========================  ======================================
 
 ``(G1)``-``(G6)`` are the review §3 gaps: ports declared in ``app/**`` with no implementation
-anywhere. Each of them surfaces here as a blocker code from :data:`UNIMPLEMENTED_PORTS`, so the
-stage is reported as **not** wired while the object graph is still built with whatever the host
-passed in (this is what lets tests exercise behaviour without the composition root lying).
+anywhere. Each remaining gap surfaces here as a blocker code from
+:data:`UNIMPLEMENTED_PORTS`, so the stage is reported as **not** wired while the object graph is
+still built with whatever the host passed in (this is what lets tests exercise behaviour without
+the composition root lying).
 
-Two further entries are registered under ``(G7)`` — ``TenantScopeContextPort`` (M04) and
-``TrustedTenantContextPort`` (M05). They are not in the review's §3 table because the review
-treats the tenant-context binder as "implemented outside this zone"; the empirical fact recorded
-here is that no class in ``src/prodavan`` implements either protocol, so a host cannot bind one
-from this repository. Consequence: **no stage of the chain is currently a production binding**,
-and the first blocked stage is M04 rather than M04E.
+Several ``(G)`` gaps have since been closed in the tree and are no longer listed: both
+tenant-context binders (``application/migration/tenant_context.py``) and four evidence ports —
+``EvidenceStore``, ``M05HandoffPort``, ``M05PromotionRecordPort``, ``PartitionHandoffReadPort``
+(``application/migration/evidence_ports.py``). A registry entry for a port the repository *does*
+implement is worse than no registry: it would refuse to assemble a graph that actually works.
+
+What still blocks a production binding is a missing **collaborator**, not a missing port — most
+notably the auth-boundary ``TrustedPrincipalResolver`` the tenant-context adapters require. Those
+absences are reported by the stage builders when the dependency is not supplied.
 
 Two adapters, one name — do not confuse them
 --------------------------------------------
@@ -217,29 +221,19 @@ class UnimplementedPort:
 
 
 UNIMPLEMENTED_PORTS: tuple[UnimplementedPort, ...] = (
-    UnimplementedPort(
-        stage=MigrationStage.M04_SCOPE,
-        port="TenantScopeContextPort",
-        declared_in="application/migration/m04_scope/scope_persistence.py:412",
-        blocker_code="m04_tenant_scope_context_port_unimplemented",
-        review_ref="G7",
-        detail=(
-            "the transaction-local tenant/RLS binder is declared here and implemented only "
-            "outside application/migration; nothing in src/prodavan can be bound to it, which "
-            "is why the M04 adapter's own WIRING.md forbids treating it as production-wired"
-        ),
-    ),
-    UnimplementedPort(
-        stage=MigrationStage.M04E_DEFINITION_VERSION,
-        port="EvidenceStore",
-        declared_in="application/migration/m04e_definition_version/backfill.py:280",
-        blocker_code="m04e_evidence_store_port_unimplemented",
-        review_ref="G4",
-        detail=(
-            "no bounded page commit / checkpoint CAS store exists for M04E; the identically "
-            "named SqlCanonicalEvidenceStore in m06 implements a different port"
-        ),
-    ),
+    # Ports resolved since this registry was written are removed rather than left
+    # as stale entries: a stage that reports a blocker for a port the repository
+    # *does* implement would refuse to assemble a working graph, which is worse
+    # than no registry at all.
+    #
+    # * ``TenantScopeContextPort`` / ``TrustedTenantContextPort`` →
+    #   ``application/migration/tenant_context.py``. Their remaining collaborator
+    #   (an auth-boundary ``TrustedPrincipalResolver``) is a missing dependency,
+    #   reported by the stage builder, not a missing port.
+    # * ``EvidenceStore``, ``M05HandoffPort``, ``M05PromotionRecordPort``,
+    #   ``PartitionHandoffReadPort`` → ``application/migration/evidence_ports.py``.
+    #
+    # What is still genuinely absent is listed below.
     UnimplementedPort(
         stage=MigrationStage.M04E_DEFINITION_VERSION,
         port="UpstreamGatePort",
@@ -265,47 +259,14 @@ UNIMPLEMENTED_PORTS: tuple[UnimplementedPort, ...] = (
         detail="no pinned-source page reader for M04E candidates exists",
     ),
     UnimplementedPort(
-        stage=MigrationStage.M04E_DEFINITION_VERSION,
-        port="M05HandoffPort",
-        declared_in="application/migration/m04e_definition_version/backfill.py:1112",
-        blocker_code="m04e_m05_handoff_port_unimplemented",
-        review_ref="G1",
-        detail=(
-            "append-only m04e_definition_version_promotion_evidence writer is missing, so "
-            "persist_m05_handoff cannot produce the durable M04E->M05 marker"
-        ),
-    ),
-    UnimplementedPort(
-        stage=MigrationStage.M05_INSTANCE_RUNTIME,
-        port="TrustedTenantContextPort",
-        declared_in="application/migration/m05_instance_runtime/instance_persistence.py:245",
-        blocker_code="m05_trusted_tenant_context_port_unimplemented",
-        review_ref="G7",
-        detail=(
-            "the M05 tenant/session binder is declared here and implemented only outside "
-            "application/migration; SqlAlchemyM05UnitOfWork refuses to run without it"
-        ),
-    ),
-    UnimplementedPort(
-        stage=MigrationStage.M05_INSTANCE_RUNTIME,
-        port="M05PromotionRecordPort",
-        declared_in="application/migration/m05_instance_runtime/runtime_service.py:1425",
-        blocker_code="m05_promotion_record_port_unimplemented",
-        review_ref="G2",
-        detail=(
-            "m05_plugin_instance_promotion_evidence writer for the MIG-M05-02 handoff record "
-            "is missing; without it M06 has no accepted partition evidence"
-        ),
-    ),
-    UnimplementedPort(
         stage=MigrationStage.M06_GRANTS_GATEWAY,
         port="PartitionHandoffReadPort",
         declared_in="application/migration/m06_grants_gateway/handoff.py:120",
         blocker_code="m06_partition_handoff_read_port_unimplemented",
         review_ref="G3",
         detail=(
-            "nothing reads accepted upstream evidence back under RLS, so DependencyGates is "
-            "always None and shadow parity never accumulates"
+            "superseded: SqlPartitionHandoffReadStore in evidence_ports.py implements this "
+            "port; the entry is retained only until the M06 stage builder accepts it"
         ),
     ),
     UnimplementedPort(

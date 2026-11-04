@@ -123,6 +123,12 @@ from prodavan.infrastructure.persistence.models.plugin_instance_registry import 
     PluginInstanceRegistryLinkRow,
     PluginInstanceRegistryRow,
 )
+# MIG-DDL-M04EVID-01: the accepted M04-02 scope/RLS evidence row that the evidence
+# ports refused to synthesise. Registered here so it is part of Base.metadata and of
+# the RLS coverage report; no positive canonical writer is enabled by importing it.
+from prodavan.infrastructure.persistence.models.m04_scope_evidence import (
+    M04ScopePromotionEvidenceRow,
+)
 from prodavan.infrastructure.persistence.models.dynamic_apps import (
     AppDefinitionRow,
     AppGrantRow,
@@ -203,6 +209,7 @@ __all__ = [
     "DynamicAppDefinitionFoundationRow",
     "DynamicAppDefinitionVersionFoundationRow",
     "M04EDefinitionVersionPromotionEvidenceRow",
+    "M04ScopePromotionEvidenceRow",
     "M05PluginInstancePromotionEvidenceRow",
     "PluginInstanceRegistryLinkRow",
     "PluginInstanceRegistryRow",

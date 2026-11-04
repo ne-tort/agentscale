@@ -33,7 +33,6 @@ from prodavan.infrastructure.persistence.rls.context import (
 )
 from prodavan.infrastructure.persistence.rls.policies import (
     CANONICAL_TABLE_POLICIES,
-    TRUSTED_SERVICE_ROLE,
     tenant_predicate,
 )
 
