@@ -75,10 +75,16 @@ async def test_consumer_tick_exception_does_not_kill_the_loop() -> None:
     # ``last_reason``/``last_result`` after the tick returns.  Waiting only on the
     # call count sampled the snapshot between the two and observed the third
     # tick's failure as if it were the last one.
+    #
+    # The budget is wall-clock, not a claim about speed: four ticks at a short
+    # interval are instant on an idle machine but a full-suite run shares the CPU
+    # with every other test, and three seconds was tight enough to flake only when
+    # the whole suite ran. The state being waited for is unchanged, and the
+    # assertions below still require exactly the recovered shape.
     recovered = await wait_until(
         lambda: len(dispatcher.calls) >= 4
         and resource.report()["loops"][LOOP_CONSUMER]["last_reason"] == "ok",
-        timeout=3.0,
+        timeout=20.0,
     )
     assert recovered
     snapshot = resource.report()["loops"][LOOP_CONSUMER]
@@ -100,7 +106,7 @@ async def test_worker_tick_exception_does_not_kill_the_loop() -> None:
     resource = _resource(dispatcher=FakeDispatcher(), worker=worker)
 
     await resource.startup()
-    assert await wait_until(lambda: worker.calls >= 3, timeout=3.0)
+    assert await wait_until(lambda: worker.calls >= 3, timeout=20.0)
     snapshot = resource.report()["loops"][LOOP_WORKER]
 
     assert snapshot["running"] is True
@@ -115,7 +121,7 @@ async def test_empty_round_is_idle_not_an_error() -> None:
     resource = _resource(dispatcher=FakeDispatcher(), worker=FakeWorker(ticks=[]))
     await resource.startup()
     assert await wait_until(
-        lambda: resource.report()["loops"][LOOP_WORKER]["ticks"] >= 1, timeout=3.0
+        lambda: resource.report()["loops"][LOOP_WORKER]["ticks"] >= 1, timeout=20.0
     )
     snapshot = resource.report()["loops"][LOOP_WORKER]
     assert snapshot["errors"] == 0
@@ -189,7 +195,7 @@ async def test_tick_failure_reason_is_exposed_in_the_report() -> None:
     resource = _resource(dispatcher=dispatcher, worker=FakeWorker())
     await resource.startup()
     assert await wait_until(
-        lambda: resource.report()["loops"][LOOP_CONSUMER]["errors"] >= 1, timeout=3.0
+        lambda: resource.report()["loops"][LOOP_CONSUMER]["errors"] >= 1, timeout=20.0
     )
     snapshot = resource.report()["loops"][LOOP_CONSUMER]
     assert snapshot["last_reason"] == REASON_TICK_FAILED
