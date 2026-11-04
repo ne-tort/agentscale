@@ -21,7 +21,7 @@ const fetcher = (build: (correlationId: string) => RegistryResponse = (correlati
     expect(validateDeclarativeManifest({ ...manifest, protocol: "2.0" })).toMatchObject({ ok: false, code: "unsupported_version" });
     const bad = structuredClone(manifest); (bad.entrypoints.ui.root.children[0] as { type: string }).type = "html";
     expect(validateDeclarativeManifest(bad)).toMatchObject({ ok: false, code: "invalid_schema" });
-    const duplicate = structuredClone(manifest); duplicate.entrypoints.ui.root.children.push({ type: "text", id: "label", props: {} });
+    const duplicate = structuredClone(manifest); duplicate.entrypoints.ui.root.children.push({ type: "text", id: "label", props: { text: "Demo" } });
     expect(validateDeclarativeManifest(duplicate)).toMatchObject({ ok: false, code: "invalid_schema" });
     expect(validateDeclarativeManifest({ ...manifest, privileged: true })).toMatchObject({ ok: false, code: "invalid_schema" });
     const malformedRoute = { ...manifest, entrypoints: { ...manifest.entrypoints, ui: { ...manifest.entrypoints.ui, routes: [{ ...manifest.entrypoints.ui.routes[0], path: "/%2e%2e/admin" }] } } };

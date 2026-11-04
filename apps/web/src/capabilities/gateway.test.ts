@@ -22,7 +22,10 @@ const grantSet = {
 };
 
 function transport(): CapabilityGatewayTransport {
-  return { request: vi.fn(async () => null), notify: vi.fn() };
+  // The stub answers every method with `null`, which no narrower generic result can promise, so the
+  // spy is declared with the transport's own signature. It stays a `vi.fn`, so call assertions work.
+  const request = vi.fn(async () => null) as CapabilityGatewayTransport["request"];
+  return { request, notify: vi.fn() };
 }
 
 describe("capability gateway", () => {

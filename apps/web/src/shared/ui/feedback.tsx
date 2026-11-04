@@ -12,18 +12,12 @@ export function StatusBadge({ children, variant = "neutral" }: StatusBadgeProps)
   return <span className={`ui-status-badge ui-status-badge--${variant}`}>{children}</span>;
 }
 
-export interface InlineErrorProps {
-  readonly message: ReactNode;
-  readonly action?: ReactNode;
-  readonly className?: string;
-}
-
-export function InlineError({ message, action, className }: InlineErrorProps) {
-  return <div className={["ui-inline-error", className].filter(Boolean).join(" ")} role="alert">
-    <span className="ui-inline-error__message">{message}</span>
-    {action && <div className="ui-inline-error__action">{action}</div>}
-  </div>;
-}
+// ``InlineError`` lives in ``./forms/inline-error`` and is re-exported from the
+// foundation barrel. It used to be defined here as well, with the same prop names but
+// a different class vocabulary (``ui-inline-error`` vs ``form-inline-error``) and no
+// ``title``, so two barrels exported the same component name with different rendering.
+// The forms variant is the superset: keep one definition and re-export it below.
+export { InlineError, type InlineErrorProps } from "./forms/inline-error";
 
 export interface EmptyStateProps {
   readonly title: string;

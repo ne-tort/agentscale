@@ -639,8 +639,10 @@ export function EquipmentProcurementView({ heading, initialCatalogs, initialScop
       <WorkspaceSnapshotContext blocker={service.blocker} scope={scope} workspace={workspace} />
       <EquipmentWorkspaceNavigation activeView={activeWorkspaceView} onView={setActiveWorkspaceView} sourceCount={catalogs.length} sourceServiceConnected workspace={workspace} />
       {activeWorkspaceView === "sources"
+        // С живым admin-сервисом экран сам грузит свежие строки: снимок ему не передаётся,
+        // иначе можно показать устаревшую конфигурацию как текущую. Без сервиса — только снимок.
         ? sourcesService
-          ? <EquipmentSourcesPage initialWorkspace={initialSourcesWorkspace} service={sourcesService} />
+          ? <EquipmentSourcesPage service={sourcesService} />
           : initialSourcesWorkspace
             ? <EquipmentSourcesPage initialWorkspace={initialSourcesWorkspace} service={UNMOUNTED_SOURCES_SERVICE} />
             : <SourceConfigurationView catalogs={catalogs} scope={scope} />

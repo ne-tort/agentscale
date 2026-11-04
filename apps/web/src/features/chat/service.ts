@@ -257,8 +257,11 @@ function isTerminalType(frame: DecodedStreamFrame): boolean {
 }
 
 function normalizeStreamCode(code: string | undefined): string | undefined {
-  if (code === undefined) return undefined;
-  return UPSTREAM_CODE_ALIASES[code] ?? code;
+  // Пустой код — не код: `??` оставил бы "" и замаскировал стабильный fallback,
+  // поэтому пустая/пробельная строка нормализуется в отсутствие кода.
+  const trimmed = code?.trim();
+  if (!trimmed) return undefined;
+  return UPSTREAM_CODE_ALIASES[trimmed] ?? trimmed;
 }
 
 /** HTTP status a stable stream code implies, unless the server named one. */
@@ -365,13 +368,16 @@ function decodeStreamFrame(frame: SseFrame): DecodedStreamFrame {
   if (kind === "application") {
     const application = readApplicationEnvelope(parsed);
     const type = application.eventType;
+    // Contract §7: transport `event:` and the envelope `event_type` must agree.
+    // The check covers *every* application frame, not only error frames —
+    // otherwise a `text_delta` payload arriving under `event: done` would be
+    // delivered as an ordinary delta and the terminal marker silently lost.
+    if (frame.event !== undefined && frame.event !== type) throw new UpstreamStreamMalformed("event_name_mismatch");
     if (type === "_error" || type === "error") {
       const payload = application.payload;
       const serverCode = normalizeStreamCode(typeof payload.code === "string" ? payload.code : undefined);
       const message = parseErrorMessage(payload, STREAM_MESSAGES.terminal).message;
       const status = streamStatusFor(serverCode, typeof payload.status === "number" ? payload.status : 500);
-      // A control-plane event name on the frame must not contradict the payload.
-      if (frame.event !== undefined && frame.event !== type) throw new UpstreamStreamMalformed("event_name_mismatch");
       // Neither legacy form carries run/sequence, so neither can become a
       // replayable event; both are surfaced as an explicit terminal code.
       throw streamFailure(

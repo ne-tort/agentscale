@@ -38,10 +38,22 @@ describe("legacy chat service", () => {
       calls.push({ url: String(url), init });
       const encoder = new TextEncoder();
       if (calls.length === 1) {
+        const chunks = [
+          encoder.encode("data: {\"type\":\"_session\",\"data\":{\"session_id\":\"session-1\"}}\n\n"),
+          encoder.encode("data: {\"type\":\"text_delta\",\"data\":{\"text\":\"partial\"}}\n\n"),
+        ];
+        let delivered = 0;
         return new Response(new ReadableStream<Uint8Array>({
-          start(controller) {
-            controller.enqueue(encoder.encode("data: {\"type\":\"_session\",\"data\":{\"session_id\":\"session-1\"}}\n\n"));
-            controller.enqueue(encoder.encode("data: {\"type\":\"text_delta\",\"data\":{\"text\":\"partial\"}}\n\n"));
+          // The failure is raised from `pull`, i.e. only after the consumer has
+          // read the chunks. Erroring a stream that still holds queued chunks
+          // discards them per the Streams spec, which would model a connection
+          // that never delivered anything — the opposite of mid-stream loss.
+          pull(controller) {
+            if (delivered < chunks.length) {
+              controller.enqueue(chunks[delivered]!);
+              delivered += 1;
+              return;
+            }
             controller.error(new TypeError("connection lost mid-stream"));
           },
         }), { headers: { "Content-Type": "text/event-stream" } });

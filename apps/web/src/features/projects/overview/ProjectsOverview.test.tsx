@@ -160,7 +160,13 @@ describe("ProjectsOverview acceptance surface", () => {
       input.dispatchEvent(new Event("change", { bubbles: true }));
     });
     await click(".projects-create-form button[type='submit']");
-    expect(document.body.textContent).toContain("Ответ создания не совпадает");
+    // Прежнее ожидание здесь было «Ответ создания не совпадает» — это текст проверки
+    // маршрута POST (её покрывает соседний тест с другим названием в ответе create).
+    // В этой фикстуре маршрут создания отвечает корректным проектом, а расходятся
+    // повторные чтения (список и GET отдают «Other name»), поэтому отказ обязан прийти
+    // из проверки readback, и он должен быть видимым и отличным от успеха.
+    expect(document.body.textContent).toContain("Повторное чтение списка и проекта не подтвердило создание");
+    expect(document.body.textContent).toContain("Проект создан, но его состояние не удалось подтвердить");
     expect(document.body.textContent).not.toContain("создан и выбран");
   });
 

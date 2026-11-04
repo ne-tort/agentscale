@@ -48,6 +48,10 @@ describe("chat stream bridge wiring", () => {
       "data: \"data\":{\"session_id\":\"session-1\"}}\r\n\r\n",
       "data: {\"type\":\"text_delta\",\"data\":{\"text\":\"hi\"}}\r\n",
       "\r\n",
+      // Без terminal-кадра поток по контракту незавершён (см. кейс
+      // «reports an incomplete stream when no terminal frame arrives»), поэтому
+      // завершитель присутствует: этот кейс проверяет только CRLF и разрез чанка.
+      "data: {\"type\":\"_turn_complete\",\"data\":{}}\r\n\r\n",
     ].join("");
     // Split at an arbitrary byte so the terminator straddles two reads.
     const encoder = new TextEncoder();
@@ -62,7 +66,7 @@ describe("chat stream bridge wiring", () => {
     })) });
     const { events, error } = await drain(service);
     expect(error).toBeUndefined();
-    expect(events.map((event) => event.type)).toEqual(["_session", "text_delta"]);
+    expect(events.map((event) => event.type)).toEqual(["_session", "text_delta", "_turn_complete"]);
     expect(events[0].data).toEqual({ session_id: "session-1" });
   });
 
@@ -84,9 +88,18 @@ describe("chat stream bridge wiring", () => {
       calls.push((init?.headers ?? {}) as Record<string, string>);
       call += 1;
       if (call === 1) {
+        const bytes = encoder.encode(frame({ type: "text_delta", data: { text: "a" }, seq: 1 }, { id: "evt-1" }));
+        let delivered = false;
         return new Response(new ReadableStream<Uint8Array>({
-          start(controller) {
-            controller.enqueue(encoder.encode(frame({ type: "text_delta", data: { text: "a" }, seq: 1 }, { id: "evt-1" })));
+          // The connection drops only *after* the frame was read. Calling
+          // `error()` while a chunk is still queued discards that chunk per the
+          // Streams spec, so the mid-stream cut would lose the frame entirely.
+          pull(controller) {
+            if (!delivered) {
+              delivered = true;
+              controller.enqueue(bytes);
+              return;
+            }
             controller.error(new TypeError("connection lost"));
           },
         }));

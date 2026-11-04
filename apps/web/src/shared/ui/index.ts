@@ -11,8 +11,9 @@ export {
   type TextAreaFieldProps,
   type TextFieldProps,
 } from "./forms";
-// `./forms` resolves to `forms.tsx`; the directory modules below are shadowed by it,
-// so they must be re-exported explicitly for `../../shared/ui` consumers.
+// `./forms` is the `forms/` directory barrel (the old `forms.tsx` copy that used to
+// shadow it is gone). Components that live only in the directory are re-exported here
+// so a single `../../shared/ui` import still covers the whole kit.
 export { TableToolbar, type TableToolbarProps } from "./forms/table-toolbar";
 export {
   EmptyState,

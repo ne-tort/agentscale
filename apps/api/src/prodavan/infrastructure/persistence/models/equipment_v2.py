@@ -3,6 +3,43 @@
 This module is intentionally independent from the legacy ``mod_equipment``
 JSON rows. It is a foundation for a later migration and is not registered in
 legacy module code.
+
+Tenant/project anchors (task ``MIG-EQ-ANCHORS-01``, revision ``2026110318``)
+=========================================================================
+``docs/08-migration/equipment-association-tables.md`` section 2.1 asks for a
+*preparatory* scope revision before any project-scoped cutover: a canonical
+``project_id`` on the operational rows and the relational replacement of the two
+JSONB reference arrays.  This module is that preparation step, and it is
+deliberately the **nullable** stage of it:
+
+* ``equipment_v2_requests``, ``equipment_v2_ingestion_runs`` and
+  ``equipment_v2_tenders`` gain ``project_id``/``cabinet_id``.  Both are
+  ``NULL``-able so that every row written before the backfill keeps working
+  (section 2.1: a nullable anchor plus a backfill first, a later revision that
+  forbids ``NULL`` second), and the compound ``(tenant_id, cabinet_id,
+  project_id)`` tuple is *not* yet enforced by a composite FK: a partially
+  backfilled table must not reject the rows it cannot prove yet.
+* ``equipment_v2_candidate_group_offers`` and
+  ``equipment_v2_tender_candidate_groups`` are created with their own
+  ``tenant_id`` (``NOT NULL`` — the tables start empty, so every association row
+  is provably tenant-owned from its first insert) and a nullable
+  ``cabinet_id``/``project_id`` pair mirroring the parent's scope.  The scoped
+  *composite* foreign keys of sections 3.1/3.2 are **not** installed yet: they
+  require ``tenant_id, project_id NOT NULL`` on ``candidate_groups`` and
+  ``catalog_offers``, which this revision does not introduce (the catalog chain
+  stays tenant-scoped shared catalog with ``project_id IS NULL``).  What is
+  installed here is the part a plain FK can prove today - parent existence and
+  delete semantics - plus the deferred ordinal uniqueness that makes a
+  transactional reorder safe.
+* The JSONB arrays (``candidate_groups.offer_ids``,
+  ``tenders.candidate_group_ids``) stay in place and stay authoritative.
+  Sections 5/6 of the design: they are the rollback source until the cutover
+  window ends, so this revision is "expand" only - no backfill, no dual-write,
+  no read cutover.
+
+New columns are declared **last** in their class on purpose: ``ALTER TABLE ...
+ADD COLUMN`` appends them to the physical table, so model column order matches
+the migrated order and ``alembic revision --autogenerate`` stays empty.
 """
 
 from __future__ import annotations
@@ -33,6 +70,14 @@ class EquipmentIngestionRunRow(Base):
             "status",
             text("created_at DESC"),
         ),
+        # MIG-EQ-ANCHORS-01: the project feed ("runs of this project, newest
+        # first") and the cabinet regression check by anchor.
+        Index(
+            "ix_equipment_v2_ingestion_project_created",
+            "project_id",
+            text("created_at DESC"),
+        ),
+        Index("ix_equipment_v2_ingestion_cabinet_id", "cabinet_id"),
     )
 
     id: Mapped[str] = mapped_column(String(40), primary_key=True, default=lambda: _id("eir"))
@@ -44,6 +89,16 @@ class EquipmentIngestionRunRow(Base):
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # MIG-EQ-ANCHORS-01: the import context.  ``NULL`` keeps the shared-catalog
+    # policy of the design doc (one catalog may serve several projects); a
+    # project-scoped import records the project it was requested for, and the
+    # snapshots/offers below still inherit nothing from it (shared catalog).
+    project_id: Mapped[str | None] = mapped_column(
+        String(40), ForeignKey("projects.id", ondelete="RESTRICT"), nullable=True
+    )
+    cabinet_id: Mapped[str | None] = mapped_column(
+        String(40), ForeignKey("cabinet_instances.id", ondelete="RESTRICT"), nullable=True
+    )
 
 
 class EquipmentCatalogSnapshotRow(Base):
@@ -99,6 +154,14 @@ class EquipmentRequestRow(Base):
             "status",
             text("created_at DESC"),
         ),
+        # MIG-EQ-ANCHORS-01: partition boundary for procurement per project.
+        Index(
+            "ix_equipment_v2_requests_project_status_created",
+            "project_id",
+            "status",
+            text("created_at DESC"),
+        ),
+        Index("ix_equipment_v2_requests_cabinet_id", "cabinet_id"),
     )
 
     id: Mapped[str] = mapped_column(String(40), primary_key=True, default=lambda: _id("erq"))
@@ -107,6 +170,15 @@ class EquipmentRequestRow(Base):
     status: Mapped[str] = mapped_column(String(24), nullable=False, default="planned")
     requested_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # MIG-EQ-ANCHORS-01: the request belongs to a project (and, through it, to a
+    # cabinet).  ``NULL`` only for rows written before the backfill; once the
+    # backfill is proven, a later revision forbids ``NULL`` (design doc 2.1).
+    project_id: Mapped[str | None] = mapped_column(
+        String(40), ForeignKey("projects.id", ondelete="RESTRICT"), nullable=True
+    )
+    cabinet_id: Mapped[str | None] = mapped_column(
+        String(40), ForeignKey("cabinet_instances.id", ondelete="RESTRICT"), nullable=True
+    )
 
 
 class EquipmentRequestLineRow(Base):
@@ -156,6 +228,9 @@ class EquipmentTenderRow(Base):
             "opens_at IS NULL OR closes_at IS NULL OR closes_at > opens_at",
             name="ck_equipment_v2_tender_window_order",
         ),
+        # MIG-EQ-ANCHORS-01: the project's live tenders.
+        Index("ix_equipment_v2_tenders_project_status", "project_id", "status"),
+        Index("ix_equipment_v2_tenders_cabinet_id", "cabinet_id"),
     )
 
     id: Mapped[str] = mapped_column(String(40), primary_key=True, default=lambda: _id("etd"))
@@ -168,6 +243,15 @@ class EquipmentTenderRow(Base):
     opens_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     closes_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     candidate_group_ids: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    # MIG-EQ-ANCHORS-01: the tender's scope, which must agree with its request's
+    # scope.  Both sides are nullable in this expand stage, so the equality is a
+    # service/trigger invariant until the backfill allows ``NOT NULL``.
+    project_id: Mapped[str | None] = mapped_column(
+        String(40), ForeignKey("projects.id", ondelete="RESTRICT"), nullable=True
+    )
+    cabinet_id: Mapped[str | None] = mapped_column(
+        String(40), ForeignKey("cabinet_instances.id", ondelete="RESTRICT"), nullable=True
+    )
 
 
 class EquipmentBudgetAllocationRow(Base):

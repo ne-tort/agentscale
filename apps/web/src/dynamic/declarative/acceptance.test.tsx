@@ -8,6 +8,7 @@ import { mountIsolatedPlugin } from "../plugin-host";
 import type { CapabilityBoundary, CapabilityGateway, EffectiveCapability } from "../../capabilities/types";
 import type { DeclarativeAppManifest, JsonValue } from "../../../../../packages/schemas/declarative-app/v1";
 import { validateDeclarativeManifest } from "../schema";
+import type { RegistryClientResolution } from "../registry-client/controller";
 import { DynamicReactHost } from "./host";
 import type { DynamicReactHostProps } from "./host";
 
@@ -33,7 +34,7 @@ const HOST_MANIFEST: DeclarativeAppManifest = {
 };
 const hostValidation = validateDeclarativeManifest(HOST_MANIFEST);
 if (!hostValidation.ok) throw new Error("Invalid dynamic host acceptance manifest");
-const hostResolution = { state: "resolved" as const, manifest: hostValidation.manifest,
+const hostResolution: Extract<RegistryClientResolution, { state: "resolved" }> = { state: "resolved", manifest: hostValidation.manifest,
   route: { id: "main", path: "/demo", title: "Demo", root: "root", requirements: { context: ["tenantId"] } },
   digest: `sha256:${"b".repeat(64)}`, etag: '"fixture"', cacheKey: "fixture", correlationId: "registry.fixture" };
 const effective = new Map<"platform.queries" | "platform.commands", EffectiveCapability>([

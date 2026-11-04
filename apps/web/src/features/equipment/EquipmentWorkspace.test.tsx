@@ -89,7 +89,9 @@ describe("equipment workspace integration", () => {
   });
 
   it("presents supplied source data as a read-only snapshot without an admin service", () => {
-    const markup = renderToStaticMarkup(<EquipmentProcurementView heading="Equipment procurement" initialScope={localScope} initialSourcesWorkspace={sourceWorkspace} initialWorkspaceView="sources" service={service} />);
+    // Source configuration открывается только после того, как загружен workspace:
+    // без снимка workspace экран честно остаётся в состоянии загрузки.
+    const markup = renderToStaticMarkup(<EquipmentProcurementView heading="Equipment procurement" initialScope={localScope} initialSourcesWorkspace={sourceWorkspace} initialWorkspace={emptyEquipmentWorkspace()} initialWorkspaceView="sources" service={service} />);
 
     expect(markup).toContain("Northwind catalog");
     expect(markup).not.toContain("Select this offer");
@@ -114,7 +116,7 @@ describe("equipment workspace integration", () => {
 
   it("mounts the existing source configuration screen only with its typed service", () => {
     const sourcesService = {} as EquipmentSourcesService;
-    const markup = renderToStaticMarkup(<EquipmentProcurementView heading="Equipment procurement" initialScope={localScope} initialSourcesWorkspace={sourceWorkspace} initialWorkspaceView="sources" service={service} sourcesService={sourcesService} />);
+    const markup = renderToStaticMarkup(<EquipmentProcurementView heading="Equipment procurement" initialScope={localScope} initialSourcesWorkspace={sourceWorkspace} initialWorkspace={emptyEquipmentWorkspace()} initialWorkspaceView="sources" service={service} sourcesService={sourcesService} />);
 
     expect(markup).toContain("Каталоги источников");
     expect(markup).not.toContain("Northwind catalog");

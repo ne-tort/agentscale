@@ -137,6 +137,61 @@ def read_field_aliases(path: Path, function: str) -> dict[str, tuple[str, ...]]:
 # ----------------------------------------------------------------------- endpoints
 
 
+@dataclass(frozen=True, slots=True)
+class RouteBinding:
+    """One declared gateway method: how the client reaches it and what it sends."""
+
+    method: str
+    http: str
+    path: str
+    path_identifier: str | None
+    query: tuple[str, ...]
+
+
+_BINDING_BLOCK_RE = re.compile(
+    r"export const DYNAMIC_ROUTE_BINDINGS\s*=\s*\[(?P<body>.*?)\n\]\s*as const", re.DOTALL
+)
+_BINDING_ENTRY_RE = re.compile(r"\{(?P<body>[^{}]*)\}")
+
+
+def dynamic_route_bindings(path: Path = DYNAMIC_CLIENT) -> list[RouteBinding]:
+    """Parse ``DYNAMIC_ROUTE_BINDINGS`` — the client's own wire declaration.
+
+    The client states which HTTP method, path, path identifier and query keys each
+    gateway method uses. Declaring it in the client (rather than in this test) keeps
+    one source of truth: a screen action that changes shape has to change the
+    declaration next to it.
+    """
+    text = _read(path)
+    block = _BINDING_BLOCK_RE.search(text)
+    if block is None:
+        raise AssertionError(f"{path} does not declare DYNAMIC_ROUTE_BINDINGS")
+    bindings: list[RouteBinding] = []
+    for entry in _BINDING_ENTRY_RE.finditer(block.group("body")):
+        body = entry.group("body")
+        method = re.search(r'method:\s*"(\w+)"', body)
+        http = re.search(r'http:\s*"(\w+)"', body)
+        route = re.search(r'path:\s*"([^"]+)"', body)
+        if not (method and http and route):
+            continue
+        identifier = re.search(r'pathIdentifier:\s*(null|"(\w+)")', body)
+        query = re.search(r"query:\s*\[([^\]]*)\]", body)
+        bindings.append(
+            RouteBinding(
+                method=method.group(1),
+                http=http.group(1).upper(),
+                path=route.group(1),
+                path_identifier=(
+                    identifier.group(2) if identifier and identifier.group(2) else None
+                ),
+                query=tuple(re.findall(r'"(\w+)"', query.group(1))) if query else (),
+            )
+        )
+    if not bindings:
+        raise AssertionError(f"DYNAMIC_ROUTE_BINDINGS in {path} is empty")
+    return bindings
+
+
 _IDENTIFIER = r"[A-Za-z_$][\w$.]*"
 
 
@@ -151,27 +206,10 @@ def _normalize_path_template(template: str) -> str:
     return re.sub(r"\$\{[^}]*\}", "{p}", without_query)
 
 
-@lru_cache(maxsize=None)
-def _client_passthrough() -> dict[str, str]:
-    """Method name -> path template for the shared ``ApiClient`` request wrapper.
-
-    The content-ops service mounts its own ``fetch`` wrapper, so its literals are
-    already absolute. Several feature adapters instead delegate to the shared
-    client (``request(...)``), and a path typed there is still a path the web
-    client calls.
-    """
-    text = _read(API_CLIENT)
-    forwarding = re.search(r"dynamicModules\s*:\s*\{(?P<body>.*?)\n\s*\}", text, re.DOTALL)
-    return {"body": forwarding.group("body")} if forwarding else {}
-
-
 @dataclass(frozen=True, slots=True)
 class WebCall:
     call: Call
     template: str
-    #: ``True`` when the path comes from a template literal whose leading host/prefix is
-    #: supplied by the adapter, so only the literal part can be checked here.
-    partial: bool = False
 
 
 _METHOD_HINT = re.compile(r"method:\s*['\"](\w+)['\"]")
@@ -273,11 +311,14 @@ __all__ = [
     "RESOURCE_SERVICE",
     "RESOURCE_TYPES",
     "Interface",
+    "RouteBinding",
     "WebCall",
     "content_ops_calls",
+    "dynamic_route_bindings",
     "error_code_literals",
     "error_code_patterns",
     "interface",
+    "interface_fields",
     "interfaces",
     "read_field_aliases",
     "status_keys",

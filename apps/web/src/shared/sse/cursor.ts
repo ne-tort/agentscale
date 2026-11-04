@@ -48,6 +48,17 @@ function validSequence(value: number | undefined): number | undefined {
   return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : undefined;
 }
 
+/**
+ * How many handled transport ids a cursor remembers.
+ *
+ * A reconnect that echoes `Last-Event-ID` may replay a short window of frames,
+ * not just the single last one, so deduplication by event id must not depend on
+ * "is this the most recent id". The map is bounded: forgetting the oldest id
+ * only downgrades its classification from `duplicate` to `stale`/`deliver`, it
+ * never turns an unhandled frame into a duplicate.
+ */
+const HANDLED_EVENT_ID_LIMIT = 256;
+
 function normalizeIdentity(identity: StreamIdentity): StreamIdentity {
   const eventId = nonEmpty(identity.eventId);
   const runId = nonEmpty(identity.runId);
@@ -62,6 +73,8 @@ function normalizeIdentity(identity: StreamIdentity): StreamIdentity {
 export class SseCursor {
   private current: StreamIdentity = {};
   private header: string | undefined;
+  /** Every transport id already handed to the consumer, oldest first. */
+  private readonly handledEventIds = new Map<string, StreamIdentity>();
 
   constructor(seed?: StreamIdentity) {
     if (seed) {
@@ -69,6 +82,7 @@ export class SseCursor {
       if (identity.eventId !== undefined || (identity.runId !== undefined && identity.sequence !== undefined)) {
         this.current = identity;
         this.header = identity.eventId ?? `${identity.runId}:${identity.sequence}`;
+        if (identity.eventId !== undefined) this.rememberHandled(identity);
       }
     }
   }
@@ -97,12 +111,26 @@ export class SseCursor {
     const identity = normalizeIdentity(candidate);
     const current = this.current;
 
-    if (identity.eventId !== undefined && current.eventId !== undefined && identity.eventId === current.eventId) {
-      const sameRun = identity.runId === undefined || current.runId === undefined || identity.runId === current.runId;
-      const sameSequence = identity.sequence === undefined || current.sequence === undefined || identity.sequence === current.sequence;
-      return sameRun && sameSequence
-        ? { kind: "duplicate", reason: "event_id" }
-        : { kind: "conflict", reason: "event_id_reused" };
+    if (identity.eventId !== undefined) {
+      if (identity.eventId === current.eventId) {
+        const sameRun = identity.runId === undefined || current.runId === undefined || identity.runId === current.runId;
+        const sameSequence = identity.sequence === undefined || current.sequence === undefined || identity.sequence === current.sequence;
+        return sameRun && sameSequence
+          ? { kind: "duplicate", reason: "event_id" }
+          : { kind: "conflict", reason: "event_id_reused" };
+      }
+      // A replay window may resend frames handled before the current one. The
+      // id is only "already handled" when it is not the position we are at
+      // (that case is above); a reused id with a contradictory identity is
+      // still a conflict, never a silent duplicate.
+      const handled = this.handledEventIds.get(identity.eventId);
+      if (handled !== undefined) {
+        const sameRun = identity.runId === undefined || handled.runId === undefined || identity.runId === handled.runId;
+        const sameSequence = identity.sequence === undefined || handled.sequence === undefined || identity.sequence === handled.sequence;
+        return sameRun && sameSequence
+          ? { kind: "duplicate", reason: "event_id" }
+          : { kind: "conflict", reason: "event_id_reused" };
+      }
     }
 
     if (identity.runId !== undefined && current.runId !== undefined && identity.runId !== current.runId) {
@@ -128,19 +156,38 @@ export class SseCursor {
    * identities that cannot be replayed.
    */
   commit(candidate: StreamIdentity): CursorCommitResult {
-    const verdict = this.inspect(candidate);
-    if (verdict.kind !== "deliver") return { committed: false, reason: "rejected", verdict };
+    // Replayability is decided before the verdict: a frame that names no
+    // replayable identity at all (empty id, negative or fractional sequence) is
+    // not "rejected by the cursor" — it simply cannot become a cursor. It still
+    // must not be recorded as handled.
     const identity = normalizeIdentity(candidate);
     const replayable = identity.eventId !== undefined || (identity.runId !== undefined && identity.sequence !== undefined);
-    if (!replayable) return { committed: false, reason: "not_replayable", verdict };
+    if (!replayable) return { committed: false, reason: "not_replayable", verdict: { kind: "deliver" } };
+    const verdict = this.inspect(candidate);
+    if (verdict.kind !== "deliver") return { committed: false, reason: "rejected", verdict };
     this.current = identity;
     this.header = identity.eventId ?? `${identity.runId}:${identity.sequence}`;
+    if (identity.eventId !== undefined) this.rememberHandled(identity);
     return { committed: true, lastEventId: this.header };
   }
 
   reset(): void {
     this.current = {};
     this.header = undefined;
+    this.handledEventIds.clear();
+  }
+
+  private rememberHandled(identity: StreamIdentity): void {
+    const eventId = identity.eventId;
+    if (eventId === undefined) return;
+    // Re-inserting moves the id to the newest position of the bounded window.
+    this.handledEventIds.delete(eventId);
+    this.handledEventIds.set(eventId, identity);
+    while (this.handledEventIds.size > HANDLED_EVENT_ID_LIMIT) {
+      const oldest = this.handledEventIds.keys().next();
+      if (oldest.done) break;
+      this.handledEventIds.delete(oldest.value);
+    }
   }
 }
 

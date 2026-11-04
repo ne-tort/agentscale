@@ -318,23 +318,31 @@ def enable_statements(spec: TablePolicySpec) -> tuple[str, str]:
     )
 
 
-def create_policy_statements(spec: TablePolicySpec) -> tuple[str, str]:
+def trusted_policy_statement(spec: TablePolicySpec, name: str | None = None) -> str:
+    """``CREATE POLICY`` for the trusted-service policy of ``spec``.
+
+    ``name`` lets a caller recreate the policy under a historical name (the
+    downgrade of revision ``2026110318`` has to put back what ``2026110317`` left
+    behind); it defaults to the name the registry declares today.
+    """
+
     trusted = trusted_service_predicate()
+    policy = spec.trusted_policy if name is None else name
     if spec.trusted_command == "SELECT":
-        trusted_statement = (
-            f"CREATE POLICY {spec.trusted_policy} ON {spec.table} FOR SELECT USING ({trusted})"
-        )
-    else:
-        trusted_statement = (
-            f"CREATE POLICY {spec.trusted_policy} ON {spec.table} FOR ALL "
-            f"USING ({trusted}) WITH CHECK ({trusted})"
-        )
+        return f"CREATE POLICY {policy} ON {spec.table} FOR SELECT USING ({trusted})"
+    return (
+        f"CREATE POLICY {policy} ON {spec.table} FOR ALL "
+        f"USING ({trusted}) WITH CHECK ({trusted})"
+    )
+
+
+def create_policy_statements(spec: TablePolicySpec) -> tuple[str, str]:
     predicate = tenant_predicate(spec)
     tenant_statement = (
         f"CREATE POLICY {spec.tenant_policy} ON {spec.table} FOR ALL "
         f"USING ({predicate}) WITH CHECK ({predicate})"
     )
-    return (tenant_statement, trusted_statement)
+    return (tenant_statement, trusted_policy_statement(spec))
 
 
 def drop_policy_statements(spec: TablePolicySpec) -> tuple[str, str]:
@@ -344,10 +352,52 @@ def drop_policy_statements(spec: TablePolicySpec) -> tuple[str, str]:
     )
 
 
-def upgrade_statements(spec: TablePolicySpec) -> tuple[str, ...]:
-    """Idempotent enable+create statements (policies are dropped first)."""
+def legacy_policy_names(spec: TablePolicySpec) -> tuple[str, ...]:
+    """Policy names an *earlier* registry version installed for ``spec``.
 
-    return (*enable_statements(spec), *drop_policy_statements(spec), *create_policy_statements(spec))
+    Only one situation produces a legacy name: a table long enough that the
+    fully spelled suffix was rendered before the compact form existed.  The
+    server then stored the 63-character prefix of that longer name, so a
+    re-apply that drops only the *current* names would leave the stale policy in
+    place and the table would end up with three policies - the exact ambiguity
+    this module now prevents.  Revision ``2026110318`` needs these names to
+    withdraw them.
+
+    The mapping is the truncation PostgreSQL itself applies, so this reproduces
+    the stored name byte for byte without hard-coding a table.  A candidate that
+    is declared by *any* spec today is skipped: dropping it would remove another
+    table's live policy.
+    """
+
+    declared_everywhere = {name for other in CANONICAL_TABLE_POLICIES for name in other.policy_names}
+    names: list[str] = []
+    for suffix in (TENANT_POLICY_SUFFIX, TRUSTED_POLICY_SUFFIX):
+        candidate = installed_policy_name(f"{spec.table}_{suffix}")
+        if candidate in spec.policy_names or candidate in declared_everywhere or candidate in names:
+            continue
+        names.append(candidate)
+    return tuple(names)
+
+
+def legacy_drop_statements(spec: TablePolicySpec) -> tuple[str, ...]:
+    """``DROP POLICY IF EXISTS`` for every stale name :func:`legacy_policy_names` returns."""
+
+    return tuple(f"DROP POLICY IF EXISTS {name} ON {spec.table}" for name in legacy_policy_names(spec))
+
+
+def upgrade_statements(spec: TablePolicySpec) -> tuple[str, ...]:
+    """Idempotent enable+create statements (policies are dropped first).
+
+    Legacy names are dropped as well, so re-applying this block to a database
+    upgraded by an older registry leaves exactly the two current policies.
+    """
+
+    return (
+        *enable_statements(spec),
+        *drop_policy_statements(spec),
+        *legacy_drop_statements(spec),
+        *create_policy_statements(spec),
+    )
 
 
 def downgrade_statements(spec: TablePolicySpec) -> tuple[str, ...]:
@@ -355,6 +405,7 @@ def downgrade_statements(spec: TablePolicySpec) -> tuple[str, ...]:
 
     return (
         *drop_policy_statements(spec),
+        *legacy_drop_statements(spec),
         f"ALTER TABLE {spec.table} NO FORCE ROW LEVEL SECURITY",
         f"ALTER TABLE {spec.table} DISABLE ROW LEVEL SECURITY",
     )
@@ -1040,11 +1091,14 @@ __all__ = [
     "enable_statements",
     "excluded_table_names",
     "installed_policy_name",
+    "legacy_drop_statements",
+    "legacy_policy_names",
     "policy_inventory",
     "registry_tables",
     "relation_exists",
     "scoped_column_predicate",
     "tenant_predicate",
+    "trusted_policy_statement",
     "trusted_service_predicate",
     "uncovered_relations",
     "upgrade_guard_sql",

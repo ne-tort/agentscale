@@ -141,6 +141,17 @@ function ProjectRow({
 
 export function ProjectsOverview({ service, employeeId, initialCabinetId }: ProjectsOverviewProps) {
   const [searchParams, setSearchParams] = useSearchParams();
+  /**
+   * `useSearchParams` возвращает новый `setSearchParams` на каждое изменение location
+   * (его identity замемоизирована на текущем `searchParams`). Если положить его в deps
+   * `loadCabinets`, то запись `?cabinet=`, которую делает сам загрузчик, меняет identity
+   * загрузчика, mount-эффект перезапускается и делает второй, никем не запрошенный
+   * round-trip кабинетов и проектов. Этот лишний запрос не только дублирует сеть: его
+   * падение попадает в тот же catch и стирает уже успешно загруженные строки.
+   * Держим сеттер в ref, чтобы загрузчики оставались стабильными.
+   */
+  const setSearchParamsRef = useRef(setSearchParams);
+  setSearchParamsRef.current = setSearchParams;
   const requestedCabinetId = searchParams.get("cabinet") ?? initialCabinetId;
   const [cabinets, setCabinets] = useState<Cabinet[]>([]);
   const [cabinetId, setCabinetId] = useState<Id>(requestedCabinetId ?? "");
@@ -219,7 +230,7 @@ export function ProjectsOverview({ service, employeeId, initialCabinetId }: Proj
       setCabinetId(nextCabinetId);
       if (requested !== nextCabinetId) {
         requestedCabinetRef.current = nextCabinetId || undefined;
-        setSearchParams((current) => {
+        setSearchParamsRef.current((current) => {
           const next = new URLSearchParams(current);
           if (nextCabinetId) next.set("cabinet", nextCabinetId);
           else next.delete("cabinet");
@@ -242,7 +253,7 @@ export function ProjectsOverview({ service, employeeId, initialCabinetId }: Proj
     } finally {
       if (!signal?.aborted && loadId === cabinetRequestNumber.current) setIsCabinetsLoading(false);
     }
-  }, [employeeId, refreshProjects, service, setSearchParams]);
+  }, [employeeId, refreshProjects, service]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -266,6 +277,12 @@ export function ProjectsOverview({ service, employeeId, initialCabinetId }: Proj
   const changeCabinet = useCallback(async (nextCabinetId: Id) => {
     mutationNumber.current += 1;
     requestNumber.current += 1;
+    // Инвалидируем незавершённый первичный `loadCabinets` (его результат относится к прежнему
+    // кабинету). Его `finally` сверяет `loadId` с счётчиком и потому уже не сбросит флаг
+    // загрузки — без явного сброса здесь экран навсегда остаётся в состоянии
+    // «Загрузка кабинетов…», хотя список кабинетов уже загружен и переключение осмысленно.
+    cabinetRequestNumber.current += 1;
+    setIsCabinetsLoading(false);
     cabinetIdRef.current = nextCabinetId;
     requestedCabinetRef.current = nextCabinetId;
     persistCabinetPreference(employeeId, nextCabinetId);
@@ -275,29 +292,30 @@ export function ProjectsOverview({ service, employeeId, initialCabinetId }: Proj
     setConfirmingCompletionId(undefined);
     setIsCreating(false);
     setPendingAction(undefined);
+    setCabinetError(undefined);
     setProjectError(undefined);
     setNotice(undefined);
-    setSearchParams((current) => {
+    setSearchParamsRef.current((current) => {
       const next = new URLSearchParams(current);
       next.set("cabinet", nextCabinetId);
       return next;
     });
     await refreshProjects(nextCabinetId);
-  }, [employeeId, refreshProjects, setSearchParams]);
+  }, [employeeId, refreshProjects]);
 
   useEffect(() => {
     requestedCabinetRef.current = requestedCabinetId;
     if (requestedCabinetId && cabinets.some((cabinet) => cabinet.id === requestedCabinetId) && requestedCabinetId !== cabinetIdRef.current) {
       void changeCabinet(requestedCabinetId);
     } else if (requestedCabinetId && cabinets.length > 0 && !cabinets.some((cabinet) => cabinet.id === requestedCabinetId)) {
-      setSearchParams((current) => {
+      setSearchParamsRef.current((current) => {
         const next = new URLSearchParams(current);
         if (cabinetIdRef.current) next.set("cabinet", cabinetIdRef.current);
         else next.delete("cabinet");
         return next;
       }, { replace: true });
     }
-  }, [cabinets, changeCabinet, requestedCabinetId, setSearchParams]);
+  }, [cabinets, changeCabinet, requestedCabinetId]);
 
   async function selectProject(project: ProjectSummary) {
     const mutationId = ++mutationNumber.current;
