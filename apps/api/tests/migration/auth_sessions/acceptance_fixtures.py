@@ -61,6 +61,13 @@ REVISION_FILE = VERSIONS / "2026110317_auth_sessions.py"
 REVISION_ID = "2026110317"
 DOWN_REVISION_ID = "2026110316"
 
+#: The revision that succeeded ``2026110317`` (``2026110318_rls_policy_rename``). Recorded
+#: rather than discovered so "this revision is not forked, and its only successor attaches
+#: here" stays an assertion about a *known* successor instead of a tautology over whatever
+#: the tree currently contains — the same convention ``tests/migration/m04e_ledger`` and
+#: ``tests/migration/m06_cutover_evidence`` use for their own successors.
+SUCCESSOR_REVISION_ID = "2026110318"
+
 TABLE = AUTH_SESSION_CORRELATION_GAP.table
 SUBJECT_INDEX = "ix_auth_sessions_subject_expiry"
 
@@ -360,6 +367,7 @@ __all__ = [
     "TENANT_A",
     "TENANT_B",
     "TIMESTAMP_COLUMNS",
+    "SUCCESSOR_REVISION_ID",
     "auth_session_database",
     "as_utc",
     "chain_from_head",

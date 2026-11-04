@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
-from server_contract import API_SRC, WEB_SRC, Call
+from .server_contract import API_SRC, WEB_SRC, Call
 
 DYNAMIC_CLIENT = WEB_SRC / "api" / "dynamic.ts"
 CONTENT_OPS_SERVICE = WEB_SRC / "features" / "resources" / "content-ops" / "service.ts"
@@ -151,31 +151,35 @@ class RouteBinding:
 _BINDING_BLOCK_RE = re.compile(
     r"export const DYNAMIC_ROUTE_BINDINGS\s*=\s*\[(?P<body>.*?)\n\]\s*as const", re.DOTALL
 )
-_BINDING_ENTRY_RE = re.compile(r"\{(?P<body>[^{}]*)\}")
 
 
 def dynamic_route_bindings(path: Path = DYNAMIC_CLIENT) -> list[RouteBinding]:
     """Parse ``DYNAMIC_ROUTE_BINDINGS`` — the client's own wire declaration.
 
     The client states which HTTP method, path, path identifier and query keys each
-    gateway method uses. Declaring it in the client (rather than in this test) keeps
-    one source of truth: a screen action that changes shape has to change the
+    transport method uses. Declaring it in the client (rather than in this test)
+    keeps one source of truth: a screen action that changes shape has to change the
     declaration next to it.
+
+    One entry per line is parsed deliberately: paths contain ``{companyId}``, so
+    counting balanced braces would confuse a path placeholder with an object
+    literal.
     """
     text = _read(path)
     block = _BINDING_BLOCK_RE.search(text)
     if block is None:
         raise AssertionError(f"{path} does not declare DYNAMIC_ROUTE_BINDINGS")
     bindings: list[RouteBinding] = []
-    for entry in _BINDING_ENTRY_RE.finditer(block.group("body")):
-        body = entry.group("body")
-        method = re.search(r'method:\s*"(\w+)"', body)
-        http = re.search(r'http:\s*"(\w+)"', body)
-        route = re.search(r'path:\s*"([^"]+)"', body)
-        if not (method and http and route):
+    for line in block.group("body").splitlines():
+        if "method:" not in line:
             continue
-        identifier = re.search(r'pathIdentifier:\s*(null|"(\w+)")', body)
-        query = re.search(r"query:\s*\[([^\]]*)\]", body)
+        method = re.search(r'method:\s*"(\w+)"', line)
+        http = re.search(r'http:\s*"(\w+)"', line)
+        route = re.search(r'path:\s*"([^"]+)"', line)
+        if not (method and http and route):
+            raise AssertionError(f"malformed DYNAMIC_ROUTE_BINDINGS entry: {line.strip()}")
+        identifier = re.search(r"pathIdentifier:\s*(null|\"(\w+)\")", line)
+        query = re.search(r"query:\s*\[([^\]]*)\]", line)
         bindings.append(
             RouteBinding(
                 method=method.group(1),

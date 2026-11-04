@@ -159,7 +159,10 @@ describe("Chat session workflow acceptance", () => {
     await act(async () => latestController?.actions.saveDraft("first five and more"));
     await act(async () => { resolveFirstSave({ text: "first five", session_id: "created-session", materialized: true }); });
     await waitFor(() => container.querySelector("[data-testid='selected-session']")?.textContent === "created-session");
-    await act(async () => { await new Promise((resolve) => window.setTimeout(resolve, 0)); });
+    // Draft persistence is debounced (~350 ms) and serialized behind the first
+    // write, so the second save can only land after that timer fires. Waiting a
+    // single tick asserted a race, not the behaviour under test.
+    await waitFor(() => service.saveDraft.mock.calls.some(([, , sessionId]) => sessionId === "created-session"));
     expect(service.saveDraft).toHaveBeenCalledWith("project-1", "first five and more", "created-session");
     expect(service.createSession).not.toHaveBeenCalled();
   });

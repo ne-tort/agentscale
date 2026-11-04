@@ -14,8 +14,8 @@ from __future__ import annotations
 
 import pytest
 
-from server_contract import dynamic_app_fields, dynamic_vocabulary
-from web_contract import DYNAMIC_CLIENT, interface_fields, read_field_aliases
+from .server_contract import dynamic_app_fields, dynamic_vocabulary
+from .web_contract import DYNAMIC_CLIENT, interface_fields, read_field_aliases
 
 #: Client interface -> the server serializer that must carry every required field.
 ENTITY_SOURCES = {

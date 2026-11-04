@@ -471,6 +471,31 @@ export const DYNAMIC_MODULES_TRANSPORT_METHODS = [
 
 type TransportMethod = (typeof DYNAMIC_MODULES_TRANSPORT_METHODS)[number];
 
+/**
+ * The wire shape each transport method uses.
+ *
+ * Declared next to the transport because it is the client's one machine-readable
+ * statement of its HTTP contract: the API parity suite (`apps/api/tests/migration/
+ * web_contract_parity`) mounts the real routers and asserts that every entry below
+ * resolves to a registered operation, that `pathIdentifier` is a parameter the
+ * server route actually declares, and that every `query` key is served. `null`
+ * means "no identifier in the path".
+ *
+ * A transport method added without an entry here fails that suite.
+ */
+export const DYNAMIC_ROUTE_BINDINGS = [
+  { method: "listDefinitions", http: "get", path: "/companies/{companyId}/dynamic-apps", pathIdentifier: null, query: ["limit", "cursor", "lifecycle"] },
+  { method: "getDefinition", http: "get", path: "/companies/{companyId}/dynamic-apps/{appId}", pathIdentifier: "appId", query: [] },
+  { method: "listVersions", http: "get", path: "/companies/{companyId}/dynamic-apps/{appId}/versions", pathIdentifier: "appId", query: [] },
+  { method: "publishVersion", http: "post", path: "/companies/{companyId}/dynamic-apps/{appId}/versions/{versionId}/publish", pathIdentifier: "appId", query: [] },
+  { method: "listInstances", http: "get", path: "/companies/{companyId}/dynamic-apps/{appId}/instances", pathIdentifier: "appId", query: ["limit"] },
+  { method: "installInstance", http: "post", path: "/companies/{companyId}/dynamic-apps/{appId}/instances", pathIdentifier: "appId", query: [] },
+  { method: "listGrants", http: "get", path: "/companies/{companyId}/dynamic-apps/{appId}/versions/{versionId}/grants", pathIdentifier: "appId", query: [] },
+  { method: "grantCapability", http: "post", path: "/companies/{companyId}/dynamic-apps/{appId}/versions/{versionId}/grants", pathIdentifier: "appId", query: [] },
+  { method: "revokeCapability", http: "post", path: "/companies/{companyId}/dynamic-apps/{appId}/versions/{versionId}/grants/{capability}/revoke", pathIdentifier: "appId", query: [] },
+  { method: "archiveDefinition", http: "post", path: "/companies/{companyId}/dynamic-apps/{appId}/archive", pathIdentifier: "appId", query: [] },
+] as const;
+
 export function dynamicModulesTransportOf(api: ApiClient | undefined): DynamicModulesTransport | undefined {
   if (!api) return undefined;
   const candidate = (api as DynamicModulesApiClient).dynamicModules;

@@ -114,7 +114,9 @@ describe("chat stream bridge wiring", () => {
 
     const first = await drain(service);
     expect((first.error as LegacyChatError).code).toBe(CHAT_STREAM_ERROR_CODES.streamOutcomeUnknown);
-    expect(first.events.map((event) => event.data.text ?? event.data)).toEqual(["a", {}]);
+    // The first attempt delivers the one partial delta and then loses the
+    // connection; its terminal marker only exists in the replayed response.
+    expect(first.events.map((event) => event.data.text ?? event.data)).toEqual(["a"]);
     expect(service.lastEventIdFor(turn.turnId)).toBe("evt-1");
 
     const second = await drain(service);

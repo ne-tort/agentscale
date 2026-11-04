@@ -7,10 +7,10 @@ import type {
   GrantSet,
 } from "../../../../packages/schemas/declarative-app/v1";
 import {
-  CONSTRAINT_KEYS,
   METHOD_SCOPED_CAPABILITIES,
   capabilityAcceptsConstraint,
   capabilityConstraintMismatch,
+  enforcedConstraintKeys,
   isKnownCapability,
   unsupportedConstraintKeys,
   type ConstraintKey,
@@ -89,6 +89,16 @@ function validManifest(manifest: DeclarativeAppManifest): string | undefined {
   return undefined;
 }
 
+/**
+ * Structural problems in a grant set that make the whole set unusable.
+ *
+ * A constraint key that the capability does not enforce is deliberately *not*
+ * one of them: it is a per-capability decision recorded on that capability's
+ * denial (`unsupported_constraint`), so one unsupported key on one grant cannot
+ * erase an unrelated, correctly bounded grant. Structural defects — unknown
+ * capability name, bad decision/grantor, invalid date, duplicate name — have no
+ * per-capability meaning and invalidate the set (fail closed).
+ */
 function validGrantSet(grantSet: GrantSet, now: number): string | undefined {
   if (typeof grantSet.appId !== "string" || typeof grantSet.manifestVersion !== "string") return "malformed_grant_set";
   if (!validDate(grantSet.issuedAt) || Date.parse(grantSet.issuedAt) > now) return "malformed_grant_set";
@@ -96,6 +106,7 @@ function validGrantSet(grantSet: GrantSet, now: number): string | undefined {
   if (!Array.isArray(grantSet.grants)) return "malformed_grant_set";
   for (const grant of grantSet.grants) {
     const problem = grantProblem(grant, now);
+    if (problem !== undefined && problem.startsWith("unsupported_constraint")) continue;
     if (problem !== undefined) return problem;
   }
   if (new Set(grantSet.grants.map((grant) => grant.name)).size !== grantSet.grants.length) return "malformed_grant_set";
@@ -150,10 +161,16 @@ export function createCapabilityBoundary(manifest: DeclarativeAppManifest, grant
   if (manifestProblem !== undefined) return empty;
   const grantProblem = validGrantSet(grantSet, now);
   if (grantProblem !== undefined) return empty;
-  if (grantSet.appId !== manifest.appId || grantSet.manifestVersion !== manifest.version) return empty;
+  const scopeMatches = grantSet.appId === manifest.appId && grantSet.manifestVersion === manifest.version;
 
   const effective = new Map<CapabilityName, EffectiveCapability>();
   const denied = new Map<CapabilityName, CapabilityDenialCode>();
+  if (!scopeMatches) {
+    // A grant set issued for another app/version authorizes nothing; still say so
+    // per requested capability instead of returning an unexplained empty result.
+    for (const request of manifest.requestedCapabilities) denied.set(request.name, "binding_mismatch");
+    return { ...empty, denied };
+  }
   for (const request of manifest.requestedCapabilities) {
     const grant = grantSet.grants.find((candidate) => candidate.name === request.name);
     if (!grant) { denied.set(request.name, "not_granted"); continue; }
@@ -204,5 +221,5 @@ export function denialReason(boundary: CapabilityBoundary | undefined, capabilit
 }
 
 export function constraintKeysFor(capability: CapabilityName): readonly ConstraintKey[] {
-  return CONSTRAINT_KEYS.filter((key) => capabilityAcceptsConstraint(capability, key));
+  return enforcedConstraintKeys(capability);
 }

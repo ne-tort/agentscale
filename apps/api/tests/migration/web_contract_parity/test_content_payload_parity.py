@@ -12,8 +12,8 @@ import re
 
 import pytest
 
-from server_contract import content_fields, content_vocabulary, server_errors
-from web_contract import (
+from .server_contract import content_fields, content_vocabulary, server_errors
+from .web_contract import (
     CONTENT_OPS_SERVICE,
     CONTENT_OPS_TYPES,
     interface_fields,

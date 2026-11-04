@@ -70,6 +70,18 @@ function normalizeIdentity(identity: StreamIdentity): StreamIdentity {
   };
 }
 
+/**
+ * True when a field was declared but carries no usable value.
+ *
+ * `seq: -1` and `seq: 1.5` are not "the frame did not declare a sequence" — they
+ * declare an invalid one, and the contract refuses to turn either into a cursor
+ * (`not_replayable`) rather than reading the frame as an incomplete identity.
+ */
+function declaredInvalidIdentity(identity: StreamIdentity): boolean {
+  if (identity.eventId !== undefined && nonEmpty(identity.eventId) === undefined) return true;
+  return identity.sequence !== undefined && validSequence(identity.sequence) === undefined;
+}
+
 export class SseCursor {
   private current: StreamIdentity = {};
   private header: string | undefined;
@@ -156,15 +168,18 @@ export class SseCursor {
    * identities that cannot be replayed.
    */
   commit(candidate: StreamIdentity): CursorCommitResult {
-    // Replayability is decided before the verdict: a frame that names no
-    // replayable identity at all (empty id, negative or fractional sequence) is
-    // not "rejected by the cursor" — it simply cannot become a cursor. It still
-    // must not be recorded as handled.
-    const identity = normalizeIdentity(candidate);
-    const replayable = identity.eventId !== undefined || (identity.runId !== undefined && identity.sequence !== undefined);
-    if (!replayable) return { committed: false, reason: "not_replayable", verdict: { kind: "deliver" } };
+    // An identity field that was declared but could not be normalized (empty
+    // id, negative or fractional sequence) is an *invalid* identity, not an
+    // incomplete one: there is no sequence to reason about, so it is reported as
+    // not replayable instead of as a verdict about a value that never existed.
+    if (declaredInvalidIdentity(candidate)) return { committed: false, reason: "not_replayable", verdict: { kind: "deliver" } };
     const verdict = this.inspect(candidate);
     if (verdict.kind !== "deliver") return { committed: false, reason: "rejected", verdict };
+    const identity = normalizeIdentity(candidate);
+    const replayable = identity.eventId !== undefined || (identity.runId !== undefined && identity.sequence !== undefined);
+    // A complete run identity is replayable even without a transport id; a bare
+    // sequence or a sequence without a run is not.
+    if (!replayable) return { committed: false, reason: "not_replayable", verdict };
     this.current = identity;
     this.header = identity.eventId ?? `${identity.runId}:${identity.sequence}`;
     if (identity.eventId !== undefined) this.rememberHandled(identity);
@@ -191,15 +206,22 @@ export class SseCursor {
   }
 }
 
-/** Build an identity from transport fields plus optional application fields. */
+/**
+ * Build an identity from transport fields plus optional application fields.
+ *
+ * The builder deliberately does **not** normalize: declaring `eventId: ""` or
+ * `sequence: -1` is a statement about the frame, and the cursor must be able to
+ * tell it apart from a frame that declared nothing. Normalization happens
+ * inside `SseCursor`, which owns the replay semantics.
+ */
 export function streamIdentity(input: {
   eventId?: string | undefined;
   runId?: string | undefined;
   sequence?: number | undefined;
 }): StreamIdentity {
-  return normalizeIdentity({
+  return {
     ...(input.eventId === undefined ? {} : { eventId: input.eventId }),
     ...(input.runId === undefined ? {} : { runId: input.runId }),
     ...(input.sequence === undefined ? {} : { sequence: input.sequence }),
-  });
+  };
 }

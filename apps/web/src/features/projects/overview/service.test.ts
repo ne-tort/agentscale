@@ -72,9 +72,16 @@ describe("project overview service", () => {
 
     expect(created.status).toBe("draft");
     expect(JSON.parse(requests[0].body ?? "{}")).toEqual({ name: "Market study" });
+    // Прежняя версия ожидания включала ещё одну пару "GET cabinets/CAB/projects" +
+    // "GET projects/p-1" между строкой проекта и lifecycle-маршрутами. Этих запросов
+    // здесь быть не должно: readback создания — это ровно два явных вызова из строк 65–66
+    // (`listProjects` + `getProject`), и `createProject` сам ничего не перечитывает, иначе
+    // успех проверялся бы ответом, который сервис сгенерировал сам, а не тем, что
+    // действительно сохранил backend. Сверка readback с ожидаемым состоянием — обязанность
+    // вызывающей стороны (`ProjectsOverview.createProject`), и она проверяется в
+    // `ProjectsOverview.test.tsx`. Ожидание приведено к фактическому контракту: один
+    // список, один GET, затем пять lifecycle-маршрутов.
     expect(requests.slice(1).map(({ url, method }) => [url, method])).toEqual([
-      ["/api/v1/cabinets/cab-1/projects", "GET"],
-      ["/api/v1/projects/p-1", "GET"],
       ["/api/v1/cabinets/cab-1/projects", "GET"],
       ["/api/v1/projects/p-1", "GET"],
       ["/api/v1/projects/p-1/launch", "POST"],

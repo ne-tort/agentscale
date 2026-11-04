@@ -56,6 +56,7 @@ from .acceptance_fixtures import (
     REVISION_FILE,
     REVISION_ID,
     SUBJECT_INDEX,
+    SUCCESSOR_REVISION_ID,
     TABLE,
     TIMESTAMP_COLUMNS,
     RecordedOps,
@@ -124,19 +125,31 @@ def test_the_revision_attaches_to_the_cutover_revision() -> None:
     assert DOWN_REVISION_ID in graph, "the parent revision must exist"
 
 
-def test_there_is_exactly_one_head_and_it_is_this_revision() -> None:
-    """A second head (or a fork) would make ``upgrade head`` ambiguous."""
+def test_there_is_exactly_one_head_and_this_revision_is_on_its_chain() -> None:
+    """A second head (or a fork) would make ``upgrade head`` ambiguous.
 
-    assert head_revisions() == (REVISION_ID,)
+    Not "the head is this revision": a later revision (``2026110318`` today) legitimately
+    extends the chain above ``2026110317`` and must not make this assertion fail for the
+    wrong reason. What must hold is one head, and this revision on the path below it.
+    """
+
+    heads = head_revisions()
+    assert len(heads) == 1, f"expected exactly one head, got {heads}"
+
     chain = chain_from_head()
-    assert chain[:3] == (REVISION_ID, DOWN_REVISION_ID, "2026110315")
+    position = chain.index(REVISION_ID)
+    assert chain[position:] == (REVISION_ID, DOWN_REVISION_ID, "2026110315")
 
 
 def test_exactly_one_revision_declares_this_one_as_its_parent() -> None:
+    """A *second* successor would fork the chain, so exactly one is required."""
+
     graph = revision_graph()
     children = sorted(revision for revision, down in graph.items() if down == REVISION_ID)
 
-    assert children == [], f"unexpected successors of {REVISION_ID}: {children}"
+    assert children == [SUCCESSOR_REVISION_ID], (
+        f"unexpected successors of {REVISION_ID}: {children}"
+    )
 
 
 def test_the_revision_can_be_loaded_by_path_like_alembic_does() -> None:

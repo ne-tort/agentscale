@@ -78,6 +78,18 @@ export function capabilityAcceptsConstraint(name: string, key: ConstraintKey): b
   return capabilityConstraintKeys(name).includes(key);
 }
 
+/**
+ * Constraint keys a capability enforces, in canonical `CONSTRAINT_KEYS` order.
+ *
+ * The declaration order inside one contract is an authoring detail; the *set* is
+ * what the boundary enforces. `network.fetch` declares `["domains", "methods"]`,
+ * so reporting the contract's own order for it while `unsupportedConstraintKeys`
+ * walks `CONSTRAINT_KEYS` would describe the same capability two different ways.
+ */
+export function enforcedConstraintKeys(name: string): readonly ConstraintKey[] {
+  return CONSTRAINT_KEYS.filter((key) => capabilityAcceptsConstraint(name, key));
+}
+
 export function capabilityRequiresAuthoritativeScope(name: string): readonly ScopeDimension[] {
   return capabilityContract(name)?.authoritativeScope ?? NONE;
 }

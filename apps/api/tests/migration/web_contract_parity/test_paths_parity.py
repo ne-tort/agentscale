@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import pytest
 
-from server_contract import operations, path_parameters, route_matches
-from web_contract import (
+from .server_contract import operations, path_parameters, route_matches
+from .web_contract import (
     CONTENT_OPS_SERVICE,
     DYNAMIC_CLIENT,
     content_ops_calls,

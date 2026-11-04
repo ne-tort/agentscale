@@ -14,19 +14,27 @@ import {
 } from "./envelope";
 import type { RunSequenceIndex } from "./envelope";
 
-/** Trusted index fixture: only the pairs listed here are known events. */
-function makeIndex(runId: string, sequences: number[]): RunSequenceIndex {
+/**
+ * Trusted index fixture: only the pairs listed here are known events.
+ *
+ * A real replay index is durable evidence of both directions — `has(run, seq)`
+ * says a pair exists, and `findByEventId(uuid)` resolves the canonical UUIDv5 of
+ * that same pair. The fixture therefore precomputes the reverse map from the
+ * known sequences; an empty reverse map would claim pairs exist that it cannot
+ * resolve, and `toWireEnvelope` correctly treats that as an inconsistent index.
+ */
+async function makeIndex(runId: string, sequences: number[]): Promise<RunSequenceIndex> {
   const known = new Set(sequences);
   const byId = new Map<string, number>();
+  for (const sequence of sequences) byId.set(await wireEventId(runId, sequence), sequence);
   return {
     runId,
     has(candidateRun, sequence) {
       return candidateRun === runId && known.has(sequence);
     },
     findByEventId(eventId) {
-      const cached = byId.get(eventId);
-      if (cached !== undefined) return { runId, sequence: cached };
-      return undefined;
+      const sequence = byId.get(eventId);
+      return sequence === undefined ? undefined : { runId, sequence };
     },
   };
 }
@@ -67,7 +75,11 @@ describe("envelope separation", () => {
     // `type` falls back to `event`, then to `data.type`.
     expect(readApplicationEnvelope({ event: "block", data: {} }).eventType).toBe("block");
     expect(readApplicationEnvelope({ data: { type: "tool_result" } }).eventType).toBe("tool_result");
-    expect(readApplicationEnvelope({ data: {} }).sequence).toBeUndefined();
+    // A frame without any `seq` parses, but carries no sequence. The fixture
+    // must still name its type: an application frame with no type at all is
+    // malformed (asserted below), so `{ data: {} }` could never reach this
+    // assertion — the previous expectation was self-contradictory.
+    expect(readApplicationEnvelope({ type: "delta", data: {} }).sequence).toBeUndefined();
     expect(() => readApplicationEnvelope({ type: "delta", data: {}, seq: -1 })).toThrow(UpstreamStreamMalformed);
     expect(() => readApplicationEnvelope({ type: "delta", data: {}, seq: "7" })).toThrow(UpstreamStreamMalformed);
     expect(() => readApplicationEnvelope({ type: "delta" })).toThrow(UpstreamStreamMalformed);
@@ -109,19 +121,19 @@ describe("envelope separation", () => {
     // An index that does not know the pair refuses too: no sequence is invented.
     await expect(toWireEnvelope(
       { eventType: "text_delta", payload: {}, runId: "run-1", sequence: 9 },
-      { projectId: "project-1", index: makeIndex("run-1", [7]) },
+      { projectId: "project-1", index: await makeIndex("run-1", [7]) },
     )).rejects.toBeInstanceOf(UpstreamStreamMalformed);
     // A missing run identity can never be filled from the request scope.
     await expect(toWireEnvelope(
       { eventType: "text_delta", payload: {} },
-      { projectId: "project-1", index: makeIndex("run-1", [7]) },
+      { projectId: "project-1", index: await makeIndex("run-1", [7]) },
     )).rejects.toBeInstanceOf(UpstreamStreamMalformed);
   });
 
   it("converts only pairs proven by the trusted index", async () => {
     const envelope = await toWireEnvelope(
       { eventType: "text_delta", payload: { text: "hi" }, runId: "run-1", sequence: 7 },
-      { projectId: "project-1", sessionId: "session-1", index: makeIndex("run-1", [7]) },
+      { projectId: "project-1", sessionId: "session-1", index: await makeIndex("run-1", [7]) },
     );
     expect(envelope).toEqual({
       eventId: await wireEventId("run-1", 7),
@@ -136,7 +148,7 @@ describe("envelope separation", () => {
     });
     await expect(toWireEnvelope(
       { eventType: "text_delta", payload: {}, runId: "run-2", sequence: 7 },
-      { projectId: "project-1", index: makeIndex("run-1", [7]) },
+      { projectId: "project-1", index: await makeIndex("run-1", [7]) },
     )).rejects.toBeInstanceOf(UpstreamStreamMalformed);
   });
 
@@ -173,7 +185,7 @@ describe("envelope separation", () => {
     expect(await lastEventIdFor({ runId: "run-1", sequence: 7 })).toBe("run-1:7");
     expect(await lastEventIdFor({ sequence: 7 })).toBeUndefined();
     expect(await lastEventIdFor({ runId: "run-1" })).toBeUndefined();
-    const index = makeIndex("run-1", [7]);
+    const index = await makeIndex("run-1", [7]);
     expect(await lastEventIdFor({ runId: "run-1", sequence: 7 }, index)).toBe(await wireEventId("run-1", 7));
     await expect(lastEventIdFor({ runId: "run-1", sequence: 8 }, index)).rejects.toBeInstanceOf(UpstreamStreamMalformed);
     // A transport id is reused verbatim.

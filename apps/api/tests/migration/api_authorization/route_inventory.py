@@ -366,6 +366,17 @@ class SourceIndex:
             elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
                 for alias in node.names:
                     index.imports[alias.asname or alias.name] = (node.module, alias.name)
+        # Package ``__init__`` modules in this codebase re-export their submodules
+        # from a lazy ``__getattr__`` (``if name == "X": from ...sub import X``),
+        # so the imports sit *inside* a function body. Without reading those, a
+        # handler's ``ProjectQuery(...).get(...)`` would look like an unknown
+        # receiver and every such route would be reported unguarded — the exact
+        # false positive that makes a guard audit worthless.
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ImportFrom) or not node.module or node.level != 0:
+                continue
+            for alias in node.names:
+                index.imports.setdefault(alias.asname or alias.name, (node.module, alias.name))
         return index
 
     # -- lookups ------------------------------------------------------- #
@@ -388,16 +399,30 @@ class SourceIndex:
         return entry.classes.get(cls, {}).get(name)
 
     def resolve_class(self, module: str, name: str | None) -> tuple[str, str] | None:
-        """``SomeService`` as written in ``module`` -> ``(defining module, class)``."""
+        """``SomeService`` as written in ``module`` -> ``(defining module, class)``.
+
+        Re-exports are followed transitively: a package ``__init__`` that only
+        forwards ``ProjectQuery`` to ``project_service.query`` must resolve to
+        the module that actually declares the class, otherwise the method lookup
+        that follows would search the empty package namespace.
+        """
 
         if not name:
             return None
-        entry = self._modules.get(module)
-        if entry is not None and name in entry.imports:
-            target_module, target_name = entry.imports[name]
-            return target_module, target_name
-        if entry is not None and name in entry.classes:
-            return module, name
+        seen: set[tuple[str, str]] = set()
+        current: tuple[str, str] = (module, name)
+        while current not in seen:
+            seen.add(current)
+            owner_module, owner_name = current
+            entry = self._modules.get(owner_module)
+            if entry is None:
+                return None
+            if owner_name in entry.classes:
+                return owner_module, owner_name
+            forward = entry.imports.get(owner_name)
+            if forward is None:
+                return None
+            current = forward
         return None
 
     # -- guard search -------------------------------------------------- #
