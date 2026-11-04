@@ -388,6 +388,16 @@ class Settings(BaseSettings):
             "MIGRATION_COMPOSITION_ENABLED",
         ),
     )
+    # Durable correlation -> subject store (MIG-AUTHSESS-01). Off by default: with the flag
+    # off ``api/deps.py::get_principal`` writes no ``auth_sessions`` row and the request
+    # behaves exactly as it did before the table existed; the request path keeps resolving
+    # through the bearer credential either way. Turning it on records one row per verified
+    # bearer request so a worker/job/second replica can resolve the same correlation id
+    # without holding the token (principal_resolver.SqlAuthSessionCredentialSource).
+    auth_session_store_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("AUTH_SESSION_STORE_ENABLED"),
+    )
     projects_auto_rematerialize_on_cabinet_change: bool = Field(
         default=False,
         validation_alias=AliasChoices(

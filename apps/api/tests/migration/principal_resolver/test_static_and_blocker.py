@@ -1,4 +1,4 @@
-"""Static obligations of the resolver module, plus the recorded blocker it leaves open.
+"""Static obligations of the resolver module, plus the schema specification it now uses.
 
 Three things cannot be proven by calling the resolver:
 
@@ -6,8 +6,13 @@ Three things cannot be proven by calling the resolver:
   module's AST;
 * that it never caches a correlation -> subject mapping in process memory, and never writes to
   the identity tables — proven on the module's text/AST;
-* that the recorded schema gap is real, i.e. the table it names genuinely does not exist —
-  proven against the registered models and the Alembic revision files.
+* that the store the durable path reads is real — the model is registered, exactly one
+  revision creates it, the resolver selects it, and it stays outside the canonical RLS set
+  with a reviewed exclusion.
+
+The old ``test_the_named_table_still_does_not_exist`` tripwire is gone on purpose: it existed
+to force the blocker to be lifted in the same change that added the table, ``MIG-AUTHSESS-01``
+did exactly that, and the test that replaces it proves the *result* rather than the absence.
 """
 
 from __future__ import annotations
@@ -168,30 +173,98 @@ def test_the_blocker_is_reported_for_the_composition_root() -> None:
     assert "None" in PRINCIPAL_RESOLVER_BLOCKER
 
 
-def test_the_named_table_still_does_not_exist() -> None:
-    """The gap is honest: no registered model declares it, and no revision creates it.
+def test_the_named_table_now_exists_and_the_resolver_uses_it() -> None:
+    """Was "``auth_sessions`` still does not exist", which is no longer true.
 
-    When someone adds ``auth_sessions`` this test fails on purpose — the blocker must be
-    lifted (and the resolver switched to it) in the same change, not left to rot.
+    The tripwire has been *paid off*, not deleted: ``MIG-AUTHSESS-01`` added the table
+    (model + revision ``2026110317``) and switched the durable path onto it, so the old
+    assertion ("no model, no revision") would now fail for the wrong reason. What must be
+    proven instead is the state the tripwire wanted to force, from all three sides:
+
+    * the model is registered and declares the specification's table;
+    * a revision creates it, as exactly one table, at the head of the chain;
+    * the resolver reads it — ``SqlAuthSessionCredentialSource`` is exported and its
+      implementation selects ``AuthSessionRow``;
+    * the table stays **outside** the canonical RLS set (a platform anchor read before a
+      tenant exists) and is recorded as a reviewed exclusion, not silently skipped.
     """
 
-    assert "auth_sessions" not in Base.metadata.tables
+    from prodavan.application.migration.principal_resolver import (
+        SqlAuthSessionCredentialSource,
+    )
+    from prodavan.infrastructure.persistence.models.auth_sessions import AuthSessionRow
+    from prodavan.infrastructure.persistence.rls import policies
+
+    # 1. Registered, and the name is the specification's.
+    assert "auth_sessions" in Base.metadata.tables
+    assert Base.metadata.tables["auth_sessions"] is AuthSessionRow.__table__
+    assert AuthSessionRow.__tablename__ == AUTH_SESSION_CORRELATION_GAP.table
+
+    # 2. Exactly one revision creates it, and it is the head. The revision passes its table
+    #    name as the ``AUTH_SESSIONS`` constant (so the check text is rendered once), hence
+    #    the two accepted spellings; ``tests/migration/auth_sessions`` replays it and proves
+    #    the resulting object, which is the authoritative check.
     revisions = sorted(ALEMBIC_VERSIONS.glob("*.py"))
     assert revisions, "the Alembic revision directory must be readable"
     creating = [
         path.name
         for path in revisions
-        if re.search(r"""create_table\(\s*["']auth_sessions["']""", path.read_text(encoding="utf-8"))
+        if re.search(
+            r"""create_table\(\s*(?:["']auth_sessions["']|AUTH_SESSIONS\b)""",
+            path.read_text(encoding="utf-8"),
+        )
     ]
-    assert creating == [], f"auth_sessions is created by {creating}; lift the blocker"
+    assert len(creating) == 1, f"auth_sessions is created by {creating}"
+    assert creating[0].startswith("2026110317"), creating
+
+    # 3. The resolver is the reader: the durable builder wires the SQL source, not the
+    #    bearer one, and the source implements the same ``lookup`` protocol.
+    assert "AuthSessionRow" in SOURCE
+    assert callable(getattr(SqlAuthSessionCredentialSource, "lookup", None))
+    durable = module.build_durable_principal_resolver(session_factory=lambda: None)
+    assert type(getattr(durable, "_credentials")) is SqlAuthSessionCredentialSource
+
+    # 4. Outside the RLS registry, inside the reviewed exclusions.
+    registered = set(policies.registry_tables())
+    assert "auth_sessions" not in registered
+    assert "auth_sessions" in policies.excluded_table_names()
+    assert policies.uncovered_relations(Base.metadata.tables.keys()) == ()
 
 
-def test_a_stateless_credential_store_is_documented_as_the_current_path() -> None:
-    """The module docstring must say *why* the credential path is per-request, not durable."""
+def test_the_specification_columns_are_the_declared_columns() -> None:
+    """The specification is copied, not paraphrased: names, order, type family, nullability.
+
+    ``AUTH_SESSION_CORRELATION_GAP`` is what a reviewer reads; the model is what runs. A
+    column in one and not the other would make the resolved principal depend on a shape
+    nobody reviewed, so the two are compared here rather than in prose.
+    """
+
+    from prodavan.infrastructure.persistence.models.auth_sessions import AuthSessionRow
+
+    table = AuthSessionRow.__table__
+    declared = [(column.name, column.nullable) for column in table.columns]
+    specified = [
+        (name, "null" in column_type and "not null" not in column_type)
+        for name, column_type, _meaning in AUTH_SESSION_CORRELATION_GAP.columns
+    ]
+
+    assert declared == specified
+    # The primary key is the correlation id, exactly as the specification says.
+    assert tuple(column.name for column in table.primary_key.columns) == ("correlation_id",)
+    # The two keys the specification names exist.
+    index_columns = {tuple(column.name for column in index.columns) for index in table.indexes}
+    assert ("subject_claim", "expires_at") in index_columns
+
+
+def test_the_materialised_store_is_documented_as_durable_not_request_scoped() -> None:
+    """The module docstring must say where the durable answer comes from and that the
+    request path keeps the bearer credential — the two claims a worker depends on."""
 
     docstring = ast.get_docstring(TREE) or ""
     assert "auth_sessions" in docstring
-    assert "no such table" in docstring.lower() or "absent" in docstring.lower()
+    assert "SqlAuthSessionCredentialSource" in docstring
+    assert "BearerJwtCredentialSource" in docstring
+    assert "request path" in docstring
 
 
 # ---------------------------------------------------------------------------

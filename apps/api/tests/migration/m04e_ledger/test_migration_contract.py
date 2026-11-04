@@ -252,11 +252,18 @@ def test_revision_identifiers_follow_the_wave_chain() -> None:
 
 def test_the_chain_has_exactly_one_head_and_it_is_a_successor_of_this_revision() -> None:
     """Was "the head is this revision": that stopped being true when ``2026110316``
-    landed. The invariant that still matters is that the tree has one head, this
-    revision is on its chain, and its only successor declares it as ``down_revision``
-    (a second head or a fork would make ``upgrade head`` ambiguous)."""
-    assert head_revisions() == (SUCCESSOR_REVISION_ID,)
+    landed, and again when ``2026110317`` (the ``auth_sessions`` store) succeeded *it*.
+
+    The invariant that still matters is that the tree has one head, this revision is on its
+    chain, and its only successor declares it as ``down_revision`` (a second head or a fork
+    would make ``upgrade head`` ambiguous). The successor is pinned; the head is not, because
+    every later revision legitimately extends the chain — that is what a chain is for.
+    """
+
+    heads = head_revisions()
+    assert len(heads) == 1, f"expected exactly one head, got {heads}"
     assert revision_graph()[SUCCESSOR_REVISION_ID] == REVISION_ID
+    assert REVISION_ID in chain_from_head()
 
 
 def test_exactly_one_revision_declares_this_one_as_its_parent() -> None:
@@ -271,10 +278,17 @@ def test_exactly_one_revision_declares_this_one_as_its_parent() -> None:
 
 
 def test_the_head_walks_back_through_the_scope_evidence_and_rls_passes() -> None:
-    chain = chain_from_head()
+    """Walking the chain from the head must reach this revision, in the reviewed order.
 
-    assert chain[:5] == (
-        SUCCESSOR_REVISION_ID,
+    Expressed as "everything below this revision is unchanged" rather than "this revision is
+    at position 1": a later revision (``2026110317`` is one) extends the chain above it and
+    must not make this assertion fail for the wrong reason.
+    """
+
+    chain = chain_from_head()
+    position = chain.index(REVISION_ID)
+
+    assert chain[position : position + 4] == (
         REVISION_ID,
         DOWN_REVISION_ID,
         "2026110313",
@@ -1151,11 +1165,23 @@ def test_downgrade_leaves_earlier_installers_policies_alone() -> None:
 
 
 def test_a_successor_revision_would_not_fork_the_head() -> None:
+    """Exactly one successor, it attaches here, and walking down from the head reaches us.
+
+    Was "the head is the successor": ``2026110317`` now sits above ``2026110316``, so the
+    head is one more step away. The property this test exists for — a linear chain with no
+    fork — is stated directly instead of assuming the successor is always the head.
+    """
+
     graph = revision_graph()
     successors = sorted(revision for revision, down in graph.items() if down == REVISION_ID)
+    assert successors == [SUCCESSOR_REVISION_ID]
     for successor in successors:
         assert graph[successor] == REVISION_ID
-    assert head_revisions() == (successors[-1] if successors else REVISION_ID,)
+
+    heads = head_revisions()
+    assert len(heads) == 1, f"a fork would produce several heads: {heads}"
+    assert heads[0] == chain_from_head()[0]
+    assert REVISION_ID in chain_from_head()
 
 
 def test_the_revision_can_be_loaded_by_path_like_alembic_does() -> None:

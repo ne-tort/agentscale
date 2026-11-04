@@ -43,6 +43,11 @@ from prodavan.infrastructure.persistence.models.ai_models import (
     AiModelRow,
     AiModelSdkBindingRow,
 )
+# MIG-AUTHSESS-01: the durable correlation_id -> verified subject store the auth-boundary
+# principal resolver was missing. A platform table (like companies/memberships): it is read
+# before a tenant exists, so it is deliberately absent from the canonical RLS registry and
+# recorded in policies.EXCLUDED_TABLES instead.
+from prodavan.infrastructure.persistence.models.auth_sessions import AuthSessionRow
 from prodavan.infrastructure.persistence.models.base import Base
 from prodavan.infrastructure.persistence.models.cabinets import (
     CabinetCompanyGrantRow,
@@ -188,6 +193,7 @@ __all__ = [
     "WebhookDeliveryRow",
     "WebhookSubscriptionRow",
     "AgentUsageRow",
+    "AuthSessionRow",
     "CanonicalGrantAuditRow",
     "CanonicalGrantMappingRow",
     "CanonicalGrantQuarantineRow",

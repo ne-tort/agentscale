@@ -39,8 +39,15 @@ dependency                     why it cannot exist at startup
 ``m04_tenant_context``,
 ``m05_tenant_context``         ``RlsTenantScopeContextAdapter`` /
                                ``RlsTrustedTenantContextAdapter`` need a
-                               ``TrustedPrincipalResolver`` — an auth-boundary
-                               collaborator this repository does not implement.
+                               ``TrustedPrincipalResolver``. That resolver now
+                               exists (``application/migration/principal_resolver.py``),
+                               but a *process* can only use the durable variant
+                               (``build_durable_principal_resolver``), which reads
+                               ``auth_sessions`` — so the two adapters are composed
+                               only when ``AUTH_SESSION_STORE_ENABLED`` is on. With
+                               the flag off no row can exist, a process-scope
+                               resolver could only refuse, and the adapters stay
+                               absent with the codes below.
 ``m04e_store``                 ``build_m04e_evidence_store`` answers ``None`` with
                                the open DDL gaps until that schema is reviewed.
 ``m04e_artifacts``,
@@ -55,9 +62,15 @@ partition handoff reader       the evidence stores require a resolved
 ``m05_runtime_context``,
 ``m05_upstream_evidence``      a run/partition-bound context and the exact
                                upstream gate evidence for one instance.
-``m06_ports``                  ``ShadowGatewayPorts`` needs the capability
-                               facade's scope/quota/mapping adapters, which no
-                               composition root publishes yet.
+``m06_ports``                  ``ShadowGatewayPorts`` needs every M06 port at
+                               once. The legacy repository and scope ports now
+                               have SQL implementations
+                               (``infrastructure/persistence/dynamic_app_gateway``)
+                               and are composed here, but the legacy **quota**
+                               port has no table that can express a
+                               per-invocation limit, and the identity/handoff
+                               collaborators are per-partition. So the port set
+                               stays absent and the quota absence is named.
 =============================  ==================================================
 
 Those absences are exactly what ``assemble_migration_chain`` reports per stage,
@@ -108,9 +121,14 @@ BLOCKER_SESSION_FACTORY_UNAVAILABLE = "migration_chain_session_factory_unavailab
 #: ``assemble_migration_chain`` (or the dependency resolution itself) raised.
 BLOCKER_COMPOSITION_FAILED = "migration_chain_composition_failed"
 
-#: ``TrustedPrincipalResolver`` is an auth-boundary collaborator, not implemented here.
+#: ``TrustedPrincipalResolver`` is an auth-boundary collaborator. It exists now, but the
+#: process-scope variant needs the durable ``auth_sessions`` store: with
+#: ``AUTH_SESSION_STORE_ENABLED`` off there is nothing a process could resolve, so these
+#: codes still describe the absent adapters.
 PART_M04_TENANT_CONTEXT_UNAVAILABLE = "migration_chain_m04_tenant_context_unavailable"
 PART_M05_TENANT_CONTEXT_UNAVAILABLE = "migration_chain_m05_tenant_context_unavailable"
+#: The durable resolver itself could not be constructed (a composition error, not a gap).
+PART_DURABLE_PRINCIPAL_RESOLVER_FAILED = "migration_chain_durable_principal_resolver_failed"
 #: Both M04E adapters are bound to a caller-owned transaction, not to a factory.
 PART_M04E_ARTIFACTS_UNAVAILABLE = "migration_chain_artifact_content_session_bound"
 PART_M04E_SERVER_REPOSITORY_UNAVAILABLE = (
@@ -121,7 +139,13 @@ PART_EVIDENCE_SCOPE_IS_PER_PARTITION = "migration_chain_evidence_scope_is_per_pa
 #: Run-bound M05 inputs: resolved tenant/subject/session and exact upstream gates.
 PART_M05_RUNTIME_CONTEXT_UNAVAILABLE = "migration_chain_runtime_context_is_per_run"
 PART_M05_UPSTREAM_EVIDENCE_UNAVAILABLE = "migration_chain_upstream_evidence_is_per_partition"
-#: No composition root publishes the shadow gateway's capability adapters.
+#: ``ShadowGatewayPorts`` cannot be stated without this port, and no table can decide it.
+PART_M06_LEGACY_QUOTA_TABLE_MISSING = "migration_chain_legacy_quota_table_missing"
+#: The remaining M06 ports (identity, handoff, mapping, canonical) are per-partition.
+PART_M06_IDENTITY_AND_HANDOFF_PER_PARTITION = (
+    "migration_chain_m06_identity_and_handoff_are_per_partition"
+)
+#: The shadow facade's port set is incomplete, so the stage must stay unwired.
 PART_M06_SHADOW_PORTS_UNAVAILABLE = "migration_chain_shadow_gateway_ports_unavailable"
 
 #: "The caller did not pass this factory" — distinct from an explicit ``None``,
@@ -271,7 +295,7 @@ def _empty_dependencies(session_factory: Any) -> ChainDependencies:
 
 
 def build_migration_chain_dependencies(
-    *, session_factory: Any = _UNSET
+    *, session_factory: Any = _UNSET, durable_principals: bool | None = None
 ) -> ChainDependencySet:
     """Resolve every dependency a *process* can own, and name the ones it cannot.
 
@@ -281,6 +305,17 @@ def build_migration_chain_dependencies(
         ``None`` -> this process deliberately has no database, so no port is
         composed and only stage blockers are reported;
         a factory -> used verbatim (tests and hosts with a partial composition).
+
+    ``durable_principals``:
+        ``None`` -> follow ``settings.auth_session_store_enabled``. ``True`` -> compose the
+        durable principal resolver (``build_durable_principal_resolver``, which reads
+        ``auth_sessions``) and the M04/M05 tenant-context adapters over it. ``False`` ->
+        leave both absent, exactly as before the store existed.
+
+    The request path is untouched by all of this: a request resolves through
+    ``BearerJwtCredentialSource`` with the token it carries. The durable source exists for
+    callers that hold no token (a worker, a queued job, a second replica), which is why it
+    is wired here — at process scope — and never into ``api/deps.py``.
 
     Never raises. Nothing here opens a connection, starts a transaction or calls
     a stage method: every constructor in this tree only stores ports and
@@ -295,6 +330,9 @@ def build_migration_chain_dependencies(
         build_m04e_sql_ports,
     )
     from prodavan.application.migration.m06_cutover.ports import build_cutover_ports
+    from prodavan.infrastructure.persistence.dynamic_app_gateway import (
+        build_legacy_gateway_ports,
+    )
 
     built: list[str] = []
     blockers: list[str] = []
@@ -322,6 +360,14 @@ def build_migration_chain_dependencies(
             built=(),
             blockers=_dedupe(blockers),
         )
+
+    if durable_principals is None:
+        # The store and the writer are one decision: ``api/deps.py::get_principal`` writes
+        # an ``auth_sessions`` row only when this flag is on, so a process-scope resolver is
+        # only composed when such a row can exist.
+        from prodavan.config.settings import settings
+
+        durable_principals = bool(getattr(settings, "auth_session_store_enabled", False))
 
     m04e_ports = _pair(
         "m04e_sql_ports",
@@ -360,26 +406,75 @@ def build_migration_chain_dependencies(
         blockers=blockers,
     )
 
+    principal_resolver = None
+    if durable_principals:
+        from prodavan.application.migration.principal_resolver import (
+            build_durable_principal_resolver,
+        )
+
+        principal_resolver = _attempt(
+            "durable_principal_resolver",
+            lambda: build_durable_principal_resolver(session_factory=factory),
+            built=built,
+            blockers=blockers,
+        )
+
+    m04_tenant_context = None
+    m05_tenant_context = None
+    if principal_resolver is not None:
+        from prodavan.application.migration.tenant_context import (
+            RlsTenantScopeContextAdapter,
+            RlsTrustedTenantContextAdapter,
+        )
+
+        m04_tenant_context = RlsTenantScopeContextAdapter(
+            principal_resolver=principal_resolver
+        )
+        m05_tenant_context = RlsTrustedTenantContextAdapter(
+            principal_resolver=principal_resolver
+        )
+
+    # The legacy gateway ports: two of the three ``build_shadow_gateway`` needs are
+    # implemented over the ``dynamic_app_*`` tables and constructed here. They are
+    # *composed*, not published: without the quota port ``ShadowGatewayPorts``
+    # cannot be stated, and inventing the port set around the hole would turn
+    # "quota enforced" into "quota ignored" for every shadow observation.
+    legacy_ports = _attempt(
+        "legacy_gateway_ports",
+        lambda: build_legacy_gateway_ports(session_factory=factory),
+        built=built,
+        blockers=blockers,
+    )
+    if legacy_ports is not None:
+        # ``_attempt`` records only exceptions; the partial-port codes are data, so
+        # they are merged explicitly (``_dedupe`` at the end makes a repeat harmless).
+        blockers.extend(legacy_ports.blockers)
+        built.append("legacy_gateway_repository")
+        built.append("legacy_gateway_scope")
+
     # Every absence below is structural (see the module docstring table), not a
     # missing implementation this task could have supplied.
-    blockers.extend(
-        (
-            PART_M04_TENANT_CONTEXT_UNAVAILABLE,
-            PART_M05_TENANT_CONTEXT_UNAVAILABLE,
-            PART_M04E_ARTIFACTS_UNAVAILABLE,
-            PART_M04E_SERVER_REPOSITORY_UNAVAILABLE,
-            PART_EVIDENCE_SCOPE_IS_PER_PARTITION,
-            PART_M05_RUNTIME_CONTEXT_UNAVAILABLE,
-            PART_M05_UPSTREAM_EVIDENCE_UNAVAILABLE,
-            PART_M06_SHADOW_PORTS_UNAVAILABLE,
-        )
-    )
+    structural_absences = [
+        PART_M04E_ARTIFACTS_UNAVAILABLE,
+        PART_M04E_SERVER_REPOSITORY_UNAVAILABLE,
+        PART_EVIDENCE_SCOPE_IS_PER_PARTITION,
+        PART_M05_RUNTIME_CONTEXT_UNAVAILABLE,
+        PART_M05_UPSTREAM_EVIDENCE_UNAVAILABLE,
+        PART_M06_LEGACY_QUOTA_TABLE_MISSING,
+        PART_M06_IDENTITY_AND_HANDOFF_PER_PARTITION,
+        PART_M06_SHADOW_PORTS_UNAVAILABLE,
+    ]
+    if m04_tenant_context is None:
+        structural_absences.insert(0, PART_M04_TENANT_CONTEXT_UNAVAILABLE)
+    if m05_tenant_context is None:
+        structural_absences.append(PART_M05_TENANT_CONTEXT_UNAVAILABLE)
+    blockers.extend(structural_absences)
 
     from prodavan.application.migration.composition import ChainDependencies
 
     dependencies = ChainDependencies(
         session_factory=factory,
-        m04_tenant_context=None,
+        m04_tenant_context=m04_tenant_context,
         m04e_reader=m04e_ports.reader if m04e_ports is not None else None,
         m04e_store=store,
         m04e_gates=m04e_ports.gates if m04e_ports is not None else None,
@@ -390,7 +485,7 @@ def build_migration_chain_dependencies(
         # Evidence stores are tenant/partition bound (``TrustedEvidenceScope``).
         m04e_m05_handoff=None,
         m04e_page_size=M04E_PAGE_SIZE,
-        m05_tenant_context=None,
+        m05_tenant_context=m05_tenant_context,
         m05_runtime_context=None,
         m05_upstream_evidence=None,
         m05_promotion_records=None,
@@ -751,12 +846,15 @@ __all__ = [
     "M04E_PAGE_SIZE",
     "M05_PAGE_SIZE",
     "PART_EVIDENCE_SCOPE_IS_PER_PARTITION",
+    "PART_DURABLE_PRINCIPAL_RESOLVER_FAILED",
     "PART_M04E_ARTIFACTS_UNAVAILABLE",
     "PART_M04E_SERVER_REPOSITORY_UNAVAILABLE",
     "PART_M04_TENANT_CONTEXT_UNAVAILABLE",
     "PART_M05_RUNTIME_CONTEXT_UNAVAILABLE",
     "PART_M05_TENANT_CONTEXT_UNAVAILABLE",
     "PART_M05_UPSTREAM_EVIDENCE_UNAVAILABLE",
+    "PART_M06_IDENTITY_AND_HANDOFF_PER_PARTITION",
+    "PART_M06_LEGACY_QUOTA_TABLE_MISSING",
     "PART_M06_SHADOW_PORTS_UNAVAILABLE",
     "RESOURCE_NAME",
     "STATE_ATTR",

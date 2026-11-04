@@ -48,6 +48,13 @@ REVISION_FILE = VERSIONS / "2026110316_m06_cutover_evidence.py"
 REVISION_ID = "2026110316"
 DOWN_REVISION_ID = "2026110315"
 
+#: The revision that succeeded ``2026110316``: ``2026110317`` (MIG-AUTHSESS-01, the durable
+#: correlation -> subject store) creates ``auth_sessions`` and attaches here. ``2026110316``
+#: is therefore no longer the head, exactly as this revision succeeded ``2026110315`` — the
+#: "is this the head" assertions below compare against the successor rather than the constant
+#: ``2026110316``, the same way ``tests/migration/m04e_ledger`` does.
+SUCCESSOR_REVISION_ID = "2026110317"
+
 LEDGER_TABLE = CUTOVER_LEDGER_TABLE
 SOURCE_TAIL_TABLE = CUTOVER_SOURCE_TAIL_TABLE
 
@@ -308,6 +315,7 @@ __all__ = [
     "RecordedOps",
     "SOURCE_TAIL_TABLE",
     "SPEC_TYPE_LABELS",
+    "SUCCESSOR_REVISION_ID",
     "chain_from_head",
     "check_catalog",
     "column_signature",

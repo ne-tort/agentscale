@@ -805,6 +805,15 @@ EXCLUDED_TABLES: Final[tuple[tuple[tuple[str, ...], str], ...]] = (
         "Legacy platform anchors stay outside the canonical target RLS set; they are read "
         "by the policy predicates above and need a separate platform-level RLS decision.",
     ),
+    (
+        ("auth_sessions",),
+        "MIG-AUTHSESS-01: durable correlation_id -> verified subject store. A platform "
+        "anchor like companies/memberships, read *before* a tenant exists (that is how a "
+        "correlation id learns which tenant it may bind), so the reader runs with no "
+        "app.tenant_id and a tenant-scoped policy would deny the only legitimate read. "
+        "Ownership is enforced at write time: only the auth boundary writes it, after "
+        "signature/expiry verification (application/auth/auth_sessions.py).",
+    ),
 )
 
 #: Name prefixes that mark a table as part of the canonical tenant-owned target

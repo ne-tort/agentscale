@@ -19,8 +19,8 @@ the declarative metadata — same SQLAlchemy rendering on both sides. No databas
 
 Covered:
 
-* chain shape: ``2026110316 -> 2026110315``, one head, no fork, ``upgrade head`` ends
-  here;
+* chain shape: ``2026110316 -> 2026110315``, one head, no fork, and its only successor is
+  ``2026110317`` (the ``auth_sessions`` store, which attaches here);
 * exactly two tables with column/type/nullability/default parity, named check parity,
   unique and primary-key parity, index parity and no foreign key;
 * the specification is copied, not paraphrased: every ``ColumnSpec`` (name, type,
@@ -91,6 +91,7 @@ from .acceptance_fixtures import (
     REVISION_ID,
     SOURCE_TAIL_TABLE,
     SPEC_TYPE_LABELS,
+    SUCCESSOR_REVISION_ID,
     RecordedOps,
     chain_from_head,
     check_catalog,
@@ -183,21 +184,40 @@ def test_revision_identifiers_follow_the_cutover_chain() -> None:
     assert module._POLICIES_ADDED_HERE == frozenset({REVISION_ID})
 
 
-def test_the_chain_has_exactly_one_head_and_it_is_this_revision() -> None:
-    assert head_revisions() == (REVISION_ID,)
+def test_the_chain_has_exactly_one_head_and_it_is_a_successor_of_this_revision() -> None:
+    """Was "the head is this revision": no longer true since ``2026110317`` landed.
+
+    The invariant that still matters is that the tree has one head, this revision is on its
+    chain, and its only successor declares it as ``down_revision`` — a second head or a fork
+    would make ``upgrade head`` ambiguous.
+    """
+
+    assert head_revisions() == (SUCCESSOR_REVISION_ID,)
+    assert revision_graph()[SUCCESSOR_REVISION_ID] == REVISION_ID
 
 
-def test_no_revision_declares_this_one_as_its_parent_yet() -> None:
+def test_exactly_one_revision_declares_this_one_as_its_parent() -> None:
+    """Was "no revision declares this one as its parent yet": ``2026110317`` now does.
+
+    A *second* successor would fork the chain, so exactly one is required.
+    """
+
     graph = revision_graph()
     children = sorted(revision for revision, down in graph.items() if down == REVISION_ID)
 
-    assert children == [], f"unexpected successors of {REVISION_ID}: {children}"
+    assert children == [SUCCESSOR_REVISION_ID], f"unexpected successors of {REVISION_ID}: {children}"
 
 
 def test_the_head_walks_back_through_the_m04e_ledger() -> None:
     chain = chain_from_head()
 
-    assert chain[:4] == (REVISION_ID, DOWN_REVISION_ID, "2026110314", "2026110313")
+    assert chain[:5] == (
+        SUCCESSOR_REVISION_ID,
+        REVISION_ID,
+        DOWN_REVISION_ID,
+        "2026110314",
+        "2026110313",
+    )
 
 
 def test_the_revision_can_be_loaded_by_path_like_alembic_does() -> None:

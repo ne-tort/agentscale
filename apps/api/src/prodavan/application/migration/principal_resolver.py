@@ -29,7 +29,8 @@ Refuse, never guess
 
 Every negative answer is ``None``, as the protocol demands, and never an exception:
 
-* unknown correlation id, no verified credential, expired credential -> ``None``;
+* unknown correlation id, no verified credential, expired credential, revoked session ->
+  ``None``;
 * no ``employees`` row for the verified subject, disabled/invited employee -> ``None``;
 * no membership, deleted or non-active company, membership in another tenant -> ``None``;
 * a project/cabinet that does not belong to the resolved tenant, an inactive project or
@@ -53,30 +54,37 @@ The principal is created through
 only.  Constructing ``TrustedPrincipal`` directly is refused by that module, and this one
 does not try.
 
-Known blocker: no durable correlation -> subject store
-------------------------------------------------------
+Two credential sources, one answer
+---------------------------------
 
 The protocol speaks about *correlation ids*, which is the right shape for a worker or a
 long-lived operator session: a durable record ``correlation_id -> verified subject`` that
-outlives the request.  **This repository has no such table.**  ``agent_sessions`` is chat
-session state (``projects``/provider/model, no credential), ``identity_links`` maps an
-employee to an external IdP subject (``provider``, ``provider_subject``, no lifetime, no
-revocation, no correlation), and the auth service itself keeps no session at all — it is a
-stateless BFF over Keycloak (``application/auth/service.py``).  The missing relation is
-``auth_sessions``; inventing it here is out of scope, and caching the mapping in process
-memory would make the resolver's answer depend on which worker handled the request, so this
-module does neither.
+outlives the request.  ``agent_sessions`` is chat session state (``projects``/provider/model,
+no credential) and ``identity_links`` maps an employee to an external IdP subject
+(``provider``, ``provider_subject``, no lifetime, no revocation, no correlation), so neither
+could serve as that record.  The relation is ``auth_sessions`` — declared by
+``infrastructure/persistence/models/auth_sessions.py``, created by revision ``2026110317``
+and specified by :data:`AUTH_SESSION_CORRELATION_GAP` — and it is written by the auth
+boundary (``application/auth/auth_sessions.py``) after the credential was verified.
 
-What it implements instead is the verified-credential path that *does* exist:
-:class:`BearerJwtCredentialSource` re-verifies the bearer token through the repository's
-JWKS validator on every call and answers for exactly one correlation id — the one the auth
-boundary issued for the request that carried the token.  There is no cache and no
-process-wide map, so a correlation id belonging to another request cannot select this
-credential.  The consequence is honest and recorded: a correlation id whose credential is no
-longer in hand (a queued job, a worker that woke up later, a second replica) resolves to
-``None`` and the tenant-context bind refuses.  :data:`AUTH_SESSION_CORRELATION_GAP` holds the
-exact specification of the table that would close it, and
-:data:`PRINCIPAL_RESOLVER_BLOCKER` is the one-line form for the composition root.
+:class:`SqlAuthSessionCredentialSource` reads it.  That is the source a **worker, a
+background job or a second replica** uses: it holds no token, only the correlation id the
+auth boundary issued in the request that started the work.  The row is the authority for
+«which verified subject this correlation id belongs to»; its ``expires_at`` is the
+credential's own expiry, and a row that is expired, revoked or absent resolves to ``None``.
+
+:class:`BearerJwtCredentialSource` stays the **request path**: it re-verifies the bearer
+token through the repository's JWKS validator on every call and answers for exactly one
+correlation id — the one the auth boundary issued for the request that carried the token.
+There is no cache and no process-wide map, so a correlation id belonging to another request
+cannot select this credential.
+
+Neither source caches anything, and the durable one is not a fallback for the other: the
+composition root picks the source by *where the caller runs* (request -> bearer, process ->
+SQL) instead of trying one and then the other, because «try the token, else look it up» would
+let a caller pass a correlation id it never proved in order to reach the stored subject.  A
+correlation id nothing recorded — no row — still resolves to ``None`` and the tenant-context
+bind refuses.
 
 `Resolved by` evidence
 ----------------------
@@ -140,13 +148,16 @@ __all__ = [
     "PrincipalRefusalRecord",
     "PrincipalRefusalSink",
     "SchemaGap",
+    "SqlAuthSessionCredentialSource",
     "SqlTenantIdentityDirectory",
     "TenantIdentity",
     "TenantIdentityDirectory",
     "TenantIdentityRefusal",
     "TokenVerifier",
     "VerifiedCredential",
+    "build_durable_principal_resolver",
     "build_sql_principal_resolver",
+    "credential_from_claims",
 ]
 
 #: The only ``companies.status`` value a tenant binding may be issued for.  ``companies``
@@ -189,6 +200,7 @@ class PrincipalRefusal(StrEnum):
     CORRELATION_UNREPRESENTABLE = "principal_correlation_unrepresentable"
     CREDENTIAL_UNVERIFIED = "principal_credential_unverified"
     CREDENTIAL_EXPIRED = "principal_credential_expired"
+    CREDENTIAL_REVOKED = "principal_credential_revoked"
     EXPIRY_NOT_IN_FUTURE = "principal_expiry_not_in_future"
     SUBJECT_UNBOUND = "principal_subject_unbound"
     SUBJECT_INACTIVE = "principal_subject_inactive"
@@ -395,23 +407,11 @@ class BearerJwtCredentialSource:
                 type(exc).__name__,
             )
             return None
-        subject = claims.get("sub")
-        if not isinstance(subject, str) or not subject.strip():
-            return None
-        expires_at = _expiry_of(claims)
-        if expires_at is None:
-            # No usable lifetime: the principal could not carry a meaningful expires_at.
-            return None
-        if expires_at <= self._clock():
-            return None
-        return VerifiedCredential(
+        return credential_from_claims(
             correlation_id=correlation_id,
-            subject_claim=subject.strip(),
+            claims=claims,
             resolution_source=self._resolution_source,
-            expires_at=expires_at,
-            asserted_tenant_id=_claim_text(claims, "company_id", "tenant_id"),
-            asserted_cabinet_id=_claim_text(claims, "cabinet_id"),
-            asserted_project_id=_claim_text(claims, "project_id"),
+            now=self._clock(),
         )
 
 
@@ -421,6 +421,218 @@ def _claim_text(claims: Mapping[str, Any], *names: str) -> str | None:
         if isinstance(value, str) and value.strip():
             return value.strip()
     return None
+
+
+def credential_from_claims(
+    *,
+    correlation_id: str,
+    claims: Mapping[str, Any],
+    resolution_source: str = "bearer_jwt_verified",
+    now: datetime | None = None,
+) -> VerifiedCredential | None:
+    """The credential a **verified** claim set describes, or ``None``.
+
+    ``claims`` must be the answer of a verifier (the JWKS validator, the auth boundary's own
+    token exchange) — never a payload decoded from an unverified string.  The same rules the
+    bearer path applies are applied here, so both sources and the auth-boundary writer agree
+    on what a usable credential is: a non-blank ``sub``, a usable ``exp`` in the future, and
+    a ``resolution_source`` the RLS vocabulary knows.
+
+    The auth-boundary writer (``application/auth/auth_sessions.py``) uses this to turn the
+    claims of the token it just verified into the exact :class:`VerifiedCredential` it
+    stores, so a stored row and a re-verified token cannot describe different shapes.
+    """
+
+    if not isinstance(claims, Mapping):
+        return None
+    subject = claims.get("sub")
+    if not isinstance(subject, str) or not subject.strip():
+        return None
+    expires_at = _expiry_of(claims)
+    if expires_at is None:
+        # No usable lifetime: the principal could not carry a meaningful expires_at.
+        return None
+    moment = now if now is not None else datetime.now(UTC)
+    if expires_at <= moment:
+        return None
+    try:
+        return VerifiedCredential(
+            correlation_id=correlation_id,
+            subject_claim=subject.strip(),
+            resolution_source=resolution_source,
+            expires_at=expires_at,
+            asserted_tenant_id=_claim_text(claims, "company_id", "tenant_id"),
+            asserted_cabinet_id=_claim_text(claims, "cabinet_id"),
+            asserted_project_id=_claim_text(claims, "project_id"),
+        )
+    except ValueError:
+        # A source outside the allow-list, or an id the shape refuses: not a credential.
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Durable correlation -> subject store (the auth_sessions reader)
+# ---------------------------------------------------------------------------
+
+
+def _as_aware(value: datetime) -> datetime:
+    """A stored instant as UTC.
+
+    ``TIMESTAMPTZ`` is stored in UTC, but not every driver hands it back with a timezone
+    (``sqlite``/``aiosqlite``, which the acceptance harness uses, returns a naive value for
+    ``DateTime(timezone=True)``).  Assuming UTC is therefore a *reading* normalisation and
+    not a policy: it never extends a lifetime that a PostgreSQL read would refuse.
+    """
+
+    return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+
+
+class SqlAuthSessionCredentialSource:
+    """Durable credential source: ``correlation_id`` -> the row the auth boundary wrote.
+
+    This is the source a worker, a queued job, a background task or a second replica uses.
+    It holds no token and no in-process state: the only thing that answers is the
+    ``auth_sessions`` row, which the authentication boundary wrote *after* it verified the
+    credential (``application/auth/auth_sessions.py``).
+
+    Fail-closed, in this order:
+
+    * an empty, blank or whitespace-padded correlation id selects nothing (the resolver
+      refuses it before ever calling here, and this source refuses it too);
+    * no row -> ``None`` (the correlation id was never verified, or the id is another
+      process's);
+    * ``revoked_at`` set -> ``None``, immediately, whatever ``expires_at`` says;
+    * ``expires_at`` not in the future -> ``None`` (``exp`` is exclusive: at the boundary
+      instant the credential is already dead);
+    * a row whose stored ``resolution_source`` is not one of
+      ``SERVER_RESOLUTION_SOURCES``, or that cannot be turned into a
+      :class:`VerifiedCredential`, -> ``None`` with a refusal code, because a stored row is
+      data and data can be wrong; it is never laundered into a principal.
+
+    A **database failure propagates**.  Like the identity directory, this class treats an
+    outage as "no answer" rather than as "no access": returning ``None`` on a broken
+    connection would turn every worker bind into ``principal_correlation_unknown``, which
+    reads exactly like a revoked session.
+    """
+
+    def __init__(
+        self,
+        *,
+        session_factory: Callable[[], Any] | None = None,
+        clock: Callable[[], datetime] | None = None,
+        refusals: PrincipalRefusalSink | None = None,
+    ) -> None:
+        self._session_factory = session_factory
+        self._clock = clock or (lambda: datetime.now(UTC))
+        self._refusals = refusals
+
+    def _factory(self) -> Callable[[], Any]:
+        if self._session_factory is not None:
+            return self._session_factory
+        from prodavan.infrastructure.persistence.database import get_session_factory
+
+        return get_session_factory()
+
+    async def lookup(self, *, correlation_id: str) -> VerifiedCredential | None:
+        if not isinstance(correlation_id, str) or not correlation_id:
+            return self._refuse(
+                PrincipalRefusal.CORRELATION_UNKNOWN, correlation_id, "empty correlation id"
+            )
+        if correlation_id != correlation_id.strip():
+            # The row is written with a trimmed id; a padded id is another id, not this one.
+            return self._refuse(
+                PrincipalRefusal.CORRELATION_UNREPRESENTABLE,
+                correlation_id,
+                "the correlation id has surrounding whitespace",
+            )
+        return await self._lookup(correlation_id=correlation_id)
+
+    async def _lookup(self, *, correlation_id: str) -> VerifiedCredential | None:
+        from prodavan.infrastructure.persistence.models.auth_sessions import AuthSessionRow
+
+        async with self._factory()() as session:
+            row = (
+                await session.execute(
+                    select(
+                        AuthSessionRow.subject_claim,
+                        AuthSessionRow.resolution_source,
+                        AuthSessionRow.expires_at,
+                        AuthSessionRow.revoked_at,
+                        AuthSessionRow.company_id,
+                        AuthSessionRow.cabinet_id,
+                        AuthSessionRow.project_id,
+                    ).where(AuthSessionRow.correlation_id == correlation_id)
+                )
+            ).first()
+        if row is None:
+            return self._refuse(
+                PrincipalRefusal.CORRELATION_UNKNOWN,
+                correlation_id,
+                "no auth_sessions row is bound to this correlation id",
+            )
+        subject_claim, resolution_source, expires_at, revoked_at, company_id, cabinet_id, project_id = (
+            row
+        )
+        if revoked_at is not None:
+            # Revocation outranks expiry: the credential is dead either way, but the
+            # operator needs the right code.
+            return self._refuse(
+                PrincipalRefusal.CREDENTIAL_REVOKED,
+                correlation_id,
+                "the stored session was revoked",
+            )
+        if not isinstance(expires_at, datetime):
+            # A column the schema declares NOT NULL came back unusable: refuse, do not guess.
+            return self._refuse(
+                PrincipalRefusal.CREDENTIAL_UNVERIFIED,
+                correlation_id,
+                "the stored session has no usable expiry",
+            )
+        if _as_aware(expires_at) <= self._clock():
+            return self._refuse(
+                PrincipalRefusal.CREDENTIAL_EXPIRED,
+                correlation_id,
+                "the stored session has expired",
+            )
+        if not isinstance(subject_claim, str) or not subject_claim.strip():
+            return self._refuse(
+                PrincipalRefusal.SUBJECT_UNBOUND,
+                correlation_id,
+                "the stored session names no subject",
+            )
+        try:
+            return VerifiedCredential(
+                correlation_id=correlation_id,
+                subject_claim=subject_claim.strip(),
+                resolution_source=str(resolution_source),
+                expires_at=_as_aware(expires_at),
+                asserted_tenant_id=company_id,
+                asserted_cabinet_id=cabinet_id,
+                asserted_project_id=project_id,
+            )
+        except ValueError:
+            # A source outside the allow-list (a direct-SQL writer bypassing the CHECK, or a
+            # vocabulary narrowed since the row was written). The row is not a credential.
+            return self._refuse(
+                PrincipalRefusal.CREDENTIAL_UNVERIFIED,
+                correlation_id,
+                "the stored session names a resolution source that is not server-side",
+            )
+
+    def _refuse(
+        self, reason: PrincipalRefusal, correlation_id: str, detail: str
+    ) -> VerifiedCredential | None:
+        record = PrincipalRefusalRecord(
+            reason=reason, correlation_id=correlation_id or "", detail=detail
+        )
+        if self._refusals is not None:
+            try:
+                self._refusals.record(record)
+            except Exception:  # noqa: BLE001 - an observer must not change the decision
+                logger.warning("principal refusal sink failed for %s", reason.value)
+        logger.info("auth session refused: %s correlation=%s", record, correlation_id or "-")
+        return None
+
 
 
 # ---------------------------------------------------------------------------
@@ -921,17 +1133,51 @@ def build_sql_principal_resolver(
     )
 
 
+def build_durable_principal_resolver(
+    *,
+    session_factory: Callable[[], Any] | None = None,
+    clock: Callable[[], datetime] | None = None,
+    max_ttl: timedelta = DEFAULT_MAX_PRINCIPAL_TTL,
+    refusals: PrincipalRefusalSink | None = None,
+) -> AuthBoundaryPrincipalResolver:
+    """The resolver a **process** owns: durable store in, no request credential needed.
+
+    This is the source that closes the recorded blocker. A worker, a queued job, a
+    background task or a second replica has no bearer token in hand, but it does have the
+    correlation id the auth boundary issued in the request that started the work, and
+    :class:`SqlAuthSessionCredentialSource` turns that id into the verified subject the
+    boundary stored.
+
+    The request path must keep using :class:`BearerJwtCredentialSource` (built per request,
+    with the token in hand, through :func:`build_sql_principal_resolver`): a process-scope
+    resolver serves callers that could not otherwise be answered, it does not replace the
+    credential the request already proved.
+    """
+
+    return AuthBoundaryPrincipalResolver(
+        credential_source=SqlAuthSessionCredentialSource(
+            session_factory=session_factory, clock=clock, refusals=refusals
+        ),
+        directory=SqlTenantIdentityDirectory(session_factory=session_factory, clock=clock),
+        clock=clock,
+        max_ttl=max_ttl,
+        refusals=refusals,
+    )
+
+
 # ---------------------------------------------------------------------------
-# Recorded blocker
+# Recorded schema specification (materialised by revision 2026110317)
 # ---------------------------------------------------------------------------
 
 
 @dataclass(frozen=True, slots=True)
 class SchemaGap:
-    """A durable table this module needs and the repository does not have.
+    """A durable table this module needs, written down as a reviewable specification.
 
     Specification only — no DDL is emitted or invented here.  The columns are what the
-    resolver would read; the constraints are the guarantees it would rely on.
+    resolver reads; the constraints are the guarantees it relies on.  ``auth_sessions``
+    (revision ``2026110317``) is the first instance of this type, and the tests compare the
+    model and the revision against it column by column.
     """
 
     table: str
@@ -969,9 +1215,14 @@ AUTH_SESSION_CORRELATION_GAP: Final = SchemaGap(
 )
 
 #: One-line summary for the composition root / acceptance report.
+#:
+#: Kept as a constant (and kept in this module) because the composition root and the
+#: acceptance reports quote it; it now records that the gap is **closed** rather than open.
 PRINCIPAL_RESOLVER_BLOCKER: Final = (
-    "no durable correlation -> subject store: auth_sessions (see AUTH_SESSION_CORRELATION_GAP) "
-    "is absent, so BearerJwtCredentialSource answers only for the correlation id of the request "
-    "that carried the verified token; a queued/worker/second-replica correlation id resolves to "
-    "None and the tenant-context bind refuses"
+    "closed by auth_sessions (revision 2026110317, see AUTH_SESSION_CORRELATION_GAP): a "
+    "correlation id whose credential is no longer in hand is resolved by "
+    "SqlAuthSessionCredentialSource from the row the auth boundary recorded, so a queued / "
+    "worker / second-replica bind no longer depends on the request holding the token; an id "
+    "nothing recorded — or a row that is expired or revoked — still resolves to None and the "
+    "tenant-context bind refuses"
 )

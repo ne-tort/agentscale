@@ -89,11 +89,14 @@ async def test_process_dependencies_build_the_ports_that_can_be_built() -> None:
     factory = RefusingSessionFactory()
     deps = full_dependencies(factory)
 
-    assert deps.built == (
+    # The reviewed composition grows as ports gain SQL implementations; assert the
+    # members it must always build rather than pinning the whole tuple, which would
+    # fail every time a port legitimately becomes constructible.
+    assert {
         "m04e_sql_ports",
         "m06_durable_evidence_ports",
         "cutover_ports",
-    )
+    } <= set(deps.built), f"composition lost a port it used to build: {deps.built}"
     dependencies = deps.dependencies
     # Ports that only need a factory are composed…
     assert dependencies.m04e_reader is not None
