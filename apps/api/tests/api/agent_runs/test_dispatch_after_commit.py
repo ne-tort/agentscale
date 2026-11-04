@@ -61,10 +61,19 @@ TERMINAL = {AgentRunStatus.SUCCEEDED, AgentRunStatus.FAILED, AgentRunStatus.CANC
 
 
 class CommitDouble:
-    """Deterministic CAS/replay adapter; it never touches a database."""
+    """Deterministic CAS/replay adapter; it never touches a database.
 
-    def __init__(self) -> None:
-        self.log: list[str] = []
+    ``log`` is the shared ordering journal used by these vectors: the double
+    records ``commit`` in it and ``RecordingDispatcher`` records ``dispatch``.
+    It used to be a private list, which made every ``log == ["commit", ...]``
+    assertion in this module unfalsifiable - the double appended to its own
+    list while the test compared a list that could only ever hold dispatches.
+    Sharing the journal is what makes "dispatch only after the commit" an
+    observable invariant rather than a tautology.
+    """
+
+    def __init__(self, log: list[str] | None = None) -> None:
+        self.log: list[str] = log if log is not None else []
         self.writes = []
         self.committed = []
         self.sequences: dict[tuple[str, str], int] = {}
@@ -185,7 +194,13 @@ def _approval_view(command) -> ApprovalRequestView | None:
 
 
 class RecordingDispatcher:
-    """DispatchRunner double that also records the ordering with the commit."""
+    """DispatchRunner double that also records the ordering with the commit.
+
+    The guard is deliberately an assertion, not a comment: handing intents to a
+    consumer before the transaction that persists them returned is the failure
+    these vectors exist to catch, so a dispatch that has no preceding ``commit``
+    in the journal fails loudly for every test in this module.
+    """
 
     def __init__(self, log: list[str], *, report: DispatchBatchReport | None = None) -> None:
         self.log = log
@@ -193,8 +208,13 @@ class RecordingDispatcher:
         self._report = report if report is not None else DispatchBatchReport(claimed=1, retried=1)
 
     async def dispatch_batch(self, *, owner_id: str, limit: int, repair_expired: int = 0):
-        self.log.append("dispatch")
         self.calls.append((owner_id, limit))
+        self.log.append("dispatch")
+        if "commit" not in self.log[:-1]:
+            # Recorded before raising so the ordering assertions below report
+            # ``['dispatch', 'commit']`` instead of hiding the violation behind
+            # the failure-tolerant ``dispatch_after_commit`` wrapper.
+            raise AssertionError("dispatch was triggered before any control-plane commit")
         return self._report
 
 
@@ -309,8 +329,8 @@ def test_approval_decision_writes_two_events_and_two_intents_atomically() -> Non
 
 
 def test_create_commit_is_dispatched_only_after_the_write_returns() -> None:
-    double = CommitDouble()
     log: list[str] = []
+    double = CommitDouble(log)
     dispatcher = RecordingDispatcher(log)
     backend = _backend(double, dispatcher)
     service = backend.control_plane(tenant_id=TENANT)
@@ -339,8 +359,8 @@ def test_create_commit_is_dispatched_only_after_the_write_returns() -> None:
 
 
 def test_create_replay_returns_the_original_receipt_without_a_second_write() -> None:
-    double = CommitDouble()
     log: list[str] = []
+    double = CommitDouble(log)
     dispatcher = RecordingDispatcher(log, report=DispatchBatchReport(claimed=1, delivered=1))
     backend = _backend(double, dispatcher)
     service = backend.control_plane(tenant_id=TENANT)
@@ -379,9 +399,9 @@ def test_create_replay_returns_the_original_receipt_without_a_second_write() -> 
 
 
 def test_cancel_cas_rejection_writes_nothing_and_has_nothing_to_dispatch() -> None:
-    double = CommitDouble()
-    double.seed("agent_run", RUN, 6, AgentRunStatus.RUNNING)
     log: list[str] = []
+    double = CommitDouble(log)
+    double.seed("agent_run", RUN, 6, AgentRunStatus.RUNNING)
     dispatcher = RecordingDispatcher(log)
     backend = _backend(double, dispatcher)
     service = backend.control_plane(tenant_id=TENANT)
@@ -426,10 +446,10 @@ def test_cancel_cas_rejection_writes_nothing_and_has_nothing_to_dispatch() -> No
 
 
 def test_approve_vs_deny_race_has_one_winner_and_one_dispatch() -> None:
-    double = CommitDouble()
+    log: list[str] = []
+    double = CommitDouble(log)
     double.seed("approval_request", APPROVAL, 1, ApprovalRequestStatus.PENDING)
     double.seed("agent_run", RUN, 4, AgentRunStatus.WAITING_APPROVAL)
-    log: list[str] = []
     dispatcher = RecordingDispatcher(log, report=DispatchBatchReport(claimed=2, retried=2))
     backend = _backend(double, dispatcher)
     service = backend.control_plane(tenant_id=TENANT)

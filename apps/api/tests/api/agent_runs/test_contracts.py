@@ -11,7 +11,12 @@ import inspect
 
 import pytest
 
-from prodavan.api.migration_agent_runs.dependencies import AgentRunBackend
+from prodavan.api.migration_agent_runs.dependencies import (
+    BLOCKER_DISPATCHER_UNAVAILABLE,
+    BLOCKER_FEATURE_FLAG_DISABLED,
+    FEATURE_FLAG,
+    AgentRunBackend,
+)
 from prodavan.api.migration_agent_runs.schemas import EventTimelineQuery
 from prodavan.api.v1 import agent_runs
 from prodavan.application.agent_runs import (
@@ -24,6 +29,7 @@ from prodavan.application.agent_runs import (
     encode_cursor,
     validate_retry_result,
 )
+from prodavan.domain.errors import AppError
 
 
 NOW = datetime(2026, 11, 3, 12, 0, tzinfo=UTC)
@@ -156,16 +162,48 @@ def test_route_contracts_keep_project_scope_and_expose_durable_cursor_pages() ->
     assert "await AgentSessionService" not in source
 
 
+class _NeverCommits:
+    """Transaction seam that only exists so the gate can be composed."""
+
+    async def commit(self, *, write):  # pragma: no cover - the gate must block first
+        raise AssertionError("the write gate must refuse before any commit")
+
+
 def test_writes_remain_fail_closed_until_the_gate_and_consumer_are_wired() -> None:
     source = __import__("inspect").getsource(agent_runs)
     assert source.count("backend.require_writes()") >= 3
-    require_source = inspect.getsource(AgentRunBackend.require_writes)
-    # Off by default: the flag gate refuses with an explicit code and blocker.
-    assert "agent_run_api_feature_flag_disabled" in require_source
-    assert "AGENT_RUN_API_DISABLED" in require_source
+
+    # Assert the gate's *behaviour* and the stable blocker values, not the text
+    # of ``require_writes``. The previous version matched literal reason strings
+    # inside the function source, which broke as soon as the gate was expressed
+    # through the shared ``BLOCKER_*`` constants and would also have passed on a
+    # correct-looking string that raised the wrong code.
+    disabled = AgentRunBackend(transaction=_NeverCommits(), session=object())
+    with pytest.raises(AppError) as flag_error:
+        disabled.require_writes()
+    assert flag_error.value.code == "AGENT_RUN_API_DISABLED"
+    assert flag_error.value.extra["blocker"] == BLOCKER_FEATURE_FLAG_DISABLED
+    assert BLOCKER_FEATURE_FLAG_DISABLED == "agent_run_api_feature_flag_disabled"
+    assert flag_error.value.extra["feature_flag"] == FEATURE_FLAG
+    # With the flag off the control plane is composed without a transaction, so a
+    # hypothetical committed state transition cannot reach storage at all.
+    assert disabled.control_plane(tenant_id="tenant-a").is_wired is False
+
     # A committed intent with no consumer would be queued forever, so refuse.
-    assert "agent_control_plane_dispatcher_unavailable" in require_source
-    assert "writes_enabled" in require_source
+    # Writes enabled is not enough: the durable dispatcher must be bound too.
+    unwired = AgentRunBackend(transaction=_NeverCommits(), session=object(), writes_enabled=True)
+    with pytest.raises(AppError) as consumer_error:
+        unwired.require_writes()
+    assert consumer_error.value.code == "AGENT_RUN_PERSISTENCE_NOT_READY"
+    assert consumer_error.value.extra["blocker"] == BLOCKER_DISPATCHER_UNAVAILABLE
+    assert BLOCKER_DISPATCHER_UNAVAILABLE == "agent_control_plane_dispatcher_unavailable"
+
+    # Flag on and consumer bound: the gate is silent and the transaction is used.
+    wired = AgentRunBackend(
+        transaction=_NeverCommits(), session=object(), writes_enabled=True, dispatcher=object()
+    )
+    wired.require_writes()
+    assert wired.control_plane(tenant_id="tenant-a").is_wired is True
     assert "in_memory" not in source.lower()
 
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime
 
+from prodavan.api.migration_agent_runs.dependencies import INTENT_QUEUE_NAME
 from prodavan.application.agent_control_plane import (
     ControlPlaneLinkage,
     ControlPlaneWriteResult,
@@ -125,12 +126,40 @@ def test_approve_and_reject_race_commands_share_both_expected_cas_versions() -> 
         assert versions[("agent_run", RUN)] == 9
         assert write.command.expected_approval_status is ApprovalRequestStatus.PENDING
         assert write.command.expected_run_status is AgentRunStatus.WAITING_APPROVAL
+        # The event version is the CAS successor of the *declared* precondition:
+        # ``expected_approval_sequence=3`` -> event 4, ``expected_run_sequence=9``
+        # -> event 10. The previous expectation (2 and 5) came from an older
+        # vector that asserted 1 and 4; keeping it here would have encoded a race
+        # where the event version is unrelated to the version the command CASes
+        # on, i.e. an event that claims to precede the state it records.
         assert [(event.aggregate_type, event.sequence) for event in write.events] == [
-            ("approval_request", 2),
-            ("agent_run", 5),
+            ("approval_request", 4),
+            ("agent_run", 10),
         ]
+        next_versions = {
+            (version.aggregate_type, version.aggregate_id): version.next_sequence
+            for version in write.command.aggregates
+        }
+        assert next_versions[("approval_request", APPROVAL)] == 4
+        assert next_versions[("agent_run", RUN)] == 10
+        assert {
+            (event.aggregate_type, event.aggregate_id, event.sequence) for event in write.events
+        } == {
+            ("approval_request", APPROVAL, next_versions[("approval_request", APPROVAL)]),
+            ("agent_run", RUN, next_versions[("agent_run", RUN)]),
+        }
         assert len(write.outbox_intents) == 2
-        assert all(intent.event_id == event.event_id for intent, event in zip(write.outbox_intents, write.events))
+        # ``EventEnvelope.event_id`` is a UUID; the outbox/inbox contracts carry
+        # the same identity as a 128-char string. Comparing the two raw values was
+        # always ``False`` and the assertion never ran because the sequence check
+        # above failed first, so the intent/event binding was unverified.
+        assert [intent.event_id for intent in write.outbox_intents] == [
+            str(event.event_id) for event in write.events
+        ]
+        assert [intent.deduplication_key for intent in write.outbox_intents] == [
+            outbox.idempotency_key for outbox in write.outbox_events
+        ]
+        assert {intent.queue_name for intent in write.outbox_intents} == {INTENT_QUEUE_NAME}
 
     targets = {write.command.target_approval_status for write in capture.writes}
     assert targets == {ApprovalRequestStatus.APPROVED, ApprovalRequestStatus.DENIED}
