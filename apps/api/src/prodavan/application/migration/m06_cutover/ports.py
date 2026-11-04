@@ -907,7 +907,11 @@ def _ledger_values(state: PartitionCutover, evidence: PromotionEvidence,
         "writer_epoch": evidence.writer_epoch,
         "lease_fencing_token": lease.fencing_token,
         "canonical_positive_writes": bool(evidence.canonical_positive_writes),
-        "occurred_at": evidence.occurred_at.isoformat(),
+        # Bound as the datetime object, not ``isoformat()``: the column is TIMESTAMPTZ and
+        # asyncpg refuses a string parameter for it, so an ISO string would pass on SQLite
+        # and fail on the first append against PostgreSQL. The payload envelope above still
+        # carries the ISO form, because that one is JSON, not a bind value.
+        "occurred_at": evidence.occurred_at,
         "state_payload": _json_text(state_payload(state)),
         "record_payload": _json_text(evidence_payload(evidence)),
     }

@@ -26,6 +26,7 @@ enforce column types) and fatal under ``asyncpg`` — and named in
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from collections.abc import Mapping
 
 import pytest
@@ -334,20 +335,19 @@ async def test_the_whole_transition_chain_runs_on_the_registered_schema(model_en
 # ---------------------------------------------------------------------------
 
 
-def test_the_repository_binds_occurred_at_as_iso_text_into_a_timestamp_column() -> None:
-    """Pins the mismatch instead of hiding it behind a permissive column type.
+def test_the_repository_binds_occurred_at_as_a_datetime_for_a_timestamp_column() -> None:
+    """The bind value must match the reviewed column type.
 
-    ``_ledger_values`` hands ``occurred_at`` to a raw ``text()`` INSERT as
-    ``evidence.occurred_at.isoformat()`` — a string — while the reviewed specification
-    declares the column ``TIMESTAMPTZ``. SQLite passes the string through (it does not
-    enforce column types), so the ports suite cannot see the problem; asyncpg's
-    ``timestamptz`` codec requires a ``datetime``, so a live cutover would fail at the
-    first append. The specification is the source of truth, so the column keeps its
-    declared type and the fix belongs to ``ports.py``.
+    ``_ledger_values`` hands ``occurred_at`` to a raw ``text()`` INSERT while the
+    reviewed specification declares the column ``TIMESTAMPTZ``. SQLite does not enforce
+    column types, so a string passed there and only asyncpg's codec refused it: the
+    mismatch stayed invisible until this suite ran against PostgreSQL, where it would
+    have failed at the first append of a live cutover.
 
-    This test is green while the mismatch exists and fails the moment either side
-    changes, which is when the pair must be re-reviewed:
-    ``M06_CUTOVER_EVIDENCE_DEFERRED['occurred_at_bound_as_iso_string']``.
+    This test used to pin the mismatch (asserting a ``str``) as a reminder. The reminder
+    did its job -- ``ports.py`` now binds a real ``datetime`` -- so it asserts the
+    correct pairing instead. The envelope payload still carries the ISO form, because
+    that one is JSON, not a bind value.
     """
 
     import sqlalchemy as sa
@@ -358,8 +358,8 @@ def test_the_repository_binds_occurred_at_as_iso_text_into_a_timestamp_column() 
     state = _shadow_state(record, revision=1)
     values = ports._ledger_values(state, record, lease(1))
 
-    assert isinstance(values["occurred_at"], str), (
-        "ports now binds a datetime: drop the deferred gap and the timestamp contract here"
+    assert isinstance(values["occurred_at"], datetime), (
+        "a string bind would fail on asyncpg timestamptz"
     )
     column = Base.metadata.tables[CUTOVER_LEDGER_TABLE].c["occurred_at"]
     assert isinstance(column.type, sa.DateTime)
