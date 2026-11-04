@@ -610,7 +610,7 @@ _CANONICAL: tuple[TablePolicySpec, ...] = (
         trusted_command="ALL",
         notes="Tender carries its own tenant anchor and references the request by identity.",
     ),
-    # --- Agent Run execution fence (2026110309) ---
+    # --- Agent Run execution fence + attempt journal (2026110309, 2026110311) ---
     TablePolicySpec(
         table="agent_run_leases",
         owner_revision="2026110309",
@@ -621,6 +621,17 @@ _CANONICAL: tuple[TablePolicySpec, ...] = (
             "stays index-only; it is not an authorization anchor. No project/cabinet scope is "
             "declared because the table carries no cabinet anchor and project narrowing is the "
             "claim predicate's job, not RLS policy state."
+        ),
+    ),
+    TablePolicySpec(
+        table="agent_run_provider_attempts",
+        owner_revision="2026110311",
+        tenant=ScopedColumn(column="tenant_id"),
+        trusted_command="ALL",
+        notes=(
+            "Redacted attempt journal: digests, state and counters only. Reconciliation must "
+            "read across the tenant boundary, hence a trusted service policy alongside the "
+            "tenant policy."
         ),
     ),
 )

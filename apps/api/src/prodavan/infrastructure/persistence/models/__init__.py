@@ -28,6 +28,9 @@ from prodavan.infrastructure.persistence.agent_control_plane.models import (
 from prodavan.infrastructure.persistence.agent_control_plane.lease_registry import (
     AgentRunLeaseRow,
 )
+from prodavan.infrastructure.persistence.agent_control_plane.attempt_registry import (
+    AgentRunProviderAttemptRow,
+)
 from prodavan.infrastructure.persistence.models.ai_keys import (
     AiKeyAuditEventRow,
     AiKeyCheckResultRow,
@@ -152,6 +155,7 @@ __all__ = [
     "AgentControlPlaneRunScopeRow",
     "AgentEventRow",
     "AgentRunLeaseRow",
+    "AgentRunProviderAttemptRow",
     "AgentRunRow",
     "AgentSessionRow",
     "AgentTurnRow",
