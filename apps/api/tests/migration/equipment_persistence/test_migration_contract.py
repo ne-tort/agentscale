@@ -302,6 +302,120 @@ def _orm_tables() -> dict[str, sa.Table]:
     return {model.__tablename__: model.__table__ for model in _MODELS}
 
 
+#: Revision that anchors the equipment tables *after* ``2026110305`` created them
+#: (task ``MIG-EQ-ANCHORS-01``): it adds ``project_id``/``cabinet_id``, their
+#: ``RESTRICT`` keys and their indexes.  ``2026110305`` must still create exactly the
+#: pre-anchor shape - that is what the "nothing is invented" assertions below pin -
+#: but the table a database holds after ``upgrade head`` is the sum of both revisions,
+#: and the model is the source of truth for that sum.  The parity tests therefore
+#: replay the anchor revision on top: comparing ``2026110305`` alone against today's
+#: metadata would demand that the model forget the anchors, which is the opposite of
+#: what the metadata is for.
+ANCHOR_REVISION_PATH = VERSIONS_DIR / "2026110319_equipment_anchors.py"
+
+
+class _AlterRecorder:
+    """Records the ALTER-shaped operations the anchor revision performs."""
+
+    def __init__(self) -> None:
+        self.added_columns: list[tuple[str, sa.Column[Any]]] = []
+        self.created_foreign_keys: list[dict[str, Any]] = []
+        self.indexes: list[tuple[str, str, list[Any], bool]] = []
+        self.dropped_constraints: list[tuple[str, str]] = []
+        self.dropped_columns: list[tuple[str, str]] = []
+        self.created_tables: list[Any] = []
+        self.executed: list[str] = []
+
+    def add_column(self, table_name: str, column: sa.Column[Any], **kw: Any) -> None:
+        self.added_columns.append((table_name, column))
+
+    def create_foreign_key(
+        self,
+        name: str,
+        source_table: str,
+        referent_table: str,
+        local_cols: list[str],
+        remote_cols: list[str],
+        **kw: Any,
+    ) -> None:
+        self.created_foreign_keys.append(
+            {
+                "name": name,
+                "table": source_table,
+                "local": tuple(local_cols),
+                "remote": tuple(f"{referent_table}.{column}" for column in remote_cols),
+                "ondelete": kw.get("ondelete"),
+            }
+        )
+
+    def create_index(self, name: str, table_name: str, columns: Any, unique: bool = False, **kw: Any) -> None:
+        self.indexes.append((name, table_name, list(columns), unique))
+
+    def drop_constraint(self, name: str, table_name: str, type_: str | None = None, **kw: Any) -> None:
+        self.dropped_constraints.append((name, table_name))
+
+    def drop_column(self, table_name: str, column_name: str, **kw: Any) -> None:
+        self.dropped_columns.append((table_name, column_name))
+
+    def create_table(self, *args: Any, **kw: Any) -> None:
+        # The anchor revision also creates the two association tables, which are not
+        # part of the eight ``2026110305`` tables this module compares; they are
+        # covered by ``tests/migration/equipment_anchors``.
+        self.created_tables.append(args[0] if args else kw.get("name"))
+
+    def drop_table(self, *args: Any, **kw: Any) -> None:  # pragma: no cover - not expected
+        raise AssertionError("the anchor revision must not drop a 2026110305 table")
+
+    def drop_index(self, *args: Any, **kw: Any) -> None:
+        # Only the indexes of its own association tables are dropped by the downgrade,
+        # which this recorder does not replay.
+        pass
+
+    def execute(self, statement: Any, **kw: Any) -> None:
+        self.executed.append(str(statement))
+
+
+def _anchor_replay() -> _AlterRecorder:
+    spec = importlib.util.spec_from_file_location("_equipment_anchors_replay", ANCHOR_REVISION_PATH)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    recorder = _AlterRecorder()
+    original = module.op
+    module.op = recorder
+    try:
+        module.upgrade()
+    finally:
+        module.op = original
+    return recorder
+
+
+def _with_anchors(tables: dict[str, sa.Table], indexes: list[tuple[Any, ...]]) -> dict[str, sa.Table]:
+    """Apply the anchor revision on top of the ``2026110305`` replay, in place.
+
+    The result is what PostgreSQL holds after ``upgrade head``: the original columns
+    in their original order, then the anchors, then the keys and indexes installed by
+    the later revision.  ``indexes`` (the recorder's signature list) is extended in
+    place so the index-parity test sees them too.
+    """
+
+    anchors = _anchor_replay()
+    for table_name, column in anchors.added_columns:
+        tables[table_name].append_column(column.copy())
+    for key in anchors.created_foreign_keys:
+        tables[key["table"]].append_constraint(
+            sa.ForeignKeyConstraint(
+                list(key["local"]),
+                list(key["remote"]),
+                name=key["name"],
+                ondelete=key["ondelete"],
+            )
+        )
+    for name, table_name, columns, unique in anchors.indexes:
+        indexes.append(_index_signature(name, table_name, columns, unique))
+    return tables
+
+
 def _orm_index_signatures(table: sa.Table) -> list[tuple[Any, ...]]:
     return sorted(
         _index_signature(index.name, table.name, index.expressions, bool(index.unique))
@@ -356,9 +470,10 @@ def test_upgrade_creates_exactly_the_orm_tables_after_their_parents() -> None:
 def test_columns_match_orm_metadata_exactly() -> None:
     upgrade, _ = _record(_load_revision())
     orm_tables = _orm_tables()
+    tables = _with_anchors({table.name: table for table in upgrade.tables}, upgrade.indexes)
 
     for table_name in _EXPECTED_TABLES:
-        recorded = _table(upgrade, table_name)
+        recorded = tables[table_name]
         orm = orm_tables[table_name]
         assert tuple(recorded.columns.keys()) == tuple(orm.columns.keys()), table_name
         assert [_column_signature(column) for column in recorded.columns] == [
@@ -369,9 +484,10 @@ def test_columns_match_orm_metadata_exactly() -> None:
 def test_constraints_match_orm_metadata_exactly() -> None:
     upgrade, _ = _record(_load_revision())
     orm_tables = _orm_tables()
+    tables = _with_anchors({table.name: table for table in upgrade.tables}, upgrade.indexes)
 
     for table_name in _EXPECTED_TABLES:
-        assert _constraint_bundle(_table(upgrade, table_name)) == _constraint_bundle(
+        assert _constraint_bundle(tables[table_name]) == _constraint_bundle(
             orm_tables[table_name]
         ), table_name
 
@@ -379,11 +495,12 @@ def test_constraints_match_orm_metadata_exactly() -> None:
 def test_indexes_match_orm_metadata_exactly() -> None:
     upgrade, _ = _record(_load_revision())
     orm_tables = _orm_tables()
+    # ``_with_anchors`` appends the anchor revision's indexes to this list in place.
+    indexes: list[tuple[Any, ...]] = list(upgrade.indexes)
+    _with_anchors({table.name: table for table in upgrade.tables}, indexes)
 
     for table_name in _EXPECTED_TABLES:
-        recorded = sorted(
-            signature for signature in upgrade.indexes if signature[1] == table_name
-        )
+        recorded = sorted(signature for signature in indexes if signature[1] == table_name)
         assert recorded == _orm_index_signatures(orm_tables[table_name]), table_name
 
 

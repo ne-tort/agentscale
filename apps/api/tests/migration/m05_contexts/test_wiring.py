@@ -205,18 +205,12 @@ def test_the_per_partition_plan_fills_all_four_m05_fields() -> None:
 
 
 def test_the_plan_and_the_chain_then_report_m05_without_partition_blockers() -> None:
-    from tests.migration.partition_chain.partition_fixtures import Inert
-
     overrides = PartitionAssemblyOverrides(
-        principal_resolver=__import__(
-            "tests.migration.partition_chain.partition_fixtures", fromlist=["PrincipalResolver"]
-        ).PrincipalResolver(),
+        principal_resolver=PrincipalResolver(),
         m04e_artifacts=Inert(),
         m04e_server_repository=Inert(),
         m05_contexts=fx.context_inputs(),
-        m06_shadow_ports=__import__(
-            "tests.migration.partition_chain.partition_fixtures", fromlist=["shadow_ports"]
-        ).shadow_ports(),
+        m06_shadow_ports=shadow_ports(),
     )
     plan = build_partition_chain(
         key=key(),
@@ -240,8 +234,6 @@ def test_the_plan_and_the_chain_then_report_m05_without_partition_blockers() -> 
 
 def test_the_plan_still_names_m05_contexts_it_was_not_given() -> None:
     """Without ``m05_contexts`` the four fields stay ``None`` *and* named, as before."""
-
-    from tests.migration.partition_chain.partition_fixtures import Inert, PrincipalResolver
 
     plan = build_partition_chain(
         key=key(),
@@ -267,8 +259,6 @@ def test_the_plan_still_names_m05_contexts_it_was_not_given() -> None:
 
 
 def test_the_plan_refuses_a_runtime_context_of_another_tenant() -> None:
-    from tests.migration.partition_chain.partition_fixtures import Inert, PrincipalResolver
-
     plan = build_partition_chain(
         key=key(),
         session_factory=fx.RecordingSessionFactory(),
@@ -287,12 +277,6 @@ def test_the_plan_refuses_a_runtime_context_of_another_tenant() -> None:
 
 def test_an_explicit_override_still_wins_over_the_derived_context() -> None:
     """A host that already holds a validated context is not forced through the builder."""
-
-    from tests.migration.partition_chain.partition_fixtures import (
-        Inert,
-        PrincipalResolver,
-        runtime_context,
-    )
 
     stated = runtime_context(subject_id="subject-from-host")
     plan = build_partition_chain(
@@ -337,12 +321,6 @@ def test_the_process_scope_resource_still_leaves_the_four_fields_none() -> None:
 
 def test_no_chain_dependency_is_left_unstated_by_the_partition_plan() -> None:
     """Every field of ``ChainDependencies`` is either an object or a named blocker."""
-
-    from tests.migration.partition_chain.partition_fixtures import (
-        Inert,
-        PrincipalResolver,
-        shadow_ports,
-    )
 
     plan = build_partition_chain(
         key=key(),

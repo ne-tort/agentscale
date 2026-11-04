@@ -16,17 +16,28 @@ database (the container in the task brief is one):
         -e POSTGRES_DB=prodavan_test -p 55432:5432 postgres:16.15-alpine
     $env:PRODAVAN_PARTITION_TEST_DATABASE_URL="postgresql+asyncpg://test:test@127.0.0.1:55432/prodavan_test"
 
-Nothing here runs a migration or creates a table: the schema is *deliberately* absent, which
-is what makes claim 3 testable.
+Nothing here runs a migration or creates a table.  Claim 3 needs a database where the
+migration relations are *absent*, and the shared ``prodavan_test`` database is no longer such
+a place: the chain is applied to it (``alembic_version`` and every migration table are
+present), so "no relation exists" is not a property of the database any more.  A test may not
+depend on the environment being empty -- that is an expectation about somebody else's run, not
+about this code -- so the empty-database case builds its own throwaway schema and points
+``search_path`` at it, exactly like ``tests/migration/auth_sessions/test_postgres_auth_sessions.py``.
 """
 
 from __future__ import annotations
 
 import os
+import socket
+import uuid
+from collections.abc import AsyncIterator
 
 import pytest
+import pytest_asyncio
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.engine import make_url
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
 
 from prodavan.application.migration.composition import MigrationStage
 from prodavan.application.migration.evidence_ports import (
@@ -34,6 +45,9 @@ from prodavan.application.migration.evidence_ports import (
     SqlM05PromotionEvidenceStore,
     TrustedEvidenceScope,
     bind_evidence_transaction,
+)
+from prodavan.application.migration.m04e_definition_version.backfill import (
+    M05HandoffMarker,  # noqa: F401 - imported so the marker decoder's module is loaded
 )
 from prodavan.application.migration.partition_chain import build_partition_chain
 from prodavan.application.migration.partition_runner import (
@@ -64,6 +78,45 @@ async def factory():
         yield async_sessionmaker(engine, expire_on_commit=False)
     finally:
         await engine.dispose()
+
+
+@pytest_asyncio.fixture()
+async def unprovisioned_factory() -> AsyncIterator[async_sessionmaker[AsyncSession]]:
+    """A factory whose ``search_path`` holds an empty schema, created and dropped per test.
+
+    Unqualified relation names in the adapters therefore resolve to nothing: this is a
+    database where the migration chain was never applied, whatever the shared database
+    happens to contain.
+    """
+
+    dsn = _url()
+    url = make_url(dsn)
+    try:
+        with socket.create_connection(
+            (url.host or "localhost", url.port or 5432), timeout=1.0
+        ):
+            pass
+    except OSError:
+        pytest.skip(f"nothing listens at {url.render_as_string(hide_password=True)}")
+
+    schema = f"partition_empty_{uuid.uuid4().hex[:12]}"
+    admin = create_async_engine(dsn, poolclass=NullPool)
+    try:
+        async with admin.begin() as connection:
+            await connection.execute(text(f'CREATE SCHEMA "{schema}"'))
+        engine = create_async_engine(
+            dsn,
+            poolclass=NullPool,
+            connect_args={"server_settings": {"search_path": schema}},
+        )
+        try:
+            yield async_sessionmaker(engine, expire_on_commit=False)
+        finally:
+            await engine.dispose()
+    finally:
+        async with admin.begin() as connection:
+            await connection.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
+        await admin.dispose()
 
 
 async def test_the_trusted_scope_is_applied_and_read_back_on_a_real_server(factory) -> None:
@@ -106,25 +159,34 @@ async def test_a_partition_assembles_its_evidence_stores_over_a_real_factory(fac
 
 
 async def test_the_partition_evidence_source_refuses_its_own_tenant_without_a_schema(
-    factory,
+    unprovisioned_factory,
 ) -> None:
     """A missing relation is a redacted refusal, and it never reads as readiness.
 
-    The database has no migration tables at all here, so the read must fail -- and the point
-    is precisely *how* it fails: ``partition_evidence_blocked`` with an exception class, not
-    an empty result (which would let an operator conclude "M04E has not started yet") and not
-    an exception out of the runner.
+    ``unprovisioned_factory`` points ``search_path`` at an empty schema, so the migration
+    relations genuinely do not exist for this test whatever the shared database contains.
+    The read must therefore fail -- and the point is precisely *how* it fails:
+    ``partition_evidence_blocked`` with an exception class, not an empty result (which would
+    let an operator conclude "M04E has not started yet") and not an exception out of the
+    runner.
+
+    The earlier version of this case relied on the shared database having *no* migration
+    tables at all.  That premise became false as soon as the chain was applied to it, and the
+    runner then (correctly) reported ``partition_stage_precondition_unmet`` -- "no handoff
+    marker yet" -- instead of ``partition_evidence_blocked``.  A test may not assert an
+    unreadable store by depending on somebody else's migrations being absent; it has to
+    create the unreadable state itself.
     """
 
     source = SqlPartitionEvidenceSource(
-        session_factory=factory,
+        session_factory=unprovisioned_factory,
         scope=TrustedEvidenceScope(tenant_id=key().tenant_id, writer_generation=GENERATION),
     )
 
     outcome = await run_partition_stage(
         key=key(),
         stage=MigrationStage.M05_INSTANCE_RUNTIME,
-        session_factory=factory,
+        session_factory=unprovisioned_factory,
         writer_generation=GENERATION,
         overrides=complete_overrides(),
         evidence_source=source,

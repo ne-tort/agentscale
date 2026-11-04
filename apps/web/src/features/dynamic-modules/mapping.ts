@@ -27,6 +27,7 @@ export const UNKNOWN_VALUE = "—";
  */
 export const KIND_UNAVAILABLE = "Kind not reported by the server";
 export const ROUTES_UNAVAILABLE = "Route table not reported by the server";
+export const MANIFEST_UNAVAILABLE = "Manifest body not reported by the server; the digest is the immutable evidence.";
 
 const STATUS_LABELS: Readonly<Record<DynamicModuleStatus, string>> = {
   draft: "Draft",

@@ -37,7 +37,9 @@ What this revision does
    declares.  A mismatch raises and aborts the revision - an installer that
    silently skipped a table or left a stale name is not allowed to record success.
    This is the fail-closed half of the change: the *upgrade* proves the round-trip
-   instead of trusting the DDL it just ran.
+   instead of trusting the DDL it just ran.  An offline render (``upgrade --sql``)
+   has no catalog to read and therefore skips the check, which is recorded in the
+   log rather than passed over silently.
 
 Downgrade
 =========
@@ -102,8 +104,6 @@ def _relation_exists(connection, table: str) -> bool:
 
 
 def upgrade() -> None:
-    connection = op.get_bind()
-
     legacy_targets: list[tuple[str, tuple[str, ...]]] = []
     for spec in policies.CANONICAL_TABLE_POLICIES:
         op.execute(policies.upgrade_guard_sql(spec))
@@ -114,7 +114,16 @@ def upgrade() -> None:
     for table, names in legacy_targets:
         logger.info("rls %s: withdrew stale policy name(s) %s on %s", revision, ", ".join(names), table)
 
-    # Fail-closed verification of the round-trip this revision exists for.
+    # ``as_sql`` is true for ``alembic upgrade --sql`` *and* for the database-free
+    # replay in ``tests/migration/ddl_cross_review``: both render DDL without a
+    # connection, so neither can read ``pg_policy``.  Skipping the verification
+    # there is not a weakening - an online upgrade, which is the only path that can
+    # actually install anything, still runs it and still aborts on a mismatch.
+    if getattr(op.get_context(), "as_sql", False):
+        logger.info("rls %s: offline render, post-install verification skipped", revision)
+        return
+
+    connection = op.get_bind()
     problems: list[str] = []
     for spec in policies.CANONICAL_TABLE_POLICIES:
         if not _relation_exists(connection, spec.table):

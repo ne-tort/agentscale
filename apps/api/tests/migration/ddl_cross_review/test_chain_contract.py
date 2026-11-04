@@ -86,6 +86,14 @@ VERSIONS_DIR: Path = H.VERSIONS_DIR
 #: Kept as an explicit range so the contract fails loudly when a new revision
 #: lands without this file being extended: the chain review must be re-run, not
 #: silently widened.
+#:
+#: ``2026110317``-``2026110319`` are deliberately **not** in this range yet.  Two of
+#: them own no table (``2026110317`` creates one platform table, ``2026110318`` is a
+#: policy rename), so nothing here is lost; ``2026110319`` does own two tables, but
+#: replaying it needs ``op.add_column``/``op.drop_column`` in ``harness._FakeOp``,
+#: which is the MIG-EQ-ANCHORS-01 task's change to make, not a silent widening on
+#: this side.  Until then the equipment parity checks below report the 0319 delta
+#: as model drift, which is the honest reading of a chain list that stops at 0316.
 CHAIN: tuple[str, ...] = tuple(f"20261103{number:02d}" for number in range(1, 17))
 CHAIN_ROOT = "2026110202"
 
@@ -951,11 +959,40 @@ def test_table_downgrades_mirror_upgrades() -> None:
 
 
 def test_policy_revision_downgrade_removes_exactly_its_policies() -> None:
+    """The downgrade removes the policies it installs - and nothing else of its own.
+
+    Since ``2026110318`` the guarded block also withdraws the *historical* names an
+    earlier registry left behind (``policies.legacy_policy_names``: the truncated
+    ``..._trusted_service_acce``).  A downgrade must withdraw those too, otherwise
+    un-applying the policy revision would leave an orphan policy on a table whose
+    RLS it just disabled - a control nobody owns.  The equality asserted before
+    (installed set == dropped set) therefore had to become a superset relation.
+
+    The property that matters is asserted instead: every installed policy is
+    dropped, every extra drop is exactly a legacy name this registry computes (not
+    an arbitrary identifier), and no extra drop names a policy that some table
+    still declares.
+    """
+
     up = upgrade("2026110307")
     down = downgrade("2026110307")
-    assert set(up.sql_objects) == set(down.dropped_sql_objects), (
-        "2026110307 must drop exactly the policies it installs: "
-        f"not dropped={sorted(set(up.sql_objects) - set(down.dropped_sql_objects))}"
+    installed = set(up.sql_objects)
+    dropped = set(down.dropped_sql_objects)
+    assert installed <= dropped, (
+        "2026110307 must drop every policy it installs: "
+        f"not dropped={sorted(installed - dropped)}"
+    )
+    legacy = {
+        name for spec in policies.CANONICAL_TABLE_POLICIES for name in policies.legacy_policy_names(spec)
+    }
+    assert dropped - installed <= legacy, (
+        "2026110307 drops names it neither installs nor recognises as a legacy spelling: "
+        f"{sorted((dropped - installed) - legacy)}"
+    )
+    declared_now = {name for spec in policies.CANONICAL_TABLE_POLICIES for name in spec.policy_names}
+    assert not ((dropped - installed) & declared_now), (
+        "a downgrade must never withdraw a policy another table still declares: "
+        f"{sorted((dropped - installed) & declared_now)}"
     )
     assert not up.tables and not down.dropped_tables, "the policy revision must not own tables"
 

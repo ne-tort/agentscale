@@ -6,6 +6,7 @@ import { CapabilityDeniedNotice, DynamicModuleErrorNotice, DynamicModulesEmpty }
 import type { DynamicModuleAccess } from "./capability";
 import {
   formatDateTime,
+  MANIFEST_UNAVAILABLE,
   manifestText,
   sortVersionsDesc,
   summarizeManifest,
@@ -32,6 +33,16 @@ export interface VersionPanelProps {
 }
 
 function ManifestViewer({ label, manifest }: { readonly label: string; readonly manifest: DynamicModuleVersion["manifest"] }) {
+  // The version payload carries the digest but not the manifest body, so an
+  // unread manifest is reported as absent rather than rendered as an empty object.
+  if (manifest === undefined) {
+    return <details className="dynamic-modules__manifest">
+      <summary>{label}</summary>
+      <div className="dynamic-modules__manifest-body">
+        <p className="dynamic-modules__hint">{MANIFEST_UNAVAILABLE}</p>
+      </div>
+    </details>;
+  }
   const summary = summarizeManifest(manifest);
   return <details className="dynamic-modules__manifest">
     <summary>{label}</summary>
@@ -80,9 +91,9 @@ export function VersionPanel({ service, access, definition, versions, onChanged 
   const formId = useId();
   const ordered = sortVersionsDesc(versions);
   const latest = ordered[0];
-  const [manifestText, setManifestText] = useState(() => (latest ? manifestDraftText(latest.manifest) : starterManifestText({
+  const [manifestText, setManifestText] = useState(() => (latest && latest.manifest ? manifestDraftText(latest.manifest) : starterManifestText({
     appId: definition.appId,
-    kind: definition.kind,
+    ...(definition.kind === undefined ? {} : { kind: definition.kind }),
     version: suggestNextVersion(definition.latestVersion),
   })));
   const [notes, setNotes] = useState("");
@@ -95,7 +106,7 @@ export function VersionPanel({ service, access, definition, versions, onChanged 
     if (!validationAttempted) return;
     setErrors(validatePublishForm(
       { manifestText: nextManifest, notes: nextNotes, ...(definition.latestVersion ? { expectedVersion: definition.latestVersion } : {}) },
-      { appId: definition.appId, kind: definition.kind },
+      { appId: definition.appId, ...(definition.kind === undefined ? {} : { kind: definition.kind }) },
     ));
   };
 
@@ -104,7 +115,7 @@ export function VersionPanel({ service, access, definition, versions, onChanged 
     setValidationAttempted(true);
     const nextErrors = validatePublishForm(
       { manifestText, notes, ...(definition.latestVersion ? { expectedVersion: definition.latestVersion } : {}) },
-      { appId: definition.appId, kind: definition.kind },
+      { appId: definition.appId, ...(definition.kind === undefined ? {} : { kind: definition.kind }) },
     );
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) return;
@@ -112,7 +123,7 @@ export function VersionPanel({ service, access, definition, versions, onChanged 
       const published = await service.publishVersion({
         definitionId: definition.id,
         appId: definition.appId,
-        kind: definition.kind,
+        ...(definition.kind === undefined ? {} : { kind: definition.kind }),
         values: {
           manifestText,
           notes,
@@ -207,7 +218,7 @@ export function VersionPanel({ service, access, definition, versions, onChanged 
               onClick={() => {
                 setManifestText(latest ? manifestDraftText(latest.manifest) : starterManifestText({
                   appId: definition.appId,
-                  kind: definition.kind,
+                  ...(definition.kind === undefined ? {} : { kind: definition.kind }),
                   version: suggestNextVersion(definition.latestVersion),
                 }));
                 setNotes("");

@@ -279,7 +279,12 @@ describe("workspace shell route contract", () => {
     expect(container.textContent).toContain("This shell is scoped to Signal Lab (project-42)");
     expect(container.textContent).toContain("project-other");
     expect(container.querySelector("[data-testid='route-child']")).toBeNull();
-    expect(container.querySelector("a[href='/projects/project-42']")?.textContent).toBe("Open Signal Lab");
+    // Scope the lookup to the recovery panel's own action row. ``data-route-state``
+    // sits on the shell root and the header brand link shares the same href, so any
+    // broader selector asserts on the wrong anchor.
+    expect(
+      container.querySelector(".workspace-shell__route-actions a[href='/projects/project-42']")?.textContent,
+    ).toBe("Open Signal Lab");
     expect(container.querySelector("[data-testid='location']")?.textContent).toBe("/projects/project-other/chat/session-9");
   });
 
