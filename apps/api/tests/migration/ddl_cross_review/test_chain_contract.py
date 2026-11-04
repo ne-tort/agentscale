@@ -26,11 +26,11 @@ foreign targets, RLS coverage) plus the fragile spots named in the review
 (retained project key, M05 anchor-key ownership, deferred cycle, validation gate,
 downgrade symmetry).
 
-Two tests carry a **strict** ``xfail``.  A strict xfail means "the invariant is
-documented as violated by the current chain, and the fix is a new revision, not an
-edit of an applied one".  When the owning fix lands those tests turn into
-``XPASS`` and fail on purpose, so the marker cannot rot into a permanent excuse.
-See ``ddl-chain-cross-review.md`` (B1, M1, M3).
+Three tests carry a **strict** ``xfail`` (B1, M1, M3 of the review).  A strict
+xfail means "the invariant is documented as violated by the current chain, and the
+fix is a new revision, not an edit of an applied one".  When the owning fix lands
+those tests turn into ``XPASS`` and fail on purpose, so the marker cannot rot into
+a permanent excuse.
 """
 
 from __future__ import annotations
@@ -203,6 +203,7 @@ def table_owners() -> dict[str, str]:
     return owners
 
 
+@lru_cache(maxsize=1)
 def raw_sql_uniques() -> dict[str, set[tuple[str, tuple[str, ...]]]]:
     """Unique constraints the chain creates through raw SQL, keyed by table.
 
@@ -225,6 +226,7 @@ def raw_sql_uniques() -> dict[str, set[tuple[str, tuple[str, ...]]]]:
     return found
 
 
+@lru_cache(maxsize=1)
 def created_object_owners() -> dict[str, list[tuple[str, str]]]:
     """Object name -> ``[(kind, revision)]`` for everything the chain creates."""
 
@@ -248,6 +250,7 @@ def created_object_owners() -> dict[str, list[tuple[str, str]]]:
     return dict(owners)
 
 
+@lru_cache(maxsize=1)
 def policy_installers() -> dict[str, tuple[str, ...]]:
     """Policy name -> revisions of the chain that emit ``CREATE POLICY`` for it."""
 
@@ -289,8 +292,9 @@ def declared_foreign_keys() -> Iterator[tuple[str, str, object]]:
             yield revision, spec.source_table or "", spec
 
 
-def chain_foreign_keys() -> list[tuple[str, str, object]]:
-    return list(declared_foreign_keys())
+@lru_cache(maxsize=1)
+def chain_foreign_keys() -> tuple[tuple[str, str, object], ...]:
+    return tuple(declared_foreign_keys())
 
 
 def aggregated_foreign_keys(table: str) -> set[tuple[tuple[str, ...], tuple[str, ...], str | None, bool | None, str | None]]:
@@ -873,9 +877,14 @@ def test_chain_creates_no_rls_object_before_the_policy_revision() -> None:
 
 
 def test_no_chain_revision_emits_not_valid() -> None:
+    # Word-boundary match on purpose: the gate revision 2026110308 contains the
+    # prose "constraints are still missing or not validated" in a RAISE message.
+    # A naive substring check reports a false positive there; ``\bNOT\s+VALID\b``
+    # does not, because "VALIDATED" has no boundary after "VALID".
+    pattern = re.compile(r"\bNOT\s+VALID\b", re.IGNORECASE)
     offenders: list[str] = []
     for revision in CHAIN:
         for statement in upgrade(revision).statements:
-            if re.search(r"\bNOT\s+VALID\b", statement, re.IGNORECASE):
+            if pattern.search(statement):
                 offenders.append(revision)
     assert not offenders, f"NOT VALID constraints were introduced by {sorted(set(offenders))}; 2026110308 is the gate"

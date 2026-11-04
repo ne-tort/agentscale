@@ -634,6 +634,51 @@ _CANONICAL: tuple[TablePolicySpec, ...] = (
             "tenant policy."
         ),
     ),
+    # --- Runtime revision head / attempt / audit (2026110306) ---
+    # These carry ``project_id`` only; tenant and cabinet are proven through
+    # ``projects``, exactly like ``project_runtime_revisions``.
+    TablePolicySpec(
+        table="runtime_revision_heads",
+        owner_revision="2026110306",
+        tenant=ScopedColumn(
+            chain=(ParentHop(table="projects", on_column="project_id", value_column="company_id"),),
+        ),
+        cabinet=ScopedColumn(
+            chain=(ParentHop(table="projects", on_column="project_id", value_column="cabinet_id"),),
+        ),
+        project=ScopedColumn(column="project_id"),
+        trusted_command="ALL",
+        notes=(
+            "Resource-wide CAS head. Has no tenant column: tenant/cabinet are inherited from "
+            "projects and the project GUC must match project_id."
+        ),
+    ),
+    TablePolicySpec(
+        table="runtime_materialization_attempts",
+        owner_revision="2026110306",
+        tenant=ScopedColumn(
+            chain=(ParentHop(table="projects", on_column="project_id", value_column="company_id"),),
+        ),
+        cabinet=ScopedColumn(
+            chain=(ParentHop(table="projects", on_column="project_id", value_column="cabinet_id"),),
+        ),
+        project=ScopedColumn(column="project_id"),
+        trusted_command="ALL",
+        notes="Durable attempt history; scope inherited from projects.",
+    ),
+    TablePolicySpec(
+        table="runtime_materialization_audit",
+        owner_revision="2026110306",
+        tenant=ScopedColumn(
+            chain=(ParentHop(table="projects", on_column="project_id", value_column="company_id"),),
+        ),
+        cabinet=ScopedColumn(
+            chain=(ParentHop(table="projects", on_column="project_id", value_column="cabinet_id"),),
+        ),
+        project=ScopedColumn(column="project_id"),
+        trusted_command="ALL",
+        notes="Append-only materialization audit; scope inherited from projects.",
+    ),
 )
 
 CANONICAL_TABLE_POLICIES: Final[tuple[TablePolicySpec, ...]] = _CANONICAL
@@ -673,6 +718,14 @@ CANONICAL_TABLE_PREFIXES: Final[tuple[str, ...]] = (
     "dynamic_app_capability_",
     "project_runtime_revision",
     "materialization_",
+    # ``runtime_revision_heads``, ``runtime_materialization_attempts`` and
+    # ``runtime_materialization_audit`` were a blind spot: none of the prefixes
+    # above matched their names, so the coverage report could not name them and
+    # the "nothing uncovered" invariant held vacuously. A prefix that matches a
+    # table set nobody registered is exactly what the report exists to catch.
+    "runtime_",
+    "equipment_v2_",
+    "agent_run_",
 )
 
 

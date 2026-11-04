@@ -41,6 +41,12 @@ depends_on = None
 logger = logging.getLogger("alembic.runtime.migration")
 
 
+#: Owner revisions whose policies this revision is responsible for withdrawing.
+#: Policies owned by ``2026110307`` stay in place: this revision did not create
+#: them and cannot know whether they pre-existed.
+_POLICIES_ADDED_HERE = frozenset({"2026110309"})
+
+
 def upgrade() -> None:
     installed = 0
     for spec in policies.CANONICAL_TABLE_POLICIES:
@@ -50,11 +56,14 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    # Intentionally empty: this revision re-applies an idempotent policy set that
-    # is owned by 2026110307.  Removing it would silently drop policies this
-    # revision does not own.  Roll back policies only with a reviewed forward
-    # revision against a database whose actual policy state is known.
-    logger.info(
-        "rls %s: downgrade is a no-op; canonical policies remain owned by 2026110307",
-        revision,
-    )
+    # Withdraw exactly the policies this revision is accountable for — the ones
+    # whose table was created after 2026110307.  A blanket no-op left an upgrade
+    # delta that no downgrade removed, which the DDL cross-review flagged as an
+    # unsymmetric pair.
+    removed = 0
+    for spec in policies.CANONICAL_TABLE_POLICIES:
+        if spec.owner_revision not in _POLICIES_ADDED_HERE:
+            continue
+        op.execute(policies.downgrade_guard_sql(spec))
+        removed += 1
+    logger.info("rls %s: withdrew %d canonical table policies", revision, removed)
