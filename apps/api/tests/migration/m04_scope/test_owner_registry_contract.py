@@ -69,24 +69,29 @@ def test_scope_parents_are_restrictive_and_project_parent_tuple_is_composite() -
         for constraint in constraints
         if isinstance(constraint, ForeignKeyConstraint)
     }
-    foreign_keys = {
-        constraint.name: constraint
-        for constraint in constraints
-        if isinstance(constraint, ForeignKeyConstraint)
-    }
     assert foreign_keys["fk_scope_registry_project_typed_parent"].ondelete == "RESTRICT"
     project_fk = foreign_keys["fk_scope_registry_project_typed_parent"]
-    assert len(project_fk.columns) == 3
+    # The registry parent FK is the *state-bearing* anchor key, not just the three
+    # identity columns: it additionally pins tenant_type, project_status and
+    # owner_state, so a registry row can only reference a lifecycle-matched anchor
+    # (revision 2026110301 and ``ScopeOwnerProjectAnchorRow`` define this tuple).
+    assert len(project_fk.columns) == 6
     assert [element.target_fullname for element in project_fk.elements] == [
         "scope_owner_project_anchors.project_id",
         "scope_owner_project_anchors.tenant_id",
+        "scope_owner_project_anchors.tenant_type",
         "scope_owner_project_anchors.cabinet_id",
+        "scope_owner_project_anchors.project_status",
+        "scope_owner_project_anchors.owner_state",
     ]
     cabinet_fk = foreign_keys["fk_scope_registry_cabinet_typed_parent"]
     assert cabinet_fk.ondelete == "RESTRICT"
+    assert len(cabinet_fk.columns) == 4
     assert [element.target_fullname for element in cabinet_fk.elements] == [
         "scope_owner_cabinet_anchors.cabinet_id",
         "scope_owner_cabinet_anchors.tenant_id",
+        "scope_owner_cabinet_anchors.tenant_type",
+        "scope_owner_cabinet_anchors.owner_state",
     ]
 
 
@@ -101,7 +106,9 @@ def test_cabinet_anchor_restricts_both_typed_parents_and_scope_fk() -> None:
     assert anchor_fks["fk_scope_owner_cabinet_anchor_tenant"].ondelete == "RESTRICT"
     assert any(
         isinstance(constraint, UniqueConstraint)
-        and constraint.name == "uq_scope_owner_cabinet_anchor_tuple_state"
+        # Name as defined by the model and revision 2026110301: the unique key is
+        # the typed (cabinet, tenant, tenant_type) tuple *plus* owner_state.
+        and constraint.name == "uq_scope_owner_cabinet_anchor_typed_tuple_state"
         for constraint in anchor_constraints
     )
 

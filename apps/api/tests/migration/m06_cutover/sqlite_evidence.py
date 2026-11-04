@@ -91,6 +91,36 @@ def dialect_neutral_ddl() -> tuple[str, ...]:
     return tuple(statements)
 
 
+_SPEC_TYPES = {
+    "TEXT": sa.String,
+    "BIGINT": sa.BigInteger,
+    "BOOLEAN": sa.Boolean,
+    "TIMESTAMPTZ": sa.String,
+}
+
+
+def spec_table(spec: Any, metadata: sa.MetaData) -> sa.Table:
+    """A seeding shim for one cutover table declared by ``CUTOVER_REQUIRED_SCHEMA``.
+
+    The table itself is created from :func:`dialect_neutral_ddl`; this mapping exists only so
+    the fixture can insert and read rows without hand-writing column lists.
+    """
+
+    return sa.Table(
+        spec.name,
+        metadata,
+        *(
+            sa.Column(
+                column.name,
+                _SPEC_TYPES[column.sql_type.split("(")[0].strip()](),
+                primary_key=column.name in spec.primary_key,
+                nullable=column.nullable,
+            )
+            for column in spec.columns
+        ),
+    )
+
+
 class EvidenceDatabase:
     """One ephemeral SQLite database with the evidence mirror and the cutover ledger."""
 
@@ -99,6 +129,9 @@ class EvidenceDatabase:
         self.tables: dict[str, sa.Table] = {
             model.__tablename__: mirror_table(model, self.metadata)
             for model in MIRRORED_MODELS
+        }
+        self.cutover_tables = {
+            spec.name: spec_table(spec, self.metadata) for spec in CUTOVER_REQUIRED_SCHEMA
         }
         self._created: list[str] = []
         self.engine = create_async_engine(
@@ -112,14 +145,16 @@ class EvidenceDatabase:
 
     async def create(self, *, with_cutover_tables: bool = True,
                      cutover_tables: Sequence[str] | None = None) -> "EvidenceDatabase":
+        names = (
+            list(cutover_tables)
+            if cutover_tables is not None
+            else ([CUTOVER_LEDGER_TABLE, CUTOVER_SOURCE_TAIL_TABLE]
+                  if with_cutover_tables else [])
+        )
+        for name in names:
+            self.tables[name] = self.cutover_tables[name]
         async with self.engine.begin() as connection:
             await connection.run_sync(self.metadata.create_all)
-            names = (
-                list(cutover_tables)
-                if cutover_tables is not None
-                else ([CUTOVER_LEDGER_TABLE, CUTOVER_SOURCE_TAIL_TABLE]
-                      if with_cutover_tables else [])
-            )
             for statement in dialect_neutral_ddl():
                 table_name = statement.split()[2]
                 if table_name in names:

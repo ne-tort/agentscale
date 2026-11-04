@@ -432,8 +432,17 @@ def test_ddl_indexes_match_registered_metadata(upgrade_sql: str) -> None:
 
 
 def test_ddl_table_comments_match_registered_metadata(upgrade_sql: str) -> None:
+    """Every commented table carries the exact ``comment`` from the ORM metadata.
+
+    Comment bodies are compared verbatim, so a comment may contain a ``;`` — that
+    is precisely why :func:`_split_sql` is literal-aware: a naive split would
+    truncate the audit comment and drop it from the comparison.
+    """
     statements = _statements(upgrade_sql)
-    assert _migration_comments(statements) == _metadata_comments(CREATED_TABLES)
+    migration = _migration_comments(statements)
+    metadata = _metadata_comments(CREATED_TABLES)
+    assert set(migration) == set(metadata)
+    assert migration == metadata
 
 
 def test_new_tables_have_exact_expected_names_and_no_renames(upgrade_sql: str) -> None:
