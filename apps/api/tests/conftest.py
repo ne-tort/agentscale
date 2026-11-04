@@ -1,10 +1,19 @@
-"""Pytest fixtures — shared gates and DB helpers."""
+"""Pytest fixtures — shared gates and DB helpers.
+
+Reachability of the optional services is memoised. The PostgreSQL probe is a TCP
+connect to a port that is normally closed, and on this platform an IPv4 loopback
+connect to a closed port is *dropped* rather than refused, so a single probe costs
+the whole ``timeout``. Calling it per test (the autouse ``clean_engine_cache``
+fixture did) turned a 30-second unit run into tens of minutes of near-idle socket
+waiting — indistinguishable from a hang.
+"""
 
 import asyncio
 import os
 import shutil
 import socket
 import subprocess
+import time
 import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
@@ -26,16 +35,14 @@ DATABASE_URL = os.getenv(
 )
 
 _POSTGRES_AVAILABLE: bool | None = None
-"""Session-level memo of :func:`_postgres_available`.
+_POSTGRES_PROBED_AT: float = 0.0
 
-The probe is a *TCP connect* to a port that is normally closed.  On this
-machine an IPv4 loopback connection to a closed port is **not refused, it is
-dropped**, so the probe burns its full ``timeout`` (1 s) every single call.  It
-is called from the autouse ``clean_engine_cache`` fixture and from the
-``requires_postgres`` gate; without the memo, a 2000-test run spent ~35 minutes
-inside a reachability check at ~0 % CPU, which looks exactly like a hang.
-Presence of a database does not change during a run, so one probe per process is
-the honest answer.
+NEGATIVE_PROBE_TTL_SEC = 300.0
+"""How long "no PostgreSQL" is trusted before the socket is asked again.
+
+A *positive* answer is kept for the whole process (the endpoint does not grow a
+database mid-run), but a negative one expires, so a long session that starts
+PostgreSQL between runs re-detects it instead of staying blind for ever.
 """
 
 
@@ -54,16 +61,22 @@ def _probe_postgres(timeout: float = 1.0) -> bool:
 
 def _postgres_available() -> bool:
     """``True`` when PostgreSQL answers at ``DATABASE_URL`` (memoised, see above)."""
-    global _POSTGRES_AVAILABLE
-    if _POSTGRES_AVAILABLE is None:
-        _POSTGRES_AVAILABLE = _probe_postgres()
+    global _POSTGRES_AVAILABLE, _POSTGRES_PROBED_AT
+    now = time.monotonic()
+    if _POSTGRES_AVAILABLE is True:
+        return True
+    if _POSTGRES_AVAILABLE is False and now - _POSTGRES_PROBED_AT < NEGATIVE_PROBE_TTL_SEC:
+        return False
+    _POSTGRES_AVAILABLE = _probe_postgres()
+    _POSTGRES_PROBED_AT = now
     return _POSTGRES_AVAILABLE
 
 
 def _reset_postgres_available() -> None:
     """Forget the memo (a test that opens/closes a database itself may need this)."""
-    global _POSTGRES_AVAILABLE
+    global _POSTGRES_AVAILABLE, _POSTGRES_PROBED_AT
     _POSTGRES_AVAILABLE = None
+    _POSTGRES_PROBED_AT = 0.0
 
 
 requires_postgres = pytest.mark.skipif(

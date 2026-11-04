@@ -209,9 +209,20 @@ def _spec_table_foreign_keys(tree: ast.Module) -> set[tuple[str, str]]:
 
     Revision ``2026110303`` builds seven ``op.create_foreign_key`` calls from
     ``DEFERRED_FOREIGN_KEYS``; the call arguments are subscripts, so the names
-    are read from the literal spec table instead of from the call site.
+    are read from the spec table instead of from the call site.
+
+    The spec table is resolved **per element and per value**, not as one
+    ``ast.literal_eval`` blob: its ``source``/``referent`` values are module
+    constants (``INSTANCE_TABLE``, ``LINK_TABLE``, ...), and a whole-table
+    ``literal_eval`` raises on those ``Name`` nodes, yielding ``None``. The
+    previous whole-table read therefore reported *no* staged key for 2026110303
+    while the DDL created seven deferred ones — a silent under-count that made
+    the coverage assertion fail (and, had ``EXPECTED_INVENTORY`` been trimmed to
+    match, would have let unvalidated deferred keys pass). Resolving through
+    ``_resolve`` reports exactly the names the loop will emit.
     """
     found: set[tuple[str, str]] = set()
+    constants = _module_constants(tree)
     for node in tree.body:
         value: ast.AST | None = None
         if isinstance(node, ast.Assign) and len(node.targets) == 1:
@@ -221,12 +232,14 @@ def _spec_table_foreign_keys(tree: ast.Module) -> set[tuple[str, str]]:
             value = node.value
         if not isinstance(value, (ast.Tuple, ast.List)):
             continue
-        items = _literal(value)
-        if not isinstance(items, (tuple, list)):
-            continue
-        for item in items:
-            if not isinstance(item, dict):
+        for element in value.elts:
+            if not isinstance(element, ast.Dict):
                 continue
+            item: dict[object, object] = {}
+            for key_node, value_node in zip(element.keys, element.values):
+                key = _resolve(key_node, constants)
+                if isinstance(key, str):
+                    item[key] = _resolve(value_node, constants)
             name, source = item.get("name"), item.get("source")
             if not isinstance(name, str) or not isinstance(source, str):
                 continue
@@ -370,11 +383,17 @@ def test_the_wave_revisions_do_not_validate_anything_themselves() -> None:
 # 2. inventory coverage
 # --------------------------------------------------------------------------- #
 def test_inventory_covers_every_staged_constraint_exactly_once() -> None:
+    # ``_discovered_staged_foreign_keys`` maps each staged pair to its owning
+    # revision, so the coverage comparison has to run on the key set. The checks
+    # below are unchanged in strength: the derived pairs must still equal the
+    # declared inventory exactly, with no overlap against the explicit binding.
     discovered = _discovered_staged_foreign_keys()
     explicit = set(CLOSED_PARTITION_BINDINGS)
 
-    assert discovered.isdisjoint(explicit), "the closed-partition binding must be declared once"
-    expected = discovered | explicit
+    assert set(discovered).isdisjoint(explicit), (
+        "the closed-partition binding must be declared once"
+    )
+    expected = set(discovered) | explicit
     assert expected == EXPECTED_INVENTORY
 
     actual = [(spec["table"], spec["constraint"]) for spec in MODULE.VALIDATION_SPECS]
