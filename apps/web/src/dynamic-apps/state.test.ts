@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createInitialDynamicAppsState, reduceDynamicAppsState } from "./state";
 import { createDynamicAppRegistryContract, DYNAMIC_APP_METHODS } from "./gateway";
-import type { CapabilityGateway } from "../capabilities/types";
+import type { CapabilityGateway, GatewayInvokeOptions, JsonValue } from "../capabilities/types";
 
 const page = { items: [], nextCursor: "next" } as const;
 const detail = {
@@ -16,6 +16,28 @@ const detail = {
   manifest: { protocol: "1.0" as const, appId: "demo-app", version: "1.0.0", displayName: "Demo", entrypoints: {}, requestedCapabilities: [] },
   lifecycleEvents: [],
 };
+
+/** The same snapshot, checked as JSON once, so the gateway doubles below can serve any `TResult`. */
+const detailPayload: JsonValue = detail;
+
+/**
+ * Gateway double that answers every call with the same registry snapshot.
+ *
+ * `CapabilityGateway.invoke` is generic over the caller's expected result, while a stub always
+ * returns one fixed value: no stub can prove that this snapshot is an instance of each concrete
+ * `TResult`, so the single unavoidable cast lives here, inside the test double.
+ */
+function fixedGateway(
+  calls?: Array<{ method: string; params?: JsonValue; capability?: string }>,
+): CapabilityGateway {
+  return {
+    invoke: async <TResult extends JsonValue = JsonValue>(method: string, params?: JsonValue, options?: GatewayInvokeOptions) => {
+      calls?.push({ method, params, capability: options?.capability });
+      return detailPayload as TResult;
+    },
+    notify: () => undefined,
+  };
+}
 
 describe("dynamic app view state", () => {
   it("preserves registry data while entering a detail loading state", () => {
@@ -45,11 +67,8 @@ describe("dynamic app view state", () => {
 
 describe("dynamic app gateway contract", () => {
   it("maps lifecycle operations to typed capability-protected methods", async () => {
-    const calls: Array<{ method: string; params: unknown; capability?: string }> = [];
-    const gateway: CapabilityGateway = {
-      invoke: async (method, params, options) => { calls.push({ method, params, capability: options?.capability }); return detail; },
-      notify: () => undefined,
-    };
+    const calls: Array<{ method: string; params?: JsonValue; capability?: string }> = [];
+    const gateway = fixedGateway(calls);
     const registry = createDynamicAppRegistryContract({ gateway, appId: detail.appId, manifestVersion: detail.manifestVersion });
     await registry.list({ publication: "published" });
     await registry.detail(detail.appId);
@@ -63,7 +82,7 @@ describe("dynamic app gateway contract", () => {
   });
 
   it("rejects app/version scope changes before transport", async () => {
-    const gateway: CapabilityGateway = { invoke: async () => detail, notify: () => undefined };
+    const gateway = fixedGateway();
     const registry = createDynamicAppRegistryContract({ gateway, appId: detail.appId, manifestVersion: detail.manifestVersion });
     expect(() => registry.detail("other-app")).toThrow("scope");
     expect(() => registry.grant({ appId: detail.appId, manifestVersion: "2.0.0", capability: { name: "ui.render", decision: "granted", grantedBy: "administrator" } })).toThrow("version");

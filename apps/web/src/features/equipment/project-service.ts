@@ -1,5 +1,6 @@
 import type { ApiClient, JsonObject, ProjectSelection } from "../../api/types";
-import { EquipmentServiceError, type EquipmentProjectService, type EquipmentProcurementExport, type EquipmentWorkspaceScope, type EquipmentSourceCatalog } from "./live-contract";
+import { EquipmentServiceError, type EquipmentProjectService, type EquipmentProcurementExport, type EquipmentServiceErrorCode, type EquipmentWorkspaceScope, type EquipmentSourceCatalog } from "./live-contract";
+import { calculateProcurement } from "./calculations";
 import { emptyEquipmentWorkspace, type EquipmentAuthoritativeOffer, type EquipmentCandidateGroup, type EquipmentWorkspace, type MatchKind, type OfferFreshness, type ProcurementPatch } from "./types";
 
 interface Row { row_id: string; body: Record<string, unknown>; session_id?: string | null; created_at?: string | null; created_by?: string | null }
@@ -192,7 +193,7 @@ export function createEquipmentProjectService(api: ApiClient, projectId: string)
           status: text(row.body.status) || "unknown",
           paused: row.body.paused === true,
           ...(state.indexedAt ? { lastIndexedAt: state.indexedAt } : {}),
-          freshness: state.freshness,
+          freshness: state.state,
           ...(state.reason ? { freshnessReason: state.reason } : {}),
         };
       });

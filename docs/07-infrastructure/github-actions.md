@@ -29,8 +29,8 @@ Job **`postgres-integration`** живёт в [`ci-api.yml`](../../.github/workfl
 
 | Шаг | Смысл |
 |-----|-------|
-| service `postgres:16.15-alpine` | порт `5432` публикуется на хост раннера, healthcheck `pg_isready -U test -d prodavan_test` |
-| `Resolve DSNs` | `PRODAVAN_TEST_DATABASE_URL` + `PRODAVAN_TEST_MIGRATION_DATABASE_URL`; хост из `PRODAVAN_CI_HOST` (Docker Desktop) или `127.0.0.1` |
+| service `postgres:16.15-alpine` | `5432` контейнера публикуется на **эфемерный** хост-порт (все раннеры делят один docker daemon — фиксированный порт сталкивался бы с параллельным прогоном), healthcheck `pg_isready -U test -d prodavan_test` |
+| `Resolve DSNs` | `PRODAVAN_TEST_DATABASE_URL` + `PRODAVAN_TEST_MIGRATION_DATABASE_URL`; хост из `PRODAVAN_CI_HOST` (Docker Desktop) или `127.0.0.1`, порт — из `docker port <service>` |
 | `Wait for Postgres` | TCP-проба *с раннера*: healthcheck контейнера не доказывает, что опубликованный порт доступен |
 | `Create empty migration-cycle database` | пересоздаёт пустую `prodavan_migrate` — без неё `test_alembic_cycle.py` скипается по контракту фикстуры |
 | `Pytest (PostgreSQL integration — must not skip)` | `pytest tests/migration/postgres_integration -q --no-header --strict-markers -rs --junitxml=…` |
@@ -42,8 +42,9 @@ Job **`postgres-integration`** живёт в [`ci-api.yml`](../../.github/workfl
 в JUnit-отчёте, поэтому job падает, если хоть один тест скипнут или если не
 собрано ни одного.
 
-Порт хоста задан одной переменной `PG_PORT` (в `env` job'а), чтобы те же скрипты
-можно было прогнать локально против контейнера на `55432`.
+Порт хоста задан одной переменной `PG_PORT`: пусто в CI (порт берётся из
+`docker port`, чтобы параллельные прогоны не сталкивались), `55432` — при
+локальном прогоне тех же скриптов против контейнера.
 
 ### Локально — то же, что в CI
 

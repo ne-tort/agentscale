@@ -32,6 +32,34 @@ function requireNonEmpty(value: string, field: string): void {
   if (typeof value !== "string" || value.length === 0) throw new Error(`Invalid ${field}`);
 }
 
+/** Why the payloads below need this check: registry inputs are `interface`s, which carry no index
+ * signature and therefore are not structurally assignable to the protocol's `JsonValue`, even
+ * though every field is JSON data. Instead of asserting the conversion away, the payload is
+ * verified as plain JSON where it crosses into the capability gateway, so a class instance,
+ * function member, `undefined` field or cycle fails closed here rather than producing an RPC
+ * message the host cannot serialise. */
+function isJsonPayload(value: unknown, seen = new Set<object>(), depth = 0): value is JsonValue {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return true;
+  if (typeof value === "number") return Number.isFinite(value);
+  if (typeof value !== "object" || depth > 16 || seen.has(value)) return false;
+  seen.add(value);
+  let valid: boolean;
+  if (Array.isArray(value)) {
+    valid = value.every((item) => isJsonPayload(item, seen, depth + 1));
+  } else {
+    const prototype = Object.getPrototypeOf(value);
+    valid = (prototype === Object.prototype || prototype === null)
+      && Object.values(value as Record<string, unknown>).every((item) => item !== undefined && isJsonPayload(item, seen, depth + 1));
+  }
+  seen.delete(value);
+  return valid;
+}
+
+function jsonPayload(value: object, field: string): JsonValue {
+  if (!isJsonPayload(value)) throw new Error(`Invalid ${field}`);
+  return value;
+}
+
 function assertBoundApp(context: DynamicAppCapabilityContext, appId: string, manifestVersion?: string): void {
   requireNonEmpty(appId, "appId");
   if (!/^[a-z][a-z0-9-]{2,63}$/.test(appId)) throw new Error("Invalid appId");
@@ -69,10 +97,13 @@ export function createDynamicAppRegistryContract(
 ): DynamicAppRegistryContract {
   const queryCapability = policy.queryCapability ?? "platform.queries";
   const commandCapability = policy.commandCapability ?? "platform.commands";
-  const invoke = <TResult>(method: string, params: JsonValue, options?: { signal?: AbortSignal }) => {
+  const invoke = <TResult>(method: string, params: object, options?: { signal?: AbortSignal }) => {
     const capability = QUERY_METHODS.has(method) ? queryCapability : COMMAND_METHODS.has(method) ? commandCapability : undefined;
     if (!capability) throw new Error(`Unsupported dynamic app registry method: ${method}`);
-    return context.gateway.invoke<JsonValue>(method, params, { ...capabilityMethod(capability, method), signal: options?.signal }) as Promise<TResult>;
+    // The registry result types (page/detail) are interfaces too, so they are not structurally
+    // `JsonValue` either; the gateway answers with the validated JSON payload and the declared
+    // `TResult` is asserted here, at the single boundary that decodes it.
+    return context.gateway.invoke<JsonValue>(method, jsonPayload(params, "registry params"), { ...capabilityMethod(capability, method), signal: options?.signal }) as Promise<TResult>;
   };
 
   return {

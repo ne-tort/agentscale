@@ -82,8 +82,18 @@ src/capabilities/gateway.test.ts(25,12): error TS2322: Type 'Mock<() => Promise<
   Type 'Promise<null>' is not assignable to type 'Promise<TResult>'.
     Type 'null' is not assignable to type 'TResult'.
       'null' is assignable to the constraint of type 'TResult', but 'TResult' could be instantiated with a different subtype of constraint 'JsonValue'.
-src/dynamic-apps/contracts.ts(9,8): error TS2307: Cannot find module '../../../packages/schemas/declarative-app/v1' or its corresponding type declarations.
-src/dynamic-apps/gateway.ts(3,32): error TS2307: Cannot find module '../../../packages/schemas/declarative-app/v1' or its corresponding type declarations.
+src/dynamic-apps/gateway.ts(79,118): error TS2345: Argument of type 'DynamicAppRegistryQuery' is not assignable to parameter of type 'JsonValue'.
+  Type 'DynamicAppRegistryQuery' is not assignable to type '{ [key: string]: JsonValue; }'.
+    Index signature for type 'string' is missing in type 'DynamicAppRegistryQuery'.
+src/dynamic-apps/gateway.ts(84,68): error TS2345: Argument of type 'PublishDynamicAppInput' is not assignable to parameter of type 'JsonValue'.
+  Type 'PublishDynamicAppInput' is not assignable to type '{ [key: string]: JsonValue; }'.
+    Index signature for type 'string' is missing in type 'PublishDynamicAppInput'.
+src/dynamic-apps/gateway.ts(88,66): error TS2345: Argument of type 'GrantCapabilityInput' is not assignable to parameter of type 'JsonValue'.
+  Type 'GrantCapabilityInput' is not assignable to type '{ [key: string]: JsonValue; }'.
+    Index signature for type 'string' is missing in type 'GrantCapabilityInput'.
+src/dynamic-apps/gateway.ts(92,67): error TS2345: Argument of type 'RevokeCapabilityInput' is not assignable to parameter of type 'JsonValue'.
+  Type 'RevokeCapabilityInput' is not assignable to type '{ [key: string]: JsonValue; }'.
+    Index signature for type 'string' is missing in type 'RevokeCapabilityInput'.
 src/dynamic-apps/state.test.ts(50,7): error TS2322: Type '<TResult extends JsonValue = JsonValue, TParams extends JsonValue = JsonValue>(method: string, params: TParams | undefined, options: GatewayInvokeOptions | undefined) => Promise<...>' is not assignable to type '<TResult extends JsonValue = JsonValue, TParams extends JsonValue = JsonValue>(method: string, params?: TParams | undefined, options?: GatewayInvokeOptions | undefined) => Promise<...>'.
   Type 'Promise<{ appId: string; manifestVersion: string; displayName: string; publication: "published"; lifecycle: "running"; availability: "available"; requestedCapabilityCount: number; updatedAt: string; manifest: { ...; }; lifecycleEvents: never[]; }>' is not assignable to type 'Promise<TResult>'.
     Type '{ appId: string; manifestVersion: string; displayName: string; publication: "published"; lifecycle: "running"; availability: "available"; requestedCapabilityCount: number; updatedAt: string; manifest: { ...; }; lifecycleEvents: never[]; }' is not assignable to type 'TResult'.
@@ -92,7 +102,7 @@ src/dynamic-apps/state.test.ts(66,62): error TS2322: Type 'Promise<{ appId: stri
   Type '{ appId: string; manifestVersion: string; displayName: string; publication: "published"; lifecycle: "running"; availability: "available"; requestedCapabilityCount: number; updatedAt: string; manifest: { ...; }; lifecycleEvents: never[]; }' is not assignable to type 'TResult'.
     '{ appId: string; manifestVersion: string; displayName: string; publication: "published"; lifecycle: "running"; availability: "available"; requestedCapabilityCount: number; updatedAt: string; manifest: { ...; }; lifecycleEvents: never[]; }' is assignable to the constraint of type 'TResult', but 'TResult' could be instantiated with a different subtype of constraint 'JsonValue'.
 src/dynamic/declarative/acceptance.test.tsx(43,16): error TS2304: Cannot find name 'Root'.
-src/dynamic/declarative/acceptance.test.tsx(47,101): error TS2304: Cannot find name 'createRoot'.
+src/dynamic/declarative/acceptance.test.tsx(47,101): error TS2552: Cannot find name 'createRoot'. Did you mean 'reactRoot'?
 src/dynamic/declarative/acceptance.test.tsx(48,9): error TS2304: Cannot find name 'act'.
 src/dynamic/declarative/acceptance.test.tsx(50,51): error TS2304: Cannot find name 'act'.
 src/dynamic/declarative/acceptance.test.tsx(53,5): error TS2322: Type '{ state: "resolved"; manifest: DeclarativeAppManifest; route: { id: string; path: string; title: string; root: string; requirements: { context: string[]; }; }; digest: string; etag: string; cacheKey: string; correlationId: string; }' is not assignable to type 'RegistryClientResolution'.
@@ -155,45 +165,8 @@ src/dynamic/registry.ts(305,70): error TS2345: Argument of type 'string' is not 
 src/dynamic/registry.ts(324,75): error TS2345: Argument of type 'string' is not assignable to parameter of type 'CapabilityName'.
 src/dynamic/schema.ts(218,20): error TS2352: Conversion of type 'Record<string, unknown>' to type 'DeclarativeAppManifest' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
   Type 'Record<string, unknown>' is missing the following properties from type 'DeclarativeAppManifest': protocol, appId, version, displayName, and 2 more.
-src/features/automations/AutomationsPage.tsx(539,164): error TS2304: Cannot find name 'channel'.
-src/features/automations/index.ts(8,3): error TS2300: Duplicate identifier 'AutomationsPageProps'.
-src/features/automations/index.ts(12,3): error TS2300: Duplicate identifier 'AutomationsPageProps'.
-src/features/automations/service.test.ts(143,75): error TS2558: Expected 0 type arguments, but got 1.
-src/features/chat/hooks.ts(201,53): error TS2322: Type 'ChatSidebarResponse' is not assignable to type '{ cabinet_id: string; selected_project_id?: string | undefined; selected_session_id?: string | undefined; projects: ChatSidebarProject[]; project_chats: ChatItem[]; }'.
-  Types of property 'selected_project_id' are incompatible.
-    Type 'string | null | undefined' is not assignable to type 'string | undefined'.
-      Type 'null' is not assignable to type 'string | undefined'.
-src/features/chat/service.sse-bridge.test.ts(145,45): error TS2345: Argument of type '{ turnId: string; sessionId: undefined; text: string; attachmentRefs: string[]; model?: string; submittedAt: number; }' is not assignable to parameter of type 'PendingTurn'.
-  Types of property 'sessionId' are incompatible.
-    Type 'undefined' is not assignable to type 'string'.
-src/features/contours/CompanyContour.tsx(109,185): error TS2339: Property 'employee_id' does not exist on type '{ id: string; }'.
 src/features/dynamic-modules/DynamicModulePage.tsx(221,8): error TS2322: Type '{ children: Element; busy: boolean; confirmLabel: string; description: string; onCancel: () => void; onConfirm: () => undefined; open: boolean; title: string; }' is not assignable to type 'IntrinsicAttributes & ConfirmationDialogProps'.
   Property 'children' does not exist on type 'IntrinsicAttributes & ConfirmationDialogProps'.
-src/features/dynamic-modules/DynamicModulesPage.tsx(123,11): error TS2322: Type '{ className: string; id: string; label: string; onValueChange: (value: any) => void; options: readonly { readonly value: "draft" | "disabled" | "published" | "approved" | "validated" | "archived"; readonly label: string; }[]; placeholder: string; value: "" | ... 5 more ... | "archived"; }' is not assignable to type 'IntrinsicAttributes & SelectFieldProps'.
-  Property 'onValueChange' does not exist on type 'IntrinsicAttributes & SelectFieldProps'. Did you mean 'onVolumeChange'?
-src/features/dynamic-modules/DynamicModulesPage.tsx(123,27): error TS7006: Parameter 'value' implicitly has an 'any' type.
-src/features/dynamic-modules/GrantPanel.tsx(211,13): error TS2322: Type '{ error: string; id: string; label: string; onValueChange: (value: any) => void; options: { value: string; label: string; }[]; placeholder: string; required: true; value: string; }' is not assignable to type 'IntrinsicAttributes & SelectFieldProps'.
-  Property 'onValueChange' does not exist on type 'IntrinsicAttributes & SelectFieldProps'. Did you mean 'onVolumeChange'?
-src/features/dynamic-modules/GrantPanel.tsx(211,29): error TS7006: Parameter 'value' implicitly has an 'any' type.
-src/features/dynamic-modules/GrantPanel.tsx(221,13): error TS2322: Type '{ error: string; id: string; label: string; onValueChange: (value: any) => void; options: { value: string; label: string; }[]; placeholder: string; required: true; value: "" | "project" | "cabinet"; }' is not assignable to type 'IntrinsicAttributes & SelectFieldProps'.
-  Property 'onValueChange' does not exist on type 'IntrinsicAttributes & SelectFieldProps'. Did you mean 'onVolumeChange'?
-src/features/dynamic-modules/GrantPanel.tsx(221,29): error TS7006: Parameter 'value' implicitly has an 'any' type.
-src/features/dynamic-modules/GrantPanel.tsx(232,13): error TS2322: Type '{ disabled: boolean; error: string; id: string; label: string; onValueChange: (value: any) => void; options: { value: string; label: string; }[]; placeholder: string; value: string; }' is not assignable to type 'IntrinsicAttributes & SelectFieldProps'.
-  Property 'onValueChange' does not exist on type 'IntrinsicAttributes & SelectFieldProps'. Did you mean 'onVolumeChange'?
-src/features/dynamic-modules/GrantPanel.tsx(232,29): error TS7006: Parameter 'value' implicitly has an 'any' type.
-src/features/dynamic-modules/InstallationPanel.tsx(160,13): error TS2322: Type '{ error: string; hint: string; id: string; label: string; onValueChange: (value: any) => void; options: { value: string; label: string; }[]; placeholder: string; required: true; value: string; }' is not assignable to type 'IntrinsicAttributes & SelectFieldProps'.
-  Property 'onValueChange' does not exist on type 'IntrinsicAttributes & SelectFieldProps'. Did you mean 'onVolumeChange'?
-src/features/dynamic-modules/InstallationPanel.tsx(160,29): error TS7006: Parameter 'value' implicitly has an 'any' type.
-src/features/dynamic-modules/InstallationPanel.tsx(171,13): error TS2322: Type '{ error: string; hint: string; id: string; label: string; onValueChange: (value: any) => void; options: { value: string; label: string; }[]; placeholder: string; required: true; value: string; }' is not assignable to type 'IntrinsicAttributes & SelectFieldProps'.
-  Property 'onValueChange' does not exist on type 'IntrinsicAttributes & SelectFieldProps'. Did you mean 'onVolumeChange'?
-src/features/dynamic-modules/InstallationPanel.tsx(171,29): error TS7006: Parameter 'value' implicitly has an 'any' type.
-src/features/dynamic-modules/InstallationPanel.tsx(181,13): error TS2322: Type '{ error: string; id: string; label: string; onValueChange: (value: any) => void; options: { value: string; label: string; }[]; placeholder: string; required: true; value: "" | "project" | "cabinet"; }' is not assignable to type 'IntrinsicAttributes & SelectFieldProps'.
-  Property 'onValueChange' does not exist on type 'IntrinsicAttributes & SelectFieldProps'. Did you mean 'onVolumeChange'?
-src/features/dynamic-modules/InstallationPanel.tsx(181,29): error TS7006: Parameter 'value' implicitly has an 'any' type.
-src/features/dynamic-modules/InstallationPanel.tsx(193,13): error TS2322: Type '{ disabled: boolean; error: string; hint: string; id: string; label: string; onValueChange: (value: any) => void; options: { value: string; label: string; }[]; placeholder: string; value: string; }' is not assignable to type 'IntrinsicAttributes & SelectFieldProps'.
-  Property 'onValueChange' does not exist on type 'IntrinsicAttributes & SelectFieldProps'. Did you mean 'onVolumeChange'?
-src/features/dynamic-modules/InstallationPanel.tsx(193,29): error TS7006: Parameter 'value' implicitly has an 'any' type.
-src/features/dynamic-modules/mapping.ts(99,47): error TS18046: 'definition.routes' is of type 'unknown'.
 src/features/equipment/calculations.ts(164,39): error TS18047: 'total' is possibly 'null'.
 src/features/equipment/EquipmentProcurementPage.tsx(11,69): error TS2724: '"./project-service"' has no exported member named 'EquipmentProjectService'. Did you mean 'createEquipmentProjectService'?
 src/features/equipment/EquipmentProcurementPage.tsx(16,8): error TS2724: '"./types"' has no exported member named 'EquipmentProcurementExport'. Did you mean 'EquipmentProcurementSettings'?

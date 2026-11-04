@@ -8,12 +8,11 @@ import {
   formatObservedAt,
   matchKindLabel,
 } from "./calculations";
-import { createEquipmentProjectService, EquipmentServiceError, type EquipmentProjectService } from "./project-service";
-import { type EquipmentWorkspaceScope, type EquipmentSourceCatalog } from "./live-contract";
+import { createEquipmentProjectService, EquipmentServiceError } from "./project-service";
+import { type EquipmentProjectService, type EquipmentProcurementExport, type EquipmentWorkspaceScope, type EquipmentSourceCatalog } from "./live-contract";
 import {
   type EquipmentAuthoritativeOffer,
   type EquipmentCandidateGroup,
-  type EquipmentProcurementExport,
   type EquipmentRequestLine,
   type EquipmentWorkspace,
   type ProcurementCalculation,
@@ -100,7 +99,7 @@ function useEquipmentMutation(
   setError: (error: string | undefined) => void,
 ) {
   const [busyAction, setBusyAction] = useState<string>();
-  async function mutate(action: string, operation: () => Promise<EquipmentWorkspace>) {
+  async function mutate(action: string, operation: () => Promise<EquipmentWorkspace>): Promise<void> {
     setBusyAction(action);
     setError(undefined);
     try {
@@ -571,6 +570,10 @@ function EquipmentProcurementView({ service, heading }: { service: EquipmentProj
     }
   }
 
+  // Тот же fail-closed предикат, что и requireWritable в project-service: глобальный
+  // биндинг без разрешения дочерних правок делает все стадии только для чтения.
+  const readOnly = scope !== undefined && scope.bindKind === "global" && !scope.childMayEdit;
+
   return (
     <main className="equipment-page">
       <PageHeader heading={heading} workspace={workspace} />
@@ -579,10 +582,10 @@ function EquipmentProcurementView({ service, heading }: { service: EquipmentProj
       <EquipmentWorkspaceNavigation activeView={activeWorkspaceView} onView={setActiveWorkspaceView} sourceCount={catalogs.length} sourceServiceConnected workspace={workspace} />
       {activeWorkspaceView === "sources" ? <SourceConfigurationView catalogs={catalogs} scope={scope} /> : <>
         <StageNavigation activeStage={activeStage} onStage={setActiveStage} workspace={workspace} />
-        {activeStage === "requests" && <RequestsStage busy={busyAction === "create-request"} onCreate={createRequest} onStage={setActiveStage} workspace={workspace} />}
+        {activeStage === "requests" && <RequestsStage busy={busyAction === "create-request"} onCreate={createRequest} onStage={setActiveStage} projectId={scope?.projectId} readOnly={readOnly} workspace={workspace} />}
         {activeStage === "candidates" && <CandidatesStage workspace={workspace} />}
-        {activeStage === "offers" && <OffersStage busyAction={busyAction} onRefresh={() => void refreshOffers()} onSelect={selectOffer} workspace={workspace} />}
-        {activeStage === "procurement" && <ProcurementStage busy={busyAction?.startsWith("procurement-") ?? false} onPatch={(supplier, patch) => void mutate(`procurement-${supplier}`, () => service.updateProcurement(supplier, patch))} workspace={workspace} />}
+        {activeStage === "offers" && <OffersStage busyAction={busyAction} onRefresh={() => void refreshOffers()} onSelect={selectOffer} readOnly={readOnly} workspace={workspace} />}
+        {activeStage === "procurement" && <ProcurementStage busy={busyAction?.startsWith("procurement-") ?? false} onPatch={(supplier, patch) => void mutate(`procurement-${supplier}`, () => service.updateProcurement(supplier, patch))} readOnly={readOnly} workspace={workspace} />}
         {activeStage === "export" && <ExportStage busy={exportBusy} exportData={exportData} onExport={exportSnapshot} workspace={workspace} />}
       </>}
     </main>

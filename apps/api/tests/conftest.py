@@ -202,8 +202,126 @@ def _dispose_app_engine() -> None:
     _run_async(_dispose, timeout=45)
 
 
+_PUBLIC_USER_TRIGGER_STATES_SQL = """
+SELECT c.relname AS table_name,
+       t.tgname AS trigger_name,
+       t.tgenabled AS enabled
+FROM pg_trigger t
+JOIN pg_class c ON c.oid = t.tgrelid
+JOIN pg_namespace n ON n.oid = c.relnamespace
+WHERE NOT t.tgisinternal
+  AND n.nspname = 'public'
+ORDER BY 1, 2
+"""
+"""Every app-owned (non-internal) trigger in ``public`` with its enable state.
+
+``tgenabled`` is ``O`` for a normally active trigger, ``D`` for a disabled one.
+The fixture only ever moves between those two values.
+"""
+
+_PUBLIC_TABLES_WITH_USER_TRIGGERS_SQL = """
+SELECT DISTINCT c.relname
+FROM pg_trigger t
+JOIN pg_class c ON c.oid = t.tgrelid
+JOIN pg_namespace n ON n.oid = c.relnamespace
+WHERE NOT t.tgisinternal
+  AND n.nspname = 'public'
+  AND c.relkind IN ('r', 'p')
+ORDER BY 1
+"""
+
+_PUBLIC_DISABLED_TRIGGER_TABLES_SQL = """
+SELECT DISTINCT c.relname
+FROM pg_trigger t
+JOIN pg_class c ON c.oid = t.tgrelid
+JOIN pg_namespace n ON n.oid = c.relnamespace
+WHERE NOT t.tgisinternal
+  AND n.nspname = 'public'
+  AND t.tgenabled = 'D'
+ORDER BY 1
+"""
+
+
+def _quote_ident(name: str) -> str:
+    """Quote a catalog-supplied identifier for an ``ALTER TABLE``."""
+    return '"' + name.replace('"', '""') + '"'
+
+
+async def _ensure_user_triggers_enabled(engine) -> None:
+    """Re-enable USER triggers on every ``public`` table that has one disabled.
+
+    Catalog-driven and self-contained (own transaction, own round-trip), so it
+    still works when the caller's transaction is aborted. It runs before the wipe
+    (a previous crashed run must not make this run falsely green) and after it
+    (this run must not hand a guard-less database to the next test).
+    """
+    async with engine.begin() as conn:
+        await conn.execute(text("SET lock_timeout = '5s'"))
+        result = await conn.execute(text(_PUBLIC_DISABLED_TRIGGER_TABLES_SQL))
+        for (table_name,) in result.all():
+            await conn.execute(
+                text(f"ALTER TABLE public.{_quote_ident(table_name)} ENABLE TRIGGER USER")
+            )
+
+
+def _trigger_state(value) -> str:
+    """Normalise ``pg_trigger.tgenabled``.
+
+    The column is PostgreSQL's one-byte ``"char"`` type; asyncpg hands it back as
+    ``bytes`` (``b'O'``), while other drivers give ``str``. Compare as text.
+    """
+    if isinstance(value, (bytes, bytearray)):
+        return value.decode("ascii")
+    return str(value)
+
+
+def public_user_trigger_states() -> list[tuple[str, str, str]]:
+    """``(table, trigger, tgenabled)`` for every app-owned trigger in ``public``."""
+
+    async def _read() -> list[tuple[str, str, str]]:
+        engine = create_async_engine(DATABASE_URL, pool_pre_ping=True)
+        try:
+            async with engine.connect() as conn:
+                result = await conn.execute(text(_PUBLIC_USER_TRIGGER_STATES_SQL))
+                return [(r[0], r[1], _trigger_state(r[2])) for r in result.all()]
+        finally:
+            await engine.dispose()
+
+    box: dict[str, list[tuple[str, str, str]]] = {}
+
+    def _run() -> None:
+        box["rows"] = asyncio.run(_read())
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        pool.submit(_run).result(timeout=60)
+    return box["rows"]
+
+
 def _wipe_public_tables() -> None:
-    """Truncate app tables in a worker thread so Windows Proactor stays intact."""
+    """Truncate app tables in a worker thread so Windows Proactor stays intact.
+
+    Why the trigger dance: several migrations install *append-only* guards — on
+    ``runtime_materialization_audit`` (``2026110306_resources_runtime``), on the
+    M04E ledger tables (``2026110315_m04e_ledger``), on the M06 cutover evidence
+    table (``2026110316_m06_cutover_evidence``) and on
+    ``agent_control_plane_events`` — whose ``BEFORE UPDATE OR DELETE`` and
+    ``BEFORE TRUNCATE`` triggers raise on purpose. Production must keep them, so a
+    bare ``TRUNCATE`` fails closed with ``... is append-only``.
+
+    The fixture is what is wrong here, not the invariant: it resets the whole
+    world between tests and therefore has to step *through* the guard. The
+    contract is: drop USER triggers for the duration of the wipe and switch them
+    back on before control returns to the test. Leaving them off would make the
+    next run *falsely* green — every append-only test would pass against a
+    database that enforces nothing.
+
+    The guarded tables are read from ``pg_trigger``/``pg_class``, never
+    hard-coded, so a future append-only table cannot break the fixture again.
+    ``DISABLE``, ``TRUNCATE`` and ``ENABLE`` share one transaction (a rollback
+    restores the flags by itself); the repair pass in ``finally`` covers what a
+    transaction cannot — a killed worker, or a committed-but-crashed run left
+    behind by an earlier process.
+    """
 
     async def _wipe() -> None:
         engine = create_async_engine(
@@ -211,20 +329,55 @@ def _wipe_public_tables() -> None:
             pool_pre_ping=True,
             connect_args={"timeout": 10},
         )
-        async with engine.begin() as conn:
-            await conn.execute(text("SET lock_timeout = '5s'"))
-            await conn.execute(text("SET statement_timeout = '30s'"))
-            result = await conn.execute(
-                text(
-                    "SELECT tablename FROM pg_tables "
-                    "WHERE schemaname = 'public' AND tablename <> 'alembic_version'"
+        try:
+            # Entry repair, before the truncate is allowed to trust the database.
+            await _ensure_user_triggers_enabled(engine)
+            async with engine.begin() as conn:
+                await conn.execute(text("SET lock_timeout = '5s'"))
+                await conn.execute(text("SET statement_timeout = '30s'"))
+                guarded = [
+                    row[0]
+                    for row in (
+                        await conn.execute(text(_PUBLIC_TABLES_WITH_USER_TRIGGERS_SQL))
+                    ).all()
+                ]
+                result = await conn.execute(
+                    text(
+                        "SELECT tablename FROM pg_tables "
+                        "WHERE schemaname = 'public' AND tablename <> 'alembic_version'"
+                    )
                 )
-            )
-            tables = [r[0] for r in result.all()]
-            if tables:
-                quoted = ", ".join(f'"{t}"' for t in tables)
-                await conn.execute(text(f"TRUNCATE {quoted} CASCADE"))
-        await engine.dispose()
+                tables = [r[0] for r in result.all()]
+
+                # FK constraint triggers are *not* USER triggers, so referential
+                # integrity keeps being enforced across the truncate.
+                for table_name in guarded:
+                    await conn.execute(
+                        text(
+                            f"ALTER TABLE public.{_quote_ident(table_name)} "
+                            "DISABLE TRIGGER USER"
+                        )
+                    )
+                try:
+                    if tables:
+                        quoted = ", ".join(f'"{t}"' for t in tables)
+                        await conn.execute(text(f"TRUNCATE {quoted} CASCADE"))
+                finally:
+                    # Same transaction on purpose: it runs on the happy path *and*
+                    # when the truncate raised, and if these statements never get
+                    # to run the whole block rolls back and restores the flags.
+                    for table_name in guarded:
+                        await conn.execute(
+                            text(
+                                f"ALTER TABLE public.{_quote_ident(table_name)} "
+                                "ENABLE TRIGGER USER"
+                            )
+                        )
+        finally:
+            # Last line of defence, on a fresh connection: runs even when the block
+            # above blew up, and raises rather than leave the guards off.
+            await _ensure_user_triggers_enabled(engine)
+            await engine.dispose()
 
     _run_async(_wipe, timeout=60)
 

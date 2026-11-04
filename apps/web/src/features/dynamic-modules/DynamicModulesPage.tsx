@@ -8,7 +8,7 @@ import {
   type DynamicModuleStatus,
 } from "../../api/dynamic";
 import { Breadcrumbs, Button, StatusBadge, TableToolbar } from "../../shared/ui";
-import { SelectField } from "../../shared/ui/forms";
+import { SelectField } from "../../shared/ui/forms/index";
 import { useDynamicModuleAccess } from "./access";
 import type { DynamicModuleAccess } from "./capability";
 import {

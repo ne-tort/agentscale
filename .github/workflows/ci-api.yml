@@ -196,15 +196,19 @@ jobs:
       PIP_CACHE_DIR: /cache/pip
       # Credentials/database names mirror the documented local container
       # (`docker run … -e POSTGRES_USER=test -e POSTGRES_DB=prodavan_test`), so the
-      # command in the README and the command CI runs differ only in the port.
+      # README recipe and the CI job differ only in the published port.
       PG_USER: test
       PG_PASSWORD: test
       PG_DATABASE: prodavan_test
       PG_MIGRATION_DATABASE: prodavan_migrate
-      # Published host port of the service container. Kept as a variable rather
-      # than inlined into three scripts so the *same* scripts can be executed
-      # against a local container on another port (55432) for verification.
-      PG_PORT: "5432"
+      # Published host port of the service container.  Empty = discover it: all
+      # four self-hosted runners share ONE docker daemon (infra/github-runner
+      # mounts /var/run/docker.sock), so a fixed host port 5432 would collide
+      # with any concurrent run of this job — the same reason the `test` job
+      # above starts its container with `-p 0:5432`.  The container itself still
+      # listens on 5432; only the host side is ephemeral.  Set it (55432) to run
+      # these exact scripts against a local container.
+      PG_PORT: ""
     services:
       postgres:
         image: postgres:16.15-alpine
@@ -213,7 +217,7 @@ jobs:
           POSTGRES_PASSWORD: test
           POSTGRES_DB: prodavan_test
         ports:
-          - "5432:5432"
+          - "5432"
         options: >-
           --health-cmd "pg_isready -U test -d prodavan_test"
           --health-interval 5s
@@ -240,7 +244,14 @@ jobs:
         run: |
           set -euo pipefail
           PG_HOST="${PRODAVAN_CI_HOST:-127.0.0.1}"
+          # The service container id IS the container name on this runner.
+          PG_PORT="${PG_PORT:-$(docker port "${{ job.services.postgres.id }}" 5432/tcp | head -1 | awk -F: '{print $NF}')}"
+          if [ -z "${PG_PORT}" ]; then
+            echo "could not resolve the published Postgres port" >&2
+            exit 1
+          fi
           echo "PG_HOST=${PG_HOST}" >> "${GITHUB_ENV}"
+          echo "PG_PORT=${PG_PORT}" >> "${GITHUB_ENV}"
           echo "PRODAVAN_TEST_DATABASE_URL=postgresql+asyncpg://${PG_USER}:${PG_PASSWORD}@${PG_HOST}:${PG_PORT}/${PG_DATABASE}" >> "${GITHUB_ENV}"
           echo "PRODAVAN_TEST_MIGRATION_DATABASE_URL=postgresql+asyncpg://${PG_USER}:${PG_PASSWORD}@${PG_HOST}:${PG_PORT}/${PG_MIGRATION_DATABASE}" >> "${GITHUB_ENV}"
           echo "PRODAVAN_TEST_DATABASE_URL=postgresql+asyncpg://${PG_USER}:***@${PG_HOST}:${PG_PORT}/${PG_DATABASE}"

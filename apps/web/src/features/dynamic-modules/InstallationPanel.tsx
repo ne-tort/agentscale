@@ -1,7 +1,7 @@
 import { useId, useState, type FormEvent } from "react";
 import type { DynamicModuleDefinition, DynamicModuleInstance, DynamicModuleVersion } from "../../api/dynamic";
 import { Button, StatusBadge } from "../../shared/ui";
-import { SelectField } from "../../shared/ui/forms";
+import { SelectField } from "../../shared/ui/forms/index";
 import type { DynamicModuleAccess } from "./capability";
 import { useResource, useSubmitController } from "./hooks";
 import {

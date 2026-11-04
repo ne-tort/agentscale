@@ -9,6 +9,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from prodavan.infrastructure.persistence.models.cabinets import (
@@ -187,15 +188,23 @@ async def seed_baseline(
     grant_id: str = GRANT_A,
     digest: str = DIGEST_A,
 ) -> None:
-    """One published definition/version/instance with one unexpired capability grant."""
+    """One published definition/version/instance with one unexpired capability grant.
+
+    Inserted in the order production must use: a draft definition with no current
+    version, then the version, then the transition that publishes the definition
+    and points it at that version.  PostgreSQL enforces
+    ``fk_dynamic_app_definition_current_version`` immediately, so seeding a
+    published definition whose version does not exist yet would model a state the
+    real schema refuses — and a test built on it would prove nothing.
+    """
 
     async with session_factory() as session:
         session.add(
             definition(
                 row_id=definition_id,
                 tenant_id=tenant_id,
-                status="published",
-                current_version_id=version_id,
+                status="draft",
+                current_version_id=None,
             )
         )
         await session.flush()
@@ -216,6 +225,12 @@ async def seed_baseline(
                 version_id=version_id,
                 scope_id=tenant_id,
             )
+        )
+        await session.flush()
+        await session.execute(
+            update(AppDefinitionRow)
+            .where(AppDefinitionRow.id == definition_id)
+            .values(status="published", current_version_id=version_id)
         )
         await session.commit()
 

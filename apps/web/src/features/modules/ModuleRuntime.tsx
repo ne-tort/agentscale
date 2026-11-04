@@ -8,6 +8,7 @@ import type {
   ModulePage,
   ModuleProjectOption,
   ModuleRecord,
+  ModuleRow,
   ModuleRuntimeProps,
   ModuleRuntimeRouteState,
   ModuleRuntimeScope,
@@ -159,7 +160,7 @@ function DataView({ view, manifest, scope, service, route, setRoute, slots, onRe
   const aggregates = useModuleAggregateRows(view, manifest, service, scope, tableAvailable && chatScopeAvailable, aggregateEpoch);
   const filteredRows = state.page?.items ?? [];
   const [mutationError, setMutationError] = useState<string>();
-  const [mutationNotice, setMutationNotice] = useState<string>(route.notice);
+  const [mutationNotice, setMutationNotice] = useState<string | undefined>(route.notice);
   const [mutationUnknown, setMutationUnknown] = useState(Boolean(route.noticeUnknown));
   const mutationUnknownRef = useRef(Boolean(route.noticeUnknown));
   useEffect(() => {
@@ -289,11 +290,14 @@ function DataView({ view, manifest, scope, service, route, setRoute, slots, onRe
     const tableName = source.match(/^aggregate\.([a-z][a-z0-9_]{0,63})\./)?.[1];
     return tableName && !aggregates.loading && !aggregates.error && !aggregates.rowsByTable[tableName] ? [tableName] : [];
   }))];
+  const contextHeaderMeta = isRecord(ui.context_header) ? ui.context_header : undefined;
+  const contextHeaderTableSlug = typeof contextHeaderMeta?.table_slug === "string" ? contextHeaderMeta.table_slug : undefined;
+  const contextHeaderFields = Array.isArray(contextHeaderMeta?.fields) ? contextHeaderMeta.fields.filter(isRecord) : [];
   return <section className="module-runtime-surface" aria-busy={state.loading || busy}>
     <SectionHeader eyebrow={`${scope.moduleName} / ${tableSlug}`} title={title} detail={scope.bindKind === "global" ? "Общие данные модуля" : "Локальные данные проекта"} action={<div className="module-runtime-actions"><button type="button" className="module-runtime-button" onClick={refreshData} disabled={state.loading || aggregates.loading}>Обновить</button>{view.kind === "detail" && !readonly && selectedRow && <button type="button" className="module-runtime-button" onClick={() => setRoute({ viewSlug: view.slug, mode: "edit", row: selectedRow, ...(route.contextRowId ? { contextRowId: route.contextRowId } : {}), ...(route.returnTo ? { returnTo: route.returnTo } : {}) })}>Изменить</button>}</div>} />
     {view.kind === "detail" && selectedRow && <dl className="module-runtime-detail-facts">{manifest.columns.filter((column) => column.table_slug === tableSlug).map((column) => <div key={column.name}><dt>{labelText(column.label) || column.name}</dt><dd><CellValue value={selectedRow.body[column.name]} definition={{}} scope={scope} service={service} /></dd></div>)}</dl>}
     {contextHeaderError && <p className="module-runtime-error" role="alert">{contextHeaderError}</p>}
-    {route.contextRowId && isRecord(ui.context_header) && contextHeader[0] && <div className="module-runtime-context-header"><strong>{displayValue(contextHeader[0].body.name ?? contextHeader[0].body.title ?? route.contextRowId)}</strong>{(ui.context_header.fields as unknown[]).filter(isRecord).map((field) => <span key={String(field.column)}>{labelText(manifest.columns.find((column) => column.table_slug === ui.context_header!.table_slug && column.name === field.column)?.label) || String(field.column)}: {displayValue(contextHeader[0].body[String(field.column)])}</span>)}</div>}
+    {route.contextRowId && contextHeaderMeta && contextHeader[0] && <div className="module-runtime-context-header"><strong>{displayValue(contextHeader[0].body.name ?? contextHeader[0].body.title ?? route.contextRowId)}</strong>{contextHeaderFields.map((field) => <span key={String(field.column)}>{labelText(manifest.columns.find((column) => column.table_slug === contextHeaderTableSlug && column.name === field.column)?.label) || String(field.column)}: {displayValue(contextHeader[0].body[String(field.column)])}</span>)}</div>}
     {view.kind === "collection" && <div className="module-runtime-search"><label htmlFor={`search-${scope.moduleId}-${view.slug}`}>Поиск по данным</label><input id={`search-${scope.moduleId}-${view.slug}`} type="search" value={state.search} onChange={(event) => state.setSearch(event.currentTarget.value)} placeholder="Введите запрос"/><span>{total} записей</span></div>}
     {canCreate && <form className="module-runtime-inline-add" onSubmit={(event) => void createInline(event)}><label htmlFor={`add-${scope.moduleId}-${view.slug}`}>{labelText(isRecord(ui.inline_add) ? ui.inline_add.title : undefined) || "Добавить запись"}</label><input id={`add-${scope.moduleId}-${view.slug}`} name="value" placeholder={labelText(isRecord(ui.inline_add) ? ui.inline_add.hintText : undefined) || labelText(isRecord(ui.inline_add) ? ui.inline_add.title : undefined)} required/><button type="submit" disabled={busy}>{busy ? "Сохраняем…" : "Добавить"}</button></form>}
     {view.kind === "collection" && isRecord(ui.primary_action) && ui.primary_action.kind === "create_row" && primaryCreate?.route && !readonly && <button type="button" className="module-runtime-button module-runtime-button--primary" disabled={busy} onClick={() => setRoute(primaryCreate.route!)}>{labelText(ui.primary_action.label) || "Добавить"}</button>}
@@ -319,8 +323,16 @@ function DataView({ view, manifest, scope, service, route, setRoute, slots, onRe
         if (!destination) return null;
         const rowTarget = (destination.kind === "form" || destination.kind === "detail") && destination.table_slug === tableSlug;
         const contextRowId = isRecord(destination.ui_json.context_bind) ? row.row_id : route.contextRowId;
-        const mode = rowTarget ? destination.kind === "form" ? "edit" : "view" : destination.kind === "form" || destination.kind === "detail" ? "create" : "view";
-        return <button type="button" key={`row-view-${index}`} title={labelText(action.tooltip) || label} onClick={() => setRoute({ viewSlug: destination.slug, mode, ...(rowTarget ? { row } : {}), ...(contextRowId ? { contextRowId } : {}), returnTo: { viewSlug: route.viewSlug, ...(route.contextRowId ? { contextRowId: route.contextRowId } : {}) } })}>{label}</button>;
+        const returnTo = { viewSlug: route.viewSlug, ...(route.contextRowId ? { contextRowId: route.contextRowId } : {}) };
+        const context = contextRowId ? { contextRowId } : {};
+        // `edit` carries a required row, `create` never does, so the three modes are
+        // built as explicit literals instead of a widened `mode` string.
+        const target: ModuleRuntimeRouteState = rowTarget && destination.kind === "form"
+          ? { viewSlug: destination.slug, mode: "edit", row, ...context, returnTo }
+          : !rowTarget && (destination.kind === "form" || destination.kind === "detail")
+            ? { viewSlug: destination.slug, mode: "create", ...context, returnTo }
+            : { viewSlug: destination.slug, mode: "view", ...(rowTarget ? { row } : {}), ...context, returnTo };
+        return <button type="button" key={`row-view-${index}`} title={labelText(action.tooltip) || label} onClick={() => setRoute(target)}>{label}</button>;
       }
       const definition = definitionFor(action.action);
       if (!definition) return null;

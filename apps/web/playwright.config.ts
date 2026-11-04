@@ -48,7 +48,10 @@ export default defineConfig({
     // `vite build` only: `npm run build` runs the repo-wide `tsc --noEmit`
     // gate, which is a separate check and currently red in unrelated zones.
     // The bundle here must prove the browser surface, not re-run typechecking.
-    command: `npm run build:e2e && npm run preview:e2e -- --port ${E2E_PREVIEW_PORT} --strictPort`,
+    //
+    // `--host 127.0.0.1` is required: the bare `vite preview` binds to `localhost`,
+    // which resolves to `::1` on Windows, while `baseURL`/`url` below are IPv4.
+    command: `npm run build:e2e && npm run preview:e2e -- --host 127.0.0.1 --port ${E2E_PREVIEW_PORT} --strictPort`,
     url: `${E2E_BASE_URL}/login`,
     reuseExistingServer: !process.env.CI,
     timeout: 180_000,

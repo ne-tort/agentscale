@@ -95,8 +95,15 @@ export function formatDateTime(value: string | undefined): string {
   return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(parsed));
 }
 
+/** `routes` есть только у полного definition; у summary его нет, а не-массив — мусор. */
+function routeCountOf(routes: unknown): number | undefined {
+  return Array.isArray(routes) ? routes.length : undefined;
+}
+
 export function definitionSubtitle(definition: DynamicModuleDefinitionSummary): string {
-  const routeCount = "routes" in definition ? definition.routes.length : undefined;
+  // Список определений (summary) не содержит routes — они приходят только в полном
+  // definition. Поэтому длина маршрутов читается, только если поле реально пришло.
+  const routeCount = "routes" in definition ? routeCountOf(definition.routes) : undefined;
   const parts = [
     definition.kind === "declarative-app" ? "Declarative app" : "Isolated plugin",
     `${definition.versionCount} ${definition.versionCount === 1 ? "version" : "versions"}`,

@@ -65,3 +65,7 @@ infra/.kube/*
 .kilo/
 .opencode/
 .zcode/
+
+# Scratch files: probes, tsc dumps, junit captures written during a run
+apps/*/_*.txt
+apps/*/_probe_*.py

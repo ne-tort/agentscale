@@ -393,7 +393,7 @@ export function EquipmentSourcesPage({ service, initialWorkspace }: EquipmentSou
           {selected.body.status === "error" && <p className="equipment-source-notice equipment-source-notice--error">Ошибка индексации: {sanitizeCatalogMessage(selected.body.error)}</p>}
           {(() => { const freshness = catalogFreshness(selected.body); return freshness.freshness === "stale" || freshness.freshness === "unknown" ? <p className="equipment-source-notice equipment-source-notice--warning">{freshness.label}{freshness.lastGoodLabel ? ` · последняя успешная: ${freshness.lastGoodLabel}` : ". Успешная индексация не подтверждена."}</p> : null; })()}
           {selected.body.remote_auth_failed === true && <p className="equipment-source-notice equipment-source-notice--warning">PostgreSQL сообщает об ошибке аутентификации. Проверьте DSN/учётные данные и запустите probe.</p>}
-          {selected.body.error && selected.body.status !== "error" && <p className="equipment-source-notice equipment-source-notice--warning">{sanitizeCatalogMessage(selected.body.error)}</p>}
+          {Boolean(selected.body.error) && selected.body.status !== "error" && <p className="equipment-source-notice equipment-source-notice--warning">{sanitizeCatalogMessage(selected.body.error)}</p>}
         </section>}
       </section>
     </div>}

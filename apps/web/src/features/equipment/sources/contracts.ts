@@ -123,7 +123,8 @@ export function catalogSourceColumns(body: CatalogRowBody): string[] {
     catch { return []; }
   }
   if (!Array.isArray(columns)) return [];
-  return [...new Set(columns.filter((item): item is string => typeof item === "string" && item.trim()).map((item) => item.trim()))];
+  // Предикат должен возвращать boolean: результат проверки на непустоту приводится явно.
+  return [...new Set(columns.filter((item): item is string => typeof item === "string" && item.trim() !== "").map((item) => item.trim()))];
 }
 
 export function catalogColumnMap(body: CatalogRowBody): Record<string, string> {

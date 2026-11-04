@@ -150,6 +150,7 @@ export interface ModuleRuntimeService {
   deleteRow(scope: ModuleRuntimeScope, tableSlug: string, rowId: string): Promise<void>;
   invokeAction(scope: ModuleRuntimeScope, actionId: string, input?: { rowId?: string; params?: JsonRecord }): Promise<ModuleActionResult>;
   uploadContent(scope: ModuleRuntimeScope, file: File): Promise<ModuleFileRef>;
+  uploadSecret(scope: ModuleRuntimeScope, secret: string, label?: string): Promise<JsonRecord>;
   downloadFile(scope: ModuleRuntimeScope, ref: ModuleFileRef): Promise<{ blob: Blob; filename: string }>;
   listBoundProjects(scope: ModuleRuntimeScope, options?: { signal?: AbortSignal }): Promise<ModuleProjectOption[]>;
   setProfile(scope: ModuleRuntimeScope, profileId: string): Promise<JsonRecord>;

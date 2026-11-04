@@ -161,7 +161,7 @@ function getSettings(
 function sumOrNull(values: Array<number | null>): number | null {
   return values.length === 0 || values.some((value) => value === null)
     ? null
-    : values.reduce((total, value) => total + (value ?? 0), 0);
+    : values.reduce<number>((total, value) => total + (value ?? 0), 0);
 }
 
 export function calculateProcurement(workspace: EquipmentWorkspace): ProcurementCalculation {
