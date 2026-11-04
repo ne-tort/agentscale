@@ -19,15 +19,21 @@ Coverage map (kept explicit so cross-review does not read it as double coverage)
     * refusal of a page appended after a completed run (replays stay allowed);
     * the guarded ``partial``/``blocked`` writer, which excludes ``succeeded``
       in its ``WHERE`` clause and introduces no new status value;
+    * the run-row ownership re-read that refuses a colliding foreign run id;
     * absence of any ``project_id``/``cabinet_id`` scope, and no DDL.
 
-``durable.py``-owned behaviour (already asserted by the sibling task's own
-acceptance work; only *reached through* ``persistence.py`` here)
+``durable.py``-owned behaviour (relied upon here, **not** asserted here)
     * the ``metadata_json`` page-evidence envelope, deterministic snapshot/offer
       row ids and the offer ``$ingestion`` attribute namespace;
     * the single page transaction, ``FOR UPDATE`` run lock and checkpoint CAS;
     * ``ON CONFLICT (snapshot_id, external_key) DO NOTHING`` offer inserts;
     * ``uq_equipment_v2_snapshot_hash`` handling for a repeated content digest.
+
+Those belong to ``durable.py`` and are reached only *through* this repository.
+``durable.py`` currently has no test module of its own anywhere under
+``apps/api/tests`` (verified by search), so this file does not claim to replace
+that coverage: it pins the outcomes ``persistence.py`` depends on, and the
+missing dedicated suite for ``durable.py`` is reported as an open gap.
 
 This module never re-derives the storage encoding: the double below models the
 ``DurablePageStore`` protocol's *observable outcomes*, not its SQL, and the
@@ -38,6 +44,7 @@ window prefix from ``durable`` instead of redefining them.
 from __future__ import annotations
 
 import ast
+import hashlib
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -71,7 +78,6 @@ from prodavan.application.migration.equipment_ingestion.persistence import (
     PageWrite,
     PersistenceError,
     RunCheckpoint,
-    RunOpening,
     TERMINAL_RUN_STATUSES,
     decide_page_write,
     terminal_status_statement,
@@ -90,9 +96,9 @@ WINDOW = IngestionWindow(start=NOW - timedelta(days=1), end=NOW)
 DIGEST_A = "sha256:" + "a" * 64
 DIGEST_B = "sha256:" + "b" * 64
 DIGEST_C = "sha256:" + "c" * 64
-PERSISTENCE_PATH = Path(
-    "apps/api/src/prodavan/application/migration/equipment_ingestion/persistence.py"
-)
+API_ROOT = Path(__file__).resolve().parents[3]
+PERSISTENCE_PATH = (API_ROOT / "src" / "prodavan" / "application" / "migration"
+                    / "equipment_ingestion" / "persistence.py")
 
 
 # --------------------------------------------------------------------------
@@ -122,7 +128,6 @@ class DurableRunStore:
         self.failed_calls = 0
         self.page_writes = 0
         self.forced_outcome: PageCommitOutcome | None = None
-        self.forced_offer_counts: tuple[int, int, int] | None = None
 
     # -- admission -------------------------------------------------------
 
@@ -136,13 +141,21 @@ class DurableRunStore:
                                    source_id=source.source_id or "", window=window)
         window_ids = tuple(sorted(run_id for run_id in self.runs if run_id.startswith(prefix)))
         if computed in window_ids:
-            status = self._status(computed)
+            status = self.status(computed)
             if status is IngestionRunStatus.SUCCEEDED:
                 return RunAdmission(RunAdmissionState.REPLAYS, computed)
             return RunAdmission(RunAdmissionState.RESUMED, computed)
         if window_ids:
             return RunAdmission(RunAdmissionState.CONFLICT, computed,
                                 "run_window_digest_conflict")
+        # Admission writes the run row immediately, without page evidence, so a
+        # crash before the first page still leaves the one run for this key.
+        self.runs[computed] = IngestionRun(
+            run_id=computed, source=source, supplier=supplier,
+            status=IngestionRunStatus.RUNNING, checkpoint_cursor=None, page_count=0,
+            record_count=0, artifact_ids=(), snapshot_ids=(),
+            started_at=now or NOW, updated_at=now or NOW,
+        )
         return RunAdmission(RunAdmissionState.CREATED, computed)
 
     async def load_run(self, run_id: str) -> IngestionRun | None:
@@ -162,10 +175,10 @@ class DurableRunStore:
         if existing is not None:
             return self._replay_or_conflict(existing=existing, payload=payload,
                                             artifact=artifact, snapshot=snapshot, run=run)
-        if self.forced_outcome is not None:
-            outcome, self.forced_outcome = self.forced_outcome, None
-            if outcome.result is not PageCommitResult.COMMITTED:
-                return outcome
+        forced, self.forced_outcome = self.forced_outcome, None
+        if forced is not None and forced.result is PageCommitResult.PARTIALLY_COMMITTED:
+            # Nothing of this page lands: the batch died before the run row write.
+            return forced
         current = self.runs.get(run.run_id)
         stored_checkpoint = current.checkpoint_cursor if current is not None else None
         if stored_checkpoint != expected_checkpoint:
@@ -183,6 +196,10 @@ class DurableRunStore:
         self.snapshots[snapshot.snapshot_id] = snapshot
         self.runs[run.run_id] = run
         self.page_writes += 1
+        if forced is not None:
+            # COMMITTED_INCOMPLETE (page durable, post-commit step failed) or a
+            # deliberately shortened written count; both must be inspected.
+            return forced
         return PageCommitOutcome(PageCommitResult.COMMITTED, "page_committed",
                                  offers_written=written)
 
@@ -221,26 +238,24 @@ class DurableRunStore:
 
     # -- internals -------------------------------------------------------
 
-    def _status(self, run_id: str) -> IngestionRunStatus:
-        return self.runs[run_id].status
-
     def _fingerprint(self, offer: CatalogOffer) -> tuple[str, ...]:
         return (offer.supplier_id, offer.source_record_key, offer.price or "",
                 offer.currency, offer.availability, offer.provenance_digest)
 
     def _insert_offers(self, snapshot: CatalogSnapshot) -> int | None:
-        stored = self.offers.setdefault(snapshot.snapshot_id, {})
-        written = 0
+        """Insert-or-skip per external key, atomically, like the offer batch."""
+        existing = self.offers.get(snapshot.snapshot_id, {})
+        pending: dict[str, tuple[str, ...]] = {}
         for offer in snapshot.offers:
-            if offer.source_record_key in stored:
-                # ON CONFLICT DO NOTHING: not inserted, so the caller's count
-                # shortfall rolls the page back in the real adapter.
+            if offer.source_record_key in existing or offer.source_record_key in pending:
                 continue
-            stored[offer.source_record_key] = self._fingerprint(offer)
-            written += 1
-        if written != len(snapshot.offers):
+            pending[offer.source_record_key] = self._fingerprint(offer)
+        if len(pending) != len(snapshot.offers):
+            # A skipped key leaves the whole page transaction rolled back.
             return None
-        return written
+        existing.update(pending)
+        self.offers[snapshot.snapshot_id] = existing
+        return len(pending)
 
     def _replay_or_conflict(self, *, existing: CatalogSnapshot, payload: bytes,
                             artifact: RawArtifact, snapshot: CatalogSnapshot,
@@ -329,7 +344,7 @@ class Page:
             artifact_id=f"{run_id}:artifact:{index}",
             source_id=SOURCE_ID,
             run_id=run_id,
-            content_digest="sha256:" + __import__("hashlib").sha256(self.payload).hexdigest(),
+            content_digest="sha256:" + hashlib.sha256(self.payload).hexdigest(),
             byte_length=len(self.payload),
             media_type="application/octet-stream",
             immutable=True,
@@ -382,30 +397,10 @@ class Page:
             quarantined_count=prior.quarantined_count if prior is not None else 0,
         )
 
-    @property
-    def expected_checkpoint(self) -> str | None:
-        return None if self.run.page_count == 1 else self._prior_checkpoint
-
-    # The caller always knows the cursor it asked the source for; tests set it
-    # explicitly through ``expected`` when it differs from "previous page's next".
-    _prior_checkpoint: str | None = None
-
 
 def persistence(store: DurableRunStore, **kwargs) -> EquipmentIngestionPersistence:
     kwargs.setdefault("clock", lambda: NOW)
     return EquipmentIngestionPersistence(store=store, tenant_id=TENANT, **kwargs)
-
-
-async def open_first_page(*, store: DurableRunStore | None = None,
-                          run_scope: IngestionRunScope | None = None,
-                          keys: tuple[str, ...] = ("sku-1", "sku-2")):
-    """Admit the run and build page 0 for it."""
-    store = store or DurableRunStore()
-    run_scope = run_scope or scope()
-    repository = persistence(store)
-    opening = await repository.open(run_scope, source=SOURCE, supplier=SUPPLIER, now=NOW)
-    page = Page(scope=run_scope, index=0, cursor=None, next_cursor="c1", keys=keys)
-    return store, repository, run_scope, opening, page
 
 
 # --------------------------------------------------------------------------
@@ -414,10 +409,11 @@ async def open_first_page(*, store: DurableRunStore | None = None,
 
 
 async def test_single_page_run_reaches_succeeded_and_persists_offers() -> None:
+    store = DurableRunStore()
+    repository = persistence(store)
     run_scope = scope()
-    store, repository, run_scope, opening, page = await open_first_page(
-        run_scope=run_scope)
 
+    opening = await repository.open(run_scope, source=SOURCE, supplier=SUPPLIER, now=NOW)
     assert opening.state is RunAdmissionState.CREATED
     assert opening.run_id == run_scope.run_id
     assert opening.checkpoint == RunCheckpoint.empty(run_scope.run_id)
@@ -470,9 +466,14 @@ async def test_empty_final_page_still_succeeds_when_checkpoint_is_exhausted() ->
 
 
 async def test_resume_reopens_the_same_run_from_the_durable_checkpoint() -> None:
-    store, repository, run_scope, opening, first = await open_first_page()
+    store = DurableRunStore()
+    repository = persistence(store)
+    run_scope = scope()
+    opening = await repository.open(run_scope, source=SOURCE, supplier=SUPPLIER, now=NOW)
     assert opening.state is RunAdmissionState.CREATED
 
+    first = Page(scope=run_scope, index=0, cursor=None, next_cursor="c1",
+                 keys=("sku-1", "sku-2"))
     first_write = await repository.commit_page(
         run_scope, artifact=first.artifact, payload=first.payload,
         snapshot=first.snapshot, run=first.run, expected_checkpoint=None,
@@ -514,7 +515,11 @@ async def test_resume_reopens_the_same_run_from_the_durable_checkpoint() -> None
 
 
 async def test_stale_expected_checkpoint_is_a_typed_conflict_without_advance() -> None:
-    store, repository, run_scope, _opening, first = await open_first_page()
+    store = DurableRunStore()
+    repository = persistence(store)
+    run_scope = scope()
+    await repository.open(run_scope, source=SOURCE, supplier=SUPPLIER, now=NOW)
+    first = Page(scope=run_scope, index=0, cursor=None, next_cursor="c1", keys=("sku-1",))
     await repository.commit_page(run_scope, artifact=first.artifact, payload=first.payload,
                                  snapshot=first.snapshot, run=first.run,
                                  expected_checkpoint=None)
@@ -620,7 +625,9 @@ async def test_changed_digest_in_the_same_window_conflicts_instead_of_a_new_run(
     assert opening.run_id == changed.run_id
     # Exactly one run exists for the window, and it is still the first digest.
     assert store.window_run_ids() == (run_scope.run_id,)
-    assert len(store.runs) == 0  # neither run row was written: admission found one key
+    assert len(store.runs) == 1
+    assert changed.run_id not in store.runs
+    assert store.admit_calls == 2
 
 
 async def test_different_windows_never_share_a_run_key() -> None:
@@ -760,7 +767,14 @@ async def test_mark_partial_is_a_resumable_guarded_write() -> None:
         await repository.mark_partial(run_scope, reason_code="page_budget_exhausted", at=NOW)
     assert unavailable.value.reason_code == "guarded_run_writer_unavailable"
 
-    deferred: list[str] = []
+    deferred: list[object] = []
+
+    class _Begin:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
 
     class Session:
         async def __aenter__(self):
@@ -769,8 +783,11 @@ async def test_mark_partial_is_a_resumable_guarded_write() -> None:
         async def __aexit__(self, *exc):
             return False
 
+        def begin(self) -> _Begin:
+            return _Begin()
+
         async def execute(self, statement):
-            deferred.append(str(statement))
+            deferred.append(statement)
             return _Rowcount(1)
 
     class Factory:
@@ -782,8 +799,11 @@ async def test_mark_partial_is_a_resumable_guarded_write() -> None:
     assert await writer.mark_partial(run_scope, reason_code="page_budget_exhausted",
                                      at=NOW) is True
     assert len(deferred) == 1
-    assert "partial" in deferred[0]
-    assert "succeeded" in deferred[0]
+    statement = deferred[0]
+    compiled = " ".join(str(statement).split())
+    # One guarded UPDATE, and its bound value is the existing partial status.
+    assert compiled.startswith("UPDATE equipment_v2_ingestion_runs SET")
+    assert set(statement.compile().params.values()) >= {"partial"}
     # The checkpoint stays put, so the run is resumable rather than finished.
     checkpoint = await writer.resume(run_scope)
     assert checkpoint is not None and checkpoint.cursor == "c1"
@@ -992,6 +1012,76 @@ async def test_repository_requires_a_bounded_tenant() -> None:
             EquipmentIngestionPersistence(store=DurableRunStore(), tenant_id=invalid)
 
 
+class _OwnershipSession:
+    """Session double that answers the run-ownership re-read."""
+
+    def __init__(self, row) -> None:
+        self._row = row
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    async def execute(self, statement):
+        return _First(self._row)
+
+
+class _First:
+    def __init__(self, row) -> None:
+        self._row = row
+
+    def first(self):
+        return self._row
+
+
+class _OwnershipFactory:
+    def __init__(self, row) -> None:
+        self._row = row
+
+    def __call__(self):
+        return _OwnershipSession(self._row)
+
+
+async def test_a_run_row_owned_by_another_tenant_is_refused_after_admission() -> None:
+    # durable.run_row_id omits tenant/source from the key, so an equal window and
+    # digest collide across owners. The repository must refuse, not drive a
+    # foreign run.
+    store = DurableRunStore()
+    repository = EquipmentIngestionPersistence(
+        store=store, tenant_id=TENANT,
+        session_factory=_OwnershipFactory((OTHER_TENANT, SOURCE_ID)), clock=lambda: NOW)
+    with pytest.raises(PersistenceError) as refused:
+        await repository.open(scope(), source=SOURCE, supplier=SUPPLIER, now=NOW)
+    assert refused.value.reason_code == "run_identity_collision"
+
+
+async def test_a_run_row_of_another_source_is_refused_after_admission() -> None:
+    store = DurableRunStore()
+    repository = EquipmentIngestionPersistence(
+        store=store, tenant_id=TENANT,
+        session_factory=_OwnershipFactory((TENANT, "source-other")), clock=lambda: NOW)
+    with pytest.raises(PersistenceError) as refused:
+        await repository.open(scope(), source=SOURCE, supplier=SUPPLIER, now=NOW)
+    assert refused.value.reason_code == "run_identity_collision"
+
+
+async def test_an_owned_run_row_is_accepted_and_an_absent_row_is_not_a_refusal() -> None:
+    store = DurableRunStore()
+    owned = EquipmentIngestionPersistence(
+        store=store, tenant_id=TENANT,
+        session_factory=_OwnershipFactory((TENANT, SOURCE_ID)), clock=lambda: NOW)
+    opening = await owned.open(scope(), source=SOURCE, supplier=SUPPLIER, now=NOW)
+    assert opening.state is RunAdmissionState.CREATED
+
+    absent = EquipmentIngestionPersistence(
+        store=DurableRunStore(), tenant_id=TENANT,
+        session_factory=_OwnershipFactory(None), clock=lambda: NOW)
+    assert (await absent.open(scope(), source=SOURCE, supplier=SUPPLIER,
+                              now=NOW)).state is RunAdmissionState.CREATED
+
+
 # --------------------------------------------------------------------------
 # 9. pure decision table
 # --------------------------------------------------------------------------
@@ -1072,16 +1162,18 @@ def test_page_write_refuses_a_success_it_cannot_justify() -> None:
     run_scope = scope()
     stored = RunCheckpoint(run_id=run_scope.run_id, status=IngestionRunStatus.RUNNING,
                            cursor=None, page_count=1, accepted=1, quarantined=0, observed=1)
-    # succeeded + a conflicting offer
+    pending = RunCheckpoint(run_id=run_scope.run_id, status=IngestionRunStatus.RUNNING,
+                            cursor="c1", page_count=1, accepted=1, quarantined=0, observed=1)
+    # succeeded + a conflicting offer on the decisive page
     with pytest.raises(PersistenceError):
         PageWrite(result=PageCommitResult.COMMITTED, reason_code="page_committed",
                   run_status=IngestionRunStatus.SUCCEEDED, checkpoint=stored,
                   offers_conflicted=1)
-    # succeeded + a rolled-back page result
+    # succeeded + a page whose post-commit step failed
     with pytest.raises(PersistenceError):
-        PageWrite(result=PageCommitResult.CONFLICT, reason_code="offer_conflict",
+        PageWrite(result=PageCommitResult.COMMITTED_INCOMPLETE, reason_code="index_failed",
                   run_status=IngestionRunStatus.SUCCEEDED, checkpoint=stored)
-    # succeeded + an exhausted-checkpoint violation
+    # succeeded without any checkpoint evidence
     with pytest.raises(PersistenceError):
         PageWrite(result=PageCommitResult.COMMITTED, reason_code="page_committed",
                   run_status=IngestionRunStatus.SUCCEEDED, checkpoint=None)
@@ -1097,6 +1189,16 @@ def test_page_write_refuses_a_success_it_cannot_justify() -> None:
                                            status=IngestionRunStatus.SUCCEEDED,
                                            cursor="c1", page_count=2,
                                            accepted=1, quarantined=0, observed=1))
+    # a rolled-back page cannot claim a success it did not produce
+    with pytest.raises(PersistenceError):
+        PageWrite(result=PageCommitResult.CONFLICT, reason_code="offer_conflict",
+                  run_status=IngestionRunStatus.SUCCEEDED, checkpoint=pending)
+    # ...but reporting an already-succeeded run after a rolled-back page is fine:
+    # nothing changed, and the exhausted checkpoint proves the run was complete.
+    reported = PageWrite(result=PageCommitResult.CONFLICT, reason_code="offer_conflict",
+                         run_status=IngestionRunStatus.SUCCEEDED, checkpoint=stored,
+                         offers_conflicted=1)
+    assert reported.terminal and not reported.durable
 
 
 def test_run_checkpoint_rejects_inconsistent_counters() -> None:

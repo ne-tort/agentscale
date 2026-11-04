@@ -364,6 +364,18 @@ class Settings(BaseSettings):
     # Audit API-P2c: forbidden outside dev — a stray prod env var must not open the
     # stub adapter path. Validated in __init__ via field_validator.
     agent_inprocess_adapters_enabled: bool = False
+    # Canonical browser SSE transport (/api/v1/web/projects/{id}/chat/sessions/{id}/stream).
+    # Off by default: with the flag off no ``WebStreamRuntime`` is installed and the
+    # route keeps refusing with 503 web_chat_stream_facade_unwired, i.e. exactly the
+    # pre-wiring behaviour. Turning it on composes the runtime in the API lifespan
+    # (see core/infra/web_stream_resource.py); it never stubs a missing part silently.
+    web_stream_runtime_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices(
+            "WEB_STREAM_RUNTIME_ENABLED",
+            "WEB_CHAT_STREAM_RUNTIME_ENABLED",
+        ),
+    )
     projects_auto_rematerialize_on_cabinet_change: bool = Field(
         default=False,
         validation_alias=AliasChoices(
@@ -454,6 +466,60 @@ class Settings(BaseSettings):
     trigger_outbox_backoff_sec: float = 5.0
     # Idle pause sweep shares the trigger worker loop when enabled (default off).
     idle_pause_worker_enabled: bool = False
+
+    # Durable Agent Run background loops (MIG-AR-HOST-01), hosted by
+    # core/infra/agent_run_worker_resource.py. Both are disabled by default: a
+    # flag alone starts a loop that idles with a blocker code until the fenced
+    # execution adapter is assembled, so enabling one never breaks the process.
+    # No URL, credential or endpoint belongs here — adapters own their own.
+    agent_run_worker_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices(
+            "agent_run_worker_enabled",
+            "AGENT_RUN_WORKER_ENABLED",
+            "AGENT_RUNS_WORKER_ENABLED",
+        ),
+    )
+    agent_run_worker_interval_sec: float = Field(
+        default=15.0,
+        validation_alias=AliasChoices(
+            "agent_run_worker_interval_sec",
+            "AGENT_RUN_WORKER_INTERVAL_SEC",
+            "AGENT_RUNS_WORKER_INTERVAL_SEC",
+        ),
+    )
+    agent_run_worker_batch_max: int = Field(
+        default=5,
+        validation_alias=AliasChoices(
+            "agent_run_worker_batch_max",
+            "AGENT_RUN_WORKER_BATCH_MAX",
+            "AGENT_RUNS_WORKER_BATCH_MAX",
+        ),
+    )
+    agent_run_consumer_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices(
+            "agent_run_consumer_enabled",
+            "AGENT_RUN_CONSUMER_ENABLED",
+            "AGENT_RUNS_CONSUMER_ENABLED",
+        ),
+    )
+    agent_run_consumer_interval_sec: float = Field(
+        default=5.0,
+        validation_alias=AliasChoices(
+            "agent_run_consumer_interval_sec",
+            "AGENT_RUN_CONSUMER_INTERVAL_SEC",
+            "AGENT_RUNS_CONSUMER_INTERVAL_SEC",
+        ),
+    )
+    agent_run_consumer_batch_max: int = Field(
+        default=25,
+        validation_alias=AliasChoices(
+            "agent_run_consumer_batch_max",
+            "AGENT_RUN_CONSUMER_BATCH_MAX",
+            "AGENT_RUNS_CONSUMER_BATCH_MAX",
+        ),
+    )
 
     # B2B-Center tender importer (supplier Integration API, read-only).
     # Credentials live in the k8s secret `agentscale-b2b-secrets`; empty values

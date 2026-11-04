@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from prodavan.config.settings import settings
+from prodavan.core.infra.agent_run_worker_resource import AgentRunWorkerResource
 from prodavan.core.infra.database_resource import DatabaseEngineResource
 from prodavan.core.infra.gotenberg_manager import GotenbergManager
 from prodavan.core.infra.k8s_manager import k8s_manager_from_settings
@@ -13,9 +14,16 @@ from prodavan.core.infra.opensearch_manager import OpenSearchManager
 from prodavan.core.infra.platform_bootstrap_resource import PlatformBootstrapResource
 from prodavan.core.infra.pod_metrics_sampler_resource import PodMetricsSamplerResource
 from prodavan.core.infra.redis_manager import RedisManager
+from prodavan.core.infra.resource_apply_resource import (
+    resource_apply_resource_from_settings,
+)
 from prodavan.core.infra.sandbox_client import sandbox_client_resource_from_settings
 from prodavan.core.infra.storage_metrics_sampler_resource import StorageMetricsSamplerResource
 from prodavan.core.infra.trigger_worker_resource import TriggerWorkerResource
+from prodavan.core.infra.web_stream_resource import (
+    WebStreamLifespanManager,
+    web_stream_runtime_resource_from_settings,
+)
 from prodavan.core.lifespan.manager import LifespanManager
 from prodavan.infrastructure.files.manager import FileStoreManager
 
@@ -34,8 +42,29 @@ def build_lifespan_manager() -> LifespanManager:
         backend = "local"
     from prodavan.core.infra.worker_manager import worker_manager_from_settings
 
-    manager = LifespanManager()
+    manager = WebStreamLifespanManager()
     manager.register(DatabaseEngineResource())
+    # Durable Resource API apply port (MIG-RES-APPLYPORT-01): publishes the
+    # AtomicMaterializationApplyPort through
+    # application.resources.adapters.factory.install_materialization_apply_port and
+    # withdraws it on shutdown. Registered right after the DB resource because the
+    # ledger opens its own sessions from the process factory. Off by default
+    # (RESOURCE_APPLY_ENABLED): with the flag off nothing is installed and
+    # POST .../materialization/apply keeps answering 503 RESOURCE_APPLY_UNAVAILABLE,
+    # while every resource CRUD path is unaffected.
+    manager.register(resource_apply_resource_from_settings())
+    # Canonical browser SSE transport (MIG-WEB-RUNTIME-01): installs
+    # WebStreamRuntime on app.state (see api/v1/web_stream.install_web_stream_runtime).
+    # Inert unless WEB_STREAM_RUNTIME_ENABLED=true — with the flag off the route
+    # keeps refusing 503 web_chat_stream_facade_unwired exactly as before.
+    # Registered right after the DB resource: the runtime opens its own sessions
+    # from the process factory, so storage must be started first.
+    manager.register(web_stream_runtime_resource_from_settings())
+    # Durable Agent Run loops (MIG-AR-HOST-01): inert unless one of the
+    # AGENT_RUN_{WORKER,CONSUMER}_ENABLED flags is on and the execution adapter
+    # has registered its composition. Registered right after the DB resource so
+    # storage is started before any loop can take a session.
+    manager.register(AgentRunWorkerResource())
     manager.register(k8s_manager_from_settings())
     # agent-sandbox SDK client (inert unless pod_runtime_mode=sandbox; Wave 2
     # runtime adapter resolves it lazily via get_sandbox_client_manager).

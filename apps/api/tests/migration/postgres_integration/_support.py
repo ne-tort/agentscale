@@ -167,7 +167,8 @@ async def blocked_backends(
 
     async def probe() -> int:
         async with harness.engine.connect() as conn:
-            return int(await conn.scalar(sql, {"needle": needle}) or 0)
+            count = int(await conn.scalar(sql, {"needle": needle}) or 0)
+        return count if count >= at_least else 0
 
     return await wait_until(
         probe,
@@ -195,6 +196,18 @@ def sha256_of_text(value: str) -> str:
     return f"sha256:{hashlib.sha256(value.encode('utf-8')).hexdigest()}"
 
 
+def sqlstate_of(error: Exception) -> str | None:
+    """Best-effort SQLSTATE for an SQLAlchemy ``DBAPIError``.
+
+    ``asyncpg`` exposes ``sqlstate``; older/other drivers only expose ``pgcode``.
+    Reading both keeps the assertions explicit about *which* PostgreSQL error was
+    expected (23505 unique, 23503 foreign key, 23514 check) instead of matching on
+    a message that the driver may localise or reformat.
+    """
+    original = getattr(error, "orig", error)
+    return getattr(original, "sqlstate", None) or getattr(original, "pgcode", None)
+
+
 __all__ = [
     "DEFAULT_TIMEOUT",
     "Gate",
@@ -204,5 +217,6 @@ __all__ = [
     "hold_until_advisory",
     "sha256_digest",
     "sha256_of_text",
+    "sqlstate_of",
     "wait_until",
 ]

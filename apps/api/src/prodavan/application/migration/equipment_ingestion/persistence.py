@@ -52,6 +52,15 @@ This module adds the layer ``durable.py`` deliberately leaves to its callers:
   context is missing fails closed (RLS returns no rows) instead of crossing
   tenants. This module never sets the tenant GUC and never uses a
   ``BYPASSRLS``/superuser path.
+* a run-row ownership re-read after admission (:meth:`_verify_run_ownership`).
+  ``durable.run_row_id`` now derives the primary key as
+  ``run_window_prefix(...) + digest``, so the id carries the tenant, the source
+  and the window and always starts with its own window prefix. That closed both
+  defects the earlier derivation had: two tenants could share one primary key,
+  and a run id built from the window token alone would never match the
+  ``id LIKE '<prefix>%'`` admission scan, making "same window, different digest"
+  undetectable. The ownership re-read is kept as defence in depth — it refuses
+  with ``run_identity_collision`` rather than trusting the derivation.
 
 Schema boundaries (revision ``2026110305``), respected by construction:
 
@@ -85,7 +94,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Callable, Protocol, runtime_checkable
 
-from sqlalchemy import Update, update
+from sqlalchemy import Update, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from prodavan.application.migration.equipment_ingestion.durable import (
@@ -137,6 +146,13 @@ _GUARDED_WRITABLE_STATUSES = frozenset({
 _COMMITTED_PAGE_RESULTS = frozenset({
     PageCommitResult.COMMITTED,
     PageCommitResult.REPLAYED,
+    PageCommitResult.COMMITTED_INCOMPLETE,
+})
+
+#: Page results whose own transaction wrote the run row, so the requested run
+#: record *is* durable state and needs no read-back.
+_SELF_EVIDENT_PAGE_RESULTS = frozenset({
+    PageCommitResult.COMMITTED,
     PageCommitResult.COMMITTED_INCOMPLETE,
 })
 
@@ -271,7 +287,7 @@ class RunCheckpoint:
     @property
     def resumable(self) -> bool:
         """True when a next page can be requested from :attr:`cursor`."""
-        return self.status is not None and not self.terminal
+        return self.status is not None and not self.terminal and not self.exhausted
 
     @property
     def exhausted(self) -> bool:
@@ -298,10 +314,11 @@ class RunOpening:
             if self.checkpoint is not None:
                 raise PersistenceError("blocked_run_opening_has_checkpoint")
             return
-        if self.reason_code is not None:
-            raise PersistenceError("admitted_run_opening_has_reason")
         if self.checkpoint is None:
             raise PersistenceError("admitted_run_opening_requires_checkpoint")
+        if self.state is not RunAdmissionState.CONFLICT and self.reason_code is not None:
+            # Only a refusal carries a reason: an admitted run is self-describing.
+            raise PersistenceError("admitted_run_opening_has_reason")
 
     @property
     def run_id(self) -> str | None:
@@ -341,19 +358,30 @@ class PageWrite:
             value = getattr(self, name)
             if not isinstance(value, int) or isinstance(value, bool) or value < 0:
                 raise PersistenceError(f"page_{name}_invalid")
-        if self.run_status is IngestionRunStatus.SUCCEEDED:
-            # The only way a run may be succeeded: a page transaction committed
-            # (or replayed) the final page with no conflicted offer and the
-            # checkpoint is exhausted. Everything else is a programming error.
-            if self.result not in (PageCommitResult.COMMITTED, PageCommitResult.REPLAYED):
-                raise PersistenceError("succeeded_page_result_invalid")
-            if self.offers_conflicted:
-                raise PersistenceError("succeeded_page_has_conflicts")
-            if self.checkpoint is None or not self.checkpoint.exhausted:
-                raise PersistenceError("succeeded_run_requires_exhausted_checkpoint")
         if self.result is PageCommitResult.PARTIALLY_COMMITTED and (
                 self.run_status is not IngestionRunStatus.PARTIAL):
             raise PersistenceError("partially_committed_page_must_report_partial")
+        if self.result is PageCommitResult.COMMITTED_INCOMPLETE and (
+                self.run_status is IngestionRunStatus.SUCCEEDED):
+            raise PersistenceError("committed_incomplete_page_cannot_succeed")
+        if self.run_status is not IngestionRunStatus.SUCCEEDED:
+            return
+        # Everything below constrains a report whose run status is ``succeeded``.
+        # An exhausted checkpoint is required either way: it is the only durable
+        # proof that the source was consumed rather than abandoned mid-cursor.
+        if self.checkpoint is None or not self.checkpoint.exhausted:
+            raise PersistenceError("succeeded_run_requires_exhausted_checkpoint")
+        if self.result in (PageCommitResult.COMMITTED, PageCommitResult.REPLAYED):
+            # A success produced by *this* call: the decisive page must be a
+            # committed one, with no conflicted offer.
+            if self.offers_conflicted:
+                raise PersistenceError("succeeded_page_has_conflicts")
+            return
+        if self.result is PageCommitResult.COMMITTED_INCOMPLETE:
+            raise PersistenceError("committed_incomplete_page_cannot_succeed")
+        # A rolled-back page reported against a run that was already succeeded:
+        # nothing changed, so reporting the stored success is correct. It is not
+        # a success transition, and the guard above keeps it unexhausted-proof.
 
     @property
     def durable(self) -> bool:
@@ -371,6 +399,12 @@ class PageWrite:
 
     @property
     def resumable(self) -> bool:
+        """True when the durable checkpoint is a cursor a forward re-run can use.
+
+        This is a property of the committed evidence, not of the reported status:
+        a page that committed before a post-commit failure is reported ``failed``
+        and is still resumable from its advanced checkpoint.
+        """
         return (self.checkpoint is not None and self.checkpoint.resumable
                 and not self.checkpoint.exhausted)
 
@@ -409,8 +443,10 @@ def decide_page_write(*, requested: IngestionRun, outcome: PageCommitOutcome,
         )
 
     if outcome.result is PageCommitResult.COMMITTED_INCOMPLETE:
-        # Page durable, post-commit requirement failed: the checkpoint advanced
-        # but the run may not be reported as running or succeeded.
+        # Page durable, post-commit requirement failed. The checkpoint advanced,
+        # so a forward re-run resumes after this page; the run is reported failed
+        # and is never running or succeeded. The durable run row still holds the
+        # requested status until ``close(..., failed)`` persists the failure.
         return PageWrite(
             result=outcome.result, reason_code=outcome.reason_code,
             run_status=IngestionRunStatus.FAILED,
@@ -603,6 +639,14 @@ class EquipmentIngestionPersistence:
             # A replayed digest must describe a fully consumed run; a replay that
             # still has a cursor means the evidence is inconsistent.
             raise PersistenceError("replay_run_not_exhausted")
+        if admission.state is RunAdmissionState.CONFLICT:
+            # The window is already bound to another digest: the caller must not
+            # commit pages, and the reason code says why.
+            return RunOpening(
+                RunAdmissionState.CONFLICT, checkpoint=checkpoint,
+                reason_code=admission.reason_code or "run_window_digest_conflict",
+            )
+        await self._verify_run_ownership(scope)
         return RunOpening(state=admission.state, checkpoint=checkpoint)
 
     async def resume(self, scope: IngestionRunScope) -> RunCheckpoint | None:
@@ -666,9 +710,11 @@ class EquipmentIngestionPersistence:
             expected_checkpoint=expected_checkpoint,
         ))
         stored = None
-        if outcome.result not in _COMMITTED_PAGE_RESULTS:
-            # The page transaction rolled back, so the durable run is whatever it
-            # already was; report that instead of the requested record.
+        if outcome.result not in _SELF_EVIDENT_PAGE_RESULTS:
+            # Only COMMITTED/COMMITTED_INCOMPLETE wrote the run row in this same
+            # transaction. Everything else — including a replay, which wrote
+            # nothing — is reported from the durable record, never from the
+            # request.
             stored = await self.resume(scope)
         decision = decide_page_write(requested=run, outcome=outcome, stored=stored)
         if decision.terminal and decision.run_status is IngestionRunStatus.SUCCEEDED:
@@ -727,6 +773,34 @@ class EquipmentIngestionPersistence:
         return rowcount > 0
 
     # -- invariants ------------------------------------------------------
+
+    async def _verify_run_ownership(self, scope: IngestionRunScope) -> None:
+        """Refuse an admitted run whose row belongs to another owner.
+
+        The durable key derivation now folds tenant and source into the run id,
+        so a cross-owner collision should be impossible. This re-read is kept as
+        defence in depth: any future regression in the derivation turns into a
+        typed ``run_identity_collision`` refusal instead of a write against
+        another owner's row.
+
+        Only runs with a session factory can re-read; a store-only wiring keeps
+        its admission answer.
+        """
+        if self._session_factory is None:
+            return
+        async with self._session_factory() as session:
+            result = await session.execute(
+                select(EquipmentIngestionRunRow.tenant_id, EquipmentIngestionRunRow.source_id)
+                .where(EquipmentIngestionRunRow.id == scope.run_id)
+            )
+            row = result.first()
+        if row is None:
+            # The row is not visible in this tenant's scope at all: either it was
+            # never written or RLS hid it. Either way it is not ours to drive.
+            return
+        tenant_id, source_id = row[0], row[1]
+        if tenant_id != self._tenant_id or source_id != scope.source_id:
+            raise PersistenceError("run_identity_collision")
 
     async def _load_durable_run(self, scope: IngestionRunScope) -> IngestionRun | None:
         """The run as durably stored, or ``None`` when it has no page evidence."""

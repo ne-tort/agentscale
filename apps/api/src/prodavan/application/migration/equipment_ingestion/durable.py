@@ -241,16 +241,28 @@ def _json_safe(value: Any, *, code: str) -> Any:
 
 def run_row_id(*, tenant_id: str, source_id: str, window: IngestionWindow,
                source_digest: str) -> str:
-    """Deterministic run primary key: window token plus declared digest token."""
-    if not isinstance(tenant_id, str) or not tenant_id.strip():
-        raise ValueError("tenant identity is required")
-    if not isinstance(source_id, str) or not source_id.strip():
-        raise ValueError("source identity is required")
-    if not isinstance(window, IngestionWindow):
-        raise ValueError("an ingestion window is required")
+    """Deterministic run primary key: window prefix plus declared digest token.
+
+    The identity is ``run_window_prefix(...) + digest``, and that composition is
+    load-bearing, not cosmetic:
+
+    * every run id must start with its own window prefix, because the admission
+      scan finds sibling runs with ``id LIKE '<prefix>%'``.  An id built from the
+      window alone would never match its own prefix, so "same window, different
+      digest" would be undetectable and two runs would share one window;
+    * the prefix hashes ``tenant_id`` and ``source_id``, so two tenants (or two
+      sources of one tenant) can never derive the same primary key for the same
+      window and digest.
+
+    ``eir_`` + 16 prefix chars + ``_`` + 16 digest chars = 37 characters, which
+    fits the ``String(40)`` primary key.
+    """
+    prefix = run_window_prefix(
+        tenant_id=tenant_id, source_id=source_id, window=window
+    )
     if not isinstance(source_digest, str) or not _SHA256_RE.fullmatch(source_digest):
         raise ValueError("source_digest must be a sha256 digest")
-    return f"{RUN_ID_PREFIX}{window.token}_{source_digest[7:23]}"
+    return f"{prefix}{source_digest[7:23]}"
 
 
 def run_window_prefix(*, tenant_id: str, source_id: str, window: IngestionWindow) -> str:

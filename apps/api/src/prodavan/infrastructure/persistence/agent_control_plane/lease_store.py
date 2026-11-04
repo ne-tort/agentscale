@@ -35,6 +35,22 @@ Contract notes (the parts that are easy to get wrong)
 * nothing here falls back to process memory and nothing writes a second table.
   A host without this store must raise
   :class:`~prodavan.application.agent_runs.lease.LeaseStorageUnavailable`.
+* ``select_claim_candidate`` accepts one optional narrowing argument,
+  ``statuses`` (default :data:`~prodavan.application.agent_runs.lease.CLAIMABLE_STATUSES`).
+  A caller whose start transition cannot express a status (the control plane can
+  only perform ``queued`` → ``running``) narrows the predicate in SQL instead of
+  selecting a row it cannot start; the queue therefore never stalls behind such a
+  row and no fence generation is burnt on a poll.
+
+Statement builders
+------------------
+The SQL of every operation is produced by a pure function
+(``claim_candidate_statement``, ``acquire_statement``, ``renew_statement``,
+``release_statement``, ``park_statement``, ``fence_statement``,
+``slot_statement``) that the store method only executes.  Keeping the statements
+pure is what makes the fencing predicates reviewable without a database: the
+acceptance artifacts render them for the PostgreSQL dialect and assert on the
+``WHERE`` clause instead of trusting a mock.
 
 Extensions beyond the protocol
 ------------------------------
@@ -61,8 +77,9 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any, Protocol
 
-from sqlalchemy import and_, exists, func, or_, select, update
+from sqlalchemy import Update, and_, exists, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.sql import Select
 
 from prodavan.application.agent_runs.execution import AgentRunLease
 from prodavan.application.agent_runs.lease import (
@@ -100,10 +117,15 @@ class RunLeaseFenceStore(RunLeaseStore, Protocol):
     """``RunLeaseStore`` plus the two fencing statements the port adapter needs.
 
     ``DurableRunLeaseManager`` only requires the base protocol; the execution
-    adapter additionally requires ``cas_park`` (retry / unknown parking) and
-    ``cas_fence`` (cancellation bumps the generation).  Both are single
-    ``UPDATE ... WHERE`` statements returning the affected row count.
+    adapter additionally requires ``claim_scope`` (one transaction across select
+    and acquire), ``cas_park`` (retry / unknown parking) and ``cas_fence``
+    (cancellation bumps the generation).  Each CAS is a single
+    ``UPDATE ... WHERE`` returning the affected row count.
     """
+
+    def claim_scope(self) -> Any:
+        """Async context manager pinning one transaction across select + acquire."""
+        ...
 
     async def cas_park(
         self,
@@ -114,6 +136,11 @@ class RunLeaseFenceStore(RunLeaseStore, Protocol):
     ) -> int: ...
 
     async def cas_fence(self, *, tenant_id: str, run_id: str, now: datetime) -> int: ...
+
+
+# --------------------------------------------------------------------------- #
+# Validation helpers
+# --------------------------------------------------------------------------- #
 
 
 def _aware(value: datetime, name: str) -> datetime:
@@ -147,7 +174,8 @@ def _run_status_in(statuses: frozenset[str]) -> Any:
     )
 
 
-def _slot_query() -> Any:
+def _slot_columns() -> Any:
+    """The lease snapshot a worker plans against, read from three tables."""
     lease = AgentRunLeaseRow
     run = AgentRunRow
     aggregate = AgentControlPlaneAggregateRow
@@ -194,6 +222,242 @@ def _slot_from_row(row: Mapping[str, Any]) -> LeaseSlot:
     )
 
 
+# --------------------------------------------------------------------------- #
+# Pure statement builders (one statement each; no reads, no fallbacks)
+# --------------------------------------------------------------------------- #
+
+
+def slot_statement(*, run_id: str) -> Select:
+    """``SELECT`` one run's lease snapshot (no lock, no eligibility filter)."""
+    return _slot_columns().where(AgentRunLeaseRow.run_id == _required(run_id, "run_id"))
+
+
+def claim_candidate_statement(
+    *, now: datetime, statuses: frozenset[str] | None = None
+) -> Select:
+    """``SELECT`` the single most-eligible claimable lease with ``SKIP LOCKED``.
+
+    Eligible means: the run is in ``statuses`` (default
+    :data:`~prodavan.application.agent_runs.lease.CLAIMABLE_STATUSES`), its
+    committed cursor agrees with the run row and has a positive sequence, the
+    retry window (if any) is open, and no previous lease is still live.
+
+    ``statuses`` exists because the *contract* claimable set and the set a
+    particular caller can actually start differ: the control plane can only
+    perform ``queued`` → ``running`` today, so an execution adapter narrows the
+    predicate instead of selecting a row whose start it cannot commit (which
+    would burn a fence generation on every poll).  Narrowing happens in SQL, not
+    after the fact, so a run the caller cannot start never blocks the queue.
+    """
+    now = _aware(now, "now")
+    allowed = CLAIMABLE_STATUSES if statuses is None else statuses
+    if not allowed:
+        raise ValueError("at least one claimable status is required")
+    if not allowed <= CLAIMABLE_STATUSES:
+        raise ValueError("claim statuses must be a subset of CLAIMABLE_STATUSES")
+    lease = AgentRunLeaseRow
+    run = AgentRunRow
+    aggregate = AgentControlPlaneAggregateRow
+    return (
+        _slot_columns()
+        .where(
+            run.status.in_(tuple(sorted(allowed))),
+            aggregate.status == run.status,
+            aggregate.last_sequence >= 1,
+            lease.attempt >= 1,
+            or_(lease.retry_at.is_(None), lease.retry_at <= now),
+            or_(lease.lease_until.is_(None), lease.lease_until <= now),
+        )
+        .order_by(
+            lease.retry_at.asc().nulls_first(),
+            lease.lease_until.asc().nulls_first(),
+            lease.run_id.asc(),
+        )
+        .limit(1)
+        .with_for_update(skip_locked=True, of=lease)
+    )
+
+
+def acquire_statement(*, slot: LeaseSlot, lease: AgentRunLease, now: datetime) -> Update:
+    """Write the claimed lease if the planned slot is still the current one.
+
+    Preconditions: same row and tenant, ``lease_generation`` unchanged, the
+    attempt counter unchanged, the run still claimable, and neither the retry
+    window nor a live lease in the way.
+    """
+    if slot.run_id != lease.run_id:
+        raise ValueError("lease does not belong to the planned slot")
+    if lease.generation != slot.generation + 1:
+        raise ValueError("acquired lease generation must follow the observed generation")
+    if lease.attempt != slot.attempt + 1:
+        raise ValueError("acquired lease attempt must follow the observed attempt")
+    now = _aware(now, "now")
+    _aware(lease.lease_until, "lease_until")
+    lease_row = AgentRunLeaseRow
+    return (
+        update(lease_row)
+        .where(
+            lease_row.run_id == slot.run_id,
+            lease_row.tenant_id == slot.tenant_id,
+            lease_row.lease_generation == slot.generation,
+            lease_row.attempt == slot.attempt,
+            or_(lease_row.retry_at.is_(None), lease_row.retry_at <= now),
+            or_(lease_row.lease_until.is_(None), lease_row.lease_until <= now),
+            _run_status_in(CLAIMABLE_STATUSES),
+        )
+        .values(
+            lease_owner=lease.owner_id,
+            lease_token=lease.lease_token,
+            lease_until=lease.lease_until,
+            lease_generation=lease.generation,
+            attempt=lease.attempt,
+            updated_at=now,
+        )
+        .execution_options(synchronize_session=False)
+    )
+
+
+def renew_statement(*, lease: AgentRunLease, now: datetime, lease_until: datetime) -> Update:
+    """Extend the deadline of a lease we still own; never resurrect one.
+
+    Requires the same generation, token and owner, a deadline that has not
+    passed (``lease_until > now``) and does not move backwards, and a run status
+    a fenced worker may hold.  Renewing after expiry affects ``0`` rows — the
+    run belongs to whoever claims it next.
+    """
+    now = _aware(now, "now")
+    new_deadline = _aware(lease_until, "lease_until")
+    if new_deadline <= now:
+        raise ValueError("a renewal deadline must be after the database time")
+    lease_row = AgentRunLeaseRow
+    return (
+        update(lease_row)
+        .where(
+            lease_row.run_id == lease.run_id,
+            lease_row.tenant_id == lease.tenant_id,
+            lease_row.lease_generation == lease.generation,
+            lease_row.lease_token == lease.lease_token,
+            lease_row.lease_owner == lease.owner_id,
+            lease_row.lease_until.is_not(None),
+            lease_row.lease_until > now,
+            lease_row.lease_until <= new_deadline,
+            _run_status_in(RENEWABLE_STATUSES),
+        )
+        .values(lease_until=new_deadline, updated_at=now)
+        .execution_options(synchronize_session=False)
+    )
+
+
+def release_statement(*, lease: AgentRunLease, now: datetime, status: str) -> Update:
+    """Drop the lease triple while keeping the generation.
+
+    ``status`` is the run status the caller asserts the run is in for this
+    release to be legitimate (``queued``/``retry_due``/``running``/terminal);
+    anything else is refused before the statement is built.  Releasing back to
+    ``queued`` also clears ``retry_at``, so the run is immediately due again;
+    any other release keeps the parked retry window.
+    """
+    now = _aware(now, "now")
+    target = _required(status, "status", max_length=32).lower()
+    if target not in RELEASABLE_STATUSES:
+        raise ValueError("release status is outside the releasable set")
+    lease_row = AgentRunLeaseRow
+    values: dict[str, Any] = {
+        "lease_owner": None,
+        "lease_token": None,
+        "lease_until": None,
+        "updated_at": now,
+    }
+    if target == AgentRunStatus.QUEUED.value:
+        values["retry_at"] = None
+    return (
+        update(lease_row)
+        .where(
+            lease_row.run_id == lease.run_id,
+            lease_row.tenant_id == lease.tenant_id,
+            lease_row.lease_generation == lease.generation,
+            lease_row.lease_token == lease.lease_token,
+            lease_row.lease_owner == lease.owner_id,
+            lease_row.lease_until.is_not(None),
+            _run_status_in(frozenset({target})),
+        )
+        .values(**values)
+        .execution_options(synchronize_session=False)
+    )
+
+
+def park_statement(
+    *, lease: AgentRunLease, now: datetime, retry_at: datetime | None
+) -> Update:
+    """Clear the lease triple and optionally set ``retry_at``; keep the fence.
+
+    Parking is what ``schedule_retry`` and ``finish_unknown`` need: the worker
+    stops holding the lease (so nothing is renewed for a run it no longer
+    drives) while ``lease_generation`` stays put, because that generation is the
+    fence the reconciler/retry path will present.  The run status is deliberately
+    untouched: the adapter must neither write a status without its control-plane
+    event nor pretend an ambiguous outcome is terminal.
+    """
+    now = _aware(now, "now")
+    if retry_at is not None:
+        retry_at = _aware(retry_at, "retry_at")
+    lease_row = AgentRunLeaseRow
+    return (
+        update(lease_row)
+        .where(
+            lease_row.run_id == lease.run_id,
+            lease_row.tenant_id == lease.tenant_id,
+            lease_row.lease_generation == lease.generation,
+            lease_row.lease_token == lease.lease_token,
+            lease_row.lease_owner == lease.owner_id,
+            lease_row.lease_until.is_not(None),
+            _run_status_in(PARKED_STATUSES),
+        )
+        .values(
+            lease_owner=None,
+            lease_token=None,
+            lease_until=None,
+            retry_at=retry_at,
+            updated_at=now,
+        )
+        .execution_options(synchronize_session=False)
+    )
+
+
+def fence_statement(*, tenant_id: str, run_id: str, now: datetime) -> Update:
+    """Move ``lease_generation`` forward and drop any lease, for cancellation.
+
+    Cancellation is performed by an actor that does not hold the lease, so this
+    is the one statement that is *not* token-scoped; it is tenant-scoped instead.
+    ``0`` rows means the run had no lease row at all (it was never claimed),
+    which is a normal pre-cancel state rather than an error.
+    """
+    tenant_id = _required(tenant_id, "tenant_id")
+    run_id = _required(run_id, "run_id")
+    now = _aware(now, "now")
+    lease_row = AgentRunLeaseRow
+    return (
+        update(lease_row)
+        .where(
+            lease_row.run_id == run_id,
+            lease_row.tenant_id == tenant_id,
+        )
+        .values(
+            lease_generation=lease_row.lease_generation + 1,
+            lease_owner=None,
+            lease_token=None,
+            lease_until=None,
+            updated_at=now,
+        )
+        .execution_options(synchronize_session=False)
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Store
+# --------------------------------------------------------------------------- #
+
+
 class SqlAlchemyRunLeaseStore:
     """Durable lease store over ``agent_run_leases`` (+ run status and cursor).
 
@@ -215,10 +479,10 @@ class SqlAlchemyRunLeaseStore:
 
         ``FOR UPDATE SKIP LOCKED`` only serialises two workers while the lock is
         held, so ``select_claim_candidate`` + ``cas_acquire`` must share a
-        transaction for the lock to mean anything.  The transaction is committed
-        when the block exits cleanly and rolled back on any exception, so a
-        planning refusal (``LeaseRefused``) can never leave a lock or an open
-        transaction behind.
+        transaction for the lock to mean anything.  The transaction commits when
+        the block exits cleanly and rolls back on any exception, so a planning
+        refusal (``LeaseRefused``) can never leave a lock or an open transaction
+        behind.
 
         Nesting is refused: two pinned transactions on one store would let a
         caller commit half a claim.
@@ -258,46 +522,23 @@ class SqlAlchemyRunLeaseStore:
             raise RuntimeError("database clock did not return a timestamp")
         return _aware(value, "database_now")
 
-    async def select_claim_candidate(self, *, now: datetime) -> LeaseSlot | None:
+    async def select_claim_candidate(
+        self, *, now: datetime, statuses: frozenset[str] | None = None
+    ) -> LeaseSlot | None:
         """Lock at most one claimable lease row and return its snapshot.
 
-        Eligibility is a single predicate: the run is ``queued``/``retry_due``,
-        its committed cursor agrees with it and has a positive sequence, the
-        retry window (if any) is open, and the previous lease (if any) has
-        expired.  ``SKIP LOCKED`` means a run another worker already locked is
-        skipped instead of waited for.
+        ``statuses`` optionally narrows the claimable set (see
+        :func:`claim_candidate_statement`); the default is the protocol's
+        ``CLAIMABLE_STATUSES``.
         """
-        now = _aware(now, "now")
-        lease = AgentRunLeaseRow
-        run = AgentRunRow
-        aggregate = AgentControlPlaneAggregateRow
-        claimable = tuple(sorted(CLAIMABLE_STATUSES))
-        statement = (
-            _slot_query()
-            .where(
-                run.status.in_(claimable),
-                aggregate.status == run.status,
-                aggregate.last_sequence >= 1,
-                lease.attempt >= 1,
-                or_(lease.retry_at.is_(None), lease.retry_at <= now),
-                or_(lease.lease_until.is_(None), lease.lease_until <= now),
-            )
-            .order_by(
-                lease.retry_at.asc().nulls_first(),
-                lease.lease_until.asc().nulls_first(),
-                lease.run_id.asc(),
-            )
-            .limit(1)
-            .with_for_update(skip_locked=True, of=lease)
-        )
+        statement = claim_candidate_statement(now=now, statuses=statuses)
         async with self._session() as session:
             row = (await session.execute(statement)).mappings().one_or_none()
         return None if row is None else _slot_from_row(row)
 
     async def read_slot(self, *, run_id: str) -> LeaseSlot | None:
         """Read one run's lease snapshot without locking or claiming anything."""
-        run_id = _required(run_id, "run_id")
-        statement = _slot_query().where(AgentRunLeaseRow.run_id == run_id)
+        statement = slot_statement(run_id=run_id)
         async with self._session() as session:
             row = (await session.execute(statement)).mappings().one_or_none()
         return None if row is None else _slot_from_row(row)
@@ -309,43 +550,8 @@ class SqlAlchemyRunLeaseStore:
         lease: AgentRunLease,
         now: datetime,
     ) -> int:
-        """Take the lease for ``slot`` if it is still the generation we planned.
-
-        Preconditions: same row, ``lease_generation`` unchanged, the attempt
-        counter unchanged, the run still claimable, and neither the retry window
-        nor a live lease in the way.  A concurrent claim (generation moved),
-        cancellation (status moved) or a different attempt is a ``0``.
-        """
-        if slot.run_id != lease.run_id:
-            raise ValueError("lease does not belong to the planned slot")
-        if lease.generation != slot.generation + 1:
-            raise ValueError("acquired lease generation must follow the observed generation")
-        if lease.attempt != slot.attempt + 1:
-            raise ValueError("acquired lease attempt must follow the observed attempt")
-        now = _aware(now, "now")
-        _aware(lease.lease_until, "lease_until")
-        lease_row = AgentRunLeaseRow
-        statement = (
-            update(lease_row)
-            .where(
-                lease_row.run_id == slot.run_id,
-                lease_row.tenant_id == slot.tenant_id,
-                lease_row.lease_generation == slot.generation,
-                lease_row.attempt == slot.attempt,
-                or_(lease_row.retry_at.is_(None), lease_row.retry_at <= now),
-                or_(lease_row.lease_until.is_(None), lease_row.lease_until <= now),
-                _run_status_in(CLAIMABLE_STATUSES),
-            )
-            .values(
-                lease_owner=lease.owner_id,
-                lease_token=lease.lease_token,
-                lease_until=lease.lease_until,
-                lease_generation=lease.generation,
-                attempt=lease.attempt,
-                updated_at=now,
-            )
-            .execution_options(synchronize_session=False)
-        )
+        """Take the lease for ``slot`` if it is still the generation we planned."""
+        statement = acquire_statement(slot=slot, lease=lease, now=now)
         async with self._session() as session:
             result = await session.execute(statement)
         return int(result.rowcount or 0)
@@ -357,34 +563,8 @@ class SqlAlchemyRunLeaseStore:
         now: datetime,
         lease_until: datetime,
     ) -> int:
-        """Extend the deadline of a lease we still own; never resurrect one.
-
-        The predicate requires the same generation, token and owner, a deadline
-        that has not passed (``lease_until > now``) and does not move
-        backwards, and a run status a fenced worker may hold.  Renewing after
-        expiry is ``0`` — the run belongs to whoever claims it next.
-        """
-        now = _aware(now, "now")
-        new_deadline = _aware(lease_until, "lease_until")
-        if new_deadline <= now:
-            raise ValueError("a renewal deadline must be after the database time")
-        lease_row = AgentRunLeaseRow
-        statement = (
-            update(lease_row)
-            .where(
-                lease_row.run_id == lease.run_id,
-                lease_row.tenant_id == lease.tenant_id,
-                lease_row.lease_generation == lease.generation,
-                lease_row.lease_token == lease.lease_token,
-                lease_row.lease_owner == lease.owner_id,
-                lease_row.lease_until.is_not(None),
-                lease_row.lease_until > now,
-                lease_row.lease_until <= new_deadline,
-                _run_status_in(RENEWABLE_STATUSES),
-            )
-            .values(lease_until=new_deadline, updated_at=now)
-            .execution_options(synchronize_session=False)
-        )
+        """Extend the deadline of a lease we still own; never resurrect one."""
+        statement = renew_statement(lease=lease, now=now, lease_until=lease_until)
         async with self._session() as session:
             result = await session.execute(statement)
         return int(result.rowcount or 0)
@@ -396,44 +576,8 @@ class SqlAlchemyRunLeaseStore:
         now: datetime,
         status: str,
     ) -> int:
-        """Drop the lease triple while keeping the generation.
-
-        ``status`` is the run status the caller asserts the run is in for this
-        release to be legitimate (``queued``/``retry_due``/``running``/terminal);
-        anything else is refused before the statement is built.  Releasing back
-        to ``queued`` also clears ``retry_at``, so the run is immediately due
-        again; any other release keeps the parked retry window.
-
-        Releasing keeps ``lease_generation``: the next claim increments it, so
-        every write this worker could still attempt is already fenced out.
-        """
-        now = _aware(now, "now")
-        target = _required(status, "status", max_length=32).lower()
-        if target not in RELEASABLE_STATUSES:
-            raise ValueError("release status is outside the releasable set")
-        lease_row = AgentRunLeaseRow
-        values: dict[str, Any] = {
-            "lease_owner": None,
-            "lease_token": None,
-            "lease_until": None,
-            "updated_at": now,
-        }
-        if target == AgentRunStatus.QUEUED.value:
-            values["retry_at"] = None
-        statement = (
-            update(lease_row)
-            .where(
-                lease_row.run_id == lease.run_id,
-                lease_row.tenant_id == lease.tenant_id,
-                lease_row.lease_generation == lease.generation,
-                lease_row.lease_token == lease.lease_token,
-                lease_row.lease_owner == lease.owner_id,
-                lease_row.lease_until.is_not(None),
-                _run_status_in(frozenset({target})),
-            )
-            .values(**values)
-            .execution_options(synchronize_session=False)
-        )
+        """Drop the lease triple (fenced by generation + token + status)."""
+        statement = release_statement(lease=lease, now=now, status=status)
         async with self._session() as session:
             result = await session.execute(statement)
         return int(result.rowcount or 0)
@@ -447,71 +591,15 @@ class SqlAlchemyRunLeaseStore:
         now: datetime,
         retry_at: datetime | None,
     ) -> int:
-        """Clear the lease triple and optionally set ``retry_at``; keep the fence.
-
-        Parking is what ``schedule_retry`` and ``finish_unknown`` need: the
-        worker stops holding the lease (so nothing is renewed for a run it is no
-        longer driving) while ``lease_generation`` stays put, because that
-        generation is the fence the reconciler/retry path will present.  The run
-        status is deliberately untouched: the adapter must neither write a
-        status without its control-plane event nor pretend an ambiguous outcome
-        is terminal.
-        """
-        now = _aware(now, "now")
-        if retry_at is not None:
-            retry_at = _aware(retry_at, "retry_at")
-        lease_row = AgentRunLeaseRow
-        statement = (
-            update(lease_row)
-            .where(
-                lease_row.run_id == lease.run_id,
-                lease_row.tenant_id == lease.tenant_id,
-                lease_row.lease_generation == lease.generation,
-                lease_row.lease_token == lease.lease_token,
-                lease_row.lease_owner == lease.owner_id,
-                lease_row.lease_until.is_not(None),
-                _run_status_in(PARKED_STATUSES),
-            )
-            .values(
-                lease_owner=None,
-                lease_token=None,
-                lease_until=None,
-                retry_at=retry_at,
-                updated_at=now,
-            )
-            .execution_options(synchronize_session=False)
-        )
+        """Clear the lease triple, optionally set ``retry_at``; keep the fence."""
+        statement = park_statement(lease=lease, now=now, retry_at=retry_at)
         async with self._session() as session:
             result = await session.execute(statement)
         return int(result.rowcount or 0)
 
     async def cas_fence(self, *, tenant_id: str, run_id: str, now: datetime) -> int:
-        """Move ``lease_generation`` forward and drop any lease, for cancellation.
-
-        Cancellation is performed by an actor that does not hold the lease, so
-        this is the one statement that is *not* token-scoped; it is tenant-scoped
-        instead.  ``0`` rows means the run had no lease row at all (it was never
-        claimed), which is a normal pre-cancel state rather than an error.
-        """
-        tenant_id = _required(tenant_id, "tenant_id")
-        run_id = _required(run_id, "run_id")
-        now = _aware(now, "now")
-        lease_row = AgentRunLeaseRow
-        statement = (
-            update(lease_row)
-            .where(
-                lease_row.run_id == run_id,
-                lease_row.tenant_id == tenant_id,
-            )
-            .values(
-                lease_generation=lease_row.lease_generation + 1,
-                lease_owner=None,
-                lease_token=None,
-                lease_until=None,
-                updated_at=now,
-            )
-            .execution_options(synchronize_session=False)
-        )
+        """Move ``lease_generation`` forward (tenant-scoped) and drop any lease."""
+        statement = fence_statement(tenant_id=tenant_id, run_id=run_id, now=now)
         async with self._session() as session:
             result = await session.execute(statement)
         return int(result.rowcount or 0)
@@ -524,4 +612,11 @@ __all__ = [
     "RUN_AGGREGATE_TYPE",
     "RunLeaseFenceStore",
     "SqlAlchemyRunLeaseStore",
+    "acquire_statement",
+    "claim_candidate_statement",
+    "fence_statement",
+    "park_statement",
+    "release_statement",
+    "renew_statement",
+    "slot_statement",
 ]

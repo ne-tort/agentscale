@@ -67,6 +67,12 @@ Blockers this adapter does not hide
   the same reason ``schedule_retry`` persists the durable ``retry_at`` gate but
   leaves the run ``running``: the retry scheduler must requeue it, and that
   requeue is not wired yet.
+* ``agent_run_retry_due_start_transition_unwired`` (:data:`RETRY_DUE_BLOCKER`) —
+  ``retry_due`` is in ``CLAIMABLE_STATUSES`` but the control plane can only
+  validate ``queued`` → ``running`` for ``agent_run.start``, so the adapter
+  narrows its claim predicate to ``queued`` in SQL.  A ``retry_due`` run is
+  therefore not claimed (and does not block the queue) until the retry
+  scheduler's requeue — or a ``retry_due`` start — exists.
 * ``agent_run_unknown_case_journal_unwired`` — the ambiguous attempt is parked
   without a row in the reconciliation journal (``agent_runs/reconcile.py`` owns
   that table and no revision exists).  Parking still blocks re-execution, and
@@ -107,7 +113,6 @@ from prodavan.application.agent_runs.lease import (
     LeaseRefused,
     LeaseSlot,
     RunLeaseStore,
-    new_lease_token,
     verify_lease,
 )
 from prodavan.domain.agent.control_plane import AgentRunStatus, AgentRunView
@@ -122,6 +127,19 @@ UNKNOWN_CASE_JOURNAL_BLOCKER = "agent_run_unknown_case_journal_unwired"
 
 ACTOR_BLOCKER = "agent_run_control_plane_actor_unresolved"
 """A run with no resolvable employee actor cannot be written by the control plane."""
+
+RETRY_DUE_BLOCKER = "agent_run_retry_due_start_transition_unwired"
+"""``retry_due`` is reserved and claimable in policy, but not startable today.
+
+``RunTransitionCommand`` can only express ``AgentRunStatus`` values and accepts
+``queued`` → ``running`` for ``agent_run.start``, so a ``retry_due`` row has no
+valid start transition.  The adapter therefore narrows its claim predicate to
+``queued`` in SQL (rather than selecting rows it cannot start and burning a fence
+generation on every poll) until the retry scheduler's requeue lands.
+"""
+
+STARTABLE_STATUSES: frozenset[str] = frozenset({AgentRunStatus.QUEUED.value})
+"""Run statuses this adapter can commit a claim (start transition) for."""
 
 DEFAULT_FAILURE_CODE = "agent_run.provider_failed"
 RECONCILED_FAILURE_CODE = "agent_run.reconciled_failed"
@@ -146,6 +164,12 @@ class FencedLeaseStore(RunLeaseStore, Protocol):
 
     def claim_scope(self) -> AbstractAsyncContextManager[None]:
         """Async context manager pinning one transaction across select + acquire."""
+        ...
+
+    async def select_claim_candidate(
+        self, *, now: datetime, statuses: frozenset[str] | None = None
+    ) -> LeaseSlot | None:
+        """``RunLeaseStore`` snapshot, optionally narrowed by ``statuses``."""
         ...
 
     async def cas_park(
@@ -187,6 +211,44 @@ def _bounded_code(value: str | None, name: str, *, max_length: int = 128) -> str
     return code
 
 
+class _StartableOnlyStore:
+    """Narrow a lease store to the candidates this adapter can actually start.
+
+    ``DurableRunLeaseManager`` drives the lease policy; this wrapper only
+    replaces the eligibility predicate so the manager never plans against a
+    ``retry_due`` row whose start transition the control plane cannot express
+    (:data:`RETRY_DUE_BLOCKER`).  Everything else is delegated verbatim, so the
+    manager still sees exactly one store and the adapter still has exactly one
+    place with policy.
+    """
+
+    def __init__(self, store: FencedLeaseStore, statuses: frozenset[str]) -> None:
+        self._store = store
+        self._statuses = statuses
+
+    async def database_now(self) -> datetime:
+        return await self._store.database_now()
+
+    async def select_claim_candidate(self, *, now: datetime) -> LeaseSlot | None:
+        return await self._store.select_claim_candidate(now=now, statuses=self._statuses)
+
+    async def cas_acquire(
+        self, *, slot: LeaseSlot, lease: AgentRunLease, now: datetime
+    ) -> int:
+        return await self._store.cas_acquire(slot=slot, lease=lease, now=now)
+
+    async def cas_renew(
+        self, *, lease: AgentRunLease, now: datetime, lease_until: datetime
+    ) -> int:
+        return await self._store.cas_renew(lease=lease, now=now, lease_until=lease_until)
+
+    async def cas_release(self, *, lease: AgentRunLease, now: datetime, status: str) -> int:
+        return await self._store.cas_release(lease=lease, now=now, status=status)
+
+    async def read_slot(self, *, run_id: str) -> LeaseSlot | None:
+        return await self._store.read_slot(run_id=run_id)
+
+
 class ControlPlaneAgentRunExecutionAdapter:
     """``AgentRunExecutionPort`` over a durable lease store and control plane.
 
@@ -194,6 +256,17 @@ class ControlPlaneAgentRunExecutionAdapter:
     with their events, and ``runs`` is the tenant-scoped run read port used to
     resolve the acting employee (the control plane authorises an actor on every
     write) and the run's session linkage.
+
+    ``DurableAgentControlPlane`` is bound to one tenant at construction, so a
+    single instance only serves that tenant: pass a ``tenant_id -> control
+    plane`` factory for a multi-tenant worker.  A run of another tenant is a
+    composition error and fails loudly instead of writing cross-tenant.
+
+    ``runs`` is used for two different reads and satisfies both:
+    ``AgentControlPlaneReadPort.get_run`` (the control-plane run view) and
+    ``AgentTurnRunner``'s ``RunInputSource.get_run`` (``project_id``,
+    ``session_id``, ``requested_by_employee_id``, ``input_payload``), so the same
+    tenant-scoped read port can be handed to ``AgentRunWorker`` unchanged.
     """
 
     def __init__(
@@ -256,10 +329,14 @@ class ControlPlaneAgentRunExecutionAdapter:
         clock: only the duration crosses from the caller's clock domain, never an
         absolute instant.  A window outside ``LeasePolicy`` bounds falls back to
         the configured policy instead of silently clamping.
+
+        Only ``queued`` runs are claimed (:data:`STARTABLE_STATUSES`): ``retry_due``
+        is claimable in policy but has no expressible start transition until the
+        retry requeue lands (:data:`RETRY_DUE_BLOCKER`).
         """
         owner = _required(owner_id, "owner_id")
         manager = DurableRunLeaseManager(
-            store=self._leases,
+            store=_StartableOnlyStore(self._leases, STARTABLE_STATUSES),
             policy=self._policy_for(now=now, lease_until=lease_until),
         )
         async with self._leases.claim_scope():
@@ -399,7 +476,10 @@ class ControlPlaneAgentRunExecutionAdapter:
         """
         _require_lease(lease)
         _aware(observed_at, "observed_at")
-        _bounded_code(provider_request_id, "provider_request_id")
+        if provider_request_id is not None:
+            # Only shape-checked: it is never persisted here (no journal row yet),
+            # so a provider-specific identifier format must not break the park.
+            _required(provider_request_id, "provider_request_id", max_length=160)
         db_now, slot = await self._verified_slot(lease)
         if slot is None:
             return False
@@ -573,6 +653,14 @@ class ControlPlaneAgentRunExecutionAdapter:
         slot = await self._leases.read_slot(run_id=lease.run_id)
         if slot is None or slot.generation != lease.generation:
             return False
+        if slot.status not in STARTABLE_STATUSES:
+            logger.warning(
+                "agent run claim cannot be started run=%s status=%s blocker=%s",
+                slot.run_id,
+                slot.status,
+                RETRY_DUE_BLOCKER,
+            )
+            return False
         linkage = await self._linkage(slot, trace=f"agent-run:{slot.run_id}:g{slot.generation}")
         if linkage is None:
             return False
@@ -673,11 +761,6 @@ def _require_lease(lease: AgentRunLease) -> AgentRunLease:
     return lease
 
 
-def build_claim_token() -> str:
-    """Expose the lease-token generator so composition roots do not import policy."""
-    return new_lease_token()
-
-
 __all__ = [
     "ACTOR_BLOCKER",
     "ControlPlaneAgentRunExecutionAdapter",
@@ -685,6 +768,7 @@ __all__ = [
     "FencedLeaseStore",
     "RECONCILED_FAILURE_CODE",
     "REQUEUE_BLOCKER",
+    "RETRY_DUE_BLOCKER",
+    "STARTABLE_STATUSES",
     "UNKNOWN_CASE_JOURNAL_BLOCKER",
-    "build_claim_token",
 ]
