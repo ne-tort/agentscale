@@ -791,7 +791,10 @@ class ResourceMaterializationApplyPort:
         if not isinstance(command, DurableRollbackCommand):
             return _blocked_result("rollback_command_invalid", phase="rollback")
         if self.evidence is not None:
-            now = await self._now()
+            try:
+                now = await self._now()
+            except Exception:  # noqa: BLE001 - an unusable clock is not evidence
+                return _blocked_result("rollback_approval_unverified", phase="rollback")
             approval = None
             if command.approval_id:
                 try:

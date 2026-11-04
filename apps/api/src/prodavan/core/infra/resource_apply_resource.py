@@ -57,7 +57,9 @@ class ResourceApplySettings(BaseSettings):
     exactly like the neighbouring feature flags.
     """
 
-    model_config = SettingsConfigDict(extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=".env", env_file_encoding="utf-8", extra="ignore"
+    )
 
     resource_apply_enabled: bool = Field(
         default=False,

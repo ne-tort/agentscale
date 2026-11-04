@@ -290,6 +290,21 @@ async def _drop_schema(admin: AsyncEngine, name: str) -> None:
         )
 
 
+def _run_in_new_loop(coro_factory):
+    """Run one coroutine on a private loop and close it.
+
+    Used only from *synchronous* fixtures.  ``asyncio.run`` would refuse to start
+    if pytest-asyncio happens to have a loop installed in this thread, and the
+    repository's own conftest already hit that class of problem on Windows; a
+    dedicated loop has neither the "already running" check nor any shared state.
+    """
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro_factory())
+    finally:
+        loop.close()
+
+
 def _clean_database_problem(url: str) -> str | None:
     """Return why ``url`` cannot host an alembic cycle, or ``None`` when it can.
 
@@ -323,17 +338,17 @@ def _clean_database_problem(url: str) -> str | None:
         finally:
             await engine.dispose()
 
-    tables, versioned = asyncio.run(_probe())
+    tables, versioned = _run_in_new_loop(_probe)
     if versioned:
         return (
             "the database already has an alembic_version table, so it is not a clean "
             "database and would be downgraded by this cycle"
         )
-    present = sorted(tables & set(Base.metadata.tables))
-    if present:
+    if tables:
+        listed = ", ".join(sorted(tables)[:5]) + ("…" if len(tables) > 5 else "")
         return (
-            f"the database already has {len(present)} ORM table(s) in public "
-            f"({', '.join(present[:5])}{'…' if len(present) > 5 else ''}), so it is not clean"
+            f"the database is not empty: {len(tables)} table(s) already live in public "
+            f"({listed}), so `upgrade head` would not start from a known-empty schema"
         )
     return None
 
@@ -344,8 +359,8 @@ def migration_database_url(pg_dsn: str) -> str:
 
     Prefers ``PRODAVAN_TEST_MIGRATION_DATABASE_URL`` (an empty, throwaway
     database).  Falls back to ``PRODAVAN_TEST_DATABASE_URL`` only after proving
-    that database has no ``alembic_version`` and no ORM tables in ``public``;
-    otherwise the migration test skips instead of mutating a real database.
+    that database's ``public`` schema is completely empty; otherwise the
+    migration test skips instead of mutating a real database.
     """
     dedicated = (os.getenv(MIGRATION_DATABASE_URL_ENV) or "").strip()
     if dedicated:

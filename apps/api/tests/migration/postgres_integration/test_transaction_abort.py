@@ -76,8 +76,8 @@ async def _install_failure_trigger(pg_schema, table: str) -> None:
 
 
 async def _drop_failure_trigger(pg_schema, table: str) -> None:
+    """Remove the injected failure so the same schema can be reused by the test."""
     function_name = f"pgint_fail_{table}"
-    await pg_schema.execute(f"ALTER TABLE {table} DISABLE TRIGGER trg_{function_name}")
     await pg_schema.execute(f"DROP TRIGGER trg_{function_name} ON {table}")
     await pg_schema.execute(f"DROP FUNCTION {function_name}()")
 

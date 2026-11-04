@@ -120,10 +120,15 @@ def test_flag_defaults_to_off(monkeypatch) -> None:
     for name in (
         "RESOURCE_APPLY_ENABLED",
         "RESOURCE_MATERIALIZATION_APPLY_ENABLED",
+        "RESOURCE_APPLY_REQUIRE_INSTALL",
     ):
         monkeypatch.delenv(name, raising=False)
+    # Assert the declared defaults, not a resolved instance: a developer ``.env``
+    # must not be able to make this artifact pass or fail.
+    fields = ResourceApplySettings.model_fields
+    assert fields["resource_apply_enabled"].default is False
+    assert fields["resource_apply_require_install"].default is True
     assert ResourceApplySettings().resource_apply_enabled is False
-    assert ResourceApplySettings().resource_apply_require_install is True
     assert resource_apply_enabled() is False
 
 

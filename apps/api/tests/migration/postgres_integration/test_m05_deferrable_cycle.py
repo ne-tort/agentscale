@@ -145,12 +145,9 @@ async def test_the_pair_must_resolve_to_the_same_instance(pg_schema):
     async with pg_schema.engine.connect() as conn:
         trans = await conn.begin()
         await conn.execute(INSERT_PLUGIN_SCOPE_REGISTRY, registry)
-        await conn.execute(
-            # The other side of the *other* instance is never inserted, and this
-            # instance points at a registry row that names "pi_other".
-            INSERT_PLUGIN_INSTANCE,
-            {**instance, "plugin_instance_id": INSTANCE_ID, "scope_id": INSTANCE_ID},
-        )
+        # The instance points at a registry row that names a *different* instance,
+        # and the other side of that foreign instance is never inserted at all.
+        await conn.execute(INSERT_PLUGIN_INSTANCE, instance)
         with pytest.raises(IntegrityError) as failure:
             await trans.commit()
 
