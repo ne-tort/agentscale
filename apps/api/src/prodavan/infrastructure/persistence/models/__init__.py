@@ -129,6 +129,16 @@ from prodavan.infrastructure.persistence.models.plugin_instance_registry import 
 from prodavan.infrastructure.persistence.models.m04_scope_evidence import (
     M04ScopePromotionEvidenceRow,
 )
+# MIG-DDL-M04E-LEDGER-01: the four ledger tables the M04E EvidenceStore port needs
+# (per-source first mapping, changed-digest observations, durable cursor, redacted
+# audit). Registered so they are part of Base.metadata and of the RLS coverage
+# report; importing them enables no writer and no positive canonical write.
+from prodavan.infrastructure.persistence.models.m04e_ledger import (
+    M04EDefinitionVersionAuditRow,
+    M04EDefinitionVersionCheckpointRow,
+    M04EDefinitionVersionMappingRow,
+    M04EDefinitionVersionQuarantineRow,
+)
 from prodavan.infrastructure.persistence.models.dynamic_apps import (
     AppDefinitionRow,
     AppGrantRow,
@@ -210,6 +220,10 @@ __all__ = [
     "DynamicAppDefinitionVersionFoundationRow",
     "M04EDefinitionVersionPromotionEvidenceRow",
     "M04ScopePromotionEvidenceRow",
+    "M04EDefinitionVersionAuditRow",
+    "M04EDefinitionVersionCheckpointRow",
+    "M04EDefinitionVersionMappingRow",
+    "M04EDefinitionVersionQuarantineRow",
     "M05PluginInstancePromotionEvidenceRow",
     "PluginInstanceRegistryLinkRow",
     "PluginInstanceRegistryRow",

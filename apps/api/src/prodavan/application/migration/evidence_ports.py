@@ -15,6 +15,7 @@ Port                          Target table(s)
 `PartitionHandoffReadPort.load_partition` `m05_plugin_instance_promotion_evidence`,
                                           `m05_plugin_instances`,
                                           `m04e_definition_version_promotion_evidence`,
+                                          `m04_scope_promotion_evidence` (M04-02 scope),
                                           `m06_canonical_grant_promotion_evidence`,
                                           `dynamic_app_capability_grant_mappings` +
                                           `dynamic_app_capability_grants` (inventory),
@@ -53,10 +54,18 @@ enables a positive writer"). :func:`decode_*` reconstructs the contract value ex
 an exact retry compares equal, but a reviewer querying ``outcome`` must not read it as
 the handoff status.
 
-No table stores an accepted M04 scope/RLS *evidence row*, so
-:meth:`SqlPartitionHandoffReadStore.read_partition` refuses with
-``m04_scope_promotion_evidence_missing`` until that artefact exists (the M04 RLS digest
-itself is verified from the live catalog against a security-reviewed manifest).
+The M04-02 scope link is stored: `m04_scope_promotion_evidence` (revision
+`2026110313`, RLS policy from `2026110314`) carries the accepted scope/RLS row for one
+``(tenant_id, scope_kind, scope_id)`` partition and is the only M04 promotion-evidence
+table whose ``outcome`` may read ``ready``. :meth:`SqlPartitionHandoffReadStore
+.read_partition` therefore reads the latest such row for the partition's *owner* scope and
+attests ``m04_scope_evidence_id``/``m04_scope_evidence_digest`` from it. The former
+unconditional ``m04_scope_promotion_evidence_missing`` refusal is gone: that blocker -- and
+``m04_scope_evidence_not_ready`` / ``m04_scope_evidence_digest_mismatch`` -- is now raised
+only when the stored row is absent, not ``ready``, or not the row this partition's M05
+promotion record cites. The M04 RLS digest itself is still recomputed from the live catalog
+against a security-reviewed manifest; no approved manifest is wired in this repository, so
+that path keeps its own named refusal.
 """
 
 from __future__ import annotations
@@ -108,6 +117,9 @@ from prodavan.infrastructure.persistence.models.canonical_grants import (
 from prodavan.infrastructure.persistence.models.dynamic_app_definition_version import (
     M04EDefinitionVersionPromotionEvidenceRow,
 )
+from prodavan.infrastructure.persistence.models.m04_scope_evidence import (
+    M04ScopePromotionEvidenceRow,
+)
 from prodavan.infrastructure.persistence.models.plugin_instance_registry import (
     M05PluginInstancePromotionEvidenceRow,
     PluginInstanceRegistryRow,
@@ -145,12 +157,39 @@ M05_PROMOTION_ACTOR_WIDTH = 128
 M05_PROMOTION_OWNER_WIDTH = 200
 M06_PROMOTION_PARTITION_WIDTH = 160
 
-#: Static blockers that live catalog or stored evidence cannot repair or infer.
-#: Included in every partition read refusal so the remaining gap is named, not silent.
+#: Digest columns of ``m04_scope_promotion_evidence`` re-checked on read. Every one is
+#: pinned to ``sha256:<64 hex>`` by a check constraint; the read re-asserts the shape so a
+#: row written by a future/foreign writer cannot be consumed as evidence without it.
+M04_SCOPE_EVIDENCE_DIGEST_COLUMNS = (
+    "source_snapshot_digest",
+    "canonical_digest",
+    "checkpoint_digest",
+    "gate_evidence_digest",
+    "rls_policy_digest",
+)
+
+#: Exact, stable refusal texts of the M04-scope link. Named as constants so the read and
+#: the acceptance artefacts cannot drift on the wording.
+M04_SCOPE_EVIDENCE_MISSING = "m04_scope_promotion_evidence_missing"
+M04_SCOPE_EVIDENCE_NOT_READY = "m04_scope_evidence_not_ready"
+M04_SCOPE_EVIDENCE_DIGEST_MISMATCH = "m04_scope_evidence_digest_mismatch"
+
+#: Declared read refusals of the M04-scope link: raised **conditionally**, only when the
+#: stored artefact is absent, not accepted or inconsistent with the rest of the partition.
+#: They are no longer appended to every read: ``m04_scope_promotion_evidence`` (revision
+#: 2026110313, RLS policy 2026110314) is a registered table, so the former "no table
+#: stores this row" refusal is closed. The tuple stays exported so a reviewer or a
+#: composition root can compare the declared wording with what :func:`review_m04_scope_
+#: evidence` raises for the same condition.
 DECLARED_READ_BLOCKERS = (
-    "m04_scope_promotion_evidence_missing: no registered table stores the accepted "
-    "M04-02 scope/RLS promotion evidence row, so AcceptedPartitionEvidence cannot "
-    "attest m04_scope_evidence_id from stored evidence",
+    "m04_scope_promotion_evidence_missing: the partition has no accepted M04-02 scope "
+    "evidence row under the trusted tenant, so AcceptedPartitionEvidence cannot attest "
+    "m04_scope_evidence_id from stored evidence",
+    "m04_scope_evidence_not_ready: the stored M04-02 row's outcome is not 'ready' "
+    "(blocked or quarantined), so it records a refusal and never acceptance",
+    "m04_scope_evidence_digest_mismatch: the stored row's canonical digest -- or one of "
+    "its sha256 digest columns -- disagrees with the M04_scope gate digest the M05 "
+    "promotion record cites for this exact partition",
 )
 
 #: Review inputs, not executed checks: the gaps this module cannot close.
@@ -159,8 +198,14 @@ SCHEMA_BLOCKERS = (
     "ck_m05_instance_promotion_outcome admit only ('blocked','quarantined'), so the "
     "handoff status is persisted in the redacted gate_evidence envelope and the "
     "outcome column always reads 'blocked'",
-    "m04_scope_promotion_evidence_missing: no registered table stores the accepted M04 "
-    "scope/RLS evidence row, so PartitionHandoffReadPort refuses with a named blocker",
+    "m04_scope_evidence_writer_absent: revision 2026110313 registers "
+    "m04_scope_promotion_evidence and the partition read now consumes a 'ready' row from "
+    "it, but no production writer appends those rows yet, so a live read refuses with "
+    "m04_scope_promotion_evidence_missing until trusted M04-02 tooling records one",
+    "m04_scope_evidence_row_is_not_epoch_bound: the M04-02 row carries writer_generation "
+    "but is not compared with the requested writer epoch (the M05 promotion record and "
+    "the M06 row are); the digest cross-check against the M05 M04_scope gate is what "
+    "binds the row to this partition",
     "m05_promotion_record_carries_no_source_inventory: PromotionRecord holds counts "
     "only; the M06 accepted source inventory is reconstructed from the mapped grant "
     "sources of the exact partition (dynamic_app_capability_grant_mappings joined to its "
@@ -1811,9 +1856,103 @@ def policy_shape_is_restrictive(row: Mapping[str, Any]) -> bool:
     return command in {"SELECT", "INSERT", "UPDATE", "DELETE", "ALL"}
 
 
+def m04_scope_anchor(
+    *, tenant_id: str, cabinet_id: str | None, project_id: str | None
+) -> tuple[str, str, str | None, str | None] | None:
+    """Typed owner-scope key ``(kind, scope_id, cabinet_id, project_id)`` of a partition.
+
+    The M05 instance row always carries ``scope_kind = 'plugin_instance'`` (its own check
+    constraint pins that), so the M04-02 *owner* scope a partition belongs to is the owner
+    anchor the instance was installed at: the project if one is set, otherwise the cabinet,
+    otherwise the tenant itself. That is exactly the shape
+    ``ck_m04_scope_promotion_typed_shape`` admits, and ``plugin_instance`` is not
+    representable here -- the M04-02 contract refuses a plugin-instance scope
+    (``plugin_instance_scope_denied``) because an instance cannot own registry evidence.
+
+    Anything that cannot be spelled as one of the three typed scopes yields ``None``, so
+    the read refuses with a named blocker instead of guessing an anchor.
+    """
+    if not isinstance(tenant_id, str) or not tenant_id.strip():
+        return None
+    if project_id is not None:
+        if not isinstance(project_id, str) or not project_id.strip():
+            return None
+        if not isinstance(cabinet_id, str) or not cabinet_id.strip():
+            return None
+        return ("project", project_id, cabinet_id, project_id)
+    if cabinet_id is not None:
+        if not isinstance(cabinet_id, str) or not cabinet_id.strip():
+            return None
+        return ("cabinet", cabinet_id, cabinet_id, None)
+    return ("tenant", tenant_id, None, None)
+
+
+def review_m04_scope_evidence(
+    *,
+    row: Any | None,
+    tenant_id: str,
+    anchor: tuple[str, str, str | None, str | None] | None,
+    scope_registry_id: str,
+    expected_digest: str | None,
+) -> tuple[tuple[str, ...], str, str]:
+    """Re-verify one stored M04-02 scope-evidence row against the exact partition.
+
+    Returns ``(blockers, row_id, canonical_digest)``. A present row that cannot be the
+    accepted evidence of *this* partition yields named blockers and empty ids, so the
+    caller refuses instead of assembling a partial object. The three refusals this task
+    names are exact: ``m04_scope_promotion_evidence_missing`` (no row), ``m04_scope_
+    evidence_not_ready`` (``outcome`` is not ``ready``) and ``m04_scope_evidence_digest_
+    mismatch`` (a digest column is malformed, or the row's canonical digest is not the
+    M04_scope gate digest the M05 promotion record cites).
+
+    ``expected_digest`` is the M05 record's ``M04_scope`` gate digest. When it is absent or
+    malformed the read already refuses with ``m04_scope_evidence_digest_missing`` upstream,
+    so no second refusal is invented here for the same cause.
+    """
+    if row is None:
+        return (M04_SCOPE_EVIDENCE_MISSING,), "", ""
+    blockers: list[str] = []
+    if getattr(row, "tenant_id", None) != tenant_id:
+        blockers.append("m04_scope_evidence_tenant_mismatch")
+    shape_ok = False
+    if anchor is not None:
+        scope_kind, scope_id, cabinet_id, project_id = anchor
+        shape_ok = (
+            getattr(row, "scope_kind", None) == scope_kind
+            and getattr(row, "scope_id", None) == scope_id
+            and (getattr(row, "cabinet_id", None) or None) == cabinet_id
+            and (getattr(row, "project_id", None) or None) == project_id
+        )
+    if not shape_ok:
+        blockers.append("m04_scope_evidence_scope_shape_mismatch")
+    stored_registry = getattr(row, "scope_registry_id", None)
+    if not isinstance(stored_registry, str) or stored_registry != scope_registry_id:
+        blockers.append("m04_scope_evidence_registry_mismatch")
+    if str(getattr(row, "outcome", "") or "").strip().lower() != "ready":
+        blockers.append(M04_SCOPE_EVIDENCE_NOT_READY)
+    canonical_digest = getattr(row, "canonical_digest", None)
+    digest_mismatch = not all(
+        is_sha256(getattr(row, column, None)) for column in M04_SCOPE_EVIDENCE_DIGEST_COLUMNS
+    )
+    if is_sha256(expected_digest) and canonical_digest != expected_digest:
+        digest_mismatch = True
+    if digest_mismatch:
+        blockers.append(M04_SCOPE_EVIDENCE_DIGEST_MISMATCH)
+    if blockers:
+        return tuple(blockers), "", ""
+    return (), str(row.id), str(canonical_digest)
+
+
 @dataclass(frozen=True, slots=True)
 class PartitionParts:
-    """Reviewed inputs of one partition read; assembled only from stored artefacts."""
+    """Reviewed inputs of one partition read; assembled only from stored artefacts.
+
+    ``scope_registry_id`` is the registry row the plugin instance is bound to (the
+    ``m04_scope_evidence_id`` identity); ``m04_scope_evidence_row_id`` and
+    ``m04_scope_evidence_digest`` are that row's own id and ``canonical_digest``, so the
+    assembled evidence can be traced back to the exact stored M04-02 row rather than to a
+    value inferred from M05 gates.
+    """
 
     m05_record: PromotionRecord
     m04e_marker: M05HandoffMarker
@@ -1825,6 +1964,8 @@ class PartitionParts:
     m06_row_id: str
     m06_schema_identity_digest: str
     m04_rls_evidence: ReviewedM04RlsEvidence
+    m04_scope_evidence_row_id: str
+    m04_scope_evidence_digest: str
 
 
 def assemble_partition_evidence(
@@ -1865,6 +2006,12 @@ def assemble_partition_evidence(
         blockers.append("m04e_gate_digest_differs_from_stored_marker")
     if not parts.scope_registry_id.strip():
         blockers.append("m04_scope_evidence_id_missing")
+    if not parts.m04_scope_evidence_row_id.strip():
+        blockers.append(M04_SCOPE_EVIDENCE_MISSING)
+    if not is_sha256(parts.m04_scope_evidence_digest):
+        blockers.append(M04_SCOPE_EVIDENCE_DIGEST_MISMATCH)
+    elif m04_scope_digest is not None and parts.m04_scope_evidence_digest != m04_scope_digest:
+        blockers.append(M04_SCOPE_EVIDENCE_DIGEST_MISMATCH)
     if not parts.instance_row_id.strip():
         blockers.append("m05_instance_runtime_evidence_id_missing")
     if not parts.m06_row_id.strip():
@@ -2001,6 +2148,32 @@ class SqlPartitionHandoffReadStore:
                 blockers.append("plugin_instance_not_published")
             elif not (instance.scope_registry_id or "").strip():
                 blockers.append("typed_scope_anchor_missing")
+            # M04-02 accepted scope/RLS evidence for the partition's *owner* scope. The
+            # row is read under the bound tenant and only when the instance anchors can be
+            # spelled as a typed owner scope; every condition is a named refusal, so a
+            # missing/blocked/inconsistent row can never be masked by the rest of the
+            # partition being healthy (and a healthy one adds no blocker).
+            scope_row_id = ""
+            scope_digest = ""
+            if instance is not None:
+                anchor = m04_scope_anchor(
+                    tenant_id=tenant_id,
+                    cabinet_id=instance.cabinet_id,
+                    project_id=instance.project_id,
+                )
+                scope_row = None
+                if anchor is not None:
+                    scope_row = await self._load_m04_scope_evidence_row(
+                        session, tenant_id, scope_kind=anchor[0], scope_id=anchor[1]
+                    )
+                scope_blockers, scope_row_id, scope_digest = review_m04_scope_evidence(
+                    row=scope_row,
+                    tenant_id=tenant_id,
+                    anchor=anchor,
+                    scope_registry_id=instance.scope_registry_id or "",
+                    expected_digest=_gate_digest(gates, "M04_scope"),
+                )
+                blockers.extend(scope_blockers)
             inventory = await self._load_inventory(
                 session, tenant_id, app_definition_id, app_version_id, plugin_instance_id
             )
@@ -2018,7 +2191,6 @@ class SqlPartitionHandoffReadStore:
                     blockers.append("m06_promotion_not_ready")
             rls_blockers, m04_rls = await self._verify_m04_rls(session)
             blockers.extend(rls_blockers)
-            blockers.extend(DECLARED_READ_BLOCKERS)
             if blockers:
                 return PartitionHandoffRead(None, tuple(blockers))
             assert marker_row is not None and instance is not None and m06_row is not None
@@ -2040,6 +2212,8 @@ class SqlPartitionHandoffReadStore:
                     m06_row_id=m06_row.id,
                     m06_schema_identity_digest=_m06_schema_digest(m06_row),
                     m04_rls_evidence=m04_rls,
+                    m04_scope_evidence_row_id=scope_row_id,
+                    m04_scope_evidence_digest=scope_digest,
                 ),
             )
             return PartitionHandoffRead(evidence, ())
@@ -2126,6 +2300,36 @@ class SqlPartitionHandoffReadStore:
                 PluginInstanceRegistryRow.definition_id == app_definition_id,
                 PluginInstanceRegistryRow.version_id == app_version_id,
             )
+        )
+
+    async def _load_m04_scope_evidence_row(
+        self,
+        session: AsyncSession,
+        tenant_id: str,
+        *,
+        scope_kind: str,
+        scope_id: str,
+    ) -> M04ScopePromotionEvidenceRow | None:
+        """Latest M04-02 scope-evidence revision for one typed owner scope.
+
+        The statement runs inside the tenant-bound transaction (``app.tenant_id`` is set
+        and read back before any query) *and* filters by the exact typed scope key, so a
+        row of another tenant or another scope is invisible twice over. ``recorded_at``
+        then ``revision_id`` order the append-only revisions deterministically: the newest
+        recorded row of the partition is the one the partition must be attested from.
+        """
+        return await session.scalar(
+            select(M04ScopePromotionEvidenceRow)
+            .where(
+                M04ScopePromotionEvidenceRow.tenant_id == tenant_id,
+                M04ScopePromotionEvidenceRow.scope_kind == scope_kind,
+                M04ScopePromotionEvidenceRow.scope_id == scope_id,
+            )
+            .order_by(
+                M04ScopePromotionEvidenceRow.recorded_at.desc(),
+                M04ScopePromotionEvidenceRow.revision_id.desc(),
+            )
+            .limit(1)
         )
 
     async def _load_inventory(
@@ -2466,6 +2670,10 @@ __all__ = [
     "M04E_BACKFILL_SCHEMA",
     "M04E_HANDOFF_SCHEMA",
     "M04_OWNER_TABLES",
+    "M04_SCOPE_EVIDENCE_DIGEST_COLUMNS",
+    "M04_SCOPE_EVIDENCE_DIGEST_MISMATCH",
+    "M04_SCOPE_EVIDENCE_MISSING",
+    "M04_SCOPE_EVIDENCE_NOT_READY",
     "M05_PROMOTION_SCHEMA",
     "M06_DEPENDENCY_KEYS",
     "MarkerAppendPlan",
@@ -2492,6 +2700,7 @@ __all__ = [
     "digest",
     "handoff_marker_row_values",
     "is_sha256",
+    "m04_scope_anchor",
     "m05_partition_id",
     "m06_partition_id",
     "marker_ledger_key",
@@ -2507,4 +2716,5 @@ __all__ = [
     "promotion_row_values",
     "record_from_payload",
     "record_payload",
+    "review_m04_scope_evidence",
 ]

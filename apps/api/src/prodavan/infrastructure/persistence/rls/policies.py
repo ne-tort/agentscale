@@ -413,6 +413,57 @@ _CANONICAL: tuple[TablePolicySpec, ...] = (
         tenant=ScopedColumn(column="tenant_id"),
         notes="Immutable review evidence; readable in-tenant, writable only by trusted writers.",
     ),
+    # --- M04E backfill ledger (2026110315, task MIG-DDL-M04E-LEDGER-01) ---
+    # The four tables the M04E EvidenceStore port needs: per-source first mapping,
+    # changed-digest observations, durable cursor and redacted audit. Every one
+    # carries its own ``tenant_id`` (the ledger is keyed by
+    # ``(tenant_id, definition_id)`` and has no FK to the definition row, so a
+    # blocked page can still record evidence for an unresolvable definition), hence
+    # a direct tenant anchor instead of a parent chain. The mapping/observations are
+    # written by the trusted migration writer only, so they need an ALL command for
+    # the trusted policy; the checkpoints row is mutated by that writer as well.
+    TablePolicySpec(
+        table="m04e_definition_version_mappings",
+        owner_revision="2026110315",
+        tenant=ScopedColumn(column="tenant_id"),
+        trusted_command="ALL",
+        notes=(
+            "First mapping ever recorded for one exact source identity; append-only, "
+            "written by the trusted migration writer. Readable in-tenant."
+        ),
+    ),
+    TablePolicySpec(
+        table="m04e_definition_version_quarantine",
+        owner_revision="2026110315",
+        tenant=ScopedColumn(column="tenant_id"),
+        trusted_command="ALL",
+        notes=(
+            "Redacted changed-digest observation. Append-only; only reason codes, "
+            "digests and actionable guidance, never payload."
+        ),
+    ),
+    TablePolicySpec(
+        table="m04e_definition_version_checkpoints",
+        owner_revision="2026110315",
+        tenant=ScopedColumn(column="tenant_id"),
+        trusted_command="ALL",
+        notes=(
+            "Durable per-partition cursor read FOR UPDATE and advanced by CAS. The "
+            "trusted migration writer needs both SELECT and UPDATE, so the trusted "
+            "policy is FOR ALL."
+        ),
+    ),
+    TablePolicySpec(
+        table="m04e_definition_version_audit",
+        owner_revision="2026110315",
+        tenant=ScopedColumn(column="tenant_id"),
+        trusted_command="ALL",
+        notes=(
+            "Append-only redacted page audit: event kind, reason code, correlation, "
+            "checkpoint, actor and numeric counters. UPDATE/DELETE are denied by the "
+            "revision's append-only trigger, not by the policy."
+        ),
+    ),
     # --- M04 accepted scope/RLS evidence (2026110313) ---
     # MIG-DDL-M04EVID-01 creates this table; the policy itself is installed by the next
     # registry re-apply revision, because a table-adding revision cannot install its own

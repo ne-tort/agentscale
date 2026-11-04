@@ -261,3 +261,86 @@ def promotion_row_view(values: Mapping[str, Any]) -> _RowView:
         target_digest=values["target_digest"],
         gate_evidence=values["gate_evidence"],
     )
+
+
+# ---------------------------------------------------------------------------
+# M04-02 accepted scope evidence (m04_scope_promotion_evidence)
+# ---------------------------------------------------------------------------
+
+M04_SCOPE_ROW_ID = "m04scope-evidence-1"
+M04_SCOPE_REVISION_ID = "m04scope-revision-1"
+M04_SCOPE_REGISTRY_ID = "scope-registry-evidence-1"
+
+
+def scope_evidence_row(**overrides: Any) -> Any:
+    """A complete accepted M04-02 row in ORM *state*, never persisted.
+
+    ``canonical_digest`` defaults to :data:`M04_SCOPE_DIGEST`, the same digest the M05
+    promotion record cites as its ``M04_scope`` gate, so a default row is the row that
+    attests the default partition. Every override is a named negative case.
+    """
+    from prodavan.infrastructure.persistence.models.m04_scope_evidence import (
+        M04ScopePromotionEvidenceRow,
+    )
+
+    values: dict[str, Any] = {
+        "id": M04_SCOPE_ROW_ID,
+        "tenant_id": TENANT,
+        "scope_kind": "tenant",
+        "scope_id": TENANT,
+        "cabinet_id": None,
+        "project_id": None,
+        "scope_registry_id": M04_SCOPE_REGISTRY_ID,
+        "revision_id": M04_SCOPE_REVISION_ID,
+        "previous_revision_id": None,
+        "outcome": "ready",
+        "source_snapshot_id": SNAPSHOT_ID,
+        "source_snapshot_digest": SNAPSHOT_DIGEST,
+        "canonical_digest": M04_SCOPE_DIGEST,
+        "canonical_schema_version": "scope-registry.v1",
+        "checkpoint_digest": M04E_GATE_DIGEST,
+        "gate_evidence_digest": M05_RUNTIME_DIGEST,
+        "rls_policy_digest": M06_SCHEMA_DIGEST,
+        "rls_security_review_id": "rls-review-evidence",
+        "rls_database_role": "prodavan_migration",
+        "gate_evidence": {"gates": [], "redaction": "identifiers_digests_counts_only"},
+        "reason_code": None,
+        "writer_generation": 3,
+        "correlation_id": "corr-evidence",
+        "actor_id": "actor-evidence",
+        "canonical_positive_writes": False,
+    }
+    values.update(overrides)
+    return M04ScopePromotionEvidenceRow(**values)
+
+
+class RecordingStatementSession:
+    """Minimal read-only session stub: records the statement, returns one preset row.
+
+    Used only to inspect the exact SQL a single loader emits (filters and ordering), not
+    to emulate a database. Foreign-partition invisibility is proved by the compiled
+    predicate, not by the stub's answer.
+    """
+
+    def __init__(self, row: Any = None) -> None:
+        self._row = row
+        self.statements: list[Any] = []
+
+    async def scalar(self, statement: Any) -> Any:
+        self.statements.append(statement)
+        return self._row
+
+    async def execute(self, statement: Any, *args: Any, **kwargs: Any) -> Any:
+        self.statements.append(statement)
+        raise AssertionError("this stub only answers scalar() loads")
+
+    def compiled(self, index: int = -1) -> str:
+        return str(self.statements[index].compile(
+            dialect=_postgresql_dialect(), compile_kwargs={"literal_binds": False}
+        ))
+
+
+def _postgresql_dialect() -> Any:
+    from sqlalchemy.dialects import postgresql
+
+    return postgresql.dialect()

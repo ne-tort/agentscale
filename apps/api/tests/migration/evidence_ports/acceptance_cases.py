@@ -101,6 +101,52 @@ ACCEPTANCE_CASES: tuple[AcceptanceCase, ...] = (
         "not written: requires a provisioned non-superuser role (see rls registry review)",
         executable=False,
     ),
+    # --- MIG-EVIDENCE-M04READ-01: the M04-02 scope link of read_partition ---
+    AcceptanceCase(
+        "m04_scope_ready_row_is_accepted",
+        "SqlPartitionHandoffReadStore.read_partition / review_m04_scope_evidence",
+        "a stored 'ready' M04-02 row attests the partition and adds no blocker",
+        "test_m04_scope_read.py::test_a_ready_row_is_consumed_and_adds_no_blocker",
+    ),
+    AcceptanceCase(
+        "m04_scope_absent_row_is_missing",
+        "review_m04_scope_evidence",
+        "no row for the partition's owner scope -> m04_scope_promotion_evidence_missing",
+        "test_m04_scope_read.py::test_an_absent_row_is_the_missing_evidence_refusal",
+    ),
+    AcceptanceCase(
+        "m04_scope_non_ready_row_is_refused",
+        "review_m04_scope_evidence",
+        "outcome blocked/quarantined -> m04_scope_evidence_not_ready",
+        "test_m04_scope_read.py::test_a_non_ready_row_records_a_refusal_and_is_not_accepted",
+    ),
+    AcceptanceCase(
+        "m04_scope_digest_must_match",
+        "review_m04_scope_evidence / assemble_partition_evidence",
+        "a digest column or canonical digest disagreeing with the M05 M04_scope gate -> "
+        "m04_scope_evidence_digest_mismatch",
+        "test_m04_scope_read.py::test_a_row_digest_that_differs_from_the_m05_gate_is_a_mismatch",
+    ),
+    AcceptanceCase(
+        "m04_scope_foreign_partition_invisible",
+        "SqlPartitionHandoffReadStore._load_m04_scope_evidence_row",
+        "the statement filters tenant + typed scope and a foreign/other-scope row is refused",
+        "test_m04_scope_read.py::test_the_m04_scope_statement_is_tenant_and_scope_bound_and_takes_the_latest",
+    ),
+    AcceptanceCase(
+        "m04_scope_blocker_is_conditional",
+        "SqlPartitionHandoffReadStore.read_partition",
+        "DECLARED_READ_BLOCKERS is no longer appended to every read",
+        "test_m04_scope_read.py::test_read_partition_no_longer_appends_the_declared_blockers_unconditionally",
+    ),
+    AcceptanceCase(
+        "m04_scope_read_under_real_database",
+        "SqlPartitionHandoffReadStore.read_partition",
+        "a ready row written by the M04-02 writer is consumed end to end with RLS installed",
+        "not written: no production writer for m04_scope_promotion_evidence exists yet "
+        "(SCHEMA_BLOCKERS: m04_scope_evidence_writer_absent)",
+        executable=False,
+    ),
 )
 
 

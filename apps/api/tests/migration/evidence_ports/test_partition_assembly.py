@@ -79,6 +79,10 @@ def parts(**overrides) -> PartitionParts:
         "m06_row_id": "m06promo-evidence-1",
         "m06_schema_identity_digest": M06_SCHEMA_DIGEST,
         "m04_rls_evidence": reviewed_rls(),
+        # Stored M04-02 scope-evidence row (m04_scope_promotion_evidence); its digest is
+        # the same value the M05 record cites as its M04_scope gate.
+        "m04_scope_evidence_row_id": "m04scope-evidence-1",
+        "m04_scope_evidence_digest": M04_SCOPE_DIGEST,
     }
     values.update(overrides)
     return PartitionParts(**values)
@@ -117,6 +121,10 @@ def test_a_complete_partition_produces_exactly_one_accepted_evidence_object():
     assert evidence.final_delta_checkpoint == promotion_record().final_delta_checkpoint_digest
     assert evidence.inventory_digest == inventory_digest(_accepted_sources())
     assert evidence.accepted_sources == _accepted_sources()
+    # The M04-02 scope link is attested from the stored row, not from the M05 gate value.
+    assert evidence.m04_scope_evidence_id == "scope-registry-1"
+    assert parts().m04_scope_evidence_row_id == "m04scope-evidence-1"
+    assert parts().m04_scope_evidence_digest == evidence.m04_scope_digest
 
 
 def test_the_accepted_inventory_is_canonically_ordered():
@@ -153,6 +161,10 @@ def test_the_accepted_inventory_is_canonically_ordered():
         ({"m06_schema_identity_digest": ""}, "m06_schema_identity_digest_missing"),
         ({"instance_version_id": "version-other"}, "plugin_instance_version_mismatch"),
         ({"accepted_sources": ()}, "m06_accepted_source_inventory_missing"),
+        ({"m04_scope_evidence_row_id": ""}, "m04_scope_promotion_evidence_missing"),
+        ({"m04_scope_evidence_digest": ""}, "m04_scope_evidence_digest_mismatch"),
+        ({"m04_scope_evidence_digest": "sha256:" + "0" * 64},
+         "m04_scope_evidence_digest_mismatch"),
         ({"m05_record": promotion_record(gate_evidence=())}, "m04_scope_evidence_digest_missing"),
         (
             {"m05_record": promotion_record(gate_evidence=(
