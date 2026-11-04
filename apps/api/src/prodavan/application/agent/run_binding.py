@@ -1061,6 +1061,32 @@ class DurableRunBindingBridge:
             clock=self._clock,
         )
 
+    async def _atomic(self, awaitable: Any) -> ControlPlaneWriteResult:
+        """Await one control-plane write, mapping every failure to a named code.
+
+        ``DurableAgentControlPlane`` raises for a rejected command
+        (``ValueError``), for a failed port call (``ControlPlaneWriteError``) and
+        for an inconsistent port result (``ControlPlaneResultError``). None of
+        those may escape as an opaque exception or degrade into a fallback write.
+        """
+        try:
+            return await awaitable
+        except RunBindingError:
+            raise
+        except ValueError as exc:
+            raise RunBindingError(
+                CODE_ATOMIC_WRITE_REJECTED,
+                BLOCKER_TURN_UNBOUND,
+                detail="the control-plane command was rejected by its contract",
+            ) from exc
+        except Exception as exc:  # noqa: BLE001 - redacted into a stable code
+            logger.warning("run binding atomic write failed error=%s", type(exc).__name__)
+            raise RunBindingError(
+                CODE_ATOMIC_WRITE_REJECTED,
+                BLOCKER_TURN_UNBOUND,
+                detail="the control-plane write failed",
+            ) from exc
+
     async def _commit_frame(
         self,
         *,

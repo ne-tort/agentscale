@@ -696,12 +696,20 @@ class AgentRunIntentHandler:
         handler that retried unconditionally would bypass the attempts cap it
         applies to its own retries.  At ``max_attempts`` this becomes the same
         terminal ``intent_attempts_exhausted`` refusal.
+
+        The delay is exponential in the attempt counter and floored by
+        ``retry_delay_seconds``, so an intent is never scheduled back into the
+        claim window in the same instant it was leased, and capped by
+        ``max_retry_backoff_seconds`` so a poison pill cannot hide for a week.
         """
         if intent.attempts >= self._max_attempts:
             return rejected(IntentDispatchReason.ATTEMPTS_EXHAUSTED)
         delay = min(
             self._max_retry_backoff_seconds,
-            self._retry_backoff_seconds * (2 ** (intent.attempts - 1)),
+            max(
+                self._retry_delay_seconds,
+                self._retry_backoff_seconds * (2 ** (intent.attempts - 1)),
+            ),
         )
         return IntentDispatchOutcome(
             action=IntentDispatchAction.RETRY,
