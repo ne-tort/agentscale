@@ -464,8 +464,8 @@ class FakeTransitions:
 
 
 def retry_journal_row(
-    *,
     journal: FakeRetryJournal,
+    *,
     run_id: str = "agr_1",
     tenant_id: str = "tenant-a",
     project_id: str = "project-1",

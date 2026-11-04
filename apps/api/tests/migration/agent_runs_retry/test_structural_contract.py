@@ -93,14 +93,30 @@ def test_reason_codes_are_redacted_namespaced_constants() -> None:
 
 
 def test_sql_adapters_fail_closed_before_touching_schema() -> None:
-    for module, adapter, blocker in (
-        (retry_module, "SqlAlchemyAgentRunRetryJournal", retry_module.RETRY_TABLE_BLOCKER),
-        (reconcile_module, "SqlAlchemyUnknownOutcomeJournal", reconcile_module.RECONCILE_BLOCKER_TABLE),
+    for module, adapter, blocker, constant_name in (
+        (
+            retry_module,
+            "SqlAlchemyAgentRunRetryJournal",
+            retry_module.RETRY_TABLE_BLOCKER,
+            "RETRY_TABLE_BLOCKER",
+        ),
+        (
+            reconcile_module,
+            "SqlAlchemyUnknownOutcomeJournal",
+            reconcile_module.RECONCILE_BLOCKER_TABLE,
+            "RECONCILE_BLOCKER_TABLE",
+        ),
     ):
         cls = getattr(module, adapter)
         assert hasattr(cls, "ensure_ready")
         source = inspect.getsource(cls.ensure_ready)
-        assert blocker in source
+        # The adapter may name the blocker literally or through its module
+        # constant; both are one source of truth, so accept either. Requiring the
+        # literal would force the constant to be duplicated at the call site.
+        assert blocker in source or constant_name in source, (adapter, blocker)
+        # And the constant itself must still carry the documented code, so a
+        # renamed constant cannot silently weaken this check.
+        assert getattr(module, constant_name) == blocker
         assert "ProgrammingError" in source
 
 

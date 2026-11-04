@@ -10,7 +10,7 @@ from prodavan.application.migration.scope_registry_adapter import (
 )
 from prodavan.application.scope_registry.contracts import OwnerState, ScopeKind
 from prodavan.application.migration.scope_registry_adapter.ports import ScopeRegistryEvidenceIds
-from acceptance_fixtures import (
+from .acceptance_fixtures import (
     accepted_entry,
     accepted_gate,
     cabinet_anchors,

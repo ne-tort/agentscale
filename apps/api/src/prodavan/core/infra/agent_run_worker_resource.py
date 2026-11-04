@@ -77,6 +77,7 @@ the exception *class* only, and every audit-ish string is a fixed reason code.
 from __future__ import annotations
 
 import asyncio
+import copy
 import logging
 import uuid
 from collections.abc import Callable
@@ -500,7 +501,11 @@ class _LoopState:
             "started_at": _iso(self.started_at),
             "last_tick_at": _iso(self.last_tick_at),
             "last_reason": self.last_reason,
-            "last_result": dict(self.last_result),
+            # A shallow ``dict()`` would share the inner result mapping with the
+            # live loop, so a snapshot taken before a tick would be rewritten by
+            # that tick. Callers (health report, tests, an operator reading the
+            # only report the loop exposes) need the values as of the call.
+            "last_result": copy.deepcopy(dict(self.last_result)),
             "ticks": self.ticks,
             "errors": self.errors,
             "last_error_class": self.last_error_class,
@@ -679,7 +684,17 @@ class AgentRunWorkerResource(LifespanResource):
     # -- one bounded round (also the seam acceptance checks drive) ---------
 
     async def drain_consumer_once(self) -> dict[str, Any]:
-        """One bounded consumer round under the advisory lock."""
+        """One bounded consumer round under the advisory lock.
+
+        The result is published on the loop state before returning, so a round
+        driven directly (operator drain, probe, test) is visible in ``report()``
+        exactly like a loop tick.
+        """
+        result = await self._drain_consumer_round()
+        self._record_round(self._consumer, result)
+        return result
+
+    async def _drain_consumer_round(self) -> dict[str, Any]:
         self._ensure_dependencies()
         blockers = self._blockers_for(self._consumer)
         self._consumer.blockers = blockers
@@ -719,8 +734,35 @@ class AgentRunWorkerResource(LifespanResource):
             "repaired": int(report.repaired),
         }
 
+    def _record_round(self, loop: _LoopState, result: dict[str, Any]) -> None:
+        """Publish one manually driven round exactly as the loop would.
+
+        ``report()`` reads the loop state, not the return value of a round, so a
+        round invoked outside the loop (operator drain, admin probe, test) would
+        leave the report describing an older tick -- or nothing at all. Both entry
+        points go through here so the observable state has one author.
+
+        ``ticks`` is not incremented here: it counts *attempts*, including ones
+        that raised, and the loop owns that counter for both paths.
+        """
+        skipped = bool(result.get("skipped"))
+        loop.last_tick_at = self._now()
+        loop.last_reason = str(
+            result.get("reason") or (REASON_SKIPPED if skipped else REASON_OK)
+        )
+        loop.last_result = _redacted(result)
+
     async def run_worker_round_once(self) -> dict[str, Any]:
-        """One bounded run-worker round (claim → execute → settle) under the lock."""
+        """One bounded run-worker round (claim → execute → settle) under the lock.
+
+        Like the consumer round, it publishes its own result so a directly driven
+        round is visible in ``report()``.
+        """
+        result = await self._run_worker_round()
+        self._record_round(self._worker, result)
+        return result
+
+    async def _run_worker_round(self) -> dict[str, Any]:
         self._ensure_dependencies()
         blockers = self._blockers_for(self._worker)
         self._worker.blockers = blockers
@@ -773,8 +815,9 @@ class AgentRunWorkerResource(LifespanResource):
         )
         try:
             while self._stop is not None and not self._stop.is_set():
+                # A tick is an *attempt*: it counts even when the round raises,
+                # otherwise a loop that fails forever would report zero activity.
                 loop.ticks += 1
-                loop.last_tick_at = self._now()
                 try:
                     result = await tick()
                 except asyncio.CancelledError:
@@ -783,6 +826,7 @@ class AgentRunWorkerResource(LifespanResource):
                     # Class name only: an exception message can carry a run
                     # identifier, a prompt fragment or a connection string.
                     loop.errors += 1
+                    loop.last_tick_at = self._now()
                     loop.last_error_class = type(exc).__qualname__
                     loop.last_reason = REASON_TICK_FAILED
                     loop.last_result = {}
@@ -792,12 +836,10 @@ class AgentRunWorkerResource(LifespanResource):
                         loop.last_error_class,
                     )
                 else:
-                    skipped = bool(result.get("skipped"))
-                    loop.last_reason = str(
-                        result.get("reason") or (REASON_SKIPPED if skipped else REASON_OK)
-                    )
-                    loop.last_result = _redacted(result)
-                    if not skipped:
+                    # The round already published itself through ``_record_round``;
+                    # the loop only logs. Recording here as well would count every
+                    # tick twice.
+                    if not result.get("skipped"):
                         logger.debug(
                             "agent run %s loop tick result=%s", loop.name, loop.last_result
                         )

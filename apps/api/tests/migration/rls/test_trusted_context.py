@@ -27,7 +27,7 @@ from prodavan.infrastructure.persistence.rls.context import (
     trusted_tenant_transaction_sync,
 )
 from prodavan.infrastructure.persistence.rls.policies import TRUSTED_SERVICE_ROLE
-from acceptance_fixtures import (
+from .acceptance_fixtures import (
     ASSERTIONS,
     CABINET_A,
     CABINET_B,

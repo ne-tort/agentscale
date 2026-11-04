@@ -25,7 +25,7 @@ from prodavan.application.migration.m04e_definition_version.repository import (
     ServerDefinitionVersionRepository,
 )
 from prodavan.domain.dynamic_apps import AppLifecycleStatus
-from acceptance_fixtures import (
+from .acceptance_fixtures import (
     DEFINITION,
     MANIFEST_VERSION,
     SNAPSHOT_DIGEST,

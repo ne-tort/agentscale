@@ -25,7 +25,7 @@ from prodavan.infrastructure.persistence.migration_scope.adapter import (
     _policy_digest,
     _policy_shape_is_restrictive,
 )
-from acceptance_fixtures import candidate, checkpoint, trusted_context
+from tests.migration.m04_scope.acceptance_fixtures import candidate, checkpoint, trusted_context
 
 
 class _Rows:
@@ -354,13 +354,13 @@ def test_policy_review_requires_command_appropriate_using_and_with_check():
 
 
 def checkpoint_stream():
-    from acceptance_fixtures import scope_stream
+    from tests.migration.m04_scope.acceptance_fixtures import scope_stream
 
     return scope_stream()
 
 
 def item_anchors():
-    from acceptance_fixtures import cabinet_anchors
+    from tests.migration.m04_scope.acceptance_fixtures import cabinet_anchors
 
     return cabinet_anchors()
 

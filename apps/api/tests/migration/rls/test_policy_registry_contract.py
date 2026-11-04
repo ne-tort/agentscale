@@ -35,7 +35,7 @@ from prodavan.infrastructure.persistence.rls.policies import (
     uncovered_relations,
     upgrade_guard_sql,
 )
-from acceptance_fixtures import BOUNDARY, NEGATIVE_CASES, restricted_tables
+from .acceptance_fixtures import BOUNDARY, NEGATIVE_CASES, restricted_tables
 
 #: Every table the wave creates, grouped by the revision that creates it.  The
 #: registry must cover exactly this set; adding a table to the schema without a

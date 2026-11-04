@@ -11,7 +11,7 @@ from __future__ import annotations
 import pytest
 
 from prodavan.infrastructure.persistence.rls.policies import CANONICAL_TABLE_POLICIES
-from acceptance_fixtures import (
+from .acceptance_fixtures import (
     CABINET_A,
     CABINET_B,
     CONTEXTS,

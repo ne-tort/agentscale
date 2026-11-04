@@ -41,11 +41,18 @@ def project_anchors() -> ScopeAnchors:
 
 
 def plugin_anchors() -> ScopeAnchors:
+    """A well-formed plugin-instance anchor.
+
+    The contract requires ``scope_id == plugin_instance_id`` for this kind, so the
+    fixture names both rather than only the scope id; an anchor that cannot be
+    constructed proves nothing about the plugin denial path it is used for.
+    """
     return ScopeAnchors(
         scope_kind=ScopeKind.PLUGIN_INSTANCE,
         scope_id="plugin-1",
         tenant_id=TENANT,
         cabinet_id=CABINET,
+        plugin_instance_id="plugin-1",
     )
 
 

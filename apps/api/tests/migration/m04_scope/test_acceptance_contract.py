@@ -28,7 +28,7 @@ from prodavan.application.scope_registry.contracts import (
     ScopeAnchors,
     ScopeKind,
 )
-from acceptance_fixtures import (
+from .acceptance_fixtures import (
     CABINET,
     CORRELATION,
     TENANT,

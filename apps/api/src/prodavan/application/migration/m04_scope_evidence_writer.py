@@ -59,6 +59,17 @@ transaction and compared field by field (``m04_scope_evidence_readback_mismatch`
 
 This module deliberately does not wire itself into ``composition.py`` and does not touch
 ``evidence_ports.py``; both are owned by other tasks.
+
+Open gaps this writer does not close
+------------------------------------
+* ``composition.py`` still does not construct the writer, so nothing calls it in production
+  yet (the module is import-safe and fail-closed on its own).
+* ``evidence_ports.SCHEMA_BLOCKERS`` still lists ``m04_scope_evidence_writer_absent``; that
+  text is stale now but the module owns it.
+* The table's RLS policy is installed by the follow-up registry re-apply revision
+  (``2026110313`` only creates the table), so the database-side append-only gate and the
+  policy are still pending, exactly as the model records in
+  ``M04_SCOPE_EVIDENCE_DEFERRED``.
 """
 
 from __future__ import annotations
@@ -207,6 +218,10 @@ M04_SCOPE_EVIDENCE_RECORDED_AT_INVALID = "m04_scope_evidence_recorded_at_invalid
 M04_SCOPE_EVIDENCE_REDACTION_VIOLATION = "redaction_violation:m04_scope_evidence"
 M04_SCOPE_EVIDENCE_REVISION_CONTENT_CONFLICT = "m04_scope_evidence_revision_content_conflict"
 M04_SCOPE_EVIDENCE_CONCURRENT_APPEND_CONFLICT = "m04_scope_evidence_concurrent_append_conflict"
+M04_SCOPE_EVIDENCE_CONSTRAINT_VIOLATION = "m04_scope_evidence_constraint_violation"
+M04_SCOPE_EVIDENCE_REGISTRY_REFERENCE_INVALID = (
+    "m04_scope_evidence_registry_reference_invalid"
+)
 M04_SCOPE_EVIDENCE_READBACK_MISSING = "m04_scope_evidence_readback_missing"
 M04_SCOPE_EVIDENCE_READBACK_MISMATCH = "m04_scope_evidence_readback_mismatch"
 
@@ -434,13 +449,23 @@ class ScopeEvidenceAppend:
 def _assert_redacted(mapping: Mapping[str, Any], *, where: str) -> None:
     """Refuse to persist a key that could carry payload material.
 
-    Stricter than a filter: silently dropping evidence would hide a redaction bug.
+    Stricter than a filter and deeper than ``evidence_ports._assert_redacted``: silently
+    dropping evidence would hide a redaction bug, and a nested envelope is exactly where a
+    raw source payload would hide. Every dict/list level is walked.
     """
-    for key in mapping:
+    for key, value in mapping.items():
         lowered = str(key).lower()
         for marker in _REDACTED_KEY_MATERIAL:
             if marker in lowered:
-                raise MigrationEvidenceBlocked((f"{M04_SCOPE_EVIDENCE_REDACTION_VIOLATION}:{where}:{key}",))
+                raise MigrationEvidenceBlocked(
+                    (f"{M04_SCOPE_EVIDENCE_REDACTION_VIOLATION}:{where}:{key}",)
+                )
+        if isinstance(value, Mapping):
+            _assert_redacted(value, where=f"{where}:{key}")
+        elif isinstance(value, (list, tuple)):
+            for index, item in enumerate(value):
+                if isinstance(item, Mapping):
+                    _assert_redacted(item, where=f"{where}:{key}:{index}")
 
 
 def _blank(value: object) -> bool:
@@ -671,7 +696,8 @@ def _ready_evidence(write: ScopeEvidenceWrite) -> tuple[ScopeRegistryEntry, str]
     if (
         not evidence.parent_proof.valid_for_scope(entry.anchors.scope_kind)
         or evidence.parent_evidence.invalid_reason_for(entry.anchors) is not None
-    ):        raise MigrationEvidenceBlocked((M04_SCOPE_EVIDENCE_READY_REQUIRES_PARENT,))
+    ):
+        raise MigrationEvidenceBlocked((M04_SCOPE_EVIDENCE_READY_REQUIRES_PARENT,))
     if not _rls_is_proven(evidence.rls_evidence, write.anchors):
         raise MigrationEvidenceBlocked((M04_SCOPE_EVIDENCE_READY_REQUIRES_RLS,))
     actor = evidence.actor_membership_evidence
@@ -705,6 +731,12 @@ def scope_evidence_row_values(
         raise MigrationEvidenceBlocked((M04_SCOPE_EVIDENCE_RESOLUTION_INVALID,))
     if not isinstance(write.resolution, ScopeResolutionResult):
         raise MigrationEvidenceBlocked((M04_SCOPE_EVIDENCE_RESOLUTION_INVALID,))
+    try:
+        # Fail closed on an unknown provider verdict: the table's check admits only three
+        # states, and a string that is not one of the resolver's outcomes has no mapping.
+        verdict = ScopeResolution(write.resolution.outcome)
+    except ValueError as exc:
+        raise MigrationEvidenceBlocked((M04_SCOPE_EVIDENCE_RESOLUTION_INVALID,)) from exc
     if not isinstance(write.anchors, ScopeAnchors):
         raise MigrationEvidenceBlocked((M04_SCOPE_EVIDENCE_SCOPE_SHAPE_INVALID,))
     anchors = write.anchors
@@ -753,7 +785,7 @@ def scope_evidence_row_values(
     if len(registry_id) > M04_SCOPE_EVIDENCE_REGISTRY_WIDTH:
         raise MigrationEvidenceBlocked((M04_SCOPE_EVIDENCE_REGISTRY_WIDTH_INVALID,))
 
-    outcome = _OUTCOME_BY_RESOLUTION.get(write.resolution.outcome)
+    outcome = _OUTCOME_BY_RESOLUTION.get(verdict)
     if outcome is None:
         raise MigrationEvidenceBlocked((M04_SCOPE_EVIDENCE_RESOLUTION_INVALID,))
 
@@ -842,13 +874,15 @@ def scope_evidence_row_values(
         "actor_id": actor_id,
         "canonical_positive_writes": False,
     }
-    revision_id = str(write.revision_id or m04_scope_evidence_revision_id(values)).strip()
+    revision_id = str(write.revision_id or m04_scope_evidence_revision_id(values=values)).strip()
     if not revision_id:
         raise MigrationEvidenceBlocked((M04_SCOPE_EVIDENCE_REVISION_WIDTH_INVALID,))
     if len(revision_id) > M04_SCOPE_EVIDENCE_REVISION_WIDTH:
         raise MigrationEvidenceBlocked((M04_SCOPE_EVIDENCE_REVISION_WIDTH_INVALID,))
     if write.previous_revision_id is not None:
         previous = str(write.previous_revision_id).strip()
+        if not previous:
+            raise MigrationEvidenceBlocked((M04_SCOPE_EVIDENCE_REVISION_WIDTH_INVALID,))
         if len(previous) > M04_SCOPE_EVIDENCE_REVISION_WIDTH:
             raise MigrationEvidenceBlocked((M04_SCOPE_EVIDENCE_REVISION_WIDTH_INVALID,))
         if previous == revision_id:
@@ -918,6 +952,23 @@ def plan_scope_evidence_append(
 # ---------------------------------------------------------------------------
 
 
+#: Fragments identifying which database constraint rejected the insert. Classified by name
+#: rather than swallowed: a lost insert race is a conflict to retry, an unproven registry
+#: reference or a check violation is a bug that must not be reported as "try again".
+_UNIQUE_RACE_FRAGMENTS = ("uq_m04_scope_promotion_revision", "duplicate key value")
+_REGISTRY_REFERENCE_FRAGMENTS = ("fk_m04_scope_promotion_registry", "foreign key")
+
+
+def _classify_integrity_error(exc: IntegrityError) -> Exception:
+    """Map one rejected insert onto the refusal class its constraint means."""
+    message = str(getattr(exc, "orig", "") or exc).lower()
+    if any(fragment in message for fragment in _UNIQUE_RACE_FRAGMENTS):
+        return MigrationEvidenceConflict((M04_SCOPE_EVIDENCE_CONCURRENT_APPEND_CONFLICT,))
+    if any(fragment in message for fragment in _REGISTRY_REFERENCE_FRAGMENTS):
+        return MigrationEvidenceBlocked((M04_SCOPE_EVIDENCE_REGISTRY_REFERENCE_INVALID,))
+    return MigrationEvidenceBlocked((M04_SCOPE_EVIDENCE_CONSTRAINT_VIOLATION,))
+
+
 class _WriterBoundaries:
     """One database transaction per append, always tenant-bound first."""
 
@@ -978,9 +1029,7 @@ class SqlM04ScopeEvidenceWriter:
             try:
                 await session.flush()
             except IntegrityError as exc:
-                raise MigrationEvidenceConflict(
-                    (M04_SCOPE_EVIDENCE_CONCURRENT_APPEND_CONFLICT,)
-                ) from exc
+                raise _classify_integrity_error(exc) from exc
             readback = await self._load_revision(session, values)
             if readback is None:
                 raise MigrationEvidenceCorrupt((M04_SCOPE_EVIDENCE_READBACK_MISSING,))
@@ -1026,6 +1075,7 @@ __all__ = [
     "M04_SCOPE_EVIDENCE_CANONICAL_SCHEMA_WIDTH",
     "M04_SCOPE_EVIDENCE_IMMUTABLE_FIELDS",
     "M04_SCOPE_EVIDENCE_KIND",
+    "M04_SCOPE_EVIDENCE_REGISTRY_REFERENCE_INVALID",
     "M04_SCOPE_EVIDENCE_SCHEMA",
     "PLUGIN_INSTANCE_SCOPE_DENIED",
     "RLS_ENFORCEMENT_FLAGS",

@@ -235,8 +235,22 @@ async def test_crash_between_decision_and_transition_resumes_with_the_same_comma
         state=UnknownOutcomeState.DECIDED,
         resolved_at=None,
         resolved_status=None,
-        claim_token=None,
-        lease_until=None,
+        # ``_decided_case`` persists the observation's failure code in the reason
+        # field, and for a non-resolved, non-quarantined state the record demands
+        # an ``agent_run.error.*`` code there. Keeping the *resolution* reason
+        # instead (``agent_run.reconcile.*``) would describe a row the domain
+        # cannot construct, so the simulated crash has to carry the error code
+        # too -- otherwise the test asserts on an impossible state.
+        reason_code=failed_observation().failure_code,
+        # A crash lets the claim expire; it does not erase it. Clearing the token
+        # outright models another forbidden state ("an active case requires a
+        # claim token, lease and positive generation"), so the durable row keeps a
+        # claim with a positive generation whose lease has run out -- which is what
+        # a rebooted peer actually leaves behind, and what lets the next reconciler
+        # reclaim the case and re-apply the same command idempotently.
+        claim_token=durable.claim_token or "claim-from-first-decision",
+        claim_generation=max(durable.claim_generation, 1),
+        lease_until=LATER - timedelta(minutes=5),
     )
     transitions.run_status[case.run_id] = "running"
 

@@ -198,12 +198,18 @@ def test_any_enabled_requires_at_least_one_flag() -> None:
 
 
 def test_resource_is_registered_after_the_database_resource() -> None:
-    """Static check: the wiring module registers it immediately after the DB."""
+    """Static check: the host resource is registered immediately after the DB.
+
+    The wiring now composes the resource through ``build_agent_run_host_resource``
+    rather than registering a bare ``AgentRunWorkerResource``: the bundle has to
+    publish the dependency seam and hand the resource an addressed dispatcher, and
+    neither is possible with the bare constructor.
+    """
     from prodavan.core import wiring
 
     source = inspect.getsource(wiring.build_lifespan_manager)
     database_at = source.index("manager.register(DatabaseEngineResource())")
-    host_at = source.index("manager.register(AgentRunWorkerResource())")
+    host_at = source.index("manager.register(build_agent_run_host_resource())")
     assert database_at < host_at, "the loops must start after the engine"
     # And before the loop-heavy tail (samplers/workers), so shutdown order makes
     # the loops stop before the storage they depend on.
@@ -214,8 +220,11 @@ def test_import_is_present_once() -> None:
     from prodavan.core import wiring
 
     source = inspect.getsource(wiring)
-    assert source.count("from prodavan.core.infra.agent_run_worker_resource import") == 1
-    assert source.count("manager.register(AgentRunWorkerResource())") == 1
+    assert source.count("from prodavan.core.infra.agent_run_bundle import") == 1
+    assert source.count("manager.register(build_agent_run_host_resource())") == 1
+    # The bare resource constructor must not be registered anywhere: registering
+    # it would bypass the bundle and leave both loops idling on an empty seam.
+    assert "manager.register(AgentRunWorkerResource())" not in source
 
 
 def test_registered_name_does_not_collide() -> None:

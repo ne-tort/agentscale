@@ -52,7 +52,7 @@ from prodavan.infrastructure.persistence.agent_control_plane.repository import (
     SqlAlchemyAgentControlPlaneRepository,
 )
 
-from .acceptance_fixtures import FakeSessionFactory
+from .acceptance_fixtures import FakeLeaseStore, FakeSessionFactory
 
 
 @pytest.fixture(autouse=True)
@@ -193,7 +193,12 @@ def test_intent_pipeline_factory_builds_a_port_over_the_given_store() -> None:
     """Every dispatch needs its port over a *narrowed* store, so the factory is the seam."""
     bundle = build_agent_run_bundle(session_factory=FakeSessionFactory())
 
-    narrowed_store = object()
+    # A store-shaped object rather than ``object()``: the adapter validates the
+    # lease-store protocol on construction, and passing a bare sentinel would only
+    # prove that validation rejects garbage -- a different concern, already pinned
+    # elsewhere. What this test owns is that the factory builds a *wired* port over
+    # whatever narrow store the handler supplies.
+    narrowed_store = FakeLeaseStore()
     port = bundle.execution_factory(narrowed_store)
 
     assert isinstance(port, ControlPlaneAgentRunExecutionAdapter)

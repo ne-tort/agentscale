@@ -10,7 +10,7 @@ from prodavan.infrastructure.persistence.models.owner_registry import (
     ScopeOwnerProjectAnchorRow,
     ScopeRegistryRow,
 )
-from owner_registry_fixtures import (
+from .owner_registry_fixtures import (
     ACCEPTANCE_BOUNDARY,
     INVALID_OR_BLOCKED_SHAPES,
     RLS_ACCEPTANCE_CASES,

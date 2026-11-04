@@ -57,7 +57,7 @@ from sqlalchemy import (
     Integer,
     String,
     and_,
-    column,
+    Column,
     insert,
     or_,
     select,
@@ -142,6 +142,16 @@ RECONCILE_REASON_RUN_TERMINAL = "agent_run.reconcile.run_terminal"
 RECONCILE_REASON_SETTLED = "agent_run.reconcile.settled"
 
 _REASON_PREFIX = "agent_run.reconcile."
+
+#: Failure code written to the run when a resumed decision settles it as failed.
+#:
+#: Two vocabularies meet here and they are not interchangeable: ``reason_code``
+#: explains *why reconciliation decided* (``agent_run.reconcile.*``), while
+#: ``failure_code`` describes *what happened to the run* and must be a redacted
+#: ``agent_run.error.*`` code. Reusing the reason code as the failure code makes
+#: the transition validator reject the command, so a resumed failure could never
+#: be applied at all.
+RECONCILE_FAILURE_CODE = "agent_run.error.reconciled_failed"
 
 
 def _reason_code(value: str) -> str:
@@ -877,7 +887,14 @@ def _observation_from_case(case: UnknownOutcomeRecord) -> ProviderOutcomeObserva
         observed_at=case.decided_at,  # type: ignore[arg-type]
         evidence_id=case.evidence_id,  # type: ignore[arg-type]
         evidence_digest=case.evidence_digest,  # type: ignore[arg-type]
-        failure_code=case.reason_code,
+        # The persisted reason code explains the decision; the run's failure code
+        # is a different vocabulary and must stay a redacted agent_run.error code.
+        # A successful outcome carries no failure code at all.
+        failure_code=(
+            None
+            if case.decided_status is CaseDecision.SUCCEEDED
+            else RECONCILE_FAILURE_CODE
+        ),
         output_digest=case.output_digest,
     )
 
@@ -1401,48 +1418,48 @@ def _contradicts_stored_evidence(
 # unable to infer bind parameter types for the due-selection predicates.
 _unknown_outcomes = table(
     UNKNOWN_OUTCOME_TABLE,
-    column("reconcile_id", String(64), primary_key=True),
-    column("reconcile_key", String(71), nullable=False),
-    column("tenant_id", String(64), nullable=False),
-    column("project_id", String(40), nullable=False),
-    column("run_id", String(40), nullable=False),
-    column("run_generation", Integer, nullable=False),
-    column("run_attempt", Integer, nullable=False),
-    column("provider_request_id", String(128), nullable=True),
-    column("state", String(24), nullable=False),
-    column("claim_token", String(128), nullable=True),
-    column("claim_generation", Integer, nullable=False),
-    column("lease_until", DateTime(timezone=True), nullable=True),
-    column("reconcile_attempts", Integer, nullable=False),
-    column("next_reconcile_at", DateTime(timezone=True), nullable=True),
-    column("decided_status", String(24), nullable=True),
-    column("resolution_digest", String(71), nullable=True),
-    column("transition_key", String(128), nullable=True),
-    column("decided_at", DateTime(timezone=True), nullable=True),
-    column("resolved_status", String(24), nullable=True),
-    column("evidence_id", String(128), nullable=True),
-    column("evidence_digest", String(71), nullable=True),
-    column("output_digest", String(71), nullable=True),
-    column("reason_code", String(128), nullable=True),
-    column("resolved_at", DateTime(timezone=True), nullable=True),
-    column("created_at", DateTime(timezone=True), nullable=False),
-    column("updated_at", DateTime(timezone=True), nullable=False),
+    Column("reconcile_id", String(64), primary_key=True),
+    Column("reconcile_key", String(71), nullable=False),
+    Column("tenant_id", String(64), nullable=False),
+    Column("project_id", String(40), nullable=False),
+    Column("run_id", String(40), nullable=False),
+    Column("run_generation", Integer, nullable=False),
+    Column("run_attempt", Integer, nullable=False),
+    Column("provider_request_id", String(128), nullable=True),
+    Column("state", String(24), nullable=False),
+    Column("claim_token", String(128), nullable=True),
+    Column("claim_generation", Integer, nullable=False),
+    Column("lease_until", DateTime(timezone=True), nullable=True),
+    Column("reconcile_attempts", Integer, nullable=False),
+    Column("next_reconcile_at", DateTime(timezone=True), nullable=True),
+    Column("decided_status", String(24), nullable=True),
+    Column("resolution_digest", String(71), nullable=True),
+    Column("transition_key", String(128), nullable=True),
+    Column("decided_at", DateTime(timezone=True), nullable=True),
+    Column("resolved_status", String(24), nullable=True),
+    Column("evidence_id", String(128), nullable=True),
+    Column("evidence_digest", String(71), nullable=True),
+    Column("output_digest", String(71), nullable=True),
+    Column("reason_code", String(128), nullable=True),
+    Column("resolved_at", DateTime(timezone=True), nullable=True),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
 )
 
 _reconciliation_audit = table(
     RECONCILIATION_AUDIT_TABLE,
-    column("audit_id", String(64), primary_key=True),
-    column("tenant_id", String(64), nullable=False),
-    column("project_id", String(40), nullable=False),
-    column("run_id", String(40), nullable=False),
-    column("run_generation", Integer, nullable=False),
-    column("run_attempt", Integer, nullable=False),
-    column("decision", String(24), nullable=False),
-    column("resolution", String(24), nullable=False),
-    column("reason_code", String(128), nullable=False),
-    column("evidence_id", String(128), nullable=False),
-    column("evidence_digest", String(71), nullable=False),
-    column("recorded_at", DateTime(timezone=True), nullable=False),
+    Column("audit_id", String(64), primary_key=True),
+    Column("tenant_id", String(64), nullable=False),
+    Column("project_id", String(40), nullable=False),
+    Column("run_id", String(40), nullable=False),
+    Column("run_generation", Integer, nullable=False),
+    Column("run_attempt", Integer, nullable=False),
+    Column("decision", String(24), nullable=False),
+    Column("resolution", String(24), nullable=False),
+    Column("reason_code", String(128), nullable=False),
+    Column("evidence_id", String(128), nullable=False),
+    Column("evidence_digest", String(71), nullable=False),
+    Column("recorded_at", DateTime(timezone=True), nullable=False),
 )
 
 

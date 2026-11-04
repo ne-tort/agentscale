@@ -353,8 +353,19 @@ class MemoryIntentStore:
         action = outcome.action.value
         reason = outcome.reason.value
         kind_code = "" if kind is None else f" kind={kind.value}"
+        # The durable record uses the *record* vocabulary, not the dispatch one:
+        # ``SqlAlchemyIntentConsumer._record_action`` maps DELIVERED onto
+        # ``DispatchRecordAction.DELIVER`` ("deliver"), so an audit line built from
+        # ``outcome.action.value`` ("delivered") would not match what the real
+        # consumer writes and would hide a divergence from these tests.
+        record_action = {
+            "delivered": "deliver",
+            "retry": "retry",
+            "rejected": "reject",
+            "quarantined": "quarantine",
+        }[action]
         self.audit_records.append(
-            f"action={action} reason={reason}{kind_code} attempts={intent.attempts}"
+            f"action={record_action} reason={reason}{kind_code} attempts={intent.attempts}"
         )
         if action == "delivered":
             self.state = "delivered"

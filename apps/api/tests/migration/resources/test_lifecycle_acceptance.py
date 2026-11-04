@@ -30,7 +30,7 @@ from prodavan.application.migration.resources import (
     validate_candidate,
     validate_resource_payload,
 )
-from lifecycle_acceptance_fixtures import (
+from .lifecycle_acceptance_fixtures import (
     ASSET_DIGEST,
     PROJECT_A,
     PROJECT_B,
