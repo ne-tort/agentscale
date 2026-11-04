@@ -11,7 +11,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -21,6 +21,7 @@ from prodavan.infrastructure.persistence.dynamic_app_gateway import (
     SqlDynamicPluginRepository,
 )
 
+from .seeds import NOW
 from .sqlite_mirror import create_schema, make_engine
 
 
@@ -52,14 +53,16 @@ async def gateway_with(
     ``without_unique`` exists only for the ambiguity tests: the ports refuse to
     pick a row when a query answers twice, and that state cannot exist while the
     unique constraint is installed.  ``now`` pins the scope port's clock so an
-    expiry decision is exact rather than wall-clock dependent.
+    expiry decision is exact rather than wall-clock dependent; the default is the
+    same frozen instant every fixture row is seeded relative to, so
+    ``NOW - 1min`` is expired and ``NOW + 5min`` is not, in every run.
     """
 
     engine = make_engine()
     try:
         await create_schema(engine, without_unique=without_unique)
         factory = async_sessionmaker(engine, expire_on_commit=False)
-        pinned = now if now is not None else datetime.now(UTC)
+        pinned = now if now is not None else NOW
         yield GatewayHarness(
             session_factory=factory,
             repository=SqlDynamicPluginRepository(session_factory=factory),

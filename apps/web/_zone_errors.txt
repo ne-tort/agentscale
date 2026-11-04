@@ -1,0 +1,40 @@
+src/capabilities/gateway.test.ts(25,12): error TS2322: Type 'Mock<() => Promise<null>>' is not assignable to type '<TResult extends JsonValue = JsonValue, TParams extends JsonValue = JsonValue>(message: { method: string; params?: TParams | undefined; deadlineAt?: string | undefined; signal?: AbortSignal | undefined; }) => Promise<...>'.
+src/dynamic/declarative/acceptance.test.tsx(43,16): error TS2304: Cannot find name 'Root'.
+src/dynamic/declarative/acceptance.test.tsx(47,101): error TS2304: Cannot find name 'createRoot'.
+src/dynamic/declarative/acceptance.test.tsx(48,9): error TS2304: Cannot find name 'act'.
+src/dynamic/declarative/acceptance.test.tsx(50,51): error TS2304: Cannot find name 'act'.
+src/dynamic/declarative/acceptance.test.tsx(53,5): error TS2322: Type '{ state: "resolved"; manifest: DeclarativeAppManifest; route: { id: string; path: string; title: string; root: string; requirements: { context: string[]; }; }; digest: string; etag: string; cacheKey: string; correlationId: string; }' is not assignable to type 'RegistryClientResolution'.
+src/dynamic/declarative/acceptance.test.tsx(137,3): error TS2304: Cannot find name 'afterEach'.
+src/dynamic/declarative/acceptance.test.tsx(138,26): error TS2304: Cannot find name 'act'.
+src/dynamic/declarative/acceptance.test.tsx(149,11): error TS2304: Cannot find name 'act'.
+src/dynamic/declarative/acceptance.test.tsx(152,11): error TS2304: Cannot find name 'act'.
+src/dynamic/declarative/acceptance.test.tsx(164,11): error TS2304: Cannot find name 'act'.
+src/dynamic/declarative/acceptance.test.tsx(165,11): error TS2304: Cannot find name 'act'.
+src/dynamic/declarative/acceptance.test.tsx(179,11): error TS2304: Cannot find name 'act'.
+src/dynamic/declarative/acceptance.test.tsx(180,11): error TS2304: Cannot find name 'act'.
+src/dynamic/declarative/acceptance.test.tsx(182,11): error TS2304: Cannot find name 'act'.
+src/dynamic/declarative/acceptance.test.tsx(184,11): error TS2304: Cannot find name 'act'.
+src/dynamic/declarative/host.tsx(96,50): error TS2345: Argument of type '{ type: "text" | "input" | "button" | "table"; id: string; props: Record<string, JsonValue>; bindings?: Record<string, string> | undefined; }' is not assignable to parameter of type 'never'.
+src/dynamic/declarative/host.tsx(162,22): error TS2339: Property 'props' does not exist on type 'never'.
+src/dynamic/declarative/host.tsx(163,64): error TS2339: Property 'id' does not exist on type 'never'.
+src/dynamic/declarative/host.tsx(164,39): error TS2339: Property 'id' does not exist on type 'never'.
+src/dynamic/declarative/host.tsx(164,91): error TS2339: Property 'id' does not exist on type 'never'.
+src/dynamic/declarative/host.tsx(169,49): error TS2339: Property 'id' does not exist on type 'never'.
+src/dynamic/declarative/host.tsx(170,44): error TS2339: Property 'id' does not exist on type 'never'.
+src/dynamic/declarative/host.tsx(207,82): error TS2339: Property 'props' does not exist on type 'never'.
+src/dynamic/declarative/host.tsx(221,181): error TS2339: Property 'props' does not exist on type 'never'.
+src/dynamic/declarative/host.tsx(221,209): error TS2339: Property 'id' does not exist on type 'never'.
+src/dynamic/declarative/host.tsx(221,227): error TS2339: Property 'props' does not exist on type 'never'.
+src/dynamic/declarative/host.tsx(248,42): error TS2769: No overload matches this call.
+src/dynamic/declarative/host.tsx(248,65): error TS2769: No overload matches this call.
+src/dynamic/declarative/host.tsx(257,40): error TS2769: No overload matches this call.
+src/dynamic/declarative/renderer.ts(33,22): error TS2339: Property 'props' does not exist on type '{ type: "row" | "column" | "stack"; id?: string | undefined; children: UiNode[]; } | { type: "text" | "input" | "button" | "table"; id: string; props: Record<string, JsonValue>; bindings?: Record<...> | undefined; }'.
+src/dynamic/declarative/renderer.ts(58,29): error TS2538: Type 'undefined' cannot be used as an index type.
+src/dynamic/registry-client/use-registry.ts(22,3): error TS1024: 'readonly' modifier can only appear on a property declaration or index signature.
+src/dynamic/registry.test.ts(24,123): error TS2741: Property 'text' is missing in type '{}' but required in type '{ text: string; }'.
+src/dynamic/registry.ts(154,107): error TS18046: 'value.ttlSeconds' is of type 'unknown'.
+src/dynamic/registry.ts(154,132): error TS18046: 'value.ttlSeconds' is of type 'unknown'.
+src/dynamic/registry.ts(187,11): error TS2345: Argument of type 'string | undefined' is not assignable to parameter of type 'string'.
+src/dynamic/registry.ts(305,70): error TS2345: Argument of type 'string' is not assignable to parameter of type 'CapabilityName'.
+src/dynamic/registry.ts(324,75): error TS2345: Argument of type 'string' is not assignable to parameter of type 'CapabilityName'.
+src/dynamic/schema.ts(218,20): error TS2352: Conversion of type 'Record<string, unknown>' to type 'DeclarativeAppManifest' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.

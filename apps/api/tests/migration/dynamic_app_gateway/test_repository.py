@@ -10,22 +10,21 @@ from __future__ import annotations
 from datetime import timedelta
 
 import pytest
-from sqlalchemy.ext.asyncio import async_sessionmaker
+from sqlalchemy.exc import IntegrityError
 
 from prodavan.application.dynamic_app_plugin_gateway.contracts import PluginOpenRequest
 from prodavan.domain.dynamic_apps import AppLifecycleStatus, AppScope, AppScopeKind
-from prodavan.infrastructure.persistence.dynamic_app_gateway import (
-    AmbiguousPluginRecord,
-    SqlDynamicPluginRepository,
-)
+from prodavan.infrastructure.persistence.dynamic_app_gateway import AmbiguousPluginRecord
+from prodavan.infrastructure.persistence.models.dynamic_apps import AppGrantRow
 
-from .conftest import GatewayHarness
-from .seeds import NOW, definition, grant, instance, seed_baseline, seed_second_tenant, version
+from .conftest import GatewayHarness, gateway_with
+from .seeds import NOW, definition, seed_baseline, seed_second_tenant, version
 from .sqlite_mirror import (
     APP_ID,
     DEFINITION_A,
     DEFINITION_B,
     DIGEST_A,
+    GRANT_A,
     INSTANCE_A,
     MANIFEST_VERSION,
     TENANT_A,
@@ -294,47 +293,109 @@ async def test_a_disabled_definition_is_still_resolved(gateway: GatewayHarness) 
 # ---------------------------------------------------------------------------
 
 
-async def test_two_definitions_for_one_app_are_refused_not_guessed(
+async def test_two_definitions_for_one_app_are_refused_not_guessed() -> None:
+    """The unique key makes this impossible in a migrated database; if it happens
+    anyway (a dropped constraint, a restore, a hand-written row), picking a row
+    would authorize the wrong app — so the port refuses instead.
+
+    The schema is created *without* ``uq_dynamic_app_definition_tenant_app`` on
+    purpose: with the constraint installed the state under test cannot exist, and
+    a test that never reaches the guard proves nothing about it.  A companion
+    test below asserts the constraint really does make it unreachable in the
+    normal schema.
+    """
+
+    async with gateway_with(
+        without_unique=frozenset({"uq_dynamic_app_definition_tenant_app"})
+    ) as harness:
+        await seed_baseline(harness.session_factory)
+        async with harness.session_factory() as session:
+            session.add(
+                definition(
+                    row_id="app_cccccccccccccccccccc",
+                    app_id=APP_ID,
+                    current_version_id="aver_cccccccccccccccccccc",
+                )
+            )
+            await session.flush()
+            session.add(
+                version(
+                    row_id="aver_cccccccccccccccccccc",
+                    definition_id="app_cccccccccccccccccccc",
+                    digest="sha256:" + "c" * 64,
+                )
+            )
+            await session.commit()
+
+        with pytest.raises(AmbiguousPluginRecord):
+            await harness.repository.resolve(open_request())
+
+
+async def test_the_unique_key_makes_a_second_definition_unreachable(
     gateway: GatewayHarness,
 ) -> None:
-    """The unique key makes this impossible in a migrated database; if it happens
-    anyway, picking a row would authorize the wrong app."""
+    """With the real constraint, the ambiguous state cannot be written at all.
+
+    Both halves matter: the constraint prevents the state in a healthy database,
+    and the guard refuses it in a damaged one.  Asserting only the guard would
+    leave the constraint unverified; asserting only the constraint would leave
+    the guard untested.
+    """
 
     await seed_baseline(gateway.session_factory)
-    # Insert a second definition for the same app with its own version/instance.
-    other = "app_bbbbbbbbbbbbbbbbbbbb"
     async with gateway.session_factory() as session:
         session.add(
             definition(
                 row_id="app_cccccccccccccccccccc",
                 app_id=APP_ID,
-                current_version_id="aver_cccccccccccccccccccc",
+                current_version_id=None,
             )
         )
-        await session.flush()
-        session.add(
-            version(
-                row_id="aver_cccccccccccccccccccc",
-                definition_id="app_cccccccccccccccccccc",
-                digest="sha256:" + "c" * 64,
+        with pytest.raises(IntegrityError):
+            await session.commit()
+        await session.rollback()
+
+    # Exactly one definition survived, so the port resolves it.
+    record = await gateway.repository.resolve(open_request())
+    assert record is not None and record.definition.id == DEFINITION_A
+
+
+async def test_two_grant_rows_for_one_scope_are_refused() -> None:
+    """Two rows for one version+scope would be two conflicting decisions."""
+
+    async with gateway_with(
+        without_unique=frozenset({"uq_dynamic_app_grant_version_scope"})
+    ) as harness:
+        await seed_baseline(harness.session_factory)
+        async with harness.session_factory() as session:
+            session.add(
+                AppGrantRow(
+                    id="agr_bbbbbbbbbbbbbbbbbbbb",
+                    app_definition_id=DEFINITION_A,
+                    app_version_id=VERSION_A,
+                    scope_kind="tenant",
+                    scope_id=TENANT_A,
+                    grants=[],
+                    issued_at=NOW,
+                )
             )
-        )
-        await session.commit()
+            await session.commit()
 
-    with pytest.raises(AmbiguousPluginRecord):
-        await gateway.repository.resolve(open_request())
+        with pytest.raises(AmbiguousPluginRecord):
+            await harness.repository.resolve(open_request())
+        with pytest.raises(AmbiguousPluginRecord):
+            await harness.repository.get_grants(
+                instance_id=INSTANCE_A, app_version_id=VERSION_A, tenant_id=TENANT_A
+            )
 
 
-async def test_two_grant_rows_for_one_scope_are_refused(gateway: GatewayHarness) -> None:
-    """Two rows for one version+scope would be two different decisions."""
+async def test_one_grant_row_per_scope_is_the_normal_shape(
+    gateway: GatewayHarness,
+) -> None:
+    """The unique key is what lets the port treat "two rows" as an anomaly."""
 
     await seed_baseline(gateway.session_factory)
-    from prodavan.infrastructure.persistence.models.dynamic_apps import AppGrantRow
-
-    GRANT_A = "agr_aaaaaaaaaaaaaaaaaaaa"
     async with gateway.session_factory() as session:
-        # The unique key forbids the second row; assert the relation the port
-        # depends on rather than pretending the adapter could see it.
         session.add(
             AppGrantRow(
                 id="agr_bbbbbbbbbbbbbbbbbbbb",
@@ -346,33 +407,25 @@ async def test_two_grant_rows_for_one_scope_are_refused(gateway: GatewayHarness)
                 issued_at=NOW,
             )
         )
-        with pytest.raises(Exception):
+        with pytest.raises(IntegrityError):
             await session.commit()
         await session.rollback()
 
-    # The single row is what the port returns, and it is unambiguous.
     rows = await gateway.repository.get_grants(
         instance_id=INSTANCE_A, app_version_id=VERSION_A, tenant_id=TENANT_A
     )
     assert len(rows) == 1
 
-
-async def test_an_expired_grant_row_is_still_returned_for_the_facade(
-    gateway: GatewayHarness,
-) -> None:
-    """Expiry is decided by the facade against its own ``now``; hiding it here
-    would move the decision into the adapter and desynchronise the two owners."""
-
-    await seed_baseline(gateway.session_factory)
     async with gateway.session_factory() as session:
-        from prodavan.infrastructure.persistence.models.dynamic_apps import AppGrantRow
-
-        row = await session.get(AppGrantRow, "agr_aaaaaaaaaaaaaaaaaaaa")
-        row.expires_at = NOW - timedelta(days=2)
+        row = await session.get(AppGrantRow, GRANT_A)
+        assert row is not None
+        # Expiry is decided by the facade against its own ``now``; hiding an
+        # expired row here would move the decision into the adapter and
+        # desynchronise the two owners it exists to compare.
+        row.expires_at = NOW + timedelta(minutes=5)
         await session.commit()
 
     record = await gateway.repository.resolve(open_request())
-
     assert record is not None
     assert record.grants[0].expires_at is not None
 
@@ -395,9 +448,22 @@ async def test_an_expired_grant_row_is_still_returned_for_the_facade(
 async def test_a_blank_request_never_resolves(
     gateway: GatewayHarness, request_kwargs: dict[str, str]
 ) -> None:
+    """A contract that was never filled in must not read the whole table.
+
+    ``AppScope`` is built from a *fixed* tenant id here: the point of the case is
+    the blank field under test, and a scope derived from a blank tenant would
+    raise inside pydantic before the port ever ran — proving nothing about the
+    port.  (An empty ``PluginOpenRequest`` is still expressible, because the
+    contract is a plain dataclass precisely so a malformed caller is the port's
+    problem to refuse, not a construction error to crash on.)
+    """
+
     await seed_baseline(gateway.session_factory)
 
-    assert await gateway.repository.resolve(open_request(**request_kwargs)) is None
+    request = open_request(
+        scope=AppScope(kind=AppScopeKind.TENANT, id=TENANT_A), **request_kwargs
+    )
+    assert await gateway.repository.resolve(request) is None
 
 
 async def test_the_repository_never_writes(gateway: GatewayHarness) -> None:

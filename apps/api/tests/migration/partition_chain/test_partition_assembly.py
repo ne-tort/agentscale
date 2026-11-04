@@ -39,7 +39,6 @@ from .partition_fixtures import (
     TENANT,
     complete_overrides,
     key,
-    runtime_context,
 )
 
 PER_PARTITION_SERVICES = (

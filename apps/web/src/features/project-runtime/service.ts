@@ -223,7 +223,7 @@ export function createProjectRuntimeService(options: ProjectRuntimeServiceOption
     try {
       response = await fetchImpl(`${baseUrl}${projectPath(projectId, `/container/workspace/content?${params}`)}`, {
         signal: requestOptions?.signal,
-        headers: { Accept: "application/octet-stream", ...(token ? { Authorization: *** ${token}` } : {}) },
+        headers: { Accept: "application/octet-stream", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       });
     } catch (error) {
       throw new ProjectRuntimeRequestError(error instanceof Error ? `Не удалось скачать файл: ${error.message}` : "Не удалось скачать файл.");

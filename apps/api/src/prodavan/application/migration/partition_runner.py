@@ -41,13 +41,12 @@ stage whose earlier stage has not recorded its evidence refuses.
 ==========================  ============================================================  ========================================
 stage                       durable precondition                                            read from
 ==========================  ============================================================  ========================================
-``M04_SCOPE``               none: it is the first stage, and the scope resolver re-proves   (nothing -- recorded as
-                            the owner/RLS gates per row at run time                          ``no_earlier_stage``)
+``M04_SCOPE``               none: it is the first stage, and the scope resolver re-proves   (nothing to read -- the
+                            the owner/RLS gates per row at run time                          check records ``ok``)
 ``M04E_DEFINITION_VERSION`` a ``ready`` M04-02 scope row for the partition's tenant at     ``m04_scope_promotion_evidence``
                             this writer generation
-``M05_INSTANCE_RUNTIME``    the ``MIG-M04E-02`` handoff marker for this partition and the   ``m04e_definition_version_
-                            M04E export digest, ``ready``, at this generation, with zero    promotion_evidence``
-                            quarantined rows
+``M05_INSTANCE_RUNTIME``    a ``ready`` ``MIG-M04E-02`` handoff marker for this partition    ``m04e_definition_version_
+                            at this generation with zero quarantined rows                    promotion_evidence``
 ``M06_GRANTS_GATEWAY``      a ``ready`` M05 promotion record for this partition at this     ``m05_plugin_instance_promotion_
                             generation                                                       evidence``
 ``CUTOVER``                 a ``ready``/``promotable`` M06 promotion record for this         ``m06_canonical_grant_promotion_
@@ -57,7 +56,9 @@ stage                       durable precondition                                
 Codes, most specific first: the refusal class is never depended on alone, so an operator log
 still says exactly which artefact was absent (``partition_stage_precondition_unmet``),
 unaccepted (``partition_evidence_missing``), stale (``partition_writer_generation_stale``) or
-non-zero (``partition_unresolved_counts``).
+non-zero (``partition_unresolved_counts``).  A store that cannot be read at all -- an outage,
+a missing relation -- is reported as ``partition_evidence_blocked`` with the exception
+*class*: an unreadable store is not a negative answer, and it must never read as readiness.
 
 Why no M04E *checkpoint* precondition
 =====================================
@@ -93,6 +94,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, AsyncIterator, Awaitable, Callable, Protocol
 
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 
 from prodavan.application.migration.composition import (
     MigrationChain,
@@ -127,6 +129,9 @@ from prodavan.application.migration.partition_chain import (
 )
 from prodavan.infrastructure.persistence.models.canonical_grants import (
     M06CanonicalGrantPromotionEvidenceRow,
+)
+from prodavan.infrastructure.persistence.models.dynamic_app_definition_version import (
+    M04EDefinitionVersionPromotionEvidenceRow,
 )
 from prodavan.infrastructure.persistence.models.m04_scope_evidence import (
     M04ScopePromotionEvidenceRow,
@@ -739,7 +744,17 @@ async def _evaluate(
         checks.append(f"precondition:{stage.value}:skipped")
         return tuple(codes), tuple(details), tuple(checks)
 
-    refusal = await _CHECK_BY_STAGE[stage](source, plan)
+    try:
+        refusal = await _CHECK_BY_STAGE[stage](source, plan)
+    except SQLAlchemyError as exc:
+        # An unreadable store is *not* a negative answer and must never read as readiness:
+        # the stage is refused with the exception class (never its message, which can carry
+        # a DSN) so an outage or a missing table cannot be mistaken for "nothing to do".
+        refusal = _Refusal(
+            PARTITION_EVIDENCE_BLOCKED,
+            f"reading this partition's evidence failed with {type(exc).__name__}: an "
+            "unreadable store is never treated as readiness",
+        )
     checks.append(f"precondition:{stage.value}:{'refused' if refusal else 'ok'}")
     if refusal is not None:
         codes.append(refusal.code)

@@ -11,6 +11,9 @@ export {
   type TextAreaFieldProps,
   type TextFieldProps,
 } from "./forms";
+// `./forms` resolves to `forms.tsx`; the directory modules below are shadowed by it,
+// so they must be re-exported explicitly for `../../shared/ui` consumers.
+export { TableToolbar, type TableToolbarProps } from "./forms/table-toolbar";
 export {
   EmptyState,
   InlineError,

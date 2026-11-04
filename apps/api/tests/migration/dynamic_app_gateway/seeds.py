@@ -11,26 +11,40 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from prodavan.infrastructure.persistence.models.cabinets import (
+    CabinetCompanyGrantRow,
+    CabinetEmployeeAssignmentRow,
+    CabinetInstanceRow,
+)
 from prodavan.infrastructure.persistence.models.dynamic_apps import (
     AppDefinitionRow,
     AppGrantRow,
     AppInstanceRow,
     AppVersionRow,
 )
+from prodavan.infrastructure.persistence.models.identity import (
+    CompanyRow,
+    EmployeeRow,
+    MembershipRow,
+)
+from prodavan.infrastructure.persistence.models.projects import ProjectRow
 
 from .sqlite_mirror import (
     APP_ID,
+    CABINET_A,
     CAPABILITY_GRANT,
     DEFINITION_A,
     DEFINITION_B,
     DIGEST_A,
     DIGEST_B,
+    EMPLOYEE_A,
     GRANT_A,
     GRANT_B,
     INSTANCE_A,
     INSTANCE_B,
-    MANIFEST,
     MANIFEST_VERSION,
+    PROJECT_A,
+    SUBJECT_A,
     TENANT_A,
     TENANT_B,
     VERSION_A,
@@ -222,13 +236,173 @@ async def seed_second_tenant(
     )
 
 
+# ---------------------------------------------------------------------------
+# Identity / scope rows: what makes a subject "able to act" in a tenant
+# ---------------------------------------------------------------------------
+
+
+def company(
+    *,
+    company_id: str = TENANT_A,
+    status: str = "active",
+    deleted_at: datetime | None = None,
+) -> CompanyRow:
+    return CompanyRow(
+        id=company_id,
+        name=f"Company {company_id}",
+        login_slug=f"slug-{company_id[-8:]}",
+        status=status,
+        deleted_at=deleted_at,
+    )
+
+
+def employee(
+    *,
+    employee_id: str = EMPLOYEE_A,
+    subject: str = SUBJECT_A,
+    status: str = "active",
+    deleted_at: datetime | None = None,
+) -> EmployeeRow:
+    return EmployeeRow(
+        id=employee_id,
+        keycloak_sub=subject,
+        login=f"{employee_id}@agentscale.local",
+        email=f"{employee_id}@agentscale.local",
+        status=status,
+        deleted_at=deleted_at,
+    )
+
+
+def membership(
+    *,
+    employee_id: str = EMPLOYEE_A,
+    company_id: str = TENANT_A,
+    role: str = "member",
+) -> MembershipRow:
+    return MembershipRow(
+        id=f"mem_{company_id[-6:]}{employee_id[-6:]}",
+        employee_id=employee_id,
+        company_id=company_id,
+        role=role,
+    )
+
+
+def cabinet(
+    *,
+    cabinet_id: str = CABINET_A,
+    status: str = "active",
+    owner_scope: str = "platform",
+    owner_company_id: str | None = None,
+    company_grant_scope: str = "selected",
+) -> CabinetInstanceRow:
+    return CabinetInstanceRow(
+        id=cabinet_id,
+        name=f"Cabinet {cabinet_id}",
+        schema_name=f"cab_in_{cabinet_id[-8:]}",
+        status=status,
+        owner_scope=owner_scope,
+        owner_company_id=owner_company_id,
+        company_grant_scope=company_grant_scope,
+    )
+
+
+def cabinet_grant(
+    *,
+    cabinet_id: str = CABINET_A,
+    company_id: str = TENANT_A,
+    status: str = "active",
+) -> CabinetCompanyGrantRow:
+    return CabinetCompanyGrantRow(
+        id=f"ccg_{cabinet_id[-6:]}{company_id[-6:]}",
+        cabinet_id=cabinet_id,
+        company_id=company_id,
+        status=status,
+    )
+
+
+def cabinet_assignment(
+    *,
+    cabinet_id: str = CABINET_A,
+    employee_id: str = EMPLOYEE_A,
+    status: str = "active",
+) -> CabinetEmployeeAssignmentRow:
+    return CabinetEmployeeAssignmentRow(
+        id=f"cas_{cabinet_id[-6:]}{employee_id[-6:]}",
+        cabinet_id=cabinet_id,
+        employee_id=employee_id,
+        status=status,
+    )
+
+
+def project(
+    *,
+    project_id: str = PROJECT_A,
+    company_id: str = TENANT_A,
+    cabinet_id: str = CABINET_A,
+    status: str = "active",
+) -> ProjectRow:
+    return ProjectRow(
+        id=project_id,
+        company_id=company_id,
+        cabinet_id=cabinet_id,
+        name=f"Project {project_id}",
+        slug=project_id,
+        status=status,
+        visibility_mode="cabinet_shared",
+        workspace_key=f"ws-{project_id}",
+        container_ref=f"container-{project_id}",
+    )
+
+
+async def seed_identity(
+    session_factory: async_sessionmaker[AsyncSession],
+    *,
+    company_id: str = TENANT_A,
+    employee_id: str = EMPLOYEE_A,
+    subject: str = SUBJECT_A,
+    cabinet_id: str = CABINET_A,
+    project_id: str = PROJECT_A,
+) -> None:
+    """One active tenant with one active member who may use one granted cabinet/project."""
+
+    async with session_factory() as session:
+        session.add(company(company_id=company_id))
+        session.add(employee(employee_id=employee_id, subject=subject))
+        await session.flush()
+        session.add(membership(employee_id=employee_id, company_id=company_id))
+        session.add(cabinet(cabinet_id=cabinet_id))
+        await session.flush()
+        session.add(cabinet_grant(cabinet_id=cabinet_id, company_id=company_id))
+        session.add(cabinet_assignment(cabinet_id=cabinet_id, employee_id=employee_id))
+        session.add(project(project_id=project_id, company_id=company_id, cabinet_id=cabinet_id))
+        await session.commit()
+
+
+async def seed_gateway_with_identity(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """The full happy path: a published plugin granted to an active member's tenant."""
+
+    await seed_identity(session_factory)
+    await seed_baseline(session_factory)
+
+
 __all__ = [
     "NOW",
+    "cabinet",
+    "cabinet_assignment",
+    "cabinet_grant",
+    "company",
     "definition",
+    "employee",
     "grant",
     "instance",
     "manifest",
+    "membership",
+    "project",
     "seed_baseline",
+    "seed_gateway_with_identity",
+    "seed_identity",
     "seed_second_tenant",
     "version",
 ]

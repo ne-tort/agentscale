@@ -32,12 +32,23 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
+from prodavan.infrastructure.persistence.models.cabinets import (
+    CabinetCompanyGrantRow,
+    CabinetEmployeeAssignmentRow,
+    CabinetInstanceRow,
+)
 from prodavan.infrastructure.persistence.models.dynamic_apps import (
     AppDefinitionRow,
     AppGrantRow,
     AppInstanceRow,
     AppVersionRow,
 )
+from prodavan.infrastructure.persistence.models.identity import (
+    CompanyRow,
+    EmployeeRow,
+    MembershipRow,
+)
+from prodavan.infrastructure.persistence.models.projects import ProjectRow
 
 #: Stable identities shared by every test module in this package.
 TENANT_A = "comp_aaaaaaaaaaaaaaaaaaaa"
@@ -94,7 +105,12 @@ CAPABILITY_GRANT: dict = {
 }
 
 def _mirror(model: type, metadata: sa.MetaData, *constraints: sa.schema.Constraint) -> sa.Table:
-    """Copy one registered model's columns (JSONB -> JSON) and stated constraints."""
+    """Copy one registered model's columns (JSONB -> JSON) and stated constraints.
+
+    ``server_default`` is copied too: the real tables rely on ``func.now()`` for
+    ``created_at``/``updated_at``, and a mirror that dropped it would make every
+    seed insert fail on a NOT NULL the production schema never enforces.
+    """
 
     columns = []
     for column in model.__table__.columns:
@@ -105,6 +121,7 @@ def _mirror(model: type, metadata: sa.MetaData, *constraints: sa.schema.Constrai
                 column_type,
                 primary_key=column.primary_key,
                 nullable=column.nullable if not column.primary_key else False,
+                server_default=column.server_default,
             )
         )
     return sa.Table(model.__tablename__, metadata, *columns, *constraints)
@@ -199,6 +216,29 @@ def dynamic_app_metadata(*, without_unique: frozenset[str] = frozenset()) -> sa.
     return metadata
 
 
+#: The platform tables the scope port reads for the subject's own authority.
+#: Mirrored without constraints: they are read, never joined through the dynamic-app
+#: relations, and their real foreign keys point at tables (``scope_registry``,
+#: ``m04e_*``) this suite has no reason to build.
+SCOPE_MODELS: tuple[type, ...] = (
+    CompanyRow,
+    EmployeeRow,
+    MembershipRow,
+    CabinetInstanceRow,
+    CabinetCompanyGrantRow,
+    CabinetEmployeeAssignmentRow,
+    ProjectRow,
+)
+
+
+def scope_metadata(metadata: sa.MetaData) -> sa.MetaData:
+    """Add the identity/scope tables the scope port reads into ``metadata``."""
+
+    for model in SCOPE_MODELS:
+        _mirror(model, metadata)
+    return metadata
+
+
 def make_engine():
     """A single-connection in-memory engine; ``StaticPool`` keeps the schema alive."""
 
@@ -210,9 +250,14 @@ def make_engine():
 
 
 async def create_schema(
-    engine, *, without_unique: frozenset[str] = frozenset()
+    engine,
+    *,
+    without_unique: frozenset[str] = frozenset(),
+    with_scope_tables: bool = True,
 ) -> sa.MetaData:
     metadata = dynamic_app_metadata(without_unique=without_unique)
+    if with_scope_tables:
+        scope_metadata(metadata)
     async with engine.begin() as connection:
         # SQLite enforces foreign keys only when asked; the ports rely on the
         # relations, so a fixture that bypassed them would prove nothing.

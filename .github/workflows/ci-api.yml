@@ -171,3 +171,198 @@ jobs:
           docker volume prune -f >/dev/null 2>&1 || true
 
       # actions/setup-python@v5 removed — Kali not in python-versions manifest.
+
+  # ------------------------------------------------------------------------- #
+  # MIG-CI-PG-01 — PostgreSQL-only migration suite.
+  #
+  # `tests/migration/postgres_integration` proves what SQLite cannot: SKIP LOCKED,
+  # aggregate CAS on a live engine, transaction abort, the M05 deferrable cycle,
+  # partial unique and migration reversibility.  Without a DSN the whole
+  # directory *skips*, so before this job it was never executed in CI — and the
+  # defect it did find (the lease store reporting "applied" while writing
+  # nothing) would have stayed invisible.
+  #
+  # The job therefore fails on a skip, not just on a red assertion: a suite that
+  # quietly tests nothing is the failure mode being guarded against.
+  # ------------------------------------------------------------------------- #
+  postgres-integration:
+    name: postgres-integration
+    runs-on: [self-hosted, linux, docker]
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: apps/api
+    env:
+      PIP_CACHE_DIR: /cache/pip
+      # Credentials/database names mirror the documented local container
+      # (`docker run … -e POSTGRES_USER=test -e POSTGRES_DB=prodavan_test`), so the
+      # command in the README and the command CI runs differ only in the port.
+      PG_USER: test
+      PG_PASSWORD: test
+      PG_DATABASE: prodavan_test
+      PG_MIGRATION_DATABASE: prodavan_migrate
+      # Published host port of the service container. Kept as a variable rather
+      # than inlined into three scripts so the *same* scripts can be executed
+      # against a local container on another port (55432) for verification.
+      PG_PORT: "5432"
+    services:
+      postgres:
+        image: postgres:16.15-alpine
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: prodavan_test
+        ports:
+          - "5432:5432"
+        options: >-
+          --health-cmd "pg_isready -U test -d prodavan_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Python venv (self-hosted)
+        run: |
+          set -euo pipefail
+          python3 --version
+          # api requires >=3.12 (Docker runner image must ship 3.12)
+          python3 -c 'import sys; assert sys.version_info >= (3, 12), sys.version'
+          mkdir -p "${PIP_CACHE_DIR:-/cache/pip}"
+          python3 -m venv "${{ runner.temp }}/venv"
+          echo "${{ runner.temp }}/venv/bin" >> "${GITHUB_PATH}"
+          "${{ runner.temp }}/venv/bin/python" -m pip install -U pip
+
+      - name: Resolve DSNs
+        # Docker Desktop runners publish service ports on the Desktop VM, so the
+        # reachable host is overridable exactly the way the `test` job above does
+        # it (PRODAVAN_CI_HOST); WSL/host runners keep 127.0.0.1.
+        run: |
+          set -euo pipefail
+          PG_HOST="${PRODAVAN_CI_HOST:-127.0.0.1}"
+          echo "PG_HOST=${PG_HOST}" >> "${GITHUB_ENV}"
+          echo "PRODAVAN_TEST_DATABASE_URL=postgresql+asyncpg://${PG_USER}:${PG_PASSWORD}@${PG_HOST}:${PG_PORT}/${PG_DATABASE}" >> "${GITHUB_ENV}"
+          echo "PRODAVAN_TEST_MIGRATION_DATABASE_URL=postgresql+asyncpg://${PG_USER}:${PG_PASSWORD}@${PG_HOST}:${PG_PORT}/${PG_MIGRATION_DATABASE}" >> "${GITHUB_ENV}"
+          echo "PRODAVAN_TEST_DATABASE_URL=postgresql+asyncpg://${PG_USER}:***@${PG_HOST}:${PG_PORT}/${PG_DATABASE}"
+          echo "PRODAVAN_TEST_MIGRATION_DATABASE_URL=postgresql+asyncpg://${PG_USER}:***@${PG_HOST}:${PG_PORT}/${PG_MIGRATION_DATABASE}"
+
+      - name: Wait for Postgres
+        # The service healthcheck runs *inside* the container; it does not prove
+        # the runner can reach the published port. Probe it the way the suite
+        # itself will (plain TCP), so a networking problem fails here with a
+        # clear message instead of surfacing as 39 skips.
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os, socket, sys, time
+          host = os.environ["PG_HOST"]
+          port = int(os.environ["PG_PORT"])
+          deadline = time.monotonic() + 120
+          last = None
+          while time.monotonic() < deadline:
+              try:
+                  with socket.create_connection((host, port), timeout=2):
+                      print(f"Postgres reachable at {host}:{port}")
+                      sys.exit(0)
+              except OSError as exc:
+                  last = exc
+                  time.sleep(2)
+          sys.exit(f"Postgres at {host}:{port} never became reachable: {last}")
+          PY
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Create empty migration-cycle database
+        # `test_alembic_cycle.py` runs upgrade → downgrade → upgrade against a
+        # whole database (alembic's env.py cannot be pointed at a throwaway
+        # schema), and the fixture *skips* unless the database is provably empty.
+        # A dedicated, never-used database is what makes that test execute
+        # instead of skip. The suite's own schemas stay in PG_DATABASE, so this
+        # one is still empty when the suite starts.
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import asyncio, os
+          import asyncpg
+
+          async def main() -> None:
+              host = os.environ["PG_HOST"]
+              name = os.environ["PG_MIGRATION_DATABASE"]
+              conn = await asyncpg.connect(
+                  host=host, port=int(os.environ["PG_PORT"]),
+                  user=os.environ["PG_USER"], password=os.environ["PG_PASSWORD"],
+                  database=os.environ["PG_DATABASE"],
+              )
+              try:
+                  exists = await conn.fetchval(
+                      "SELECT 1 FROM pg_database WHERE datname = $1", name
+                  )
+                  if exists:
+                      # Idempotent re-run on a reused server: start from zero.
+                      await conn.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
+                  await conn.execute(f'CREATE DATABASE "{name}"')
+              finally:
+                  await conn.close()
+              print(f"empty database {name!r} ready for the alembic cycle")
+
+          asyncio.run(main())
+          PY
+
+      - name: Pytest (PostgreSQL integration — must not skip)
+        # --strict-markers keeps a typo'd marker from silently selecting nothing;
+        # -rs prints the reason for every skip, so the assertion step below has
+        # something to quote when it fails.
+        run: |
+          set -euo pipefail
+          echo "PRODAVAN_TEST_DATABASE_URL=${PRODAVAN_TEST_DATABASE_URL}" | sed 's#//[^@]*@#//***@#'
+          pytest tests/migration/postgres_integration \
+            -q --no-header --strict-markers -rs \
+            --junitxml="${RUNNER_TEMP}/postgres-integration.xml"
+
+      - name: Assert the suite actually executed
+        # pytest exits 0 for a fully skipped suite, and `--strict-markers` does
+        # not change that. Reading the JUnit report is the only reliable "did it
+        # run" signal: skips carry no failure, so they must be counted, not
+        # inferred. Zero collected is treated as a failure too (a renamed path
+        # would otherwise report a green, empty run).
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import os
+          import sys
+          import xml.etree.ElementTree as ET
+
+          path = os.environ.get("PGINT_JUNIT") or os.path.join(
+              os.environ["RUNNER_TEMP"], "postgres-integration.xml"
+          )
+          if not os.path.exists(path):
+              sys.exit(f"no JUnit report at {path}: pytest did not run")
+          root = ET.parse(path).getroot()
+          cases = list(root.iter("testcase"))
+          skipped, failed = [], []
+          for case in cases:
+              name = f'{case.get("classname")}::{case.get("name")}'
+              if case.find("skipped") is not None:
+                  skipped.append(name)
+              if case.find("failure") is not None or case.find("error") is not None:
+                  failed.append(name)
+
+          print(
+              f"collected={len(cases)} passed={len(cases) - len(skipped) - len(failed)} "
+              f"skipped={len(skipped)} failed={len(failed)}"
+          )
+          if failed:
+              print("FAILED:", *failed, sep="\n  ")
+          if not cases:
+              sys.exit("postgres_integration collected 0 tests — the suite path is wrong or collection errored")
+          if skipped:
+              print("SKIPPED (a skipped PostgreSQL test proves nothing):", *skipped, sep="\n  ")
+              sys.exit(f"{len(skipped)} test(s) skipped; this job requires every test in "
+                       "tests/migration/postgres_integration to execute")
+          print(f"OK — all {len(cases)} PostgreSQL integration tests executed")
+          PY
+
+      - name: Dump service logs on failure
+        if: failure()
+        run: docker logs "${{ job.services.postgres.id }}" 2>&1 | tail -50 || true

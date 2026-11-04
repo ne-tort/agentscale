@@ -1,0 +1,84 @@
+src/api/client.current-user.test.ts(49,34): error TS2493: Tuple type '[]' of length '0' has no element at index '0'.
+src/api/client.expansion.test.ts(79,37): error TS2493: Tuple type '[]' of length '0' has no element at index '0'.
+src/api/client.expansion.test.ts(79,42): error TS2493: Tuple type '[]' of length '0' has no element at index '1'.
+src/api/client.expansion.test.ts(79,64): error TS2339: Property 'method' does not exist on type 'never'.
+src/api/client.expansion.test.ts(90,34): error TS2493: Tuple type '[]' of length '0' has no element at index '1'.
+src/api/client.expansion.test.ts(90,38): error TS2339: Property 'body' does not exist on type 'never'.
+src/api/client.expansion.test.ts(91,34): error TS2493: Tuple type '[]' of length '0' has no element at index '1'.
+src/api/client.expansion.test.ts(91,38): error TS2339: Property 'body' does not exist on type 'never'.
+src/api/client.expansion.test.ts(92,34): error TS2493: Tuple type '[]' of length '0' has no element at index '1'.
+src/api/client.expansion.test.ts(92,38): error TS2339: Property 'headers' does not exist on type 'never'.
+src/api/client.expansion.test.ts(93,52): error TS2493: Tuple type '[]' of length '0' has no element at index '1'.
+src/api/client.expansion.test.ts(93,56): error TS2339: Property 'body' does not exist on type 'never'.
+src/api/client.expansion.test.ts(131,37): error TS2493: Tuple type '[]' of length '0' has no element at index '0'.
+src/api/client.expansion.test.ts(131,42): error TS2493: Tuple type '[]' of length '0' has no element at index '1'.
+src/api/client.expansion.test.ts(131,64): error TS2339: Property 'method' does not exist on type 'never'.
+src/api/client.expansion.test.ts(141,34): error TS2493: Tuple type '[]' of length '0' has no element at index '1'.
+src/api/client.expansion.test.ts(141,38): error TS2339: Property 'headers' does not exist on type 'never'.
+src/api/client.expansion.test.ts(142,34): error TS2493: Tuple type '[]' of length '0' has no element at index '1'.
+src/api/client.expansion.test.ts(142,38): error TS2339: Property 'body' does not exist on type 'never'.
+src/api/client.expansion.test.ts(143,34): error TS2493: Tuple type '[]' of length '0' has no element at index '1'.
+src/api/client.expansion.test.ts(143,38): error TS2339: Property 'body' does not exist on type 'never'.
+src/api/client.expansion.test.ts(144,34): error TS2493: Tuple type '[]' of length '0' has no element at index '1'.
+src/api/client.expansion.test.ts(144,38): error TS2339: Property 'body' does not exist on type 'never'.
+src/api/client.expansion.test.ts(145,34): error TS2493: Tuple type '[]' of length '0' has no element at index '1'.
+src/api/client.expansion.test.ts(145,38): error TS2339: Property 'body' does not exist on type 'never'.
+src/api/client.expansion.test.ts(194,37): error TS2493: Tuple type '[]' of length '0' has no element at index '0'.
+src/api/client.expansion.test.ts(194,42): error TS2493: Tuple type '[]' of length '0' has no element at index '1'.
+src/api/client.expansion.test.ts(194,64): error TS2339: Property 'method' does not exist on type 'never'.
+src/api/client.expansion.test.ts(237,34): error TS2493: Tuple type '[]' of length '0' has no element at index '1'.
+src/api/client.expansion.test.ts(237,38): error TS2339: Property 'body' does not exist on type 'never'.
+src/api/client.expansion.test.ts(238,34): error TS2493: Tuple type '[]' of length '0' has no element at index '1'.
+src/api/client.expansion.test.ts(238,38): error TS2339: Property 'body' does not exist on type 'never'.
+src/api/client.expansion.test.ts(239,35): error TS2493: Tuple type '[]' of length '0' has no element at index '1'.
+src/api/client.expansion.test.ts(239,39): error TS2339: Property 'body' does not exist on type 'never'.
+src/api/client.expansion.test.ts(240,35): error TS2493: Tuple type '[]' of length '0' has no element at index '1'.
+src/api/client.expansion.test.ts(240,39): error TS2339: Property 'body' does not exist on type 'never'.
+src/api/client.expansion.test.ts(241,35): error TS2493: Tuple type '[]' of length '0' has no element at index '1'.
+src/api/client.expansion.test.ts(241,39): error TS2339: Property 'body' does not exist on type 'never'.
+src/api/client.expansion.test.ts(242,35): error TS2493: Tuple type '[]' of length '0' has no element at index '1'.
+src/api/client.expansion.test.ts(242,39): error TS2339: Property 'body' does not exist on type 'never'.
+src/api/client.expansion.test.ts(243,35): error TS2493: Tuple type '[]' of length '0' has no element at index '1'.
+src/api/client.expansion.test.ts(243,39): error TS2339: Property 'body' does not exist on type 'never'.
+src/api/client.expansion.test.ts(244,35): error TS2493: Tuple type '[]' of length '0' has no element at index '1'.
+src/api/client.expansion.test.ts(244,39): error TS2339: Property 'body' does not exist on type 'never'.
+src/api/client.expansion.test.ts(245,35): error TS2493: Tuple type '[]' of length '0' has no element at index '1'.
+src/api/client.expansion.test.ts(245,39): error TS2339: Property 'body' does not exist on type 'never'.
+src/api/client.expansion.test.ts(246,35): error TS2493: Tuple type '[]' of length '0' has no element at index '1'.
+src/api/client.expansion.test.ts(246,39): error TS2339: Property 'body' does not exist on type 'never'.
+src/api/client.expansion.test.ts(247,35): error TS2493: Tuple type '[]' of length '0' has no element at index '1'.
+src/api/client.expansion.test.ts(247,39): error TS2339: Property 'body' does not exist on type 'never'.
+src/api/client.expansion.test.ts(248,35): error TS2493: Tuple type '[]' of length '0' has no element at index '1'.
+src/api/client.expansion.test.ts(248,39): error TS2339: Property 'body' does not exist on type 'never'.
+src/api/client.expansion.test.ts(249,35): error TS2493: Tuple type '[]' of length '0' has no element at index '1'.
+src/api/client.expansion.test.ts(249,39): error TS2339: Property 'body' does not exist on type 'never'.
+src/api/client.expansion.test.ts(250,35): error TS2493: Tuple type '[]' of length '0' has no element at index '1'.
+src/api/client.expansion.test.ts(250,39): error TS2339: Property 'body' does not exist on type 'never'.
+src/api/client.test.ts(43,12): error TS2493: Tuple type '[]' of length '0' has no element at index '0'.
+src/api/client.test.ts(43,17): error TS2493: Tuple type '[]' of length '0' has no element at index '1'.
+src/api/client.test.ts(45,18): error TS2339: Property 'method' does not exist on type 'never'.
+src/api/client.test.ts(46,18): error TS2339: Property 'headers' does not exist on type 'never'.
+src/api/client.test.ts(47,18): error TS2339: Property 'headers' does not exist on type 'never'.
+src/api/client.test.ts(48,18): error TS2339: Property 'headers' does not exist on type 'never'.
+src/api/client.test.ts(81,41): error TS2493: Tuple type '[]' of length '0' has no element at index '0'.
+src/api/client.test.ts(117,41): error TS2493: Tuple type '[]' of length '0' has no element at index '0'.
+src/api/client.test.ts(167,44): error TS2493: Tuple type '[]' of length '0' has no element at index '1'.
+src/api/client.test.ts(167,48): error TS2339: Property 'body' does not exist on type 'never'.
+src/api/client.test.ts(169,46): error TS2493: Tuple type '[]' of length '0' has no element at index '1'.
+src/api/client.test.ts(169,50): error TS2339: Property 'body' does not exist on type 'never'.
+src/api/client.test.ts(171,41): error TS2493: Tuple type '[]' of length '0' has no element at index '0'.
+src/api/client.test.ts(195,14): error TS2493: Tuple type '[]' of length '0' has no element at index '1'.
+src/api/client.test.ts(196,18): error TS2339: Property 'body' does not exist on type 'never'.
+src/api/client.test.ts(197,18): error TS2339: Property 'headers' does not exist on type 'never'.
+src/api/client.test.ts(198,18): error TS2339: Property 'headers' does not exist on type 'never'.
+src/api/client.test.ts(199,18): error TS2339: Property 'headers' does not exist on type 'never'.
+src/api/facade-contract.acceptance.test.ts(26,12): error TS2493: Tuple type '[]' of length '0' has no element at index '0'.
+src/api/facade-contract.acceptance.test.ts(26,17): error TS2493: Tuple type '[]' of length '0' has no element at index '1'.
+src/api/facade-contract.acceptance.test.ts(28,36): error TS2339: Property 'body' does not exist on type 'never'.
+src/api/facade-contract.acceptance.test.ts(34,18): error TS2339: Property 'headers' does not exist on type 'never'.
+src/api/facade-contract.acceptance.test.ts(35,18): error TS2339: Property 'headers' does not exist on type 'never'.
+src/api/facade-contract.acceptance.test.ts(36,18): error TS2339: Property 'headers' does not exist on type 'never'.
+src/dynamic-apps/contracts.ts(9,8): error TS2307: Cannot find module '../../../packages/schemas/declarative-app/v1' or its corresponding type declarations.
+src/dynamic-apps/gateway.ts(3,32): error TS2307: Cannot find module '../../../packages/schemas/declarative-app/v1' or its corresponding type declarations.
+src/dynamic-apps/state.test.ts(50,7): error TS2322: Type '<TResult extends JsonValue = JsonValue, TParams extends JsonValue = JsonValue>(method: string, params: TParams | undefined, options: GatewayInvokeOptions | undefined) => Promise<...>' is not assignable to type '<TResult extends JsonValue = JsonValue, TParams extends JsonValue = JsonValue>(method: string, params?: TParams | undefined, options?: GatewayInvokeOptions | undefined) => Promise<...>'.
+src/dynamic-apps/state.test.ts(66,62): error TS2322: Type 'Promise<{ appId: string; manifestVersion: string; displayName: string; publication: "published"; lifecycle: "running"; availability: "available"; requestedCapabilityCount: number; updatedAt: string; manifest: { ...; }; lifecycleEvents: never[]; }>' is not assignable to type 'Promise<TResult>'.

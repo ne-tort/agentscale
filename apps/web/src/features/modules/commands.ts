@@ -46,7 +46,7 @@ export function parseModuleCollectionRowAction(value: unknown): ModuleCollection
   }
   if (kind === "open_view" && typeof value.view === "string" && value.view) {
     if (value.action !== undefined || value.params_form !== undefined) return { ok: false, error: "open_view cannot declare an action or params_form." };
-    return { ok: true, action: { kind, view: value.view, ...(value.label !== undefined ? { label: value.label } : {}), ...(value.tooltip !== undefined ? { tooltip: value.tooltip } : {}), ...(value.icon !== undefined ? { icon: value.icon } : {}), ...(isRecord(value.when) ? { when: value.when } : {}) };
+    return { ok: true, action: { kind, view: value.view, ...(value.label !== undefined ? { label: value.label } : {}), ...(value.tooltip !== undefined ? { tooltip: value.tooltip } : {}), ...(value.icon !== undefined ? { icon: value.icon } : {}), ...(isRecord(value.when) ? { when: value.when } : {}) } };
   }
   return { ok: false, error: "row action must invoke a declared action or open a declared view." };
 }
