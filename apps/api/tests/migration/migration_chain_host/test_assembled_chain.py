@@ -143,12 +143,14 @@ async def test_cutover_stage_is_wired_because_its_ports_are_implemented() -> Non
         assert "cutover_command_service" in cutover.services
 
 
-async def test_the_m06_registry_gap_is_reported_not_smoothed_over() -> None:
-    """The one blocker no process can close by itself stays visible by name.
+async def test_the_m06_gap_is_reported_not_smoothed_over() -> None:
+    """A stage a process cannot complete by itself stays visible by name.
 
-    ``composition.UNIMPLEMENTED_PORTS`` keeps ``PartitionHandoffReadPort`` until
-    the M06 stage builder takes it as a dependency, so the M06 stage reports that
-    exact code. The resource must not report the chain wired around it.
+    The registry entry for ``PartitionHandoffReadPort`` is gone (the port is
+    implemented and the builder accepts it), so M06 is now held back by something
+    real: a bare process cannot own ``ShadowGatewayPorts``, which need live legacy
+    scope and quota owners plus the M05 upstream evidence object. The resource must
+    name that code and must not report the chain wired around it.
     """
 
     app = build_app()
@@ -158,8 +160,11 @@ async def test_the_m06_registry_gap_is_reported_not_smoothed_over() -> None:
         report = res.report()
         m06 = next(stage for stage in report.stages if stage.stage == "M06_grants_gateway")
         assert m06.wired is False
-        assert "m06_partition_handoff_read_port_unimplemented" in m06.blockers
         assert "m06_shadow_gateway_ports_missing" in m06.blockers
+        assert "m06_partition_handoff_read_port_unimplemented" not in m06.blockers, (
+            "the port is implemented and accepted by the builder; reporting it again "
+            "would be a stale registry claim"
+        )
         assert report.wired is False
         # The process still boots and the report is still complete.
         assert await res.health() is False
@@ -182,12 +187,14 @@ async def test_process_scope_codes_explain_the_tenant_and_run_bound_absences() -
 # ---------------------------------------------------------------------------
 
 
-async def test_complete_dependency_set_wires_every_stage_but_the_registered_gap() -> None:
-    """No field is ``None``: the resource's own resolution is not the blocker.
+async def test_complete_dependency_set_wires_every_stage() -> None:
+    """No field is ``None`` and no port is unimplemented: the whole chain wires.
 
-    This is the sharpest statement of where the remaining work is. Four stages
-    become wired; the fifth is held back by the review §3 registry entry alone —
-    not by anything this resource failed to resolve.
+    This used to stop at M06, held back by the registry entry for
+    ``PartitionHandoffReadPort``. That entry is gone: the M06 builder takes the port
+    through ``ShadowGatewayPorts.handoff_partitions`` and
+    ``SqlPartitionHandoffReadStore`` implements it. Zero unwired stages is now the
+    correct answer, and it is the statement that the chain is assemblable end to end.
     """
 
     app = build_app()
@@ -197,10 +204,10 @@ async def test_complete_dependency_set_wires_every_stage_but_the_registered_gap(
         chain = res.chain
         assert chain is not None
         unwired = [assembly.stage for assembly in chain.stages if not assembly.wired]
-        assert unwired == [MigrationStage.M06_GRANTS_GATEWAY]
+        assert unwired == [], f"stages still unwired with a complete set: {unwired}"
         # No process-scope code is invented when the host states every dependency.
         assert res.composition_blockers == ()
-        assert await res.health() is False
+        assert await res.health() is True
 
 
 # ---------------------------------------------------------------------------

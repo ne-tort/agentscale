@@ -39,7 +39,7 @@ from prodavan.infrastructure.persistence.rls.context import (
 from tests.migration.principal_resolver.db_fixtures import (
     CABINET_A,
     CABINET_B,
-    CLOCK_NOW,
+    clock_now,
     CORRELATION,
     CORRELATION_OTHER,
     EMPLOYEE_A,
@@ -88,7 +88,7 @@ def credential(
         correlation_id=correlation_id,
         subject_claim=subject,
         resolution_source=source,
-        expires_at=CLOCK_NOW + ttl,
+        expires_at=clock_now() + ttl,
         asserted_tenant_id=tenant,
         asserted_cabinet_id=cabinet,
         asserted_project_id=project,
@@ -161,7 +161,7 @@ async def test_principal_fields_come_from_the_identity_tables() -> None:
     assert principal.resolved_by == "auth.bearer_jwt"
     assert principal.digest.startswith("sha256:")
     # The seal is real: the principal re-validates, including its digest and lifetime.
-    principal.validate(now=CLOCK_NOW)
+    principal.validate(now=clock_now())
 
 
 async def test_project_scope_is_derived_from_the_project_row() -> None:
@@ -227,7 +227,7 @@ async def test_lifetime_is_capped_by_max_ttl() -> None:
         ).resolve(correlation_id=CORRELATION)
 
     assert isinstance(principal, TrustedPrincipal)
-    assert principal.expires_at == CLOCK_NOW + timedelta(minutes=5)
+    assert principal.expires_at == clock_now() + timedelta(minutes=5)
 
 
 async def test_lifetime_follows_a_shorter_credential_expiry() -> None:
@@ -240,7 +240,7 @@ async def test_lifetime_follows_a_shorter_credential_expiry() -> None:
         )
 
     assert isinstance(principal, TrustedPrincipal)
-    assert principal.expires_at == CLOCK_NOW + timedelta(seconds=45)
+    assert principal.expires_at == clock_now() + timedelta(seconds=45)
     assert DEFAULT_MAX_PRINCIPAL_TTL > timedelta(0)
 
 
@@ -516,5 +516,5 @@ async def test_principal_is_refused_by_rls_context_when_it_expires() -> None:
 
     assert isinstance(principal, TrustedPrincipal)
     with pytest.raises(RlsContextError) as excinfo:
-        principal.validate(now=CLOCK_NOW + timedelta(minutes=2))
+        principal.validate(now=clock_now() + timedelta(minutes=2))
     assert excinfo.value.reason_code == "tenant_context_expired"

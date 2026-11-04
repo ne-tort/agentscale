@@ -19,7 +19,7 @@ from prodavan.application.migration.principal_resolver import (
     VerifiedCredential,
 )
 from tests.migration.principal_resolver.db_fixtures import (
-    CLOCK_NOW,
+    clock_now,
     CORRELATION,
     CORRELATION_OTHER,
     SUBJECT_A,
@@ -29,12 +29,12 @@ from tests.migration.principal_resolver.db_fixtures import (
 SECRET = "test-only-secret-long-enough-for-hs256"
 
 #: JWT ``exp`` is a NumericDate (epoch seconds), never a datetime.
-EXP_IN_15_MIN = int((CLOCK_NOW + timedelta(minutes=15)).timestamp())
-EXP_NOW = int(CLOCK_NOW.timestamp())
+EXP_IN_15_MIN = int((clock_now() + timedelta(minutes=15)).timestamp())
+EXP_NOW = int(clock_now().timestamp())
 
 
 def exp_in(delta: timedelta) -> int:
-    return int((CLOCK_NOW + delta).timestamp())
+    return int((clock_now() + delta).timestamp())
 
 
 def token_for(**claims: object) -> str:
@@ -114,7 +114,7 @@ async def test_credential_without_usable_expiry_is_refused() -> None:
 async def test_revocation_takes_effect_without_a_cache() -> None:
     """A token that expires between two lookups stops resolving: nothing is memoized."""
 
-    moment = [CLOCK_NOW]
+    moment = [clock_now()]
     credential_source = BearerJwtCredentialSource(
         correlation_id=CORRELATION,
         token=token_for(),
@@ -123,7 +123,7 @@ async def test_revocation_takes_effect_without_a_cache() -> None:
     )
 
     assert await credential_source.lookup(correlation_id=CORRELATION) is not None
-    moment[0] = CLOCK_NOW + timedelta(minutes=2)
+    moment[0] = clock_now() + timedelta(minutes=2)
     assert await credential_source.lookup(correlation_id=CORRELATION) is None
 
 
@@ -271,12 +271,12 @@ def test_credential_requires_aware_expiry_and_a_server_side_source() -> None:
             correlation_id=CORRELATION,
             subject_claim=SUBJECT_A,
             resolution_source="job_payload",
-            expires_at=CLOCK_NOW,
+            expires_at=clock_now(),
         )
     with pytest.raises(ValueError):
         VerifiedCredential(
             correlation_id=CORRELATION,
             subject_claim="",
             resolution_source="bearer_jwt_verified",
-            expires_at=CLOCK_NOW,
+            expires_at=clock_now(),
         )

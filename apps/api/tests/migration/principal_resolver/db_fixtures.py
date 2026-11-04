@@ -65,15 +65,32 @@ CORRELATION_OTHER = "corr_bbbbbbbbbbbbbbbbbbbb"
 
 #: A frozen "now" so lifetime assertions are exact rather than flaky.
 #:
-#: Anchored to the wall clock (truncated to a whole second) rather than to a fixed calendar
-#: date: ``TrustedPrincipal.from_resolution`` validates against the real clock, so a fixture
-#: frozen in the past would make every positive case fail for the wrong reason.  Every
-#: expectation is expressed relative to this instant, which is what keeps the assertions exact.
-CLOCK_NOW = datetime.now(UTC).replace(microsecond=0)
+#: Anchored to the wall clock at *call* time, not at import time.
+#:
+#: ``TrustedPrincipal.from_resolution`` validates against the real clock, so a fixture
+#: frozen in the past would make every positive case fail for the wrong reason. It must
+#: not be frozen at import either: a full-suite run takes minutes, and a case using a
+#: short credential TTL (45 seconds) would find its credential already expired by the
+#: time it executed -- which is exactly how this flaked, and only in the full run.
+def clock_now() -> datetime:
+    """The wall clock, truncated to a whole second, read when the fixture is used."""
+
+    return datetime.now(UTC).replace(microsecond=0)
 
 
-def frozen_clock(moment: datetime = CLOCK_NOW) -> Callable[[], datetime]:
-    return lambda: moment
+def frozen_clock(moment: datetime | None = None) -> Callable[[], datetime]:
+    anchor = moment if moment is not None else clock_now()
+    return lambda: anchor
+
+
+def retry_until_principal_anchor() -> datetime:
+    """Compatibility alias for fixtures that still read a module-level constant.
+
+    Prefer :func:`clock_now`: a constant bound at import drifts out of agreement with
+    the real clock as soon as a run takes a while.
+    """
+
+    return clock_now()
 
 
 def mirror_table(model: Any, metadata: sa.MetaData) -> sa.Table:

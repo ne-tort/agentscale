@@ -457,8 +457,17 @@ def test_the_m06_handoff_port_is_implemented_and_registered_only_while_unwired()
     registered = M06_HANDOFF_PORT in {entry.port for entry in UNIMPLEMENTED_PORTS}
     import inspect
 
+    from prodavan.application.migration.m06_grants_gateway.composition import (
+        ShadowGatewayPorts,
+    )
+
+    # The port is not a top-level parameter: the builder takes it inside
+    # ``ShadowGatewayPorts`` as ``handoff_partitions``. Either shape means "the builder can
+    # be handed one"; a top-level parameter alone would report False for a port the stage
+    # actually consumes, which is how this test first fired against a correct change.
     parameters = set(inspect.signature(build_m06_grants_gateway_stage).parameters)
-    builder_accepts = "handoff_partitions" in parameters
+    bundled = set(getattr(ShadowGatewayPorts, "__annotations__", {}))
+    builder_accepts = "handoff_partitions" in parameters or "handoff_partitions" in bundled
     assert registered or builder_accepts, (
         "PartitionHandoffReadPort left the registry but the M06 builder still cannot be "
         "handed one: the registry would claim a wiring that does not exist"

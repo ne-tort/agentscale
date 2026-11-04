@@ -18,9 +18,9 @@ revision in ``tests/migration/m06_cutover_evidence``.
 
 One finding is recorded rather than worked around: ``ports._ledger_values`` binds
 ``occurred_at`` as an ISO string while the reviewed specification declares ``TIMESTAMPTZ``.
-The last test below is a strict ``xfail`` for exactly that gap — see
-``M06_CUTOVER_EVIDENCE_DEFERRED['occurred_at_bound_as_iso_string']`` — so the suite stays
-honest about it instead of hiding it behind a permissive column type.
+That mismatch is pinned by its own test below — it is invisible to SQLite (which does not
+enforce column types) and fatal under ``asyncpg`` — and named in
+``M06_CUTOVER_EVIDENCE_DEFERRED['occurred_at_bound_as_iso_string']`` so it is not lost.
 """
 
 from __future__ import annotations

@@ -32,7 +32,7 @@ from prodavan.application.scope_registry.contracts import RlsContext
 from prodavan.infrastructure.persistence.rls.context import RlsContextError
 from tests.migration.principal_resolver.db_fixtures import (
     CABINET_A,
-    CLOCK_NOW,
+    clock_now,
     CORRELATION,
     EMPLOYEE_A,
     PROJECT_A,
@@ -76,7 +76,7 @@ def credential(**overrides: object) -> VerifiedCredential:
         "correlation_id": CORRELATION,
         "subject_claim": SUBJECT_A,
         "resolution_source": "bearer_jwt_verified",
-        "expires_at": CLOCK_NOW + timedelta(minutes=10),
+        "expires_at": clock_now() + timedelta(minutes=10),
     }
     for name, value in overrides.items():
         values[aliases.get(name, name)] = value
@@ -325,7 +325,7 @@ async def test_m04_bind_refuses_an_expired_correlation_id() -> None:
         pg = FakePostgres()
         session = FakeAsyncSession(pg)
         expired = AuthBoundaryPrincipalResolver(
-            credential_source=Source(credential(expires_at=CLOCK_NOW - timedelta(seconds=1))),
+            credential_source=Source(credential(expires_at=clock_now() - timedelta(seconds=1))),
             directory=SqlTenantIdentityDirectory(session_factory=factory),
             clock=frozen_clock(),
         )

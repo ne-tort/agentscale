@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import sqlalchemy as sa
+
 from prodavan.application.migration.m06_cutover.cutover import (
     CanonicalRepairEvidence,
     GateEvidence,

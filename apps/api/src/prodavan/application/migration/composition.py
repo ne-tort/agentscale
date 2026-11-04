@@ -249,17 +249,13 @@ UNIMPLEMENTED_PORTS: tuple[UnimplementedPort, ...] = (
     # The M06 stage builder does not accept the evidence ports yet, so
     # ``PartitionHandoffReadPort`` keeps its entry until that wiring lands; a
     # registry entry for an implemented port would refuse a graph that works.
-    UnimplementedPort(
-        stage=MigrationStage.M06_GRANTS_GATEWAY,
-        port="PartitionHandoffReadPort",
-        declared_in="application/migration/m06_grants_gateway/handoff.py:120",
-        blocker_code="m06_partition_handoff_read_port_unimplemented",
-        review_ref="G3",
-        detail=(
-            "implemented by SqlPartitionHandoffReadStore in evidence_ports.py; the entry stays "
-            "only until the M06 stage builder takes the port as a dependency"
-        ),
-    ),
+    #
+    # ``PartitionHandoffReadPort`` was the last entry and has now been retired: the M06
+    # builder takes it through ``ShadowGatewayPorts.handoff_partitions``, and
+    # ``SqlPartitionHandoffReadStore`` implements it. The register is therefore empty,
+    # which is the honest state: every port the chain declares now has an implementation
+    # and a builder that accepts it. ``_port_blockers`` still reports a port the host
+    # omits, so an unwired deployment is named rather than silently degraded.
 )
 
 _UNIMPLEMENTED_BY_STAGE: Mapping[MigrationStage, tuple[UnimplementedPort, ...]] = {

@@ -95,8 +95,8 @@ from __future__ import annotations
 import logging
 
 import sqlalchemy as sa
-from alembic import op
 
+from alembic import op
 from prodavan.infrastructure.persistence.rls import policies
 
 revision = "2026110316"

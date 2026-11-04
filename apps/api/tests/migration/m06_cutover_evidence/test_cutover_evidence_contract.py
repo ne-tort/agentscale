@@ -51,13 +51,13 @@ from __future__ import annotations
 
 from typing import Any
 
-import alembic
 import alembic.op  # noqa: F401 — load the proxy module so it can be swapped below
 import pytest
 import sqlalchemy as sa
 from sqlalchemy.orm import make_transient_to_detached
 from sqlalchemy.schema import CreateTable
 
+import alembic
 import prodavan.infrastructure.persistence.models as models
 from prodavan.application.migration.m06_cutover.ports import (
     CUTOVER_LEDGER_TABLE,
