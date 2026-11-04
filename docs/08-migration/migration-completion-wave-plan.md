@@ -1,8 +1,69 @@
 # Migration completion — wave plan (continuing to functional replacement)
 
 Status: active. Owner: orchestrator agent. Updated: 2026-11-04.
-Verification freeze is in force (see `AGENTS.md`): acceptance artifacts are authored,
-nothing is executed.
+
+## Verification freeze is LIFTED
+
+The user lifted the freeze. Tests are now executed, not merely authored, and a task
+is not finished until its directory is green. The first full run collected **2739
+tests** under `tests/migration` and turned a large set of "authored" acceptance
+artifacts into evidence — and immediately found defects that reading had missed.
+
+Run command:
+
+```powershell
+cd apps/api; $env:PYTHONPATH="apps/api/src"
+python -m pytest tests/migration/<dir> -q --no-header -p no:cacheprovider
+```
+
+## What the first runs proved (production defects only)
+
+Reading the code had not found these; running it did:
+
+- `retry.py` / `reconcile.py` called legacy `column()`, which rejects
+  `primary_key`/`nullable`, so both modules failed at import.
+- `reconcile` reused a resolve-only reason code as a run `failure_code`, a field
+  validated as a redacted `agent_run.error.*` code — a resumed failure could never
+  be applied.
+- `rls/context.py` and `tenant_context.py` read the readback row by GUC name while
+  the SQL aliases columns without the prefix, so restoring previous values wiped
+  the caller's live tenant context.
+- `web_facade` contracts called `.value` on `RunStreamEvent.type`, which
+  `use_enum_values` turns into `str`: the first canonical SSE frame raised on the
+  live `run_chat` path.
+- `migration_definition_version` adapter never awaited its RLS probe, so the
+  reviewed-RLS gate passed unconditionally.
+- `ScopeMigrationCoordinator.resume_checkpoint` checked for a missing port before
+  lineage, reporting a foreign-tenant cursor as retryable instead of terminal.
+- `scope_registry_adapter` returned a tuple where `ScopeResolutionEvidence` was
+  required, and its port could not express the rls/actor evidence ACTIVE needs.
+- `module_capabilities` lost a `params_schema` assignment (every legacy module
+  failed normalization), built `_TranslatedPayload` without two required fields,
+  treated `row_filter` keys as UI vocabulary, and required a stable ID for the
+  platform `project_ids` column.
+- `equipment` validated only the shape of a currency code, so `ZZZ` passed.
+- `automation_service/__init__.py` re-exported names that `contracts` exposes only
+  lazily, breaking the **first** import of `automation_persistence` in production.
+- `parity_runner.run_key_for` keyed on the observed evidence digest, so a rerun with
+  changed evidence was silently RECORDED instead of CONFLICT.
+- `executor`'s rollback branch ignored `receipt.succeeded`, so a refusal could be
+  recorded as an applied generation.
+- `dynamic_apps` CRUD called `dataclasses.replace` on frozen pydantic models and
+  used an unimported `GrantActor`.
+
+## Standing lesson
+
+Most remaining failures were fixtures modelling states the domain forbids
+(`dataclasses.replace` on pydantic models, identities that raise in their own
+constructor, "partial" runs with exhausted checkpoints, receipts the type refuses
+to build). The rule applied throughout: fix the fixture, never loosen the
+assertion, and where possible make the check stricter than before.
+
+Dozens of gates were also found to be **vacuous** and were rewritten to check a
+property rather than a constant: hardcoded chain heads, `inspect.iscoroutinefunction`
+called on a `Signature`, raw-text scans matching their own docstrings, substring
+checks against their own literals, and an anti-duplicate check that only compared
+`__init__` imports.
 
 ## DDL chain (linear, single head `2026110310`, 193 revisions, no forks)
 
@@ -112,4 +173,8 @@ future reader can tell a missing table from a deliberate trade-off.
 - **No production promotion anywhere.** Every package keeps its promotion record
   `blocked`; canonical positive writes stay disabled until gates, RLS review and an
   explicit decision.
-- **Freeze still on.** No tests, builds, migrations or DDL have been executed.
+- **Freeze lifted; unit and migration suites are executed.** What is still *not*
+  executed: `alembic upgrade`/`downgrade` against a live database, and the
+  PostgreSQL concurrency suite in `tests/migration/postgres_integration` (it skips
+  without `PRODAVAN_TEST_DATABASE_URL`). Nothing has been applied to any
+  environment.

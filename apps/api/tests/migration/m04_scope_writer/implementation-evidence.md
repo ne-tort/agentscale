@@ -94,6 +94,29 @@ Covered, per the task's acceptance list:
 7. a foreign partition is refused before any SQL (`ExplodingSessionFactory`);
 8. append-only: no `UPDATE`/`DELETE` statement, ORM call or import anywhere in the module.
 
+### Check-priority note (MIG-M04WRITER-TESTS-01)
+
+Point 4 is asserted on both sides of the contract: the writer (`scope_evidence_row_values`)
+and `ScopeParentEvidence.invalid_reason_for`. The writer already returned
+`plugin_instance_scope_denied`; the contract did not — it ran the tenant/parent legs first and
+answered `cross_tenant_parent` whenever the tenant leg did not line up. That was the defect, not
+the expectation:
+
+* `plugin_instance` is not a kind M04-02 can represent at all (it is absent from
+  `ck_m04_scope_promotion_scope_kind` and from `m04_scope_anchor`), so the denial is
+  **terminal** — no parent evidence, however complete, changes it. `cross_tenant_parent` is a
+  mismatch of the tenant leg, which a caller can legitimately retry with corrected evidence;
+  using it for an unrepresentable kind invites exactly the wrong recovery.
+* Every other M04-02 entry point already denies the kind first:
+  `ScopeResolver.resolve` and `evaluate_active_scope_evidence` both return
+  `plugin_instance_denied_m05` before their `context.usable` / tenant / `matches_scope` checks,
+  and `scope_evidence_row_values` refuses before reading the anchors' parents. Making
+  `invalid_reason_for` the one place that consults parents first was an inconsistency, not a
+  deliberate "do not reveal the kind before the tenant is proven" rule — the kind is already
+  revealed by the caller's own anchors, so there is nothing to conceal.
+* The same reason code now also covers any other kind the contract does not model (the
+  fall-through stayed a terminal refusal rather than becoming a parent reason).
+
 ## Deliberately not done (outside this task's file zone)
 
 * `evidence_ports.py` still lists `m04_scope_evidence_writer_absent` in `SCHEMA_BLOCKERS`.
@@ -103,9 +126,18 @@ Covered, per the task's acceptance list:
 * No RLS policy for the table is installed yet (revision `2026110313` only creates it); the
   writer binds the tenant GUCs and leaves the policy gate to the RLS follow-up task.
 
-## Not executed
+## Executed
 
-Per the migration-stage verification freeze, no test, build, lint, formatter, Alembic or
-database command was run for these artefacts. The behaviour above was reasoned from the
-writer, the reader (`review_m04_scope_evidence`), the model constraints and the M04-02
-contracts.
+The migration-stage verification freeze was lifted; these artefacts are run, not only
+reasoned about. From `apps/api` with `PYTHONPATH=<worktree>/apps/api/src`:
+
+| command | result |
+|---|---|
+| `python -m pytest tests/migration/m04_scope_writer -q` | 81 passed |
+| `python -m pytest tests/migration/m04_scope tests/migration/m04_scope_evidence tests/migration/evidence_ports -q` | 293 passed |
+| `python -m pytest tests/migration/m04_scope_writer tests/migration/m04_scope tests/migration/m04_scope_evidence tests/migration/evidence_ports -q` | 374 passed |
+| `python -m pytest tests/migration/m06_grants_gateway tests/migration/migration_composition -q` | 161 passed |
+
+The last two suites were run because they consume `evaluate_active_scope_evidence` /
+`invalid_reason_for`: the reordering must not change any accepted path. No database command,
+build, lint or Alembic step was run.

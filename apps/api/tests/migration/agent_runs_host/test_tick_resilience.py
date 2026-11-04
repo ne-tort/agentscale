@@ -70,7 +70,17 @@ async def test_consumer_tick_exception_does_not_kill_the_loop() -> None:
     resource = _resource(dispatcher=dispatcher, worker=FakeWorker())
 
     await resource.startup()
-    assert await wait_until(lambda: len(dispatcher.calls) >= 4, timeout=3.0)
+    # Wait for the *recovered* state, not just for the fourth dispatch call: the
+    # dispatcher records its call before it raises, while the loop publishes
+    # ``last_reason``/``last_result`` after the tick returns.  Waiting only on the
+    # call count sampled the snapshot between the two and observed the third
+    # tick's failure as if it were the last one.
+    recovered = await wait_until(
+        lambda: len(dispatcher.calls) >= 4
+        and resource.report()["loops"][LOOP_CONSUMER]["last_reason"] == "ok",
+        timeout=3.0,
+    )
+    assert recovered
     snapshot = resource.report()["loops"][LOOP_CONSUMER]
 
     assert snapshot["running"] is True
