@@ -123,16 +123,26 @@ class AutomationService:
         result = await self._repository.complete_task(claim=claim, completed_at=require_aware(self._clock.now(), name="clock.now()"))
         return _cas_applied(result)
 
-    async def fail_task_run(self, *, claim: TaskClaim, error: BaseException, retry_after_seconds: int = 30):
+    async def fail_task_run(
+        self, *, claim: TaskClaim, error: BaseException, retry_after_seconds: int = 30
+    ) -> bool:
+        """Record a failure and report whether a retry was scheduled.
+
+        The boolean reports the *outcome for the caller*: ``True`` only when the
+        run was moved to ``RETRY_WAIT`` and that CAS was applied. A dead-lettered
+        run is terminal, so it must report ``False`` — otherwise a worker would
+        treat an exhausted run as queued for another attempt and re-drive work
+        that was already declared failed.
+        """
         run = claim.run
         lease = claim.lease
         now = require_aware(self._clock.now(), name="clock.now()")
         _validate_lease(lease, now)
         safe = _safe_error(error, code="task_failed")
         if run.attempts >= self._max_attempts:
-            result = await self._repository.dead_letter_task(claim=claim, error=safe, failed_at=now)
-        else:
-            result = await self._repository.retry_task(claim=claim, error=safe, now=now)
+            await self._repository.dead_letter_task(claim=claim, error=safe, failed_at=now)
+            return False
+        result = await self._repository.retry_task(claim=claim, error=safe, now=now)
         return _cas_applied(result)
 
     async def schedule_delivery(self, *, delivery: DeliverySchedule) -> None:

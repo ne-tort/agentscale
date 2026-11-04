@@ -45,14 +45,37 @@ class Definitions:
         )
 
 
+PLUGIN_IDENTITY = PluginInstanceIdentity(
+    "plugin-1", "definition-1", "version-1", "tenant-1", "tenant", "tenant-1", "sha256:" + "a" * 64
+)
+
+
 class Identity:
     async def resolve_identity(self, **kwargs):
-        return PluginInstanceIdentity("plugin-1", "definition-1", "version-1", "tenant-1", "tenant", "tenant-1", "sha256:" + "a" * 64)
+        return PLUGIN_IDENTITY
 
 
 class Fencing:
     async def authorize_positive_write(self, request):
-        return PositiveWriteDecision(True, PluginInstanceDecisionReason.ALLOWED, PluginInstanceRecord(IdentityRecord.identity, request.subject_id, request.session_id, PluginInstanceState.ACTIVE, request.fencing, request.lease_owner, request.lease_id, request.now + timedelta(minutes=5)))
+        # M05 возвращает запись, чья identity должна совпасть с identity, ранее
+        # разрешённой портом plugin_identity. Прежний фейк подставлял в поле
+        # `identity` экземпляр порта-резолвера (`IdentityRecord.identity`), что
+        # моделировало невозможное состояние: сервис получил бы запись с чужой
+        # identity и обязан был бы отказать.
+        return PositiveWriteDecision(
+            True,
+            PluginInstanceDecisionReason.ALLOWED,
+            PluginInstanceRecord(
+                identity=PLUGIN_IDENTITY,
+                subject_id=request.subject_id,
+                session_id=request.session_id,
+                state=PluginInstanceState.ACTIVE,
+                fencing=request.fencing,
+                lease_owner=request.lease_owner,
+                lease_id=request.lease_id,
+                lease_until=request.now + timedelta(minutes=5),
+            ),
+        )
 
 
 class Grants:
@@ -81,9 +104,6 @@ def grant(**changes):
     value = dict(grant_id="grant-1", tenant_id="tenant-1", app_definition_id="definition-1", app_id="billing", app_version_id="version-1", app_artifact_digest="sha256:" + "a" * 64, scope_kind="tenant", scope_id="tenant-1", plugin_instance_id="plugin-1", subject_id="employee-1", session_id="session-1", capability_key="storage.kv", operations=frozenset({"read"}), resources=frozenset({"invoice/1"}), domains=frozenset({"storage"}), constraints={"region": "eu"}, issued_at=NOW, issued_by="admin-1")
     value.update(changes)
     return CanonicalGrant(**value)
-
-
-IdentityRecord = Identity()
 
 
 def service(values):

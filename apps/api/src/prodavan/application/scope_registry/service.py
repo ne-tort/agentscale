@@ -106,7 +106,21 @@ class ScopeRegistryService:
         if entry.owner_state is not OwnerState.ACTIVE:
             reason = f"scope_{entry.owner_state.value}"
             await self._port.record(self._quarantine_for(entry.anchors, reason, entry))
-            return PositiveWriteDecision(False, reason, entry, reason)
+            return PositiveWriteDecision(
+                allowed=False,
+                reason_code=reason,
+                entry=entry,
+                quarantine_reason=reason,
+            )
+        if entry.anchors.scope_kind is ScopeKind.PLUGIN_INSTANCE:
+            # M04 never creates a plugin-instance registry row: the cyclic
+            # registry<->instance relation is staged by M05, so a self-issued
+            # plugin anchor would become an authorization anchor nobody proved.
+            # RLS and parent evidence are evaluated first, so a broken context or
+            # chain is reported precisely instead of being masked as deferral.
+            deferred_reason: str | None = "plugin_instance_deferred_m05"
+        else:
+            deferred_reason = None
         if context is None:
             reason = "missing_rls_context"
         elif context.tenant_id != entry.anchors.tenant_id:
@@ -128,11 +142,19 @@ class ScopeRegistryService:
             )
             if not valid:
                 reason = self._parent_reason(entry.anchors.scope_kind, proof)
+        if reason is None:
+            reason = deferred_reason
         if reason is not None:
             await self._port.record(self._quarantine_for(entry.anchors, reason, entry))
-            return PositiveWriteDecision(False, reason, entry, reason)
+            return PositiveWriteDecision(
+                allowed=False,
+                reason_code=reason,
+                entry=entry,
+                quarantine_reason=reason,
+                details={"parent_proof": proof.model_dump() if proof else None},
+            )
         stored = await self._port.put_scope(entry)
-        return PositiveWriteDecision(True, "allowed", stored)
+        return PositiveWriteDecision(allowed=True, reason_code="allowed", entry=stored)
 
     @staticmethod
     def _assertion_mismatch(assertion: ScopeAssertion, anchors: ScopeAnchors) -> str | None:
@@ -154,7 +176,15 @@ class ScopeRegistryService:
             return "tenant_parent_invalid"
         if kind in (ScopeKind.CABINET, ScopeKind.PROJECT) and not proof.cabinet_membership_active:
             return "cabinet_membership_invalid"
-        if kind is ScopeKind.PROJECT and not proof.project_policy_eligible:
+        if kind is ScopeKind.PROJECT and not (
+            proof.project_exists
+            and proof.project_tenant_compatible
+            and proof.project_cabinet_compatible
+            and proof.project_policy_eligible
+        ):
+            # Every project gate (existence, tenant/cabinet compatibility, policy
+            # eligibility) is project-parent evidence; a missing or incompatible
+            # project parent must not degrade into a generic parent reason.
             return "project_parent_invalid"
         return "parent_compatibility_invalid"
 

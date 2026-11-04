@@ -91,7 +91,12 @@ async def test_allow_routes_only_full_transaction_evidence():
     assert result.final_result_event.event_id == "final-1"
     assert result.scope == ("project", "project-1")
     assert result.integrity.auth_event.digests["payload_digest"] == DIGEST
-    assert result.redacted.redaction_version == original.redaction_version
+    # The redaction marker lives on the full audit envelope; ``redacted`` is the
+    # narrow MCP projection and by contract carries only MCP fields, so the
+    # version has to be checked where it is actually preserved.
+    assert result.redacted.argument_digest == original.arguments_digest
+    assert result.redacted.correlation_id == original.correlation_id
+    assert result.outcome.redaction_version == original.redaction_version
 
 
 @pytest.mark.asyncio
@@ -101,7 +106,16 @@ async def test_quarantine_routes_only_to_durable_quarantine():
     adapter = AuditIntegrityAdapter(
         outcome_adapter=AuditOutcomeAdapter(transaction=transaction), quarantine=quarantine
     )
-    quarantined = outcome(decision=AuditDecision.QUARANTINE, result_status=AuditResult.ERROR, error_code="review")
+    quarantined = outcome(
+        decision=AuditDecision.QUARANTINE,
+        result_status=AuditResult.ERROR,
+        # A quarantine outcome whose reason_code still said "allowed" (the
+        # default of this helper, which was written for an allow outcome) is a
+        # self-contradictory envelope: quarantine evidence must name the reason
+        # it was quarantined, and the durable record keeps that same code.
+        reason_code="review",
+        error_code="review",
+    )
     auth = linked(AuditEventClass.AUTH, decision=AuditDecision.QUARANTINE, result_status=AuditResult.ERROR, error_code="review")
     final = linked(AuditEventClass.FINAL_RESULT, decision=AuditDecision.QUARANTINE, result_status=AuditResult.ERROR, error_code="review")
     result = await adapter.append(AuditIntegrityAppendRequest(quarantined, auth, final))

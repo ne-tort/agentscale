@@ -408,6 +408,11 @@ async def test_delivery_succeeds_and_clears_lease() -> None:
     repo, clock, queue, transport = FakeRepository(), FakeClock(), FakeQueue(), FakeTransport()
     app = service(repo, clock, FakeVerifier(), queue, transport)
     delivery = DeliverySchedule(id="delivery-1", destination="https://example.test", payload={}, available_at=clock.value)
+    # Доставка выдаётся только через CAS репозитория: строка обязана уже
+    # существовать, иначе claim_delivery не находит её и deliver обязан
+    # отказать. Прежняя фикстура звала deliver() для незаписанной доставки и
+    # тем самым моделировала состояние, которого домен не допускает.
+    repo.deliveries[delivery.id] = delivery
 
     delivered = await app.deliver(delivery=delivery, worker_id="worker-a")
 

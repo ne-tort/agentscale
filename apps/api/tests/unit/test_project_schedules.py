@@ -136,7 +136,13 @@ def test_cron_question_mark_leaves_the_other_day_field_unrestricted() -> None:
     assert next_cron_at("0 9 ? * 1-5", after, "Europe/Samara") == datetime(
         2026, 11, 6, 5, tzinfo=UTC
     )
-    assert next_cron_at("0 9 ? * 1-5", datetime(2026, 11, 6, 5, tzinfo=UTC)) == datetime(
+    # Same schedule, cursor advanced past Friday 09:00 Samara local: the next
+    # weekday occurrence is Monday, so the weekend is skipped. This case is about
+    # the schedule's own timezone, so the tz argument belongs on this call too —
+    # without it the expression is evaluated in UTC, where 09:00 UTC on the same
+    # Friday is legitimately the next match and the assertion would describe a
+    # Samara instant against a UTC clock.
+    assert next_cron_at("0 9 ? * 1-5", datetime(2026, 11, 6, 5, tzinfo=UTC), "Europe/Samara") == datetime(
         2026, 11, 9, 5, tzinfo=UTC
     )
 

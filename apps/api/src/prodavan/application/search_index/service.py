@@ -119,18 +119,19 @@ class SearchIndexService:
             # shared by every project in the company; keep the project match
             # authoritative while allowing only that unscoped company row.
             requested_project_id = filt.pop("project_id", None)
-            if include_unscoped_project_docs:
-                filt["__project_scope__"] = {
-                    "project_id": project_id,
-                    "include_unscoped": requested_project_id is None,
-                    # An explicit caller project filter remains conjunctive and
-                    # can narrow the implicit owner/project scope, never widen it.
-                    "requested_project_id": requested_project_id,
-                }
-            else:
-                # Non-Bridge callers retain exact-project isolation; an extra
-                # filter cannot replace that authoritative scope.
-                filt["project_id"] = project_id
+            # Both branches go through ``__project_scope__`` so an explicit
+            # caller project filter stays *conjunctive*: it can narrow the
+            # authoritative project scope but never replace it. Assigning
+            # ``filt["project_id"]`` directly let a caller-supplied
+            # ``filter={"project_id": <other project>}`` read another project's
+            # documents.
+            filt["__project_scope__"] = {
+                "project_id": project_id,
+                "include_unscoped": bool(
+                    include_unscoped_project_docs and requested_project_id is None
+                ),
+                "requested_project_id": requested_project_id,
+            }
         return filt
 
     async def ensure_index(

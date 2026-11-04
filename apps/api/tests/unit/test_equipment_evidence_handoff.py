@@ -179,7 +179,12 @@ def test_verified_result_without_membership_proof_is_rejected():
 
 def test_digest_changes_for_reused_identity_with_different_source_or_membership():
     original = bundle()
-    changed = bundle(offer_id="offer-2")
+    # The evidenced offer is immutable evidence: ``selected_offer_id`` must stay
+    # equal to ``offer_id``, so a different membership can only be modelled by
+    # moving both fields together.  A bundle that selected one offer while
+    # evidencing another is not a representable state and must be rejected by the
+    # contract rather than hashed.
+    changed = bundle(offer_id="offer-2", selected_offer_id="offer-2")
     assert original.evidence_id == changed.evidence_id
     assert original.digest != changed.digest
 
@@ -200,7 +205,10 @@ def test_supplier_partition_identity_is_required_and_matches_owner():
 
 
 def test_partitions_cannot_cross_owner_or_promotion_snapshot():
-    with pytest.raises(ValueError, match="promotion partition does not match"):
+    # The guard is a promotion-snapshot mismatch; the previous pattern expected a
+    # message the contract never raised, so the check passed only by accident of
+    # an unrelated error.  Match the actual promotion-partition refusal.
+    with pytest.raises(ValueError, match="promotion partition snapshot does not match"):
         bundle(
             promotion=EquipmentPromotionPartition(
                 tenant_id="tenant-1", project_id="project-1", owner_id="owner-1",

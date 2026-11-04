@@ -111,7 +111,12 @@ class IdentityEnvelope:
             raise IdentityEnvelopeError("generations must be non-negative")
         if self.lease_until.tzinfo is None or self.lease_until.utcoffset() is None:
             raise IdentityEnvelopeError("lease_until must be timezone-aware")
-        partition = self.promotion_partition or PromotionPartition(
+        # The partition is always derived from canonical identity and compared
+        # against a supplied one. Comparing ``partition`` (which *is* the supplied
+        # value when present) against itself accepted any contradictory
+        # partition, letting an envelope carry another scope/version into M06
+        # promotion.
+        canonical_partition = PromotionPartition(
             tenant_id=self.tenant_id,
             definition_id=self.definition_id,
             version_id=self.version_id,
@@ -121,9 +126,9 @@ class IdentityEnvelope:
             subject_id=self.subject_id,
             session_id=self.session_id,
         )
-        if self.promotion_partition is not None and partition != self.promotion_partition:
+        if self.promotion_partition is not None and self.promotion_partition != canonical_partition:
             raise IdentityEnvelopeError("promotion_partition does not match canonical identity")
-        object.__setattr__(self, "promotion_partition", partition)
+        object.__setattr__(self, "promotion_partition", canonical_partition)
         expected = self.compute_digest()
         if self.envelope_digest and self.envelope_digest != expected:
             raise IdentityEnvelopeError("envelope_digest does not match canonical identity")

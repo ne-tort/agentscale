@@ -167,7 +167,13 @@ async def test_produce_due_does_not_enqueue_twice_after_advancing_due_cursor() -
 
 
 class _TaskApp:
-    def task(self, *, name: str, bind: bool = False):
+    # A real Celery app accepts arbitrary task options, so the double must too:
+    # ``register_tasks`` legitimately registers some jobs with ``acks_late`` /
+    # ``reject_on_worker_lost``. Rejecting those keywords here failed the test on
+    # unrelated registrations instead of on the lock behaviour under test.
+    def task(self, *, name: str, bind: bool = False, **options: object):
+        self.options.append((name, options))
+
         def _decorate(fn):
             fn.name = name
             self.tasks[name] = fn
@@ -177,6 +183,7 @@ class _TaskApp:
 
     def __init__(self) -> None:
         self.tasks: dict[str, object] = {}
+        self.options: list[tuple[str, dict[str, object]]] = []
 
 
 

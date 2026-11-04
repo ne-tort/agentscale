@@ -4,14 +4,21 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping
 from typing import Any
 
 from prodavan.domain.materialization.types import MaterializationOperation, SourceProvenance
 
 
 def canonicalize(value: Any) -> Any:
-    """Return JSON-compatible data with deterministic mapping key ordering."""
-    if isinstance(value, dict):
+    """Return JSON-compatible data with deterministic mapping key ordering.
+
+    Provenance metadata and operation payloads are frozen into
+    ``MappingProxyType`` by the domain contracts, so any mapping (not only a
+    ``dict``) must be walked here; leaving a read-only mapping in place makes the
+    payload unhashable by ``json`` and every digest call would fail.
+    """
+    if isinstance(value, Mapping):
         return {str(key): canonicalize(value[key]) for key in sorted(value, key=str)}
     if isinstance(value, (list, tuple)):
         return [canonicalize(item) for item in value]

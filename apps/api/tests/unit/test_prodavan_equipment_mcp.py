@@ -26,11 +26,14 @@ def test_tools_list_contains_catalog_and_sot_tools() -> None:
     assert "found_groups_delete" in names
     upsert = next(t for t in listed["result"]["tools"] if t["name"] == "request_lines_upsert")
     assert "status" not in upsert["inputSchema"]["properties"]
+    # 3.3.0: B2B-тендеры добавили tender_take_to_work (см. следующий тест), поэтому
+    # прежняя фиксация 3.2.0 устарела — версия манифеста монотонно растёт с каждым
+    # релизом набора инструментов.
     assert (
         mcp_server._handle({"jsonrpc": "2.0", "id": 9, "method": "initialize"})["result"][
             "serverInfo"
         ]["version"]
-        == "3.2.0"
+        == "3.3.0"
     )
 
 
@@ -601,6 +604,8 @@ def test_tools_list_contains_v2_tools() -> None:
         "tender_delete",
         "tender_positions_upsert",
         "tender_attach",
+        # B2B-Center: «Взять в работу» создаёт проект/сессию и запускает kickoff.
+        "tender_take_to_work",
     ):
         assert name in names
     # «Интернет магазины» / «Интернет товары» (web_shops + web_products, TTL 72ч)
@@ -618,12 +623,14 @@ def test_tools_list_contains_v2_tools() -> None:
         "mail_profiles_list",
     ):
         assert name in names
-    assert len(names) == 36
+    # Точное число инструментов остаётся страховкой от случайного дрейфа набора:
+    # 36 прежних + tender_take_to_work (B2B-тендеры, v3.3.0).
+    assert len(names) == 37
     assert (
         mcp_server._handle({"jsonrpc": "2.0", "id": 2, "method": "initialize"})["result"][
             "serverInfo"
         ]["version"]
-        == "3.2.0"
+        == "3.3.0"
     )
 
 

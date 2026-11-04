@@ -55,6 +55,15 @@ class AuditTransactionEvidenceV2:
         return self.integrity.outcome
 
     @property
+    def decision(self) -> AuditDecision:
+        """Decision of the preserved outcome, never a re-derived one."""
+        return self.outcome.decision
+
+    @property
+    def result_status(self) -> AuditResult:
+        return self.outcome.result_status
+
+    @property
     def redacted(self) -> RedactedAuditOutcome:
         return self.legacy.redacted
 

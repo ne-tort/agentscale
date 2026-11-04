@@ -48,24 +48,6 @@ class EquipmentEvidenceHandoffService:
                 raise EvidenceHandoffError("EVIDENCE_DIGEST_MISMATCH")
         return result
 
-
-def _membership_matches(bundle: EquipmentEvidenceBundle, proof: CandidateOfferMembershipProof) -> bool:
-    return all(
-        getattr(proof, field, None) == expected
-        for field, expected in (
-            ("tenant_id", bundle.owner.tenant_id),
-            ("project_id", bundle.owner.project_id),
-            ("candidate_group_id", bundle.candidate_group_id),
-            ("offer_id", bundle.offer_id),
-            ("snapshot_id", bundle.snapshot_id),
-            ("source_id", bundle.source_id),
-            ("run_id", bundle.run_id),
-            ("artifact_id", bundle.artifact_id),
-            ("supplier_key", bundle.owner.supplier_key),
-            ("provenance_digest", bundle.provenance_digest),
-        )
-    )
-
     async def admit_evidence(self, bundle: EquipmentEvidenceBundle, *, operation_id: str) -> EquipmentAdmissionResult:
         return await self.admit(bundle, intent=AdmissionIntent.EVIDENCE_ONLY, operation_id=operation_id)
 
@@ -90,6 +72,24 @@ def _membership_matches(bundle: EquipmentEvidenceBundle, proof: CandidateOfferMe
             evidence_digest=bundle.digest,
             reason_code="ADMISSION_REQUIRES_DURABLE_TRANSACTION",
         )
+
+
+def _membership_matches(bundle: EquipmentEvidenceBundle, proof: CandidateOfferMembershipProof) -> bool:
+    return all(
+        getattr(proof, field, None) == expected
+        for field, expected in (
+            ("tenant_id", bundle.owner.tenant_id),
+            ("project_id", bundle.owner.project_id),
+            ("candidate_group_id", bundle.candidate_group_id),
+            ("offer_id", bundle.offer_id),
+            ("snapshot_id", bundle.snapshot_id),
+            ("source_id", bundle.source_id),
+            ("run_id", bundle.run_id),
+            ("artifact_id", bundle.artifact_id),
+            ("supplier_key", bundle.owner.supplier_key),
+            ("provenance_digest", bundle.provenance_digest),
+        )
+    )
 
 
 class EvidenceHandoffError(ValueError):

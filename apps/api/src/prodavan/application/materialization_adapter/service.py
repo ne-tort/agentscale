@@ -25,8 +25,8 @@ class ResourceMaterializationAdapter:
     """Translate resource operations into immutable runtime revision entries.
 
     The adapter is deliberately a planner only.  It does not import or call the
-    legacy ``MaterializeExecutor`` and it refuses to report a complete plan when
-    a required operation kind is absent.
+    legacy workspace executor and it refuses to report a complete plan when a
+    required operation kind is absent.
     """
 
     def build_plan(self, request: ResourceMaterializationRequest) -> ResourceMaterializationPlan:

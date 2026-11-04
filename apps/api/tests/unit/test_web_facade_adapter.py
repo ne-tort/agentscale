@@ -19,7 +19,10 @@ class FakeServices:
 
     async def current_user(self, *, context):
         self.calls.append(("current_user", context))
-        return {"id": "u1", "company_id": "co1"}
+        # The tenant comes from the authenticated request context, exactly like
+        # the legacy service does; a fake that hard-codes a company would make
+        # the adapter's "never infer a company from the employee" rule untestable.
+        return {"id": "u1", "company_id": context.company_id}
 
     async def projects(self, *, context, cabinet_id):
         self.calls.append(("projects", cabinet_id))
@@ -85,6 +88,10 @@ async def test_company_is_not_inferred_from_employee_identity() -> None:
     adapter = WebFacadeAdapter(services, scopes={AdapterScope.CURRENT_USER_READ})
     value = await adapter.current_user(context=context(company=None))
     assert value.company_id is None
+    # The context-chosen company is still returned verbatim — the adapter must
+    # neither invent a tenant nor drop the one the request carries.
+    scoped = await adapter.current_user(context=context(company="co2"))
+    assert scoped.company_id == "co2"
 
 
 @pytest.mark.asyncio
