@@ -583,9 +583,12 @@ class AgentRunIntentHandler:
         target = context.target
         scope = AddressableRunScope.from_target(target)
         store = IntentAddressedLeaseStore(store=_lease_store(pipeline), scope=scope)
+        port = _execution_port(pipeline, store)
 
+        # Only the worker's own composition refusals are translated here; an
+        # unexpected fault propagates and the dispatcher turns it into its own
+        # bounded ``intent_handler_failed`` retry, which keeps the reason honest.
         try:
-            port = _execution_port(pipeline, store)
             worker = AgentRunWorker(
                 port=port,
                 runs=_run_source(pipeline),
@@ -600,12 +603,6 @@ class AgentRunIntentHandler:
             raise IntentHandlerUnavailable(
                 BLOCKER_WORKER_CONFIG_INVALID, type(invalid).__qualname__
             ) from invalid
-        except IntentHandlerUnavailable:
-            raise
-        except Exception as exc:  # noqa: BLE001 - composition faults are named, never fatal
-            raise IntentHandlerUnavailable(
-                BLOCKER_EXECUTION_FACTORY_FAILED, type(exc).__qualname__
-            ) from exc
 
         tick = await worker.tick()
         self._report.ticks += 1

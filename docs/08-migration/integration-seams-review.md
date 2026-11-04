@@ -96,6 +96,14 @@ Severity: **S1** — блокирует cutover, **S2** — блокирует �
 **Важно:** сироты O1–O4, O6–O7 — это не «мёртвый код случайно»: это компоненты, покрытые тестами и
 RLS-реестром, у которых отсутствует только проводка (см. §8, вердикт «забытая проводка»).
 
+Машиночитаемое подмножество сирот закреплено в тесте (`REVIEWED_ORPHANS`): реализации портов из §2,
+которые конструируются только внутри своего модуля или в невызываемой фабрике —
+`ScopeRegistryApplicationAdapter`, `SqlAlchemyTrustedScopeTransactionPort`,
+`SqlAlchemyRuntimeInstanceLifecycle`, `SqlAlchemyM05IdentityEvidence`,
+`SqlAlchemyInstanceImportStore`, `SqlAlchemyInstanceQuarantineStore`, `SqlAlchemyRedactedAuditSink`.
+Появление у любого из них внешнего вызывающего без записи в отчёте валит
+`test_implementations_have_a_caller_or_are_reviewed_orphans`.
+
 ---
 
 ## 5. Несовместимости (одно понятие — разные имена/типы по обе стороны)
@@ -149,7 +157,7 @@ infra-адаптеров, и один вызов из `core/wiring.py`. Внут
 Метод: собраны все литералы, привязанные к имени/параметру `blocker` (`NAME = "…"`, `blocker="…"`,
 `"blocker": "…"`), покрывающие `*_unwired` / `*_not_wired` / `*_missing`; для каждого проверено, есть ли
 реализация зависимости в `src/prodavan` и есть ли конструктор/вызов этой реализации в продакшн-пути.
-Полный список (51 код) зафиксирован в тесте (`BLOCKER_CLASSIFICATION`), чтобы новые блокеры нельзя было
+Полный список (52 кода) зафиксирован в тесте (`BLOCKER_CLASSIFICATION`), чтобы новые блокеры нельзя было
 добавить без классификации.
 
 Уже исправленные до этой ревизии (не переоценивались, приняты как факт задания):
@@ -160,11 +168,11 @@ infra-адаптеров, и один вызов из `core/wiring.py`. Внут
 
 | Блокер | Где | Реализация зависимости | Вердикт |
 |---|---|---|---|
-| `agent_run_lease_storage_missing` | app/agent_runs/lease.py:78 | **есть**: `SqlAlchemyRunLeaseStore` (infra/agent_control_plane/lease_store.py:461, 542 строки, включая `RunLeaseFenceStore` :116) | **Забытая проводка.** Текст блокера («storage missing») устарел: storage реализован, отсутствует композиция `LeaseManager(store=…)`. Волна фиксирует это как «Execution adapter + lease store — In progress», т.е. дефект известен, но константа вводит в заблуждение |
-| `agent_run_requeue_transition_unwired` | app/agent_runs/lease.py:81 | **частично**: fence/claim-scope объявлены в `RunLeaseFenceStore` (lease_store.py:116) и `claim_scope` (:21) | Требует сверки: если park/requeue реализованы в store — это тоже забытая проводка, а не граница |
+| `agent_run_lease_storage_missing` | app/agent_runs/lease.py:78 | **есть**: `SqlAlchemyRunLeaseStore` (infra/agent_control_plane/lease_store.py:461, 542 строки, включая `RunLeaseFenceStore` :116, `claim_scope` :477, `park/fence` statements :389/:427) | **Забытая проводка.** Текст блокера («storage missing») устарел: storage реализован, отсутствует композиция `LeaseManager(store=…)`. Волна фиксирует это как «Execution adapter + lease store — In progress», т.е. дефект известен, но константа вводит в заблуждение |
 | `agent_run_retry_journal_unwired` | app/agent_runs/retry.py:99 | **есть**: `SqlAlchemyAgentRunRetryJournal` (retry.py:1201) в том же модуле | **Забытая проводка**: журнал реализован, конструкторов в `src/prodavan` нет |
 | `agent_run_unknown_outcome_journal_unwired` | app/agent_runs/reconcile.py:128 | **есть**: `SqlAlchemyUnknownOutcomeJournal` (reconcile.py:1488) | **Забытая проводка** |
-| `agent_run_durable_claim_and_lease_unwired` / `agent_run_execution_port_unwired` | app/agent_runs/dispatcher.py:147, core/infra/agent_run_worker_resource.py:140 | **частично**: execution-адаптер объявлен (`FencedLeaseStore`, execution_adapter.py:165), lease store реализован | **Забытая проводка** (композиции `AgentRunExecutionPort` нет), признана волной |
+| `agent_run_durable_claim_and_lease_unwired` / `agent_run_execution_port_unwired` | app/agent_runs/dispatcher.py:147, core/infra/agent_run_worker_resource.py:140 | **есть**: `FencedLeaseStore`/`ControlPlaneAgentRunExecutionAdapter` (execution_adapter.py:165,261) + реализованный lease store | **Забытая проводка**: `ControlPlaneAgentRunExecutionAdapter(` и `AgentRunUnknownOutcomeReconciler(` не конструируются нигде в `src/prodavan` |
+| `agent_run_provider_outcome_reconciliation_unwired` | app/agent_runs/dispatcher.py:148, app/agent_runs/service.py:30, app/agent_runs/reconcile.py:5 | **есть**: `AgentRunUnknownOutcomeReconciler` (reconcile.py:957) + `SqlAlchemyUnknownOutcomeJournal` (reconcile.py:1488) | **Забытая проводка**: reconciler реализован, в процесс не проведён; код дублирует причину `agent_run_unknown_outcome_journal_unwired` |
 | `intent_handler_not_wired` | app/agent_runs/dispatcher.py:145 | **зависит от предыдущей**: dispatcher собирается (`build_intent_dispatcher`, intent_consumer.py:692; вызывается из api/dependencies.py:260 и worker_resource.py:925), но реестр handler'ов пуст | Следствие забытой проводки #выше; текст блокера маскирует причину (нет execution port, а не «handler не написан») |
 
 ### 8.2 Документированные границы (зависимости нет по дизайну)
@@ -179,16 +187,21 @@ infra-адаптеров, и один вызов из `core/wiring.py`. Внут
 | `agent_run_unknown_case_journal_unwired`, `agent_run_control_plane_actor_unresolved` | app/agent_runs/execution_adapter.py:126,129 | нет журнала/резолвера актора — граница |
 | `web_stream_session_resolver_unwired`, `durable_run_sequence_index_missing`, `web_stream_run_index_evidence_missing` | app/web_facade_adapter/runtime_factory.py:82,83,86 | границы web-фасада (часть уже закрыта фиксом `web_chat_stream_facade_unwired`) |
 | `scope_registry_transaction_port_missing` | app/scope_registry_adapter/adapter.py:109 | менеджер транзакций M04 не реализован нигде → граница **и одновременно** первичная причина G7 |
+| `agent_run_requeue_transition_unwired` | app/agent_runs/lease.py:81 | операции `agent_run.requeue` в контроль-плейне нет по дизайну: репозиторий принимает только `start/fail/cancel/timeout` (docstring lease.py:49–59). Освобождение захваченного run'а идёт через истечение TTL, а не через вернувшуюся операцию — честная граница |
 | `equipment_domain_transaction_adapter_unwired` | app/migration/equipment_domain/transactions.py:32 | Композиция `build_durable_equipment_service` реализована и передаёт `transaction=repository` → блокер для неё недостижим (`transactions.py:11` прямо это фиксирует). Дефект другой: **композиция не вызывается из API** (O10) |
 | 8 блокеров automation ingress: `subscription_resolver_unwired`, `signature_verifier_unwired`, `project_trigger_resolver_unwired`, `trigger_fence_unwired`, `m04_scope_resolver_unwired`, `promotion_gate_verifier_unwired`, `m04e_definition_resolver_unwired`, `atomic_ingress_transaction_unwired`, `durable_quarantine_unwired` (+ `*_unavailable`, `*_outcome_unknown`) | app/migration/automation_ingress/ingress_service.py:780–1065 | Сервис `AutomationIngress` не конструируется в src, но его infra-репозиторий (`SqlAlchemyAutomationIngressRepository`, infra ingress.py:76, 515 строк с `verify_m04*`) реализован и не проведён → **смешанный случай**: сами резолверы — граница, а неиспользованный репозиторий — забытая проводка (O3) |
 | `durable_quarantine_unwired`, `resource_persistence_adapter_unavailable`, `m04_*_unavailable` | см. выше / resources/api/composition.py:126 | fallback-коды после неудачи композиции — границы |
 
 ### 8.3 Итог по классу
 
-Из проверенных блокеров **6 относятся к «забытой проводке»** (lease storage, retry journal,
-unknown-outcome journal, durable claim+lease / execution port, и два следствия: `intent_handler_not_wired`,
-`agent_run_requeue_transition_unwired` — кандидат). Остальные — документированные границы либо
-DDL-долги, требующие сверки при снятии freeze.
+Из проверенных блокеров **7 относятся к «забытой проводке»** (`agent_run_lease_storage_missing`,
+`agent_run_retry_journal_unwired`, `agent_run_unknown_outcome_journal_unwired`,
+`agent_run_provider_outcome_reconciliation_unwired`, `agent_run_durable_claim_and_lease_unwired`,
+`agent_run_execution_port_unwired` и следствие `intent_handler_not_wired`). `agent_run_requeue_transition_unwired`
+пересмотрен как **граница**: операции `agent_run.requeue` в контроль-плейне нет по дизайну.
+Остальные — документированные границы либо DDL-долги, требующие сверки при снятии freeze.
+Полный перечень вердиктов зафиксирован в `BLOCKER_CLASSIFICATION` теста; новый
+блокер без вердикта валит тест, а вердикт, которого нет в этом отчёте, — тоже.
 
 ---
 
@@ -227,17 +240,42 @@ DDL-долги, требующие сверки при снятии freeze.
 ## 10. Приёмочные артефакты и границы ревизии
 
 Покрыто: карта швов (§2), разрывы (§3), сироты (§4), несовместимости (§5), дубли (§6), отсутствие
-проводки в процесс (§7), классификация 51 blocker-кода (§8), список правок (§9). Тестовый артефакт
-проверяет статически: наличие каждого критичного порта, наличие реализации, наличие вызывающего
-(или явно задокументированного отсутствия), совместимость полей marker→consumer и
-M05→`AcceptedPartitionEvidence`, согласованность gate-имён м04e↔m05, единственность канонизатора
-дайджеста (с зафиксированным отклонением cutover), полноту классификации blocker-кодов.
+проводки в процесс (§7), классификация blocker-кодов (§8), список правок (§9).
+
+Тест [`test_seam_contract.py`](../../apps/api/tests/migration/integration_seams/test_seam_contract.py)
+не импортирует `prodavan.*` вовсе: он читает исходники и `ast`, поэтому не требует настроек, БД и
+фикстур. Четырнадцать проверок:
+
+| Проверка | Что ловит |
+|---|---|
+| `test_every_seam_port_is_declared_at_the_reviewed_location` | порт переехал/перестал быть `Protocol` |
+| `test_declared_ports_have_an_implementation_or_a_reviewed_gap` | новый порт без реализации и без вердикта |
+| `test_implementations_have_a_caller_or_are_reviewed_orphans` | новая сирота без записи в `REVIEWED_ORPHANS` |
+| `test_chain_is_not_wired_into_the_process` | цепочка «незаметно» проведена в `api/`/`core/` (тогда §7 устарел) |
+| `test_m04_application_adapter_still_violates_the_resolve_scope_contract` | I1 молча «исправлен» без пересмотра §5 |
+| `test_m04e_handoff_marker_still_carries_every_field_m05_reads` | marker потерял поле, которое читает M05 |
+| `test_m05_promotion_record_still_cannot_satisfy_m06_partition_evidence` | I2 зафиксирован: пересечение имён полей пусто, разрыв не «схлопнулся» |
+| `test_writer_epoch_and_writer_generation_stayed_different` | I3: имена/домены не слились без mapper'а |
+| `test_gate_name_vocabularies_match_upstream_and_differ_downstream` | дрейф gate-имён m04e↔m05 и словаря `GateStage` |
+| `test_digest_canonicalizer_is_unique_except_for_the_reviewed_deviation` | новый канонизатор без `ensure_ascii` / cutover «починили» без пересмотра I8 |
+| `test_duplicate_contract_names_match_the_review` | появился/исчез дубль контракта |
+| `test_every_emitted_blocker_code_is_classified` | новый `blocker=`-код без вердикта «граница vs забытая проводка» |
+| `test_classified_blockers_still_exist` | вердикт ссылается на исчезнувший код |
+| `test_defect_verdicts_are_recorded_in_the_review` | вердикт есть в тесте, но не в §8.1 (дрейф отчёта и теста) |
+
+Область сканирования блокеров: все литералы `blocker=`/`"blocker":` в `src/prodavan` плюс
+константы-блокеры внутри `application/migration/**` и `infrastructure/persistence/**`. Константы
+`application/agent_runs/**`, `core/infra/**`, `api/**` исключены из сканирования (они относятся к
+host-wiring агентских run'ов, см. §8.1), но их вердикты зафиксированы в `BLOCKER_CLASSIFICATION` и
+проверяются на актуальность.
 
 Границы: ничего не исполнялось; DDL/ORM не проверялись на живой БД; `Base.metadata` для
 `*_table_missing`-кодов не сверялся (см. §8.2) — это отдельная задача при снятии freeze.
-Негативные/граничные случаи, зафиксированные в отчёте: партиция с `writer_generation=0`, не-ASCII
-payload в дайджесте, курсорный порядок источников против сортированного inventory, отсутствие
-`handoff_marker`, `transactions=None` в M04-адаптере, `store=None` в `persist_m05_handoff`.
+Негативные/граничные случаи, зафиксированные в отчёте и тесте: партиция с `writer_generation=0`
+(против `writer_epoch > 0`), не-ASCII payload в дайджесте, курсорный порядок источников против
+сортированного inventory, отсутствие `handoff_marker`, `transactions=None` в M04-адаптере,
+`store=None` в `persist_m05_handoff`, `upstream=None` в `build_sql_resolve_plugin_instance_port`
+(молча собирает deny-everything порт).
 
 ## 11. Freeze
 

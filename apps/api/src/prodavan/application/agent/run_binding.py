@@ -1324,6 +1324,8 @@ class DurableRunBindingBridge:
         raise RunBindingError(
             CODE_CONCURRENT_ACTIVE_RUN,
             BLOCKER_TURN_UNBOUND,
+            detail=(
+                "another turn of this session still owns an active run; "
                 "finish that turn as cancelled before binding a new one"
             ),
         )
@@ -1436,6 +1438,7 @@ __all__ = [
     "BLOCKER_TURN_TERMINAL",
     "BLOCKER_TURN_UNBOUND",
     "CODE_ATOMIC_WRITE_REJECTED",
+    "CODE_CONCURRENT_ACTIVE_RUN",
     "CODE_NO_ACTIVE_RUN",
     "CODE_RUN_IDENTITY_CONFLICT",
     "CODE_SCOPE_DENIED",

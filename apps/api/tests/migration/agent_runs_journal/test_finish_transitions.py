@@ -23,6 +23,10 @@ from prodavan.application.agent_runs.attempts import (
     AttemptRefusal,
     AttemptRejected,
     AttemptState,
+    next_state,
+)
+from prodavan.infrastructure.persistence.agent_control_plane.attempt_journal import (
+    finish_values,
 )
 
 from .acceptance_fixtures import (
@@ -33,6 +37,8 @@ from .acceptance_fixtures import (
     Script,
     Step,
     record,
+    rendered_sql,
+    rendered_where,
     row_of,
     store_for,
 )
@@ -59,6 +65,11 @@ FAILURE_TARGETS = frozenset(
 )
 
 
+def code_for(state: AttemptState) -> str | None:
+    """The failure code a record in ``state`` must carry (``None`` otherwise)."""
+    return FAILURE_CODE if state in FAILURE_TARGETS else None
+
+
 # --------------------------------------------------------------------------- #
 # The whole matrix
 # --------------------------------------------------------------------------- #
@@ -68,28 +79,49 @@ FAILURE_TARGETS = frozenset(
 async def test_every_legal_transition_applies(
     current: AttemptState, outcome: AttemptOutcome, target: AttemptState
 ) -> None:
-    attempt = record(current, failure_code=FAILURE_CODE if current in FAILURE_TARGETS else None)
+    attempt = record(current, failure_code=code_for(current))
     script = Script(Step("execute", FakeResult(rowcount=1)))
 
     applied = await store_for(script).finish_attempt(
-        attempt,
-        outcome=outcome,
-        at=NOW,
-        failure_code=FAILURE_CODE if target in FAILURE_TARGETS else None,
+        attempt, outcome=outcome, at=NOW, failure_code=code_for(target)
     )
 
     assert applied.applied
     assert applied.rows == 1
     assert script.kinds == ["execute"]
-    statement = str(script.calls[0][1])
-    # exactly one UPDATE, fenced by the row identity *and* the observed state
-    assert statement.startswith(f"UPDATE agent_run_provider_attempts SET state=")
-    assert f"agent_run_provider_attempts.state = '{current.value}'" in statement
-    assert f"state='{target.value}'" in statement
+    statement = script.calls[0][1]
+    sql = rendered_sql(statement, literals=False)
+    # exactly one UPDATE that writes the state, and nothing else
+    assert sql.startswith("UPDATE agent_run_provider_attempts SET state=")
+    assert sql.count("UPDATE ") == 1
+    assert "DELETE " not in sql and "INSERT " not in sql
+    # the CAS fence contains the identity *and* the state the caller observed
+    where = rendered_where(statement)
+    assert f"agent_run_provider_attempts.attempt_id = '{attempt.attempt_id}'" in where
+    assert f"agent_run_provider_attempts.state = '{current.value}'" in where
 
 
 @pytest.mark.parametrize(("current", "outcome", "target"), LEGAL_TRANSITIONS)
-def test_no_legal_transition_targets_a_started_state(
+def test_the_written_state_is_the_matrix_target(
+    current: AttemptState, outcome: AttemptOutcome, target: AttemptState
+) -> None:
+    """The store's ``SET state`` agrees with ``next_state`` for every outcome."""
+    assert next_state(current, outcome) is target
+
+    values = finish_values(
+        expected_state=current,
+        next_state=target,
+        finished_at=NOW,
+        failure_code=code_for(target),
+        metadata={},
+    )
+
+    assert values["state"] == target.value
+    assert values["finished_at"] == NOW
+
+
+@pytest.mark.parametrize(("current", "outcome", "target"), LEGAL_TRANSITIONS)
+def test_no_legal_transition_targets_an_open_state(
     current: AttemptState, outcome: AttemptOutcome, target: AttemptState
 ) -> None:
     """Every legal transition closes the attempt or records ambiguity."""
@@ -141,7 +173,11 @@ async def test_reconciliation_is_the_only_way_out_of_unknown() -> None:
     )
 
     assert applied.applied
-    assert "state='reconciled_succeeded'" in str(script.calls[0][1])
+    # and it still CASes from ``unknown``: reconciliation cannot skip the state
+    assert (
+        f"agent_run_provider_attempts.state = '{AttemptState.UNKNOWN.value}'"
+        in rendered_where(script.calls[0][1])
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -174,16 +210,11 @@ async def test_a_started_attempt_cannot_jump_straight_to_reconciled() -> None:
     ],
 )
 async def test_a_terminal_attempt_can_never_move_again(terminal: AttemptState) -> None:
-    attempt = record(
-        terminal,
-        failure_code=FAILURE_CODE if terminal in FAILURE_TARGETS else None,
-    )
+    attempt = record(terminal, failure_code=code_for(terminal))
     script = Script()
 
     with pytest.raises(AttemptRejected) as rejected:
-        await store_for(script).finish_attempt(
-            attempt, outcome=AttemptOutcome.UNKNOWN, at=NOW
-        )
+        await store_for(script).finish_attempt(attempt, outcome=AttemptOutcome.UNKNOWN, at=NOW)
 
     assert rejected.value.reason is AttemptRefusal.ALREADY_TERMINAL
     assert script.calls == []
@@ -195,9 +226,7 @@ async def test_a_second_finish_of_the_same_record_is_already_terminal() -> None:
     script = Script()
 
     with pytest.raises(AttemptRejected) as rejected:
-        await store_for(script).finish_attempt(
-            attempt, outcome=AttemptOutcome.SUCCEEDED, at=NOW
-        )
+        await store_for(script).finish_attempt(attempt, outcome=AttemptOutcome.SUCCEEDED, at=NOW)
 
     assert rejected.value.reason is AttemptRefusal.ALREADY_TERMINAL
     assert script.calls == []
@@ -411,4 +440,6 @@ async def test_the_lost_race_read_is_tenant_narrowed() -> None:
         await store_for(script).finish_attempt(attempt, outcome=AttemptOutcome.SUCCEEDED, at=NOW)
 
     assert rejected.value.reason is AttemptRefusal.INVALID_RECORD
-    assert f"agent_run_provider_attempts.tenant_id = '{TENANT}'" in str(script.calls[1][1])
+    assert f"agent_run_provider_attempts.tenant_id = '{TENANT}'" in rendered_sql(
+        script.calls[1][1]
+    )

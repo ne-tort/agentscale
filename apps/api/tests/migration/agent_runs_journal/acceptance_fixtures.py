@@ -20,6 +20,8 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
+from sqlalchemy.dialects import postgresql
+
 from prodavan.application.agent_runs.attempts import (
     CLOSED_ATTEMPT_STATES,
     AttemptState,
@@ -282,8 +284,42 @@ def store_for(script: Script) -> SqlAlchemyProviderAttemptJournal:
     )
 
 
+# --------------------------------------------------------------------------- #
+# Statement rendering (no database, no DDL)
+# --------------------------------------------------------------------------- #
+
+DIALECT = postgresql.dialect()
+"""The dialect the store actually runs on; rendering it is the predicate review."""
+
+
+def rendered_sql(statement: Any, *, literals: bool = True) -> str:
+    """Render one statement as PostgreSQL text on a single line.
+
+    ``literals=False`` is required for anything touching the ``metadata`` JSONB
+    column: SQLAlchemy has no literal renderer for JSONB (it raises
+    ``CompileError``), so those statements are reviewed by column name, clause
+    keyword and ``rendered_where`` instead of by inlined values.
+    """
+    compile_kwargs = {"literal_binds": True} if literals else {}
+    compiled = statement.compile(dialect=DIALECT, compile_kwargs=compile_kwargs)
+    return " ".join(str(compiled).split())
+
+
+def rendered_where(statement: Any) -> str:
+    """Render only the ``WHERE`` clause with literal values.
+
+    Every predicate this store relies on (row identity, the observed state, the
+    tenant narrow, the deadline window) lives in ``WHERE``, so this is the part
+    that must be readable verbatim — and it never carries JSONB.
+    """
+    clause = statement.whereclause  # type: ignore[attr-defined]
+    compiled = clause.compile(dialect=DIALECT, compile_kwargs={"literal_binds": True})
+    return " ".join(str(compiled).split())
+
+
 __all__ = [
     "DEADLINE",
+    "DIALECT",
     "FAILURE_CODE",
     "FakeResult",
     "NOW",
@@ -303,6 +339,8 @@ __all__ = [
     "make_attempt",
     "make_lease",
     "record",
+    "rendered_sql",
+    "rendered_where",
     "row_of",
     "store_for",
 ]

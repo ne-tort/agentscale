@@ -36,7 +36,6 @@ from prodavan.application.agent_runs.worker import WorkerTick, WorkerTickStatus
 from prodavan.domain.agent.control_plane import AgentRunStatus
 
 from .acceptance_fixtures import (
-    EMPLOYEE,
     NOW,
     RUN,
     FixedResolver,
@@ -109,7 +108,7 @@ async def test_missing_pipeline_reports_a_named_blocker() -> None:
     assert harness.runner.calls == 0
 
 
-async def test_partially_assembled_pipeline_reports_every_missing_member() -> None:
+def test_partially_assembled_pipeline_reports_every_missing_member() -> None:
     pipeline = IntentExecutionPipeline()
 
     assert pipeline.wired is False
@@ -407,22 +406,30 @@ async def test_worker_tick_maps_to_one_dispatch_outcome(
 
 
 async def test_owner_id_is_derived_from_the_consumer_owner_not_its_token() -> None:
+    """The run lease belongs to an identity; the intent's token never reaches it."""
     harness = build_harness()
-    captured: list[str] = []
+    observed: dict[str, object] = {}
 
-    class _RecordingFactory:
-        def __call__(self, store):
-            captured.append(store.scope.run_id)
-            return harness._adapter(store)
+    async def capture(_request, _cancel) -> None:
+        observed["lease_owner"] = harness.lease.lease_owner
+        observed["lease_token"] = harness.lease.lease_token
+
+    harness.runner.on_execute = capture
 
     handler = build_run_intent_handler(
-        pipeline=replace(harness.pipeline, execution_factory=_RecordingFactory()),
+        pipeline=harness.pipeline,
         owner_prefix="agent-run-intent",
         clock=harness.clock,
     )
 
-    await handler(context(lease_owner=f"agent-run-api:trace-{EMPLOYEE}", lease_token="secret-token"))
+    outcome = await handler(
+        context(lease_owner="agent-run-api:trace-handler", lease_token="intent-lease-token")
+    )
 
-    assert captured == [RUN]
-    assert harness.run.status == AgentRunStatus.SUCCEEDED.value
+    assert outcome.action is IntentDispatchAction.DELIVERED
+    assert observed["lease_owner"] == "agent-run-intent:agent-run-api:trace-handler"
+    assert observed["lease_token"] != "intent-lease-token"
+    assert isinstance(observed["lease_token"], str) and observed["lease_token"]
+    # Settlement dropped the lease again.
     assert harness.lease.lease_owner is None
+    assert harness.run.status == AgentRunStatus.SUCCEEDED.value

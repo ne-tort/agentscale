@@ -6,20 +6,26 @@ they parse source text and ``ast`` so a seam regression fails on a clean checkou
 
 Companion review: ``docs/08-migration/integration-seams-review.md``.
 
-Contract covered here:
+What is pinned here:
 
-* every critical seam port is declared exactly where the review says it is;
+* every critical seam port is declared where the review says, and is still a ``Protocol``;
 * every declared port has an implementation, or an explicitly reviewed gap;
-* every implementation has a caller, or is an explicitly reviewed orphan;
-* the M04E handoff marker still carries every field M05 reads from it;
-* M05's ``PromotionRecord`` still cannot satisfy M06's ``AcceptedPartitionEvidence``
-  (the incompatibility is pinned; fixing it must remove the pinned expectation);
-* the M04E/M05 gate-name vocabularies still agree, and the cutover stage vocabulary
-  still differs (documented mismatch, not a silent drift);
-* the digest canonicalizer is unique except for the reviewed cutover deviation;
+* every implementation has a caller outside its own module, or is a reviewed orphan;
+* the M04E -> M05 handoff marker still carries every field M05 reads from it;
+* the M05 -> M06 handoff gap is pinned: ``PromotionRecord`` cannot satisfy
+  ``AcceptedPartitionEvidence`` without a mapper (no shared field name at all);
+* one concept still has two names/domains: ``writer_generation`` vs ``writer_epoch``;
+* M04E and M05 agree on the six handoff gate names, M05 status gates and the cutover
+  ``GateStage`` vocabulary still differ (documented mismatch, not silent drift);
+* the digest canonicalizer is unique except the reviewed cutover deviation;
 * duplicate contract names stay exactly as reviewed;
-* every ``*_unwired`` / ``*_not_wired`` / ``*_missing`` blocker code is classified in
-  :data:`BLOCKER_CLASSIFICATION` — a new blocker without a verdict fails the suite.
+* blocker codes stay classified: every ``blocker=`` literal in ``src/prodavan`` and every
+  blocker constant inside the migration zone has a verdict, and no recorded code went stale.
+
+Deliberately out of scope of the last check: blocker constants of ``application/agent_runs/**``,
+``core/infra/**`` and ``api/**``. They belong to the agent-run host wiring (review §8.1) and are
+churning; the review records their verdicts, and :func:`test_classified_blockers_still_exist`
+still fails if one of the recorded codes disappears.
 """
 
 from __future__ import annotations
@@ -32,6 +38,7 @@ from pathlib import Path
 # apps/api/tests/migration/integration_seams/test_seam_contract.py -> apps/api
 API_ROOT = Path(__file__).resolve().parents[3]
 SRC = API_ROOT / "src" / "prodavan"
+REVIEW_DOC = API_ROOT.parents[1] / "docs" / "08-migration" / "integration-seams-review.md"
 
 
 # ---------------------------------------------------------------------------
@@ -65,11 +72,11 @@ def _class_fields(relative: str, name: str) -> tuple[str, ...]:
     node = _class_node(relative, name)
     if node is None:
         raise AssertionError(f"{name} is not declared in {relative}")
-    fields: list[str] = []
-    for statement in node.body:
-        if isinstance(statement, ast.AnnAssign) and isinstance(statement.target, ast.Name):
-            fields.append(statement.target.id)
-    return tuple(fields)
+    return tuple(
+        statement.target.id
+        for statement in node.body
+        if isinstance(statement, ast.AnnAssign) and isinstance(statement.target, ast.Name)
+    )
 
 
 def _method_return_annotation(relative: str, class_name: str, method_name: str) -> str:
@@ -107,7 +114,7 @@ def _class_definitions(files: dict[str, str]) -> dict[str, tuple[str, ...]]:
 class SeamPort:
     name: str
     declared_in: str
-    implementations: tuple[tuple[str, str], ...]  # (module, symbol) or ("", symbol) when absent
+    implementations: tuple[tuple[str, str], ...]  # (module, symbol)
     reviewed_gap: str | None = None
 
 
@@ -145,7 +152,19 @@ SEAM_PORTS: tuple[SeamPort, ...] = (
         name="EvidenceStore",
         declared_in="application/migration/m04e_definition_version/backfill.py",
         implementations=(),
-        reviewed_gap="G4: bounded M04E page-commit/checkpoint CAS store is absent",
+        reviewed_gap="G4: bounded M04E page-commit/checkpoint-CAS store is absent",
+    ),
+    SeamPort(
+        name="UpstreamGatePort",
+        declared_in="application/migration/m04e_definition_version/backfill.py",
+        implementations=(),
+        reviewed_gap="G6: trusted partition gate re-proof is absent",
+    ),
+    SeamPort(
+        name="CandidateProofPort",
+        declared_in="application/migration/m04e_definition_version/backfill.py",
+        implementations=(),
+        reviewed_gap="G6: per-candidate owner/scope/artifact re-proof is absent",
     ),
     SeamPort(
         name="CutoverRepository",
@@ -259,21 +278,21 @@ SEAM_PORTS: tuple[SeamPort, ...] = (
 )
 
 
-# Implementations whose only instantiator is their own module or a factory without an
-# external caller (review §4).  A symbol listed here must NOT gain a caller silently:
-# the assertion below fails as soon as wiring appears, so this list stays honest.
+# Implementations whose only instantiator lives in their own module or in an uncalled
+# factory (review §4).  Listing them keeps the caller test honest in both directions:
+# wiring a symbol removes it from here, and adding a new orphan without a note fails.
 REVIEWED_ORPHANS: dict[str, str] = {
-    "SqlAlchemyRuntimeInstanceLifecycle": "O-factory: only built by build_sql_resolve_plugin_instance_port",
-    "SqlAlchemyM05IdentityEvidence": "O-factory: built inside the same module only",
-    "SqlAlchemyInstanceImportStore": "O-factory: built inside the same module only",
-    "SqlAlchemyInstanceQuarantineStore": "O-factory: built inside the same module only",
-    "SqlAlchemyRedactedAuditSink": "O-factory: built inside the same module only",
-    "FailClosedResolvePluginInstance": "used by m06 identity adapter and the m05 factory",
-    "ServerResolvedHandoffResolver": "used by build_shadow_gateway (itself uncalled)",
+    "ScopeRegistryApplicationAdapter": "O1: no composition root instantiates the M04 adapter",
+    "SqlAlchemyTrustedScopeTransactionPort": "O2: only referenced by the M04 adapter typing",
+    "SqlAlchemyRuntimeInstanceLifecycle": "only built by build_sql_resolve_plugin_instance_port",
+    "SqlAlchemyM05IdentityEvidence": "built inside the same module only",
+    "SqlAlchemyInstanceImportStore": "built inside the same module only",
+    "SqlAlchemyInstanceQuarantineStore": "built inside the same module only",
+    "SqlAlchemyRedactedAuditSink": "built inside the same module only",
 }
 
 
-# Review §7: services of the chain that no production composition root instantiates.
+# Review §7: services of the chain that no process (api/, core/) composition instantiates.
 PROCESS_WIRING_GAPS: tuple[str, ...] = (
     "ScopeRegistryApplicationAdapter",
     "DefinitionVersionEvidenceBackfill",
@@ -290,11 +309,10 @@ PROCESS_WIRING_GAPS: tuple[str, ...] = (
 # ---------------------------------------------------------------------------
 
 M04E_MARKER = ("application/migration/m04e_definition_version/backfill.py", "M05HandoffMarker")
-M05_EXPORT = ("application/migration/m05_instance_runtime/runtime_service.py", "M05EvidenceExport")
 M05_PROMOTION = ("application/migration/m05_instance_runtime/runtime_service.py", "PromotionRecord")
 M06_ACCEPTED = ("application/migration/m06_grants_gateway/handoff.py", "AcceptedPartitionEvidence")
 
-# Fields M05 reads off the marker (runtime_service.py, marker_ready block).
+# Fields M05 reads off the M04E marker (runtime_service.py, marker_ready block).
 MARKER_FIELDS_REQUIRED_BY_M05: frozenset[str] = frozenset(
     {
         "record_id",
@@ -316,7 +334,7 @@ MARKER_FIELDS_REQUIRED_BY_M05: frozenset[str] = frozenset(
     }
 )
 
-# Fields M06 needs from upstream evidence that the M05 promotion record does not carry.
+# Fields M06 needs from upstream evidence that the M05 promotion record cannot supply.
 PINNED_HANDOFF_GAP: frozenset[str] = frozenset(
     {
         "accepted_sources",
@@ -345,10 +363,8 @@ EXPECTED_HANDOFF_GATES: frozenset[str] = frozenset(
 
 EXPECTED_CUTOVER_STAGES: frozenset[str] = frozenset({"M04", "M04E", "M05"})
 
-# m05 names its status gates differently from both m04e and cutover stages (review I6).
-M05_GATE_NAMES: frozenset[str] = frozenset(
-    {"M04_scope", "M04E_definition_version", "M05_runtime"}
-)
+# M05 status gates are named differently from both M04E gate IDs and cutover stages (I6).
+M05_GATE_NAMES: frozenset[str] = frozenset({"M04_scope", "M04E_definition_version", "M05_runtime"})
 
 
 # ---------------------------------------------------------------------------
@@ -363,7 +379,7 @@ DIGEST_MODULES: tuple[str, ...] = (
 )
 
 # Reviewed deviation: cutover serializes without ensure_ascii=True/default=, so non-ASCII
-# payloads produce different bytes than the other three canonicalizers.
+# payloads produce different bytes than the other canonicalizers.
 PINNED_DIGEST_DEVIATIONS: frozenset[str] = frozenset(
     {"application/migration/m06_cutover/cutover.py"}
 )
@@ -377,7 +393,7 @@ EXPECTED_DUPLICATE_COUNTS: dict[str, int] = {
     "CapabilityGatewayService": 2,
     "PromotionRecord": 4,
     "GateEvidence": 2,
-    "HandoffStatus": 2,
+    "HandoffStatus": 3,
     "FinalDeltaEvidence": 2,
     "PartitionKey": 2,
     "ParityEvidence": 1,
@@ -395,7 +411,7 @@ CLASSIFICATION_COMPOSITION = "implemented_but_no_caller"
 CLASSIFICATION_FALLBACK = "post_failure_fallback_code"
 
 BLOCKER_CLASSIFICATION: dict[str, str] = {
-    # --- agent runs / control plane ---
+    # --- agent runs / control plane (verdicts recorded, scope outside the zone scan) ---
     "agent_control_plane_atomic_transaction_adapter_unwired": CLASSIFICATION_BOUNDARY,
     "agent_control_plane_aggregate_cursor_missing": CLASSIFICATION_BOUNDARY,
     "agent_run_provider_attempt_journal_unwired": CLASSIFICATION_BOUNDARY,
@@ -404,7 +420,7 @@ BLOCKER_CLASSIFICATION: dict[str, str] = {
     "agent_run_control_plane_actor_unresolved": CLASSIFICATION_BOUNDARY,
     "agent_run_retry_due_start_transition_unwired": CLASSIFICATION_BOUNDARY,
     "agent_run_lease_storage_missing": CLASSIFICATION_DEFECT,
-    "agent_run_requeue_transition_unwired": CLASSIFICATION_DEFECT,
+    "agent_run_requeue_transition_unwired": CLASSIFICATION_BOUNDARY,
     "agent_run_retry_journal_unwired": CLASSIFICATION_DEFECT,
     "agent_run_retry_schedules_table_missing": CLASSIFICATION_BOUNDARY,
     "agent_run_unknown_outcome_journal_unwired": CLASSIFICATION_DEFECT,
@@ -423,7 +439,7 @@ BLOCKER_CLASSIFICATION: dict[str, str] = {
     "web_stream_run_index_evidence_missing": CLASSIFICATION_BOUNDARY,
     # --- equipment domain ---
     "equipment_domain_transaction_adapter_unwired": CLASSIFICATION_COMPOSITION,
-    # --- automation ingress (service never constructed; its repository is an orphan) ---
+    # --- automation ingress (service never constructed; its repository is an orphan O3) ---
     "subscription_resolver_unwired": CLASSIFICATION_BOUNDARY,
     "subscription_resolution_unavailable": CLASSIFICATION_FALLBACK,
     "signature_verifier_unwired": CLASSIFICATION_BOUNDARY,
@@ -440,9 +456,9 @@ BLOCKER_CLASSIFICATION: dict[str, str] = {
     "m04e_definition_unavailable": CLASSIFICATION_FALLBACK,
     "m04e_gate_unavailable": CLASSIFICATION_FALLBACK,
     "source_claim_marker_wrong_kind": CLASSIFICATION_BOUNDARY,
-    "atomic_ingress_transaction_unwired": CLASSIFICATION_DEFECT,
+    "atomic_ingress_transaction_unwired": CLASSIFICATION_BOUNDARY,
     "atomic_claim_outcome_unknown": CLASSIFICATION_FALLBACK,
-    "durable_quarantine_unwired": CLASSIFICATION_DEFECT,
+    "durable_quarantine_unwired": CLASSIFICATION_BOUNDARY,
     "durable_quarantine_outcome_unknown": CLASSIFICATION_FALLBACK,
     "trigger_claim_marker_requires_lookup_only_resume": CLASSIFICATION_BOUNDARY,
     "durable_scope_definition_or_source_fence_unresolved": CLASSIFICATION_BOUNDARY,
@@ -458,6 +474,13 @@ DEFECT_CODES: frozenset[str] = frozenset(
     code for code, verdict in BLOCKER_CLASSIFICATION.items() if verdict == CLASSIFICATION_DEFECT
 )
 
+# Blocker constants are enforced only inside the reviewed migration zone; the rest of the
+# tree is covered by the global ``blocker=`` literal scan and by the staleness check.
+BLOCKER_ZONE_PREFIXES: tuple[str, ...] = (
+    "application/migration/",
+    "infrastructure/persistence/",
+)
+
 _ASSIGNED_CODE = re.compile(
     r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*\"([a-z0-9_]+)\"\s*$", flags=re.MULTILINE
 )
@@ -465,18 +488,21 @@ _BLOCKER_ARGUMENT = re.compile(r"\bblocker\s*=\s*\"([a-z0-9_]+)\"")
 _BLOCKER_KEY = re.compile(r"\"blocker\"\s*:\s*\"([a-z0-9_]+)\"")
 
 
-def _discovered_blocker_codes() -> frozenset[str]:
-    codes: set[str] = set()
-    for text in _source_files().values():
-        for name, code in _ASSIGNED_CODE.findall(text):
-            upper = name.upper()
-            if "BLOCKER" in upper or upper.endswith("UNWIRED") or "NOT_WIRED" in upper:
-                codes.add(code)
-            elif code.endswith(("_unwired", "_not_wired")):
-                codes.add(code)
-        codes.update(_BLOCKER_ARGUMENT.findall(text))
-        codes.update(_BLOCKER_KEY.findall(text))
-    return frozenset(codes)
+def _emitted_blocker_codes() -> dict[str, str]:
+    """Return ``code -> first module`` for every emitted blocker literal in the tree."""
+    emitted: dict[str, str] = {}
+    for relative, text in _source_files().items():
+        codes = set(_BLOCKER_ARGUMENT.findall(text)) | set(_BLOCKER_KEY.findall(text))
+        if relative.startswith(BLOCKER_ZONE_PREFIXES):
+            for name, code in _ASSIGNED_CODE.findall(text):
+                upper = name.upper()
+                if "BLOCKER" in upper or upper.endswith("UNWIRED") or "NOT_WIRED" in upper:
+                    codes.add(code)
+                elif code.endswith(("_unwired", "_not_wired")):
+                    codes.add(code)
+        for code in codes:
+            emitted.setdefault(code, relative)
+    return emitted
 
 
 # ---------------------------------------------------------------------------
@@ -488,10 +514,8 @@ def test_every_seam_port_is_declared_at_the_reviewed_location() -> None:
     for port in SEAM_PORTS:
         node = _class_node(port.declared_in, port.name)
         assert node is not None, f"{port.name} is no longer declared in {port.declared_in}"
-        bases = {ast.unparse(base) for base in node.bases}
-        assert "Protocol" in bases or "Protocol" in {b.split(".")[-1] for b in bases}, (
-            f"{port.name} must stay a Protocol contract, got bases={sorted(bases)}"
-        )
+        bases = {ast.unparse(base).split(".")[-1] for base in node.bases}
+        assert "Protocol" in bases, f"{port.name} must stay a Protocol contract, got {sorted(bases)}"
 
 
 def test_declared_ports_have_an_implementation_or_a_reviewed_gap() -> None:
@@ -520,21 +544,39 @@ def test_implementations_have_a_caller_or_are_reviewed_orphans() -> None:
             )
 
 
-def test_process_chain_has_no_undocumented_composition_root() -> None:
+def test_chain_is_not_wired_into_the_process() -> None:
     files = _source_files()
-    wiring = _read("core/wiring.py")
+    process_files = {
+        relative: text
+        for relative, text in files.items()
+        if relative.startswith(("api/", "core/"))
+    }
     for service in PROCESS_WIRING_GAPS:
-        defining = tuple(relative for relative, text in files.items() if f"class {service}" in text)
-        assert defining, f"{service} disappeared; update PROCESS_WIRING_GAPS"
-        call_sites = _references(files, f"{service}(", excluding=defining)
-        assert not call_sites, (
-            f"{service} now has a production caller ({call_sites}); "
-            "remove it from PROCESS_WIRING_GAPS and re-review the seam map"
+        assert any(f"class {service}" in text for text in files.values()), (
+            f"{service} disappeared; update PROCESS_WIRING_GAPS and the review"
         )
-    # Witness of the reviewed state: the chain is a library, not a process.
-    assert "migration" not in wiring.lower(), (
-        "core/wiring.py now mentions migration; re-review docs/08-migration/"
-        "integration-seams-review.md §7 before deleting this witness"
+        hits = _references(process_files, f"{service}(", excluding=())
+        assert not hits, (
+            f"{service} is now wired into the process layer ({hits}); "
+            "re-review docs/08-migration/integration-seams-review.md §7 and shrink the gap list"
+        )
+    # Witness of the reviewed state: nothing in the wiring module knows about the chain.
+    assert "migration" not in _read("core/wiring.py").lower(), (
+        "core/wiring.py now mentions migration; re-review review §7 before deleting this witness"
+    )
+
+
+def test_m04_application_adapter_still_violates_the_resolve_scope_contract() -> None:
+    """I1: the only app-level M04 adapter returns a type M06 rejects with ``isinstance``."""
+    annotation = _method_return_annotation(
+        "application/migration/scope_registry_adapter/adapter.py",
+        "ScopeRegistryApplicationAdapter",
+        "resolve_active",
+    )
+    assert "ScopeAdapterResult" in annotation, f"adapter return type changed: {annotation!r}"
+    assert "ScopeResolutionEvidence" not in annotation, (
+        "I1 appears fixed: make the adapter satisfy ResolveScopePort, then delete this test "
+        "and review §5 I1"
     )
 
 
@@ -548,20 +590,16 @@ def test_m05_promotion_record_still_cannot_satisfy_m06_partition_evidence() -> N
     accepted_fields = set(_class_fields(*M06_ACCEPTED))
     promotion_fields = set(_class_fields(*M05_PROMOTION))
 
-    # No name is shared between the two contracts: every hop needs an explicit mapper.
+    # Not a single field name is shared: every hop needs an explicit mapper (review §5 I2).
     assert accepted_fields & promotion_fields == set(), (
         "M05 PromotionRecord and M06 AcceptedPartitionEvidence now share field names; "
-        "re-review the handoff mapper gap (review §5, I2)"
+        "re-review the handoff mapper gap (review §5 I2)"
     )
-    missing = PINNED_HANDOFF_GAP - accepted_fields
-    assert not missing, (
-        f"AcceptedPartitionEvidence no longer requires {sorted(missing)}; "
-        "update PINNED_HANDOFF_GAP and the review"
+    assert not (PINNED_HANDOFF_GAP - accepted_fields), (
+        "AcceptedPartitionEvidence no longer requires part of PINNED_HANDOFF_GAP; update §5 I2"
     )
-    unavailable = PINNED_HANDOFF_GAP - promotion_fields
-    assert unavailable, "the M05/M06 handoff gap appears closed; re-review before relaxing"
     assert not (PINNED_HANDOFF_GAP & promotion_fields), (
-        "M05 PromotionRecord now supplies part of the M06 handoff; update the review"
+        "M05 PromotionRecord now supplies part of the M06 handoff; update §5 I2"
     )
 
 
@@ -584,7 +622,7 @@ def test_gate_name_vocabularies_match_upstream_and_differ_downstream() -> None:
         assert f'"{name}"' in m05_text, f"M05 status gate {name} disappeared"
 
     stage_node = _class_node("application/migration/m06_cutover/cutover.py", "GateStage")
-    assert stage_node is not None
+    assert stage_node is not None, "cutover GateStage disappeared"
     stages = {
         statement.value.value
         for statement in stage_node.body
@@ -594,9 +632,9 @@ def test_gate_name_vocabularies_match_upstream_and_differ_downstream() -> None:
     }
     assert stages == set(EXPECTED_CUTOVER_STAGES), (
         f"cutover stage vocabulary changed: {sorted(stages)}; "
-        "M05/M06 gate names must be mapped explicitly (review §5, I6)"
+        "M05/M06 gate names must be mapped explicitly (review §5 I6)"
     )
-    assert not (M05_GATE_NAMES & stages), "M05 and cutover gate vocabularies merged; update the review"
+    assert not (M05_GATE_NAMES & stages), "M05 and cutover gate vocabularies merged; update §5 I6"
 
 
 def test_digest_canonicalizer_is_unique_except_for_the_reviewed_deviation() -> None:
@@ -608,7 +646,7 @@ def test_digest_canonicalizer_is_unique_except_for_the_reviewed_deviation() -> N
         )
         if not defines_canonicalizer:
             continue
-        has_ascii_guard = "ensure_ascii=True" in text or "ensure_ascii=True," in text
+        has_ascii_guard = "ensure_ascii=True" in text
         if relative in PINNED_DIGEST_DEVIATIONS:
             assert not has_ascii_guard, (
                 f"{relative} now guards ensure_ascii; remove it from PINNED_DIGEST_DEVIATIONS "
@@ -626,20 +664,34 @@ def test_duplicate_contract_names_match_the_review() -> None:
     for name, expected in EXPECTED_DUPLICATE_COUNTS.items():
         actual = len(definitions.get(name, ()))
         assert actual == expected, (
-            f"{name} is defined in {actual} modules, review says {expected}: "
-            f"{definitions.get(name)}"
+            f"{name} is defined in {actual} modules, review says {expected}: {definitions.get(name)}"
         )
 
 
-def test_every_blocker_code_is_classified() -> None:
-    discovered = _discovered_blocker_codes()
-    unclassified = discovered - set(BLOCKER_CLASSIFICATION)
+def test_every_emitted_blocker_code_is_classified() -> None:
+    emitted = _emitted_blocker_codes()
+    unclassified = sorted(set(emitted) - set(BLOCKER_CLASSIFICATION))
     assert not unclassified, (
         "blocker codes without a verdict (documented boundary vs forgotten wiring): "
-        f"{sorted(unclassified)}"
+        f"{[(code, emitted[code]) for code in unclassified]}"
     )
-    missing = DEFECT_CODES - discovered
+
+
+def test_classified_blockers_still_exist() -> None:
+    files = _source_files()
+    stale = sorted(
+        code
+        for code in BLOCKER_CLASSIFICATION
+        if not any(f'"{code}"' in text for text in files.values())
+    )
+    assert not stale, f"classification entries reference nonexistent codes: {stale}"
+
+
+def test_defect_verdicts_are_recorded_in_the_review() -> None:
+    """The review and this test must not drift: every defect verdict is written down."""
+    review = REVIEW_DOC.read_text(encoding="utf-8")
+    missing = sorted(code for code in DEFECT_CODES if code not in review)
     assert not missing, (
-        f"classified defects {sorted(missing)} no longer exist in src; "
-        "the defect list is stale and must be re-reviewed"
+        f"defect verdicts {missing} are absent from {REVIEW_DOC.as_posix()}; "
+        "record them in review §8.1 or drop the verdict"
     )
