@@ -1,7 +1,7 @@
 """M04E definition/version backfill ledger DDL (task MIG-DDL-M04E-LEDGER-01).
 
 Revision ``2026110315`` (``down_revision`` ``2026110314``) creates exactly four
-tables, nine indexes, four triggers and one guard function, and then re-applies the
+tables, ten indexes, two guard functions, four triggers, and then re-applies the
 canonical RLS registry so the four new tables are policied in the same step that
 creates them.
 

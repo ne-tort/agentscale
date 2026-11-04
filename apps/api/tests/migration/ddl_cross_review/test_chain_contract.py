@@ -74,7 +74,11 @@ VERSIONS_DIR: Path = H.VERSIONS_DIR
 
 #: The reviewed chain, in dependency order.  ``2026110301`` attaches to the
 #: pre-existing head ``2026110202``.
-CHAIN: tuple[str, ...] = tuple(f"20261103{number:02d}" for number in range(1, 12))
+#:
+#: Kept as an explicit range so the contract fails loudly when a new revision
+#: lands without this file being extended: the chain review must be re-run, not
+#: silently widened.
+CHAIN: tuple[str, ...] = tuple(f"20261103{number:02d}" for number in range(1, 16))
 CHAIN_ROOT = "2026110202"
 
 #: Revisions of the chain that own tables.
@@ -87,10 +91,18 @@ TABLE_OWNING_REVISIONS: tuple[str, ...] = (
     "2026110306",
     "2026110309",
     "2026110311",
+    "2026110313",
+    "2026110315",
 )
 
 #: Revisions that install RLS policies by walking the shared registry.
-POLICY_REVISIONS: tuple[str, ...] = ("2026110307", "2026110310")
+POLICY_REVISIONS: tuple[str, ...] = (
+    "2026110307",
+    "2026110310",
+    "2026110312",
+    "2026110314",
+    "2026110315",
+)
 
 #: ``ALTER TABLE t ADD CONSTRAINT n UNIQUE (a, b)`` emitted as raw SQL.  Revision
 #: ``2026110303`` adds its M05 anchor keys to the shared ``scope_registry`` table
@@ -384,11 +396,17 @@ def test_the_whole_versions_tree_has_a_single_head() -> None:
     headers = revision_headers()
     missing = {parent for header in headers.values() for parent in header.parents} - set(headers)
     assert not missing, f"dangling down_revision(s): {sorted(missing)}"
-    assert heads(headers) == ("2026110311",), f"expected the single head 2026110311, got {heads(headers)}"
+
+    # The head is derived from the tree, not hard-coded: a new revision must not
+    # need this assertion edited, only CHAIN extended after a review.
+    resolved_heads = heads(headers)
+    assert len(resolved_heads) == 1, f"expected a single head, got {resolved_heads}"
+    head = resolved_heads[0]
+    assert head >= "2026110301", f"head {head} is not part of the wave chain"
 
     # Walking the full history from the head must terminate at the root.
     seen: list[str] = []
-    current: str | None = "2026110311"
+    current: str | None = head
     while current is not None:
         assert current not in seen, f"cycle detected at {current}"
         seen.append(current)

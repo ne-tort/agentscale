@@ -101,10 +101,11 @@ Deliberate decisions
   ``version`` phase, and a non-empty cursor whenever a value is present. The
   *advance* itself is a CAS (``UPDATE ... WHERE tenant_id = ? AND definition_id
   = ? AND phase = ? AND sequence = ?``); a zero-row update is a stale token and
-  must fail closed. The ORM guard below additionally refuses a sequence
-  regression, a phase regression and an un-completion for ORM writers. Rejecting
-  a direct-SQL regression/rewind needs a database trigger or privilege gate — see
-  :data:`M04E_LEDGER_DEFERRED`.
+  must fail closed. A sequence regression, a phase rewind, a lineage rebind, an
+  un-completion and token reuse are refused by the ORM guard below **and** by the
+  ``trg_m04e_checkpoint_monotonic`` trigger revision ``2026110315`` installs, so a
+  direct-SQL writer is covered too. The residual gap is a role allowed to
+  ``ALTER TABLE ... DISABLE TRIGGER`` — see :data:`M04E_LEDGER_DEFERRED`.
 * Append-only is enforced twice for the three immutable ledgers: an ORM
   ``before_update``/``before_delete`` guard and a database trigger
   (``m04e_ledger_append_only`` / ``trg_m04e_ledger_append_only_<table>``,
@@ -751,17 +752,19 @@ M04E_LEDGER_DEFERRED = {
         "missing-table blockers; they do not by themselves make a page commit."
     ),
     "direct_sql_checkpoint_regression": (
-        "The ORM guard refuses a sequence or phase regression only for ORM writers. A "
-        "direct-SQL UPDATE can still move sequence backwards; the enforcement there is "
-        "the CAS predicate (WHERE sequence = :observed) plus the trusted writer. A "
-        "trigger that rejects regressions outright belongs to the append-only writer "
-        "task together with the role privilege review."
+        "The ORM guard and the trg_m04e_checkpoint_monotonic trigger installed by "
+        "revision 2026110315 both refuse a sequence regression, a phase rewind, a "
+        "lineage rebind, an un-completion and token reuse. What neither covers is a "
+        "role holding ALTER TABLE: DISABLE TRIGGER or DROP TRIGGER on the checkpoint "
+        "table. Closing that is the role privilege review named in "
+        "append_only_privileges, not an ORM concern."
     ),
     "append_only_privileges": (
         "The append-only trigger denies UPDATE/DELETE for the three immutable ledgers "
-        "regardless of role, but the per-role GRANT/REVOKE inventory (no UPDATE/DELETE "
-        "for api roles, INSERT only for the trusted migration writer) is a separate "
-        "privilege review, exactly like the M04E/M05/M06 promotion rows."
+        "regardless of role *while it is enabled*, but the per-role GRANT/REVOKE "
+        "inventory (no UPDATE/DELETE for api roles, INSERT only for the trusted "
+        "migration writer, no ALTER on the ledger tables) is a separate privilege "
+        "review, exactly like the M04E/M05/M06 promotion rows."
     ),
     "promotion_evidence_two_state_check": (
         "ck_m04e_promotion_outcome on m04e_definition_version_promotion_evidence still "

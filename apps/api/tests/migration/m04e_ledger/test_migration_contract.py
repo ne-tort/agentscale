@@ -697,7 +697,9 @@ def test_the_checkpoint_table_carries_a_monotonicity_trigger(
         assert reason in function_ddl, reason
     assert "NEW.sequence < OLD.sequence" in function_ddl
     assert "NEW.checkpoint_token = OLD.checkpoint_token" in function_ddl
-    assert function_ddl.count("ERRCODE = '23514'") == 5
+    # Six refusal branches: rebind, sequence regression, phase rewind, two un-completion
+    # paths and token reuse. Each raises the same redacted SQLSTATE.
+    assert function_ddl.count("ERRCODE = '23514'") == 6
 
     trigger = next(
         statement for statement in statements if statement.startswith(f"CREATE TRIGGER {CHECKPOINT_GUARD_TRIGGER}")
@@ -738,19 +740,17 @@ def test_orm_append_only_guards_refuse_every_update_and_delete() -> None:
     # Every column of the three immutable ledgers is covered: any changed attribute is
     # a violation, so an unlisted column cannot be silently mutable.
     for table_name in (MAPPING_TABLE, QUARANTINE_TABLE, AUDIT_TABLE):
-        row = ROW_FACTORIES[table_name]()
-        make_transient_to_detached(row)
+        guard = {
+            MAPPING_TABLE: _reject_mapping_update,
+            QUARANTINE_TABLE: _reject_quarantine_update,
+            AUDIT_TABLE: _reject_audit_update,
+        }[table_name]
         for column in Base.metadata.tables[table_name].columns:
             if column.name == "id":
                 continue
             probe = ROW_FACTORIES[table_name]()
             make_transient_to_detached(probe)
             setattr(probe, column.name, "probe-value")
-            guard = {
-                MAPPING_TABLE: _reject_mapping_update,
-                QUARANTINE_TABLE: _reject_quarantine_update,
-                AUDIT_TABLE: _reject_audit_update,
-            }[table_name]
             with pytest.raises(ValueError, match="append-only"):
                 guard(None, None, probe)
 

@@ -37,8 +37,13 @@ from prodavan.infrastructure.persistence.rls.policies import (
 )
 from acceptance_fixtures import BOUNDARY, NEGATIVE_CASES, restricted_tables
 
-#: Implemented by 2026110301-2026110306 in this wave.  Every one of these tables
-#: must be policied by 2026110307; the registry must not silently drop any.
+#: Every table the wave creates, grouped by the revision that creates it.  The
+#: registry must cover exactly this set; adding a table to the schema without a
+#: registry spec (or the reverse) fails these tests.
+#:
+#: Kept explicit rather than derived from metadata on purpose: deriving it from
+#: metadata would make the test agree with any registry drift instead of catching
+#: it. The list is extended by hand when a revision lands.
 WAVE_TABLES = {
     "2026110301": (
         "scope_owner_tenant_anchors",
@@ -67,9 +72,31 @@ WAVE_TABLES = {
         "dynamic_app_capability_writer_epochs",
         "m06_canonical_grant_promotion_evidence",
     ),
+    "2026110305": (
+        "equipment_v2_ingestion_runs",
+        "equipment_v2_catalog_snapshots",
+        "equipment_v2_catalog_offers",
+        "equipment_v2_requests",
+        "equipment_v2_request_lines",
+        "equipment_v2_candidate_groups",
+        "equipment_v2_budget_allocations",
+        "equipment_v2_tenders",
+    ),
     "2026110306": (
         "project_runtime_revisions",
         "materialization_entries",
+        "runtime_revision_heads",
+        "runtime_materialization_attempts",
+        "runtime_materialization_audit",
+    ),
+    "2026110309": ("agent_run_leases",),
+    "2026110311": ("agent_run_provider_attempts",),
+    "2026110313": ("m04_scope_promotion_evidence",),
+    "2026110315": (
+        "m04e_definition_version_mappings",
+        "m04e_definition_version_quarantine",
+        "m04e_definition_version_checkpoints",
+        "m04e_definition_version_audit",
     ),
 }
 
