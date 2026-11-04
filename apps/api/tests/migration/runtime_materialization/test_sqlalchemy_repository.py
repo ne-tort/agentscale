@@ -4,11 +4,11 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import String, select
+from sqlalchemy import MetaData, String, select
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, declarative_base, mapped_column
 
 from prodavan.application.migration.runtime_materialization.sqlalchemy_repository import (
     PersistenceStatus,
@@ -44,7 +44,18 @@ def _compile_jsonb_for_sqlite(_type, _compiler, **_kwargs):
     return "JSON"
 
 
-class RuntimeAuditFixtureRow(Base):
+#: Metadata owned by this module.
+#:
+#: ``RuntimeAuditFixtureRow`` is a *test* table. Declaring it on ``Base`` registered it
+#: in ``Base.metadata`` process-wide, so any other test that checks the real metadata
+#: (for example the RLS coverage report, which must find every canonical table
+#: registered) saw a table that does not exist in production and failed -- but only
+#: when the whole suite ran together, never when that directory ran alone. A private
+#: metadata keeps the fixture invisible to everyone else.
+FixtureBase = declarative_base(metadata=MetaData())
+
+
+class RuntimeAuditFixtureRow(FixtureBase):
     __tablename__ = "runtime_materialization_test_audit"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
@@ -88,8 +99,7 @@ TABLES = (
     CapabilityBundleRow.__table__,
     ProjectRuntimeRevisionRow.__table__,
     MaterializationEntryRow.__table__,
-    RuntimeAuditFixtureRow.__table__,
-)
+    )
 
 
 class SessionAuditWriter:
@@ -115,7 +125,12 @@ class SessionAuditWriter:
 async def repository():
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as connection:
+        # Real tables come from the production metadata; the fixture table comes from
+        # its own, so the two never share a registry.
         await connection.run_sync(lambda sync: Base.metadata.create_all(sync, tables=TABLES))
+        await connection.run_sync(
+            lambda sync: FixtureBase.metadata.create_all(sync, tables=(RuntimeAuditFixtureRow.__table__,))
+        )
     factory = async_sessionmaker(engine, expire_on_commit=False)
     async with factory() as session, session.begin():
         session.add(CompanyRow(
