@@ -406,7 +406,9 @@ describe("employee workspace integration acceptance", () => {
     expect(inputs).toHaveLength(2);
     await setValue(inputs[0], "ada@example.test");
     await setValue(inputs[1], "test-password");
-    await click(".login-page button", () => document.querySelector(".login-page button")?.textContent === "Sign in");
+    // After submit the button reads "Signing in…" and the form unmounts on success, so
+    // waiting for it to say "Sign in" again can never become true. Wait for the outcome.
+    await click(".login-page button", () => pageText().includes("Inspect notes.md"));
     await waitFor(() => pageText().includes("Inspect notes.md"));
 
     expect(pageText()).toContain("Chats");
@@ -692,8 +694,8 @@ describe("employee workspace integration acceptance", () => {
     expect(requests.some((request) => request.path === `/api/v1/cabinets/${cabinetId}/projects`)).toBe(false);
     await act(async () => {
       releaseIdentity(jsonResponse(backendIdentityResponse()));
-      await waitFor(() => Boolean(document.querySelector(`a[href='/projects/${projectId}']`)));
     });
+    await waitFor(() => Boolean(document.querySelector(`a[href='/projects/${projectId}']`)));
     expect(pageText()).toContain("Signal Lab");
     expect(requests.filter((request) => request.path === "/api/v1/me")).toHaveLength(1);
     expect(requests.find((request) => request.path === "/api/v1/me")).toMatchObject({ method: "GET", authorization: "Bearer acceptance-access" });
@@ -706,8 +708,8 @@ describe("employee workspace integration acceptance", () => {
     const selectionReadbacksBeforeFirstSelect = requests.filter((request) => request.path === `/api/v1/cabinets/${cabinetId}/me/selection` && request.method === "GET").length;
     await act(async () => {
       firstSelectButton?.click();
-      await waitFor(() => firstProjectRow?.querySelector(".projects-select")?.textContent === "Текущий проект");
     });
+    await waitFor(() => firstProjectRow?.querySelector(".projects-select")?.textContent === "Текущий проект");
     expect(requests.find((request) => request.path === `/api/v1/cabinets/${cabinetId}/me/selection` && request.method === "PUT")).toMatchObject({
       body: JSON.stringify({ project_id: projectId }),
       authorization: "Bearer acceptance-access",
@@ -718,9 +720,9 @@ describe("employee workspace integration acceptance", () => {
     const overviewLink = firstProjectRow?.querySelector<HTMLAnchorElement>(`a[href='/projects/${projectId}']`);
     await act(async () => {
       overviewLink?.click();
-      await waitFor(() => Boolean(document.querySelector(`.workspace-shell[data-project-id='${projectId}']`))
-        && pageText().includes("Наблюдаемое состояние"));
     });
+    await waitFor(() => Boolean(document.querySelector(`.workspace-shell[data-project-id='${projectId}']`))
+      && pageText().includes("Наблюдаемое состояние"));
     expect(requests.find((request) => request.path === `/api/v1/projects/${projectId}`)).toMatchObject({ method: "GET", authorization: "Bearer acceptance-access" });
     expect(requests.find((request) => request.path === `/api/v1/projects/${projectId}/container`)).toMatchObject({ method: "GET", authorization: "Bearer acceptance-access" });
     expect(requests.some((request) => request.path === `/api/v1/projects/${projectId}/container/workspace/entries?path=`)).toBe(true);
@@ -756,16 +758,16 @@ describe("employee workspace integration acceptance", () => {
     const docsEntry = [...document.querySelectorAll<HTMLButtonElement>(".files-entry-main")].find((button) => button.textContent?.includes("docs"));
     await act(async () => {
       docsEntry?.click();
-      await waitFor(() => document.querySelector<HTMLInputElement>("#files-path-input")?.value === "docs"
-        && Boolean(document.querySelector("[data-testid='acceptance-location']")?.textContent?.includes("path=docs")));
     });
+    await waitFor(() => document.querySelector<HTMLInputElement>("#files-path-input")?.value === "docs"
+      && Boolean(document.querySelector("[data-testid='acceptance-location']")?.textContent?.includes("path=docs")));
     const uploadInput = document.querySelector<HTMLInputElement>("input[aria-label='Upload files']");
     expect(uploadInput).toBeTruthy();
     await act(async () => {
       Object.defineProperty(uploadInput, "files", { configurable: true, value: [new File(["acceptance artifact"], "brief.txt", { type: "text/plain" })] });
       uploadInput?.dispatchEvent(new Event("change", { bubbles: true }));
-      await waitFor(() => pageText().includes("Uploaded 1 file"));
     });
+    await waitFor(() => pageText().includes("Uploaded 1 file"));
     const uploadRequest = requests.find((request) => request.path === `/api/v1/projects/${projectId}/container/workspace/content?path=docs%2Fbrief.txt` && request.method === "PUT");
     expect(uploadRequest).toMatchObject({ method: "PUT", contentType: "application/octet-stream", authorization: "Bearer acceptance-access" });
     expect(await uploadRequest?.binaryBody?.text()).toBe("acceptance artifact");
@@ -779,8 +781,8 @@ describe("employee workspace integration acceptance", () => {
     const briefEntry = [...document.querySelectorAll<HTMLButtonElement>(".files-entry-main")].find((button) => button.textContent?.includes("brief.txt"));
     await act(async () => {
       briefEntry?.click();
-      await waitFor(() => document.querySelector<HTMLTextAreaElement>("textarea[aria-label='Editing brief.txt']")?.value === "acceptance artifact");
     });
+    await waitFor(() => document.querySelector<HTMLTextAreaElement>("textarea[aria-label='Editing brief.txt']")?.value === "acceptance artifact");
     const deepLink = document.querySelector<HTMLOutputElement>("[data-testid='acceptance-location']")?.textContent;
     expect(deepLink).toBe(`/projects/${projectId}/files?path=docs&selected=docs%2Fbrief.txt`);
     expect(requests.find((request) => request.path === `/api/v1/projects/${projectId}/container/workspace/preview?path=docs%2Fbrief.txt`)).toMatchObject({ method: "GET", authorization: "Bearer acceptance-access" });
@@ -803,8 +805,8 @@ describe("employee workspace integration acceptance", () => {
     const selectionReadbacksBeforeSecondSelect = requests.filter((request) => request.path === `/api/v1/cabinets/${cabinetId}/me/selection` && request.method === "GET").length;
     await act(async () => {
       secondSelectButton?.click();
-      await waitFor(() => secondProjectRow?.querySelector(".projects-select")?.textContent === "Текущий проект");
     });
+    await waitFor(() => secondProjectRow?.querySelector(".projects-select")?.textContent === "Текущий проект");
     expect(requests.find((request) => request.path === `/api/v1/cabinets/${cabinetId}/me/selection` && request.method === "PUT" && JSON.parse(request.body ?? "{}").project_id === secondProjectId)).toMatchObject({
       body: JSON.stringify({ project_id: secondProjectId }),
       authorization: "Bearer acceptance-access",
@@ -814,9 +816,9 @@ describe("employee workspace integration acceptance", () => {
     const secondOverviewLink = secondProjectRow?.querySelector<HTMLAnchorElement>(`a[href='/projects/${secondProjectId}']`);
     await act(async () => {
       secondOverviewLink?.click();
-      await waitFor(() => Boolean(document.querySelector(`.workspace-shell[data-project-id='${secondProjectId}']`))
-        && pageText().includes("Наблюдаемое состояние"));
     });
+    await waitFor(() => Boolean(document.querySelector(`.workspace-shell[data-project-id='${secondProjectId}']`))
+      && pageText().includes("Наблюдаемое состояние"));
     const secondProjectRequest = requests.find((request) => request.path === `/api/v1/projects/${secondProjectId}`);
     expect(secondProjectRequest).toMatchObject({ method: "GET", authorization: "Bearer acceptance-access" });
     const beforeSecondFiles = requests.length;
@@ -855,12 +857,23 @@ describe("employee workspace integration acceptance", () => {
     const { requests } = capture((url, request) => {
       if (url.pathname === "/api/v1/me") return jsonResponse(backendIdentityResponse());
       if (url.pathname === "/api/v1/cabinets") return jsonResponse({ items: [{ id: cabinetId, name: "Northwind" }] });
-      if (url.pathname === `/api/v1/cabinets/${cabinetId}/projects`) return jsonResponse({ items: [{ ...project, status }] });
+      // ``observed_state`` must agree with the status: the shared fixture is a running
+      // project, and a draft carries no running runtime. Spreading it unchanged gave
+      // draft+running, a state the lifecycle model cannot reach, and ``projectActions``
+      // then filtered ``launch`` out of the very button this test clicks.
+      if (url.pathname === `/api/v1/cabinets/${cabinetId}/projects`) return jsonResponse({ items: [{ ...project, status, observed_state: status === "draft" ? "absent" : "running" }] });
       if (url.pathname === `/api/v1/cabinets/${cabinetId}/me/selection`) return jsonResponse({ cabinet_id: cabinetId, project_id: projectId });
       if (url.pathname === `/api/v1/projects/${projectId}/launch` && request.method === "POST") {
         status = "active";
-        return jsonResponse({ project_id: projectId, status });
+        // ``lifecycle()`` parses the whole project out of this response, not just id and
+        // status: answering with a fragment made mapProject throw "incomplete data",
+        // which the handler surfaced as a failed action.
+        return jsonResponse({ ...project, status, observed_state: "running" });
       }
+      // The lifecycle confirmation is a readback of the project itself, not of the
+      // listing: without this route the fixture threw and the handler swallowed it,
+      // so the action reported nothing at all.
+      if (url.pathname === `/api/v1/projects/${projectId}`) return jsonResponse({ ...project, status, observed_state: status === "draft" ? "absent" : "running" });
       throw new Error(`Unexpected request: ${request.method} ${request.path}`);
     });
     window.localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(tokens));
@@ -871,8 +884,10 @@ describe("employee workspace integration acceptance", () => {
     expect(launchButton).toBeTruthy();
     await act(async () => {
       launchButton?.click();
-      await waitFor(() => pageText().includes("Действие «запустить» для проекта «Signal Lab» выполнено."));
     });
+    // The overview reports the confirmed readback, not an action-log line: it names the
+    // action and the status the backend now reports.
+    await waitFor(() => pageText().includes("«Запустить» подтверждено backend. Статус проекта: «Активен»."));
 
     expect(requests.find((request) => request.path === `/api/v1/projects/${projectId}/launch` && request.method === "POST")?.authorization).toBe("Bearer acceptance-access");
     expect(requests.filter((request) => request.path === `/api/v1/cabinets/${cabinetId}/projects`).length).toBeGreaterThanOrEqual(2);
@@ -994,11 +1009,17 @@ describe("employee workspace integration acceptance", () => {
     expect(pageText()).not.toContain("Private profile");
     const profileRow = [...document.querySelectorAll<HTMLTableRowElement>(".module-runtime-table tbody tr")].find((row) => row.textContent?.includes("Default"));
     expect(profileRow).toBeTruthy();
-    await act(async () => { profileRow?.querySelector("button")?.click(); await waitFor(() => [...document.querySelectorAll<HTMLTableRowElement>(".module-runtime-table tbody tr")].some((row) => row.textContent?.includes("AGENTS.md"))); });
+    await act(async () => {
+      profileRow?.querySelector("button")?.click();
+    });
+    await waitFor(() => [...document.querySelectorAll<HTMLTableRowElement>(".module-runtime-table tbody tr")].some((row) => row.textContent?.includes("AGENTS.md")));
     const pathRow = [...document.querySelectorAll<HTMLTableRowElement>(".module-runtime-table tbody tr")].find((row) => row.textContent?.includes("AGENTS.md"));
     expect(pathRow).toBeTruthy();
     expect(pageText()).not.toContain("Private path");
-    await act(async () => { pathRow?.querySelector("button")?.click(); await waitFor(() => Boolean(document.querySelector(".project-prompt-files__editor textarea"))); });
+    await act(async () => {
+      pathRow?.querySelector("button")?.click();
+    });
+    await waitFor(() => Boolean(document.querySelector(".project-prompt-files__editor textarea")));
     const editor = document.querySelector<HTMLTextAreaElement>(".project-prompt-files__editor textarea");
     expect(editor?.value).toBe("Be precise.");
     await setValue(editor!, "Be precise and concise.");
@@ -1038,10 +1059,16 @@ describe("employee workspace integration acceptance", () => {
     await waitFor(() => pageText().includes("Profiles"));
     const profileRow = [...document.querySelectorAll<HTMLTableRowElement>(".module-runtime-table tbody tr")].find((item) => item.textContent?.includes("Default"));
     if (!profileRow) throw new Error("The Default profile row was not returned.");
-    await act(async () => { profileRow.querySelector("button")?.click(); await waitFor(() => [...document.querySelectorAll<HTMLTableRowElement>(".module-runtime-table tbody tr")].some((item) => item.textContent?.includes("AGENTS.md"))); });
+    await act(async () => {
+      profileRow.querySelector("button")?.click();
+    });
+    await waitFor(() => [...document.querySelectorAll<HTMLTableRowElement>(".module-runtime-table tbody tr")].some((item) => item.textContent?.includes("AGENTS.md")));
     const pathRow = [...document.querySelectorAll<HTMLTableRowElement>(".module-runtime-table tbody tr")].find((item) => item.textContent?.includes("AGENTS.md"));
     if (!pathRow) throw new Error("The default prompt path row was not returned.");
-    await act(async () => { pathRow.querySelector("button")?.click(); await waitFor(() => Boolean(document.querySelector(".project-prompt-files__editor textarea"))); });
+    await act(async () => {
+      pathRow.querySelector("button")?.click();
+    });
+    await waitFor(() => Boolean(document.querySelector(".project-prompt-files__editor textarea")));
     await setValue(document.querySelector<HTMLTextAreaElement>(".project-prompt-files__editor textarea")!, "My local edit.");
     simulateConcurrentChange = true;
     await click(".project-prompt-files__editor button[type='submit']", () => pageText().includes("Prompt files changed since this editor opened."));
@@ -1204,14 +1231,26 @@ describe("employee workspace integration acceptance", () => {
     await click(".module-runtime-form-actions button[type='submit']", () => requests.some((request) => request.path.endsWith("/runtime-modules/mod_files/data/files/resource-file-1") && request.method === "PATCH"));
     expect(resourceFileRow?.body.file_ref).toMatchObject({ asset_id: "uploaded-asset", blob_version_id: "uploaded-version" });
     expect(requests.some((request) => request.path === `/api/v1/cabinets/${cabinetId}/modules/mod_files/bound-projects` && request.method === "GET")).toBe(true);
+    // Saving an edit keeps the form open on the confirmed row. The form's own back
+    // control only switches that same view to read mode, so the list is reached through
+    // the module section navigation, which is what a user actually presses.
+    await act(async () => {
+      document.querySelector<HTMLButtonElement>(".module-runtime-nav button")?.click();
+    });
     await waitFor(() => [...document.querySelectorAll<HTMLTableRowElement>(".module-runtime-table tbody tr")].some((row) => row.textContent?.includes("Guide")));
     const savedFileRow = [...document.querySelectorAll<HTMLTableRowElement>(".module-runtime-table tbody tr")].find((row) => row.textContent?.includes("Guide"));
     if (!savedFileRow) throw new Error("The saved Files module row is unavailable.");
-    await act(async () => { savedFileRow.querySelector("button")?.click(); await waitFor(() => Boolean(document.querySelector(".module-runtime-form .module-runtime-file-ref button"))); });
+    await act(async () => {
+      savedFileRow.querySelector("button")?.click();
+    });
+    await waitFor(() => Boolean(document.querySelector(".module-runtime-form .module-runtime-file-ref button")));
 
     const download = document.querySelector<HTMLButtonElement>(".module-runtime-form .module-runtime-file-ref button");
     expect(download).toBeTruthy();
-    await act(async () => { download?.click(); await waitFor(() => createObjectURL.mock.calls.length === 1); });
+    await act(async () => {
+      download?.click();
+    });
+    await waitFor(() => createObjectURL.mock.calls.length === 1);
     const assetRequest = requests.find((request) => request.path.startsWith("/api/v1/content/assets/uploaded-asset/download?"));
     const downloadQuery = new URL(assetRequest?.path ?? "", window.location.origin);
     expect(downloadQuery.searchParams.get("blob_version_id")).toBe("uploaded-version");
