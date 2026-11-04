@@ -19,7 +19,7 @@ export type DynamicRegistryStatus =
 export interface DynamicRegistryHookState {
   readonly status: DynamicRegistryStatus;
   readonly resolution?: RegistryClientResolution;
-  readonly refresh(): void;
+  readonly refresh: () => void;
 }
 
 export interface DynamicRegistryQuery {

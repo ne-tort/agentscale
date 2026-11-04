@@ -285,16 +285,16 @@ describe("ProjectRuntime component workflow", () => {
     const onNavigate = vi.fn();
     const { container } = await mount({ service, initialSnapshot: initial, onNavigate });
     expect(container.textContent).toContain("Создание папок недоступно");
-    const filesTab = [...container.querySelectorAll("nav button")].find((button) => button.textContent?.startsWith("Files"));
+    const filesTab = [...container.querySelectorAll<HTMLButtonElement>("nav button")].find((button) => button.textContent?.startsWith("Files"));
     await act(async () => { filesTab?.click(); });
 
     expect(onNavigate).toHaveBeenCalledWith("files", projectId);
-    const folder = [...container.querySelectorAll(".project-runtime-file-row button")].find((button) => button.textContent?.includes("src"));
+    const folder = [...container.querySelectorAll<HTMLButtonElement>(".project-runtime-file-row button")].find((button) => button.textContent?.includes("src"));
     await act(async () => { folder?.click(); });
     await waitFor(() => container.textContent?.includes("src/main.ts") ?? false);
     expect(listWorkspace).toHaveBeenCalledWith(projectId, "src");
 
-    const file = [...container.querySelectorAll(".project-runtime-file-row button")].find((button) => button.textContent?.includes("main.ts"));
+    const file = [...container.querySelectorAll<HTMLButtonElement>(".project-runtime-file-row button")].find((button) => button.textContent?.includes("main.ts"));
     await act(async () => { file?.click(); });
     await waitFor(() => container.textContent?.includes("code") ?? false);
     expect(previewWorkspace).toHaveBeenCalledWith(projectId, "src/main.ts");

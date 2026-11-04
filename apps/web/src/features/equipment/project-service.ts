@@ -1,6 +1,25 @@
 import type { ApiClient, JsonObject, ProjectSelection } from "../../api/types";
 import { EquipmentServiceError, type EquipmentProjectService, type EquipmentProcurementExport, type EquipmentServiceErrorCode, type EquipmentWorkspaceScope, type EquipmentSourceCatalog } from "./live-contract";
 import { calculateProcurement } from "./calculations";
+
+/**
+ * Узкий порт вместо всего ApiClient: сервису нужны только чтение scope, чтение/запись
+ * module data и вызов module action. ApiClient структурно удовлетворяет этому порту,
+ * поэтому продовый вызов не меняется, а тест описывает ровно используемую поверхность.
+ */
+export type EquipmentApiPort = Pick<
+  ApiClient,
+  | "getProject"
+  | "getSelection"
+  | "getSession"
+  | "listProjectRuntimeModules"
+  | "getProjectRuntimeModuleMeta"
+  | "listProjectRuntimeModuleData"
+  | "createProjectRuntimeModuleData"
+  | "patchProjectRuntimeModuleData"
+  | "invokeProjectModuleAction"
+  | "downloadProjectModuleFile"
+>;
 import { emptyEquipmentWorkspace, type EquipmentAuthoritativeOffer, type EquipmentCandidateGroup, type EquipmentWorkspace, type MatchKind, type OfferFreshness, type ProcurementPatch } from "./types";
 
 interface Row { row_id: string; body: Record<string, unknown>; session_id?: string | null; created_at?: string | null; created_by?: string | null }
@@ -54,7 +73,7 @@ function requireWritable(context: Resolved): void {
   }
 }
 
-export function createEquipmentProjectService(api: ApiClient, projectId: string): EquipmentProjectService {
+export function createEquipmentProjectService(api: EquipmentApiPort, projectId: string): EquipmentProjectService {
   let context: Resolved | undefined;
   let resolving: Promise<Resolved> | undefined;
   let blocker: string | undefined;

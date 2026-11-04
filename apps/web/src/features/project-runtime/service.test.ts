@@ -50,7 +50,7 @@ function snapshotFetch(input: RequestInfo | URL): Response {
 
 describe("ProjectRuntime service contract", () => {
   it("loads required project, container, metrics, key/model, chat and live workspace routes with auth", async () => {
-    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => snapshotFetch(input));
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => snapshotFetch(input));
     const service = createProjectRuntimeService({ fetchImpl, getAccessToken: () => "access-token" });
 
     const snapshot = await service.load("project-42");
@@ -70,7 +70,7 @@ describe("ProjectRuntime service contract", () => {
       "/api/v1/projects/project-42/models/live",
       "/api/v1/cabinets/cabinet%2F9/chats/sidebar",
     ]));
-    expect(fetchImpl.mock.calls.every(([, init]) => (init?.headers as Record<string, string>).Authorization === "Bearer access-token")).toBe(true);
+    expect(fetchImpl.mock.calls.every(([, init]) => new Headers(init?.headers).get("Authorization") === "Bearer access-token")).toBe(true);
   });
 
   it("encodes project IDs and workspace query values without changing the backend routes", async () => {

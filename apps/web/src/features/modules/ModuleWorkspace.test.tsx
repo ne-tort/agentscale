@@ -6,9 +6,9 @@ import { equipmentModuleFixture, filesModuleFixture } from "./fixtures";
 
 function makeService(): ModuleRuntimeService {
   return {
-    listProjectModules: vi.fn(async () => [
-      { id: "mod_files", name: "Файлы", bind_kind: "local", child_may_edit: true },
-      { id: "mod_equipment", name: "Подбор техники", bind_kind: "global", child_may_edit: false },
+    listProjectModules: vi.fn(async (_projectId: string, _options?: { signal?: AbortSignal }) => [
+      { id: "mod_files", name: "Файлы", bind_kind: "local" as const, child_may_edit: true },
+      { id: "mod_equipment", name: "Подбор техники", bind_kind: "global" as const, child_may_edit: false },
     ]),
     loadModule: vi.fn(async (_projectId, moduleId) => {
       const fixture = moduleId === "mod_equipment" ? equipmentModuleFixture : filesModuleFixture;

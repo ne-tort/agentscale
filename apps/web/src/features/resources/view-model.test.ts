@@ -22,7 +22,19 @@ const enabled: ResourceServiceCapabilities = {
   syncMaterialization: true,
 };
 
-const disabled: ResourceServiceCapabilities = Object.fromEntries(Object.keys(enabled).map((key) => [key, false])) as ResourceServiceCapabilities;
+// Declared with the full capability key set so a new capability breaks the test
+// instead of silently staying `true` through an untyped Object.fromEntries cast.
+const disabledFlags: Record<keyof ResourceServiceCapabilities, boolean> = {
+  readWorkspace: false,
+  readDiff: false,
+  updateProfile: false,
+  createResource: false,
+  createVersion: false,
+  bindResource: false,
+  planMaterialization: false,
+  syncMaterialization: false,
+};
+const disabled: ResourceServiceCapabilities = disabledFlags;
 
 describe("resource workspace view model", () => {
   it("filters typed resources without flattening prompts, files, or MCP", () => {

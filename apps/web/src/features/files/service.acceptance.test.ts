@@ -39,7 +39,9 @@ describe("Pod workspace service acceptance contract", () => {
   });
 
   it("URL-encodes nested current-directory paths without changing their logical value", async () => {
-    const fetcher = vi.fn(async () => responseJson({ path: "docs/space &+", entries: [] }));
+    // Мок обязан объявить сигнатуру fetch: без параметров `mock.calls` — кортеж
+    // длины 0, и проверка фактического URL не типизируется.
+    const fetcher = vi.fn<typeof fetch>(async (_input: RequestInfo | URL, _init?: RequestInit) => responseJson({ path: "docs/space &+", entries: [] }));
     const service = createWorkspaceService({ fetcher });
     await service.listEntries("project-1", "docs/space &+");
     expect(String(fetcher.mock.calls[0]?.[0])).toBe(

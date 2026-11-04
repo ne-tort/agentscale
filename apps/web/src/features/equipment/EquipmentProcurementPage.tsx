@@ -532,8 +532,8 @@ export function EquipmentProcurementPage({
     return <main className="equipment-page"><div className="equipment-scope-blocker" role="alert"><strong>Project scope unavailable</strong><p>Open equipment from a loaded project. This workspace does not infer cabinet, project, or chat scope.</p></div></main>;
   }
   return <EquipmentProcurementView
-    catalogs={initialCatalogs}
     heading={heading}
+    initialCatalogs={initialCatalogs}
     initialScope={initialScope}
     initialSourcesWorkspace={initialSourcesWorkspace}
     initialWorkspace={initialWorkspace}
@@ -561,7 +561,7 @@ export interface EquipmentProcurementViewProps {
   sourcesService?: EquipmentSourcesService;
 }
 
-export function EquipmentProcurementView({ catalogs: initialCatalogs, heading, initialScope, initialSourcesWorkspace, initialWorkspace, initialWorkspaceView, service, sourcesService }: EquipmentProcurementViewProps) {
+export function EquipmentProcurementView({ heading, initialCatalogs, initialScope, initialSourcesWorkspace, initialWorkspace, initialWorkspaceView, service, sourcesService }: EquipmentProcurementViewProps) {
   const [workspace, setWorkspace] = useState<EquipmentWorkspace | undefined>(initialWorkspace);
   const [scope, setScope] = useState<EquipmentWorkspaceScope | undefined>(initialScope);
   const [catalogs, setCatalogs] = useState<EquipmentSourceCatalog[]>(initialCatalogs ?? []);

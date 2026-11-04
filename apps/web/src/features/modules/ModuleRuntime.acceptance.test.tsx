@@ -17,7 +17,7 @@ function buildRuntime() {
   };
   const service: ModuleRuntimeService = {
     listProjectModules: vi.fn(async () => []),
-    loadModule: vi.fn(async () => ({ scope: { projectId: fixture.project.id, cabinetId: fixture.project.cabinet_id, moduleId: fixture.module.id, moduleName: fixture.module.name, bindKind: "local", childMayEdit: true, readOnly: false }, manifest })),
+    loadModule: vi.fn(async (_projectId: string, _moduleId: string, _sessionId?: string, _options?: { signal?: AbortSignal }) => ({ scope: { projectId: fixture.project.id, cabinetId: fixture.project.cabinet_id, moduleId: fixture.module.id, moduleName: fixture.module.name, bindKind: "local" as const, childMayEdit: true, readOnly: false }, manifest })),
     listRows: vi.fn(async (_scope, tableSlug) => tableSlug === "files" ? fixture.page as never : { items: [], total: 0, page: 1, page_size: 20 }),
     createRow: vi.fn(async () => ({ row_id: "new", body: {} })),
     patchRow: vi.fn(async () => ({ row_id: "row", body: {} })),

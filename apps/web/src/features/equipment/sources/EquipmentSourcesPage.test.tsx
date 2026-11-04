@@ -1,5 +1,5 @@
+// @vitest-environment jsdom
 import { renderToStaticMarkup } from "react-dom/server";
-import { JSDOM } from "jsdom";
 import { describe, expect, it } from "vitest";
 import { EquipmentSourcesPage } from "./EquipmentSourcesPage";
 import type { EquipmentCatalogWorkspace } from "./contracts";
@@ -59,15 +59,16 @@ describe("equipment catalog source UI", () => {
 
   it("keeps pause/resume blocked even when metadata declares a UI pause toggle", () => {
     const markup = renderToStaticMarkup(<EquipmentSourcesPage initialWorkspace={workspace} service={service} />);
-    const document = new JSDOM(markup).window.document;
-    const pauseButton = Array.from(document.querySelectorAll("button"))
-      .find((button) => button.textContent?.trim() === "Пауза недоступна");
+    const container = document.createElement("div");
+    container.innerHTML = markup;
+    const pauseButton = Array.from(container.querySelectorAll("button"))
+      .find((candidate) => candidate.textContent?.trim() === "Пауза недоступна");
 
     expect(pauseButton?.getAttribute("role") ?? pauseButton?.localName).toBe("button");
     expect(pauseButton?.getAttribute("aria-label") ?? pauseButton?.textContent?.trim()).toBe("Пауза недоступна");
     expect(pauseButton?.disabled).toBe(true);
     expect(pauseButton?.title).toBe("API gap: отдельного pause/resume endpoint нет; catalogs PATCH запускает auto-index action");
-    expect(document.body.textContent).toContain("Pause/resume заблокированы: отдельного API действия нет, а PATCH строки каталога запускает auto-index action.");
+    expect(container.textContent).toContain("Pause/resume заблокированы: отдельного API действия нет, а PATCH строки каталога запускает auto-index action.");
   });
 
   it("explains disabled probe/index actions and mapping requirements from metadata gaps", () => {

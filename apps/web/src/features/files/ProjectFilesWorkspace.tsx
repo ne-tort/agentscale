@@ -12,6 +12,7 @@ import {
   parentWorkspacePath,
   WorkspaceServiceError,
   type WorkspaceEntry,
+  type WorkspaceListing,
   type WorkspaceService,
   type WorkspaceTextPreview,
 } from "./contracts";
@@ -1050,7 +1051,10 @@ export function ProjectFilesWorkspace({
     if (!selectedPath || !selectedEntry) {
       return <div className="files-preview-placeholder"><span className="files-placeholder-icon" aria-hidden="true">▧</span><h3>Select a file</h3><p>Choose a text file to preview and edit it in the live Pod workspace.</p></div>;
     }
-    if (preview.kind === "loading" || preview.path !== selectedPath) {
+    // ``idle`` carries no path at all, so it must be tested before the path
+    // comparison: otherwise the union is not narrowed and ``preview.path`` is read
+    // off a variant that does not declare it.
+    if (preview.kind === "idle" || preview.kind === "loading" || preview.path !== selectedPath) {
       return <div className="files-preview-message" role="status" aria-live="polite"><span className="files-spinner" aria-hidden="true" />Loading preview…</div>;
     }
     if (preview.kind === "error") {
@@ -1065,6 +1069,13 @@ export function ProjectFilesWorkspace({
           </div>
         </div>
       );
+    }
+    // ``idle`` can survive the two checks above when nothing has been requested yet
+    // (or after a reset). Only ``ready`` carries a preview, so the editor branch must
+    // say so explicitly: reading ``preview.preview`` off the union left ``idle`` in
+    // play and the access was unchecked.
+    if (preview.kind !== "ready") {
+      return <div className="files-preview-message" role="status" aria-live="polite"><span className="files-spinner" aria-hidden="true" />Loading preview…</div>;
     }
     return (
       <div className="files-editor-wrap">

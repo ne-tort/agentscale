@@ -4,14 +4,29 @@ import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ModuleRuntime } from "./ModuleRuntime";
-import type { ModuleRuntimeProps, ModuleRuntimeService } from "./contracts";
-import { equipmentModuleFixture, filesModuleFixture } from "./fixtures";
+import type { ModuleManifest, ModuleRuntimeLoadResult, ModuleRuntimeProps, ModuleRuntimeService } from "./contracts";
+import { equipmentModuleFixture, filesModuleFixture, type ModuleSeedFixture } from "./fixtures";
 import { createModuleSlotRegistry } from "./slots";
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 
+/**
+ * Fixture documents keep their bodies as `unknown` JSON on purpose: they mirror the
+ * backend envelope. Reading them back through the manifest contract belongs here, once,
+ * instead of a `as never` cast at every call site.
+ */
+function manifestFor(fixture: ModuleSeedFixture): ModuleManifest {
+  return {
+    syntax_version: 1,
+    tables: (fixture.documents.tables as { body: ModuleManifest["tables"] }).body,
+    columns: (fixture.documents.columns as { body: ModuleManifest["columns"] }).body,
+    views: (fixture.documents.views as { body: ModuleManifest["views"] }).body,
+    tabs: (fixture.documents.tabs as { body: ModuleManifest["tabs"] }).body,
+    actions: (fixture.documents.actions as { body: ModuleManifest["actions"] }).body,
+  };
+}
+
 function serviceFor(fixture = filesModuleFixture): ModuleRuntimeService {
-  const docs = fixture.documents;
   const rows = new Map<string, unknown>([
     ["files", fixture.page],
     ["prompt_profiles", { items: [{ row_id: "profile_default", body: { name: "Default", is_default: true } }], total: 1, page: 1, page_size: 20 }],
@@ -31,14 +46,7 @@ function serviceFor(fixture = filesModuleFixture): ModuleRuntimeService {
         readOnly: fixture.module.id === "mod_equipment",
         sessionId: fixture.sessionId,
       },
-      manifest: {
-        syntax_version: 1,
-        tables: (docs.tables as { body: never[] }).body,
-        columns: (docs.columns as { body: never[] }).body,
-        views: (docs.views as { body: never[] }).body,
-        tabs: (docs.tabs as { body: never[] }).body,
-        actions: (docs.actions as { body: never[] }).body,
-      } as never,
+      manifest: manifestFor(fixture),
     })),
     listRows: vi.fn(async (_scope, tableSlug) => rows.get(tableSlug) as never ?? { items: [], total: 0, page: 1, page_size: 20 }),
     createRow: vi.fn(async (_scope, _table, body) => ({ row_id: "new", body })),
@@ -53,8 +61,7 @@ function serviceFor(fixture = filesModuleFixture): ModuleRuntimeService {
   };
 }
 
-function initialRuntimeFor(fixture = filesModuleFixture, props: Partial<ModuleRuntimeProps> = {}) {
-  const documents = fixture.documents;
+function initialRuntimeFor(fixture = filesModuleFixture, props: Partial<ModuleRuntimeProps> = {}): ModuleRuntimeLoadResult {
   const sessionId = "sessionId" in props ? props.sessionId : fixture.sessionId;
   return {
     scope: {
@@ -67,14 +74,7 @@ function initialRuntimeFor(fixture = filesModuleFixture, props: Partial<ModuleRu
       readOnly: fixture.module.id === "mod_equipment",
       ...(sessionId !== undefined ? { sessionId } : {}),
     },
-    manifest: {
-      syntax_version: 1,
-      tables: (documents.tables as { body: never[] }).body,
-      columns: (documents.columns as { body: never[] }).body,
-      views: (documents.views as { body: never[] }).body,
-      tabs: (documents.tabs as { body: never[] }).body,
-      actions: (documents.actions as { body: never[] }).body,
-    } as never,
+    manifest: manifestFor(fixture),
   };
 }
 
@@ -225,11 +225,11 @@ describe("ModuleRuntime", () => {
     const service = serviceFor();
     vi.mocked(service.invokeAction).mockResolvedValue({ kind: "files.export", ok: true, status: "completed", result: { exported: true } });
     const base = initialRuntimeFor(filesModuleFixture);
-    const manifest = {
+    const manifest: ModuleManifest = {
       ...base.manifest,
       actions: [{ id: "files_export", kind: "files.export", enabled: true, params: { target: "workbook" } }],
       views: base.manifest.views.map((view) => view.slug === "files_primary" ? { ...view, ui_json: { ...view.ui_json, row_actions: [{ kind: "invoke_action", action: "files_export", label: "Export", params_form: [{ name: "format", label: "Format", type: "enum", required: true, values: ["csv", "xlsx"] }, { name: "include_archived", type: "bool" }, { name: "count", type: "number" }] }] } } : view),
-    } as typeof base.manifest;
+    };
     const { container } = await mountRuntime(filesModuleFixture, { service, initialRuntime: { ...base, manifest } as never, initialViewSlug: "files_primary" });
     const actionButton = [...container.querySelectorAll("button")].find((button) => button.textContent === "Export");
     expect(actionButton).toBeDefined();
@@ -254,11 +254,11 @@ describe("ModuleRuntime", () => {
   it("does not invoke a row action with missing required parameters and shows backend errors", async () => {
     const service = serviceFor();
     const base = initialRuntimeFor(filesModuleFixture);
-    const manifest = {
+    const manifest: ModuleManifest = {
       ...base.manifest,
       actions: [{ id: "files_export", kind: "files.export", enabled: true }],
       views: base.manifest.views.map((view) => view.slug === "files_primary" ? { ...view, ui_json: { ...view.ui_json, row_actions: [{ kind: "invoke_action", action: "files_export", label: "Export", params_form: [{ name: "format", type: "text", required: true }] }] } } : view),
-    } as typeof base.manifest;
+    };
     const { container } = await mountRuntime(filesModuleFixture, { service, initialRuntime: { ...base, manifest } as never, initialViewSlug: "files_primary" });
     await act(async () => { [...container.querySelectorAll("button")].find((button) => button.textContent === "Export")!.click(); });
     const form = container.querySelector<HTMLFormElement>("form.module-runtime-action-form")!;

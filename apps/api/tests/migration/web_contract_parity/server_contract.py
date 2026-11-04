@@ -322,6 +322,70 @@ def content_fields() -> dict[str, tuple[set[str], set[str]]]:
     return {name: _model_fields(model) for name, model in wanted.items()}
 
 
+# ---------------------------------------------------------------- vocabularies
+
+
+def resource_vocabulary() -> dict[str, frozenset[str]]:
+    """Closed value sets the canonical resource API accepts and emits."""
+    from prodavan.application.migration.resources.lifecycle_contracts import (
+        BindingKind,
+        ResourceLifecycle,
+        ResourceKind,
+        ScopeKind,
+        VersionStatus,
+    )
+    from prodavan.application.resources.api import contracts as resource_contracts
+
+    # ``ResourceKind`` in the migration contracts also carries the pre-MIG values
+    # (connection/credential/configuration) that the HTTP surface refuses; the
+    # creatable-on-the-wire set is the explicit constant, so that is what a client
+    # may rely on.
+    creatable = resource_contracts.RESOURCE_KINDS
+    assert creatable <= _enum_values(ResourceKind), (
+        "RESOURCE_KINDS must be a subset of the domain ResourceKind enum"
+    )
+    return {
+        "resource_kind": frozenset(creatable),
+        "owner_scope_kind": frozenset(resource_contracts.OWNER_SCOPE_KINDS),
+        "target_scope_kind": frozenset(resource_contracts.TARGET_SCOPE_KINDS),
+        "scope_kind": frozenset(_enum_values(ScopeKind)),
+        "lifecycle": frozenset(_enum_values(ResourceLifecycle)),
+        "version_status": frozenset(_enum_values(VersionStatus)),
+        "binding_mode": frozenset(_enum_values(BindingKind)),
+        "binding_kind": frozenset(resource_contracts.BINDING_KINDS),
+        "plan_status": frozenset({"ready", "blocked"}),
+        "plan_entry_status": frozenset({"planned"}),
+    }
+
+
+def content_vocabulary() -> dict[str, frozenset[str]]:
+    """Closed value sets the Content API accepts and emits."""
+    from prodavan.application.content.contracts import (
+        ContentLinkKind,
+        ContentPrincipalKind,
+        ContentVisibility,
+    )
+
+    return {
+        "principal_kind": frozenset(_enum_values(ContentPrincipalKind)),
+        "visibility": frozenset(_enum_values(ContentVisibility)),
+        "link_kind": frozenset(_enum_values(ContentLinkKind)),
+        "permission": frozenset({"read", "write", "admin"}),
+    }
+
+
+def dynamic_vocabulary() -> dict[str, frozenset[str]]:
+    """Closed value sets the dynamic-app surface emits."""
+    from prodavan.application.dynamic_apps_definition.lifecycle import API_LIFECYCLE
+    from prodavan.domain.dynamic_apps import AppScopeKind, CapabilityDecision
+
+    return {
+        "lifecycle": frozenset(API_LIFECYCLE),
+        "scope": frozenset(_enum_values(AppScopeKind)) - {"tenant"},
+        "decision": frozenset(_enum_values(CapabilityDecision)),
+    }
+
+
 # ------------------------------------------------------------------- error statuses
 
 
@@ -399,10 +463,13 @@ __all__ = [
     "ServerErrors",
     "build_app",
     "content_fields",
+    "content_vocabulary",
     "dynamic_app_fields",
+    "dynamic_vocabulary",
     "operations",
     "path_parameters",
     "resource_fields",
+    "resource_vocabulary",
     "route_matches",
     "server_errors",
 ]

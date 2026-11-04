@@ -151,7 +151,7 @@ function validSnapshot(value: unknown): value is SignedRegistrySnapshot {
   return value.schemaVersion === "1.0" && ownNonEmpty(value.apiContractVersion) && value.apiContractVersion.length <= 128 &&
     typeof value.digest === "string" && DIGEST.test(value.digest) &&
     (value.signatureStatus === "verified" || value.signatureStatus === "missing" || value.signatureStatus === "invalid") &&
-    validSignature(value.signature) && Number.isFinite(issuedAt) && Number.isInteger(value.ttlSeconds) && value.ttlSeconds >= 1 && value.ttlSeconds <= 86_400 &&
+    validSignature(value.signature) && Number.isFinite(issuedAt) && typeof value.ttlSeconds === "number" && Number.isInteger(value.ttlSeconds) && value.ttlSeconds >= 1 && value.ttlSeconds <= 86_400 &&
     Array.isArray(value.entries) && value.entries.length <= 10_000 && value.entries.every(validEntry) &&
     new Set(value.entries.map((entry) => `${entry.appId}\u0000${entry.version}`)).size === value.entries.length;
 }
@@ -301,7 +301,9 @@ export class SignedRegistryResolver {
     if (!manifestResult.ok) return failure("validation_error", context);
     const manifest = manifestResult.manifest;
     if (manifest.appId !== entry.appId || manifest.version !== entry.version) return failure("quarantined", context);
-    const requestedCapabilities = new Set(manifest.requestedCapabilities.map((capability) => capability.name));
+    // Grants and route requirements arrive as opaque strings; membership is checked against the
+    // declared names, so the lookup set stays `string`-keyed instead of claiming a narrower type.
+    const requestedCapabilities: ReadonlySet<string> = new Set(manifest.requestedCapabilities.map((capability) => capability.name));
     if (entry.grants.some((capability) => !requestedCapabilities.has(capability))) return failure("quarantined", context);
     if (entry.grants.some((capability) => !effectiveCapabilities.has(capability))) return failure("capability_denied", context);
     const uiEntry = manifestResult.manifest.entrypoints.ui;

@@ -79,9 +79,46 @@ TRUSTED_SERVICE_ROLE: Final = "prodavan_service"
 TENANT_POLICY_SUFFIX: Final = "tenant_isolation"
 TRUSTED_POLICY_SUFFIX: Final = "trusted_service_access"
 
+#: Compact substitutes used only when the full suffix would overflow the
+#: identifier limit.  Each kind has exactly one compact form, so the choice is a
+#: function of the rendered name alone - never of the table's history or of a
+#: hand-written exception list.
+TENANT_POLICY_COMPACT_SUFFIX: Final = "tenant"
+TRUSTED_POLICY_COMPACT_SUFFIX: Final = "trusted_access"
+
+#: ``NAMEDATALEN - 1``: the byte length PostgreSQL stores for an identifier.
+#: Policy names are ASCII, so characters and bytes coincide here.
+POLICY_NAME_MAX_LENGTH: Final = 63
+
 PolicyCommand = Literal["SELECT", "ALL"]
 
 _IDENTIFIER = re.compile(r"[a-z][a-z0-9_]{0,62}")
+
+
+def installed_policy_name(declared: str) -> str:
+    """The name PostgreSQL actually stores for a rendered policy name.
+
+    Kept as a function rather than an inline slice for two reasons: every catalog
+    comparison goes through the same mapping, and a *legacy* over-long name (one
+    installed by an earlier revision, before the compact suffixes existed) is
+    still resolvable - revision ``2026110318`` has to drop such a policy by the
+    truncated name the server stored.
+    """
+
+    return declared[:POLICY_NAME_MAX_LENGTH]
+
+
+def _policy_name(table: str, *suffixes: str) -> str:
+    """Longest suffix whose rendered ``<table>_<suffix>`` fits the limit."""
+
+    for suffix in suffixes:
+        candidate = f"{table}_{suffix}"
+        if len(candidate) <= POLICY_NAME_MAX_LENGTH:
+            return candidate
+    raise RlsRegistryError(
+        f"{table}: no policy suffix fits {POLICY_NAME_MAX_LENGTH} characters "
+        f"(tried {suffixes}); shorten the table name rather than letting PostgreSQL truncate"
+    )
 
 
 class RlsRegistryError(RuntimeError):
@@ -175,13 +212,29 @@ class TablePolicySpec:
                 raise RlsRegistryError(f"{self.table}: restriction must be table-qualified")
 
     # -- naming -----------------------------------------------------------
+    # The two properties below are the *declared* names, already fitted to the
+    # 63-character limit by :func:`_policy_name`; ``installed_policy_name`` applied
+    # to them is an identity, which is the whole point of the rule in the module
+    # docstring.  The table part is never shortened.
     @property
     def tenant_policy(self) -> str:
-        return f"{self.table}_{TENANT_POLICY_SUFFIX}"
+        return _policy_name(self.table, TENANT_POLICY_SUFFIX, TENANT_POLICY_COMPACT_SUFFIX)
 
     @property
     def trusted_policy(self) -> str:
-        return f"{self.table}_{TRUSTED_POLICY_SUFFIX}"
+        return _policy_name(self.table, TRUSTED_POLICY_SUFFIX, TRUSTED_POLICY_COMPACT_SUFFIX)
+
+    @property
+    def tenant_policy_is_compact(self) -> bool:
+        """``True`` when the tenant policy uses the compact suffix."""
+
+        return not self.tenant_policy.endswith(f"_{TENANT_POLICY_SUFFIX}")
+
+    @property
+    def trusted_policy_is_compact(self) -> bool:
+        """``True`` when the trusted policy uses the compact suffix."""
+
+        return not self.trusted_policy.endswith(f"_{TRUSTED_POLICY_SUFFIX}")
 
     @property
     def policy_names(self) -> tuple[str, str]:
@@ -880,6 +933,22 @@ def validate_registry(specs: tuple[TablePolicySpec, ...] = CANONICAL_TABLE_POLIC
     policy_names = [name for spec in specs for name in spec.policy_names]
     if len(set(policy_names)) != len(policy_names):
         raise RlsRegistryError("policy names must be unique across the registry")
+    # The 63-byte invariant is checked on the declared names *and* on the names
+    # PostgreSQL would store for them.  Today the two sets are identical (that is
+    # what :func:`_policy_name` guarantees); the second check is what keeps a
+    # future suffix, or a hand-built spec, from sneaking a truncation in.
+    for name in policy_names:
+        if len(name) > POLICY_NAME_MAX_LENGTH:
+            raise RlsRegistryError(
+                f"policy name {name!r} is {len(name)} characters, over the "
+                f"{POLICY_NAME_MAX_LENGTH}-character PostgreSQL limit"
+            )
+    installed = [installed_policy_name(name) for name in policy_names]
+    if len(set(installed)) != len(installed):
+        raise RlsRegistryError(
+            "policy names collide once PostgreSQL stores them; two tables would install "
+            "the same policy name"
+        )
     for spec in specs:
         if spec.tenant is not None and not scoped_column_predicate(spec, spec.tenant, TENANT_SETTING):
             raise RlsRegistryError(f"{spec.table}: empty tenant predicate")
@@ -949,14 +1018,17 @@ __all__ = [
     "CANONICAL_TABLE_POLICIES",
     "CANONICAL_TABLE_PREFIXES",
     "EXCLUDED_TABLES",
+    "POLICY_NAME_MAX_LENGTH",
     "PROJECT_SETTING",
     "ParentHop",
     "PolicyCommand",
     "REGISTRY_VERSION",
     "RlsRegistryError",
     "ScopedColumn",
+    "TENANT_POLICY_COMPACT_SUFFIX",
     "TENANT_POLICY_SUFFIX",
     "TENANT_SETTING",
+    "TRUSTED_POLICY_COMPACT_SUFFIX",
     "TRUSTED_POLICY_SUFFIX",
     "TRUSTED_SERVICE_ROLE",
     "TRUSTED_SERVICE_SETTING",
@@ -967,6 +1039,7 @@ __all__ = [
     "drop_policy_statements",
     "enable_statements",
     "excluded_table_names",
+    "installed_policy_name",
     "policy_inventory",
     "registry_tables",
     "relation_exists",

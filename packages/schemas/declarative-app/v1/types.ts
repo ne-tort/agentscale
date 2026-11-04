@@ -17,7 +17,12 @@ export type CapabilityName =
   | "secrets.read"
   | "identity.read";
 
-export interface DeclarativeAppManifest {
+/**
+ * Closed signed payload. Declared as a type alias (not an interface) on purpose: it then carries
+ * an implicit index signature, so a runtime validator that has already checked every field can
+ * assert the validated record into this shape without an unsound `unknown as` double cast.
+ */
+export type DeclarativeAppManifest = {
   protocol: ProtocolVersion;
   appId: AppId;
   version: string;
@@ -31,7 +36,7 @@ export interface DeclarativeAppManifest {
   quotas?: QuotaPolicy;
   lifecycle?: LifecyclePolicy;
   metadata?: Record<string, string>;
-}
+};
 
 export interface DeclarativeUiEntrypoint {
   kind: "declarative-ui";

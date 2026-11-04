@@ -1,6 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiRequestError, createApiClient } from "./client";
 
+/**
+ * The fetcher signature, declared once per test module.
+ *
+ * ``vi.fn()`` without a type parameter infers ``mock.calls`` as ``[]``, so
+ * ``mock.calls[0][1]`` is a "tuple of length 0" and every field read on it is
+ * ``never``. Naming the signature makes the recorded calls typed instead.
+ */
+type FetchLike = typeof fetch;
+
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 }

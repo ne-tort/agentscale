@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ContentOpsError } from "./contracts";
 import { createContentOpsService } from "./service";
+import type { ContentAclEntry } from "./types";
 
 const asset = {
   id: "cast_asset-1",
@@ -136,7 +137,7 @@ describe("Content operations acceptance contract", () => {
   });
 
   it("reads and replaces the complete asset ACL using the confirmed entries envelope", async () => {
-    const grant = { principal_kind: "company", principal_id: "company-2", permission: "read" };
+    const grant: ContentAclEntry = { principal_kind: "company", principal_id: "company-2", permission: "read" };
     const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => init?.method === "PUT"
       ? jsonResponse({ entries: [{ id: "acl-1", ...grant }] })
       : jsonResponse({ entries: [{ id: "acl-1", ...grant }] }));

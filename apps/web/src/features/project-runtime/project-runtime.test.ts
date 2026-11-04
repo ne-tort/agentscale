@@ -227,7 +227,7 @@ describe("project runtime service", () => {
   });
 
   it("sends the authenticated access token on project runtime requests", async () => {
-    const fetchImpl = vi.fn(async () => jsonResponse(project));
+    const fetchImpl = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => jsonResponse(project));
     const service = createProjectRuntimeService({ fetchImpl, getAccessToken: () => "access-token" });
 
     await service.getProject("project-42");
