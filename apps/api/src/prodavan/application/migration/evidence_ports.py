@@ -16,7 +16,8 @@ Port                          Target table(s)
                                           `m05_plugin_instances`,
                                           `m04e_definition_version_promotion_evidence`,
                                           `m06_canonical_grant_promotion_evidence`,
-                                          `scope_registry` (typed anchor id),
+                                          `dynamic_app_capability_grant_mappings` +
+                                          `dynamic_app_capability_grants` (inventory),
                                           `pg_class`/`pg_policies` (M04 RLS state)
 ============================  =====================================================
 
@@ -64,7 +65,7 @@ import hashlib
 import json
 import re
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Any, AsyncIterator, Mapping, Sequence
 
@@ -161,7 +162,9 @@ SCHEMA_BLOCKERS = (
     "m04_scope_promotion_evidence_missing: no registered table stores the accepted M04 "
     "scope/RLS evidence row, so PartitionHandoffReadPort refuses with a named blocker",
     "m05_promotion_record_carries_no_source_inventory: PromotionRecord holds counts "
-    "only; the accepted source inventory is reconstructed from m05_plugin_instances",
+    "only; the M06 accepted source inventory is reconstructed from the mapped grant "
+    "sources of the exact partition (dynamic_app_capability_grant_mappings joined to its "
+    "target grant), which is the identity AcceptedPartitionEvidence.admits compares",
     "m05_writer_generation_zero_has_no_m06_epoch: M05 allows writer_generation=0 while "
     "AcceptedPartitionEvidence requires writer_epoch>0; this module refuses instead of "
     "normalising the value",
@@ -376,16 +379,16 @@ class _EvidenceSessionBoundaries:
 
 
 @dataclass(frozen=True, slots=True)
-class MarkerAppendPlan:
+class AppendPlan:
     """Pure decision for one append: insert, exact replay, or typed conflict."""
 
     action: str
     blockers: tuple[str, ...] = ()
-    stored: M05HandoffMarker | None = None
+    stored: Any | None = None
 
     def __post_init__(self) -> None:
         if self.action not in {"insert", "replay", "conflict"}:
-            raise ValueError("marker plan action must be insert, replay or conflict")
+            raise ValueError("append plan action must be insert, replay or conflict")
 
     @property
     def is_insert(self) -> bool:
@@ -398,6 +401,10 @@ class MarkerAppendPlan:
     @property
     def is_conflict(self) -> bool:
         return self.action == "conflict"
+
+
+MarkerAppendPlan = AppendPlan
+"""Historical name for the marker-specific plan; the promotion record uses the same type."""
 
 
 def marker_ledger_key(marker: M05HandoffMarker) -> str:
@@ -508,7 +515,15 @@ def decode_marker_row(row: Any | None) -> M05HandoffMarker | None:
 
 
 def handoff_marker_row_values(marker: M05HandoffMarker) -> dict[str, Any]:
-    """Column mapping for one marker append; only columns the model declares."""
+    """Column mapping for one marker append; only columns the model declares.
+
+    Two digest columns (``current_version_resolution_digest``,
+    ``artifact_equality_digest``) exist to store the same-definition and immutable-artifact
+    gate proof. A READY marker must carry both; a BLOCKED marker may legitimately lack them
+    (that is why it is blocked), so its columns fall back to the digest of its own redacted
+    envelope — still a sha256, never a placeholder, and the exact gate list survives in the
+    envelope for the decoder and for M05's ``marker_ready`` check.
+    """
     if not isinstance(marker, M05HandoffMarker):
         raise MigrationEvidenceBlocked(("handoff_marker_type_invalid",))
     blockers: list[str] = []
@@ -524,15 +539,20 @@ def handoff_marker_row_values(marker: M05HandoffMarker) -> dict[str, Any]:
         blockers.append("handoff_marker_cannot_enable_positive_writes")
     if len(marker.partition[1]) > M04E_PROMOTION_ID_WIDTH:
         blockers.append("handoff_marker_definition_id_exceeds_column_width")
+    payload = marker_payload(marker)
+    envelope_digest = digest(payload)
     resolved = {gate.name: gate for gate in marker.gate_evidence}
+    gate_columns: dict[str, str] = {}
     for gate_name in ("same_definition_version", "immutable_artifact"):
         gate = resolved.get(gate_name)
-        if gate is None or not is_sha256(gate.evidence_digest):
+        if gate is not None and is_sha256(gate.evidence_digest):
+            gate_columns[gate_name] = gate.evidence_digest
+        elif marker.status is M04EHandoffStatus.READY:
             blockers.append(f"handoff_marker_gate_evidence_missing:{gate_name}")
+        else:
+            gate_columns[gate_name] = envelope_digest
     if blockers:
         raise MigrationEvidenceBlocked(blockers)
-    assert resolved["same_definition_version"].evidence_digest is not None
-    assert resolved["immutable_artifact"].evidence_digest is not None
     return {
         "id": marker.record_id,
         "tenant_id": marker.partition[0],
@@ -545,9 +565,9 @@ def handoff_marker_row_values(marker: M05HandoffMarker) -> dict[str, Any]:
         "valid_count": marker.accepted_count,
         "archived_count": 0,
         "quarantined_count": marker.quarantined_count,
-        "current_version_resolution_digest": resolved["same_definition_version"].evidence_digest,
-        "artifact_equality_digest": resolved["immutable_artifact"].evidence_digest,
-        "gate_evidence": marker_payload(marker),
+        "current_version_resolution_digest": gate_columns["same_definition_version"],
+        "artifact_equality_digest": gate_columns["immutable_artifact"],
+        "gate_evidence": payload,
         "canonical_positive_writes": False,
         "reviewer": marker.decision_owner[:M05_PROMOTION_OWNER_WIDTH],
         "previous_revision_id": None,
@@ -904,13 +924,15 @@ class SqlM04EBackfillEvidenceStore:
             outcome=None,
             blocker_evidence=tuple(blocker_evidence),
         )
-        row_id = "m04eb:" + digest([
+        # Same key material for the primary key and the unique revision token, so an exact
+        # repeat finds the recorded row and any divergence collides on the unique
+        # (tenant_id, definition_id, revision_id) constraint instead of appending twice.
+        blocked_key = digest([
             "blocked", list(checkpoint.partition), backfill_checkpoint_digest(checkpoint),
             reason_code, context.correlation_id,
         ]).removeprefix("sha256:")
-        revision_id = "hb-" + digest([
-            backfill_checkpoint_digest(checkpoint), reason_code,
-        ]).removeprefix("sha256:")
+        row_id = "m04eb:" + blocked_key
+        revision_id = "hb-" + blocked_key
         async with self._boundaries.write() as session:
             existing = await session.get(M04EDefinitionVersionPromotionEvidenceRow, row_id)
             if existing is not None:
@@ -1067,24 +1089,29 @@ class SqlM04EBackfillEvidenceStore:
         expected: BackfillCheckpoint,
         decisions: Sequence[CandidateDecision],
     ) -> tuple[tuple[BackfillRecord, ...], dict[str, int], dict[str, int]]:
+        """Classify each candidate against the stored ledger and derive the new rows.
+
+        The returned index maps point at the freshly written ``records`` list, so a
+        first mapping and a first changed-digest observation are both recorded inside the
+        same append-only page row.
+        """
         records: list[BackfillRecord] = []
         sources: dict[str, int] = {}
         observations: dict[str, int] = {}
         seen_identity: set[tuple[str, ...]] = set()
         for decision in decisions:
             candidate = decision.candidate
-            key = backfill_source_key(candidate.source_kind, candidate.source_id, candidate.schema_version)
+            key = backfill_source_key(
+                candidate.source_kind, candidate.source_id, candidate.schema_version
+            )
             stored = await self._ledger_lookup(session, context, "sources", key)
-            observation_key = None
-            observation = None
+            observation_key: str | None = None
+            observation: BackfillRecord | None = None
             if stored is not None and stored.source_digest != candidate.source_digest:
                 observation_key = backfill_observation_key(
                     candidate.source_kind, candidate.source_id, candidate.schema_version,
                     observed_source_digest=candidate.source_digest,
                     observed_artifact_digest=None,
-                )
-                observation = await self._ledger_lookup(
-                    session, context, "observations", observation_key
                 )
             elif (
                 stored is not None
@@ -1097,53 +1124,53 @@ class SqlM04EBackfillEvidenceStore:
                     observed_source_digest=None,
                     observed_artifact_digest=decision.verified_artifact_digest,
                 )
+            if observation_key is not None:
                 observation = await self._ledger_lookup(
                     session, context, "observations", observation_key
                 )
-            status = decision.status
-            if stored is not None:
-                source_changed = stored.source_digest != candidate.source_digest
-                artifact_changed = (
-                    stored.verified_artifact_digest is not None
-                    and decision.verified_artifact_digest is not None
-                    and stored.verified_artifact_digest != decision.verified_artifact_digest
-                )
-                if source_changed or artifact_changed:
-                    status = (
-                        EvidenceStatus.REPLAY if observation is not None
-                        else EvidenceStatus.CONFLICT
-                    )
-                else:
-                    # First mapping is immutable: an unchanged source and artifact is
-                    # always a replay of the recorded evidence, never a second mapping.
-                    status = EvidenceStatus.REPLAY
             identity = candidate.canonical_identity
-            if status is EvidenceStatus.ACCEPTED and identity and identity in seen_identity:
-                status = EvidenceStatus.CONFLICT
-            if identity:
-                seen_identity.add(identity)
 
-            if stored is not None and status is EvidenceStatus.REPLAY:
-                replay = BackfillRecord(
-                    **{
-                        **{f: getattr(stored, f) for f in _RECORD_FIELDS},
-                        "status": stored.status,
-                        "outcome": BackfillOutcome.REPLAY,
-                    }
+            if stored is None:
+                status = decision.status
+                if status is EvidenceStatus.ACCEPTED and identity and identity in seen_identity:
+                    status = EvidenceStatus.CONFLICT
+                if identity:
+                    seen_identity.add(identity)
+                record = self._build_record(
+                    context=context, checkpoint=expected, decision=decision, status=status,
                 )
-                records.append(replay)
+                records.append(record)
+                sources[key] = len(records) - 1
+                if status is EvidenceStatus.CONFLICT and observation_key is not None:
+                    observations[observation_key] = len(records) - 1
                 continue
 
-            record = self._build_record(
-                context=context, checkpoint=expected, decision=decision, status=status,
-                observation=observation,
-            )
-            records.append(record)
-            index = len(records) - 1
-            if stored is None:
-                sources[key] = index
-            if observation is None and observation_key is not None:
-                observations[observation_key] = index
+            # A first mapping is immutable: replay it, or record the changed digest as a
+            # closed conflict instead of overwriting it.
+            if observation_key is not None:
+                if observation is not None:
+                    records.append(replace(observation, outcome=BackfillOutcome.REPLAY))
+                    continue
+                record = self._build_record(
+                    context=context, checkpoint=expected, decision=decision,
+                    status=EvidenceStatus.CONFLICT,
+                )
+                records.append(record)
+                observations[observation_key] = len(records) - 1
+                continue
+            if stored.status is EvidenceStatus.CONFLICT:
+                reason = stored.reason_code
+                if reason in {"source_digest_changed", "artifact_digest_changed"}:
+                    records.append(replace(stored, outcome=BackfillOutcome.REPLAY))
+                else:
+                    # Non-digest conflicts (tenant, lifecycle, duplicate identity) are
+                    # re-derived on every pass; replaying them would break the contract
+                    # rule that a replayed conflict carries a changed-digest reason.
+                    records.append(replace(stored, outcome=BackfillOutcome.CONFLICT))
+                continue
+            records.append(replace(stored, outcome=BackfillOutcome.REPLAY))
+            if identity:
+                seen_identity.add(identity)
         return tuple(records), sources, observations
 
     @staticmethod
@@ -1153,10 +1180,11 @@ class SqlM04EBackfillEvidenceStore:
         checkpoint: BackfillCheckpoint,
         decision: CandidateDecision,
         status: EvidenceStatus,
-        observation: BackfillRecord | None,
     ) -> BackfillRecord:
         candidate = decision.candidate
         proof = decision.proof
+        if status is EvidenceStatus.REPLAY:
+            raise MigrationEvidenceBlocked(("backfill_replay_without_recorded_mapping",))
         proof_evidence: tuple[tuple[str, str], ...] = ()
         if status is EvidenceStatus.ACCEPTED and proof is not None:
             proof_evidence = (
@@ -1189,9 +1217,6 @@ class SqlM04EBackfillEvidenceStore:
                 observed_source_digest = candidate.source_digest
             elif decision.reason_code == "artifact_digest_changed":
                 observed_artifact_digest = decision.verified_artifact_digest
-            elif observation is not None:
-                observed_source_digest = observation.observed_source_digest
-                observed_artifact_digest = observation.observed_artifact_digest
         return BackfillRecord(
             source_kind=candidate.source_kind,
             source_id=candidate.source_id,
@@ -1226,9 +1251,7 @@ class SqlM04EBackfillEvidenceStore:
             observed_source_digest=observed_source_digest,
             observed_artifact_digest=observed_artifact_digest,
             blocker_evidence=(
-                decision.blocker_evidence
-                if status is EvidenceStatus.QUARANTINED
-                else (observation.blocker_evidence if observation is not None and status is EvidenceStatus.REPLAY else ())
+                decision.blocker_evidence if status is EvidenceStatus.QUARANTINED else ()
             ),
         )
 
@@ -1545,7 +1568,7 @@ def promotion_row_values(record: PromotionRecord) -> dict[str, Any]:
         "tenant_id": record.partition[0],
         "definition_id": record.partition[1],
         "partition_id": partition_id,
-        "revision_id": record.record_id,
+        "revision_id": record.record_id[:M05_PROMOTION_REVISION_WIDTH],
         "outcome": "blocked",
         "source_snapshot_id": record.checkpoint.source_snapshot_id,
         "source_schema_version": record.checkpoint.source_schema_version,
@@ -1789,7 +1812,9 @@ def policy_shape_is_restrictive(row: Mapping[str, Any]) -> bool:
 
 
 @dataclass(frozen=True, slots=True)
-class _PartitionParts:
+class PartitionParts:
+    """Reviewed inputs of one partition read; assembled only from stored artefacts."""
+
     m05_record: PromotionRecord
     m04e_marker: M05HandoffMarker
     m04e_marker_row_id: str
@@ -1809,7 +1834,7 @@ def assemble_partition_evidence(
     app_version_id: str,
     plugin_instance_id: str,
     writer_generation: int,
-    parts: _PartitionParts,
+    parts: PartitionParts,
 ) -> AcceptedPartitionEvidence:
     """Build the M06 partition evidence from stored, re-verified artefacts.
 
@@ -2004,7 +2029,7 @@ class SqlPartitionHandoffReadStore:
                 app_version_id=app_version_id,
                 plugin_instance_id=plugin_instance_id,
                 writer_generation=writer_generation,
-                parts=_PartitionParts(
+                parts=PartitionParts(
                     m05_record=record,
                     m04e_marker=_require_marker(marker_row),
                     m04e_marker_row_id=marker_row.id,
@@ -2262,6 +2287,7 @@ _RECORD_FIELDS = (
     "transaction_id", "writer_generation", "observed_source_digest", "observed_artifact_digest",
     "blocker_evidence",
 )
+"""``BackfillRecord`` fields, in declaration order; ``outcome`` is decided per append."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -2447,6 +2473,7 @@ __all__ = [
     "MigrationEvidenceConflict",
     "MigrationEvidenceCorrupt",
     "PartitionHandoffRead",
+    "PartitionParts",
     "REDACTION",
     "ReviewedM04RlsEvidence",
     "SCHEMA_BLOCKERS",
