@@ -18,6 +18,7 @@ from prodavan.application.migration.m06_cutover.cutover import (
 )
 from prodavan.application.migration.m06_cutover.ports import (
     CANONICAL_REPAIR_BLOCK,
+    CUTOVER_SOURCE_TAIL_TABLE,
     LEGACY_OWNER_BLOCK,
     ROLLBACK_BLOCK,
 )
@@ -219,4 +220,36 @@ async def attach_repair_block(env: EvidenceDatabase, evidence: CanonicalRepairEv
         M06_TABLE,
         where={"id": gate.evidence_id},
         gate_evidence=envelope,
+    )
+
+
+async def seed_source_tail(
+    env: EvidenceDatabase,
+    *,
+    tenant_id: str,
+    definition_id: str,
+    change_sequence: int,
+    writer_epoch: int,
+) -> None:
+    """Persist the live legacy source tail the cutover CAS compares against."""
+
+    await env.insert(CUTOVER_SOURCE_TAIL_TABLE, **{
+        "tenant_id": tenant_id,
+        "app_definition_id": definition_id,
+        "change_sequence": change_sequence,
+        "writer_epoch": writer_epoch,
+        "updated_at": "2026-11-01T13:00:00+00:00",
+    })
+
+
+async def set_source_tail(env: EvidenceDatabase, *, tenant_id: str, definition_id: str,
+                          change_sequence: int) -> None:
+    """Move the live source tail forward (a legacy writer committed one more change)."""
+
+    await env.execute(
+        f"UPDATE {CUTOVER_SOURCE_TAIL_TABLE} SET change_sequence = :seq "
+        "WHERE tenant_id = :tenant_id AND app_definition_id = :app_definition_id",
+        seq=change_sequence,
+        tenant_id=tenant_id,
+        app_definition_id=definition_id,
     )

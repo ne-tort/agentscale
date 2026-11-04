@@ -75,9 +75,11 @@ async def test_missing_trusted_transaction_context_blocks() -> None:
 async def test_missing_scope_mapping_actor_context_blocks_before_persistence() -> None:
     context = trusted_context()
     assert context.rls_context is not None
+    # ``RlsContext`` is a frozen pydantic contract, so the altered context must be
+    # derived with ``model_copy``; ``dataclasses.replace`` cannot copy it at all.
     mismatched = replace(
         context,
-        rls_context=replace(context.rls_context, tenant_id="tenant-other"),
+        rls_context=context.rls_context.model_copy(update={"tenant_id": "tenant-other"}),
     )
     result = await ScopeMigrationCoordinator(None).process_row(
         candidate=candidate(), checkpoint=checkpoint(), context=mismatched
@@ -105,12 +107,13 @@ async def test_mapping_blocks_when_server_context_does_not_match_anchors(anchor_
     item = candidate(anchors=project_anchors())
     context = trusted_context(anchors=project_anchors())
     assert context.rls_context is not None
+    # Frozen pydantic RLS context: derive the altered copy with ``model_copy``.
     if anchor_change == "tenant":
-        altered_rls = replace(context.rls_context, tenant_id="tenant-other")
+        altered_rls = context.rls_context.model_copy(update={"tenant_id": "tenant-other"})
     elif anchor_change == "cabinet":
-        altered_rls = replace(context.rls_context, cabinet_id="cabinet-other")
+        altered_rls = context.rls_context.model_copy(update={"cabinet_id": "cabinet-other"})
     else:
-        altered_rls = replace(context.rls_context, project_id="project-other")
+        altered_rls = context.rls_context.model_copy(update={"project_id": "project-other"})
     result = await ScopeMigrationCoordinator(None).process_row(
         candidate=item,
         checkpoint=checkpoint(),
@@ -206,10 +209,14 @@ def test_plugin_scope_is_quarantined_for_later_m05_without_positive_entry() -> N
         (ScopeKind.TENANT, ScopeParentEvidence(1, 0, 0, 0, 0, tenant_id="tenant-1", active_registry_anchors=tenant_anchors()), tenant_anchors(), False),
         (ScopeKind.TENANT, ScopeParentEvidence(1, 0, 0, 0, 2, tenant_id="tenant-1", active_registry_anchors=tenant_anchors()), tenant_anchors(), False),
         (ScopeKind.CABINET, ScopeParentEvidence(1, 1, 1, 0, 1, tenant_id="tenant-1", cabinet_id="cabinet-1", cabinet_membership_kind="cabinet_company_grant", membership_tenant_id="tenant-1", membership_cabinet_id="cabinet-1", active_registry_anchors=cabinet_anchors()), cabinet_anchors(), True),
-        (ScopeKind.CABINET, ScopeParentEvidence(1, 1, 1, 0, 1, tenant_id="tenant-1", cabinet_id="cabinet-1", cabinet_membership_kind="cabinet_company_grant", membership_tenant_id="tenant-1", membership_cabinet_id="cabinet-1", active_registry_anchors=cabinet_anchors()), cabinet_anchors(), False),
+        # Distinct invalid case: the single active membership must belong to the
+        # resolved cabinet, not merely to the same tenant.
+        (ScopeKind.CABINET, ScopeParentEvidence(1, 1, 1, 0, 1, tenant_id="tenant-1", cabinet_id="cabinet-1", cabinet_membership_kind="cabinet_company_grant", membership_tenant_id="tenant-1", membership_cabinet_id="cabinet-other", active_registry_anchors=cabinet_anchors()), cabinet_anchors(), False),
         (ScopeKind.CABINET, ScopeParentEvidence(1, 1, 2, 0, 1, tenant_id="tenant-1", cabinet_id="cabinet-1", cabinet_membership_kind="cabinet_company_grant", membership_tenant_id="tenant-1", membership_cabinet_id="cabinet-1", active_registry_anchors=cabinet_anchors()), cabinet_anchors(), False),
         (ScopeKind.PROJECT, ScopeParentEvidence(1, 1, 1, 1, 1, tenant_id="tenant-1", cabinet_id="cabinet-1", cabinet_membership_kind="cabinet_company_grant", membership_tenant_id="tenant-1", membership_cabinet_id="cabinet-1", project_id="project-1", project_tenant_id="tenant-1", project_cabinet_id="cabinet-1", active_registry_anchors=project_anchors()), project_anchors(), True),
-        (ScopeKind.PROJECT, ScopeParentEvidence(1, 1, 1, 1, 1, tenant_id="tenant-1", cabinet_id="cabinet-1", cabinet_membership_kind="cabinet_company_grant", membership_tenant_id="tenant-1", membership_cabinet_id="cabinet-1", project_id="project-1", project_tenant_id="tenant-1", project_cabinet_id="cabinet-1", active_registry_anchors=project_anchors()), project_anchors(), False),
+        # Distinct invalid case: exactly one project row must resolve to the
+        # requested project identity, not merely to the same tenant/cabinet.
+        (ScopeKind.PROJECT, ScopeParentEvidence(1, 1, 1, 1, 1, tenant_id="tenant-1", cabinet_id="cabinet-1", cabinet_membership_kind="cabinet_company_grant", membership_tenant_id="tenant-1", membership_cabinet_id="cabinet-1", project_id="project-other", project_tenant_id="tenant-1", project_cabinet_id="cabinet-1", active_registry_anchors=project_anchors()), project_anchors(), False),
         (ScopeKind.PROJECT, ScopeParentEvidence(1, 1, 1, 1, 1, tenant_id="tenant-1", cabinet_id="cabinet-1", cabinet_membership_kind="cabinet_company_grant", membership_tenant_id="tenant-1", membership_cabinet_id="cabinet-1", project_id="project-1", project_tenant_id="tenant-other", project_cabinet_id="cabinet-1", active_registry_anchors=project_anchors()), project_anchors(), False),
         (ScopeKind.PROJECT, ScopeParentEvidence(1, 1, 1, 1, 1, tenant_id="tenant-1", cabinet_id="cabinet-1", cabinet_membership_kind="cabinet_company_grant", membership_tenant_id="tenant-1", membership_cabinet_id="cabinet-1", project_id="project-1", project_tenant_id="tenant-1", project_cabinet_id="cabinet-other", active_registry_anchors=project_anchors()), project_anchors(), False),
         (ScopeKind.CABINET, ScopeParentEvidence(1, 1, 1, 0, 1, cabinet_deleted=True, tenant_id="tenant-1", cabinet_id="cabinet-1", membership_tenant_id="tenant-1", membership_cabinet_id="cabinet-1", active_registry_anchors=cabinet_anchors()), cabinet_anchors(), False),
@@ -430,6 +437,7 @@ def test_scope_stream_resumes_only_exact_snapshot_lineage() -> None:
         source_schema_version="schema-2",
         source_snapshot_digest=stream.source_snapshot_digest,
         tenant_id=TENANT,
+        writer_generation=stream.writer_generation,
     ).stream_key != stream.stream_key
 
 
@@ -589,7 +597,7 @@ def test_active_scope_evaluator_requires_exact_parent_membership_and_rls_evidenc
     assert context.rls_context is not None
     changed_context = replace(
         context,
-        rls_context=replace(context.rls_context, project_id="project-other"),
+        rls_context=context.rls_context.model_copy(update={"project_id": "project-other"}),
     )
     mismatch = evaluate_active_scope_evidence(
         context=changed_context, anchors=anchors, evidence=evidence()

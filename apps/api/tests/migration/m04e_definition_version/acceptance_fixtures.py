@@ -445,6 +445,13 @@ class FixtureEvidenceStore:
                 phase_complete=complete,
             )
             self.durable_checkpoint = current
+        elif records:
+            # A replay-only page consumes no cursor position, so a durable store
+            # returns its stored checkpoint unchanged. Rebuilding it from the
+            # caller's older ``expected_checkpoint`` would model a store that
+            # silently regresses (and could replay) an already-consumed cursor,
+            # which the real adapter never does.
+            current = self.durable_checkpoint or expected_checkpoint
         elif page_exhausted and expected_checkpoint.phase == "definition":
             current = replace(
                 expected_checkpoint,

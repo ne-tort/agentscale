@@ -258,9 +258,13 @@ def test_source_identity_and_checkpoint_cas_are_validated_before_database_work()
     successor = replace(expected, sequence=1, after_source_id=item.source_id)
 
     with pytest.raises(ValueError, match="source candidate tenant"):
+        # ``ScopeAnchors`` is a frozen pydantic contract; derive the foreign-tenant
+        # variant with ``model_copy`` instead of ``dataclasses.replace``.
         SqlAlchemyTrustedScopeTransactionPort._validate_command(
             context=context,
-            candidate=replace(source, anchors=replace(item.anchors, tenant_id="tenant-other")),
+            candidate=replace(
+                source, anchors=item.anchors.model_copy(update={"tenant_id": "tenant-other"}),
+            ),
             source_mapping_identity=item.mapping_identity,
             expected_checkpoint=expected,
             next_checkpoint=successor,

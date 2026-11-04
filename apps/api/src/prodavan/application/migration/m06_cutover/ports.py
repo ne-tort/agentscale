@@ -124,12 +124,14 @@ ROLLBACK_ACTIONS = frozenset({
     CutoverAction.REPAIRED,
 })
 
-#: One model per cutover gate stage; the stage name is the ``EvidenceReference.stage``.
-STAGE_MODELS: Mapping[GateStage, Any] = {
-    GateStage.M04: M04ScopePromotionEvidenceRow,
-    GateStage.M04E: M04EDefinitionVersionPromotionEvidenceRow,
-    GateStage.M05: M05PluginInstancePromotionEvidenceRow,
-    GateStage.M06: M06CanonicalGrantPromotionEvidenceRow,
+#: One model per cutover stage name. ``GateStage`` itself only names M04/M04E/M05 (the M06
+#: proof is the ``GateEvidence`` object itself), but a ``CanonicalRepairEvidence`` reference
+#: may name ``"M06"``, so the repair path looks rows up by name.
+STAGE_MODEL_BY_NAME: Mapping[str, Any] = {
+    "M04": M04ScopePromotionEvidenceRow,
+    "M04E": M04EDefinitionVersionPromotionEvidenceRow,
+    "M05": M05PluginInstancePromotionEvidenceRow,
+    "M06": M06CanonicalGrantPromotionEvidenceRow,
 }
 
 STAGE_BY_NAME: Mapping[str, GateStage] = {stage.value: stage for stage in GateStage}
@@ -140,13 +142,11 @@ CANONICAL_DIGEST_COLUMN: Mapping[GateStage, str] = {
     GateStage.M04: "canonical_digest",
     GateStage.M04E: "target_digest",
     GateStage.M05: "target_digest",
-    GateStage.M06: "target_digest",
 }
 SOURCE_DIGEST_COLUMN: Mapping[GateStage, str] = {
     GateStage.M04: "source_snapshot_digest",
     GateStage.M04E: "source_digest",
     GateStage.M05: "source_digest",
-    GateStage.M06: "source_digest",
 }
 
 LEGACY_OWNER_BLOCK = "legacy_owner"
@@ -923,8 +923,13 @@ class _Reading:
         async with self._session_factory() as session:
             yield session
 
-    async def row(self, session: AsyncSession, stage: GateStage, identifier: str) -> Any | None:
-        return await session.get(STAGE_MODELS[stage], identifier)
+    async def row(self, session: AsyncSession, stage_name: str, identifier: str) -> Any | None:
+        """Fetch one evidence row by stage name; an unknown stage is not a row."""
+
+        model = STAGE_MODEL_BY_NAME.get(stage_name)
+        if model is None:
+            return None
+        return await session.get(model, identifier)
 
     async def fence_epochs(self, session: AsyncSession,
                            partition: PartitionKey) -> tuple[int, ...]:
@@ -962,18 +967,19 @@ class SqlGateVerifier:
             return False
         async with self._reads.session() as session:
             rows = {
-                GateStage.M04: await self._reads.row(session, GateStage.M04, m04.evidence_id),
-                GateStage.M04E: await self._reads.row(session, GateStage.M04E, m04e.evidence_id),
-                GateStage.M05: await self._reads.row(session, GateStage.M05, m05.evidence_id),
-                GateStage.M06: await self._reads.row(session, GateStage.M06, evidence.evidence_id or ""),
+                GateStage.M04: await self._reads.row(session, "M04", m04.evidence_id),
+                GateStage.M04E: await self._reads.row(session, "M04E", m04e.evidence_id),
+                GateStage.M05: await self._reads.row(session, "M05", m05.evidence_id),
             }
-            if not rows[GateStage.M06]:
+            m06_row = await self._reads.row(
+                session, "M06", evidence.evidence_id or ""
+            )
+            if m06_row is None:
                 return False
             for stage, lineage in ((GateStage.M04, m04), (GateStage.M04E, m04e),
                                    (GateStage.M05, m05)):
                 if not lineage_row_ok(stage, rows[stage], lineage, partition):
                     return False
-            m06_row = rows[GateStage.M06]
             if not _m06_gate_row_ok(m06_row, evidence, partition):
                 return False
             if not mentions(rows[GateStage.M04E], m04.evidence_id, m04.evidence_digest):
@@ -1041,7 +1047,7 @@ class SqlLegacyOwnerVerifier:
         if not evidence.ready:
             return False
         async with self._reads.session() as session:
-            row = await self._reads.row(session, GateStage.M04, evidence.evidence_id)
+            row = await self._reads.row(session, "M04", evidence.evidence_id)
             if not partition_bound(row, evidence.partition) or not row_is_ready(row):
                 return False
             if bool(getattr(row, "canonical_positive_writes", False)):
@@ -1094,7 +1100,7 @@ class SqlRollbackVerifier:
             return False
         async with self._reads.session() as session:
             row = await self._reads.row(
-                session, GateStage.M04, evidence.legacy_owner_evidence_id
+                session, "M04", evidence.legacy_owner_evidence_id
             )
             if not partition_bound(row, evidence.partition) or not row_is_ready(row):
                 return False
@@ -1152,10 +1158,9 @@ class SqlCanonicalRepairVerifier:
         async with self._reads.session() as session:
             m06_row: Any | None = None
             for reference in evidence.gate_evidence:
-                stage = STAGE_BY_NAME.get(reference.stage)
-                if stage is None:
+                if reference.stage not in STAGE_MODEL_BY_NAME:
                     return False
-                row = await self._reads.row(session, stage, reference.evidence_id)
+                row = await self._reads.row(session, reference.stage, reference.evidence_id)
                 if not partition_bound(row, partition):
                     return False
                 if bool(getattr(row, "canonical_positive_writes", False)):
@@ -1164,9 +1169,11 @@ class SqlCanonicalRepairVerifier:
                     return False
                 if reference.evidence_digest not in recorded_digests(row):
                     return False
-                if stage is GateStage.M06:
+                if reference.stage == "M06":
                     m06_row = row
             if m06_row is None:
+                return False
+            if getattr(m06_row, "source_digest", None) != evidence.source_snapshot_digest:
                 return False
             block = envelope_block(m06_row, CANONICAL_REPAIR_BLOCK)
             if block is None or not _repair_block_matches(block, evidence):
@@ -1246,7 +1253,7 @@ __all__ = [
     "ROLLBACK_BLOCK",
     "SOURCE_DIGEST_COLUMN",
     "STAGE_BY_NAME",
-    "STAGE_MODELS",
+    "STAGE_MODEL_BY_NAME",
     "SqlCanonicalRepairVerifier",
     "SqlCutoverRepository",
     "SqlGateVerifier",

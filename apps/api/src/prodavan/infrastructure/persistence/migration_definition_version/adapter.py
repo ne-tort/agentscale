@@ -218,7 +218,7 @@ class M04EDefinitionVersionPersistenceAdapter:
             query.expected_artifact_digest
         ):
             return self._negative(DefinitionResolutionReason.ARTIFACT_DIGEST_CONFLICT)
-        if not self._table_rls_ready("m04e_dynamic_app_definitions") or not self._table_rls_ready(
+        if not await self._table_rls_ready("m04e_dynamic_app_definitions") or not await self._table_rls_ready(
             "m04e_dynamic_app_versions"
         ):
             self._note(_M04E_RLS_BLOCKER)

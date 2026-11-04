@@ -708,12 +708,18 @@ class ScopeMigrationCoordinator:
         self, *, stream: ScopeStreamIdentity, context: MigrationEvidenceContext
     ) -> ScopeCheckpointResume:
         correlation_id = context.correlation_id or "missing-correlation"
-        if not context.usable or self._port is None:
+        if not context.usable:
             return ScopeCheckpointResume(None, "missing_trusted_transaction_context_or_port", correlation_id)
+        # A caller-supplied stream is compared with the trusted transaction
+        # context before any port is consulted: a foreign tenant or a stale
+        # writer generation is a lineage defect of this call, not a retryable
+        # port outage, and must never be reported as one.
         if stream.tenant_id != context.tenant_id:
             return ScopeCheckpointResume(None, "checkpoint_tenant_mismatch", correlation_id)
-        if context.writer_generation is None or stream.writer_generation != context.writer_generation:
+        if stream.writer_generation != context.writer_generation:
             return ScopeCheckpointResume(None, "writer_generation_mismatch", correlation_id)
+        if self._port is None:
+            return ScopeCheckpointResume(None, "missing_trusted_transaction_context_or_port", correlation_id)
         try:
             stored = await self._port.load_checkpoint(context=context, stream=stream)
         except Exception:

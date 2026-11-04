@@ -144,6 +144,12 @@ class EvidenceDatabase:
         async with self.engine.begin() as connection:
             await connection.execute(table.update().where(predicate).values(**values))
 
+    async def execute(self, statement: str, **params: Any) -> None:
+        """Run one statement against the fixture database (seeding the cutover tail)."""
+
+        async with self.engine.begin() as connection:
+            await connection.execute(sa.text(statement), params)
+
     async def count(self, table_name: str) -> int:
         table = self.tables[table_name]
         async with self.engine.connect() as connection:

@@ -1,7 +1,12 @@
 """MIG-DDL-RES-01 acceptance contract for revision ``2026110306``.
 
-Authored during the verification freeze: **not executed**. Every test below is a
-checkable claim about the revision, not a record of a passed run.
+Authored during the verification freeze and executed afterwards. Every test below
+is a checkable claim about the revision, not a record of a passed run.
+
+The chain assertions are written against the *shape* of the revision graph, not
+against "``2026110306`` is the head": later revisions (``2026110307`` onwards)
+legitimately continue the chain, so "the next revision" is resolved from the
+declared ``revision`` / ``down_revision`` pairs at run time.
 
 Two layers are asserted:
 
@@ -53,7 +58,7 @@ MODELS_INIT = MODELS_DIR / "__init__.py"
 
 REVISION = "2026110306"
 DOWN_REVISION = "2026110305"
-NEXT_REVISION = "2026110307"
+VERSIONS_DIR = API_ROOT / "alembic" / "versions"
 
 EXISTING_TABLES = (
     "resources",
@@ -109,8 +114,55 @@ def _render(function_name: str) -> str:
     return buffer.getvalue()
 
 
+_DOLLAR_QUOTE = re.compile(r"\$[A-Za-z_][A-Za-z0-9_]*\$|\$\$")
+_REVISION_ID = re.compile(r"\d{10}")
+
+
+def _split_sql(sql: str) -> list[str]:
+    """Split rendered SQL on top-level ``;`` only.
+
+    ``COMMENT ON TABLE`` bodies are rendered verbatim, and a table comment may
+    legitimately contain a ``;`` (the audit comment does). Splitting on every
+    ``;`` cuts such a statement in half and silently drops it from every
+    comparison below, so the scanner tracks single-quoted literals (``''`` is an
+    escaped quote) and ``$$``-quoted function bodies instead.
+    """
+    statements: list[str] = []
+    current: list[str] = []
+    index = 0
+    length = len(sql)
+    while index < length:
+        character = sql[index]
+        if character == "'":
+            end = index + 1
+            while end < length:
+                if sql[end] == "'":
+                    if end + 1 < length and sql[end + 1] == "'":
+                        end += 2
+                        continue
+                    end += 1
+                    break
+                end += 1
+            current.append(sql[index:end])
+            index = end
+        elif character == "$" and (tag := _DOLLAR_QUOTE.match(sql, index)):
+            closing = sql.find(tag.group(0), tag.end())
+            end = length if closing == -1 else closing + len(tag.group(0))
+            current.append(sql[index:end])
+            index = end
+        elif character == ";":
+            statements.append("".join(current))
+            current = []
+            index += 1
+        else:
+            current.append(character)
+            index += 1
+    statements.append("".join(current))
+    return statements
+
+
 def _statements(sql: str) -> list[str]:
-    return [" ".join(chunk.split()) for chunk in sql.split(";") if chunk.strip()]
+    return [" ".join(chunk.split()) for chunk in _split_sql(sql) if chunk.strip()]
 
 
 def _create_order(statements: list[str]) -> list[str]:
@@ -242,34 +294,56 @@ def test_revision_identity_and_linear_chain() -> None:
 
 
 def test_revision_is_the_only_declaration_of_this_id_and_parent_exists() -> None:
-    declarations: dict[str, list[Path]] = {}
-    parents: set[str] = set()
-    for path in (API_ROOT / "alembic" / "versions").glob("*.py"):
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        for node in tree.body:
-            if not isinstance(node, ast.Assign):
-                continue
-            names = {target.id for target in node.targets if isinstance(target, ast.Name)}
-            if not isinstance(node.value, ast.Constant) or not isinstance(node.value.value, str):
-                continue
-            if "revision" in names:
-                declarations.setdefault(node.value.value, []).append(path)
-            if "down_revision" in names:
-                parents.add(node.value.value)
+    declarations, parents = _revision_graph()
     # Exactly one file may own a revision id, and this one owns exactly one.
     assert [path.name for path in declarations[REVISION]] == [REVISION_PATH.name]
     assert sum(1 for paths in declarations.values() if REVISION_PATH in paths) == 1
     assert all(len(paths) == 1 for paths in declarations.values())
     assert DOWN_REVISION in declarations
-    # No fork: nothing in the tree claims this revision as its parent yet.
-    assert REVISION not in parents
+    # No fork. The chain may continue *after* this revision — that is not a
+    # defect — but at most one revision may claim it as its parent, and that
+    # successor may not merge a second parent in. Which revision that is comes
+    # from the graph, so appending revisions never invalidates this test.
+    successors = _children_of(REVISION, parents)
+    assert len(successors) <= 1
+    for successor in successors:
+        assert successor in declarations
+        assert parents[successor] == (REVISION,)
 
 
 def test_next_revision_is_not_created_here(upgrade_sql: str) -> None:
-    """RLS/privileges belong to 2026110307; this revision must not pre-empt it."""
-    text = REVISION_PATH.read_text(encoding="utf-8")
-    assert NEXT_REVISION not in text
-    assert "POLICY" not in text.upper()
+    """RLS/privileges belong to the successor revision; this one must not pre-empt it.
+
+    The successor is resolved from the revision graph rather than hardcoded: what
+    is asserted is that ``2026110306`` declares no foreign revision id and
+    renders no policy/grant DDL, whichever revision happens to follow it.
+    """
+    declarations, parents = _revision_graph()
+    successors = _children_of(REVISION, parents)
+    # The next link of the chain is declared elsewhere, never inside this module.
+    assert all(declarations[successor] != [REVISION_PATH] for successor in successors)
+
+    tree = ast.parse(REVISION_PATH.read_text(encoding="utf-8"), filename=str(REVISION_PATH))
+    revision_ids = {
+        node.value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant) and isinstance(node.value, str) and _REVISION_ID.fullmatch(node.value)
+    }
+    # ...and the only revision ids this module *code* names are its own pair;
+    # mentioning a successor in prose (the module docstring does) stays legal.
+    assert revision_ids == {REVISION, DOWN_REVISION}
+
+    normalised = upgrade_sql.upper()
+    for forbidden in (
+        "CREATE POLICY",
+        "DROP POLICY",
+        "ENABLE ROW LEVEL SECURITY",
+        "FORCE ROW LEVEL SECURITY",
+        "GRANT ",
+        "REVOKE ",
+        "ALTER DEFAULT PRIVILEGES",
+    ):
+        assert forbidden not in normalised
 
 
 # --------------------------------------------------------------------------- #

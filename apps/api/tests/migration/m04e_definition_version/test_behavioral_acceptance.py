@@ -227,8 +227,10 @@ async def test_missing_artifact_and_archived_lifecycle_fail_closed_at_exact_reso
         app_id="demo-app", manifest_version=MANIFEST_VERSION,
     )
     resolved = resolved_pair()
-    revoked_version = replace(
-        resolved.version, status=AppLifecycleStatus.REVOKED, published_at=None,
+    # ``AppVersion`` is a frozen pydantic contract, so the lifecycle variant is
+    # derived with ``model_copy``; ``dataclasses.replace`` only works on dataclasses.
+    revoked_version = resolved.version.model_copy(
+        update={"status": AppLifecycleStatus.REVOKED, "published_at": None},
     )
     archived_pair = replace(resolved, version=revoked_version)
     archived, archived_source, archived_evidence = _resolver(result=archived_pair)
