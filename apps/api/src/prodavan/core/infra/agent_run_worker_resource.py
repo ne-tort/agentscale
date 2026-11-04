@@ -358,6 +358,14 @@ class AgentRunHostDependencies:
     runner: Any | None = None
 
     @property
+    def any_wired(self) -> bool:
+        """``False`` for the fail-closed default bundle (an entirely empty one)."""
+        return any(
+            member is not None
+            for member in (self.execution_port, self.runs, self.journal, self.runner)
+        )
+
+    @property
     def consumer_blockers(self) -> tuple[str, ...]:
         """The consumer needs an execution handler registry, i.e. the port."""
         if self.execution_port is None:
@@ -830,7 +838,10 @@ class AgentRunWorkerResource(LifespanResource):
 
     def _blockers_for(self, loop: _LoopState) -> tuple[str, ...]:
         deps = self._deps
-        if deps is None:
+        if deps is None or not deps.any_wired:
+            # Either the provider raised, or it returned the fail-closed default:
+            # nothing is assembled, so the reason is the same and it is the same
+            # for both loops.
             return (BLOCKER_DEPENDENCIES_UNWIRED,)
         if loop.name == LOOP_CONSUMER:
             return deps.consumer_blockers
