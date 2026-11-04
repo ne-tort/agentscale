@@ -1338,7 +1338,9 @@ describe("employee workspace integration acceptance", () => {
     await act(async () => {
       releaseEntries(jsonResponse({ code: "POD_NOT_RUNNING", title: "Conflict", detail: "pod is not running" }, 409));
     });
-    await waitFor(() => pageText().includes("The Pod is not running. Start the project Pod to access its files."));
+    // The panel reports the availability itself; the copy lives in the Files feature,
+    // not in this test, so assert the contract sentence it actually renders.
+    await waitFor(() => pageText().includes("This project Pod is not running or ready."));
 
     expect(document.querySelector(".files-availability[role='status']")).toBeTruthy();
     expect(document.querySelector(".files-availability")?.textContent).toContain("Retry");
