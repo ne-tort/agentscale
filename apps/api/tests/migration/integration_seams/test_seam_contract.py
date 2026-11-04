@@ -26,6 +26,28 @@ Deliberately out of scope of the last check: blocker constants of ``application/
 ``core/infra/**`` and ``api/**``. They belong to the agent-run host wiring (review §8.1) and are
 churning; the review records their verdicts, and :func:`test_classified_blockers_still_exist`
 still fails if one of the recorded codes disappears.
+
+Registry maintenance rule
+-------------------------
+``SEAM_PORTS`` records *facts about this tree*, so an entry must match the source, in both
+directions:
+
+* a port with no implementing class is a ``reviewed_gap`` (the review §3 gaps G1-G7 as first
+  written), and the gap text must name the reason;
+* a port whose implementation has landed names that ``(module, symbol)`` -- **anchored at the
+  module that declares the class**, not at a module that merely imports it. Anchoring at the
+  importer is how this registry previously pointed ``FailClosedResolvePluginInstance`` at
+  ``instance_persistence.py`` (it is declared in ``runtime_service.py``), which made the
+  implementation check look for a class that module does not define;
+* an implementation nothing constructs outside its own module needs a ``REVIEWED_ORPHANS``
+  note saying whether that is a reviewed boundary or a forgotten wiring.
+
+As of this revision no seam port is a ``reviewed_gap``: G1-G4 closed in
+``application/migration/evidence_ports.py``, G6 in ``application/migration/m04e_ports.py`` and
+G5 in ``application/migration/m06_cutover/ports.py``. The ``reviewed_gap`` branch stays in the
+test for the next port that arrives without an implementation; every remaining implementation
+is a module-local orphan with a recorded reason. ``docs/08-migration/integration-seams-review.md``
+§3 still describes the gaps as open and needs the same update from its owner.
 """
 
 from __future__ import annotations
@@ -173,14 +195,16 @@ SEAM_PORTS: tuple[SeamPort, ...] = (
     SeamPort(
         name="UpstreamGatePort",
         declared_in="application/migration/m04e_definition_version/backfill.py",
-        implementations=(),
-        reviewed_gap="G6: trusted partition gate re-proof is absent",
+        implementations=(
+            ("application/migration/m04e_ports.py", "SqlM04EUpstreamGate"),
+        ),
     ),
     SeamPort(
         name="CandidateProofPort",
         declared_in="application/migration/m04e_definition_version/backfill.py",
-        implementations=(),
-        reviewed_gap="G6: per-candidate owner/scope/artifact re-proof is absent",
+        implementations=(
+            ("application/migration/m04e_ports.py", "SqlM04ECandidateProof"),
+        ),
     ),
     SeamPort(
         name="CutoverRepository",
@@ -343,6 +367,12 @@ REVIEWED_ORPHANS: dict[str, str] = {
     "SqlRollbackVerifier": "G5 closed: built only by build_cutover_ports in the same module",
     "SqlCanonicalRepairVerifier":
         "G5 closed: built only by build_cutover_ports in the same module",
+    # G6: implemented in ``m04e_ports.py``, which builds them in ``build_m04e_sql_ports``;
+    # no composition root calls that factory, so they stay module-local orphans.
+    "SqlM04EUpstreamGate":
+        "G6 closed: built only by build_m04e_sql_ports in the same module",
+    "SqlM04ECandidateProof":
+        "G6 closed: built only by build_m04e_sql_ports in the same module",
 }
 
 
