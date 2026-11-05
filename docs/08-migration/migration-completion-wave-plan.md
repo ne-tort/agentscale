@@ -137,6 +137,34 @@ live, fully migrated database, so it is kept as a record rather than a backlog.
 | PostgreSQL concurrency suite | **Executed.** `tests/migration/postgres_integration` runs 37 passed / 2 skipped against live PostgreSQL: `SKIP LOCKED`, aggregate CAS, transaction abort and the deferrable cycle. |
 | Equipment tenant anchors | **Done.** `2026110319` adds `project_id`/`cabinet_id` to the three `equipment_v2` operational tables plus the two association tables, re-applies the RLS registry and verifies it in the same transaction; the downgrade restores the pre-anchor predicate instead of leaving the tables unpolicied. |
 
+## How an operator runs this
+
+The chain is reachable from a delivered process (`MigrationChainResource`, behind
+`MIGRATION_CHAIN_ENABLED`) and, since the operator CLI landed, from a command:
+
+```text
+python -m prodavan.migration_cli partitions
+python -m prodavan.migration_cli plan  --tenant <id> --definition <id> [--stage <name>|all]
+python -m prodavan.migration_cli run   --tenant <id> --definition <id> --stage <name> --execute
+python -m prodavan.migration_cli cutover-status --tenant <id> --definition <id>
+```
+
+Four properties, each pinned by a test:
+
+- **Dry run is the default.** `run` without `--execute` produces a plan and writes
+  nothing; forgetting the flag cannot silently migrate.
+- **Refusal is first-class.** Exit 0 means the command completed, not that the migration
+  succeeded. A correctly refused cutover is a successful command; `--strict` is what CI
+  uses to make a refusal fail.
+- **Output is codes, never payloads.** A blocker prints its code and reason — never a
+  DSN, a manifest or tenant data.
+- **`all` is plan-only for `--execute`.** Several dependent stages run for real in one
+  command would make a partial failure indistinguishable from a refusal.
+
+`partitions` also reports the legacy source honestly: `dynamic_app_definitions` predates
+the migration and no revision creates it, so on a revision-only database it is absent and
+the command says so rather than reporting "0 partitions" as though it had looked.
+
 ## Verification baseline (measured, not asserted)
 
 On a database created empty and migrated with `alembic upgrade head` to `2026110319`:
@@ -144,12 +172,17 @@ On a database created empty and migrated with `alembic upgrade head` to `2026110
 | Suite | Result |
 |---|---|
 | `tests/migration tests/unit` | 6187 passed, 0 failed |
+| `tests` (all, live PostgreSQL, excluding `tests/e2e`) | 6519 passed, 34 skipped |
 | `tests/integration` | 191 passed, 1 skipped |
 | `tests/migration/rls` | 510 passed |
 | `tests/migration/postgres_integration` | 37 passed, 2 skipped |
 | `apps/web` vitest | 596 passed, 82 files |
 | `apps/web` tsc / vite build | 0 errors / builds |
 | Playwright smoke | 21 passed, 7 skipped (live layer needs credentials) |
+
+The one full-suite failure class seen in this session — two `principal_resolver` tests
+that expired only in runs longer than twenty minutes — is fixed and proved by simulating
+the drift rather than by re-running and hoping.
 
 ## Still not done, and why it needs a human decision
 
@@ -159,6 +192,9 @@ On a database created empty and migrated with `alembic upgrade head` to `2026110
   works; they do not authorise running it against real tenant data.
 - **Which database** the first rehearsal targets is an operator decision, not an
   engineering one.
+- **`tests/e2e/live`** needs a healthy deployed contour: it points at `127.0.0.1:8088`,
+  which answers `/health/live` but returns 503 from `/health/ready`, so those tests fail
+  on the environment rather than on the code.
 
 ## Boundary decisions recorded in this session
 
