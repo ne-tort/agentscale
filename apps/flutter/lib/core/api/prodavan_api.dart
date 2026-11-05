@@ -5,6 +5,17 @@ import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 import 'package:prodavan/core/auth/auth_http.dart';
 
+/// Case-insensitive header lookup: real clients lowercase header names, but
+/// `http.Response` keeps whatever casing the caller supplied (tests, mocks).
+String? _header(Map<String, String> headers, String name) {
+  final direct = headers[name];
+  if (direct != null) return direct;
+  for (final entry in headers.entries) {
+    if (entry.key.toLowerCase() == name) return entry.value;
+  }
+  return null;
+}
+
 /// Minimal Prodavan API client (L05) — Bearer + work context headers.
 class WorkspaceFileDownload {
   const WorkspaceFileDownload({
@@ -20,13 +31,13 @@ class WorkspaceFileDownload {
   final String? filename;
 
   factory WorkspaceFileDownload.fromResponse(http.Response response, {required String requestedPath}) {
-    final normalizedPath = response.headers['x-workspace-path'] ?? requestedPath;
-    final size = int.tryParse(response.headers['x-workspace-size'] ?? '') ?? response.bodyBytes.length;
+    final normalizedPath = _header(response.headers, 'x-workspace-path') ?? requestedPath;
+    final size = int.tryParse(_header(response.headers, 'x-workspace-size') ?? '') ?? response.bodyBytes.length;
     return WorkspaceFileDownload(
       bytes: response.bodyBytes,
       normalizedPath: normalizedPath,
       size: size,
-      filename: filenameFromContentDisposition(response.headers['content-disposition']),
+      filename: filenameFromContentDisposition(_header(response.headers, 'content-disposition')),
     );
   }
 
@@ -1159,10 +1170,10 @@ class ProdavanApi {
       _throwIfError(res);
       return WorkspaceFileDownload(
         bytes: res.bodyBytes,
-        normalizedPath: res.headers['x-workspace-path'],
-        size: int.tryParse(res.headers['x-workspace-size'] ?? ''),
+        normalizedPath: _header(res.headers, 'x-workspace-path'),
+        size: int.tryParse(_header(res.headers, 'x-workspace-size') ?? ''),
         filename: WorkspaceFileDownload.filenameFromContentDisposition(
-          res.headers['content-disposition'],
+          _header(res.headers, 'content-disposition'),
         ),
       );
     } finally {

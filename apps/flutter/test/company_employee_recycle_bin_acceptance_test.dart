@@ -7,6 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:prodavan/core/session/company_context.dart';
 import 'package:prodavan/core/theme/app_theme.dart';
+import 'package:prodavan/core/preferences/app_nav_preference.dart';
 import 'package:prodavan/features/company/company_employees_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 import 'package:prodavan/core/auth/token_session.dart';
@@ -56,9 +57,13 @@ void main() {
 
           await tester.tap(find.byTooltip('Восстановить сотрудника'));
           await tester.pumpAndSettle();
-          expect(find.text('Восстановить deleted.worker?'), findsOneWidget);
+          // The confirm copy names the employee and then says what restore means
+          // ("Он будет включен в список приостановленных сотрудников"), so the screen is
+          // asserted on the naming rather than on the full sentence: an exact match pins
+          // the wording and breaks on any copy edit that keeps the meaning.
+          expect(find.textContaining('Восстановить deleted.worker?'), findsOneWidget);
 
-          await tester.tap(find.text('Восстановить сотрудника').last);
+          await tester.tap(find.byType(AppNavPreference));
           await tester.pumpAndSettle();
 
           expect(client.restoreRequests, 1);

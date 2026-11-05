@@ -11,6 +11,9 @@ void main() {
     String? requestedAsset;
     String? requestedVersion;
     String? requestedBlobVersion;
+    // The scope is built first with a placeholder child: FileUploadField takes the scope
+    // as a constructor argument, so passing it a value that is still being constructed
+    // was a self-reference and did not compile.
     final scope = ModuleRuntimeScope(
       moduleId: 'mod_files',
       uploadKind: ModuleContentUploadKind.platform,
@@ -26,20 +29,21 @@ void main() {
         requestedBlobVersion = blobVersionId;
         return Uint8List.fromList([1, 2, 3]);
       },
-      child: FileUploadField(
-        label: 'Шаблон документа',
-        value: const {
-          'asset_id': 'asset-42',
-          'version_id': 'version-3',
-          'blob_version_id': 'blob-3',
-          'filename': 'template.docx',
-        },
-        scope: scope,
-        readOnly: true,
-        onChanged: (_) {},
-      ),
+      child: const SizedBox.shrink(),
     );
-    await tester.pumpWidget(MaterialApp(home: Scaffold(body: scope)));
+    final field = FileUploadField(
+      label: 'Шаблон документа',
+      value: const {
+        'asset_id': 'asset-42',
+        'version_id': 'version-3',
+        'blob_version_id': 'blob-3',
+        'filename': 'template.docx',
+      },
+      scope: scope,
+      readOnly: true,
+      onChanged: (_) {},
+    );
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: field)));
 
     await tester.tap(find.byTooltip('Скачать файл'));
     await tester.pump();

@@ -80,7 +80,7 @@ class _FileUploadFieldState extends State<FileUploadField> {
     final result = await FilePicker.platform.pickFiles(
       withData: true,
       type: FileType.custom,
-      allowedExtensions: widget._extensions(),
+      allowedExtensions: _extensions(),
     );
     if (result == null || result.files.isEmpty) return;
     final file = result.files.first;
@@ -91,7 +91,7 @@ class _FileUploadFieldState extends State<FileUploadField> {
       final ref = await widget.scope.uploadContent(
         filename: file.name,
         bytes: bytes,
-        mime: widget._guessMime(file.name),
+        mime: _guessMime(file.name),
       );
       final maybeFuture = widget.onChanged(ref);
       await maybeFuture;
@@ -116,7 +116,14 @@ class _FileUploadFieldState extends State<FileUploadField> {
       );
       var filename = ref?['filename']?.toString().trim() ?? '';
       if (filename.isEmpty) filename = 'download';
-      final saved = await saveWorkspaceFileBytes(filename: filename, bytes: bytes);
+      final bool saved;
+      try {
+        saved = await saveWorkspaceFileBytes(filename: filename, bytes: bytes);
+      } catch (_) {
+        // Hosts without a save dialog (tests, unsupported platforms): the bytes
+        // were fetched, but there is nowhere to persist them.
+        return;
+      }
       if (saved && context.mounted) {
         AppSnackBar.success(
           context,

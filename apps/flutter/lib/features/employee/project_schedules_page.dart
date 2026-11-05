@@ -93,7 +93,8 @@ class _ProjectSchedulesPageState extends State<ProjectSchedulesPage> {
       );
       if (!mounted) return;
       // The PATCH response is authoritative: it includes next_run_at, which
-      // changes when the server accepts an enable/disable transition.
+      // changes when the server accepts an enable/disable transition. Re-read
+      // the list afterwards so the row matches the server's stored schedule.
       setState(() {
         final index = _items.indexWhere((entry) => entry['id'] == scheduleId);
         if (index >= 0) {
@@ -102,6 +103,7 @@ class _ProjectSchedulesPageState extends State<ProjectSchedulesPage> {
           _items = nextItems;
         }
       });
+      await _load();
     } catch (e) {
       if (mounted) AppErrors.showSnack(context, e);
     } finally {
@@ -218,13 +220,15 @@ class _ProjectSchedulesPageState extends State<ProjectSchedulesPage> {
                           trailing: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              Switch(
-                                value: enabled,
-                                onChanged: _togglingIds.contains(item['id'])
-                                    ? null
-                                    : (value) => _toggle(item, value),
-                                semanticLabel: l10n.scheduleEnabledFor(
+                              Semantics(
+                                label: l10n.scheduleEnabledFor(
                                   item['name'] as String? ?? '',
+                                ),
+                                child: Switch(
+                                  value: enabled,
+                                  onChanged: _togglingIds.contains(item['id'])
+                                      ? null
+                                      : (value) => _toggle(item, value),
                                 ),
                               ),
                               PopupMenuButton<String>(

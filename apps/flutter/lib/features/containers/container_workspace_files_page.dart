@@ -150,21 +150,22 @@ class _ContainerWorkspaceFilesPageState extends State<ContainerWorkspaceFilesPag
     final path = _path.isEmpty ? file.name : '$_path/${file.name}';
     setState(() => _uploading = true);
     try {
-      final uploadApi = widget.api;
-      if (uploadApi is! WorkspaceFileUploadApi) {
+      final api = widget.api;
+      if (api is! WorkspaceFileUploadApi) {
         throw StateError('Workspace upload is only available for employee projects');
       }
+      final uploadApi = api as WorkspaceFileUploadApi;
       final result = await uploadApi.uploadWorkspaceFile(path: path, bytes: bytes);
       if (!mounted) return;
       final normalizedPath = result['path'];
-       if (normalizedPath is String && normalizedPath.isNotEmpty) {
-         final separator = normalizedPath.lastIndexOf('/');
-         final normalizedDirectory = separator < 0 ? '' : normalizedPath.substring(0, separator);
-         if (normalizedDirectory != _path) {
-           setState(() => _path = normalizedDirectory);
-         }
-       }
-       AppSnackBar.success(context, AppLocalizations.of(context).commonSave);
+      if (normalizedPath is String && normalizedPath.isNotEmpty) {
+        final separator = normalizedPath.lastIndexOf('/');
+        final normalizedDirectory = separator < 0 ? '' : normalizedPath.substring(0, separator);
+        if (normalizedDirectory != _path) {
+          setState(() => _path = normalizedDirectory);
+        }
+      }
+      AppSnackBar.success(context, AppLocalizations.of(context).commonSave);
       await _load();
     } catch (e) {
       if (mounted) AppErrors.showSnack(context, e);

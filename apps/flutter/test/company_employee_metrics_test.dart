@@ -10,6 +10,7 @@ import 'package:prodavan/core/auth/token_session.dart';
 import 'package:prodavan/core/session/company_context.dart';
 import 'package:prodavan/core/theme/app_theme.dart';
 import 'package:prodavan/features/company/company_employee_detail_page.dart';
+import 'package:prodavan/core/preferences/app_nav_preference.dart';
 import 'package:prodavan/features/company/company_employees_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -117,16 +118,46 @@ void main() {
         await tester.tap(find.text('Корзина'));
         await tester.pumpAndSettle();
         expect(find.text('deleted-worker'), findsOneWidget);
+        // The default 800x600 surface renders the shared collection in *table* mode, where
+        // row actions are revealed by long-press rather than pinned to every row (see
+        // AppEntityCollection.showActionsCol). The assertion is therefore on the documented
+        // interaction, not on an always-visible icon that the widget never promised.
+        await tester.longPress(find.text('deleted-worker'));
+        await tester.pumpAndSettle();
         expect(find.byTooltip('Восстановить сотрудника'), findsOneWidget);
 
-        await tester.tap(find.byTooltip('Восстановить сотрудника').first);
+        // The tooltip wraps the IconButton, so tapping the tooltip's own box lands on the
+        // Tooltip widget rather than the button inside it and the action never fires.
+        // Tapping the button is what a user's finger does.
+        final btn = find.widgetWithIcon(IconButton, Icons.restore_outlined);
+        // ignore: avoid_print
+        print('BTN_RECT ' + tester.getRect(btn).toString() + ' SURFACE ' + tester.view.physicalSize.toString());
+        await tester.ensureVisible(btn);
         await tester.pumpAndSettle();
-        expect(find.text('Восстановить сотрудника'), findsOneWidget);
-        await tester.tap(find.text('Восстановить сотрудника').last);
+        // ignore: avoid_print
+        print('AFTER_ENSURE ' + tester.getRect(btn).toString());
+        await tester.tap(btn, warnIfMissed: false);
+        await tester.pumpAndSettle();
+        // The confirm screen names the employee it will restore. The copy also states what
+        // restore means ("... Он будет включен в список приостановленных сотрудников"), so the
+        // assertion is on the naming rather than on the full sentence -- an exact match
+        // would pin the wording and fail on any copy edit that keeps the meaning.
+        expect(find.textContaining('Восстановить deleted-worker?'), findsOneWidget);
+        // The confirm action is a tile, not a button: `AppNavPreference` renders the
+        // label as plain text and the row is what carries `onTap`. Tapping the text by
+        // label hits the AppBar title instead and the dialog stays open -- which is what
+        // an exact-text tap did here.
+        await tester.tap(find.byType(AppNavPreference));
         await tester.pumpAndSettle();
 
-        expect(find.text('deleted-worker'), findsNothing);
-        expect(find.text('Корзина пуста'), findsOneWidget);
+        // ignore: avoid_print
+        expect(
+          find.text('deleted-worker'),
+          findsNothing,
+          reason: 'page after restore: '
+              '${find.byType(Text).evaluate().map((e) => (e.widget as Text).data ?? '').where((t) => t.isNotEmpty).join(' | ')}',
+        );
+        expect(find.text('Корзина пуста'), findsOneWidget, reason: 'page after restore: ' + find.byType(Text).evaluate().map((e) => (e.widget as Text).data ?? '').where((t) => t.isNotEmpty).join(' | '));
         await tester.pumpWidget(const SizedBox.shrink());
       },
       () => _RecordingClient((request) {

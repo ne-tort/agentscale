@@ -33,12 +33,16 @@ class ServerSearchContext extends StatelessWidget {
             if (query.isNotEmpty)
               InputChip(
                 label: Text(query, overflow: TextOverflow.ellipsis),
+                // Explicit: the M3 default delete glyph changed across Flutter
+                // releases (clear vs cancel), so pin the affordance here.
+                deleteIcon: const Icon(Icons.cancel),
                 onDeleted: onClearQuery,
               ),
             if (inStockOnly)
               InputChip(
                 avatar: const Icon(Icons.inventory, size: 18),
                 label: const Text('Только в наличии'),
+                deleteIcon: const Icon(Icons.cancel),
                 onDeleted: onShowAllStock,
               ),
           ],

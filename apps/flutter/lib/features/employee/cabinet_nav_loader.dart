@@ -217,8 +217,8 @@ Future<
       rail: _finalizeCabinetNavEntries(
         _filterPlacement(cabinetRaw, CabinetNavPlacement.rail),
       ),
-      management: const [],
-      data: const [],
+      management: const <CabinetNavEntry>[],
+      data: const <CabinetNavEntry>[],
     );
   }
 
