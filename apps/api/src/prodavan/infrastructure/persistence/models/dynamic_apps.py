@@ -31,6 +31,18 @@ class AppDefinitionRow(Base):
             ["dynamic_app_versions.id", "dynamic_app_versions.app_definition_id"],
             name="fk_dynamic_app_definition_current_version",
             ondelete="RESTRICT",
+            # Definitions and versions reference each other, so revision ``2026110320``
+            # cannot emit this constraint inside ``create_table``: it creates the pair
+            # first and adds this one afterwards with ``use_alter``.
+            use_alter=True,
+            # Deferred on purpose: a definition and its first version are inserted in one
+            # transaction, so the definition's ``current_version_id`` is briefly a row
+            # that does not exist yet. These two flags must match what the revision
+            # writes -- without them ``alembic check`` reports the constraint as
+            # removed-and-re-added on every run and the deployment's drift gate fails on
+            # a database that is actually correct.
+            deferrable=True,
+            initially="DEFERRED",
         ),
         CheckConstraint(f"status IN {_LIFECYCLE_CHECK}", name="ck_dynamic_app_definition_status"),
         CheckConstraint("status <> 'published' OR current_version_id IS NOT NULL", name="ck_dynamic_app_definition_published_version"),
