@@ -29,6 +29,13 @@ from tests.migration.principal_resolver.db_fixtures import (
 SECRET = "test-only-secret-long-enough-for-hs256"
 
 #: JWT ``exp`` is a NumericDate (epoch seconds), never a datetime.
+#:
+#: These are *not* used by :func:`source`.  A constant bound at import drifts: the
+#: verifier's clock is read when the fixture is used, so in a long combined run (the suite
+#: takes well over half an hour) an ``exp`` computed at collection time is already in the
+#: past and the source correctly answers ``None``.  The two tests that used it then failed
+#: only in long runs, which is the worst kind of red.  :func:`source` derives its default
+#: ``exp`` from the same anchor it freezes, so the two always agree.
 EXP_IN_15_MIN = int((clock_now() + timedelta(minutes=15)).timestamp())
 EXP_NOW = int(clock_now().timestamp())
 
@@ -50,11 +57,23 @@ def verifier_returning(claims: dict[str, object]):
 
 
 def source(*, token: str | None = None, claims: dict[str, object] | None = None, clock=None):
+    """A source whose token, verifier claims and clock all agree on one instant.
+
+    The default ``exp`` is derived from the same anchor the clock is frozen at, so the
+    credential is valid *relative to that clock* no matter how long the process has been
+    running.  Binding ``exp`` at import instead is what made two tests red only in the
+    long combined run.
+    """
+
+    anchor_clock = clock or frozen_clock()
+    anchor = anchor_clock()
+    default_exp = int((anchor + timedelta(minutes=15)).timestamp())
+
     return BearerJwtCredentialSource(
         correlation_id=CORRELATION,
-        token=token if token is not None else token_for(),
+        token=token if token is not None else token_for(exp=default_exp),
         verifier=verifier_returning(
-            claims if claims is not None else {"sub": SUBJECT_A, "exp": EXP_IN_15_MIN}
+            claims if claims is not None else {"sub": SUBJECT_A, "exp": default_exp}
         ),
         clock=clock or frozen_clock(),
     )
