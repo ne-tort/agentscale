@@ -12,12 +12,19 @@ export default defineConfig({
   test: {
     include: ["src/**/*.{test,spec}.{ts,tsx}"],
     exclude: ["node_modules/**", "dist/**", "e2e/**", "test-results/**"],
-    // One self-hosted VM runs this suite next to the API suite (Postgres plus
-    // ~2000 tests) and the Flutter analyzer, so a component test that waits for
-    // a committed render can spend seconds queued for a core. The default 5s
-    // expired there and failed the gate with no assertion behind it; the poll
-    // budget the component tests use is `POLL_BUDGET_MS` in
-    // `src/test-support/poll-budget.ts`.
+    // The gate runs this suite on one self-hosted VM alongside the API suite (a
+    // Postgres fixture plus ~2000 tests) and the Flutter analyzer. Vitest's default
+    // here is one fork per CPU, so five concurrent jobs turned into ~35 jsdom
+    // workers on eight cores: every worker got a fraction of a core and the
+    // latency-sensitive component tests timed out with nothing failing inside them.
+    // Two forks cost wall clock (the suite is CPU-bound either way) and buy back
+    // per-test latency, which is what the polling tests actually depend on.
+    pool: "forks",
+    poolOptions: { forks: { minForks: 1, maxForks: 2 } },
+    // A component test that waits for a committed render can still queue behind a
+    // resize of the fork's heap; the default 5s expired there and failed the gate
+    // with no assertion behind it. The poll budget the component tests use is
+    // `POLL_BUDGET_MS` in `src/test-support/poll-budget.ts`.
     testTimeout: 30_000,
     hookTimeout: 30_000,
   },
