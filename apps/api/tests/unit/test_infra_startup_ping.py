@@ -166,12 +166,16 @@ async def test_redis_survives_transient_ping_failure() -> None:
     client = AsyncMock()
     client.ping = AsyncMock(side_effect=[ConnectionError("reset"), True])
     client.aclose = AsyncMock(return_value=None)
-    fake_redis = AsyncMock()
-    fake_redis.from_url = lambda *a, **k: client
 
     mgr = RedisManager("redis://r:6379/0", required=True, ping_attempts=3, ping_delay_sec=0)
 
-    with patch.dict("sys.modules", {"redis.asyncio": fake_redis}):
+    # Patch the factory, not the module. Swapping ``sys.modules["redis.asyncio"]``
+    # for a mock makes the *package* unreachable: redis 8 imports
+    # ``redis.asyncio.observability.recorder`` from ``redis.commands.core`` at import
+    # time, so the next real import fails with "``redis.asyncio`` is not a package".
+    # The seam under test is the client factory the manager calls, and that is an
+    # attribute of the real module.
+    with patch("redis.asyncio.from_url", lambda *a, **k: client):
         await mgr.startup()
 
     assert client.ping.await_count == 2
