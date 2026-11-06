@@ -20,7 +20,13 @@ Terraform генерирует на VM локальный CA (`/var/lib/rancher/
 `/home/www/agentscale-dev-ca.crt`. Чтобы браузер доверял:
 
 ```powershell
-# Windows (admin): импорт CA в доверенные корневые
+# Windows (admin): заменить старый CA, если он остался от прошлой установки.
+# CA пересоздаётся при каждой чистой установке (каталог /var/lib/rancher/k3s
+# стирается), поэтому в хранилище может лежать «Agentscale Dev CA» с прежним
+# ключом — он не проверяет новые листья и только путает диагностику.
+Get-ChildItem Cert:\LocalMachine\Root | Where-Object { $_.Subject -match 'Agentscale' } |
+  Remove-Item -Force
+
 scp www@172.31.156.203:agentscale-dev-ca.crt $env:TEMP\agentscale-dev-ca.crt
 certutil -addstore -f ROOT $env:TEMP\agentscale-dev-ca.crt
 # опционально: hosts-запись + portproxy для красивого имени
@@ -31,6 +37,18 @@ netsh interface portproxy add v4tov4 listenaddress=127.0.0.1 listenport=443 conn
 После этого работают без предупреждений: `https://172.31.156.203/`, `https://localhost/`,
 `https://agentscale.dev/`. SANs задаёт переменная `https_tls_sans` (смена SAN = `terraform apply`,
 leaf пересоздаётся, CA остаётся — переимпорт в браузер не нужен).
+
+> **Почему «принять риск и продолжить» не помогает.** `.dev` — HSTS-preloaded TLD
+> целиком, поэтому браузер не показывает кнопку перехода на невалидном
+> сертификате: путь только один — валидная цепочка. А Windows (SChannel)
+> отвергает CA **без расширения `keyUsage`** с ошибкой
+> `CA cert does not include key usage extension` (код 92), даже если CA
+> импортирован в Trusted Root. Шаблон `agentscale-tls.sh.tpl` теперь выдаёт
+> `keyUsage = critical, keyCertSign, cRLSign` и `basicConstraints =
+> critical, CA:TRUE, pathlen:0`; для leaf — `keyUsage` + `extendedKeyUsage =
+> serverAuth`. Проверить на Windows, что цепочка реально собирается, можно
+> `python -c "import ssl,socket; ..."` или просто открыв сайт — но не по факту
+> «CA импортирован», а по факту успешного рукопожатия.
 
 ## Bootstrap (однократно)
 
