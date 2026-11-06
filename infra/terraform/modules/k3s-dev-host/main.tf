@@ -526,8 +526,8 @@ resource "null_resource" "host_dns" {
     servers    = var.host_dns_servers
     over_tls   = var.host_dns_over_tls
     stub_extra = var.host_dns_stub_listener_extra
-    # Содержимое шаблона — часть контракта: правка tpl обязана пересоздать
-    # ресурс (иначе уже применённый drop-in молча останется старым).
+    # Содержимое шаблона — часть контракта: правка tpl обязана пересоздать ресурс
+    # (иначе уже применённый drop-in молча останется старым).
     tpl_sha      = filesha256("${path.module}/templates/host-dns.conf.tpl")
     ssh_host     = var.ssh_host
     ssh_port     = tostring(var.ssh_port)
@@ -585,8 +585,11 @@ resource "null_resource" "host_dns" {
   }
 
   provisioner "remote-exec" {
-    when       = destroy
-    on_failure = continue
+    when = destroy
+    # Явно fail (а не дефолт и НЕ `continue`): упавший destroy не должен
+    # рапортовать успех. Код внутри идемпотентен и не падает на уже
+    # удалённом drop-in, так что повтор destroy безопасен.
+    on_failure = fail
     connection {
       type        = "ssh"
       host        = try(self.triggers.ssh_host, "127.0.0.1")

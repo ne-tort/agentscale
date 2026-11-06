@@ -136,6 +136,18 @@ LEGACY_VERSION_TABLE: Final = "dynamic_app_versions"
 TARGET_DEFINITION_TABLE: Final = "m04e_dynamic_app_definitions"
 TARGET_VERSION_TABLE: Final = "m04e_dynamic_app_versions"
 PROMOTION_EVIDENCE_TABLE: Final = "m04e_definition_version_promotion_evidence"
+
+#: The envelope schema of a backfill page record. Only rows in this table's
+#: envelope carries it, and the promotion gate reads *this* kind, not any row:
+#: ``evidence_ports`` writes M05 handoff markers and M05 promotion records into
+#: the same table, and both are stamped ``outcome='blocked'`` by construction.
+#: Without the filter, the first handoff marker appended after a positive
+#: promotion makes ``ORDER BY recorded_at DESC LIMIT 1`` return a ``blocked``
+#: row and the gate refuses forever -- after the promotion it was gating has
+#: already succeeded. Declared here rather than imported from ``evidence_ports``
+#: because that module imports this one.
+PROMOTION_BACKFILL_SCHEMA: Final = "m04e-backfill-page.v1"
+
 COMPANY_TABLE: Final = "companies"
 TENANT_ANCHOR_TABLE: Final = "scope_owner_tenant_anchors"
 CABINET_ANCHOR_TABLE: Final = "scope_owner_cabinet_anchors"
@@ -988,6 +1000,9 @@ _SELECT_PROMOTION_EVIDENCE_SQL = text(
     "previous_revision_id, recorded_at "
     f"FROM {PROMOTION_EVIDENCE_TABLE} "
     "WHERE tenant_id = :tenant_id AND definition_id = :definition_id "
+    # This table holds three kinds of envelope (see PROMOTION_BACKFILL_SCHEMA).
+    # The gate is about one of them; the other two are stamped ``blocked``.
+    "AND gate_evidence ->> 'schema' = :backfill_schema "
     "ORDER BY recorded_at DESC, revision_id DESC LIMIT 1"
 )
 
@@ -1384,7 +1399,11 @@ async def read_promotion_evidence(
 
     rows = _rows(await session.execute(
         _SELECT_PROMOTION_EVIDENCE_SQL,
-        {"tenant_id": context.tenant_id, "definition_id": context.app_definition_id},
+        {
+            "tenant_id": context.tenant_id,
+            "definition_id": context.app_definition_id,
+            "backfill_schema": PROMOTION_BACKFILL_SCHEMA,
+        },
     ))
     if not rows:
         return _refusal(
@@ -2560,6 +2579,7 @@ class SqlM04EEvidenceStore(_SessionReads):
                 {
                     "tenant_id": context.tenant_id,
                     "definition_id": context.app_definition_id,
+                    "backfill_schema": PROMOTION_BACKFILL_SCHEMA,
                 },
             ))
         if not rows:
@@ -2701,18 +2721,55 @@ class SqlM04EEvidenceStore(_SessionReads):
         async with self._page(context) as session:
             stored = await self._checkpoint_row(session, context, phase=checkpoint.phase)
             sequence = int(stored["sequence"]) if stored is not None else checkpoint.sequence
+            # A blocked page appends one audit event whose ``event_id`` is a
+            # digest of the context and the cursor, and ``uq_m04e_audit_event``
+            # is unique on that column. Retrying the same blocked page --
+            # exactly what an operator does when the upstream gate is still
+            # closed -- therefore re-inserts the same id. Without the read
+            # below the retry surfaces as a raw ``IntegrityError`` from inside
+            # the page (a constraint name, not an answer) and the partition
+            # stage reports a failure for a page that is in fact already
+            # recorded. The event *is* the evidence, so an existing one is a
+            # replay: report it and append nothing.
+            event_id = _digest({
+                "tenant_id": context.tenant_id,
+                "app_definition_id": context.app_definition_id,
+                "correlation_id": context.correlation_id,
+                "transaction_id": context.transaction_id,
+                "event_kind": "page_blocked",
+                "phase": checkpoint.phase,
+                "sequence": sequence,
+                "reason_code": reason_code,
+            })
+            already = (await session.execute(
+                sa.select(EVIDENCE_AUDIT_TABLE_MODEL.__table__.c.id).where(
+                    EVIDENCE_AUDIT_TABLE_MODEL.__table__.c.event_id == event_id
+                ).limit(1)
+            )).first()
+            if already is not None:
+                return BackfillRecord(
+                    source_kind="m04e_backfill",
+                    source_id="blocked",
+                    schema_version=context.source_schema_version,
+                    source_digest=context.source_snapshot_digest,
+                    canonical_digest=None,
+                    canonical_identity=(),
+                    checkpoint=checkpoint,
+                    status=EvidenceStatus.BLOCKED,
+                    reason_code=reason_code,
+                    correlation_id=context.correlation_id,
+                    tenant_id=context.tenant_id,
+                    app_definition_id=context.app_definition_id,
+                    phase=checkpoint.phase,
+                    source_snapshot_digest=context.source_snapshot_digest,
+                    transaction_id=context.transaction_id,
+                    writer_generation=context.writer_generation,
+                    outcome=BackfillOutcome.BLOCKED,
+                    blocker_evidence=evidence,
+                )
             await session.execute(sa.insert(EVIDENCE_AUDIT_TABLE_MODEL.__table__).values(
                 id=_ledger_id("m04eaudit"),
-                event_id=_digest({
-                    "tenant_id": context.tenant_id,
-                    "app_definition_id": context.app_definition_id,
-                    "correlation_id": context.correlation_id,
-                    "transaction_id": context.transaction_id,
-                    "event_kind": "page_blocked",
-                    "phase": checkpoint.phase,
-                    "sequence": sequence,
-                    "reason_code": reason_code,
-                }),
+                event_id=event_id,
                 tenant_id=context.tenant_id,
                 definition_id=context.app_definition_id,
                 phase=checkpoint.phase,

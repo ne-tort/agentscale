@@ -20,6 +20,11 @@ on:
           - live
           - bridge
 
+# Least privilege by default: on a self-hosted runner the token reaches code from
+# every pull request, and the e2e jobs only read the repository.
+permissions:
+  contents: read
+
 concurrency:
   group: ci-e2e-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
@@ -27,6 +32,7 @@ concurrency:
 jobs:
   gate:
     runs-on: [self-hosted, linux, docker]
+    timeout-minutes: 5
     outputs:
       run_integration: ${{ steps.decide.outputs.run_integration }}
       run_k8s: ${{ steps.decide.outputs.run_k8s }}
@@ -34,20 +40,28 @@ jobs:
       run_bridge: ${{ steps.decide.outputs.run_bridge }}
     steps:
       - id: decide
+        # Untrusted strings reach bash through `env:`, never by interpolation.
+        # `title='${{ github.event.pull_request.title }}'` ran the PR title as
+        # shell on a self-hosted runner with docker.sock and a k3s kubeconfig —
+        # a title of `'; curl … | sh; #` was remote code execution, and it
+        # happened on `opened`/`edited`, before anything checked a label.
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
+          SUITE: ${{ github.event.inputs.suite || 'all' }}
         run: |
           set -euo pipefail
-          suite="${{ github.event.inputs.suite || 'all' }}"
+          suite="$SUITE"
           triggered=0
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
             triggered=1
           fi
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            title='${{ github.event.pull_request.title }}'
-            if echo "$title" | grep -qi '\[e2e\]'; then
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            if printf '%s' "$PR_TITLE" | grep -qi '\[e2e\]'; then
               triggered=1
             fi
-            labels='${{ toJson(github.event.pull_request.labels.*.name) }}'
-            if echo "$labels" | grep -q 'e2e'; then
+            if printf '%s' "$PR_LABELS" | grep -q 'e2e'; then
               triggered=1
             fi
           fi

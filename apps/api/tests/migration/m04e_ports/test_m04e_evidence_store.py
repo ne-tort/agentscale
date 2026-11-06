@@ -812,6 +812,36 @@ async def test_a_blocked_page_writes_audit_evidence_and_never_moves_the_cursor(l
     assert audit["checkpoint"] == "m04e-start:version"
 
 
+async def test_retrying_a_blocked_page_is_a_replay_not_an_integrity_error(ledger) -> None:
+    """An operator retries the same blocked page while the gate is still closed.
+
+    ``event_id`` is a digest of the context and the cursor and
+    ``uq_m04e_audit_event`` is unique on it, so a second append of the same
+    blocked page collides. Before this was handled the retry surfaced as a raw
+    ``IntegrityError`` from inside the page — a constraint name rather than an
+    answer — and the partition stage reported a failure for evidence it had
+    already recorded.
+    """
+
+    store = store_for(ledger)
+    first = await store.record_blocked(
+        context=context(), checkpoint=checkpoint(), reason_code="upstream_gate_closed",
+    )
+    before = await ledger.count(AUDIT_TABLE)
+
+    second = await store.record_blocked(
+        context=context(), checkpoint=checkpoint(), reason_code="upstream_gate_closed",
+    )
+
+    assert second.status is EvidenceStatus.BLOCKED
+    assert second.outcome.value == "blocked"
+    assert second.checkpoint == first.checkpoint
+    assert second.reason_code == first.reason_code
+    # The event *is* the evidence: one row for one blocked page, however often
+    # the operator asks.
+    assert await ledger.count(AUDIT_TABLE) == before == 1
+
+
 async def test_a_blocked_page_refuses_an_empty_reason_code(ledger) -> None:
     store = store_for(ledger)
 

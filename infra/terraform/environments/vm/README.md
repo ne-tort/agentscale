@@ -92,7 +92,7 @@ terraform -chdir=infra/terraform/environments/vm init
 terraform -chdir=infra/terraform/environments/vm apply -auto-approve
 ```
 
-Итог: k3s (systemd, `k3s.service`) + Traefik на hostPort 8088/8443 + boot-heal
+Итог: k3s (systemd, `k3s.service`) + Traefik на hostPort 8088/443 + boot-heal
 (ExecStartPost смоук-хелс) + Argo CD + sealed-secrets + root-app → платформа
 синкается из `main` (ghcr-pull секрет создаётся из `TF_VAR_ghcr_token`).
 
@@ -141,19 +141,23 @@ git fetch origin && git checkout main && git pull --ff-only
 # --- 1. снос ---------------------------------------------------------------
 cd ~/git/agentscale/infra/terraform/environments/vm
 terraform state list          # ожидаем 4 ресурса: k3s_server, k3s_uninstall, gitops_bootstrap[0], host_dns[0].
-                                # В старом state (до v13) их 3 — без host_dns; destroy отработает корректно.
+                                # В state ДО v13 нет host_dns: create-провижинера там не было,
+                                # поэтому destroy его НЕ снимет (см. «Снос старым state» ниже).
                                 # Если state потерян — шаг 1b
 terraform destroy -auto-approve
-# destroy прогоняет destroy-provisioner'ы в обратном порядке:
+# destroy прогоняет destroy-provisioner'ы в порядке зависимостей:
 #   gitops_bootstrap → k3s_uninstall → host_dns → (sshd) → k3s_server
+# k3s_uninstall объявлен с depends_on = [k3s_server], поэтому сносится ПЕРВЫМ
+# из пары: k3s ложится раньше, чем снимается хостовый DNS-конфиг.
 # k3s_uninstall: k3s-uninstall.sh + явный rm. После него на хосте НЕ остаётся:
 #   /var/lib/rancher/k3s (etcd/sqlite, containerd-образы, local-path PVC-данные),
-#   /etc/rancher/k3s, /var/lib/kubelet, /var/lib/cni, /run/k3s, /run/flannel,
-#   /etc/systemd/system/k3s.service.d (boot-heal), /usr/local/lib/prodavan,
-#   /usr/local/bin/k3s*, TLS CA (/var/lib/rancher/k3s/agentscale-tls —
-#   уходит вместе с data-dir) и оба kubeconfig (www + runner).
-# Provisioner больше НЕ `on_failure = continue`: если снос не удался, destroy
-# падает с ошибкой, а не «успешно» оставляет живой k3s.
+#   /etc/rancher/k3s (включая config.yaml с resolv-conf), /var/lib/kubelet,
+#   /var/lib/cni, /run/k3s, /run/flannel, /etc/systemd/system/k3s.service.d
+#   (boot-heal), /usr/local/lib/prodavan, /usr/local/bin/k3s*,
+#   TLS CA (/var/lib/rancher/k3s/agentscale-tls — уходит вместе с data-dir)
+#   и оба kubeconfig (www + runner).
+# Ни один destroy-провижинер не объявлен с `on_failure = continue`: если снос
+# не удался, destroy падает с ошибкой, а не «успешно» оставляет живой k3s.
 
 # --- 1b. если state потерян, а кластер жив --------------------------------
 # destroy нечего удалять. Ставим заново поверх живого кластера одной командой:
@@ -173,6 +177,28 @@ terraform apply -auto-approve
 объяснением и точной командой (раньше печатался один WARN, и через 12 минут
 apply падал по таймауту — выглядело как сломанный кластер).
 
+### Снос старым state новым модулем
+
+Destroy-time provisioner видит только `self.triggers`, записанные в state на
+момент `apply`. Поэтому «новый код против старого state» — это ограниченный
+сценарий, и вот его границы:
+
+| Что в state | Что реально произойдёт |
+|-------------|-------------------------|
+| Есть `host_dns[0]` с `ssh_*` (state v13+) | drop-in удаляется, resolved перезапускается |
+| **Нет** `host_dns` (state до v13) | delete этого ресурса не будет вообще → `99-zz-agentscale-dns.conf` остаётся на хосте |
+| Нет ключей `ssh_host`/`ssh_port`/`ssh_user`/`ssh_key_path` (state совсем ранний) | connection берёт fallback через `try()`: `127.0.0.1:22`, user `www`, ключ `/home/www/.ssh/prodavan_tf`. Если пользователь/порт/ключ другие — destroy падает на SSH (и это правильный сигнал, а не тихий пропуск) |
+| `k3s_uninstall[0]` | всё равно сработает: его скрипт сам находит `k3s-uninstall.sh`, data-dir и kubeconfig по `ssh_user` |
+
+Если state старый/потерян, а хост живой, безопаснее не полагаться на destroy
+(см. шаг 1b — `force_reinstall`), либо один раз снять хвосты руками:
+
+```bash
+ssh www@172.31.156.203 'sudo -n /usr/local/bin/k3s-uninstall.sh || true; \
+  sudo -n rm -f /etc/systemd/resolved.conf.d/99-zz-agentscale-dns.conf; \
+  sudo -n systemctl restart systemd-resolved'
+```
+
 ### Схема DNS (детерминированная, управляется terraform)
 
 - `host_dns` (create): drop-in `/etc/systemd/resolved.conf.d/99-zz-agentscale-dns.conf`
@@ -186,8 +212,12 @@ apply падал по таймауту — выглядело как слома�
 - `/etc/k3s-resolv.conf` (k3s_server): управляемый файл — ПРЯМЫЕ upstream'ы
   (`nameserver 9.9.9.9`, `nameserver 8.8.8.8`), переписывается при отличии содержимого
   (tmp + mv). kubelet/CoreDNS (dnsPolicy: Default) не зависят от живости resolved.
-- `post-k3s-heal.sh`: страховка — явный `forward` в CoreDNS Corefile после каждого старта k3s.
-- `host_dns` (destroy): удаляет только управляемый drop-in и рестартует resolved.
+- `post-k3s-heal.sh`: страховка — явный `forward . 9.9.9.9 8.8.8.8` в Corefile
+  CoreDNS после каждого старта k3s. Якорь — регулярка на строку `forward … /etc/resolv.conf`
+  (работает при любом отступе в блоке server), а не литерал с фиксированными
+  пробелами: иначе правка молча уходила в «не распознан — не трогаю».
+- `host_dns` (destroy): удаляет только управляемый drop-in и рестартует resolved
+  (идемпотентно: повторный destroy на уже отсутствующем файле не падает).
   До следующего apply у хоста нет управляемых upstream — apply нужно запускать сразу
   за destroy (штатный сценарий «снести → поставить»).
 

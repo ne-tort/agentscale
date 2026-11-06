@@ -33,6 +33,9 @@ jobs:
       github.event.workflow_run.head_branch != 'main' &&
       github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: [self-hosted, linux, docker]
+    # Bounded: this job holds the shared `auto-merge` concurrency slot, so a
+    # hung `gh` call would block every later merge behind it.
+    timeout-minutes: 10
     steps:
       - name: Squash-merge PR
         env:
@@ -62,6 +65,22 @@ jobs:
           labels="$(gh pr view "$PR" --repo "${{ github.repository }}" --json labels --jq '[.labels[].name]|join(",")')"
           if [[ "$labels" == *do-not-merge* ]]; then
             echo "label do-not-merge — skip"
+            exit 0
+          fi
+          # The gate ran against one commit; the branch may have moved since.
+          # Without this comparison a push landing after the green run was
+          # merged untested — GitHub Free has no branch protection to stop it.
+          TESTED="${{ github.event.workflow_run.head_sha }}"
+          CURRENT="$(gh pr view "$PR" --repo "${{ github.repository }}" --json headRefOid --jq .headRefOid)"
+          if [[ "$TESTED" != "$CURRENT" ]]; then
+            echo "PR head moved: tested $TESTED, now $CURRENT — skip (the next gate run will decide)"
+            exit 0
+          fi
+          # And the base may have moved too: the gate tested the merge against
+          # the main it saw, not the one it will be squashed onto.
+          STATE="$(gh pr view "$PR" --repo "${{ github.repository }}" --json mergeStateStatus --jq .mergeStateStatus)"
+          if [[ "$STATE" == "DIRTY" || "$STATE" == "BEHIND" || "$STATE" == "BLOCKED" ]]; then
+            echo "merge state $STATE — skip until the branch is rebuilt on main"
             exit 0
           fi
           gh pr merge "$PR" --repo "${{ github.repository }}" --squash --delete-branch

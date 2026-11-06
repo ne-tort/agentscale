@@ -8,6 +8,11 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# Least privilege by default: on a self-hosted runner the token reaches code from
+# every pull request, and nothing in this workflow writes to the repository.
+permissions:
+  contents: read
+
 concurrency:
   group: ci-gate-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   # Newer push supersedes older Gate; false left orphan gate jobs queued forever
