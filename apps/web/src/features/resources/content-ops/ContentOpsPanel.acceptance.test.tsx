@@ -8,6 +8,7 @@ import { ContentOpsError, type ContentOpsService } from "./contracts";
 import type { ContentAsset, ContentAssetVersion } from "./types";
 import { CONTENT_UPLOAD_MAX_BYTES, contentFileFeedback } from "./validation";
 import { POLL_BUDGET_MS } from "../../../test-support/poll-budget";
+import { restoreBlobUrlDescriptors } from "../../../test-support/blob-url-stubs";
 
 const asset = { id: "cast_asset-1", owner_scope: "company", owner_company_id: "company-1", visibility: "company", mime: "text/plain", title: "notes.txt", tags: [], created_by: "employee-1", latest_version: 1, created_at: "2026-10-01T12:00:00Z", updated_at: "2026-10-01T12:00:00Z" };
 
@@ -67,8 +68,7 @@ afterEach(async () => {
   host = undefined;
   if (createObjectURLDescriptor) Object.defineProperty(URL, "createObjectURL", createObjectURLDescriptor);
   else Reflect.deleteProperty(URL, "createObjectURL");
-  if (revokeObjectURLDescriptor) Object.defineProperty(URL, "revokeObjectURL", revokeObjectURLDescriptor);
-  else Reflect.deleteProperty(URL, "revokeObjectURL");
+  restoreBlobUrlDescriptors({ createObjectURL: createObjectURLDescriptor, revokeObjectURL: revokeObjectURLDescriptor });
   if (anchorClickDescriptor) Object.defineProperty(HTMLAnchorElement.prototype, "click", anchorClickDescriptor);
   else Reflect.deleteProperty(HTMLAnchorElement.prototype, "click");
   createObjectURLDescriptor = undefined;

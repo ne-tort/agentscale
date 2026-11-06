@@ -6,6 +6,7 @@ import { MemoryRouter, Route, Routes, useLocation, useNavigate, useParams } from
 import { ProjectFilesWorkspace } from "./ProjectFilesWorkspace";
 import type { WorkspaceEntry, WorkspaceListing, WorkspaceService, WorkspaceTextPreview } from "./contracts";
 import { POLL_BUDGET_MS } from "../../test-support/poll-budget";
+import { restoreBlobUrlDescriptors } from "../../test-support/blob-url-stubs";
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 
@@ -102,8 +103,7 @@ afterEach(async () => {
   else Reflect.deleteProperty(HTMLAnchorElement.prototype, "click");
   if (createObjectUrlDescriptor) Object.defineProperty(URL, "createObjectURL", createObjectUrlDescriptor);
   else Reflect.deleteProperty(URL, "createObjectURL");
-  if (revokeObjectUrlDescriptor) Object.defineProperty(URL, "revokeObjectURL", revokeObjectUrlDescriptor);
-  else Reflect.deleteProperty(URL, "revokeObjectURL");
+  restoreBlobUrlDescriptors({ createObjectURL: createObjectUrlDescriptor, revokeObjectURL: revokeObjectUrlDescriptor });
   anchorClickDescriptor = undefined;
   createObjectUrlDescriptor = undefined;
   revokeObjectUrlDescriptor = undefined;

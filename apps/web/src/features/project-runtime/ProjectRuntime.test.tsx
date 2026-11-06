@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ProjectRuntime } from "./ProjectRuntime";
 import type { ProjectRuntimeService, ProjectRuntimeSnapshot } from "./types";
 import { POLL_BUDGET_MS } from "../../test-support/poll-budget";
+import { restoreBlobUrlDescriptors } from "../../test-support/blob-url-stubs";
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 
@@ -79,10 +80,7 @@ afterEach(async () => {
   host?.remove();
   host = undefined;
   vi.restoreAllMocks();
-  if (createObjectUrlDescriptor) Object.defineProperty(URL, "createObjectURL", createObjectUrlDescriptor);
-  else Reflect.deleteProperty(URL, "createObjectURL");
-  if (revokeObjectUrlDescriptor) Object.defineProperty(URL, "revokeObjectURL", revokeObjectUrlDescriptor);
-  else Reflect.deleteProperty(URL, "revokeObjectURL");
+  restoreBlobUrlDescriptors({ createObjectURL: createObjectUrlDescriptor, revokeObjectURL: revokeObjectUrlDescriptor });
   createObjectUrlDescriptor = undefined;
   revokeObjectUrlDescriptor = undefined;
   document.body.replaceChildren();

@@ -10,6 +10,7 @@ import { getSafeNextPath } from "./auth/redirect";
 import { RESOURCE_CONTRACT_BLOCKERS } from "../features/resources";
 import { emptyEquipmentWorkspace } from "../features/equipment";
 import { filesModuleFixture, promptModuleFixture } from "../features/modules/fixtures";
+import { restoreBlobUrlDescriptors } from "../test-support/blob-url-stubs";
 import { POLL_BUDGET_MS } from "../test-support/poll-budget";
 
 const projectId = "project-71";
@@ -341,8 +342,7 @@ afterEach(async () => {
   scrollIntoViewDescriptor = undefined;
   if (createObjectURLDescriptor) Object.defineProperty(URL, "createObjectURL", createObjectURLDescriptor);
   else Reflect.deleteProperty(URL, "createObjectURL");
-  if (revokeObjectURLDescriptor) Object.defineProperty(URL, "revokeObjectURL", revokeObjectURLDescriptor);
-  else Reflect.deleteProperty(URL, "revokeObjectURL");
+  restoreBlobUrlDescriptors({ createObjectURL: createObjectURLDescriptor, revokeObjectURL: revokeObjectURLDescriptor });
   createObjectURLDescriptor = undefined;
   revokeObjectURLDescriptor = undefined;
   if (anchorClickDescriptor) Object.defineProperty(HTMLAnchorElement.prototype, "click", anchorClickDescriptor);
