@@ -85,6 +85,7 @@ from prodavan.application.migration.m05_contexts import (
     load_partition_m05_contexts,
 )
 from prodavan.application.migration.partition_chain import PartitionChainKey
+from prodavan.infrastructure.persistence.rls.policies import TRUSTED_SERVICE_ROLE
 
 from . import ledger_fixtures as fx
 from .ledger_fixtures import (
@@ -393,24 +394,33 @@ async def test_rows_without_a_durable_head_are_a_missing_cursor_not_an_export(
 
 
 async def test_two_heads_for_one_partition_are_ambiguous(export_ledger: Any) -> None:
-    """The SQLite mirror drops the PostgreSQL CHECKs but keeps this one enforceable."""
+    """The mirror copies the unique key *and* the reader refuses the ambiguity it cannot see."""
 
     await fx.complete_ledger(export_ledger)
     head = await export_ledger.single(CHECKPOINT_TABLE)
     assert head is not None
-    # ``uq_m04e_checkpoint_partition`` also lives in the mirror; model the ambiguity the
-    # reader must survive (a partition-wide unique key violation would be the DB's job).
     rows = fx.checkpoint_row_values(suffix="0002")
     rows["id"] = "m04ecp_0002"
     rows["checkpoint_token"] = "m04e-cp:second-head"
-    try:
+    # First line of defence: ``uq_m04e_checkpoint_partition`` is copied into the mirror, so
+    # the database itself refuses to hold two heads of one phase.
+    with pytest.raises(sa.exc.IntegrityError):
         await export_ledger.insert(CHECKPOINT_TABLE, **rows)
-    except sa.exc.IntegrityError:  # pragma: no cover - mirror enforces the unique key
-        pytest.skip("the SQLite mirror enforces uq_m04e_checkpoint_partition; covered live")
 
+    # Second: the reader must not rely on that key alone (a restored dump or a replica can
+    # hold a row the constraint was never applied to), so the ambiguity branch is exercised
+    # at its own seam -- there is no mirror state that can produce a second head.
+    reader = reader_for(export_ledger)
     with pytest.raises(M04EExportRefused) as raised:
-        await reader_for(export_ledger).read_export(
-            tenant_id=TENANT, app_definition_id=fx.DEFINITION_ID,
+        reader._assemble(  # noqa: SLF001 - the branch has no DB-representable input
+            (TENANT, fx.DEFINITION_ID),
+            mappings=await read_rows(
+                export_ledger, select_mappings(),
+                tenant_id=TENANT, definition_id=fx.DEFINITION_ID,
+            ),
+            observations=(),
+            heads=[head, dict(rows, phase=str(head["phase"]))],
+            audits=(),
         )
 
     assert refusal_code(raised.value) is M04EExportRefusalCode.CHECKPOINT_AMBIGUOUS
@@ -478,18 +488,22 @@ async def test_the_export_is_the_stored_handoff_evidence(export_ledger: Any) -> 
     # ``checkpoint`` (the reader reports the cursor the row was classified *under*, which
     # is the only one derivable from the stored page token; the store's in-memory batch is
     # stamped with the cursor the page advanced *to*).
-    identity = lambda record: (  # noqa: E731 - a projection, not a fixture
-        record.source_kind, record.source_id, record.schema_version, record.phase,
-        record.status, record.source_digest, record.canonical_digest,
-        record.canonical_identity, record.reason_code, record.tenant_id,
-        record.app_definition_id, record.artifact_digest, record.verified_artifact_digest,
-        record.proof_evidence, record.outcome,
-    )
-    assert [identity(record) for record in export.accepted] == [
-        identity(record) for record in expected.accepted
+    def shape(record: Any) -> tuple[Any, ...]:
+        """Every field the ledger stores for one row, in one comparable value."""
+
+        return (
+            record.source_kind, record.source_id, record.schema_version, record.phase,
+            record.status, record.source_digest, record.canonical_digest,
+            record.canonical_identity, record.reason_code, record.tenant_id,
+            record.app_definition_id, record.artifact_digest,
+            record.verified_artifact_digest, record.proof_evidence, record.outcome,
+        )
+
+    assert [shape(record) for record in export.accepted] == [
+        shape(record) for record in expected.accepted
     ]
-    assert [identity(record) for record in export.quarantined] == [
-        identity(record) for record in expected.quarantined
+    assert [shape(record) for record in export.quarantined] == [
+        shape(record) for record in expected.quarantined
     ]
     for record in (*export.accepted, *export.quarantined):
         assert record.checkpoint.partition == (TENANT, fx.DEFINITION_ID)
@@ -820,6 +834,38 @@ async def test_the_read_binds_the_tenant_transaction_locally_before_reading() ->
     _exposed_fake, exposed = dialect_session("postgresql", readback={"row_security": "off"})
     with pytest.raises(M04EExportRefused) as raised:
         await SqlM04EEvidenceExportReader(session_factory=exposed).read_export(
+            tenant_id=TENANT, app_definition_id=fx.DEFINITION_ID,
+        )
+    assert refusal_code(raised.value) is M04EExportRefusalCode.ROW_SECURITY_DISABLED
+
+
+async def test_a_session_that_is_not_the_trusted_service_role_is_refused() -> None:
+    """The policy the reader relies on grants nothing to any other role.
+
+    The tenant predicate is defence in depth; the boundary is the reviewed policy, and it is
+    written against one role. A reader that only checked its own GUCs would read across
+    tenants the moment someone pointed it at a session authenticated as anything else.
+    """
+
+    from tests.migration.m04e_ports.acceptance_fixtures import dialect_session
+
+    _other_fake, other_role = dialect_session(
+        "postgresql", readback={"database_role": "prodavan_app", "row_security": "on"},
+    )
+    with pytest.raises(M04EExportRefused) as raised:
+        await SqlM04EEvidenceExportReader(session_factory=other_role).read_export(
+            tenant_id=TENANT, app_definition_id=fx.DEFINITION_ID,
+        )
+    assert refusal_code(raised.value) is M04EExportRefusalCode.DATABASE_ROLE_NOT_TRUSTED_SERVICE
+
+    # BYPASSRLS (or a superuser) is refused separately: the role name can be right while
+    # the policies are inert.
+    _bypass_fake, bypass = dialect_session(
+        "postgresql",
+        readback={"database_role": TRUSTED_SERVICE_ROLE, "role_bypasses_rls": True},
+    )
+    with pytest.raises(M04EExportRefused) as raised:
+        await SqlM04EEvidenceExportReader(session_factory=bypass).read_export(
             tenant_id=TENANT, app_definition_id=fx.DEFINITION_ID,
         )
     assert refusal_code(raised.value) is M04EExportRefusalCode.ROW_SECURITY_DISABLED

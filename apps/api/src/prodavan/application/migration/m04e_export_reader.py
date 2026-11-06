@@ -134,10 +134,17 @@ from prodavan.infrastructure.persistence.models.dynamic_app_definition_version i
 )
 from prodavan.infrastructure.persistence.models.m04e_ledger import (
     M04EDefinitionVersionAuditRow as EVIDENCE_AUDIT_TABLE_MODEL,
+)
+from prodavan.infrastructure.persistence.models.m04e_ledger import (
     M04EDefinitionVersionCheckpointRow as EVIDENCE_CHECKPOINT_TABLE_MODEL,
+)
+from prodavan.infrastructure.persistence.models.m04e_ledger import (
     M04EDefinitionVersionMappingRow as EVIDENCE_MAPPING_TABLE_MODEL,
+)
+from prodavan.infrastructure.persistence.models.m04e_ledger import (
     M04EDefinitionVersionQuarantineRow as EVIDENCE_QUARANTINE_TABLE_MODEL,
 )
+from prodavan.infrastructure.persistence.rls.policies import TRUSTED_SERVICE_ROLE
 
 # ---------------------------------------------------------------------------
 # Roles and vocabulary
@@ -201,6 +208,7 @@ class M04EExportRefusalCode(StrEnum):
     # -- the question itself -------------------------------------------------
     PARTITION_INVALID = "m04e_export_partition_invalid"
     TENANT_CONTEXT_UNBOUND = "m04e_export_tenant_context_unbound"
+    DATABASE_ROLE_NOT_TRUSTED_SERVICE = "m04e_export_database_role_is_not_trusted_service"
     ROW_SECURITY_DISABLED = "m04e_export_row_security_disabled"
     SESSION_FACTORY_MISSING = "m04e_export_session_factory_missing"
     DIALECT_UNSUPPORTED = "m04e_export_dialect_unsupported"
@@ -300,7 +308,10 @@ _READBACK_CONTEXT_SQL = text(
     "SELECT "
     "current_setting('app.tenant_id', true) AS tenant_id, "
     "current_setting('app.migration_role', true) AS migration_role, "
-    "current_setting('row_security', true) AS row_security"
+    "current_setting('row_security', true) AS row_security, "
+    "current_user AS database_role, "
+    "(SELECT r.rolsuper OR r.rolbypassrls FROM pg_roles AS r WHERE r.rolname = current_user) "
+    "AS role_bypasses_rls"
 )
 
 #: The four reads, as typed selects over the **registered models** rather than raw text.
@@ -629,6 +640,28 @@ class SqlM04EEvidenceExportReader:
                 M04EExportRefusalCode.ROW_SECURITY_DISABLED,
                 "row_security is not on; the M04E ledger policies would be skipped",
                 "a connection where row security is enforced",
+                partition=partition,
+            )
+        # The tenant predicate is defence in depth, not the boundary: the boundary is the
+        # reviewed policy, and it grants nothing to any role but the trusted one. A session
+        # running as anything else never reaches this reader today -- but that is a property
+        # of today's composition root, not of this module, and a reader that trusts its
+        # caller to have chosen the right role would silently read across tenants the day
+        # someone wired it elsewhere.
+        if str(readback.get("database_role") or "") != TRUSTED_SERVICE_ROLE:
+            raise _refuse(
+                M04EExportRefusalCode.DATABASE_ROLE_NOT_TRUSTED_SERVICE,
+                f"the reader must run as {TRUSTED_SERVICE_ROLE!r}; the trusted-service policy "
+                "grants nothing to any other role",
+                f"a session authenticated as {TRUSTED_SERVICE_ROLE}",
+                partition=partition,
+            )
+        if bool(readback.get("role_bypasses_rls")):
+            raise _refuse(
+                M04EExportRefusalCode.ROW_SECURITY_DISABLED,
+                "the database role is a superuser or has BYPASSRLS, so the reviewed policies "
+                "would not bound this read",
+                "a role that is neither superuser nor BYPASSRLS",
                 partition=partition,
             )
 
