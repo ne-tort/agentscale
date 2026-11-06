@@ -106,6 +106,21 @@ jobs:
               conn = await asyncpg.connect(f"postgresql://agentscale:agentscale@{host}:55433/agentscale")
               await conn.execute("GRANT ALL ON ALL TABLES IN SCHEMA public TO agentscale_app")
               await conn.execute("GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO agentscale_app")
+              # The suite truncates between tests, and append-only guards
+              # (`runtime_materialization_audit`, `agent_control_plane_events`,
+              # the M04E/M06 ledgers) reject that. Stepping around a guard needs
+              # `ALTER TABLE ... DISABLE TRIGGER`, which requires *ownership* —
+              # DML grants are not enough, and without this every database-backed
+              # test fails in setup with "... is append-only". This job was red
+              # for three consecutive nights for exactly that reason.
+              rows = await conn.fetch(
+                  "SELECT c.relname FROM pg_class c "
+                  "JOIN pg_namespace n ON n.oid = c.relnamespace "
+                  "WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p')"
+              )
+              for (name,) in rows:
+                  quoted = '"' + name.replace('"', '""') + '"'
+                  await conn.execute(f"ALTER TABLE public.{quoted} OWNER TO agentscale_app")
               await conn.close()
           asyncio.run(main())
           PY
