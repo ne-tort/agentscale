@@ -46,7 +46,7 @@ PR merge → CI Images (API образ) → Argo sync
 | Место | Поведение |
 |-------|-----------|
 | `infra/k3s/base/prodavan-api/deployment.yaml` | initContainer `migrate` → `./scripts/migrate.sh` |
-| `infra/k3s/overlays/dev/patch-dev.yaml` | `imagePullPolicy: Always` на **api и migrate** (иначе кэш старого `:latest` → upgrade noop) |
+| `infra/k3s/overlays/dev/patch-dev-api.yaml` | `imagePullPolicy: Always` на **api и migrate** (иначе кэш старого `:latest` → upgrade noop) |
 | `apps/api/scripts/migrate.sh` | `upgrade head` → **current == head** → `alembic check` |
 | `apps/api/Dockerfile` | `src` + `alembic` в **одном COPY** (buildx cache не должен рассинхронить ORM и revisions) |
 | `.github/workflows/ci-api.yml` | Postgres → `upgrade head` → **`alembic check`** → downgrade/upgrade smoke → pytest |

@@ -2,7 +2,7 @@
 
 Сводная таблица переменных окружения и конфигурации по средам: **dev (VM `www@172.31.156.203`)**, **staging**, **prod**.
 
-> Таблица — сводка; источник истины для dev — `infra/k3s/overlays/dev/patch-dev.yaml`
+> Таблица — сводка; источник истины для dev — `infra/k3s/overlays/dev/patch-dev-config.yaml`
 > и `infra/k3s/base/agentscale-api/configmap.yaml`. Часть имён ресурса исторически
 > переехала `prodavan.*` → `agentscale.*` (сервисы, топики, секреты) — при расхождении
 > верить манифестам.

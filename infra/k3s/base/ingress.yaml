@@ -4,8 +4,8 @@
 #  - websecure (:443, the public entrypoint via punnel/VPN): PROD keeps the
 #    wildcard (catch-all, priority 50) so ANY Host — including a public IP that
 #    may change — lands on prod; DEV pins agentscale.dev/localhost at priority
-#    100 (patch-dev.yaml). Net rule: "any public address = prod", dev only via
-#    its explicit names. Routing never hardcodes the public IP.
+#    100 (patch-dev-ingress.yaml). Net rule: "any public address = prod", dev only
+#    via its explicit names. Routing never hardcodes the public IP.
 #  - web (:8088, local plain-HTTP): DEV keeps the wildcard (local dev access);
 #    PROD pins agentscale.local (patch-prod.yaml).
 apiVersion: networking.k8s.io/v1
