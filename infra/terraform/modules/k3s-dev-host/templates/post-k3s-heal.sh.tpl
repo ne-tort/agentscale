@@ -31,12 +31,17 @@ ensure_coredns_forward() {
   printf '%s' "$corefile" > /tmp/coredns-corefile.txt
   if ! python3 - "$DNS_UPSTREAMS" /tmp/coredns-corefile.txt > /tmp/coredns-patch.json 2>/dev/null <<'PY'
 import json
+import re
 import sys
 
 ups = sys.argv[1]
 cf = open(sys.argv[2], encoding="utf-8").read()
-old = "    forward . /etc/resolv.conf"
-if old not in cf:
+# Якорь — регулярка, а не литерал с фиксированным отступом: в разных релизах
+# k3s блок forward может быть выровнен иначе, и точное сравнение молча уходило
+# в «не распознан — не трогаю», оставляя CoreDNS на дырявом /etc/resolv.conf.
+# Строки вне блоков (без ведущих пробелов) и комментарии не матчатся.
+pattern = re.compile(r"(?m)^[ \t]+forward[ \t]+\.[ \t]+/etc/resolv\.conf[ \t]*$")
+if not pattern.search(cf):
     sys.exit(1)
 new = (
     "    # Явные upstream вместо /etc/resolv.conf: хостовый резолвер может\n"
@@ -48,7 +53,7 @@ new = (
     "        health_check 5s\n"
     "    }"
 )
-sys.stdout.write(json.dumps({"data": {"Corefile": cf.replace(old, new)}}))
+sys.stdout.write(json.dumps({"data": {"Corefile": pattern.sub(lambda m: new, cf, count=1)}}))
 PY
   then
     echo "WARN: CoreDNS forward не распознан — не трогаю"
