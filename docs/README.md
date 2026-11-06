@@ -33,7 +33,7 @@ Tenant / M00–M09 / desktop UI. Новые требования — **не** с
 | Backend | [05-backend/](05-backend/) |
 | Agent | [06-agent-runtime/](06-agent-runtime/) |
 | Infrastructure | [07-infrastructure/](07-infrastructure/) — **ops актуальны** |
-| Migration | [08-migration/](08-migration/) |
+| Migration | [08-migration/](08-migration/) — source API inventory: [api-contracts/](08-migration/api-contracts/) |
 | Checklists | [09-checklists/](09-checklists/) |
 | Implementation | [10-implementation/](10-implementation/) |
 

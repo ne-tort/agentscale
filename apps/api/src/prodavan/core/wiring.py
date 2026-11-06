@@ -3,19 +3,29 @@
 from __future__ import annotations
 
 from prodavan.config.settings import settings
+from prodavan.core.infra.agent_run_bundle import build_agent_run_host_resource
 from prodavan.core.infra.database_resource import DatabaseEngineResource
 from prodavan.core.infra.gotenberg_manager import GotenbergManager
 from prodavan.core.infra.k8s_manager import k8s_manager_from_settings
 from prodavan.core.infra.kafka_manager import KafkaManager
 from prodavan.core.infra.metrics_consumer_resource import MetricsConsumerResource
+from prodavan.core.infra.migration_chain_resource import (
+    migration_chain_resource_from_settings,
+)
 from prodavan.core.infra.mongo_manager import MongoManager
 from prodavan.core.infra.opensearch_manager import OpenSearchManager
 from prodavan.core.infra.platform_bootstrap_resource import PlatformBootstrapResource
 from prodavan.core.infra.pod_metrics_sampler_resource import PodMetricsSamplerResource
 from prodavan.core.infra.redis_manager import RedisManager
+from prodavan.core.infra.resource_apply_resource import (
+    resource_apply_resource_from_settings,
+)
 from prodavan.core.infra.sandbox_client import sandbox_client_resource_from_settings
 from prodavan.core.infra.storage_metrics_sampler_resource import StorageMetricsSamplerResource
 from prodavan.core.infra.trigger_worker_resource import TriggerWorkerResource
+from prodavan.core.infra.web_stream_resource import (
+    web_stream_runtime_resource_from_settings,
+)
 from prodavan.core.lifespan.manager import LifespanManager
 from prodavan.infrastructure.files.manager import FileStoreManager
 
@@ -34,8 +44,47 @@ def build_lifespan_manager() -> LifespanManager:
         backend = "local"
     from prodavan.core.infra.worker_manager import worker_manager_from_settings
 
+    # One manager for both surfaces. ``LifespanManager.lifespan`` forwards the
+    # ASGI app to resources exposing ``bind_app`` before startup, so app-bound
+    # resources (the web stream runtime publishes itself on ``app.state``) work
+    # without a bespoke subclass here.
     manager = LifespanManager()
     manager.register(DatabaseEngineResource())
+    # Migration chain host (MIG-COMPOSITION-WIRING-01): assembles M04 -> M04E ->
+    # M05 -> M06 -> cutover from the process session factory and publishes its
+    # diagnostics (nothing is started — no backfill, no cutover). Inert unless
+    # MIGRATION_CHAIN_ENABLED=true: with the flag off nothing is composed and the
+    # resource answers health()=None. Registered right after the DB resource
+    # because every stage's ports open their own sessions from the process
+    # factory, so storage must be started first (and stopped last).
+    # A composition error never crashes the process: the resource logs a code and
+    # starts with health()=False.
+    manager.register(migration_chain_resource_from_settings())
+    # Durable Resource API apply port (MIG-RES-APPLYPORT-01): publishes the
+    # AtomicMaterializationApplyPort through
+    # application.resources.adapters.factory.install_materialization_apply_port and
+    # withdraws it on shutdown. Registered right after the DB resource because the
+    # ledger opens its own sessions from the process factory. Off by default
+    # (RESOURCE_APPLY_ENABLED): with the flag off nothing is installed and
+    # POST .../materialization/apply keeps answering 503 RESOURCE_APPLY_UNAVAILABLE,
+    # while every resource CRUD path is unaffected.
+    manager.register(resource_apply_resource_from_settings())
+    # Canonical browser SSE transport (MIG-WEB-RUNTIME-01): installs
+    # WebStreamRuntime on app.state (see api/v1/web_stream.install_web_stream_runtime).
+    # Inert unless WEB_STREAM_RUNTIME_ENABLED=true — with the flag off the route
+    # keeps refusing 503 web_chat_stream_facade_unwired exactly as before.
+    # Registered right after the DB resource: the runtime opens its own sessions
+    # from the process factory, so storage must be started first.
+    manager.register(web_stream_runtime_resource_from_settings())
+    # Durable Agent Run loops (MIG-AR-HOST-01/02): inert unless one of the
+    # AGENT_RUN_{WORKER,CONSUMER}_ENABLED flags is on. The bundle builds every
+    # dependency from the process session factory and publishes it on the host
+    # seam, and the resource is composed over the *addressed* intent handler
+    # registry — the old non-addressable handler needs ``port.claim_run``, which a
+    # fenced adapter does not have, so intents would walk to their poison-pill.
+    # Registered after the DB resource, so storage starts before any loop can take
+    # a session (and stops after it).
+    manager.register(build_agent_run_host_resource())
     manager.register(k8s_manager_from_settings())
     # agent-sandbox SDK client (inert unless pod_runtime_mode=sandbox; Wave 2
     # runtime adapter resolves it lazily via get_sandbox_client_manager).

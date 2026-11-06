@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://prodavan.dev/schemas/declarative-app/v1/protocol.json",
+  "title": "Declarative App Runtime Protocol v1",
+  "oneOf": [
+    { "$ref": "#/$defs/grantSet" },
+    { "$ref": "#/$defs/lifecycleEvent" },
+    { "$ref": "#/$defs/rpcMessage" }
+  ],
+  "$defs": {
+    "protocol": { "const": "1.0" },
+    "appId": { "type": "string", "pattern": "^[a-z][a-z0-9-]{2,63}$" },
+    "capability": { "type": "string", "enum": ["ui.render", "ui.navigation", "storage.kv", "storage.files", "network.fetch", "events.subscribe", "platform.commands", "platform.queries", "secrets.read", "identity.read"] },
+    "constraints": { "type": "object", "additionalProperties": false, "properties": { "resources": { "type": "array", "items": { "type": "string" } }, "methods": { "type": "array", "items": { "type": "string" } }, "domains": { "type": "array", "items": { "type": "string", "format": "hostname" } }, "eventTypes": { "type": "array", "items": { "type": "string" } }, "maxBytesPerRequest": { "type": "integer", "minimum": 1 } } },
+    "grant": { "type": "object", "required": ["name", "decision", "grantedBy"], "additionalProperties": false, "properties": { "name": { "$ref": "#/$defs/capability" }, "decision": { "enum": ["granted", "denied"] }, "constraints": { "$ref": "#/$defs/constraints" }, "expiresAt": { "type": "string", "format": "date-time" }, "grantedBy": { "enum": ["platform", "administrator", "user"] } } },
+    "grantSet": { "type": "object", "required": ["appId", "manifestVersion", "grants", "issuedAt"], "additionalProperties": false, "properties": { "appId": { "$ref": "#/$defs/appId" }, "manifestVersion": { "type": "string" }, "grants": { "type": "array", "items": { "$ref": "#/$defs/grant" }, "uniqueItems": true }, "issuedAt": { "type": "string", "format": "date-time" }, "expiresAt": { "type": "string", "format": "date-time" } } },
+    "lifecycleEvent": { "type": "object", "required": ["protocol", "type", "eventId", "appId", "state", "occurredAt"], "additionalProperties": false, "properties": { "protocol": { "$ref": "#/$defs/protocol" }, "type": { "const": "lifecycle" }, "eventId": { "type": "string", "minLength": 1 }, "appId": { "$ref": "#/$defs/appId" }, "state": { "enum": ["registered", "starting", "running", "stopping", "stopped", "failed", "suspended"] }, "occurredAt": { "type": "string", "format": "date-time" }, "reason": { "type": "string" }, "restartCount": { "type": "integer", "minimum": 0 } } },
+    "json": {},
+    "rpcBase": { "type": "object", "required": ["protocol", "type"], "properties": { "protocol": { "$ref": "#/$defs/protocol" }, "type": { "enum": ["request", "response", "error", "notification"] } }, "additionalProperties": false },
+    "rpcRequest": { "allOf": [ { "$ref": "#/$defs/rpcBase" }, { "type": "object", "required": ["id", "method"], "properties": { "type": { "const": "request" }, "id": { "type": "string", "minLength": 1 }, "method": { "type": "string", "minLength": 1 }, "params": {}, "deadlineAt": { "type": "string", "format": "date-time" } } } ] },
+    "rpcResponse": { "allOf": [ { "$ref": "#/$defs/rpcBase" }, { "type": "object", "required": ["id", "result"], "properties": { "type": { "const": "response" }, "id": { "type": "string", "minLength": 1 }, "result": {} } } ] },
+    "rpcError": { "allOf": [ { "$ref": "#/$defs/rpcBase" }, { "type": "object", "required": ["id", "error"], "properties": { "type": { "const": "error" }, "id": { "type": "string", "minLength": 1 }, "error": { "type": "object", "required": ["code", "message"], "additionalProperties": false, "properties": { "code": { "type": "string" }, "message": { "type": "string" }, "details": {} } } } } ] },
+    "rpcNotification": { "allOf": [ { "$ref": "#/$defs/rpcBase" }, { "type": "object", "required": ["method"], "properties": { "type": { "const": "notification" }, "method": { "type": "string", "minLength": 1 }, "params": {} } } ] },
+    "rpcMessage": { "oneOf": [ { "$ref": "#/$defs/rpcRequest" }, { "$ref": "#/$defs/rpcResponse" }, { "$ref": "#/$defs/rpcError" }, { "$ref": "#/$defs/rpcNotification" } ] }
+  }
+}

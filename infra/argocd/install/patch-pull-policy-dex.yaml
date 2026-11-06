@@ -1,0 +1,17 @@
+# ghcr.io/dexidp/dex:v2.41.1 (public, pinned; tag verified on ghcr.io
+# 2026-11-05) + quay.io/argoproj/argocd:v2.13.3 initContainer `copyutil`.
+# Upstream ships Always for both — same registry-outage/rate-limit exposure on
+# restart as the other workloads; tags are immutable → IfNotPresent is safe.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: argocd-dex-server
+spec:
+  template:
+    spec:
+      containers:
+        - name: dex
+          imagePullPolicy: IfNotPresent
+      initContainers:
+        - name: copyutil
+          imagePullPolicy: IfNotPresent

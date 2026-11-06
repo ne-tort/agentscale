@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -112,9 +113,12 @@ class PodCommand:
         if pod.desired_state == desired.value:
             if self._status_matches_desired(pod, desired) and not force_rehydrate:
                 return
-            if desired == PodDesiredState.RUNNING and pod.status == PodStatus.PROVISIONING:
-                if not force_rehydrate:
-                    return
+            if (
+                desired == PodDesiredState.RUNNING
+                and pod.status == PodStatus.PROVISIONING
+                and reason != "resume"
+            ):
+                return
 
         pod.desired_state = desired.value
         payload = {"reason": reason} if reason else None
@@ -189,31 +193,75 @@ class PodCommand:
                     pod_id=pod.id,
                     payload=payload,
                 )
-        except Exception as exc:
-            pod.status = PodStatus.FAILED
-            pod.last_error = str(exc)[:2000]
-            await self._events.emit(
-                event_type="pod.failed",
+        except AppError as exc:
+            # A failed workspace checkpoint is a safety stop: the workload has
+            # not been touched yet, so preserve its lifecycle state and let the
+            # API return a retryable 502 instead of manufacturing pod failure.
+            if exc.code == "WORKSPACE_CHECKPOINT_FAILED":
+                raise
+            await self._record_pod_failure(
+                project,
+                pod,
+                detail=str(exc),
+                desired=desired,
+                reason=reason,
+                principal=principal,
+                payload=payload,
+            )
+            raise
+        except Exception as exc:  # noqa: BLE001 - see comment below
+            # Runtime/hydration ports fail with their own exception types
+            # (RuntimeError, K8sError, provider errors). The pod row must still
+            # stop looking alive: leaving it PROVISIONING with no last_error
+            # hides a dead pod from reconcile and lets a later sync short-circuit
+            # on a status nobody verified. Record, then re-raise unchanged so the
+            # caller's own error mapping (e.g. POD_LAUNCH_FAILED) stays intact.
+            await self._record_pod_failure(
+                project,
+                pod,
+                detail=str(exc) or type(exc).__name__,
+                desired=desired,
+                reason=reason,
+                principal=principal,
+                payload=payload,
+            )
+            raise
+
+        project.container_ref = pod.runtime_ref or project.container_ref
+
+    async def _record_pod_failure(
+        self,
+        project: ProjectRow,
+        pod: ProjectPodRow,
+        *,
+        detail: str,
+        desired: PodDesiredState,
+        reason: str | None,
+        principal: Principal,
+        payload: dict[str, Any] | None,
+    ) -> None:
+        """Persist a failed transition on the pod row and, for RUNNING, the project."""
+        pod.status = PodStatus.FAILED
+        pod.last_error = detail[:2000]
+        await self._events.emit(
+            event_type="pod.failed",
+            company_id=project.company_id,
+            project_id=project.id,
+            cabinet_id=project.cabinet_id,
+            principal=principal,
+            pod_id=pod.id,
+            payload={"error": pod.last_error, **(payload or {})},
+        )
+        if desired == PodDesiredState.RUNNING and project.status != ProjectStatus.ERROR:
+            project.status = ProjectStatus.ERROR
+            await self._project_events.emit(
+                event_type="project.failed",
                 company_id=project.company_id,
                 project_id=project.id,
                 cabinet_id=project.cabinet_id,
                 principal=principal,
-                pod_id=pod.id,
-                payload={"error": pod.last_error, **(payload or {})},
+                payload={"error": pod.last_error, "reason": reason},
             )
-            if desired == PodDesiredState.RUNNING and project.status != ProjectStatus.ERROR:
-                project.status = ProjectStatus.ERROR
-                await self._project_events.emit(
-                    event_type="project.failed",
-                    company_id=project.company_id,
-                    project_id=project.id,
-                    cabinet_id=project.cabinet_id,
-                    principal=principal,
-                    payload={"error": pod.last_error, "reason": reason},
-                )
-            raise
-
-        project.container_ref = pod.runtime_ref or project.container_ref
 
     async def provision_for_project(
         self,
@@ -456,7 +504,21 @@ class PodCommand:
         from prodavan.application.projects.workspace_checkpoint import checkpoint_project_workspace
 
         await bump_pod_bridge_generation(pod.id)
-        await checkpoint_project_workspace(self._session, project_id=project.id, best_effort=True)
+        # Reload destroys/recreates the workload; do not terminate it until the
+        # current agent-authored workspace is safely checkpointed.
+        try:
+            await checkpoint_project_workspace(
+                self._session, project_id=project.id, best_effort=False
+            )
+        except AppError:
+            raise
+        except Exception as exc:
+            raise AppError(
+                code="WORKSPACE_CHECKPOINT_FAILED",
+                title="Workspace Checkpoint Failed",
+                status=502,
+                detail=str(exc)[:300] or "could not save project workspace",
+            ) from exc
         ref = pod.runtime_ref or project.container_ref
         if ref:
             try:

@@ -102,6 +102,29 @@ def test_content_alias_bind_and_resolve(client: TestClient) -> None:
     )
     assert fin.status_code == 200, fin.text
 
+    # Clients outside the cluster can upload without resolving the MinIO URL.
+    second = client.post(
+        f"/api/v1/content/assets/{asset_id}/versions",
+        json={"mime": "text/plain"},
+        headers=emp_hdr,
+    )
+    assert second.status_code == 200, second.text
+    second_version_id = second.json()["version"]["id"]
+    uploaded = client.put(
+        f"/api/v1/content/assets/{asset_id}/versions/{second_version_id}/upload",
+        content=b"uploaded through API",
+        headers={**emp_hdr, "Content-Type": "text/plain"},
+    )
+    assert uploaded.status_code == 200, uploaded.text
+    assert uploaded.json()["size"] == len(b"uploaded through API")
+    assert uploaded.json()["sha256"]
+    download = client.get(
+        f"/api/v1/content/assets/{asset_id}/download?blob_version_id={second_version_id}&proxy=true",
+        headers=emp_hdr,
+    )
+    assert download.status_code == 200, download.text
+    assert download.content == b"uploaded through API"
+
     bind_r = client.post(
         f"/api/v1/content/aliases/{alias_id}/bind",
         json={"asset_id": asset_id, "blob_version_id": version_id},

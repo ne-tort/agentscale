@@ -2,9 +2,11 @@
 
 Delivery strategy per attachment (size permitting):
 - Inlineable text (txt/md/json/code/html/docx/odt/pptx) → parsed to plain text
-  and embedded as a "Вложенные данные" fenced block in the agent prompt.
+  and embedded as a "Вложенные данные" fenced block in the agent prompt; the
+  original file is also copied to the live Pod workspace under /workspace/inbox/.
 - Inlineable tabular (csv/tsv/xlsx/xml) → converted to JSON records and
-  embedded as a "Вложенные данные" fenced block in the agent prompt.
+  embedded as a "Вложенные данные" fenced block in the agent prompt; the
+  original file is also copied to the live Pod workspace under /workspace/inbox/.
 - Images (png/jpg/jpeg/webp/gif) → forwarded to the model as vision content
   blocks (see ``images`` on the send body) AND saved to the Pod workspace
   under /workspace/inbox/ so non-vision models / re-sends still have the file.
@@ -19,8 +21,10 @@ from __future__ import annotations
 
 import base64
 import logging
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path
+from xml.etree.ElementTree import ParseError
 from typing import Any, Literal
 
 from sqlalchemy import or_, select
@@ -37,7 +41,6 @@ from prodavan.application.content.text_extract import (
     extract_text,
     is_text_extractable_filename,
 )
-from prodavan.application.pod_service.adapters.k8s.workspace_exec_cmd import build_workspace_fs_command
 from prodavan.application.pod_service.workspace_paths import normalize_workspace_path
 from prodavan.config.settings import settings
 from prodavan.core.infra.object_keys import (
@@ -138,17 +141,20 @@ def compose_agent_message(*, user_text: str, items: list[DeliveredAttachment]) -
     sections: list[str] = []
     for item in items:
         if item.kind == "inline_table" and item.markdown is not None:
-            header = f"Вложенные данные: {item.filename} ({item.note})"
+            path_hint = f" /workspace/{item.workspace_path}" if item.workspace_path else ""
+            header = f"Вложенные данные: {item.filename} ({item.note}){path_hint}"
             sections.append(f"{header}\n```\n{item.markdown}\n```")
         elif item.kind == "inline_json" and item.records is not None:
             payload = records_to_json_bytes(item.records, indent=2).decode("utf-8")
+            path_hint = f" /workspace/{item.workspace_path}" if item.workspace_path else ""
             header = (
                 f"Вложенные данные: {item.filename} "
-                f"({item.note})"
+                f"({item.note}){path_hint}"
             )
             sections.append(f"{header}\n```json\n{payload}\n```")
         elif item.kind == "inline_text" and item.text is not None:
-            header = f"Вложенные данные: {item.filename} ({item.note})"
+            path_hint = f" /workspace/{item.workspace_path}" if item.workspace_path else ""
+            header = f"Вложенные данные: {item.filename} ({item.note}){path_hint}"
             # Fenced code block with a neutral info string; the label is in the header line.
             sections.append(f"{header}\n```\n{item.text}\n```")
         elif item.kind == "image":
@@ -265,31 +271,19 @@ class AttachmentDeliveryService:
         relative_path: str,
         data: bytes,
     ) -> None:
-        if not runtime_ref or (settings.pod_runtime_mode or "stub").strip().lower() != "k8s":
+        mode = (settings.pod_runtime_mode or "stub").strip().lower()
+        # Attachments must be visible in the live workspace immediately. Use
+        # the shared workspace port so sandbox claims go through their router;
+        # direct kubectl exec is valid only for k8s mode and silently skipped
+        # every write in the product's sandbox runtime mode.
+        if not runtime_ref or mode not in {"k8s", "sandbox"}:
             return
-        from prodavan.core.infra.k8s_manager import get_k8s_manager
-        from prodavan.infrastructure.k8s.sandbox.exec import exec_in_pod
+        from prodavan.application.pod_service.factory import build_pod_workspace
 
-        mgr = get_k8s_manager()
-        if mgr is None or mgr.client is None:
-            logger.warning("attachment pod write skipped: no k8s client path=%s", relative_path)
-            return
         rel = normalize_workspace_path(relative_path)
         if not rel:
             return
-        client = mgr.client
-        result = await exec_in_pod(
-            auth=client.auth,
-            namespace=client.namespace,
-            pod_name=runtime_ref,
-            command=build_workspace_fs_command(["write", rel]),
-            stdin_data=data,
-            timeout=120.0,
-        )
-        if result.exit_code not in (0, None):
-            err = result.stderr.decode("utf-8", errors="replace")[:500]
-            logger.warning("attachment pod write failed path=%s err=%s", rel, err)
-            raise RuntimeError(err or "pod write failed")
+        await build_pod_workspace().write_bytes(runtime_ref=runtime_ref, path=rel, data=data)
 
     async def deliver_for_send(
         self,
@@ -305,6 +299,7 @@ class AttachmentDeliveryService:
         items: list[DeliveredAttachment] = []
         images: list[dict[str, str]] = []
         inline_image_slots = CHAT_IMAGE_INLINE_MAX_COUNT
+        workspace_name_counts: dict[str, int] = {}
         for ref in storage_refs:
             row, raw = await self._load_raw(
                 project_id=project_id,
@@ -313,6 +308,9 @@ class AttachmentDeliveryService:
                 employee=employee,
             )
             filename = row.filename or Path(ref).name or "attachment.bin"
+            workspace_filename = _unique_workspace_filename(
+                filename, counts=workspace_name_counts
+            )
             is_image = is_image_filename(filename)
             inline_image = bool(
                 is_image
@@ -321,11 +319,13 @@ class AttachmentDeliveryService:
             )
             delivered = await self._prepare_one(
                 filename=filename,
+                workspace_filename=workspace_filename,
                 storage_ref=row.storage_ref,
                 raw=raw,
                 workspace_key=workspace_key,
                 runtime_ref=runtime_ref,
                 inline_image=inline_image,
+                workspace_name_counts=workspace_name_counts,
             )
             items.append(delivered)
             if inline_image:
@@ -349,10 +349,12 @@ class AttachmentDeliveryService:
         self,
         *,
         filename: str,
+        workspace_filename: str,
         storage_ref: str,
         raw: bytes,
         workspace_key: str,
         runtime_ref: str | None,
+        workspace_name_counts: dict[str, int],
         inline_image: bool = False,
     ) -> DeliveredAttachment:
         # 0) Images → vision content blocks + workspace copy (never inlined
@@ -360,6 +362,7 @@ class AttachmentDeliveryService:
         if is_image_filename(filename):
             return await self._prepare_image(
                 filename=filename,
+                workspace_filename=workspace_filename,
                 storage_ref=storage_ref,
                 raw=raw,
                 workspace_key=workspace_key,
@@ -371,16 +374,19 @@ class AttachmentDeliveryService:
         if is_tabular_filename(filename):
             return await self._prepare_tabular(
                 filename=filename,
+                workspace_filename=workspace_filename,
                 storage_ref=storage_ref,
                 raw=raw,
                 workspace_key=workspace_key,
                 runtime_ref=runtime_ref,
+                workspace_name_counts=workspace_name_counts,
             )
 
         # 2) Text-like (txt/md/json/code/html/docx/odt/pptx) → inline text or workspace file.
         if is_text_extractable_filename(filename):
             return await self._prepare_text(
                 filename=filename,
+                workspace_filename=workspace_filename,
                 storage_ref=storage_ref,
                 raw=raw,
                 workspace_key=workspace_key,
@@ -390,6 +396,7 @@ class AttachmentDeliveryService:
         # 3) Everything else (binary/unknown) → workspace file.
         return await self._prepare_workspace_file(
             filename=filename,
+            workspace_filename=workspace_filename,
             storage_ref=storage_ref,
             raw=raw,
             workspace_key=workspace_key,
@@ -401,13 +408,14 @@ class AttachmentDeliveryService:
         self,
         *,
         filename: str,
+        workspace_filename: str,
         storage_ref: str,
         raw: bytes,
         workspace_key: str,
         runtime_ref: str | None,
         inline_image: bool,
     ) -> DeliveredAttachment:
-        safe_name = Path(filename).name
+        safe_name = Path(workspace_filename).name
         rel = f"inbox/{safe_name}"
         mime = row_content_type_guess(filename)
         await self._put_inbox_bytes(
@@ -416,10 +424,10 @@ class AttachmentDeliveryService:
             data=raw,
             content_type=mime,
         )
-        try:
-            await self._write_pod_file(runtime_ref=runtime_ref, relative_path=rel, data=raw)
-        except Exception:
-            logger.exception("pod write failed for %s", rel)
+        # The prompt advertises this workspace path to the agent. If the live
+        # Pod write fails, abort delivery rather than silently sending a path
+        # that the agent cannot read; the durable inbox copy remains retryable.
+        await self._write_pod_file(runtime_ref=runtime_ref, relative_path=rel, data=raw)
         if inline_image:
             note = "изображение передано модели; копия в контейнере"
         else:
@@ -441,16 +449,19 @@ class AttachmentDeliveryService:
         self,
         *,
         filename: str,
+        workspace_filename: str,
         storage_ref: str,
         raw: bytes,
         workspace_key: str,
         runtime_ref: str | None,
+        workspace_name_counts: dict[str, int],
     ) -> DeliveredAttachment:
         try:
             parsed = tabular_bytes_to_json(raw, filename=filename)
-        except ValueError as exc:
+        except (ValueError, KeyError, ParseError, zipfile.BadZipFile) as exc:
             return await self._prepare_workspace_file(
                 filename=filename,
+                workspace_filename=workspace_filename,
                 storage_ref=storage_ref,
                 raw=raw,
                 workspace_key=workspace_key,
@@ -459,20 +470,34 @@ class AttachmentDeliveryService:
             )
 
         if parsed.row_count <= CHAT_INLINE_TABULAR_ROW_LIMIT:
+            safe_name = Path(workspace_filename).name
+            rel = f"inbox/{safe_name}"
+            await self._put_inbox_bytes(
+                workspace_key=workspace_key,
+                filename=safe_name,
+                data=raw,
+                content_type=row_content_type_guess(filename),
+            )
+            await self._write_pod_file(runtime_ref=runtime_ref, relative_path=rel, data=raw)
             return DeliveredAttachment(
                 filename=filename,
                 storage_ref=storage_ref,
                 kind="inline_table",
-                workspace_path=None,
+                workspace_path=rel,
                 row_count=parsed.row_count,
                 records=parsed.records,
                 text=None,
-                note=f"таблица, {parsed.row_count} строк",
+                note=f"таблица, {parsed.row_count} строк; исходный файл /workspace/{rel}",
                 markdown=records_to_markdown_table(parsed.records, parsed.columns),
             )
 
         # Large tabular: convert to JSON file in workspace, reference by path.
-        json_name = f"{Path(filename).stem}.json"
+        # Reserve the derived name through the same allocator as originals: a
+        # report.csv plus report.json must never overwrite one another.
+        json_name = _unique_workspace_filename(
+            f"{Path(workspace_filename).stem}.json",
+            counts=workspace_name_counts,
+        )
         rel = f"inbox/{json_name}"
         json_bytes = records_to_json_bytes(parsed.records, indent=2)
         await self._put_inbox_bytes(
@@ -481,10 +506,10 @@ class AttachmentDeliveryService:
             data=json_bytes,
             content_type="application/json",
         )
-        try:
-            await self._write_pod_file(runtime_ref=runtime_ref, relative_path=rel, data=json_bytes)
-        except Exception:
-            logger.exception("pod write failed for %s", rel)
+        # The prompt advertises this workspace path to the agent. A failed hot-push
+        # would leave the agent with a path it cannot read, so fail closed while the
+        # durable object-store JSON copy remains available for retry.
+        await self._write_pod_file(runtime_ref=runtime_ref, relative_path=rel, data=json_bytes)
         return DeliveredAttachment(
             filename=filename,
             storage_ref=storage_ref,
@@ -500,6 +525,7 @@ class AttachmentDeliveryService:
         self,
         *,
         filename: str,
+        workspace_filename: str,
         storage_ref: str,
         raw: bytes,
         workspace_key: str,
@@ -507,20 +533,30 @@ class AttachmentDeliveryService:
     ) -> DeliveredAttachment:
         text = extract_text(raw, filename=filename)
         if text and len(raw) <= MAX_INLINE_TEXT_BYTES:
+            safe_name = Path(workspace_filename).name
+            rel = f"inbox/{safe_name}"
+            await self._put_inbox_bytes(
+                workspace_key=workspace_key,
+                filename=safe_name,
+                data=raw,
+                content_type=row_content_type_guess(filename),
+            )
+            await self._write_pod_file(runtime_ref=runtime_ref, relative_path=rel, data=raw)
             return DeliveredAttachment(
                 filename=filename,
                 storage_ref=storage_ref,
                 kind="inline_text",
-                workspace_path=None,
+                workspace_path=rel,
                 row_count=None,
                 records=None,
                 text=text,
-                note="парсинг в текст, встроено в сообщение",
+                note="парсинг в текст, встроено в сообщение; копия в контейнере",
             )
         # Oversized or unparseable text-like file → workspace file.
         note = "файл помещён в контейнер" if not text else "файл превышает размер инлайна, помещён в контейнер"
         return await self._prepare_workspace_file(
             filename=filename,
+            workspace_filename=workspace_filename,
             storage_ref=storage_ref,
             raw=raw,
             workspace_key=workspace_key,
@@ -532,13 +568,14 @@ class AttachmentDeliveryService:
         self,
         *,
         filename: str,
+        workspace_filename: str,
         storage_ref: str,
         raw: bytes,
         workspace_key: str,
         runtime_ref: str | None,
         note: str,
     ) -> DeliveredAttachment:
-        safe_name = Path(filename).name
+        safe_name = Path(workspace_filename).name
         rel = f"inbox/{safe_name}"
         await self._put_inbox_bytes(
             workspace_key=workspace_key,
@@ -546,10 +583,10 @@ class AttachmentDeliveryService:
             data=raw,
             content_type=row_content_type_guess(filename),
         )
-        try:
-            await self._write_pod_file(runtime_ref=runtime_ref, relative_path=rel, data=raw)
-        except Exception:
-            logger.exception("pod write failed for %s", rel)
+        # The prompt advertises this workspace path to the agent. If the live
+        # Pod write fails, abort delivery rather than silently sending a path
+        # that the agent cannot read; the durable inbox copy remains retryable.
+        await self._write_pod_file(runtime_ref=runtime_ref, relative_path=rel, data=raw)
         return DeliveredAttachment(
             filename=filename,
             storage_ref=storage_ref,
@@ -560,6 +597,23 @@ class AttachmentDeliveryService:
             text=None,
             note=f"{note}; путь /workspace/{rel}",
         )
+
+
+def _unique_workspace_filename(filename: str, *, counts: dict[str, int]) -> str:
+    """Keep attachment paths distinct, including derived filenames."""
+    safe_name = Path(filename).name or "attachment.bin"
+    if safe_name not in counts:
+        counts[safe_name] = 1
+        return safe_name
+
+    path = Path(safe_name)
+    suffix_number = 2
+    while True:
+        candidate = f"{path.stem} ({suffix_number}){path.suffix}"
+        if candidate not in counts:
+            counts[candidate] = 1
+            return candidate
+        suffix_number += 1
 
 
 def row_content_type_guess(filename: str) -> str:

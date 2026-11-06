@@ -20,6 +20,7 @@ from prodavan.api.v1 import (
     admin_search_index,
     admin_triggers,
     agent,
+    agent_runs,
     ai_keys,
     auth,
     b2b,
@@ -30,13 +31,17 @@ from prodavan.api.v1 import (
     company_modules,
     content,
     documents,
+    dynamic_apps,
     external,
+    employee_search,
     health,
     identity,
     pod_modules,
     projects,
+    resources,
     stub,
     tenant_infra,
+    web_stream,
 )
 
 router = APIRouter()
@@ -48,6 +53,7 @@ router.include_router(company_ai_keys.router)
 router.include_router(company_ai_models.router)
 router.include_router(company_containers.router)
 router.include_router(company_modules.router)
+router.include_router(dynamic_apps.router)
 router.include_router(content.router)
 router.include_router(documents.router)
 router.include_router(admin_companies.router)
@@ -71,8 +77,12 @@ router.include_router(cabinets.router)
 router.include_router(projects.cabinet_projects_router)
 router.include_router(projects.router)
 router.include_router(tenant_infra.router)
+router.include_router(web_stream.router)
+router.include_router(employee_search.router)
 router.include_router(pod_modules.router)
 router.include_router(agent.router)
+router.include_router(agent_runs.router)
 router.include_router(b2b.router)
 router.include_router(external.router)
 router.include_router(internal_pods.router)
+router.include_router(resources.router)

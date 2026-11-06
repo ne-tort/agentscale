@@ -1,0 +1,79 @@
+.auth-recovery {
+  align-items: center;
+  background: #fff8e9;
+  border: 1px solid #e9cf9a;
+  border-radius: 6px;
+  color: #4d3b1d;
+  display: flex;
+  gap: 18px;
+  justify-content: space-between;
+  margin: 18px 24px 0;
+  padding: 14px 16px;
+}
+
+.auth-recovery__copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.auth-recovery__copy strong {
+  font-size: 14px;
+}
+
+.auth-recovery__copy span {
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.auth-recovery__cause,
+.auth-recovery__action-error {
+  color: #81582a;
+  overflow-wrap: anywhere;
+}
+
+.auth-recovery__actions {
+  align-items: center;
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+}
+
+.auth-recovery__actions button {
+  background: #fff;
+  border: 1px solid #c9a45e;
+  border-radius: 4px;
+  color: #5b431e;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 8px 11px;
+}
+
+.auth-recovery__actions button:hover:not(:disabled),
+.auth-recovery__actions button:focus-visible {
+  background: #fff1cc;
+}
+
+.auth-recovery__actions .auth-recovery__primary {
+  background: #16665d;
+  border-color: #16665d;
+  color: #fff;
+}
+
+.auth-recovery__actions .auth-recovery__primary:hover:not(:disabled),
+.auth-recovery__actions .auth-recovery__primary:focus-visible {
+  background: #0f514a;
+}
+
+@media (max-width: 680px) {
+  .auth-recovery {
+    align-items: stretch;
+    flex-direction: column;
+    margin-left: 12px;
+    margin-right: 12px;
+  }
+
+  .auth-recovery__actions {
+    flex-wrap: wrap;
+  }
+}

@@ -1,0 +1,72 @@
+"""Typed equipment procurement domain foundation (migration model)."""
+
+from prodavan.domain.equipment.commands import (
+    Approval,
+    ApprovalRequirement,
+    ClassifyRequestCommand,
+    CommandActor,
+    CreateCandidateGroupCommand,
+    EquipmentCommand,
+    EquipmentCommandInput,
+    EquipmentCommandName,
+    EquipmentCommandPolicy,
+    MaterializeOffersCommand,
+    MatchKind,
+    RecalculateProcurementCommand,
+    SearchOffersCommand,
+    SelectOfferCommand,
+)
+from prodavan.domain.equipment.ports import EquipmentRepository
+from prodavan.domain.equipment.services import EquipmentIngestionService, EquipmentProcurementService
+from prodavan.domain.equipment.schemas import (
+    BudgetAllocation,
+    CandidateGroup,
+    CatalogOffer,
+    CatalogSnapshot,
+    EquipmentRequest,
+    EquipmentRequestLine,
+    IngestionRun,
+    ProcurementTender,
+)
+from prodavan.domain.equipment.types import (
+    BudgetStatus,
+    CandidateGroupStatus,
+    IngestionRunStatus,
+    OfferStatus,
+    ProcurementStatus,
+    TenderStatus,
+)
+
+__all__ = [
+    "Approval",
+    "ApprovalRequirement",
+    "ClassifyRequestCommand",
+    "CommandActor",
+    "CreateCandidateGroupCommand",
+    "EquipmentCommand",
+    "EquipmentCommandInput",
+    "EquipmentCommandName",
+    "EquipmentCommandPolicy",
+    "MaterializeOffersCommand",
+    "MatchKind",
+    "RecalculateProcurementCommand",
+    "SearchOffersCommand",
+    "SelectOfferCommand",
+    "BudgetAllocation",
+    "EquipmentIngestionService",
+    "EquipmentProcurementService",
+    "EquipmentRepository",
+    "BudgetStatus",
+    "CandidateGroup",
+    "CandidateGroupStatus",
+    "CatalogOffer",
+    "CatalogSnapshot",
+    "EquipmentRequest",
+    "EquipmentRequestLine",
+    "IngestionRun",
+    "IngestionRunStatus",
+    "OfferStatus",
+    "ProcurementStatus",
+    "ProcurementTender",
+    "TenderStatus",
+]

@@ -676,6 +676,27 @@ class AppLocalizationsEn extends AppLocalizations {
       'Metrics not yet received or unavailable';
 
   @override
+  String get metricsSeriesEmpty => 'No CPU or memory samples yet';
+
+  @override
+  String get metricsSeriesError => 'Metrics could not be loaded';
+
+  @override
+  String get metricsSeriesUnavailable => 'Metrics are not currently available';
+
+  @override
+  String get metricsSeriesCpu => 'CPU';
+
+  @override
+  String get metricsSeriesMemory => 'Memory';
+
+  @override
+  String metricsSeriesCpuValue(String value) => 'CPU $value';
+
+  @override
+  String metricsSeriesMemoryValue(String value) => 'Memory $value';
+
+  @override
   String get adminContainerLastError => 'Error';
 
   @override
@@ -1700,6 +1721,22 @@ class AppLocalizationsEn extends AppLocalizations {
   String get companyNoEmployees => 'No employees';
 
   @override
+  String get companyEmployeesTab => 'Employees';
+
+  @override
+  String get companyEmployeeRecycleBin => 'Recycle bin';
+
+  @override
+  String get companyRestoreEmployee => 'Restore employee';
+
+  @override
+  String companyRestoreEmployeeConfirm(String login) =>
+      'Restore $login? They will return as a paused employee.';
+
+  @override
+  String get companyNoDeletedEmployees => 'Recycle bin is empty';
+
+  @override
   String get companyOrgMetrics => 'Org metrics';
 
   @override
@@ -2595,7 +2632,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get projectPreviewTruncated =>
-      'Preview truncated to first 200k characters';
+      'Preview is truncated; only the first 256 KB of the file are shown.';
 
   @override
   String get projectProject => 'Project';
@@ -2761,16 +2798,32 @@ class AppLocalizationsEn extends AppLocalizations {
   String get projectWorkspaceDownloaded => 'File saved';
 
   @override
+  String projectWorkspaceDownloadTooLarge(String size, String limit) =>
+      'This file is $size, above the $limit download limit. You can still preview supported text files.';
+
+  @override
   String get projectUpdateProject => 'Update project';
 
   @override
   String get projectResetAgent => 'Reset agent';
 
   @override
+  String get projectResetWarning =>
+      'All agent sessions will be stopped, and their chat history and usage records will be permanently deleted. Workspace files and project settings will be preserved.';
+
+  @override
   String get projectConfigureBeforeLaunch => 'Select AI provider before launch';
 
   @override
   String get projectAiProviderNotSelected => 'Not selected';
+
+  @override
+  String get projectAiProviderUnavailableReselect =>
+      'Saved AI provider is unavailable. Select another provider before launch';
+
+  @override
+  String get projectAiProviderUnavailableNoOptions =>
+      'Saved AI provider is unavailable. Add an eligible provider before launch';
 
   @override
   String get projectAiKeyColumnProvider => 'Provider';
@@ -2830,6 +2883,90 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get projectModulesLabel => 'Modules';
+
+  @override
+  String get scheduleTitle => 'Schedules';
+
+  @override
+  String get scheduleAdd => 'Add schedule';
+
+  @override
+  String get scheduleDeleteConfirmTitle => 'Delete schedule?';
+
+  @override
+  String get scheduleDeleteConfirmMessage =>
+      'This schedule will be permanently deleted.';
+
+  @override
+  String get scheduleCancel => 'Cancel';
+
+  @override
+  String get scheduleDelete => 'Delete';
+
+  @override
+  String get scheduleNoSchedules => 'No schedules yet';
+
+  @override
+  String get scheduleCreate => 'Create schedule';
+
+  @override
+  String get scheduleNextRun => 'Next run';
+
+  @override
+  String get scheduleNotScheduled => 'Not scheduled';
+
+  @override
+  String get schedulePayload => 'Payload';
+
+  @override
+  String get scheduleActions => 'Schedule actions';
+
+  @override
+  String get scheduleEdit => 'Edit';
+
+  @override
+  String get scheduleEditTitle => 'Edit schedule';
+
+  @override
+  String get scheduleNew => 'New schedule';
+
+  @override
+  String get scheduleName => 'Name';
+
+  @override
+  String get scheduleCron => 'Cron expression';
+
+  @override
+  String get scheduleCronHelper => 'Five fields, e.g. 0 9 * * 1-5';
+
+  @override
+  String get scheduleTimezone => 'Timezone';
+
+  @override
+  String get scheduleTimezoneHelper =>
+      'IANA timezone, e.g. UTC or Europe/London';
+
+  @override
+  String scheduleEnabledFor(String name) => 'Enable schedule $name';
+
+  @override
+  String get schedulePayloadJson => 'Payload (JSON object)';
+
+  @override
+  String get scheduleEnabled => 'Enabled';
+
+  @override
+  String get scheduleSave => 'Save';
+
+  @override
+  String get scheduleRequired => 'Required';
+
+  @override
+  String get scheduleInvalidJson => 'Enter a valid JSON object';
+
+  @override
+  String scheduleMissedRunsWarning(int count) =>
+      'Catch-up was limited after an outage; at least $count runs were missed.';
 
   @override
   String get commonAuto => 'Auto';

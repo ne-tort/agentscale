@@ -144,6 +144,15 @@ class _ModuleShellNavPageState extends State<ModuleShellNavPage> {
             rowId: rowId,
           );
         },
+        downloadContentFn: ({
+          required String assetId,
+          String? versionId,
+          String? blobVersionId,
+        }) => api.downloadContentAsset(
+          assetId: assetId,
+          versionId: versionId,
+          blobVersionId: blobVersionId,
+        ),
         child: child,
       );
     }
@@ -182,6 +191,15 @@ class _ModuleShellNavPageState extends State<ModuleShellNavPage> {
           rowId: rowId,
         );
       },
+      downloadContentFn: ({
+        required String assetId,
+        String? versionId,
+        String? blobVersionId,
+      }) => api.downloadContentAsset(
+        assetId: assetId,
+        versionId: versionId,
+        blobVersionId: blobVersionId,
+      ),
       child: child,
     );
   }

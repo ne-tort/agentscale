@@ -22,6 +22,16 @@ async def handle_facts_envelope(envelope: EventEnvelope) -> None:
     if envelope.event_type in _POD_TYPES:
         return
     store = build_metrics_store()
-    if envelope.event_id and not await store.mark_event_processed(envelope.event_id):
+    if envelope.event_id and await store.is_event_complete(envelope.event_id):
         return
-    await MetricsCommand().ingest_envelope(envelope)
+    if envelope.event_id and not await store.claim_event(envelope.event_id):
+        raise RuntimeError(f"metrics event is already claimed: {envelope.event_id}")
+    try:
+        await MetricsCommand().ingest_envelope(envelope)
+        if envelope.event_id:
+            await store.complete_event(envelope.event_id)
+    except Exception:
+        # Release the claim so Kafka redelivery can retry the event.
+        if envelope.event_id:
+            await store.release_event_claim(envelope.event_id)
+        raise

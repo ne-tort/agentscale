@@ -1,6 +1,11 @@
 # Environment Matrix
 
-Сводная таблица переменных окружения и конфигурации по средам: **dev (WSL)**, **staging**, **prod**.
+Сводная таблица переменных окружения и конфигурации по средам: **dev (VM `www@172.31.156.203`)**, **staging**, **prod**.
+
+> Таблица — сводка; источник истины для dev — `infra/k3s/overlays/dev/patch-dev-config.yaml`
+> и `infra/k3s/base/agentscale-api/configmap.yaml`. Часть имён ресурса исторически
+> переехала `prodavan.*` → `agentscale.*` (сервисы, топики, секреты) — при расхождении
+> верить манифестам.
 
 ---
 
@@ -33,12 +38,12 @@
 | `JWT_SECRET` / `JWT_PRIVATE_KEY` | dev key | ✓ 🔒 | ✓ 🔒 | 🔒 | Token signing (legacy; OIDC uses JWKS) |
 | `AUTH_MODE` | oidc | oidc | oidc | | `test` only for pytest |
 | `KEYCLOAK_URL` | in-cluster `/auth` | ✓ | ✓ | | Admin API base |
-| `KEYCLOAK_ISSUER_URL` | public `:8089/realms/prodavan` | ✓ | ✓ | | JWT `iss` + Flutter discovery |
+| `KEYCLOAK_ISSUER_URL` | public `:8089/realms/agentscale` | ✓ | ✓ | | JWT `iss` + Flutter discovery |
 | `OIDC_JWKS_URL` | in-cluster certs | ✓ | ✓ | | API JWKS fetch (must be pod-reachable) |
 | `KEYCLOAK_INVITE_MODE` | admin | admin | admin | | `fake` only in unit tests |
-| `KEYCLOAK_ADMIN_CLIENT_ID` | prodavan-services | ✓ | ✓ | | Confidential client |
+| `KEYCLOAK_ADMIN_CLIENT_ID` | agentscale-services | ✓ | ✓ | | Confidential client |
 | `KEYCLOAK_ADMIN_CLIENT_SECRET` | ✓ 🔒 | ✓ 🔒 | ✓ 🔒 | 🔒 | Match realm client secret |
-| `CORS_ORIGINS` | localhost/8088 | staging domain | prod domain | | Flutter origins |
+| `CORS_ORIGINS` | `*` (dev за reverse-proxy с непредсказуемым origin; auth — Bearer JWT) | staging domain | prod domain | | Flutter origins |
 
 ---
 

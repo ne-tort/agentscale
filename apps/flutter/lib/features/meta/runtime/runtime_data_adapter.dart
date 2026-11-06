@@ -44,6 +44,8 @@ class RuntimeDataAdapter extends ChangeNotifier {
 
   int serverTotal(String tableSlug) => _inner.serverTotal(tableSlug);
 
+  String equipmentSearchReadiness() => _inner.equipmentSearchReadiness();
+
   String serverSearch(String tableSlug) => _inner.serverSearch(tableSlug);
 
   Future<void> setServerPage(String tableSlug, int page) =>

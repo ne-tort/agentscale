@@ -116,6 +116,43 @@ class CabinetDataController extends ChangeNotifier with ModulePickContextMixin {
 
   int serverTotal(String tableSlug) => _serverPages[tableSlug]?.total ?? 0;
 
+  /// Readiness of owner-shared equipment catalogs used by employee search.
+  /// Derived from rows loaded through the existing employee/project SoT read.
+  String equipmentSearchReadiness() {
+    final catalogs = itemsForTable('catalogs').where((item) {
+      if (!_useProjectInstance) return true;
+      final body = item['body'];
+      if (body is! Map) return false;
+      final projectIds = body['project_ids'];
+      return projectIds is! List ||
+          projectIds.isEmpty ||
+          projectIds.map((id) => id.toString()).contains(projectId);
+    }).toList();
+    if (catalogs.isEmpty) return 'no_catalogs';
+    var hasPaused = false;
+    var hasIndexing = false;
+    var hasQueued = false;
+    var hasError = false;
+    var hasReady = false;
+    for (final item in catalogs) {
+      final body = item['body'];
+      if (body is! Map) continue;
+      final status = body['status']?.toString().trim().toLowerCase();
+      final paused = body['paused'] == true;
+      if (paused) hasPaused = true;
+      if (status == 'ready' && !paused) hasReady = true;
+      if (status == 'indexing') hasIndexing = true;
+      if (status == 'queued') hasQueued = true;
+      if (status == 'error') hasError = true;
+    }
+    if (hasReady) return 'ready';
+    if (hasIndexing) return 'indexing';
+    if (hasQueued) return 'queued';
+    if (hasError) return 'error';
+    if (hasPaused) return 'paused';
+    return 'no_ready';
+  }
+
   String serverSearch(String tableSlug) => _serverPages[tableSlug]?.search ?? '';
 
   bool serverStockOnly(String tableSlug) =>
@@ -152,9 +189,238 @@ class CabinetDataController extends ChangeNotifier with ModulePickContextMixin {
     await _loadServerPage(tableSlug);
   }
 
+  Map<String, dynamic>? _employeeSearchConfig(String tableSlug) {
+    for (final view in _manifest.views) {
+      if (view['table_slug'] != tableSlug) continue;
+      final ui = view['ui_json'];
+      if (ui is Map) {
+        final config = ui['employee_search'];
+        if (config is Map) return Map<String, dynamic>.from(config);
+      }
+    }
+    // Current equipment metadata predates the employee Search Index route.
+    // Keep a client default so the employee UI can use the generic endpoint
+    // without requiring a metadata/backend migration.
+    if (tableSlug == 'equipment_search') {
+      return {
+        'namespace': 'equipment',
+        'catalog_table': 'catalogs',
+        'search_fields': ['title', 'part_number', 'brand', 'supplier'],
+        'sort': [{'src_hash': 'asc'}],
+        'stock_field': 'in_stock',
+      };
+    }
+    return null;
+  }
+
+  Future<void> _loadEmployeeSearchPage(String tableSlug, _ServerPageState state) async {
+    // catalog metadata is loaded via the existing SoT rows endpoint, not the
+    // Search Index API. Load it before deriving readiness and index names.
+    if (itemsForTable('catalogs').isEmpty &&
+        _manifest.tables.any((table) => table['slug'] == 'catalogs')) {
+      final rows = _useProjectInstance
+          ? await api.listProjectRuntimeModuleDataRows(
+              projectId: projectId!,
+              moduleId: moduleId,
+              tableSlug: 'catalogs',
+              chatsAll: true,
+            )
+          : await api.listModuleDataRows(
+              cabinetId: cabinetId,
+              moduleId: moduleId,
+              tableSlug: 'catalogs',
+              sessionId: sessionId,
+            );
+      _items.removeWhere((item) => item['table_slug'] == 'catalogs');
+      _items.addAll([
+        for (final row in rows)
+          {
+            'table_slug': 'catalogs',
+            'row_id': row['row_id'],
+            'body': row['body'] is Map
+                ? Map<String, dynamic>.from(row['body'] as Map)
+                : <String, dynamic>{},
+          },
+      ]);
+      notifyListeners();
+    }
+    final config = _employeeSearchConfig(tableSlug);
+    if (config == null) throw StateError('Employee search is not configured');
+    final namespace = config['namespace']?.toString() ?? '';
+    final index = config['index']?.toString();
+    final indexes = <String>[];
+    if (index != null && index.isNotEmpty) {
+      indexes.add(index);
+    } else {
+      final catalogTable = config['catalog_table']?.toString() ?? 'catalogs';
+      var catalogItems = itemsForTable(catalogTable);
+      if (catalogItems.isEmpty) {
+        final rows = _useProjectInstance
+            ? await api.listProjectRuntimeModuleDataRows(
+                projectId: projectId!, moduleId: moduleId, tableSlug: catalogTable)
+            : await api.listModuleDataRows(
+                cabinetId: cabinetId, moduleId: moduleId, tableSlug: catalogTable);
+        catalogItems = [
+          for (final row in rows)
+            {'row_id': row['row_id'], 'body': row['body']},
+        ];
+      }
+      for (final item in catalogItems) {
+        final body = item['body'];
+        if (body is! Map || body['status']?.toString().toLowerCase() != 'ready') continue;
+        final id = item['row_id']?.toString() ?? '';
+        final safe = id.toLowerCase().replaceAll(RegExp(r'[^a-z0-9_]+'), '_').replaceAll(RegExp(r'^_+|_+$'), '');
+        if (safe.isEmpty) continue;
+        final normalized = RegExp(r'^[a-z]').hasMatch(safe) ? safe : 'r_$safe';
+        indexes.add('c_${normalized.substring(0, normalized.length.clamp(0, 62))}');
+      }
+    }
+    if (namespace.isEmpty || indexes.isEmpty) {
+      throw StateError('No employee-search indexes are available');
+    }
+
+    final searchFields = (config['search_fields'] is List)
+        ? (config['search_fields'] as List).map((v) => v.toString()).where((v) => v.isNotEmpty).toList()
+        : const <String>[];
+    final typedQuery = _employeeSearchQuery(state.search, searchFields);
+    final configuredQuery = config['query'];
+    final query = configuredQuery is Map && typedQuery.containsKey('multi_match')
+        ? {
+            'bool': {
+              'must': [
+                Map<String, dynamic>.from(configuredQuery),
+                typedQuery,
+              ],
+            },
+          }
+        : configuredQuery is Map
+            ? Map<String, dynamic>.from(configuredQuery)
+            : typedQuery;
+    final filter = config['filter'] is Map
+        ? Map<String, dynamic>.from(config['filter'] as Map)
+        : <String, dynamic>{};
+    final stockField = config['stock_field']?.toString();
+    if (state.stockOnly && stockField != null && stockField.isNotEmpty) {
+      filter[stockField] = true;
+    }
+    final sort = config['sort'] is List
+        ? (config['sort'] as List).whereType<Map>().map((v) => Map<String, dynamic>.from(v)).toList()
+        : const <Map<String, dynamic>>[];
+    if (sort.isEmpty) throw StateError('Employee search requires deterministic sort');
+
+    final needed = state.page * state.pageSize;
+    final merged = <Map<String, dynamic>>[];
+    var total = 0;
+    for (final searchIndex in indexes.toSet()) {
+      List<dynamic>? cursor;
+      var fetched = 0;
+      while (fetched < needed) {
+        final size = (needed - fetched).clamp(1, 200).toInt();
+        final result = await api.employeeSearchQuery(
+          projectId: projectId!,
+          namespace: namespace,
+          index: searchIndex,
+          query: query,
+          filter: filter,
+          sort: sort,
+          searchAfter: cursor,
+          size: size,
+        );
+        if (fetched == 0) total += result.total;
+        merged.addAll(result.hits);
+        fetched += result.hits.length;
+        if (result.hits.length < size ||
+            result.nextSearchAfter == null ||
+            listEquals(result.nextSearchAfter, cursor)) {
+          break;
+        }
+        cursor = result.nextSearchAfter;
+      }
+    }
+    merged.sort((a, b) => _compareEmployeeSearchHits(a, b, sort));
+    state.total = total;
+    final start = (state.page - 1) * state.pageSize;
+    final pageRows = merged.skip(start).take(state.pageSize);
+    _replaceServerPage(tableSlug, pageRows.toList());
+  }
+
+  int _compareEmployeeSearchHits(
+    Map<String, dynamic> left,
+    Map<String, dynamic> right,
+    List<Map<String, dynamic>> sort,
+  ) {
+    for (final spec in sort) {
+      if (spec.isEmpty) continue;
+      final field = spec.keys.first;
+      final rawDirection = spec[field];
+      final direction = rawDirection is Map
+          ? rawDirection['order']?.toString().toLowerCase()
+          : rawDirection?.toString().toLowerCase();
+      final descending = direction == 'desc';
+      final a = left[field];
+      final b = right[field];
+      final comparison = a == b
+          ? 0
+          : a == null
+              ? -1
+              : b == null
+                  ? 1
+                  : a is num && b is num
+                      ? a.compareTo(b)
+                      : a.toString().compareTo(b.toString());
+      if (comparison != 0) return descending ? -comparison : comparison;
+    }
+    return 0;
+  }
+
+  Map<String, dynamic> _employeeSearchQuery(String search, List<String> fields) {
+    final term = search.trim();
+    if (term.isEmpty || fields.isEmpty) return {'match_all': <String, dynamic>{}};
+    return {
+      'multi_match': {
+        'query': term,
+        'fields': fields,
+        'type': 'best_fields',
+        'operator': 'and',
+      },
+    };
+  }
+
+  void _replaceServerPage(String tableSlug, List<Map<String, dynamic>> rows) {
+    final envelope = [
+      for (final row in rows)
+        {
+          'table_slug': tableSlug,
+          'row_id': row['src_hash']?.toString() ?? row['id']?.toString() ?? '${tableSlug}_${row.hashCode}',
+          'body': Map<String, dynamic>.from(row),
+        },
+    ];
+    _items.removeWhere((item) => item['table_slug'] == tableSlug);
+    _items.addAll(envelope);
+    notifyListeners();
+  }
+
   Future<void> _loadServerPage(String tableSlug) async {
     final state = _serverPages.putIfAbsent(tableSlug, _ServerPageState.new);
-    final res = _useProjectInstance
+    // equipment_search is now queried through the employee Search Index façade.
+    // Keep the older virtual-table route as a compatibility fallback for
+    // catalogs not yet represented by Search Index indexes.
+    if (_useProjectInstance && _employeeSearchConfig(tableSlug) != null) {
+      try {
+        await _loadEmployeeSearchPage(tableSlug, state);
+        return;
+      } catch (_) {
+        // Older deployments expose only the legacy module catalog endpoint.
+      }
+    }
+    // equipment_search is an indexed catalog view shared from the cabinet
+    // owner. The project runtime route exposes project rows, but does not
+    // virtualize this OpenSearch table, so keep the employee caller on the
+    // cabinet data endpoint even when the rest of the module uses a project
+    // instance. This stays within the normal employee API scope and avoids
+    // calling the pod/Bridge search route from Flutter.
+    final useCabinetSearch = tableSlug == 'equipment_search';
+    final res = _useProjectInstance && !useCabinetSearch
         ? await api.listProjectRuntimeModuleDataRowsPage(
             projectId: projectId!,
             moduleId: moduleId,

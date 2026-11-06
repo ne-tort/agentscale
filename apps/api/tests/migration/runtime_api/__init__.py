@@ -1,0 +1,1 @@
+"""MIG-RUNTIME-API-01 acceptance fixtures; execution remains frozen."""

@@ -151,6 +151,7 @@ abstract final class AppErrors {
     String? message;
     String? oauthError;
     String? oauthDescription;
+    Map? extra;
     try {
       final decoded = jsonDecode(trimmed);
       if (decoded is Map) {
@@ -160,12 +161,20 @@ abstract final class AppErrors {
         message = decoded['message'] as String?;
         oauthError = decoded['error'] as String?;
         oauthDescription = decoded['error_description'] as String?;
+        final rawExtra = decoded['extra'];
+        if (rawExtra is Map) {
+          extra = rawExtra;
+        } else if (decoded.containsKey('size') ||
+            decoded.containsKey('max_bytes')) {
+          // FastAPI may flatten AppError.extra into the response body.
+          extra = decoded;
+        }
       }
     } catch (_) {
       // Non-JSON body (proxy text, plain string).
     }
 
-    final codeMessage = _messageForCode(l10n, code);
+    final codeMessage = _messageForCode(l10n, code, extra: extra);
     final fallbackDetail = (detail ?? message ?? oauthDescription ?? '').trim();
     // Prefer specific API detail over generic UNAUTHORIZED copy (e.g. audience mismatch).
     final display = switch (code) {
@@ -175,17 +184,58 @@ abstract final class AppErrors {
         fallbackDetail,
       _ => codeMessage ?? _statusMessage(l10n, statusCode),
     };
+    final payloadExtraDiagnostic = _payloadExtraDiagnostic(extra);
     return AppErrorPresentation(
       display: display,
       diagnostic: _diagnostic(
         statusCode,
         code: code ?? oauthError,
         detail: detail ?? message ?? oauthDescription ?? title ?? trimmed,
+        extra: payloadExtraDiagnostic,
       ),
     );
   }
 
-  static String? _messageForCode(AppLocalizations l10n, String? code) {
+  static String? _workspacePayloadTooLargeMessage(
+    AppLocalizations l10n,
+    Map? extra,
+  ) {
+    final size = _positiveInt(extra?['size']);
+    final maxBytes = _positiveInt(extra?['max_bytes']);
+    if (size == null || maxBytes == null || size <= maxBytes) return null;
+    return l10n.projectWorkspaceDownloadTooLarge(
+      _formatBytes(size),
+      _formatBytes(maxBytes),
+    );
+  }
+
+  static String? _payloadExtraDiagnostic(Map? extra) {
+    final size = _positiveInt(extra?['size']);
+    final maxBytes = _positiveInt(extra?['max_bytes']);
+    if (size == null || maxBytes == null) return null;
+    return 'size=$size max_bytes=$maxBytes';
+  }
+
+  static int? _positiveInt(Object? value) {
+    if (value is int && value > 0) return value;
+    if (value is num && value.isFinite && value > 0) return value.toInt();
+    return null;
+  }
+
+  static String _formatBytes(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    if (bytes < 1024 * 1024 * 1024) {
+      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+    }
+    return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
+  }
+
+  static String? _messageForCode(
+    AppLocalizations l10n,
+    String? code, {
+    Map? extra,
+  }) {
     if (code == null || code.isEmpty) return null;
     return switch (code) {
       'KEYCLOAK_ADMIN' || 'IDENTITY_PROVIDER' => l10n.errorIdentityProvider,
@@ -221,6 +271,7 @@ abstract final class AppErrors {
       'SCHEMA_DROP_FAILED' => l10n.errorServer,
       'AUTH_MISCONFIGURED' => l10n.errorIdentityProvider,
       'ATTACHMENT_TOO_LARGE' => l10n.errorAttachmentTooLarge,
+      'PAYLOAD_TOO_LARGE' => _workspacePayloadTooLargeMessage(l10n, extra),
       'ATTACHMENT_TYPE_FORBIDDEN' || 'ATTACHMENT_TYPE' => l10n.errorAttachmentTypeForbidden,
       'ATTACHMENT_CONTENT_FORBIDDEN' => l10n.errorAttachmentContentForbidden,
       'ATTACHMENT_NOT_FOUND' => l10n.errorNotFound,
@@ -246,6 +297,7 @@ abstract final class AppErrors {
     int statusCode, {
     String? code,
     String? detail,
+    String? extra,
   }) {
     final parts = <String>['HTTP $statusCode'];
     if (code != null && code.isNotEmpty) parts.add(code);
@@ -253,6 +305,7 @@ abstract final class AppErrors {
     if (d.isNotEmpty && !_looksLikeHtml(d)) {
       parts.add(d.length > 800 ? '${d.substring(0, 800)}…' : d);
     }
+    if (extra != null && extra.isNotEmpty) parts.add(extra);
     return parts.join(' · ');
   }
 

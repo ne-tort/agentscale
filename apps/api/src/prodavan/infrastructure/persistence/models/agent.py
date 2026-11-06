@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import DateTime, ForeignKey, Integer, Numeric, String, Text, func
+from sqlalchemy import DateTime, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -78,6 +78,27 @@ class EmployeeChatPinRow(Base):
         ForeignKey("agent_sessions.id", ondelete="CASCADE"), primary_key=True
     )
     pinned_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class AgentTurnRow(Base):
+    """Durable ledger keyed by (session_id, client-generated turn_id).
+
+    Client ids only need uniqueness within a chat; the same id in another
+    session identifies an independent turn.
+    """
+
+    __tablename__ = "agent_turns"
+    __table_args__ = (
+        UniqueConstraint("session_id", "turn_id", name="uq_agent_turn_session_turn_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True, default=lambda: _id("atr"))
+    session_id: Mapped[str] = mapped_column(ForeignKey("agent_sessions.id", ondelete="CASCADE"), nullable=False)
+    turn_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    start_seq: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(24), nullable=False, default="started")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class AgentEventRow(Base):

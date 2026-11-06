@@ -1077,18 +1077,35 @@ class AiKeysService:
             kid = item.get("id")
             if isinstance(kid, str):
                 rows.append(await self._get_row(kid))
-        runtime, disabled = self._pick_runtime_rows(
-            rows, preferred_provider=preferred_provider or project.agent_provider
-        )
+        # A configured project key is a binding, not a preference. If it is
+        # no longer active/available/runtime-capable, fail closed rather than
+        # silently launching with a different provider. Otherwise model listing,
+        # materialized endpoint, and the Pod credential lease can refer to
+        # different keys.
+        runtime, disabled = self._pick_runtime_rows(rows, preferred_provider=None)
         await self._finalize_lazy_disabled(disabled)
 
         chosen: AiProviderKeyRow | None = None
         if project.resolved_ai_key_id:
-            matched = [r for r in runtime if r.id == project.resolved_ai_key_id]
-            if matched:
-                chosen = matched[0]
-        if chosen is None and runtime:
-            chosen = runtime[0]
+            chosen = next(
+                (r for r in runtime if r.id == project.resolved_ai_key_id),
+                None,
+            )
+            if chosen is None:
+                raise AppError(
+                    code="NO_AI_KEY",
+                    title="No AI key",
+                    status=404,
+                    detail="configured project AI key is no longer active, available, or runtime-capable",
+                )
+        else:
+            preferred_runtime, _ = self._pick_runtime_rows(
+                runtime, preferred_provider=preferred_provider or project.agent_provider
+            )
+            if preferred_runtime:
+                runtime = preferred_runtime
+            if runtime:
+                chosen = runtime[0]
 
         if chosen is None:
             only_cli = bool(rows) and all(r.api_kind == ApiKind.CLI_SUBSCRIPTION for r in rows)

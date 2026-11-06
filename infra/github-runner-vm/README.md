@@ -28,6 +28,7 @@
 | Flutter SDK | `/cache/flutter-sdk` (git clone stable, flock `/cache/flutter-sdk.lock`) | SDK не перекачивается |
 | Pub | `/cache/pub` (`PUB_CACHE`) | пакеты не перекачиваются |
 | pip / Poetry | `/cache/pip`, `/cache/poetry*` | python-зависимости |
+| pnpm store | `/cache/pnpm-store` (`--store-dir` в CI Web job) | зависимости `apps/web` не перекачиваются; node 22 — в `/cache/toolcache` (setup-node), pnpm активируется corepack'ом |
 | kubectl / kustomize / setup-python / setup-node | `/cache/kubectl`, `/cache/kustomize`, `/cache/toolcache` (`RUNNER_TOOL_CACHE`) | инструменты и toolcache |
 | **Docker слои + RUN cache mounts** | persistent buildx builder `agentscale-ci` (docker-container, volume `buildx_buildkit_agentscale-ci0_state`) | слои образов и `--mount=type=cache` (pip/pub внутри Dockerfile) живут между сборками; GC — 20 GiB / 7 дней (`/etc/buildkit/buildkitd.toml`, копия — `buildkitd.toml` здесь) |
 

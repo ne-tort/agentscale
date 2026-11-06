@@ -1,0 +1,27 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agentscale-api
+spec:
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: agentscale-api
+        app.kubernetes.io/name: agentscale-api
+        app.kubernetes.io/part-of: agentscale
+        app.kubernetes.io/component: api
+    spec:
+      imagePullSecrets:
+        - name: ghcr-pull
+      # Must match api container: stale migrate image → upgrade noop + schema 500s.
+      initContainers:
+        - name: migrate
+          imagePullPolicy: Always
+      containers:
+        - name: api
+          # Dev uses :latest — Always so Verify/rollout actually pull new digests.
+          imagePullPolicy: Always
+        - name: api-pod
+          # Same image as api - must not stay stale (IfNotPresent + cached :latest).
+          imagePullPolicy: Always

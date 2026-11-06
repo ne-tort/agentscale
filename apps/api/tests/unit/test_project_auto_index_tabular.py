@@ -177,7 +177,7 @@ async def test_maybe_auto_index_routes_project_rows(monkeypatch: pytest.MonkeyPa
         ]
 
     monkeypatch.setattr(executor, "_index_tabular", _fake_index)
-    monkeypatch.setattr(executor, "_list_module_rows", _fake_list)
+    monkeypatch.setattr(executor, "_list_rows_for_scope", _fake_list)
 
     await executor.maybe_auto_index_tabular(
         cabinet_id="cab_1",

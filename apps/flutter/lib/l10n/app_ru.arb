@@ -454,6 +454,27 @@
   "adminContainerMetricsCpu": "CPU",
   "adminContainerMetricsMemory": "Память",
   "adminContainerMetricsUnavailable": "Метрики ещё не получены или недоступны",
+  "metricsSeriesEmpty": "Данных CPU и памяти пока нет",
+  "metricsSeriesError": "Не удалось загрузить метрики",
+  "metricsSeriesUnavailable": "Метрики сейчас недоступны",
+  "metricsSeriesCpu": "CPU",
+  "metricsSeriesMemory": "Память",
+  "metricsSeriesCpuValue": "CPU: {value}",
+  "@metricsSeriesCpuValue": {
+    "placeholders": {
+      "value": {
+        "type": "String"
+      }
+    }
+  },
+  "metricsSeriesMemoryValue": "Память: {value}",
+  "@metricsSeriesMemoryValue": {
+    "placeholders": {
+      "value": {
+        "type": "String"
+      }
+    }
+  },
   "adminContainerLastError": "Ошибка",
   "adminContainerRuntimeNotStarted": "Pod не запущен. Стартует при первом обращении к агенту или после «Возобновить».",
   "adminContainerRuntimeNotStartedShort": "Не запущен",
@@ -1004,6 +1025,18 @@
   "companyNoAssignedEmployees": "Сотрудники не назначены",
   "companyAssignCabinetsToEmployee": "Доступ к кабинетам",
   "companyNoEmployees": "Нет сотрудников",
+  "companyEmployeesTab": "Сотрудники",
+  "companyEmployeeRecycleBin": "Корзина",
+  "companyRestoreEmployee": "Восстановить сотрудника",
+  "companyRestoreEmployeeConfirm": "Восстановить {login}? Он будет включен в список приостановленных сотрудников.",
+  "@companyRestoreEmployeeConfirm": {
+    "placeholders": {
+      "login": {
+        "type": "String"
+      }
+    }
+  },
+  "companyNoDeletedEmployees": "Корзина пуста",
   "companyOrgMetrics": "Метрики организации",
   "companyLoginId": "ID компании",
   "companyLogin": "Логин",
@@ -1558,7 +1591,7 @@
     }
   },
   "projectPreferredAgentProvider": "Провайдер AI",
-  "projectPreviewTruncated": "Превью обрезано до первых 200k символов",
+  "projectPreviewTruncated": "Превью сокращено: показаны только первые 256 КБ файла.",
   "projectProject": "Проект",
   "projectProjectName": "Название проекта",
   "projectOpenChat": "Чат",
@@ -1631,10 +1664,20 @@
   "projectWorkspacePreview": "Просмотр",
   "projectWorkspaceDownload": "Скачать",
   "projectWorkspaceDownloaded": "Файл сохранён",
+  "projectWorkspaceDownloadTooLarge": "Файл занимает {size}, что больше лимита скачивания {limit}. Поддерживаемые текстовые файлы всё ещё можно просматривать.",
+  "@projectWorkspaceDownloadTooLarge": {
+    "placeholders": {
+      "size": {"type": "String"},
+      "limit": {"type": "String"}
+    }
+  },
   "projectUpdateProject": "Обновить проект",
   "projectResetAgent": "Сбросить агента",
+  "projectResetWarning": "Все сессии агента будут остановлены, а их история диалогов и записи использования будут удалены без возможности восстановления. Файлы рабочего пространства и настройки проекта сохранятся.",
   "projectConfigureBeforeLaunch": "Укажите провайдер AI перед запуском",
   "projectAiProviderNotSelected": "Не выбран",
+  "projectAiProviderUnavailableReselect": "Сохранённый провайдер AI недоступен. Выберите другой перед запуском",
+  "projectAiProviderUnavailableNoOptions": "Сохранённый провайдер AI недоступен. Добавьте доступный провайдер перед запуском",
   "projectAiKeyColumnProvider": "Провайдер",
   "projectAiKeyColumnSubscription": "Подписка",
   "projectSelectModuleProfile": "Выбор профиля",
@@ -1654,6 +1697,35 @@
   "projectResetSuccess": "Агент сброшен",
   "projectAiKeyLabel": "AI-ключ",
   "projectModulesLabel": "Модули",
+  "scheduleTitle": "Расписания",
+  "scheduleAdd": "Добавить расписание",
+  "scheduleDeleteConfirmTitle": "Удалить расписание?",
+  "scheduleDeleteConfirmMessage": "Расписание будет удалено без возможности восстановления.",
+  "scheduleCancel": "Отмена",
+  "scheduleDelete": "Удалить",
+  "scheduleNoSchedules": "Расписаний пока нет",
+  "scheduleCreate": "Создать расписание",
+  "scheduleNextRun": "Следующий запуск",
+  "scheduleNotScheduled": "Не запланирован",
+  "schedulePayload": "Данные",
+  "scheduleActions": "Действия с расписанием",
+  "scheduleEdit": "Изменить",
+  "scheduleEditTitle": "Изменить расписание",
+  "scheduleNew": "Новое расписание",
+  "scheduleName": "Название",
+  "scheduleCron": "Cron-выражение",
+  "scheduleCronHelper": "Пять полей, например 0 9 * * 1-5",
+  "scheduleTimezone": "Часовой пояс",
+  "scheduleTimezoneHelper": "Часовой пояс IANA, например UTC или Europe/Moscow",
+  "scheduleEnabledFor": "Включить расписание «{name}»",
+  "@scheduleEnabledFor": {"placeholders": {"name": {"type": "String"}}},
+  "schedulePayloadJson": "Данные (JSON-объект)",
+  "scheduleEnabled": "Включено",
+  "scheduleSave": "Сохранить",
+  "scheduleRequired": "Обязательное поле",
+  "scheduleInvalidJson": "Введите корректный JSON-объект",
+  "scheduleMissedRunsWarning": "После сбоя восстановление ограничено: пропущено не менее {count} запусков.",
+  "@scheduleMissedRunsWarning": {"placeholders": {"count": {"type": "int"}}},
   "commonAuto": "Авто",
   "employeeContactEmail": "Email",
   "employeePassword": "Пароль",

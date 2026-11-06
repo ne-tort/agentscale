@@ -1,4 +1,9 @@
-"""AliasBindingService — temporal alias ↔ asset links."""
+"""AliasBindingService — temporal alias ↔ asset version links.
+
+A binding records *which* immutable blob version an alias pointed at and when it
+was superseded, so resolve history is evidence and is never rewritten: binding a
+new target marks the previous row ``superseded_at`` and inserts a new row.
+"""
 
 from __future__ import annotations
 
@@ -9,6 +14,16 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.application.content.access_policy import AccessPolicyService
+from prodavan.application.content.contracts import ContentErrorCode
+from prodavan.application.content.scope import (
+    ContentActorScope,
+    asset_tenant_visible,
+    alias_tenant_visible,
+    forbidden,
+    not_found,
+    resolve_actor_scope,
+)
+from prodavan.domain.content.types import AliasStatus
 from prodavan.domain.errors import AppError
 from prodavan.domain.identity import Principal
 from prodavan.infrastructure.persistence.models.content import (
@@ -20,7 +35,7 @@ from prodavan.infrastructure.persistence.models.content import (
 from prodavan.infrastructure.persistence.models.identity import EmployeeRow
 
 
-def _binding_public(row: ContentAliasBindingRow) -> dict[str, Any]:
+def binding_public(row: ContentAliasBindingRow) -> dict[str, Any]:
     return {
         "id": row.id,
         "alias_id": row.alias_id,
@@ -37,14 +52,39 @@ class AliasBindingService:
         self._session = session
         self._acl = AccessPolicyService(session)
 
+    async def _scope(
+        self,
+        *,
+        principal: Principal,
+        employee: EmployeeRow | None,
+        scope: ContentActorScope | None,
+    ) -> ContentActorScope:
+        if scope is not None:
+            return scope
+        return await resolve_actor_scope(self._session, principal=principal, employee=employee)
+
     async def get_current(self, alias_id: str) -> ContentAliasBindingRow | None:
         q = await self._session.execute(
-            select(ContentAliasBindingRow).where(
+            select(ContentAliasBindingRow)
+            .where(
                 ContentAliasBindingRow.alias_id == alias_id,
                 ContentAliasBindingRow.superseded_at.is_(None),
             )
+            .order_by(ContentAliasBindingRow.effective_at.desc())
+            .limit(1)
         )
-        return q.scalar_one_or_none()
+        return q.scalars().first()
+
+    async def _require_alias(
+        self,
+        *,
+        alias_id: str,
+        actor: ContentActorScope,
+    ) -> ContentAliasRow:
+        alias = await self._session.get(ContentAliasRow, alias_id)
+        if alias is None or not alias_tenant_visible(alias, actor):
+            raise not_found("alias not found")
+        return alias
 
     async def bind(
         self,
@@ -54,33 +94,81 @@ class AliasBindingService:
         blob_version_id: str | None,
         principal: Principal,
         employee: EmployeeRow | None,
+        scope: ContentActorScope | None = None,
     ) -> dict[str, Any]:
-        alias = await self._session.get(ContentAliasRow, alias_id)
-        if alias is None:
-            raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="alias not found")
+        actor = await self._scope(principal=principal, employee=employee, scope=scope)
+        alias = await self._require_alias(alias_id=alias_id, actor=actor)
         asset = await self._session.get(ContentAssetRow, asset_id)
-        if asset is None:
-            raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="asset not found")
-        await self._acl.require_write_alias(principal=principal, employee=employee, alias=alias)
-        await self._acl.require_read_asset(principal=principal, employee=employee, asset=asset)
+        if asset is None or not asset_tenant_visible(asset, actor):
+            raise not_found("asset not found")
+        await self._acl.require_write_alias(
+            principal=principal, employee=employee, alias=alias, scope=actor
+        )
+        if alias.status != AliasStatus.ACTIVE:
+            # Rebinding a disabled permalink would silently make it serve bytes
+            # again without the owner re-enabling it first.
+            raise AppError(
+                code=ContentErrorCode.CONFLICT,
+                title="Conflict",
+                status=409,
+                detail="alias is disabled; re-enable it before binding a version",
+                extra={"alias_id": alias_id, "status": alias.status},
+            )
+        await self._acl.require_read_asset(
+            principal=principal, employee=employee, asset=asset, scope=actor
+        )
+        # Cross-tenant binding would publish one tenant's bytes through another
+        # tenant's permalink.
+        if (
+            alias.owner_company_id
+            and asset.owner_company_id
+            and alias.owner_company_id != asset.owner_company_id
+            and not actor.is_platform_admin
+        ):
+            raise forbidden("alias and asset belong to different companies")
+
+        version: ContentBlobVersionRow | None = None
         if blob_version_id:
-            ver = await self._session.get(ContentBlobVersionRow, blob_version_id)
-            if ver is None or ver.asset_id != asset_id:
-                raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="version not found")
+            version = await self._session.get(ContentBlobVersionRow, blob_version_id)
+            if version is None or version.asset_id != asset_id:
+                raise not_found("version not found")
+            if not self._is_sealed(version):
+                raise AppError(
+                    code=ContentErrorCode.NOT_READY,
+                    title="Not Ready",
+                    status=422,
+                    detail="version bytes are not sealed; finalize it before binding",
+                )
+        else:
+            version = await self._latest_sealed_version(asset_id)
+            if version is None:
+                raise AppError(
+                    code=ContentErrorCode.NOT_READY,
+                    title="Not Ready",
+                    status=422,
+                    detail="asset has no sealed version to bind",
+                )
+
         now = datetime.now(UTC)
         current = await self.get_current(alias_id)
+        if (
+            current is not None
+            and current.asset_id == asset_id
+            and current.blob_version_id == version.id
+        ):
+            return {**binding_public(current), "replayed": True}
         if current is not None:
             current.superseded_at = now
         row = ContentAliasBindingRow(
             alias_id=alias_id,
             asset_id=asset_id,
-            blob_version_id=blob_version_id,
-            bound_by=employee.id if employee else None,
+            blob_version_id=version.id,
+            bound_by=actor.employee_id,
         )
         self._session.add(row)
         await self._session.commit()
         await self._session.refresh(row)
-        return _binding_public(row)
+        return binding_public(row)
 
     async def unbind(
         self,
@@ -88,11 +176,13 @@ class AliasBindingService:
         alias_id: str,
         principal: Principal,
         employee: EmployeeRow | None,
+        scope: ContentActorScope | None = None,
     ) -> dict[str, Any]:
-        alias = await self._session.get(ContentAliasRow, alias_id)
-        if alias is None:
-            raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="alias not found")
-        await self._acl.require_write_alias(principal=principal, employee=employee, alias=alias)
+        actor = await self._scope(principal=principal, employee=employee, scope=scope)
+        alias = await self._require_alias(alias_id=alias_id, actor=actor)
+        await self._acl.require_write_alias(
+            principal=principal, employee=employee, alias=alias, scope=actor
+        )
         current = await self.get_current(alias_id)
         if current is None:
             return {"unbound": False, "alias_id": alias_id}
@@ -100,11 +190,50 @@ class AliasBindingService:
         await self._session.commit()
         return {"unbound": True, "alias_id": alias_id, "binding_id": current.id}
 
-    async def history(self, alias_id: str, *, limit: int = 20) -> list[dict[str, Any]]:
+    async def history(
+        self,
+        alias_id: str,
+        *,
+        limit: int = 20,
+        principal: Principal | None = None,
+        employee: EmployeeRow | None = None,
+        scope: ContentActorScope | None = None,
+    ) -> list[dict[str, Any]]:
+        """Binding history, newest first.
+
+        Passing a principal enforces the alias ``write`` ACL so this evidence is
+        never readable by an unrelated tenant or an ungranted member. The alias
+        may be disabled: history is exactly what must survive ``DELETE``.
+        """
+        if principal is not None:
+            actor = await self._scope(principal=principal, employee=employee, scope=scope)
+            alias = await self._require_alias(alias_id=alias_id, actor=actor)
+            await self._acl.require_write_alias(
+                principal=principal, employee=employee, alias=alias, scope=actor
+            )
         q = await self._session.execute(
             select(ContentAliasBindingRow)
             .where(ContentAliasBindingRow.alias_id == alias_id)
-            .order_by(ContentAliasBindingRow.effective_at.desc())
+            .order_by(ContentAliasBindingRow.effective_at.desc(), ContentAliasBindingRow.id.desc())
             .limit(max(1, min(limit, 100)))
         )
-        return [_binding_public(r) for r in q.scalars().all()]
+        return [binding_public(r) for r in q.scalars().all()]
+
+    async def _latest_sealed_version(self, asset_id: str) -> ContentBlobVersionRow | None:
+        q = await self._session.execute(
+            select(ContentBlobVersionRow)
+            .where(
+                ContentBlobVersionRow.asset_id == asset_id,
+                ContentBlobVersionRow.sha256.is_not(None),
+            )
+            .order_by(ContentBlobVersionRow.version.desc())
+            .limit(1)
+        )
+        return q.scalars().first()
+
+    @staticmethod
+    def _is_sealed(version: ContentBlobVersionRow) -> bool:
+        return bool(version.sha256) or bool((version.object_metadata or {}).get("sealed"))
+
+
+__all__ = ["AliasBindingService", "binding_public"]

@@ -1,7 +1,21 @@
-# Prevent voluntary disruptions (drain, autoscaler eviction) from taking
-# the entire router fleet offline. Tune for your replica count: with N
-# replicas, minAvailable: max(1, N-1) keeps you served during single-node
-# events while still allowing node drains.
+# Router PDB — tuned for the SINGLE-NODE k3s cluster this platform runs on.
+#
+# Vendored default was `minAvailable: 1` with 2 replicas ("with N replicas,
+# minAvailable: max(1, N-1) keeps you served during single-node events while
+# still allowing node drains"). That promise is false on a 1-node cluster:
+#   - drain evicts pod A (allowed, 2→1 available); pod A goes Pending — there
+#     is no second node to reschedule to (node is cordoned);
+#   - evicting pod B would drop available to 0 < minAvailable → eviction API
+#     returns 429 forever → `kubectl drain` / node maintenance HANGS.
+# There is also nothing to protect: with one node, "keeping a replica served
+# during eviction" is impossible by definition (the node itself is the single
+# point of failure), and Deployment rollouts never consult PDBs.
+#
+# maxUnavailable: 2 (= all replicas) keeps the object for upstream parity and
+# multi-node futures while guaranteeing voluntary disruptions (drain,
+# descheduler) always complete. Contrast with base/platform/pdb.yaml, where
+# maxUnavailable: 0 is a DELIBERATE "refuse eviction of stateful brokers"
+# choice — the router is stateless, so the opposite policy is correct here.
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
@@ -11,7 +25,7 @@ metadata:
     app.kubernetes.io/name: sandbox-router
     app.kubernetes.io/component: sandbox-router
 spec:
-  minAvailable: 1
+  maxUnavailable: 2
   selector:
     matchLabels:
       app.kubernetes.io/name: sandbox-router

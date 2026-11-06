@@ -432,6 +432,20 @@ class EmployeesCommandService:
                 status=422,
                 detail="employee is not soft-deleted",
             )
+        login_owner = await self._session.execute(
+            select(EmployeeRow.id).where(
+                EmployeeRow.login == emp.login,
+                EmployeeRow.id != emp.id,
+                EmployeeRow.deleted_at.is_(None),
+            )
+        )
+        if login_owner.scalar_one_or_none() is not None:
+            raise AppError(
+                code="CONFLICT",
+                title="Conflict",
+                status=409,
+                detail="employee login is already in use; rename or remove the other employee before restoring",
+            )
         emp.deleted_at = None
         emp.status = EmployeeStatus.DISABLED
         actor = principal or Principal(sub="system")

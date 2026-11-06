@@ -1,0 +1,288 @@
+# PostgreSQL integration suite — migration concurrency (MIG-INT-PG-01)
+
+Приёмочный сьют миграционной волны, который запускается против **реального**
+PostgreSQL — и локально, и в CI (job `postgres-integration`). Baseline
+`2026-11-04`: написан под verification freeze, затем freeze снят, сьют прогнан на
+живом движке и включён в CI (MIG-CI-PG-01), чтобы больше не мог молча
+скипаться. См. «Результат прогона» и «В CI».
+
+Сьют доказывает ровно то, что нельзя доказать на моках и на SQLite: поведение
+схемы и реальных адаптеров под конкуренцией — при живых транзакциях, блокировках
+и откатах.
+
+## Что покрыто
+
+| Файл | Критерий | Суть |
+|---|---|---|
+| `test_idempotent_reservation.py` | 1 | Два запроса с одним `Idempotency-Key` → ровно один `applied`, второй — replay исходной квитанции; ноль дублей run/event/outbox/intent; отдельно форсируется гонка на PK квитанции |
+| `test_aggregate_cas_race.py` | 2 | Два перехода с одинаковым `expected_sequence` → один `applied`, один `conflict`; курсор агрегата сдвигается ровно на шаг; отдельный CAS-тест на одной строке с форсированным interleaving |
+| `test_transaction_abort.py` | 3 | Сбой записи event / outbox / intent откатывает run, курсор, событие и **квитанцию**; после снятия сбоя тот же ключ даёт `applied` |
+| `test_lease_claim.py` | 4 | Два воркера не берут один run; `FOR UPDATE SKIP LOCKED` действительно пропускает заблокированную строку; истёкший lease переиспользуется со сдвигом `lease_generation`; `retry_at` в будущем не клеймится; отсутствие курсора/рассинхрон статуса — fail-closed |
+| `test_m05_deferrable_cycle.py` | 5 | Обе стороны цикла M05 в одной транзакции проходят (в любом порядке), нарушение ловится на `COMMIT` (SQLSTATE 23503), `SET CONSTRAINTS ALL IMMEDIATE` роняет ту же вставку раньше, `pg_constraint` подтверждает `DEFERRABLE INITIALLY DEFERRED` |
+| `test_grant_partial_unique.py` | 6 | Два активных гранта с одинаковой identity невозможны (partial unique `WHERE revoked_at IS NULL`), после `revoked_at` — можно; гонка форсируется на самом индексе; индекс не «шире» identity |
+| `test_alembic_cycle.py` | 7 | `upgrade head` → `downgrade 2026110202` → `upgrade head` на чистой БД; проверяются таблицы волны, выжившие таблицы control-plane, RLS-политики и append-only триггер; плюс идемпотентность `upgrade head` и линейность цепочки ревизий |
+
+Вспомогательные модули (не тесты, а разделяемый каркас):
+
+- `conftest.py` — DSN из env, скипы, изоляция схемы на тест, `SchemaHarness`;
+- `_support.py` — `Gate`, `advisory_gate`/`hold_until_advisory`, `wait_until`,
+  `blocked_backends`, `sha256_digest`/`sha256_of_text`, `sqlstate_of`,
+  `violated_constraint`;
+- `_seeds.py` — фикстуры строк для цепочек FK (tenant anchor → M04.e definition →
+  version → M05 instance ↔ scope registry → canonical grant), run/lease/cursor,
+  и production-проводка `DurableAgentControlPlane` на конкретную схему.
+
+## Как поднять БД
+
+Нужен PostgreSQL 13+ (используются `pg_stat_activity`, `FOR UPDATE SKIP LOCKED`,
+partial unique index, deferrable composite FK, session/xact advisory locks; всё
+это есть в 13+). Сьют прогонялся на 16. Пример ниже — 16.15-alpine, **ровно тот
+образ и те же креды, что в CI** (`postgres-integration` в
+[`ci-api.yml`](../../../../../.github/workflows/ci-api.yml)), чтобы локальный и
+CI-прогон отличались только портом.
+
+```bash
+docker run -d --name pg-test \
+  -e POSTGRES_USER=test \
+  -e POSTGRES_PASSWORD=test \
+  -e POSTGRES_DB=prodavan_test \
+  -p 55432:5432 postgres:16.15-alpine
+
+docker exec pg-test pg_isready -U test -d prodavan_test
+```
+
+Одна база для сьюта (схемы создаются и удаляются автоматически) и вторая —
+**пустая** — для alembic-цикла:
+
+```bash
+docker exec pg-test createdb -U test prodavan_migrate
+
+export PRODAVAN_TEST_DATABASE_URL=postgresql+asyncpg://test:test@127.0.0.1:55432/prodavan_test
+export PRODAVAN_TEST_MIGRATION_DATABASE_URL=postgresql+asyncpg://test:test@127.0.0.1:55432/prodavan_migrate
+```
+
+Схему сьют строит сам из ORM-моделей (`Base.metadata`), как и предписывает
+[`docs/07-infrastructure/alembic.md`](../../../../../docs/07-infrastructure/alembic.md):
+модели — источник истины, ревизии — версионированный DDL.
+
+Windows: те же `export`-и заменяются на `$env:PRODAVAN_TEST_DATABASE_URL = "..."`.
+DSN принимается и в форме `postgresql://`, драйвер нормализуется к `asyncpg`.
+
+> Alembic-цикл оставляет `prodavan_migrate` на `head` и непустой. Перед повторным
+> полным прогоном её надо пересоздать, иначе два теста `test_alembic_cycle.py`
+> скипнутся (фикстура принимает только доказуемо пустую БД):
+>
+> ```bash
+> docker exec pg-test dropdb -U test prodavan_migrate
+> docker exec pg-test createdb -U test prodavan_migrate
+> ```
+>
+> В CI это делает отдельный шаг job'а (`Create empty migration-cycle database`),
+> поэтому там скипа не бывает.
+
+## Как запустить
+
+```bash
+cd apps/api
+pytest tests/migration/postgres_integration -v
+```
+
+Команда, которой проверяется приёмка (и та же, что в CI, — отличается только
+`--junitxml`):
+
+```bash
+pytest tests/migration/postgres_integration -q --no-header --strict-markers -rs
+```
+
+Только один файл / один критерий:
+
+```bash
+pytest tests/migration/postgres_integration/test_lease_claim.py -v
+pytest tests/migration/postgres_integration -k "deferrable or partial_unique" -v
+```
+
+Без `PRODAVAN_TEST_DATABASE_URL` весь каталог **скипается** с явной причиной —
+это не ошибка конфигурации, а осознанный fail-safe: сьют не имеет дефолтного
+DSN, чтобы случайно не указывать на чужую/рабочую базу. Единственное
+исключение — `test_wave_revisions_above_the_downgrade_target_form_a_linear_chain`
+в `test_alembic_cycle.py`: он читает только script-directory Alembic (никакой БД
+не требует) и потому выполняется всегда.
+
+## В CI
+
+Сьют исполняется job'ом **`postgres-integration`** (`ci-api.yml`, вызывается из
+CI Gate как часть `api`), вместе с остальными backend-тестами. Что делает job:
+
+1. поднимает `postgres:16.15-alpine` service container с healthcheck
+   `pg_isready -U test -d prodavan_test` и публикует порт `5432` контейнера на
+   **эфемерный** хост-порт: все четыре self-hosted раннера делят один docker
+   daemon (`infra/github-runner` монтирует `/var/run/docker.sock`), поэтому
+   фиксированный `5432:5432` сталкивался бы с параллельным прогоном — ровно
+   поэтому job `test` выше стартует контейнер как `-p 0:5432`;
+2. собирает DSN'ы из `PG_HOST`/`PG_PORT`/`PG_USER`/`PG_PASSWORD`: хост
+   переопределяется `PRODAVAN_CI_HOST` (Docker Desktop раннеры публикуют порт на
+   Desktop VM), по умолчанию `127.0.0.1`; `PG_PORT` берётся из
+   `docker port <service>`, если не задан явно;
+3. ждёт TCP-доступность опубликованного порта с раннера — healthcheck контейнера
+   этого не доказывает, и без шага сетевая проблема выглядела бы как 39 скипов;
+4. создаёт пустую `prodavan_migrate` (пересоздаёт, если осталась от предыдущего
+   прогона) — это то, что заставляет `test_alembic_cycle.py` исполниться;
+5. запускает `pytest tests/migration/postgres_integration -q --no-header
+   --strict-markers -rs --junitxml=...`;
+6. **падает, если сьют что-то скипнул.** `pytest` выходит с кодом 0 при полностью
+   скипнутом каталоге, а `--strict-markers` этого не меняет, поэтому отдельный шаг
+   `Assert the suite actually executed` читает JUnit-отчёт и требует
+   `skipped == 0` и `collected > 0`. Именно эта проверка превращает «сьют есть» в
+   «сьют доказал»: дефект lease store (возвращал «применено», ничего не записав)
+   виден только на живом движке.
+
+Остальные job'ы (`test` в `ci-api.yml`, nightly, e2e) по-прежнему запускают свои
+наборы без этого DSN — сьют там скипается, и это нормально: исполняет его только
+`postgres-integration`.
+
+### Изоляция и откат
+
+- Каждый тест получает свежую схему `pgint_<12 hex>`; `search_path` пинится на
+  **каждое** соединение через `server_settings`, поэтому пул (`NullPool`) не
+  может «протечь» схемой между тестами.
+- Схема дропается в teardown; если дроп не удался (утечка соединения), это
+  `warnings.warn`, а не маскировка реального падения теста.
+- `public` не трогается никогда — сьют безопасно запускать на базе, где рядом
+  живут другие артефакты, и на базе, которую используют несколько прогонов.
+- RLS-политики в схему не ставятся (`create_all` их не создаёт): иначе проверка
+  конкуренции превратилась бы в проверку политики. RLS покрыт
+  `tests/migration/rls/`.
+- Alembic-цикл — исключение: он работает в БД целиком (см. ниже), поэтому для
+  него нужна отдельная пустая база.
+
+### Детерминизм
+
+Ни одна гонка не строится через `sleep`:
+
+- `Gate` — `asyncio`-handshake между корутинами;
+- `advisory_gate` + `hold_until_advisory` — session-level advisory lock на
+  отдельном соединении и `pg_advisory_xact_lock` внутри транзакции воркера:
+  «записал, но не закоммитил» становится стабильным состоянием, а не окном
+  времени;
+- `blocked_backends` — ожидание *наблюдаемого* условия в `pg_stat_activity`
+  (`wait_event_type = 'Lock'` + фильтр по тексту запроса): тест идёт дальше ровно
+  тогда, когда второй backend реально стоит в очереди блокировки, и падает с
+  внятным сообщением, если этого не случилось.
+
+## Почему раньше не запускалось
+
+1. **Verification freeze (снят).** В `AGENTS.md` (раздел «Migration-stage work
+   protocol») были запрещены запуски тестов, сборок, компиляции, линтеров,
+   форматтеров, `alembic upgrade` и DDL к живой БД до отдельного решения о
+   снятии freeze. Приёмка этой волны писалась как артефакты и проверялась
+   рассуждением по коду и контрактам. Freeze снят — сьют запускается и зелёный
+   на живом PostgreSQL (см. «Результат прогона» ниже).
+2. **`test_alembic_cycle.py` меняет базу целиком.** `alembic/env.py` берёт URL из
+   `settings.database_url` и работает в первой схеме `search_path` — передать ему
+   одноразовую схему штатно нельзя. Поэтому фикстура `migration_database_url`
+   принимает только доказуемо пустую БД (нет `alembic_version` и **ни одной**
+   таблицы в `public`) и **скипается**, если БД не пуста. Это защита от того,
+   чтобы `downgrade 2026110202` не откатил чью-то рабочую базу. Это единственная
+   причина, по которой два теста `test_alembic_cycle.py` могут остаться
+   `skipped` — задайте `PRODAVAN_TEST_MIGRATION_DATABASE_URL` на пустую базу.
+
+## Результат прогона (MIG-PG-SUITE-01)
+
+```text
+PRODAVAN_TEST_DATABASE_URL=<pg> pytest tests/migration/postgres_integration -q
+  37 passed, 2 skipped        # 2 skipped — alembic-цикл, нужна пустая БД
+
++ PRODAVAN_TEST_MIGRATION_DATABASE_URL=<пустая БД>
+  39 passed                   # полный зелёный, ничего не скипается
+```
+
+Контрольный прогон MIG-CI-PG-01 (`postgres:16.15-alpine`, локальный контейнер на
+`55432`, креды `test/test` — те же, что в CI), команда CI без `--junitxml`:
+
+```text
+pytest tests/migration/postgres_integration -q --no-header --strict-markers -rs
+39 passed, 8 warnings in 250.49s (0:04:10)
+# JUnit-гейт: collected=39 passed=39 skipped=0 failed=0
+```
+
+## Что вскрыл реальный движок (расхождения с SQLite)
+
+До этого прогона часть `persistence`-тестов шла на SQLite, и расхождения не
+были видны. Найденное при первом живом прогоне:
+
+1. **`SqlAlchemyRunLeaseStore._session()` закрывал сессию внутри
+   `session.begin()` — и тем самым откатывал транзакцию.** Это дефект
+   *продакшна*, а не теста: `Session.close()` при активной транзакции делает
+   rollback, после чего `begin()`-блок выходит «успешно», а `UPDATE` рапортует
+   `rowcount = 1`, хотя в базу не записано ничего. Симптом на PostgreSQL —
+   «CAS прошёл, lease не появился», то есть **два воркера могли заклеймить один
+   run** (`test_two_workers_cannot_claim_the_same_run`) и «истёкший lease не
+   переиспользовался» (`generation` оставался прежним). SQLite этого не ловил,
+   потому что в тех тестах сессия не открывалась вовсе. Исправлено в
+   `lease_store.py`: `close()` вынесен за пределы `begin()`.
+2. **ORM-`default=` не является `server_default`.** `cabinet_instances.base_template`
+   и `agent_runs.attempt` объявлены `NOT NULL` с *Python*-дефолтом. Сид, который
+   пишет сырым SQL (намеренно — чтобы проверять ограничения, а не ORM-хуки),
+   обязан передавать их явно. Это дефект фикстуры.
+3. **Цепочка причин у SQLAlchemy/asyncpg глубже, чем `error.orig`.**
+   `constraint_name` живёт на внутреннем `asyncpg.exceptions.*ViolationError`,
+   который перевёрнут минимум двумя обёртками. `violated_constraint()` теперь
+   обходит `__cause__`/`__context__`, иначе проверки «какое именно ограничение
+   сработало» проходят по тексту сообщения (а он зависит от `lc_messages`).
+
+
+## Что доказывает зелёный прогон
+
+Зелёный прогон подтверждает на реальном PostgreSQL все семь свойств, а не только
+их формулировки в коде:
+
+1. **Идемпотентность выдерживает конкурентность.** Повторный `Idempotency-Key`
+   не создаёт вторую работу: второй ответ — replay той же квитанции, а число
+   событий/outbox/intent остаётся равным одному. Отдельно доказано, что
+   арбитром служит PK квитанции, а не «повезло со временем».
+2. **CAS агрегата — настоящий compare-and-set.** Один `expected_sequence`
+   расходуется один раз; проигравший получает `conflict` и не оставляет
+   частичных записей; курсор двигается только вперёд.
+3. **Атомарность транзакции реальна.** Сбой любой из записей (event, outbox,
+   intent) откатывает всё, включая квитанцию, — значит повтор с тем же ключом
+   возможен и приводит к `applied`, а не к «полу-применённому» состоянию.
+4. **Lease-контракт держит двух воркеров.** Один run — один владелец;
+   `SKIP LOCKED` пропускает, а не блокирует; истёкший lease переиспользуется с
+   новым поколением (старый воркер зафенсен); `retry_at` в будущем и отсутствие
+   committed-курсора — отказ, а не деградация.
+5. **Цикл M05 работоспособен и не ослаблен.** Обе стороны взаимных FK пишутся в
+   одной транзакции, нарушение всплывает на `COMMIT`, а не молча, и deferral
+   подтверждён в `pg_constraint`.
+6. **Partial unique грантов ведёт себя как контракт ротации.** Два активных
+   гранта невозможны, после `revoked_at` — возможны, и конкурентная вставка
+   проигрывает с 23505, не повреждая живой грант.
+7. **DDL-цепочка обратима.** `upgrade → downgrade → upgrade` даёт один и тот же
+   состав таблиц `public` до и после: таблицы волны исчезают и возвращаются,
+   таблицы `2026110202` и его append-only триггер выживают, RLS-политики
+   снимаются и ставятся снова.
+
+## Границы сьюта
+
+- Не проверяет RLS-политики (см. `tests/migration/rls/`), parity/backfill
+  (`*_parity*`), HTTP-слой (`tests/api/**`) и k8s e2e.
+- Не запускает `alembic revision --autogenerate` и `alembic check`: это отдельный
+  CI-гейт, а не предмет конкуренции.
+- `agent_run_leases` проверяется на уровне реального адаптера
+  (`SqlAlchemyRunLeaseStore` + `DurableRunLeaseManager`), а не через worker-loop:
+  сам цикл воркера покрыт `tests/migration/agent_runs_worker/`.
+
+## Известные ограничения (осознанные)
+
+- **Обратимость ревизий `2026110301`…`2026110311` проверена запуском** — на пустой
+  базе `test_upgrade_downgrade_upgrade_cycle` зелёный, то есть `downgrade()`
+  этих ревизий действительно возвращает схему. На не-пустой базе тест скипается
+  (фикстура best-effort вернёт БД на `head`), поэтому регрессию обратимости
+  увидит только прогон с `PRODAVAN_TEST_MIGRATION_DATABASE_URL`.
+- **Порог зависимостей по версии PostgreSQL.** Partial unique, deferrable
+  composite FK и `SKIP LOCKED` требуют PostgreSQL; SQLite (на котором работает
+  часть `persistence`-тестов) эти свойства не воспроизводит — поэтому сьют
+  скипается без DSN, а не подменяет БД.
+- **Один кластер/одна база на прогон.** Тесты используют `pg_stat_activity`
+  текущей БД, поэтому параллельный `pytest -n` по этому каталогу может увидеть
+  чужие backend'ы; фильтр по тексту запроса это компенсирует, но запуск в `xdist`
+  здесь не рекомендован без отдельной БД на воркер.

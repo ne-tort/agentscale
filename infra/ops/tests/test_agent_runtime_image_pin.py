@@ -3,7 +3,7 @@
 Инцидент 2026-10-22: `web.fetch` агента упирался в Qrator (401), хотя searchnet
 эту же страницу отдаёт. Причина — не код, а образ: `sandboxtemplate.yaml` и
 `configmap.yaml` пинили `929b6768cba2` (сборка от 9 окт, `web.fetch` там делает
-голый fetch на сайт), а `patch-dev.yaml` уже был обновлён на сборку с
+голый fetch на сайт), а dev-патч конфига уже был обновлён на сборку с
 прокси-веткой. Правку сделали в ОДНОМ месте из четырёх, и поды продолжали
 ходить напрямую.
 
@@ -96,7 +96,7 @@ def test_pin_has_provenance_comment() -> None:
     [
         "base/agentscale-api/configmap.yaml",
         "base/agentscale-sandboxes-ks/sandboxtemplate.yaml",
-        "overlays/dev/patch-dev.yaml",
+        "overlays/dev/patch-dev-config.yaml",
         "overlays/dev/sandboxes/probe-pod.yaml",
     ],
 )

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -337,6 +338,72 @@ async def test_iter_send_events_empty_stream_yields_error() -> None:
     assert len(events) == 1
     assert events[0].type == AgentEventType.ERROR
     assert events[0].data.get("code") == "BRIDGE_EMPTY_STREAM"
+
+
+@pytest.mark.asyncio
+async def test_cancelled_stream_posts_runtime_cancel_and_propagates_cancel() -> None:
+    """Stopping the API-owned stream asks the runtime to abort its turn."""
+    bootstrap = OpenClawBridgeBootstrap(MagicMock())
+    endpoint = RuntimeEndpoint("http://runtime:3921", {"X-Sandbox-Id": "sandbox-1"})
+    cancel_response = MagicMock(status_code=202)
+    http = MagicMock()
+    http.__aenter__ = AsyncMock(return_value=http)
+    http.__aexit__ = AsyncMock(return_value=None)
+    http.post = AsyncMock(return_value=cancel_response)
+
+    class _StreamResponse:
+        status_code = 200
+
+        def aiter_lines(self):
+            async def _gen():
+                await asyncio.Event().wait()
+                yield ""
+
+            return _gen()
+
+    class _StreamCtx:
+        async def __aenter__(self):
+            return _StreamResponse()
+
+        async def __aexit__(self, *args):
+            return None
+
+    http.stream = MagicMock(return_value=_StreamCtx())
+    with (
+        patch.object(bootstrap, "_http_client", lambda **_: http),
+        patch("prodavan.application.agent.openclaw_bridge.ensure_recent_bind", new=AsyncMock()),
+    ):
+        task = asyncio.create_task(
+            bootstrap._stream_send(
+                endpoint=endpoint,
+                project_id="project-1",
+                session_id="session-1",
+                message="hello",
+                model=None,
+            ).__anext__()
+        )
+        await asyncio.sleep(0)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    http.post.assert_awaited_once()
+    assert http.post.await_args.args[0] == "http://runtime:3921/v1/sessions/session-1/cancel"
+
+
+@pytest.mark.asyncio
+async def test_runtime_cancel_missing_endpoint_keeps_stream_close_fallback() -> None:
+    """Old runtimes without cancel preserve the documented best-effort fallback."""
+    bootstrap = OpenClawBridgeBootstrap(MagicMock())
+    endpoint = RuntimeEndpoint("http://runtime:3921")
+    response = MagicMock(status_code=404)
+    http = MagicMock()
+    http.__aenter__ = AsyncMock(return_value=http)
+    http.__aexit__ = AsyncMock(return_value=None)
+    http.post = AsyncMock(return_value=response)
+
+    with patch.object(bootstrap, "_http_client", lambda **_: http):
+        assert await bootstrap._cancel_runtime_turn(endpoint=endpoint, session_id="session-1") is False
 
 
 # ------------------------------------------- 409-hydrating (B2) + ensure_recent_bind (H2/H4)
@@ -813,3 +880,48 @@ async def test_stream_send_404_invalidates_cache_and_reresolves(
     # exactly ONE re-resolve — the fresh endpoint served the retry
     bootstrap._resolve_endpoint_for_project.assert_awaited_once()
     assert mock_http.stream.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_resolve_approval_retries_after_sandbox_re_adoption() -> None:
+    """A stale router claim must not turn a pending HITL decision into a terminal fallback."""
+    import prodavan.application.agent.openclaw_bridge as bridge_mod
+
+    session = MagicMock()
+    ep_old = RuntimeEndpoint(
+        base_url="http://router:8080",
+        headers={"X-Sandbox-Id": "sbx-old"},
+    )
+    ep_new = RuntimeEndpoint(
+        base_url="http://router:8080",
+        headers={"X-Sandbox-Id": "sbx-new"},
+    )
+    stale = MagicMock(status_code=410)
+    accepted = MagicMock(status_code=201)
+
+    mock_http = MagicMock()
+    mock_http.__aenter__ = AsyncMock(return_value=mock_http)
+    mock_http.__aexit__ = AsyncMock(return_value=None)
+    mock_http.post = AsyncMock(side_effect=[stale, accepted])
+
+    bootstrap = OpenClawBridgeBootstrap(session, http_client=lambda **_: mock_http)
+    bootstrap._resolve_endpoint_for_project = AsyncMock(side_effect=[ep_old, ep_new])
+    invalidate = AsyncMock()
+
+    with (
+        patch("prodavan.application.agent.openclaw_bridge.settings") as mock_settings,
+        patch.object(bridge_mod, "invalidate_sandbox_name_cache", invalidate),
+    ):
+        mock_settings.pod_agent_runtime_enabled = True
+        ok = await bootstrap.resolve_approval(
+            project_id="prj_1",
+            approval_id="approval-1",
+            decision="approve",
+        )
+
+    assert ok is True
+    assert mock_http.post.await_count == 2
+    assert invalidate.await_args.kwargs["sandbox_name"] == "sbx-old"
+    bootstrap._resolve_endpoint_for_project.assert_awaited_with("prj_1")
+    assert mock_http.post.await_args_list[1].kwargs["json"] == {"decision": "allow"}
+    assert mock_http.post.await_args_list[1].kwargs["headers"]["X-Sandbox-Id"] == "sbx-new"

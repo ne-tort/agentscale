@@ -49,7 +49,8 @@ class MetricsConsumerResource(LifespanResource):
                 bootstrap_servers=bootstrap,
                 client_id=f"{settings.kafka_client_id}-metrics",
                 group_id=settings.kafka_metrics_group,
-                enable_auto_commit=True,
+                # Commit only after handlers have durably applied the event.
+                enable_auto_commit=False,
                 auto_offset_reset="latest",
             )
             await consumer.start()
@@ -101,16 +102,46 @@ class MetricsConsumerResource(LifespanResource):
                                 "metrics consumer: skip bad message offset=%s",
                                 msg.offset,
                             )
+                            # A malformed record cannot be retried successfully and
+                            # must not block later metrics on this partition forever.
+                            try:
+                                from aiokafka.structs import OffsetAndMetadata
+
+                                await consumer.commit({_tp: OffsetAndMetadata(msg.offset + 1, "")})
+                            except Exception:
+                                logger.exception(
+                                    "metrics consumer: malformed message commit failed offset=%s",
+                                    msg.offset,
+                                )
+                                break
                             continue
                         try:
                             await handle_metrics_envelope(envelope)
+                            # Commit this partition through the successfully handled record.
+                            # A handler failure deliberately leaves the offset uncommitted.
+                            from aiokafka.structs import OffsetAndMetadata
+
+                            await consumer.commit({_tp: OffsetAndMetadata(msg.offset + 1, "")})
                             self._handled += 1
                         except Exception:
                             logger.exception(
-                                "metrics consumer: handle failed type=%s bus=%s",
+                                "metrics consumer: handle/commit failed type=%s bus=%s offset=%s",
                                 data.get("event_type"),
                                 data.get("bus"),
+                                msg.offset,
                             )
+                            # Rewind the in-memory position before reading again;
+                            # otherwise getmany() can move past this record and a later
+                            # commit would acknowledge the failed event too.
+                            try:
+                                consumer.seek(_tp, msg.offset)
+                            except Exception:
+                                logger.exception(
+                                    "metrics consumer: failed to rewind offset=%s",
+                                    msg.offset,
+                                )
+                            await asyncio.sleep(1.0)
+                            break
         finally:
             logger.info("metrics consumer: stopped handled=%s", self._handled)
 

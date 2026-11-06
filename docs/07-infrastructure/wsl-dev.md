@@ -1,4 +1,16 @@
-# WSL Development Environment
+# WSL Development Environment (исторический)
+
+> **WSL-контур удалён и больше не является dev-средой.**
+> Текущий dev-кластер — на выделенной VM `www@172.31.156.203`; Terraform выполняется
+> **на VM** (из `~/git/agentscale`, SSH на localhost), Windows-хост — **только клиент**
+> (SSH/scp/браузер). WSL keepalive и portproxy (2222/6443/8088/8089) больше не нужны,
+> `tools/win-wsl-*.ps1` не применяются.
+> Актуальные документы: [`runbook.md`](runbook.md) (bootstrap + полный цикл
+> «снести → поставить с нуля», §2) и
+> [`infra/terraform/environments/vm/README.md`](../../infra/terraform/environments/vm/README.md).
+>
+> Ниже сохранено **как история** WSL-контура (Kali WSL + `environments/local`);
+> команды ниже не применять к текущему кластеру.
 
 > **Dev cluster:** только GitOps — [`runbook.md`](runbook.md).  
 > Нет `docker-compose` кластера, нет k3d, нет `infra/scripts/`.  

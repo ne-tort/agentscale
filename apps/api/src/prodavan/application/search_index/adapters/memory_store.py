@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+from functools import cmp_to_key
 from typing import Any
 
 from prodavan.domain.search_index.types import (
@@ -21,6 +22,16 @@ def _match_filter(doc: dict[str, Any], filt: dict[str, Any] | None) -> bool:
     if not filt:
         return True
     for key, want in filt.items():
+        if key == "__project_scope__" and isinstance(want, dict):
+            project_id = str(want.get("project_id") or "").strip()
+            actual_project_id = doc.get("project_id")
+            if project_id and actual_project_id != project_id:
+                if not (want.get("include_unscoped") and actual_project_id is None):
+                    return False
+            requested_project_id = want.get("requested_project_id")
+            if requested_project_id is not None and actual_project_id != requested_project_id:
+                return False
+            continue
         if doc.get(key) != want:
             return False
     return True
@@ -167,23 +178,65 @@ class InMemorySearchIndexStore:
         search_after: list[Any] | None = None,
     ) -> SearchResult:
         _ = query
-        _ = sort
-        if search_after:
-            # In-memory store has no sort values: a cursor page is empty
-            # (cursor iteration terminates immediately).
-            return SearchResult(hits=[], total=0, took_ms=0)
         matched = [
             (doc_id, doc)
             for doc_id, doc in self._bucket(namespace, index).items()
             if _match_filter(doc, filter)
         ]
+        sort_fields = list(sort or [{"_id": "asc"}])
+
+        def _sort_value(doc_id: str, doc: dict[str, Any], spec: dict[str, Any]) -> Any:
+            field = next(iter(spec), "_id")
+            return doc_id if field == "_id" else doc.get(field)
+
+        def _compare(left: tuple[str, dict[str, Any]], right: tuple[str, dict[str, Any]]) -> int:
+            for spec in sort_fields:
+                field = next(iter(spec), "_id")
+                direction_raw = spec.get(field, "asc") if isinstance(spec, dict) else "asc"
+                direction = direction_raw.get("order", "asc") if isinstance(direction_raw, dict) else direction_raw
+                a, b = _sort_value(*left, spec), _sort_value(*right, spec)
+                if a == b:
+                    continue
+                result = -1 if a is None else 1 if b is None else (-1 if a < b else 1)
+                return -result if direction == "desc" else result
+            return 0
+
+        matched.sort(key=cmp_to_key(_compare))
         total = len(matched)
+        if search_after:
+            # Search cursor values are aligned with the requested sort fields.
+            def _after(item: tuple[str, dict[str, Any]]) -> bool:
+                values = [_sort_value(*item, spec) for spec in sort_fields]
+                for value, cursor, spec in zip(values, search_after, sort_fields):
+                    if value == cursor:
+                        continue
+                    field = next(iter(spec), "_id")
+                    direction_raw = spec.get(field, "asc") if isinstance(spec, dict) else "asc"
+                    direction = direction_raw.get("order", "asc") if isinstance(direction_raw, dict) else direction_raw
+                    if value is None:
+                        return direction == "desc"
+                    if cursor is None:
+                        return direction != "desc"
+                    return value < cursor if direction == "desc" else value > cursor
+                return False
+            matched = [item for item in matched if _after(item)]
+            from_ = 0
         sliced = matched[from_ : from_ + size]
         hits = [
-            SearchHit(doc_id=doc_id, score=1.0, source=copy.deepcopy(doc))
+            SearchHit(
+                doc_id=doc_id,
+                score=1.0,
+                source=copy.deepcopy(doc),
+                sort=[_sort_value(doc_id, doc, spec) for spec in sort_fields],
+            )
             for doc_id, doc in sliced
         ]
-        return SearchResult(hits=hits, total=total, took_ms=0)
+        return SearchResult(
+            hits=hits,
+            total=total,
+            took_ms=0,
+            next_search_after=hits[-1].sort if hits and sort else None,
+        )
 
     async def count(
         self,

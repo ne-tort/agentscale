@@ -1,0 +1,13 @@
+{
+  "source_kind": "imap",
+  "message_id": "<offer-2026-01-15@example.test>",
+  "mailbox": "INBOX",
+  "subject": "Price offer",
+  "attachments": [
+    {
+      "filename": "offer.csv",
+      "media_type": "text/csv",
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  ]
+}

@@ -104,14 +104,34 @@ class SearchIndexService:
         cabinet_id: str | None = None,
         project_id: str | None = None,
         extra: dict[str, Any] | None = None,
+        include_unscoped_project_docs: bool = False,
     ) -> dict[str, Any]:
         filt = dict(extra or {})
+        # These constraints are authoritative tenancy boundaries. User-provided
+        # filters may narrow the result, but must never replace the Bridge scope.
         if namespace not in PLATFORM_NAMESPACES and company_id:
             filt["company_id"] = company_id
-        if cabinet_id:
-            filt.setdefault("cabinet_id", cabinet_id)
+        if cabinet_id and not (project_id and include_unscoped_project_docs):
+            filt["cabinet_id"] = cabinet_id
         if project_id:
-            filt.setdefault("project_id", project_id)
+            # Project-bound queries may also read owner-level documents. Owner
+            # module indexing intentionally leaves project_id unset for rows
+            # shared by every project in the company; keep the project match
+            # authoritative while allowing only that unscoped company row.
+            requested_project_id = filt.pop("project_id", None)
+            # Both branches go through ``__project_scope__`` so an explicit
+            # caller project filter stays *conjunctive*: it can narrow the
+            # authoritative project scope but never replace it. Assigning
+            # ``filt["project_id"]`` directly let a caller-supplied
+            # ``filter={"project_id": <other project>}`` read another project's
+            # documents.
+            filt["__project_scope__"] = {
+                "project_id": project_id,
+                "include_unscoped": bool(
+                    include_unscoped_project_docs and requested_project_id is None
+                ),
+                "requested_project_id": requested_project_id,
+            }
         return filt
 
     async def ensure_index(
@@ -459,11 +479,34 @@ class SearchIndexService:
         filter: dict[str, Any] | None = None,
         session: AsyncSession | None = None,
         apply_tenant_filter: bool = True,
+        include_unscoped_project_docs: bool = False,
         sort: list[dict[str, Any]] | None = None,
         search_after: list[Any] | None = None,
     ) -> SearchResult:
         ns, idx = self._resolve_ns_idx(namespace, index)
         cid = self._require_tenancy(namespace=ns, company_id=company_id)
+        if search_after is not None:
+            if int(from_) != 0:
+                raise AppError(
+                    code="VALIDATION_ERROR",
+                    title="Validation Error",
+                    status=422,
+                    detail="from must be zero when search_after is supplied",
+                )
+            if not sort:
+                raise AppError(
+                    code="VALIDATION_ERROR",
+                    title="Validation Error",
+                    status=422,
+                    detail="sort is required when search_after is supplied",
+                )
+            if not search_after or len(search_after) != len(sort):
+                raise AppError(
+                    code="VALIDATION_ERROR",
+                    title="Validation Error",
+                    status=422,
+                    detail="search_after must contain one value for each sort field",
+                )
         lim = DEFAULT_SEARCH_SIZE if size is None else int(size)
         lim = max(1, min(lim, MAX_SEARCH_SIZE))
         skip = max(0, int(from_))
@@ -473,6 +516,9 @@ class SearchIndexService:
             cabinet_id=cabinet_id if apply_tenant_filter else None,
             project_id=project_id if apply_tenant_filter else None,
             extra=filter,
+            include_unscoped_project_docs=(
+                include_unscoped_project_docs and apply_tenant_filter
+            ),
         )
         result = await self._store.search(
             namespace=ns,

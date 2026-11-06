@@ -50,6 +50,7 @@ class _CabinetShellState extends State<CabinetShell> {
   bool _subpageOpen = false;
   bool _chatOpen = false;
   bool _navLoading = true;
+  int _navRequestGeneration = 0;
   List<CabinetNavEntry> _railEntries = const [];
   List<CabinetNavEntry> _managementEntries = const [];
   List<CabinetNavEntry> _dataEntries = const [];
@@ -66,8 +67,21 @@ class _CabinetShellState extends State<CabinetShell> {
   /// Debounce for [onChatActivityChanged] reloads (turn-completion refresh).
   Timer? _sidebarRefreshDebounce;
 
-  bool get _showManagement => _managementEntries.isNotEmpty;
-  bool get _showData => _dataEntries.isNotEmpty;
+  bool get _hasActiveChat =>
+      workContext.selectedSessionId?.trim().isNotEmpty == true;
+
+  List<CabinetNavEntry> get _visibleManagementEntries => [
+    for (final entry in _managementEntries)
+      if (!entry.requiresActiveChat || _hasActiveChat) entry,
+  ];
+
+  List<CabinetNavEntry> get _visibleDataEntries => [
+    for (final entry in _dataEntries)
+      if (!entry.requiresActiveChat || _hasActiveChat) entry,
+  ];
+
+  bool get _showManagement => _visibleManagementEntries.isNotEmpty;
+  bool get _showData => _visibleDataEntries.isNotEmpty;
 
   int get _managementContentIndex => _projectsIndex + 1 + _railEntries.length;
   int get _dataContentIndex =>
@@ -152,6 +166,10 @@ class _CabinetShellState extends State<CabinetShell> {
   }
 
   Future<void> _loadNav() async {
+    // Selection/lifecycle can trigger overlapping fetches. Only the newest
+    // request may publish entries: otherwise a slow response for the previous
+    // project can overwrite the active project's hub/module destinations.
+    final requestGeneration = ++_navRequestGeneration;
     // Never flip _navLoading back to true after first paint — that replaces the
     // body Stack with a spinner and disposes the chat Navigator (kicks user out
     // of wake/resume). Soft-refresh rail entries in place.
@@ -160,20 +178,28 @@ class _CabinetShellState extends State<CabinetShell> {
         widget.cabinetId,
         projectId: workContext.selectedProjectId,
       );
-      if (!mounted) return;
+      if (!mounted || requestGeneration != _navRequestGeneration) return;
+      final wasSettings = _contentIndex == _settingsIndex;
+      final previousContentIndex = _contentIndex;
       setState(() {
         _railEntries = bundle.rail;
         _managementEntries = bundle.management;
         _dataEntries = bundle.data;
         _navLoading = false;
-        // Preserve underlying branch while chat overlay is open.
-        if (!_chatOpen && _contentIndex > _settingsIndex) {
-          _contentIndex = _overviewIndex;
-          _railSelected = null;
+        // Preserve settings when dynamic destinations change its index. If a
+        // selected hub disappeared (for example after losing its active chat),
+        // reset to overview instead of showing a different branch at its index.
+        if (!_chatOpen) {
+          if (wasSettings) {
+            _contentIndex = _settingsIndex;
+          } else if (previousContentIndex >= _settingsIndex) {
+            _contentIndex = _overviewIndex;
+            _railSelected = null;
+          }
         }
       });
     } catch (_) {
-      if (!mounted) return;
+      if (!mounted || requestGeneration != _navRequestGeneration) return;
       setState(() {
         _railEntries = const [];
         _managementEntries = const [];
@@ -698,7 +724,7 @@ class _CabinetShellState extends State<CabinetShell> {
                   cabinetId: widget.cabinetId,
                   projectId: workContext.selectedProjectId,
                   sessionId: workContext.selectedSessionId,
-                  entries: _managementEntries,
+                  entries: _visibleManagementEntries,
                 ),
               ),
             if (_showData)
@@ -710,7 +736,7 @@ class _CabinetShellState extends State<CabinetShell> {
                   cabinetId: widget.cabinetId,
                   projectId: workContext.selectedProjectId,
                   sessionId: workContext.selectedSessionId,
-                  entries: _dataEntries,
+                  entries: _visibleDataEntries,
                 ),
               ),
             EmployeeSettingsBody(

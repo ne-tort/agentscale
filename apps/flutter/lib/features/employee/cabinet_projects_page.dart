@@ -192,7 +192,9 @@ class _CabinetProjectsPageState extends State<CabinetProjectsPage> {
       return context.appColors.danger;
     }
     if (id != null &&
-        (appJobStore.isLifecycleActive(id) || containerIsInFlight(project))) {
+        (appJobStore.isLifecycleActive(id) ||
+            containerIsInFlight(project) ||
+            containerIsPaused(project))) {
       return context.appColors.warning;
     }
     if (selected &&

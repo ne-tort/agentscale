@@ -14,11 +14,16 @@ from unittest.mock import AsyncMock
 import pytest
 
 from prodavan.api.v1.content import _download_response
+from prodavan.application.content.download_service import DownloadTarget
 
 
 @pytest.mark.asyncio
 async def test_download_response_redirects_when_presigned() -> None:
-    target = SimpleNamespace(url="http://blob/presigned?sig=1", storage_key="blobs/k1")
+    # ``_download_response`` consumes a ``DownloadTarget``; every field other
+    # than url/storage_key/content_type defaults to None there. The earlier
+    # ad-hoc ``SimpleNamespace`` fixtures omitted ``filename``/``sha256``/``size``
+    # and modelled a target the service cannot produce.
+    target = DownloadTarget(url="http://blob/presigned?sig=1", storage_key="blobs/k1", content_type=None)
     res = await _download_response(target)
     assert res.status_code == 302
     assert res.headers["location"].startswith("http://blob/presigned")
@@ -26,7 +31,7 @@ async def test_download_response_redirects_when_presigned() -> None:
 
 @pytest.mark.asyncio
 async def test_download_response_proxy_streams_bytes(monkeypatch) -> None:
-    target = SimpleNamespace(
+    target = DownloadTarget(
         url="http://blob/presigned?sig=1",
         storage_key="blobs/k1",
         content_type="application/pdf",
@@ -44,7 +49,7 @@ async def test_download_response_proxy_streams_bytes(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_download_response_local_store_streams(monkeypatch) -> None:
-    target = SimpleNamespace(url=None, storage_key="blobs/k2", content_type=None)
+    target = DownloadTarget(url=None, storage_key="blobs/k2", content_type=None)
     import prodavan.api.v1.content as content_mod
 
     store = SimpleNamespace(get_bytes=AsyncMock(return_value=b"xlsx-bytes"))

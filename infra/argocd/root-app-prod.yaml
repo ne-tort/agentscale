@@ -2,7 +2,10 @@
 # agentscale-prod) — dev/e2e apps stay out of a dedicated prod host.
 # Applied by Terraform gitops_bootstrap when gitops_apps = "prod".
 # Requires apps/ to be a PLAIN directory (no kustomization.yaml) — Argo then
-# honours spec.source.directory.include.
+# honours spec.source.directory.include. The include value is a SINGLE glob
+# (gobwas/glob via argo-cd util/glob): `{a,b}` alternatives are supported and
+# matched against paths relative to apps/ (verified against v2.13.3 source,
+# reposerver getPotentiallyValidManifestFile). Do not split it into a list.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:

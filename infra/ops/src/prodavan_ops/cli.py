@@ -6,7 +6,12 @@ from prodavan_ops import __version__
 from prodavan_ops.dns_check import REQUIRED_HOSTS, check_dns
 from prodavan_ops.e2e import cleanup_e2e, run_e2e
 from prodavan_ops.heal import heal_cluster
-from prodavan_ops.k8s import assert_kubeconfig_docker_ready, rollout_restart, wait_argo_app
+from prodavan_ops.k8s import (
+    DEPLOYMENT_TARGETS,
+    assert_kubeconfig_docker_ready,
+    rollout_restart,
+    wait_argo_app,
+)
 from prodavan_ops.smoke import smoke
 from prodavan_ops.validate import validate_all
 
@@ -51,13 +56,21 @@ def rollout_cmd(
     """Restart first-party Deployments so :latest+Always re-pulls after CI Images.
 
     By default restarts all DEPLOYMENT_TARGETS (agentscale-dev: api/web/
-    celery-worker/celery-beat/celery-indexer; agentscale-dev-sandboxes:
-    agentscale-probe-pod). Pass --namespace to restrict to a single namespace's
-    first-party deployments.
+    celery-worker/celery-beat/celery-indexer/searchnet; agentscale-dev-sandboxes:
+    agentscale-probe-pod). Pass --namespace to restrict to that namespace's
+    known targets — not to the agentscale-dev list, which would 404-skip in
+    agentscale-dev-sandboxes and silently restart nothing.
     """
     assert_kubeconfig_docker_ready()
     if namespace is not None:
-        rollout_restart(namespace=namespace, deployments=FIRST_PARTY_DEPLOYMENTS, timeout_sec=timeout)
+        targets = tuple(name for name, ns in DEPLOYMENT_TARGETS if ns == namespace)
+        if not targets:
+            raise typer.BadParameter(
+                f"нет известных rollout-целей в namespace {namespace}; "
+                f"известны: {sorted({ns for _n, ns in DEPLOYMENT_TARGETS})}",
+                param_hint="--namespace",
+            )
+        rollout_restart(namespace=namespace, deployments=targets, timeout_sec=timeout)
     else:
         rollout_restart(timeout_sec=timeout)
 
@@ -73,7 +86,9 @@ def smoke_cmd(
 
 @app.command("dns-check")
 def dns_check_cmd(
-    namespace: str = typer.Option("agentscale", "--namespace", help="Namespace с Running-подом"),
+    namespace: str | None = typer.Option(
+        None, "--namespace", help="Namespace с Running-подом (по умолчанию: dev, затем prod)"
+    ),
     pod: str | None = typer.Option(None, "--pod", help="Pod[/container]; по умолчанию первый Running"),
     host: list[str] = typer.Option(
         None, "--host", help="Имя для проверки (можно несколько); по умолчанию github.com, auth.x.ai"

@@ -143,3 +143,31 @@ ORM-модель → autogenerate в PR → CI (upgrade + alembic check) → mer
 - Ответы — на русском, если не сказано иное.
 - Новые продуктовые требования — только в `docs/PRODUCT.md` (as-built — `12-layer-docs`).
 - Infra не ломать без явной задачи; не добавлять bash.
+
+## Migration-stage work protocol (current override)
+
+These rules apply to the long-running migration in `migration/agent-sandbox` / `wt-migration` and override generic workflow preferences for this stage.
+
+### Subagents first, continuously
+
+1. Work must be organized through subagents whenever the task can be delegated. Use up to 8 concurrent active subagent slots.
+2. Keep work flowing: when a subagent finishes and there is remaining work, start the next independent task immediately. Do not wait for a whole wave to finish and do not close waves before starting available work.
+3. Subagents are autonomous. Give each a self-contained task and let it report or trigger the parent when done. Do not repeatedly poll agents, wait for report files, or send progress chatter while they are working.
+4. If an agent stops without a report, first send exactly `Продолжи` in the same session. Create a replacement only when the original agent is genuinely dead and does not respond.
+5. Preserve task context and file boundaries in every delegation. Subagents may write implementation reports and work on assigned code, but must not undo other agents' changes.
+6. Every subagent task prompt must explicitly require a final report to the parent agent via `send_message` and nowhere else. A normal final chat answer is not a parent report and does not satisfy this rule. The report must state what was inspected or changed, files touched, unresolved risks/blockers, and whether tests/build/lint/compile/git checks were intentionally not run. A subagent must send this report even when it made no changes or could not complete the task; never finish silently or report only into an unmonitored location.
+7. Never call the goal/status inspection tool (`get_goal`) during migration rounds; the current goal is durable and its status must not be polled.
+8. Never poll or inspect subagent status (`list_agents`, equivalent status checks, or repeated waiting calls). Subagents are autonomous: sleep/continue useful work immediately after delegation and rely on their completion trigger/report. If a completion trigger arrives, immediately fill the freed slot with the next backlog task; do not wait for a wave, status refresh, or manual nudge. Keep all 8 slots occupied whenever backlog remains.
+
+### Verification freeze
+
+1. During migration, write high-quality tests and acceptance checks as part of the implementation, but do not execute backend tests, frontend tests, builds, compilation, lint, formatting, git status/diff checks, or other formal verification commands.
+2. Test execution and formal verification are postponed until the entire migration is implemented and reviewed multiple times, followed by an explicit decision to start verification.
+3. Reason about behavior from code, contracts, and written acceptance criteria during this freeze. Do not add formal tool runs merely for process hygiene.
+
+### Shared commits and delivery
+
+1. Because multiple subagents work in parallel, do not spend migration time splitting commits or performing commit hygiene. When a checkpoint is needed, it is acceptable to stage the accumulated work with `git add -A`, create one checkpoint commit, and push it to the migration branch.
+2. Never stage secrets, `.env` files, generated build output, or unrelated repository material intentionally. The shared-commit rule does not authorize destructive cleanup of changes made by other agents.
+3. Do not push migration changes to `main`, dev, or prod. Push/checkpoint only on `migration/agent-sandbox` unless the user explicitly changes this rule.
+4. Do not stop migration work merely because a checkpoint commit or push is pending; continue with the next available subagent task.

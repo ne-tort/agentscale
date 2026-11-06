@@ -108,8 +108,14 @@ def main() -> None:
             "install -o runner -g runner -m 600 /tmp/prodavan-dev.yaml "
             "/home/runner/.kube/prodavan-dev.yaml"
         )
-        print("==> kubeconfig -> /home/runner/.kube/prodavan-dev.yaml "
-              "(server host.docker.internal, resolved via /etc/hosts)")
+        print("==> kubeconfig -> /home/runner/.kube/prodavan-dev.yaml")
+    # NOTE: this /tmp copy is bootstrap-only convenience (a fresh VM provisioned
+    # BEFORE the cluster exists). The live source of truth is Terraform: the
+    # k3s-dev-host module installs /etc/rancher/k3s/k3s.yaml to
+    # runner_kubeconfig_path (/home/runner/.kube/prodavan-dev.yaml, server
+    # https://127.0.0.1:6443) on EVERY cluster (re)install and removes the stale
+    # file on destroy — so Verify Dev survives a clean cluster reinstall without
+    # re-running this script. See infra/terraform/modules/k3s-dev-host/main.tf.
 
     for i in range(1, 6):
         install_runner(

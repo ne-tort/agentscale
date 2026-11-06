@@ -27,6 +27,22 @@ patches:
     target:
       kind: StatefulSet
       name: argocd-application-controller
+  # The three upstream workloads still shipping imagePullPolicy: Always
+  # (redis from docker.io, dex from ghcr.io, notifications from quay.io).
+  # All tags are public + immutable → IfNotPresent on every argocd workload,
+  # so pod restarts never depend on registry availability/rate-limits.
+  - path: patch-pull-policy-redis.yaml
+    target:
+      kind: Deployment
+      name: argocd-redis
+  - path: patch-pull-policy-dex.yaml
+    target:
+      kind: Deployment
+      name: argocd-dex-server
+  - path: patch-pull-policy-notifications.yaml
+    target:
+      kind: Deployment
+      name: argocd-notifications-controller
   - path: patch-argocd-cm-health.yaml
     target:
       kind: ConfigMap

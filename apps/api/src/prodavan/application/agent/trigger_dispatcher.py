@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import json
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.application.admin.subscription_gate import CompanySubscriptionGate
 from prodavan.application.agent.session_service import AgentSessionService
 from prodavan.application.pod_service import PodCommand
+from prodavan.application.pod_service.ports.pod_runtime import PodRuntimePort
 from prodavan.application.project_service import ProjectAccessPolicy
 from prodavan.application.projects.trigger_service import ProjectTriggerService
 from prodavan.domain.agent import PLATFORM_EVENT_USER_MESSAGE, AgentSessionStatus
@@ -21,18 +24,25 @@ from prodavan.infrastructure.persistence.models.projects import ProjectTriggerRo
 _DEFAULT_DRAIN_MAX = 10
 _HARD_DRAIN_MAX = 50
 
-# Kinds that only need queue ack until a real handler exists (cabinet SPI / cron).
-_ACK_ONLY_KINDS = frozenset({"project.prepare", "system.schedule", "webhook.http"})
+# Lifecycle-only triggers do not represent work for the agent runtime.
+_ACK_ONLY_KINDS = frozenset({"project.prepare"})
+# Event triggers execute in the project agent, with their complete payload in context.
+_RUNTIME_EVENT_KINDS = frozenset({"system.schedule", "webhook.http"})
 
 
 class AgentTriggerDispatcher:
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(self, session: AsyncSession, *, runtime: PodRuntimePort | None = None) -> None:
         self._session = session
         self._sessions = AgentSessionService(session)
         self._projects = ProjectAccessPolicy(session)
         self._subscription = CompanySubscriptionGate(session)
         self._triggers = ProjectTriggerService(session)
-        self._pods = PodCommand(session)
+        # Reuse the caller's runtime when one is injected (reconcile holds an
+        # explicit adapter): deriving a second adapter from global settings here
+        # would dispatch through a different backend than the caller reconciles
+        # against, and would fail outright where settings name a runtime whose
+        # client is unavailable.
+        self._pods = PodCommand(session, runtime=runtime)
 
     async def dispatch_next(
         self,
@@ -331,7 +341,12 @@ class AgentTriggerDispatcher:
         payload = trigger.payload or {}
 
         try:
-            if trigger.kind in {"chat.message", "telegram.message", "chat.regenerate"}:
+            if trigger.kind in {
+                "chat.message",
+                "telegram.message",
+                "chat.regenerate",
+                *_RUNTIME_EVENT_KINDS,
+            }:
                 project = await self._projects.get_project(project_id)
                 if project.status == ProjectStatus.DRAFT:
                     return await self._finish_hard_fail(trigger, "project_not_launched")
@@ -340,6 +355,26 @@ class AgentTriggerDispatcher:
                 if await PodQuery(self._session).get_for_project(project_id) is None:
                     return await self._finish_hard_fail(trigger, "project_not_launched")
                 await self._pods.ensure_running_for_project(project_id, principal=principal)
+
+            if trigger.kind in _RUNTIME_EVENT_KINDS:
+                event_json = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
+                text = (
+                    f"Событие автоматизации `{trigger.kind}`. "
+                    "Обработай входные данные как задачу проекта. "
+                    "Данные события (JSON):\n"
+                    f"```json\n{event_json}\n```"
+                )
+                result = await self._run_chat_turn(
+                    project_id=project_id,
+                    principal=principal,
+                    employee=employee,
+                    text=text,
+                    attachment_refs=[],
+                )
+                return await self._finish_ok(
+                    trigger,
+                    {"action": f"run_{trigger.kind}", "run": result},
+                )
 
             if trigger.kind in {"chat.message", "telegram.message"}:
                 text = str(payload.get("text") or "")

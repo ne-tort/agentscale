@@ -11,6 +11,7 @@ from typing import Any
 from uuid import uuid4
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.application.admin.company_service import AdminCompanyService
@@ -71,7 +72,12 @@ from prodavan.domain.errors import AppError
 from prodavan.domain.identity import Principal
 from prodavan.domain.projects import CHAT_MAX_ATTACHMENTS_PER_MESSAGE, CHAT_MAX_MESSAGE_CHARS
 from prodavan.domain.projects.chat_error_policy import policy_to_send_fields
-from prodavan.infrastructure.persistence.models.agent import AgentEventRow, AgentSessionRow, AgentUsageRow
+from prodavan.infrastructure.persistence.models.agent import (
+    AgentEventRow,
+    AgentSessionRow,
+    AgentTurnRow,
+    AgentUsageRow,
+)
 from prodavan.infrastructure.persistence.models.identity import EmployeeRow
 from prodavan.infrastructure.persistence.models.modules import ModuleInstanceDataRow
 from prodavan.infrastructure.persistence.models.projects import ProjectRow
@@ -800,6 +806,7 @@ class AgentSessionService:
         employee: EmployeeRow | None,
         model: str | None = None,
         stall_retry: bool = False,
+        turn_id: str | None = None,
     ) -> AsyncIterator[dict]:
         project = await self._projects.require_access(
             project_id=project_id, principal=principal, employee=employee, write=True
@@ -911,6 +918,8 @@ class AgentSessionService:
             user_payload["attachments"] = delivery.ui_attachments()
         if employee is not None:
             user_payload["employee_id"] = employee.id
+        if turn_id:
+            user_payload["turn_id"] = turn_id
         self._session.add(
             AgentEventRow(
                 session_id=session_id,
@@ -1198,8 +1207,81 @@ class AgentSessionService:
             )
         )
         start_seq = int(seq_q.scalar_one() or 0)
+        durable_turn_id = turn_id.strip() if turn_id and turn_id.strip() else None
+        stable_turn_id = durable_turn_id or uuid4().hex
+
+        # Client ids are scoped to this resolved session. The process-local
+        # registry is only an optimization; this session-keyed ledger remains
+        # authoritative after restart or cache pruning.
+        if durable_turn_id is not None:
+            existing_q = await self._session.execute(
+                select(AgentTurnRow).where(
+                    AgentTurnRow.session_id == session_id,
+                    AgentTurnRow.turn_id == durable_turn_id,
+                )
+            )
+            persisted = existing_q.scalar_one_or_none()
+            if persisted is not None:
+                existing = detached_turns.get(durable_turn_id, session_id=session_id)
+                if existing is not None and existing.session_id == session_id:
+                    return existing
+                # A process restart cannot resume the old runtime task, but it
+                # must not execute this client request a second time. Close the
+                # abandoned reservation so replay status matches the terminal
+                # INTERRUPTED result and later retries remain deterministic.
+                interrupted = persisted.status == "started"
+                if interrupted:
+                    persisted.status = "failed"
+                    persisted.finished_at = datetime.now(tz=UTC)
+                    await self._session.commit()
+                return detached_turns.remember_completed(
+                    turn_id=durable_turn_id,
+                    session_id=session_id,
+                    project_id=project_id,
+                    start_seq=int(persisted.start_seq),
+                    error_code="INTERRUPTED" if interrupted else None,
+                )
+
+            self._session.add(
+                AgentTurnRow(
+                    session_id=session_id,
+                    turn_id=durable_turn_id,
+                    start_seq=start_seq,
+                    status="started",
+                )
+            )
+            try:
+                await self._session.commit()
+            except IntegrityError:
+                # Concurrent duplicate reservation: the unique constraint is
+                # authoritative. Roll back this request and reattach to the row.
+                await self._session.rollback()
+                existing_q = await self._session.execute(
+                    select(AgentTurnRow).where(
+                        AgentTurnRow.session_id == session_id,
+                        AgentTurnRow.turn_id == durable_turn_id,
+                    )
+                )
+                persisted = existing_q.scalar_one()
+                existing = detached_turns.get(durable_turn_id, session_id=session_id)
+                if existing is not None and existing.session_id == session_id:
+                    return existing
+                # The winning reservation may belong to a task lost during an
+                # API restart; reconcile that stale `started` row before replay.
+                interrupted = persisted.status == "started"
+                if interrupted:
+                    persisted.status = "failed"
+                    persisted.finished_at = datetime.now(tz=UTC)
+                    await self._session.commit()
+                return detached_turns.remember_completed(
+                    turn_id=durable_turn_id,
+                    session_id=session_id,
+                    project_id=project_id,
+                    start_seq=int(persisted.start_seq),
+                    error_code="INTERRUPTED" if interrupted else None,
+                )
         return await detached_turns.start(
-            turn_id=turn_id or uuid4().hex,
+            turn_id=stable_turn_id,
             session_id=session_id,
             project_id=project_id,
             start_seq=start_seq,
@@ -1248,6 +1330,7 @@ class AgentSessionService:
                     principal=turn.principal,  # type: ignore[arg-type]
                     employee=employee,
                     model=model,
+                    turn_id=turn.turn_id,
                 ):
                     collected.append(event)
                 await run_session.commit()
@@ -1255,6 +1338,17 @@ class AgentSessionService:
                 await run_session.rollback()
                 turn.error_code = "CANCELLED"
                 turn.error_detail = "turn cancelled"
+                ledger_q = await run_session.execute(
+                    select(AgentTurnRow).where(
+                        AgentTurnRow.session_id == turn.session_id,
+                        AgentTurnRow.turn_id == turn.turn_id,
+                    )
+                )
+                ledger = ledger_q.scalar_one_or_none()
+                if ledger is not None:
+                    ledger.status = "cancelled"
+                    ledger.finished_at = datetime.now(tz=UTC)
+                    await run_session.commit()
                 raise
             except AppError as err:
                 await run_session.rollback()
@@ -1264,6 +1358,17 @@ class AgentSessionService:
                 await run_session.rollback()
                 turn.error_code = turn.error_code or "INTERNAL"
                 turn.error_detail = turn.error_detail or "agent turn failed"
+            ledger_q = await run_session.execute(
+                select(AgentTurnRow).where(
+                    AgentTurnRow.session_id == turn.session_id,
+                    AgentTurnRow.turn_id == turn.turn_id,
+                )
+            )
+            ledger = ledger_q.scalar_one_or_none()
+            if ledger is not None:
+                ledger.status = "completed" if not turn.error_code else "failed"
+                ledger.finished_at = datetime.now(tz=UTC)
+                await run_session.commit()
         turn.drained_events = collected
         turn.assistant_text = assistant_text_from_events(collected)
 
@@ -2226,16 +2331,43 @@ class AgentSessionService:
         employee: EmployeeRow | None,
         pod_agent: bool = False,
     ) -> list[dict]:
-        events = await self.list_events(
+        # Keep the normal authorization / session ownership check, but do not
+        # derive pending state from the UI transcript tail: an approval may
+        # remain pending while a long-running session emits >500 events.
+        await self.list_events(
             session_id=session_id,
             project_id=project_id,
             principal=principal,
             employee=employee,
-            limit=500,
+            limit=1,
             tail=True,
             pod_agent=pod_agent,
         )
+        events = await self._list_approval_state_events(session_id)
         return _pending_approvals_from_events(events)
+
+    async def _list_approval_state_events(self, session_id: str) -> list[dict]:
+        """Fetch the complete small subset needed to reconstruct HITL state.
+
+        Transcript endpoints are deliberately paginated/capped. Approval
+        requests, decisions, and results are control-plane state, however, and
+        must not disappear merely because a session has a long transcript.
+        """
+        event_types = {
+            AgentEventType.TOOL_APPROVAL_REQUEST,
+            AgentEventType.TOOL_RESULT,
+            PLATFORM_EVENT_TOOL_APPROVAL_DECISION,
+        }
+        q = await self._session.execute(
+            select(AgentEventRow)
+            .where(AgentEventRow.session_id == session_id)
+            .where(AgentEventRow.event_type.in_(event_types))
+            .order_by(AgentEventRow.seq.asc())
+        )
+        return [
+            {"type": row.event_type, "payload": row.payload}
+            for row in q.scalars().all()
+        ]
 
     async def resolve_tool_approval(
         self,
@@ -2265,14 +2397,18 @@ class AgentSessionService:
         if row.status != AgentSessionStatus.ACTIVE:
             raise AppError(code="SESSION_CLOSED", title="Session closed", status=409, detail="session not active")
 
-        events = await self.list_events(
+        # Validate access and session/project ownership before loading the
+        # uncapped control-plane subset; transcript tail limits must not make
+        # an outstanding approval unresolvable.
+        await self.list_events(
             session_id=session_id,
             project_id=project_id,
             principal=principal,
             employee=employee,
-            limit=500,
+            limit=1,
             tail=True,
         )
+        events = await self._list_approval_state_events(session_id)
         pending = _pending_approvals_from_events(events)
         match = next((p for p in pending if p["id"] == approval_id), None)
         if match is None:
@@ -2303,11 +2439,6 @@ class AgentSessionService:
             )
             out_events.append({"type": event_type, "data": payload})
 
-        _append(
-            PLATFORM_EVENT_TOOL_APPROVAL_DECISION,
-            {"id": approval_id, "decision": decision, "name": match["name"]},
-        )
-
         forwarded = False
         if settings.pod_agent_runtime_enabled:
             forwarded = await OpenClawBridgeBootstrap(self._session).resolve_approval(
@@ -2315,6 +2446,22 @@ class AgentSessionService:
                 approval_id=approval_id,
                 decision=decision,
             )
+            if not forwarded:
+                # Do not persist a decision (or synthesize a tool result) until
+                # the runtime has accepted it. A failed re-adoption retry must
+                # leave the approval visible and retryable to the user.
+                raise AppError(
+                    code="APPROVAL_DELIVERY_FAILED",
+                    title="Approval not delivered",
+                    status=503,
+                    detail="The agent runtime did not accept this approval. It is still pending; please retry.",
+                    extra={"approval_id": approval_id, "pending": True},
+                )
+
+        _append(
+            PLATFORM_EVENT_TOOL_APPROVAL_DECISION,
+            {"id": approval_id, "decision": decision, "name": match["name"]},
+        )
 
         if not forwarded:
             if decision == "approve":

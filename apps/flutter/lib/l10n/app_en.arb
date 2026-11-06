@@ -459,6 +459,27 @@
   "adminContainerMetricsCpu": "CPU",
   "adminContainerMetricsMemory": "Memory",
   "adminContainerMetricsUnavailable": "Metrics not yet received or unavailable",
+  "metricsSeriesEmpty": "No CPU or memory samples yet",
+  "metricsSeriesError": "Metrics could not be loaded",
+  "metricsSeriesUnavailable": "Metrics are not currently available",
+  "metricsSeriesCpu": "CPU",
+  "metricsSeriesMemory": "Memory",
+  "metricsSeriesCpuValue": "CPU {value}",
+  "@metricsSeriesCpuValue": {
+    "placeholders": {
+      "value": {
+        "type": "String"
+      }
+    }
+  },
+  "metricsSeriesMemoryValue": "Memory {value}",
+  "@metricsSeriesMemoryValue": {
+    "placeholders": {
+      "value": {
+        "type": "String"
+      }
+    }
+  },
   "adminContainerLastError": "Error",
   "adminContainerRuntimeNotStarted": "Pod is not running. It starts on first agent use or after Resume.",
   "adminContainerRuntimeNotStartedShort": "Not running",
@@ -1009,6 +1030,18 @@
   "companyNoAssignedEmployees": "No employees assigned",
   "companyAssignCabinetsToEmployee": "Cabinet access",
   "companyNoEmployees": "No employees",
+  "companyEmployeesTab": "Employees",
+  "companyEmployeeRecycleBin": "Recycle bin",
+  "companyRestoreEmployee": "Restore employee",
+  "companyRestoreEmployeeConfirm": "Restore {login}? They will return as a paused employee.",
+  "companyNoDeletedEmployees": "Recycle bin is empty",
+  "@companyRestoreEmployeeConfirm": {
+    "placeholders": {
+      "login": {
+        "type": "String"
+      }
+    }
+  },
   "companyOrgMetrics": "Org metrics",
   "companyLoginId": "Company ID",
   "companyLogin": "Login",
@@ -1575,7 +1608,7 @@
     }
   },
   "projectPreferredAgentProvider": "AI provider",
-  "projectPreviewTruncated": "Preview truncated to first 200k characters",
+  "projectPreviewTruncated": "Preview is truncated; only the first 256 KB of the file are shown.",
   "projectProject": "Project",
   "projectProjectName": "Project name",
   "projectOpenChat": "Chat",
@@ -1648,10 +1681,20 @@
   "projectWorkspacePreview": "Preview",
   "projectWorkspaceDownload": "Download",
   "projectWorkspaceDownloaded": "File saved",
+  "projectWorkspaceDownloadTooLarge": "This file is {size}, above the {limit} download limit. You can still preview supported text files.",
+  "@projectWorkspaceDownloadTooLarge": {
+    "placeholders": {
+      "size": {"type": "String"},
+      "limit": {"type": "String"}
+    }
+  },
   "projectUpdateProject": "Update project",
   "projectResetAgent": "Reset agent",
+  "projectResetWarning": "All agent sessions will be stopped, and their chat history and usage records will be permanently deleted. Workspace files and project settings will be preserved.",
   "projectConfigureBeforeLaunch": "Select AI provider before launch",
   "projectAiProviderNotSelected": "Not selected",
+  "projectAiProviderUnavailableReselect": "Saved AI provider is unavailable. Select another provider before launch",
+  "projectAiProviderUnavailableNoOptions": "Saved AI provider is unavailable. Add an eligible provider before launch",
   "projectAiKeyColumnProvider": "Provider",
   "projectAiKeyColumnSubscription": "Subscription",
   "projectSelectModuleProfile": "Select profile",
@@ -1671,6 +1714,35 @@
   "projectResetSuccess": "Agent reset",
   "projectAiKeyLabel": "AI key",
   "projectModulesLabel": "Modules",
+  "scheduleTitle": "Schedules",
+  "scheduleAdd": "Add schedule",
+  "scheduleDeleteConfirmTitle": "Delete schedule?",
+  "scheduleDeleteConfirmMessage": "This schedule will be permanently deleted.",
+  "scheduleCancel": "Cancel",
+  "scheduleDelete": "Delete",
+  "scheduleNoSchedules": "No schedules yet",
+  "scheduleCreate": "Create schedule",
+  "scheduleNextRun": "Next run",
+  "scheduleNotScheduled": "Not scheduled",
+  "schedulePayload": "Payload",
+  "scheduleActions": "Schedule actions",
+  "scheduleEdit": "Edit",
+  "scheduleEditTitle": "Edit schedule",
+  "scheduleNew": "New schedule",
+  "scheduleName": "Name",
+  "scheduleCron": "Cron expression",
+  "scheduleCronHelper": "Five fields, e.g. 0 9 * * 1-5",
+  "scheduleTimezone": "Timezone",
+  "scheduleTimezoneHelper": "IANA timezone, e.g. UTC or Europe/London",
+  "scheduleEnabledFor": "Enable schedule {name}",
+  "@scheduleEnabledFor": {"placeholders": {"name": {"type": "String"}}},
+  "schedulePayloadJson": "Payload (JSON object)",
+  "scheduleEnabled": "Enabled",
+  "scheduleSave": "Save",
+  "scheduleRequired": "Required",
+  "scheduleInvalidJson": "Enter a valid JSON object",
+  "scheduleMissedRunsWarning": "Catch-up was limited after an outage; at least {count} runs were missed.",
+  "@scheduleMissedRunsWarning": {"placeholders": {"count": {"type": "int"}}},
   "commonAuto": "Auto",
   "employeeContactEmail": "Email",
   "employeePassword": "Password",

@@ -1,0 +1,1279 @@
+"""Canonical PostgreSQL RLS policy registry for the migration target schema.
+
+This module is the single source of truth for:
+
+* which canonical tables carry tenant/cabinet/project scope;
+* the exact policy name, command and predicate installed for each table;
+* the transaction-local GUC names the policies read;
+* the guarded, idempotent DDL text emitted by Alembic revision ``2026110307``.
+
+It is imported by the revision (so the revision and the acceptance tests can
+never drift apart) and by tests.  Installing a policy is *not* a positive-write
+gate: upstream M04/M04E/M05/M06 promotion evidence, registry rows, role
+privileges and trusted writers remain separate requirements.
+
+Invariants enforced by :func:`validate_registry` at import time:
+
+* every canonical table has exactly one tenant policy and exactly one trusted
+  service policy, with unique names;
+* a table either exposes a tenant anchor itself or inherits it through an
+  explicit typed parent chain - there is no implicit "platform-wide" default;
+* every generated predicate compares against ``current_setting(..., true)``
+  (unset context is NULL, therefore deny) and never interpolates a value;
+* policy DDL is idempotent (``DROP POLICY IF EXISTS`` before ``CREATE POLICY``)
+  and guarded by ``to_regclass(...)`` so a partial schema cannot raise;
+* every rendered policy name fits PostgreSQL's 63-byte identifier limit, so the
+  name stored in ``pg_policy`` is byte-for-byte the name this registry declares
+  (the rule is spelled out below).
+
+Policy names and the 63-byte limit
+----------------------------------
+PostgreSQL truncates an identifier longer than ``NAMEDATALEN - 1`` (63 bytes)
+*silently*: ``CREATE POLICY m04e_definition_version_promotion_evidence_trusted_service_access``
+(65 characters) is stored as ``..._trusted_service_acce``.  Anything comparing
+the stored name with the declared one then never matches, and two distinct
+declared names could truncate to the same stored name - a ``CREATE POLICY``
+collision or, worse, one table's policy silently replaced by another's.
+
+The rule here is deterministic and applies to every table without exception:
+
+1. the name is ``<table>_<full suffix>`` (``tenant_isolation`` /
+   ``trusted_service_access``) when that fits in :data:`POLICY_NAME_MAX_LENGTH`;
+2. otherwise the **compact suffix for the same kind** is used (``tenant`` /
+   ``trusted_access``), which is how ``m04e_definition_version_promotion_evidence``
+   gets ``m04e_definition_version_promotion_evidence_trusted_access`` (57);
+3. the table part is never shortened - a policy name always begins with the
+   exact table it belongs to, so names stay unambiguous;
+4. a table whose name is so long that even the compact form does not fit stops
+   the registry at import time (:class:`RlsRegistryError`).  Truncation is never
+   a fallback: fail closed, never degrade silently.
+
+:func:`installed_policy_name` is the single way to map a rendered name to the
+name PostgreSQL stores; catalog comparisons go through it so the "declared vs
+stored" mismatch cannot come back by hand.
+
+Review notes / deliberate exclusions live in :data:`EXCLUDED_TABLES`.
+"""
+
+from __future__ import annotations
+
+import re
+from collections.abc import Iterable
+from dataclasses import dataclass
+from typing import Final, Literal
+
+from sqlalchemy import text
+
+REGISTRY_VERSION: Final = "2026110307.1"
+
+TENANT_SETTING: Final = "app.tenant_id"
+CABINET_SETTING: Final = "app.cabinet_id"
+PROJECT_SETTING: Final = "app.project_id"
+TRUSTED_SERVICE_SETTING: Final = "app.trusted_service"
+
+#: Database role that is allowed to read across tenant boundaries.  The policy
+#: additionally requires ``app.trusted_service='true'`` so that merely reusing
+#: the role name does not silently widen access.
+TRUSTED_SERVICE_ROLE: Final = "prodavan_service"
+
+TENANT_POLICY_SUFFIX: Final = "tenant_isolation"
+TRUSTED_POLICY_SUFFIX: Final = "trusted_service_access"
+
+#: Compact substitutes used only when the full suffix would overflow the
+#: identifier limit.  Each kind has exactly one compact form, so the choice is a
+#: function of the rendered name alone - never of the table's history or of a
+#: hand-written exception list.
+TENANT_POLICY_COMPACT_SUFFIX: Final = "tenant"
+TRUSTED_POLICY_COMPACT_SUFFIX: Final = "trusted_access"
+
+#: ``NAMEDATALEN - 1``: the byte length PostgreSQL stores for an identifier.
+#: Policy names are ASCII, so characters and bytes coincide here.
+POLICY_NAME_MAX_LENGTH: Final = 63
+
+PolicyCommand = Literal["SELECT", "ALL"]
+
+_IDENTIFIER = re.compile(r"[a-z][a-z0-9_]{0,62}")
+
+
+def installed_policy_name(declared: str) -> str:
+    """The name PostgreSQL actually stores for a rendered policy name.
+
+    Kept as a function rather than an inline slice for two reasons: every catalog
+    comparison goes through the same mapping, and a *legacy* over-long name (one
+    installed by an earlier revision, before the compact suffixes existed) is
+    still resolvable - revision ``2026110318`` has to drop such a policy by the
+    truncated name the server stored.
+    """
+
+    return declared[:POLICY_NAME_MAX_LENGTH]
+
+
+def _policy_name(table: str, *suffixes: str) -> str:
+    """Longest suffix whose rendered ``<table>_<suffix>`` fits the limit."""
+
+    for suffix in suffixes:
+        candidate = f"{table}_{suffix}"
+        if len(candidate) <= POLICY_NAME_MAX_LENGTH:
+            return candidate
+    raise RlsRegistryError(
+        f"{table}: no policy suffix fits {POLICY_NAME_MAX_LENGTH} characters "
+        f"(tried {suffixes}); shorten the table name rather than letting PostgreSQL truncate"
+    )
+
+
+class RlsRegistryError(RuntimeError):
+    """The static policy registry is internally inconsistent."""
+
+
+def _require_identifier(value: str, field: str) -> str:
+    if not isinstance(value, str) or _IDENTIFIER.fullmatch(value) is None:
+        raise RlsRegistryError(f"{field} must be a plain lowercase SQL identifier, got {value!r}")
+    return value
+
+
+@dataclass(frozen=True, slots=True)
+class ParentHop:
+    """One typed parent step used to inherit a scope column.
+
+    ``on_column`` is the column on the *previous* relation (the child table for
+    the first hop, the previous parent alias afterwards).  ``key`` is the
+    referenced column on ``table``.  ``value_column`` supplies the scoped value
+    and is required only on the **last** hop of a chain.
+    """
+
+    table: str
+    on_column: str
+    key: str = "id"
+    value_column: str | None = None
+
+    def __post_init__(self) -> None:
+        _require_identifier(self.table, "parent hop table")
+        _require_identifier(self.on_column, "parent hop on_column")
+        _require_identifier(self.key, "parent hop key")
+        if self.value_column is not None:
+            _require_identifier(self.value_column, "parent hop value_column")
+
+
+@dataclass(frozen=True, slots=True)
+class ScopedColumn:
+    """Where one canonical scope value lives for a table.
+
+    Exactly one of ``column`` (direct column on the table) or ``chain``
+    (inherited through typed parents) is set.  ``allows_null`` mirrors models
+    where the scope anchor is optional (for example a tenant-scoped row that has
+    no cabinet); it never allows a NULL to match another tenant.
+    """
+
+    column: str | None = None
+    chain: tuple[ParentHop, ...] = ()
+    allows_null: bool = False
+
+    def __post_init__(self) -> None:
+        if (self.column is None) == (not self.chain):
+            raise RlsRegistryError("scoped column needs exactly one of a direct column or a parent chain")
+        if self.column is not None:
+            _require_identifier(self.column, "scoped column")
+        if any(not isinstance(hop, ParentHop) for hop in self.chain):
+            raise RlsRegistryError("parent chain entries must be ParentHop values")
+        if self.chain and self.chain[-1].value_column is None:
+            raise RlsRegistryError("the last parent hop must name the scope value column")
+        if any(hop.value_column is not None for hop in self.chain[:-1]):
+            raise RlsRegistryError("only the last parent hop may name a scope value column")
+
+
+@dataclass(frozen=True, slots=True)
+class TablePolicySpec:
+    """One canonical table and the policies that isolate it."""
+
+    table: str
+    owner_revision: str
+    tenant: ScopedColumn | None
+    cabinet: ScopedColumn | None = None
+    project: ScopedColumn | None = None
+    tenant_restriction: str | None = None
+    trusted_command: PolicyCommand = "SELECT"
+    notes: str = ""
+
+    def __post_init__(self) -> None:
+        _require_identifier(self.table, "table")
+        if not self.owner_revision.strip():
+            raise RlsRegistryError(f"{self.table}: owner revision is required")
+        if self.tenant is None and (self.cabinet is not None or self.project is not None):
+            raise RlsRegistryError(f"{self.table}: cabinet/project scope without a tenant anchor")
+        if self.cabinet is None and self.project is not None:
+            raise RlsRegistryError(f"{self.table}: project scope without a cabinet anchor")
+        if self.trusted_command not in ("SELECT", "ALL"):
+            raise RlsRegistryError(f"{self.table}: unsupported trusted policy command")
+        if self.tenant_restriction is not None:
+            restriction = self.tenant_restriction
+            if ";" in restriction or "--" in restriction or "/*" in restriction:
+                raise RlsRegistryError(f"{self.table}: restriction must be a single predicate")
+            if self.table not in restriction:
+                raise RlsRegistryError(f"{self.table}: restriction must be table-qualified")
+        # Name fitting is part of *building* a valid spec, not something a caller
+        # has to remember: the properties are lazy, so without this touch an
+        # unusable table name would construct silently and only explode when
+        # somebody read a policy name (or, worse, never - the DDL would then be
+        # rendered against a name PostgreSQL truncates).
+        _ = (self.tenant_policy, self.trusted_policy)
+
+    # -- naming -----------------------------------------------------------
+    # The two properties below are the *declared* names, already fitted to the
+    # 63-character limit by :func:`_policy_name`; ``installed_policy_name`` applied
+    # to them is an identity, which is the whole point of the rule in the module
+    # docstring.  The table part is never shortened.
+    @property
+    def tenant_policy(self) -> str:
+        return _policy_name(self.table, TENANT_POLICY_SUFFIX, TENANT_POLICY_COMPACT_SUFFIX)
+
+    @property
+    def trusted_policy(self) -> str:
+        return _policy_name(self.table, TRUSTED_POLICY_SUFFIX, TRUSTED_POLICY_COMPACT_SUFFIX)
+
+    @property
+    def tenant_policy_is_compact(self) -> bool:
+        """``True`` when the tenant policy uses the compact suffix."""
+
+        return not self.tenant_policy.endswith(f"_{TENANT_POLICY_SUFFIX}")
+
+    @property
+    def trusted_policy_is_compact(self) -> bool:
+        """``True`` when the trusted policy uses the compact suffix."""
+
+        return not self.trusted_policy.endswith(f"_{TRUSTED_POLICY_SUFFIX}")
+
+    @property
+    def policy_names(self) -> tuple[str, str]:
+        return (self.tenant_policy, self.trusted_policy)
+
+
+# ---------------------------------------------------------------------------
+# Predicate rendering
+# ---------------------------------------------------------------------------
+
+
+def _guc(setting: str) -> str:
+    """Render a GUC read; empty string is treated exactly like unset context."""
+
+    return f"nullif(current_setting('{setting}', true), '')"
+
+
+def _comparison(value: str, setting: str, *, allows_null: bool) -> str:
+    if allows_null:
+        return f"({value} IS NULL OR {value} = {_guc(setting)})"
+    return f"{value} = {_guc(setting)}"
+
+
+def _chain_predicate(parent_ref: str, chain: tuple[ParentHop, ...], depth: int, setting: str, allows_null: bool) -> str:
+    hop = chain[0]
+    alias = f"rls_{depth}"
+    join = f"{alias}.{hop.key} = {parent_ref}.{hop.on_column}"
+    if len(chain) == 1:
+        # ``value_column`` is guaranteed by ScopedColumn validation.
+        leaf = _comparison(f"{alias}.{hop.value_column}", setting, allows_null=allows_null)
+        return f"EXISTS (SELECT 1 FROM {hop.table} AS {alias} WHERE {join} AND {leaf})"
+    inner = _chain_predicate(alias, chain[1:], depth + 1, setting, allows_null)
+    return f"EXISTS (SELECT 1 FROM {hop.table} AS {alias} WHERE {join} AND {inner})"
+
+
+def scoped_column_predicate(spec: TablePolicySpec, scoped: ScopedColumn, setting: str) -> str:
+    """Render the predicate that binds ``scoped`` to the transaction-local GUC."""
+
+    if scoped.column is not None:
+        return _comparison(f"{spec.table}.{scoped.column}", setting, allows_null=scoped.allows_null)
+    return _chain_predicate(spec.table, scoped.chain, 0, setting, scoped.allows_null)
+
+
+def tenant_predicate(spec: TablePolicySpec) -> str:
+    """The full tenant/cabinet/project predicate shared by USING and WITH CHECK.
+
+    A table without a tenant anchor (global migration evidence) renders ``false``:
+    tenant sessions are denied and only the trusted service policy may reach it.
+    """
+
+    if spec.tenant is None:
+        return "false"
+    parts = [scoped_column_predicate(spec, spec.tenant, TENANT_SETTING)]
+    if spec.cabinet is not None:
+        parts.append(scoped_column_predicate(spec, spec.cabinet, CABINET_SETTING))
+    if spec.project is not None:
+        parts.append(scoped_column_predicate(spec, spec.project, PROJECT_SETTING))
+    if spec.tenant_restriction is not None:
+        parts.append(f"({spec.tenant_restriction})")
+    return " AND ".join(parts)
+
+
+def trusted_service_predicate() -> str:
+    """Predicate for the cross-tenant service/trusted role."""
+
+    return (
+        f"current_user = '{TRUSTED_SERVICE_ROLE}' "
+        f"AND {_guc(TRUSTED_SERVICE_SETTING)} = 'true'"
+    )
+
+
+# ---------------------------------------------------------------------------
+# DDL statements
+# ---------------------------------------------------------------------------
+
+
+def enable_statements(spec: TablePolicySpec) -> tuple[str, str]:
+    return (
+        f"ALTER TABLE {spec.table} ENABLE ROW LEVEL SECURITY",
+        f"ALTER TABLE {spec.table} FORCE ROW LEVEL SECURITY",
+    )
+
+
+def trusted_policy_statement(spec: TablePolicySpec, name: str | None = None) -> str:
+    """``CREATE POLICY`` for the trusted-service policy of ``spec``.
+
+    ``name`` lets a caller recreate the policy under a historical name (the
+    downgrade of revision ``2026110318`` has to put back what ``2026110317`` left
+    behind); it defaults to the name the registry declares today.
+    """
+
+    trusted = trusted_service_predicate()
+    policy = spec.trusted_policy if name is None else name
+    if spec.trusted_command == "SELECT":
+        return f"CREATE POLICY {policy} ON {spec.table} FOR SELECT USING ({trusted})"
+    return (
+        f"CREATE POLICY {policy} ON {spec.table} FOR ALL "
+        f"USING ({trusted}) WITH CHECK ({trusted})"
+    )
+
+
+def create_policy_statements(spec: TablePolicySpec) -> tuple[str, str]:
+    predicate = tenant_predicate(spec)
+    tenant_statement = (
+        f"CREATE POLICY {spec.tenant_policy} ON {spec.table} FOR ALL "
+        f"USING ({predicate}) WITH CHECK ({predicate})"
+    )
+    return (tenant_statement, trusted_policy_statement(spec))
+
+
+def drop_policy_statements(spec: TablePolicySpec) -> tuple[str, str]:
+    return (
+        f"DROP POLICY IF EXISTS {spec.tenant_policy} ON {spec.table}",
+        f"DROP POLICY IF EXISTS {spec.trusted_policy} ON {spec.table}",
+    )
+
+
+def legacy_policy_names(spec: TablePolicySpec) -> tuple[str, ...]:
+    """Policy names an *earlier* registry version installed for ``spec``.
+
+    Only one situation produces a legacy name: a table long enough that the
+    fully spelled suffix was rendered before the compact form existed.  The
+    server then stored the 63-character prefix of that longer name, so a
+    re-apply that drops only the *current* names would leave the stale policy in
+    place and the table would end up with three policies - the exact ambiguity
+    this module now prevents.  Revision ``2026110318`` needs these names to
+    withdraw them.
+
+    The mapping is the truncation PostgreSQL itself applies, so this reproduces
+    the stored name byte for byte without hard-coding a table.  A candidate that
+    is declared by *any* spec today is skipped: dropping it would remove another
+    table's live policy.
+    """
+
+    declared_everywhere = {name for other in CANONICAL_TABLE_POLICIES for name in other.policy_names}
+    names: list[str] = []
+    for suffix in (TENANT_POLICY_SUFFIX, TRUSTED_POLICY_SUFFIX):
+        candidate = installed_policy_name(f"{spec.table}_{suffix}")
+        if candidate in spec.policy_names or candidate in declared_everywhere or candidate in names:
+            continue
+        names.append(candidate)
+    return tuple(names)
+
+
+def legacy_drop_statements(spec: TablePolicySpec) -> tuple[str, ...]:
+    """``DROP POLICY IF EXISTS`` for every stale name :func:`legacy_policy_names` returns."""
+
+    return tuple(f"DROP POLICY IF EXISTS {name} ON {spec.table}" for name in legacy_policy_names(spec))
+
+
+def upgrade_statements(spec: TablePolicySpec) -> tuple[str, ...]:
+    """Idempotent enable+create statements (policies are dropped first).
+
+    Legacy names are dropped as well, so re-applying this block to a database
+    upgraded by an older registry leaves exactly the two current policies.
+    """
+
+    return (
+        *enable_statements(spec),
+        *drop_policy_statements(spec),
+        *legacy_drop_statements(spec),
+        *create_policy_statements(spec),
+    )
+
+
+def downgrade_statements(spec: TablePolicySpec) -> tuple[str, ...]:
+    """Idempotent policy removal; data is never touched."""
+
+    return (
+        *drop_policy_statements(spec),
+        *legacy_drop_statements(spec),
+        f"ALTER TABLE {spec.table} NO FORCE ROW LEVEL SECURITY",
+        f"ALTER TABLE {spec.table} DISABLE ROW LEVEL SECURITY",
+    )
+
+
+def scope_columns(spec: TablePolicySpec) -> tuple[str, ...]:
+    """Every column ``spec``'s predicate names **on the table itself**.
+
+    A direct scope column is read directly; a chain names one column of the child
+    table (the first hop's ``on_column``) and resolves the rest through parents.
+    The list is what the install guard checks before emitting the block: a
+    predicate can only be created once the columns it reads exist.
+    """
+
+    columns: list[str] = []
+    for scoped in (spec.tenant, spec.cabinet, spec.project):
+        if scoped is None:
+            continue
+        if scoped.column is not None:
+            columns.append(scoped.column)
+        elif scoped.chain:
+            columns.append(scoped.chain[0].on_column)
+    return tuple(dict.fromkeys(columns))
+
+
+def _guarded_do_block(
+    spec: TablePolicySpec,
+    statements: tuple[str, ...],
+    direction: str,
+    *,
+    require_columns: bool = False,
+) -> str:
+    body = "\n".join(f"        {statement};" for statement in statements)
+    # No ``%`` placeholders: the block is executed as literal SQL through
+    # Alembic and must not depend on the DBAPI paramstyle.
+    notice = f"rls 2026110307 {direction} skipped: relation {spec.table} is absent"
+    columns = scope_columns(spec) if require_columns else ()
+    column_guard = ""
+    if columns:
+        # A scope column may be added by a later revision than the table itself
+        # (MIG-EQ-ANCHORS-01 added ``project_id``/``cabinet_id`` to equipment rows
+        # created in ``2026110305``).  Every registry re-apply walks the *current*
+        # registry, so an early installer would otherwise emit a predicate naming a
+        # column that does not exist yet and abort the whole chain.  The skip is
+        # reported exactly like an absent relation, and the revision that adds the
+        # columns re-applies the registry in the same step, so the policy is never
+        # lost - it is only deferred to the first point where it can be created.
+        wanted = ", ".join(f"'{column}'" for column in columns)
+        column_notice = (
+            f"rls 2026110307 {direction} skipped: relation {spec.table} is missing "
+            "scope column(s) added by a later revision"
+        )
+        column_guard = (
+            "    IF EXISTS (\n"
+            f"        SELECT 1 FROM unnest(ARRAY[{wanted}]::text[]) AS want(colname)\n"
+            "        WHERE NOT EXISTS (\n"
+            "            SELECT 1 FROM pg_attribute AS a\n"
+            f"            WHERE a.attrelid = to_regclass('{spec.table}')\n"
+            "              AND a.attname::text = want.colname\n"
+            "              AND a.attnum > 0 AND NOT a.attisdropped\n"
+            "        )\n"
+            "    ) THEN\n"
+            f"        RAISE NOTICE '{column_notice}';\n"
+            "        RETURN;\n"
+            "    END IF;\n"
+        )
+    return (
+        "DO $rls$\n"
+        "BEGIN\n"
+        f"    IF to_regclass('{spec.table}') IS NULL THEN\n"
+        f"        RAISE NOTICE '{notice}';\n"
+        "        RETURN;\n"
+        "    END IF;\n"
+        f"{column_guard}"
+        f"{body}\n"
+        "END\n"
+        "$rls$"
+    )
+
+
+def upgrade_guard_sql(
+    spec: TablePolicySpec, *, require_columns: bool = True
+) -> str:
+    """One atomic, idempotent, existence-guarded upgrade block for ``spec``.
+
+    A missing relation is *not* an error: sibling revisions create these tables
+    and the revision may run against a partial schema.  The skip is reported as
+    a PostgreSQL NOTICE and the revision logs it separately, so a silently
+    unpolicied table cannot pass unnoticed.
+
+    ``require_columns`` (on by default) additionally skips the block while a scope
+    column the predicate reads does not exist yet.  That is the same situation one
+    level down - the schema is not ready for this policy - and it is reported the
+    same way.  It is not a way to lose a policy: the revision that creates the
+    column re-applies the registry, and the last installer of the chain verifies
+    that every existing canonical relation carries exactly its two policies.
+    """
+
+    return _guarded_do_block(spec, upgrade_statements(spec), "upgrade", require_columns=require_columns)
+
+
+def downgrade_guard_sql(spec: TablePolicySpec) -> str:
+    """Removal is never deferred: ``DROP POLICY`` does not read any column."""
+
+    return _guarded_do_block(spec, downgrade_statements(spec), "downgrade", require_columns=False)
+
+
+# ---------------------------------------------------------------------------
+# Catalog helpers (read-only; used by the revision log and by tests)
+# ---------------------------------------------------------------------------
+
+
+def relation_exists(connection, table: str) -> bool:
+    """Resolve ``table`` with the connection search_path, without raising."""
+
+    result = connection.execute(
+        text("SELECT to_regclass(:relation) AS relation"), {"relation": _require_identifier(table, "table")}
+    )
+    return result.scalar_one() is not None
+
+
+def missing_scope_columns(connection, spec: TablePolicySpec) -> tuple[str, ...]:
+    """Scope columns ``spec`` reads that the relation does not have (yet).
+
+    Mirrors the guard emitted by :func:`upgrade_guard_sql`, so an installer that
+    verifies its own result can tell "the guard deferred this table on purpose"
+    (columns added by a later revision) from "the guard silently skipped a table
+    that should be policied" - only the second is a defect.
+    """
+
+    if not relation_exists(connection, spec.table):
+        return ()
+    present = {
+        row[0]
+        for row in connection.execute(
+            text(
+                "SELECT a.attname::text FROM pg_attribute AS a "
+                "WHERE a.attrelid = to_regclass(:relation) "
+                "AND a.attnum > 0 AND NOT a.attisdropped"
+            ),
+            {"relation": _require_identifier(spec.table, "table")},
+        ).all()
+    }
+    return tuple(column for column in scope_columns(spec) if column not in present)
+
+
+# ---------------------------------------------------------------------------
+# Canonical registry
+# ---------------------------------------------------------------------------
+
+_CANONICAL: tuple[TablePolicySpec, ...] = (
+    # --- M04 owner registry / canonical tenant-scope evidence (2026110301) ---
+    TablePolicySpec(
+        table="scope_owner_tenant_anchors",
+        owner_revision="2026110301",
+        tenant=ScopedColumn(column="tenant_id"),
+        notes="Typed retained tenant anchor; one row per canonical companies.id.",
+    ),
+    TablePolicySpec(
+        table="scope_owner_cabinet_anchors",
+        owner_revision="2026110301",
+        tenant=ScopedColumn(column="tenant_id"),
+        cabinet=ScopedColumn(column="cabinet_id"),
+        notes="Cabinet anchor; cabinet membership proof stays a trusted-transaction check.",
+    ),
+    TablePolicySpec(
+        table="scope_owner_project_anchors",
+        owner_revision="2026110301",
+        tenant=ScopedColumn(column="tenant_id"),
+        cabinet=ScopedColumn(column="cabinet_id"),
+        project=ScopedColumn(column="project_id"),
+        notes="Project anchor carries the tenant/cabinet/project compatibility tuple.",
+    ),
+    TablePolicySpec(
+        table="scope_registry",
+        owner_revision="2026110301",
+        tenant=ScopedColumn(column="tenant_id"),
+        cabinet=ScopedColumn(column="cabinet_id", allows_null=True),
+        project=ScopedColumn(column="project_id", allows_null=True),
+        tenant_restriction="scope_registry.owner_state = 'active'",
+        notes=(
+            "Typed scope identity. Tenant sessions see only active rows; archived and "
+            "quarantined evidence stays reachable through the trusted service policy."
+        ),
+    ),
+    TablePolicySpec(
+        table="scope_owner_mappings",
+        owner_revision="2026110301",
+        tenant=ScopedColumn(
+            chain=(ParentHop(table="scope_registry", on_column="scope_registry_id", value_column="tenant_id"),),
+        ),
+        trusted_command="ALL",
+        notes=(
+            "Source-identity mapping has no tenant column; ownership is inherited through "
+            "scope_registry. An unresolved (NULL) registry link is invisible to tenants."
+        ),
+    ),
+    TablePolicySpec(
+        table="scope_owner_quarantine",
+        owner_revision="2026110301",
+        tenant=ScopedColumn(column="resolved_tenant_id"),
+        trusted_command="ALL",
+        notes=(
+            "Redacted quarantine evidence. Rows without a resolved tenant are tenant-invisible "
+            "and remain available to migration/security review through the trusted policy."
+        ),
+    ),
+    TablePolicySpec(
+        table="scope_owner_audit",
+        owner_revision="2026110301",
+        tenant=None,
+        trusted_command="ALL",
+        notes="Append-shaped migration audit has no tenant column; tenant sessions are denied.",
+    ),
+    # --- M04.e definition/version foundation (2026110302) ---
+    TablePolicySpec(
+        table="m04e_dynamic_app_definitions",
+        owner_revision="2026110302",
+        tenant=ScopedColumn(column="tenant_id"),
+        notes="Definition owner tenant; scope proof remains the registry/anchor relation.",
+    ),
+    TablePolicySpec(
+        table="m04e_dynamic_app_versions",
+        owner_revision="2026110302",
+        tenant=ScopedColumn(column="tenant_id"),
+        notes="Version snapshot inherits the definition tenant through the composite FK.",
+    ),
+    TablePolicySpec(
+        table="m04e_definition_version_promotion_evidence",
+        owner_revision="2026110302",
+        tenant=ScopedColumn(column="tenant_id"),
+        notes="Immutable review evidence; readable in-tenant, writable only by trusted writers.",
+    ),
+    # --- M04E backfill ledger (2026110315, task MIG-DDL-M04E-LEDGER-01) ---
+    # The four tables the M04E EvidenceStore port needs: per-source first mapping,
+    # changed-digest observations, durable cursor and redacted audit. Every one
+    # carries its own ``tenant_id`` (the ledger is keyed by
+    # ``(tenant_id, definition_id)`` and has no FK to the definition row, so a
+    # blocked page can still record evidence for an unresolvable definition), hence
+    # a direct tenant anchor instead of a parent chain. The mapping/observations are
+    # written by the trusted migration writer only, so they need an ALL command for
+    # the trusted policy; the checkpoints row is mutated by that writer as well.
+    TablePolicySpec(
+        table="m04e_definition_version_mappings",
+        owner_revision="2026110315",
+        tenant=ScopedColumn(column="tenant_id"),
+        trusted_command="ALL",
+        notes=(
+            "First mapping ever recorded for one exact source identity; append-only, "
+            "written by the trusted migration writer. Readable in-tenant."
+        ),
+    ),
+    TablePolicySpec(
+        table="m04e_definition_version_quarantine",
+        owner_revision="2026110315",
+        tenant=ScopedColumn(column="tenant_id"),
+        trusted_command="ALL",
+        notes=(
+            "Redacted changed-digest observation. Append-only; only reason codes, "
+            "digests and actionable guidance, never payload."
+        ),
+    ),
+    TablePolicySpec(
+        table="m04e_definition_version_checkpoints",
+        owner_revision="2026110315",
+        tenant=ScopedColumn(column="tenant_id"),
+        trusted_command="ALL",
+        notes=(
+            "Durable per-partition cursor read FOR UPDATE and advanced by CAS. The "
+            "trusted migration writer needs both SELECT and UPDATE, so the trusted "
+            "policy is FOR ALL."
+        ),
+    ),
+    TablePolicySpec(
+        table="m04e_definition_version_audit",
+        owner_revision="2026110315",
+        tenant=ScopedColumn(column="tenant_id"),
+        trusted_command="ALL",
+        notes=(
+            "Append-only redacted page audit: event kind, reason code, correlation, "
+            "checkpoint, actor and numeric counters. UPDATE/DELETE are denied by the "
+            "revision's append-only trigger, not by the policy."
+        ),
+    ),
+    # --- M04 accepted scope/RLS evidence (2026110313) ---
+    # MIG-DDL-M04EVID-01 creates this table; the policy itself is installed by the next
+    # registry re-apply revision, because a table-adding revision cannot install its own
+    # policy after the fact (see 2026110312). Membership here keeps the coverage report
+    # honest in the meantime: an unregistered sibling would be reported, not skipped.
+    # REGISTRY_VERSION is deliberately not bumped here: it also names the reviewed RLS
+    # manifest through application/migration/tenant_context.py::SECURITY_REVIEW_ID, and
+    # re-approving that identity belongs to the RLS follow-up task.
+    TablePolicySpec(
+        table="m04_scope_promotion_evidence",
+        owner_revision="2026110313",
+        tenant=ScopedColumn(column="tenant_id"),
+        notes=(
+            "Accepted M04-02 scope/RLS evidence row; the only M04 promotion-evidence "
+            "table whose outcome may read 'ready'. Readable in-tenant, append-only for "
+            "the trusted migration writer."
+        ),
+    ),
+    # --- M05 plugin instance registry (2026110303) ---
+    TablePolicySpec(
+        table="m05_plugin_instances",
+        owner_revision="2026110303",
+        tenant=ScopedColumn(column="tenant_id"),
+        cabinet=ScopedColumn(column="cabinet_id", allows_null=True),
+        project=ScopedColumn(column="project_id", allows_null=True),
+        notes="Exact plugin instance identity at its installation scope.",
+    ),
+    TablePolicySpec(
+        table="m05_plugin_instance_registry_links",
+        owner_revision="2026110303",
+        tenant=ScopedColumn(column="tenant_id"),
+        cabinet=ScopedColumn(column="cabinet_id", allows_null=True),
+        project=ScopedColumn(column="project_id", allows_null=True),
+        notes="Staged reciprocal registry link evidence.",
+    ),
+    TablePolicySpec(
+        table="m05_plugin_instance_promotion_evidence",
+        owner_revision="2026110303",
+        tenant=ScopedColumn(column="tenant_id"),
+        notes="Instance promotion record; canonical_positive_writes stays false.",
+    ),
+    # --- M06 canonical grants (2026110304) ---
+    TablePolicySpec(
+        table="dynamic_app_capability_grants",
+        owner_revision="2026110304",
+        tenant=ScopedColumn(column="tenant_id"),
+        cabinet=ScopedColumn(column="cabinet_id", allows_null=True),
+        project=ScopedColumn(column="project_id", allows_null=True),
+        notes=(
+            "Canonical grant. Definition/version/instance/scope-registry proof and the trusted "
+            "writer epoch remain application/database gates; RLS only bounds tenant visibility."
+        ),
+    ),
+    TablePolicySpec(
+        table="dynamic_app_capability_grant_mappings",
+        owner_revision="2026110304",
+        tenant=ScopedColumn(
+            chain=(
+                ParentHop(
+                    table="dynamic_app_capability_grants",
+                    on_column="target_grant_id",
+                    value_column="tenant_id",
+                ),
+            )
+        ),
+        trusted_command="ALL",
+        notes="Mapping evidence inherits the target grant tenant; unresolved mappings are tenant-invisible.",
+    ),
+    TablePolicySpec(
+        table="dynamic_app_capability_grant_quarantine",
+        owner_revision="2026110304",
+        tenant=ScopedColumn(column="resolved_tenant_id"),
+        trusted_command="ALL",
+        notes="Quarantine evidence inherits the resolved tenant; unresolved rows stay with trusted review.",
+    ),
+    TablePolicySpec(
+        table="dynamic_app_capability_audit",
+        owner_revision="2026110304",
+        tenant=ScopedColumn(column="tenant_id"),
+        trusted_command="ALL",
+        notes="Audit history: nullable tenant rows are platform-level and tenant-invisible.",
+    ),
+    TablePolicySpec(
+        table="dynamic_app_capability_writer_epochs",
+        owner_revision="2026110304",
+        tenant=ScopedColumn(column="tenant_id"),
+        notes="Trusted writer fence state per bounded partition.",
+    ),
+    TablePolicySpec(
+        table="m06_canonical_grant_promotion_evidence",
+        owner_revision="2026110304",
+        tenant=ScopedColumn(column="tenant_id"),
+        notes="Immutable promotion record; never implies a positive writer.",
+    ),
+    # --- M06 partition cutover ledger + live source tail (2026110316) ---
+    # MIG-DDL-CUTOVER-01 creates these two tables and re-applies this registry in the
+    # same revision, so no table here is left for "the next pass" (the defect
+    # 2026110309/2026110311 shipped twice, see test_policy_install_order).
+    TablePolicySpec(
+        table="m06_partition_cutover_evidence",
+        owner_revision="2026110316",
+        tenant=ScopedColumn(column="tenant_id"),
+        trusted_command="ALL",
+        notes=(
+            "Append-only cutover ledger: one row per partition transition carrying the "
+            "PartitionCutover snapshot and its PromotionEvidence record. The trusted "
+            "migration writer needs SELECT and INSERT, so the trusted policy is FOR ALL; "
+            "UPDATE/DELETE are denied by the revision's append-only trigger, not by the "
+            "policy. Tenant identity is the only RLS anchor - the partition is "
+            "(tenant_id, app_definition_id) and the state CAS is a unique key, not a "
+            "policy predicate."
+        ),
+    ),
+    TablePolicySpec(
+        table="m06_partition_cutover_source_tail",
+        owner_revision="2026110316",
+        tenant=ScopedColumn(column="tenant_id"),
+        trusted_command="ALL",
+        notes=(
+            "Live legacy source tail per partition, read by the cutover CAS and written "
+            "by the legacy writer, which advances it in place: the trusted writer needs "
+            "UPDATE as well, hence FOR ALL. A missing tail row is what makes a "
+            "final-delta transition refuse, so no policy ever synthesises one."
+        ),
+    ),
+    # --- Runtime revisions / materialization (2026110306) ---
+    TablePolicySpec(
+        table="project_runtime_revisions",
+        owner_revision="2026110306",
+        tenant=ScopedColumn(
+            chain=(ParentHop(table="projects", on_column="project_id", value_column="company_id"),),
+        ),
+        cabinet=ScopedColumn(
+            chain=(ParentHop(table="projects", on_column="project_id", value_column="cabinet_id"),),
+        ),
+        project=ScopedColumn(column="project_id"),
+        notes=(
+            "Runtime revision has no tenant column: tenant/cabinet are proven through "
+            "projects(company_id, cabinet_id) and the project GUC must match project_id."
+        ),
+    ),
+    TablePolicySpec(
+        table="materialization_entries",
+        owner_revision="2026110306",
+        tenant=ScopedColumn(
+            chain=(
+                ParentHop(table="project_runtime_revisions", on_column="revision_id"),
+                ParentHop(table="projects", on_column="project_id", value_column="company_id"),
+            ),
+        ),
+        cabinet=ScopedColumn(
+            chain=(
+                ParentHop(table="project_runtime_revisions", on_column="revision_id"),
+                ParentHop(table="projects", on_column="project_id", value_column="cabinet_id"),
+            ),
+        ),
+        project=ScopedColumn(
+            chain=(
+                ParentHop(table="project_runtime_revisions", on_column="revision_id"),
+                ParentHop(table="projects", on_column="project_id", value_column="id"),
+            ),
+        ),
+        notes=(
+            "Materialization entry inherits the whole scope from "
+            "project_runtime_revisions -> projects; it has no copied tenant column."
+        ),
+    ),
+    # --- Equipment v2 (2026110305; anchors added by 2026110318) ---
+    # MIG-EQ-ANCHORS-01 added nullable ``project_id``/``cabinet_id`` to the three
+    # operational roots (ingestion run, request, tender) and created the two
+    # association tables with their own ``tenant_id``.  Where the anchor exists it
+    # is read *directly*: the two- and three-hop EXISTS chains it replaces were
+    # correct but expensive, and a chain cannot express "this run/request/tender
+    # was made for this project" at all.
+    #
+    # ``allows_null=True`` on the new anchors is not a weakening.  The tenant
+    # comparison stays mandatory and exact, and a row with a NULL anchor is
+    # visible to any session *of its own tenant* - which is precisely the
+    # visibility it had before, when the project GUC was not a predicate at all.
+    # No row of another tenant becomes reachable, and nothing becomes visible to a
+    # session without tenant context (the tenant clause is evaluated first).
+    #
+    # The catalog side (snapshot, offer) keeps its inherited tenant: it has no
+    # tenant column of its own and the design keeps one shared catalog per tenant
+    # with ``project_id IS NULL`` (equipment-association-tables.md 2.1), so there
+    # is no project anchor to switch to.
+    TablePolicySpec(
+        table="equipment_v2_ingestion_runs",
+        owner_revision="2026110305",
+        tenant=ScopedColumn(column="tenant_id"),
+        cabinet=ScopedColumn(column="cabinet_id", allows_null=True),
+        project=ScopedColumn(column="project_id", allows_null=True),
+        trusted_command="ALL",
+        notes=(
+            "Root of the catalog ingestion chain; the only catalog table with a tenant anchor. "
+            "project_id/cabinet_id are nullable anchors (MIG-EQ-ANCHORS-01): NULL means a "
+            "tenant-wide import, which is what the shared-catalog policy allows."
+        ),
+    ),
+    TablePolicySpec(
+        table="equipment_v2_catalog_snapshots",
+        owner_revision="2026110305",
+        tenant=ScopedColumn(
+            chain=(
+                ParentHop(
+                    table="equipment_v2_ingestion_runs",
+                    on_column="ingestion_run_id",
+                    value_column="tenant_id",
+                ),
+            ),
+        ),
+        trusted_command="ALL",
+        notes="Snapshot inherits the run tenant; a snapshot never crosses its ingestion run.",
+    ),
+    TablePolicySpec(
+        table="equipment_v2_catalog_offers",
+        owner_revision="2026110305",
+        tenant=ScopedColumn(
+            chain=(
+                ParentHop(table="equipment_v2_catalog_snapshots", on_column="snapshot_id"),
+                ParentHop(table="equipment_v2_ingestion_runs", on_column="ingestion_run_id", value_column="tenant_id"),
+            ),
+        ),
+        trusted_command="ALL",
+        notes="Offer inherits the tenant through snapshot -> ingestion run; it has no tenant column of its own.",
+    ),
+    TablePolicySpec(
+        table="equipment_v2_requests",
+        owner_revision="2026110305",
+        tenant=ScopedColumn(column="tenant_id"),
+        cabinet=ScopedColumn(column="cabinet_id", allows_null=True),
+        project=ScopedColumn(column="project_id", allows_null=True),
+        trusted_command="ALL",
+        notes=(
+            "Root of the procurement request chain. Since MIG-EQ-ANCHORS-01 it carries the "
+            "project/cabinet anchor itself, so a project-scoped session sees only its project's "
+            "requests while an unanchored legacy row stays tenant-wide, never cross-tenant."
+        ),
+    ),
+    TablePolicySpec(
+        table="equipment_v2_request_lines",
+        owner_revision="2026110305",
+        tenant=ScopedColumn(
+            chain=(ParentHop(table="equipment_v2_requests", on_column="request_id", value_column="tenant_id"),),
+        ),
+        trusted_command="ALL",
+        notes="Request line inherits the request tenant.",
+    ),
+    TablePolicySpec(
+        table="equipment_v2_candidate_groups",
+        owner_revision="2026110305",
+        tenant=ScopedColumn(
+            chain=(
+                ParentHop(table="equipment_v2_request_lines", on_column="request_line_id"),
+                ParentHop(table="equipment_v2_requests", on_column="request_id", value_column="tenant_id"),
+            ),
+        ),
+        trusted_command="ALL",
+        notes=(
+            "Candidate group inherits the tenant through line -> request. "
+            "selected_offer_id is a cross-aggregate link and is not an authorization anchor."
+        ),
+    ),
+    TablePolicySpec(
+        table="equipment_v2_budget_allocations",
+        owner_revision="2026110305",
+        tenant=ScopedColumn(
+            chain=(ParentHop(table="equipment_v2_requests", on_column="request_id", value_column="tenant_id"),),
+        ),
+        trusted_command="ALL",
+        notes="Budget allocation inherits the request tenant.",
+    ),
+    TablePolicySpec(
+        table="equipment_v2_tenders",
+        owner_revision="2026110305",
+        tenant=ScopedColumn(column="tenant_id"),
+        cabinet=ScopedColumn(column="cabinet_id", allows_null=True),
+        project=ScopedColumn(column="project_id", allows_null=True),
+        trusted_command="ALL",
+        notes=(
+            "Tender carries its own tenant anchor and references the request by identity; since "
+            "MIG-EQ-ANCHORS-01 it also carries the project/cabinet anchor it must share with that "
+            "request (the equality itself stays a service/trigger invariant, not a predicate)."
+        ),
+    ),
+    # --- Equipment associations (2026110319, task MIG-EQ-ANCHORS-01) ---
+    # Created empty with a mandatory ``tenant_id``, so the tenant predicate is the
+    # direct column from the very first inserted row: no backfill, no inherited hop,
+    # no window in which an unpolicied association table could hold cross-tenant
+    # references. ``trusted_command`` is ALL because the transactional command path
+    # that reorders ``ordinal`` inserts and deletes membership rows.
+    TablePolicySpec(
+        table="equipment_v2_candidate_group_offers",
+        owner_revision="2026110319",
+        tenant=ScopedColumn(column="tenant_id"),
+        cabinet=ScopedColumn(column="cabinet_id", allows_null=True),
+        project=ScopedColumn(column="project_id", allows_null=True),
+        trusted_command="ALL",
+        notes=(
+            "Ordered candidate-group membership (relational replacement for "
+            "candidate_groups.offer_ids during the expand stage; the JSONB array stays "
+            "authoritative until cutover)."
+        ),
+    ),
+    TablePolicySpec(
+        table="equipment_v2_tender_candidate_groups",
+        owner_revision="2026110319",
+        tenant=ScopedColumn(column="tenant_id"),
+        cabinet=ScopedColumn(column="cabinet_id", allows_null=True),
+        project=ScopedColumn(column="project_id", allows_null=True),
+        trusted_command="ALL",
+        notes=(
+            "Ordered tender membership (relational replacement for "
+            "tenders.candidate_group_ids during the expand stage). Same-request membership "
+            "stays a service/trigger invariant; the pair and the order are enforced here."
+        ),
+    ),
+    # --- Agent Run execution fence + attempt journal (2026110309, 2026110311) ---
+    TablePolicySpec(
+        table="agent_run_leases",
+        owner_revision="2026110309",
+        tenant=ScopedColumn(column="tenant_id"),
+        trusted_command="ALL",
+        notes=(
+            "Lease fence row. tenant_id is denormalised from the run so the claim predicate "
+            "stays index-only; it is not an authorization anchor. No project/cabinet scope is "
+            "declared because the table carries no cabinet anchor and project narrowing is the "
+            "claim predicate's job, not RLS policy state."
+        ),
+    ),
+    TablePolicySpec(
+        table="agent_run_provider_attempts",
+        owner_revision="2026110311",
+        tenant=ScopedColumn(column="tenant_id"),
+        trusted_command="ALL",
+        notes=(
+            "Redacted attempt journal: digests, state and counters only. Reconciliation must "
+            "read across the tenant boundary, hence a trusted service policy alongside the "
+            "tenant policy."
+        ),
+    ),
+    # --- Runtime revision head / attempt / audit (2026110306) ---
+    # These carry ``project_id`` only; tenant and cabinet are proven through
+    # ``projects``, exactly like ``project_runtime_revisions``.
+    TablePolicySpec(
+        table="runtime_revision_heads",
+        owner_revision="2026110306",
+        tenant=ScopedColumn(
+            chain=(ParentHop(table="projects", on_column="project_id", value_column="company_id"),),
+        ),
+        cabinet=ScopedColumn(
+            chain=(ParentHop(table="projects", on_column="project_id", value_column="cabinet_id"),),
+        ),
+        project=ScopedColumn(column="project_id"),
+        trusted_command="ALL",
+        notes=(
+            "Resource-wide CAS head. Has no tenant column: tenant/cabinet are inherited from "
+            "projects and the project GUC must match project_id."
+        ),
+    ),
+    TablePolicySpec(
+        table="runtime_materialization_attempts",
+        owner_revision="2026110306",
+        tenant=ScopedColumn(
+            chain=(ParentHop(table="projects", on_column="project_id", value_column="company_id"),),
+        ),
+        cabinet=ScopedColumn(
+            chain=(ParentHop(table="projects", on_column="project_id", value_column="cabinet_id"),),
+        ),
+        project=ScopedColumn(column="project_id"),
+        trusted_command="ALL",
+        notes="Durable attempt history; scope inherited from projects.",
+    ),
+    TablePolicySpec(
+        table="runtime_materialization_audit",
+        owner_revision="2026110306",
+        tenant=ScopedColumn(
+            chain=(ParentHop(table="projects", on_column="project_id", value_column="company_id"),),
+        ),
+        cabinet=ScopedColumn(
+            chain=(ParentHop(table="projects", on_column="project_id", value_column="cabinet_id"),),
+        ),
+        project=ScopedColumn(column="project_id"),
+        trusted_command="ALL",
+        notes="Append-only materialization audit; scope inherited from projects.",
+    ),
+)
+
+CANONICAL_TABLE_POLICIES: Final[tuple[TablePolicySpec, ...]] = _CANONICAL
+
+#: Tables deliberately left without an RLS policy by this revision, with the
+#: reviewed reason.  Anything else in a canonical prefix (see
+#: :data:`CANONICAL_TABLE_PREFIXES`) is reported by :func:`uncovered_relations`
+#: so an unregistered sibling table cannot pass unnoticed.
+EXCLUDED_TABLES: Final[tuple[tuple[tuple[str, ...], str], ...]] = (
+    (
+        ("capability_bundles",),
+        "Global content-addressed manifest referenced by digest and shared across tenants; "
+        "it carries no tenant anchor, so a tenant-scoped policy would deny legitimate "
+        "inserts. Ownership is proven through project_runtime_revisions.bundle_id.",
+    ),
+    (
+        ("resources", "resource_versions", "resource_bindings"),
+        "Polymorphic (scope_kind, scope_id) resources created by 2026110306 need an EXISTS "
+        "binding to scope_registry before policies are safe; deferred to a dedicated RLS "
+        "review (blocker recorded, not silently skipped).",
+    ),
+    (
+        ("companies", "cabinet_instances", "cabinet_company_grants", "projects", "memberships"),
+        "Legacy platform anchors stay outside the canonical target RLS set; they are read "
+        "by the policy predicates above and need a separate platform-level RLS decision.",
+    ),
+    (
+        ("auth_sessions",),
+        "MIG-AUTHSESS-01: durable correlation_id -> verified subject store. A platform "
+        "anchor like companies/memberships, read *before* a tenant exists (that is how a "
+        "correlation id learns which tenant it may bind), so the reader runs with no "
+        "app.tenant_id and a tenant-scoped policy would deny the only legitimate read. "
+        "Ownership is enforced at write time: only the auth boundary writes it, after "
+        "signature/expiry verification (application/auth/auth_sessions.py).",
+    ),
+)
+
+#: Name prefixes that mark a table as part of the canonical tenant-owned target
+#: schema.  Used only for the coverage report, never to install a policy.
+CANONICAL_TABLE_PREFIXES: Final[tuple[str, ...]] = (
+    "scope_owner_",
+    "scope_registry",
+    "m04e_",
+    # ``m04_scope_promotion_evidence`` matched no prefix before MIG-DDL-M04EVID-01:
+    # it is neither ``m04e_`` nor ``scope_``, so a missing RLS decision for it would
+    # have been invisible to the coverage report instead of being named.
+    "m04_scope_",
+    "m05_",
+    "m06_",
+    "dynamic_app_capability_",
+    "project_runtime_revision",
+    "materialization_",
+    # ``runtime_revision_heads``, ``runtime_materialization_attempts`` and
+    # ``runtime_materialization_audit`` were a blind spot: none of the prefixes
+    # above matched their names, so the coverage report could not name them and
+    # the "nothing uncovered" invariant held vacuously. A prefix that matches a
+    # table set nobody registered is exactly what the report exists to catch.
+    "runtime_",
+    "equipment_v2_",
+    "agent_run_",
+)
+
+
+def validate_registry(specs: tuple[TablePolicySpec, ...] = CANONICAL_TABLE_POLICIES) -> None:
+    """Reject a registry that would install ambiguous or duplicated policies."""
+
+    tables = [spec.table for spec in specs]
+    if len(set(tables)) != len(tables):
+        raise RlsRegistryError("each canonical table must be registered exactly once")
+    policy_names = [name for spec in specs for name in spec.policy_names]
+    if len(set(policy_names)) != len(policy_names):
+        raise RlsRegistryError("policy names must be unique across the registry")
+    # The 63-byte invariant is checked on the declared names *and* on the names
+    # PostgreSQL would store for them.  Today the two sets are identical (that is
+    # what :func:`_policy_name` guarantees); the second check is what keeps a
+    # future suffix, or a hand-built spec, from sneaking a truncation in.
+    for name in policy_names:
+        if len(name) > POLICY_NAME_MAX_LENGTH:
+            raise RlsRegistryError(
+                f"policy name {name!r} is {len(name)} characters, over the "
+                f"{POLICY_NAME_MAX_LENGTH}-character PostgreSQL limit"
+            )
+    installed = [installed_policy_name(name) for name in policy_names]
+    if len(set(installed)) != len(installed):
+        raise RlsRegistryError(
+            "policy names collide once PostgreSQL stores them; two tables would install "
+            "the same policy name"
+        )
+    for spec in specs:
+        if spec.tenant is not None and not scoped_column_predicate(spec, spec.tenant, TENANT_SETTING):
+            raise RlsRegistryError(f"{spec.table}: empty tenant predicate")
+        for scoped in (spec.cabinet, spec.project):
+            if scoped is not None and not scoped_column_predicate(spec, scoped, TENANT_SETTING):
+                raise RlsRegistryError(f"{spec.table}: empty scope predicate")
+
+
+validate_registry()
+
+
+def policy_inventory() -> tuple[dict[str, str], ...]:
+    """Stable review inventory: one entry per installed policy."""
+
+    inventory: list[dict[str, str]] = []
+    for spec in CANONICAL_TABLE_POLICIES:
+        tenant_statement, trusted_statement = create_policy_statements(spec)
+        inventory.append(
+            {
+                "table": spec.table,
+                "policy": spec.tenant_policy,
+                "command": "ALL",
+                "owner_revision": spec.owner_revision,
+                "definition": tenant_statement,
+            }
+        )
+        inventory.append(
+            {
+                "table": spec.table,
+                "policy": spec.trusted_policy,
+                "command": spec.trusted_command,
+                "owner_revision": spec.owner_revision,
+                "definition": trusted_statement,
+            }
+        )
+    return tuple(inventory)
+
+
+def registry_tables() -> tuple[str, ...]:
+    return tuple(spec.table for spec in CANONICAL_TABLE_POLICIES)
+
+
+def excluded_table_names() -> frozenset[str]:
+    return frozenset(name for names, _ in EXCLUDED_TABLES for name in names)
+
+
+def uncovered_relations(relation_names: Iterable[str]) -> tuple[str, ...]:
+    """Canonical-prefixed relations with neither a policy nor a reviewed exclusion.
+
+    Called by the revision after upgrade with the actual catalog relations (and by
+    the acceptance tests with the model metadata), so a sibling revision adding a
+    canonical table cannot silently ship without an RLS decision.
+    """
+
+    covered = set(registry_tables()) | excluded_table_names()
+    return tuple(
+        sorted(
+            name
+            for name in relation_names
+            if name.startswith(CANONICAL_TABLE_PREFIXES) and name not in covered
+        )
+    )
+
+
+__all__ = [
+    "CABINET_SETTING",
+    "CANONICAL_TABLE_POLICIES",
+    "CANONICAL_TABLE_PREFIXES",
+    "EXCLUDED_TABLES",
+    "POLICY_NAME_MAX_LENGTH",
+    "PROJECT_SETTING",
+    "ParentHop",
+    "PolicyCommand",
+    "REGISTRY_VERSION",
+    "RlsRegistryError",
+    "ScopedColumn",
+    "TENANT_POLICY_COMPACT_SUFFIX",
+    "TENANT_POLICY_SUFFIX",
+    "TENANT_SETTING",
+    "TRUSTED_POLICY_COMPACT_SUFFIX",
+    "TRUSTED_POLICY_SUFFIX",
+    "TRUSTED_SERVICE_ROLE",
+    "TRUSTED_SERVICE_SETTING",
+    "TablePolicySpec",
+    "create_policy_statements",
+    "downgrade_guard_sql",
+    "downgrade_statements",
+    "drop_policy_statements",
+    "enable_statements",
+    "excluded_table_names",
+    "installed_policy_name",
+    "legacy_drop_statements",
+    "legacy_policy_names",
+    "policy_inventory",
+    "registry_tables",
+    "missing_scope_columns",
+    "relation_exists",
+    "scope_columns",
+    "scoped_column_predicate",
+    "tenant_predicate",
+    "trusted_policy_statement",
+    "trusted_service_predicate",
+    "uncovered_relations",
+    "upgrade_guard_sql",
+    "upgrade_statements",
+    "validate_registry",
+]

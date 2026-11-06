@@ -46,6 +46,24 @@ def with_final_answer_protocol(text: str) -> str:
     return f"{FINAL_ANSWER_PROTOCOL}\n\n{text}"
 
 
+def strip_answer_protocol_prefix(text: str) -> str:
+    """Return the message body without a leading platform protocol block.
+
+    ``with_final_answer_protocol`` prepends the contract to everything the
+    runtime receives, so a component that needs *the user's own words* — a
+    fixture that echoes them, a preview, a matcher looking at the message
+    directive — has to drop the preamble first. Only a preamble at the very head
+    is removed, and only as a whole block; the body is returned untouched.
+    """
+    if not text:
+        return text
+    stripped = text.lstrip()
+    if not stripped.startswith(FINAL_ANSWER_PROTOCOL.splitlines()[0]):
+        return text
+    _preamble, sep, body = stripped.partition("\n\n")
+    return body if sep else stripped
+
+
 def strip_final_answer_tags(text: str) -> str:
     """Remove the protocol tags for consumers that only need plain text.
 

@@ -157,3 +157,29 @@ async def test_delete_index(svc: SearchIndexService) -> None:
     await svc.ensure_index(namespace="platform", index="tmp")
     assert await svc.delete_index(namespace="platform", index="tmp") is True
     assert await svc.delete_index(namespace="platform", index="tmp") is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("sort", "search_after", "detail"),
+    [
+        (None, ["cursor"], "sort is required"),
+        ([{"title": "asc"}, {"created_at": "desc"}], ["cursor"], "one value for each sort field"),
+        ([{"title": "asc"}], [], "one value for each sort field"),
+    ],
+)
+async def test_search_rejects_invalid_cursor_contract(
+    svc: SearchIndexService,
+    sort: list[dict[str, object]] | None,
+    search_after: list[object],
+    detail: str,
+) -> None:
+    with pytest.raises(AppError) as exc:
+        await svc.search(
+            namespace="platform",
+            index="items",
+            sort=sort,
+            search_after=search_after,
+        )
+    assert exc.value.status == 422
+    assert detail in (exc.value.detail or "")

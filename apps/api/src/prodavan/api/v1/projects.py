@@ -4,18 +4,18 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header, Query, Request
-from fastapi.responses import Response
+from fastapi import APIRouter, Depends, Header, Query, Request, Response
 from pydantic import BaseModel, Field
 
 from prodavan.api.deps import PrincipalDep, SessionDep, get_current_employee
-from prodavan.api.v1.workspace_bodies import WorkspaceCopyBody, WorkspaceMoveBody
+from prodavan.api.v1.workspace_bodies import WorkspaceCopyBody, WorkspaceMoveBody, read_workspace_upload
 from prodavan.application.admin.company_service import AdminCompanyService
 from prodavan.application.modules.chat_scope import SESSION_HEADER
-from prodavan.application.pod_service.workspace_service import PodWorkspaceService
+from prodavan.application.pod_service.workspace_service import PodWorkspaceService, workspace_download_response
 from prodavan.application.project_service import ProjectAccessPolicy, ProjectCommand, ProjectQuery
 from prodavan.application.projects import (
     ProjectAttachmentService,
+    ProjectScheduleService,
     ProjectTriggerService,
 )
 from prodavan.application.projects.signed_ingress import enqueue_signed_trigger
@@ -57,6 +57,26 @@ class TriggerBody(BaseModel):
     payload: dict = Field(default_factory=dict)
 
 
+class ScheduleBody(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    name: str = Field(min_length=1, max_length=200)
+    cron: str = Field(min_length=9, max_length=120)
+    timezone: str = Field(default="UTC", min_length=1, max_length=64)
+    payload: dict = Field(default_factory=dict)
+    enabled: bool = True
+
+
+class SchedulePatchBody(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    cron: str | None = Field(default=None, min_length=9, max_length=120)
+    timezone: str | None = Field(default=None, min_length=1, max_length=64)
+    payload: dict | None = None
+    enabled: bool | None = None
+
+
 class VisibilityBody(BaseModel):
     model_config = {"extra": "forbid"}
 
@@ -75,6 +95,12 @@ class AttachmentBody(BaseModel):
     filename: str = Field(min_length=1, max_length=260)
     content_base64: str = Field(min_length=1)
     content_type: str | None = Field(default=None, max_length=128)
+
+
+class WorkspaceMkdirBody(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    path: str = Field(min_length=1, max_length=500)
 
 
 EmployeeDep = Annotated[EmployeeRow | None, Depends(get_current_employee)]
@@ -209,11 +235,41 @@ async def download_project_workspace_content(
         principal=principal,
         employee=employee,
     )
-    safe_name = entry.name.replace('"', "")
-    return Response(
-        content=data,
-        media_type="application/octet-stream",
-        headers={"Content-Disposition": f'attachment; filename="{safe_name}"'},
+    return workspace_download_response(data, entry)
+
+
+@router.put("/projects/{project_id}/container/workspace/content")
+async def upload_project_workspace_content(
+    project_id: str,
+    request: Request,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+    path: str = Query(min_length=1),
+) -> dict:
+    data = await read_workspace_upload(request)
+    return await PodWorkspaceService(session).write_content(
+        project_id=project_id,
+        path=path,
+        data=data,
+        principal=principal,
+        employee=employee,
+    )
+
+
+@router.post("/projects/{project_id}/container/workspace/mkdir", status_code=201)
+async def create_project_workspace_directory(
+    project_id: str,
+    body: WorkspaceMkdirBody,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+) -> dict:
+    return await PodWorkspaceService(session).create_directory(
+        project_id=project_id,
+        path=body.path,
+        principal=principal,
+        employee=employee,
     )
 
 
@@ -933,6 +989,72 @@ async def post_trigger(
     )
     await session.commit()
     return result
+
+
+@router.post("/projects/{project_id}/schedules", status_code=201)
+async def create_schedule(
+    project_id: str,
+    body: ScheduleBody,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+) -> dict:
+    await ProjectAccessPolicy(session).require_access(
+        project_id=project_id, principal=principal, employee=employee, write=True
+    )
+    result = await ProjectScheduleService(session).create(
+        project_id=project_id, name=body.name, cron=body.cron, timezone=body.timezone,
+        payload=body.payload, enabled=body.enabled,
+    )
+    await session.commit()
+    return result
+
+
+@router.get("/projects/{project_id}/schedules")
+async def list_schedules(
+    project_id: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+) -> dict:
+    await ProjectAccessPolicy(session).require_access(
+        project_id=project_id, principal=principal, employee=employee, write=False
+    )
+    return {"items": await ProjectScheduleService(session).list_for_project(project_id=project_id)}
+
+
+@router.patch("/projects/{project_id}/schedules/{schedule_id}")
+async def patch_schedule(
+    project_id: str,
+    schedule_id: str,
+    body: SchedulePatchBody,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+) -> dict:
+    await ProjectAccessPolicy(session).require_access(
+        project_id=project_id, principal=principal, employee=employee, write=True
+    )
+    result = await ProjectScheduleService(session).update(
+        project_id=project_id, schedule_id=schedule_id, values=body.model_dump(exclude_unset=True, exclude_none=True)
+    )
+    await session.commit()
+    return result
+
+
+@router.delete("/projects/{project_id}/schedules/{schedule_id}", status_code=204)
+async def delete_schedule(
+    project_id: str,
+    schedule_id: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+) -> None:
+    await ProjectAccessPolicy(session).require_access(
+        project_id=project_id, principal=principal, employee=employee, write=True
+    )
+    await ProjectScheduleService(session).delete(project_id=project_id, schedule_id=schedule_id)
+    await session.commit()
 
 
 @router.get("/projects/{project_id}/triggers")

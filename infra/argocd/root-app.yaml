@@ -1,5 +1,18 @@
+# DEV-host root app (gitops-bootstrap.sh, GITOPS_APPS != prod).
 # Apply once after Argo install (not synced by itself to avoid recursion):
 #   kubectl apply -f infra/argocd/root-app.yaml
+#
+# Syncs the DEV contour only: AppProjects, agent-sandbox (platform),
+# agentscale-dev, agentscale-e2e. agentscale-prod.yaml is EXCLUDED — dev
+# bootstrap must never create/sync the prod Application (policy: prod only on
+# explicit demand); the prod contour is deployed solely by root-app-prod.yaml
+# on a dedicated prod host (terraform gitops_apps=prod).
+# NOTE: apps/ must stay a PLAIN directory (no kustomization.yaml) — Argo then
+# honours spec.source.directory.exclude (single glob, gobwas syntax).
+# WARNING: re-applying this file on a cluster where agentscale-prod was
+# previously synced by an unfiltered root app will PRUNE that Application
+# (automated.prune) and cascade-delete prod workloads. On a cold install
+# (the only supported flow) nothing is pruned.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -13,6 +26,8 @@ spec:
     repoURL: https://github.com/ne-tort/agentscale.git
     targetRevision: main
     path: infra/argocd/apps
+    directory:
+      exclude: agentscale-prod.yaml
   destination:
     server: https://kubernetes.default.svc
     namespace: argocd
@@ -22,3 +37,12 @@ spec:
       selfHeal: true
     syncOptions:
       - CreateNamespace=true
+    # Cold start: a transient API/git hiccup while creating child Applications
+    # must not stall app-of-apps until the next periodic requeue — retry like
+    # the child apps do.
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m

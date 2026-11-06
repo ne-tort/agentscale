@@ -20,6 +20,14 @@ spec:
     syncOptions:
       - CreateNamespace=false
       - RespectIgnoreDifferences=true
+    # Applies to CI-triggered manual syncs too: transient apply failures retry
+    # instead of failing the workflow on the first hiccup.
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
   ignoreDifferences:
     - group: batch
       kind: Job

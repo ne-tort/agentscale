@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import AsyncIterator
 
+from prodavan.application.agent.answer_protocol import strip_answer_protocol_prefix
 from prodavan.domain.agent import AgentEvent, AgentEventType, AgentHandle, ChatMessage, CreateOpts
 
 
@@ -27,8 +28,14 @@ class FixtureCursorAdapter:
         return handle
 
     async def send(self, handle: AgentHandle, message: ChatMessage) -> AsyncIterator[AgentEvent]:
+        # The runtime receives the platform prompt layer (final-answer contract)
+        # prepended to every message. This fixture stands in for a real agent, so
+        # it acts on — and echoes — the *user's* text, the way a model answering
+        # the user would, instead of replaying the platform preamble back.
+        user_text = strip_answer_protocol_prefix(message.text)
+
         # HITL demo path: messages with "dangerous:" pause on tool_approval_request (no done).
-        if "dangerous:" in message.text.lower():
+        if "dangerous:" in user_text.lower():
             yield AgentEvent.now(
                 AgentEventType.TEXT_DELTA,
                 {"text": "Waiting for approval to run a dangerous tool."},
@@ -38,19 +45,19 @@ class FixtureCursorAdapter:
                 {
                     "id": f"apr_{uuid.uuid4().hex[:10]}",
                     "name": "shell.exec",
-                    "input": {"command": message.text},
+                    "input": {"command": user_text},
                 },
             )
             return
 
-        if message.text.startswith("cumulative:"):
-            payload = message.text.removeprefix("cumulative:").strip() or "OK"
+        if user_text.startswith("cumulative:"):
+            payload = user_text.removeprefix("cumulative:").strip() or "OK"
             for i in range(1, len(payload) + 1):
                 yield AgentEvent.now(AgentEventType.TEXT_DELTA, {"text": payload[:i]})
             yield AgentEvent.now(AgentEventType.DONE, {"reason": "completed"})
             return
 
-        reply = f"Cursor fixture: {message.text}"
+        reply = f"Cursor fixture: {user_text}"
         for i, word in enumerate(reply.split()):
             chunk = word if i == 0 else f" {word}"
             yield AgentEvent.now(AgentEventType.TEXT_DELTA, {"text": chunk})

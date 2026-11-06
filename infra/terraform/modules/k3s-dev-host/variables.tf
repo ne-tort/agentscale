@@ -37,6 +37,18 @@ variable "k3s_version" {
   default = "v1.29.5+k3s1"
 }
 
+variable "force_reinstall" {
+  type        = bool
+  default     = false
+  description = "Clean install: before installing, wipe the previous k3s state (/var/lib/rancher/k3s: etcd/sqlite, containerd images, local-path PVC data) and k3s-uninstall the old service. Part of k3s_server triggers, so flipping it true re-runs the provisioners; flip back to false afterwards (idempotent re-run, no reinstall)."
+}
+
+variable "k3s_resolv_conf" {
+  type        = string
+  default     = ""
+  description = "Optional k3s `resolv-conf` for pods (rendered into k3s config.yaml). Set when the host resolver is managed by host_dns_servers: CoreDNS (dnsPolicy: Default) must not inherit a dead upstream from /etc/resolv.conf. Empty = k3s default."
+}
+
 variable "http_port" {
   type        = number
   default     = 8088

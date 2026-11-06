@@ -19,7 +19,10 @@ import httpx
 from prodavan.application.agent.runtime_auth import runtime_auth_headers
 from prodavan.application.agent.runtime_transport import RuntimeEndpoint
 from prodavan.application.pod_service.ports.workspace import WorkspaceEntry
-from prodavan.application.pod_service.workspace_paths import normalize_workspace_path
+from prodavan.application.pod_service.workspace_paths import (
+    coerce_internal_workspace_path,
+    normalize_workspace_path,
+)
 from prodavan.config.settings import settings
 from prodavan.domain.errors import AppError
 from prodavan.infrastructure.k8s.sandbox.client import K8sSandboxClient
@@ -39,13 +42,22 @@ def _endpoint_headers(endpoint: RuntimeEndpoint) -> dict[str, str]:
     return headers
 
 
+def _normalize_response_path(raw: object) -> str:
+    value = str(raw or "").replace("\\", "/")
+    if value == "/workspace":
+        value = ""
+    elif value.startswith("/workspace/"):
+        value = value[len("/workspace/") :]
+    return normalize_workspace_path(value)
+
+
 def _entry_from_dict(raw: dict[str, Any]) -> WorkspaceEntry:
     kind = raw.get("kind")
     if kind not in ("file", "dir"):
         kind = "file"
     return WorkspaceEntry(
         name=str(raw.get("name") or ""),
-        path=str(raw.get("path") or ""),
+        path=_normalize_response_path(raw.get("path")),
         kind=kind,  # type: ignore[arg-type]
         size=raw.get("size") if kind == "file" else None,
         modified_at=raw.get("modified_at"),
@@ -53,7 +65,15 @@ def _entry_from_dict(raw: dict[str, Any]) -> WorkspaceEntry:
 
 
 class HttpWorkspaceAdapterBase:
-    """HTTP /v1/workspace client; subclasses resolve the RuntimeEndpoint."""
+    """HTTP /v1/workspace client; subclasses resolve the RuntimeEndpoint.
+
+    Path handling: request paths reach this adapter from our own service and
+    planner code, not from an HTTP request body — the API contour already ran
+    the strict validator on user input. So they are coerced softly
+    (``coerce_internal_workspace_path``: leading ``/`` and ``\\`` stripped,
+    ``\\`` -> ``/``) before the strict normalizer runs, which still refuses
+    traversal. Runtime responses keep the strict normalizer only.
+    """
 
     async def _runtime_endpoint(self, runtime_ref: str) -> RuntimeEndpoint:
         raise NotImplementedError
@@ -65,6 +85,15 @@ class HttpWorkspaceAdapterBase:
             title="Bad Gateway",
             status=502,
             detail="agent runtime has no workspace write API",
+        )
+
+    async def _mkdir_fallback(self, *, runtime_ref: str, path: str) -> None:
+        _ = runtime_ref, path
+        raise AppError(
+            code="RUNTIME_FS_FAILED",
+            title="Bad Gateway",
+            status=502,
+            detail="agent runtime has no workspace mkdir API",
         )
 
     async def _invalidate_runtime_endpoint(
@@ -130,18 +159,29 @@ class HttpWorkspaceAdapterBase:
 
         response = await self._execute_with_reresolve(runtime_ref=runtime_ref, send=_send)
         if response.status_code >= 400:
+            try:
+                problem = response.json()
+            except Exception:
+                problem = {}
+            if not isinstance(problem, dict):
+                problem = {}
             raise AppError(
                 code="RUNTIME_FS_FAILED",
                 title="Bad Gateway",
                 status=502,
-                detail=response.text[:500],
+                detail=str(problem.get("detail") or response.text[:500]),
+                extra={
+                    "runtime_status": response.status_code,
+                    "runtime_code": str(problem.get("code") or ""),
+                    "runtime_extra": problem,
+                },
             )
         if response.status_code == 204:
             return {}
         return response.json()
 
     async def list_entries(self, *, runtime_ref: str, path: str) -> list[WorkspaceEntry]:
-        rel = normalize_workspace_path(path)
+        rel = coerce_internal_workspace_path(path)
         body = await self._request_json(
             runtime_ref=runtime_ref,
             method="GET",
@@ -154,8 +194,95 @@ class HttpWorkspaceAdapterBase:
                 out.append(_entry_from_dict(item))
         return out
 
+    async def create_directory(self, *, runtime_ref: str, path: str) -> None:
+        rel = coerce_internal_workspace_path(path)
+        if not rel:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="path required",
+            )
+        try:
+            body = await self._request_json(
+                runtime_ref=runtime_ref,
+                method="POST",
+                path="/v1/workspace/mkdir",
+                json_body={"path": rel},
+            )
+        except AppError as exc:
+            runtime_status = exc.extra.get("runtime_status")
+            runtime_code = exc.extra.get("runtime_code")
+            if runtime_code == "POD_NOT_RUNNING":
+                raise AppError(
+                    code="POD_NOT_RUNNING",
+                    title="Conflict",
+                    status=409,
+                    detail=exc.detail or "pod is not running",
+                ) from exc
+            if runtime_code in {"WORKSPACE_NOT_FOUND", "WORKSPACE_PARENT_NOT_FOUND"}:
+                raise AppError(
+                    code="WORKSPACE_NOT_FOUND",
+                    title="Not Found",
+                    status=404,
+                    detail="workspace parent path not found",
+                    extra={"path": rel},
+                ) from exc
+            if runtime_code == "WORKSPACE_ALREADY_EXISTS":
+                runtime_extra = exc.extra.get("runtime_extra")
+                raise AppError(
+                    code="WORKSPACE_ALREADY_EXISTS",
+                    title="Conflict",
+                    status=409,
+                    detail="workspace path already exists",
+                    extra={"path": rel, **(runtime_extra if isinstance(runtime_extra, dict) else {})},
+                ) from exc
+            if runtime_code == "WORKSPACE_PATH_CONFLICT":
+                raise AppError(
+                    code="WORKSPACE_PATH_CONFLICT",
+                    title="Conflict",
+                    status=409,
+                    detail="a parent workspace path is not a directory",
+                    extra={"path": rel},
+                ) from exc
+            if runtime_code in {"WORKSPACE_PERMISSION_DENIED", "FORBIDDEN"}:
+                raise AppError(
+                    code="WORKSPACE_PERMISSION_DENIED",
+                    title="Forbidden",
+                    status=403,
+                    detail="permission denied creating workspace directory",
+                    extra={"path": rel},
+                ) from exc
+            if exc.code == "RUNTIME_FS_FAILED" and runtime_status in {404, 405}:
+                await self._mkdir_fallback(runtime_ref=runtime_ref, path=rel)
+                return
+            if exc.code == "RUNTIME_FS_FAILED" and runtime_status == 403:
+                raise AppError(
+                    code="WORKSPACE_PERMISSION_DENIED",
+                    title="Forbidden",
+                    status=403,
+                    detail="permission denied creating workspace directory",
+                    extra={"path": rel},
+                ) from exc
+            if exc.code == "RUNTIME_FS_FAILED" and runtime_status == 409:
+                raise AppError(
+                    code="WORKSPACE_ALREADY_EXISTS",
+                    title="Conflict",
+                    status=409,
+                    detail="workspace path already exists",
+                    extra={"path": rel},
+                ) from exc
+            raise
+        if body.get("created") is not True or _normalize_response_path(body.get("path")) != rel:
+            raise AppError(
+                code="RUNTIME_FS_FAILED",
+                title="Bad Gateway",
+                status=502,
+                detail="workspace mkdir result did not match requested path",
+            )
+
     async def read_bytes(self, *, runtime_ref: str, path: str, max_bytes: int) -> bytes:
-        rel = normalize_workspace_path(path)
+        rel = coerce_internal_workspace_path(path)
         if not rel:
             raise AppError(
                 code="VALIDATION_ERROR",
@@ -183,16 +310,27 @@ class HttpWorkspaceAdapterBase:
 
         response = await self._execute_with_reresolve(runtime_ref=runtime_ref, send=_send)
         if response.status_code >= 400:
+            try:
+                problem = response.json()
+            except Exception:
+                problem = {}
+            if not isinstance(problem, dict):
+                problem = {}
             raise AppError(
                 code="RUNTIME_FS_FAILED",
                 title="Bad Gateway",
                 status=502,
-                detail=response.text[:500],
+                detail=str(problem.get("detail") or response.text[:500]),
+                extra={
+                    "runtime_status": response.status_code,
+                    "runtime_code": str(problem.get("code") or ""),
+                    "runtime_extra": problem,
+                },
             )
         return response.content
 
     async def stat(self, *, runtime_ref: str, path: str) -> WorkspaceEntry:
-        rel = normalize_workspace_path(path)
+        rel = coerce_internal_workspace_path(path)
         if not rel:
             raise AppError(
                 code="VALIDATION_ERROR",
@@ -200,15 +338,26 @@ class HttpWorkspaceAdapterBase:
                 status=422,
                 detail="path required",
             )
-        body = await self._request_json(
-            runtime_ref=runtime_ref,
-            method="GET",
-            path=f"/v1/workspace/stat?path={quote(rel, safe='')}",
-        )
+        try:
+            body = await self._request_json(
+                runtime_ref=runtime_ref,
+                method="GET",
+                path=f"/v1/workspace/stat?path={quote(rel, safe='')}",
+            )
+        except AppError as exc:
+            if exc.code == "RUNTIME_FS_FAILED" and exc.extra.get("runtime_status") == 404:
+                raise AppError(
+                    code="WORKSPACE_NOT_FOUND",
+                    title="Not Found",
+                    status=404,
+                    detail="workspace path not found",
+                    extra={"path": rel},
+                ) from exc
+            raise
         return _entry_from_dict(body)
 
     async def delete(self, *, runtime_ref: str, path: str) -> None:
-        rel = normalize_workspace_path(path)
+        rel = coerce_internal_workspace_path(path)
         if not rel:
             raise AppError(
                 code="VALIDATION_ERROR",
@@ -216,15 +365,26 @@ class HttpWorkspaceAdapterBase:
                 status=422,
                 detail="path required",
             )
-        await self._request_json(
-            runtime_ref=runtime_ref,
-            method="DELETE",
-            path=f"/v1/workspace/entries?path={quote(rel, safe='')}",
-        )
+        try:
+            await self._request_json(
+                runtime_ref=runtime_ref,
+                method="DELETE",
+                path=f"/v1/workspace/entries?path={quote(rel, safe='')}",
+            )
+        except AppError as exc:
+            if exc.code == "RUNTIME_FS_FAILED" and exc.extra.get("runtime_status") == 404:
+                raise AppError(
+                    code="WORKSPACE_NOT_FOUND",
+                    title="Not Found",
+                    status=404,
+                    detail="workspace path not found",
+                    extra={"path": rel},
+                ) from exc
+            raise
 
     async def move(self, *, runtime_ref: str, src: str, dst: str) -> None:
-        s = normalize_workspace_path(src)
-        d = normalize_workspace_path(dst)
+        s = coerce_internal_workspace_path(src)
+        d = coerce_internal_workspace_path(dst)
         if not s or not d:
             raise AppError(
                 code="VALIDATION_ERROR",
@@ -240,8 +400,8 @@ class HttpWorkspaceAdapterBase:
         )
 
     async def copy(self, *, runtime_ref: str, src: str, dst: str) -> None:
-        s = normalize_workspace_path(src)
-        d = normalize_workspace_path(dst)
+        s = coerce_internal_workspace_path(src)
+        d = coerce_internal_workspace_path(dst)
         if not s or not d:
             raise AppError(
                 code="VALIDATION_ERROR",
@@ -258,7 +418,7 @@ class HttpWorkspaceAdapterBase:
 
     async def write_bytes(self, *, runtime_ref: str, path: str, data: bytes) -> None:
         """Prefer HTTP PUT; fall back to mode-specific write when runtime has no write API."""
-        rel = normalize_workspace_path(path)
+        rel = coerce_internal_workspace_path(path)
         if not rel:
             raise AppError(
                 code="VALIDATION_ERROR",
@@ -322,3 +482,14 @@ class HttpAgentRuntimeWorkspaceAdapter(HttpWorkspaceAdapterBase):
             path=path,
             data=data,
         )
+
+    async def _mkdir_fallback(self, *, runtime_ref: str, path: str) -> None:
+        from prodavan.application.pod_service.adapters.k8s.workspace_exec import (
+            K8sExecWorkspaceAdapter,
+        )
+
+        await K8sExecWorkspaceAdapter(client=self._client).create_directory(
+            runtime_ref=runtime_ref,
+            path=path,
+        )
+

@@ -112,6 +112,8 @@ class WebhookDeliveryRow(Base):
     payload_json: Mapped[dict] = mapped_column(JSONB, nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Immutable per-attempt outcomes; manual retry starts a new cycle without erasing history.
+    retry_history: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     next_attempt_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

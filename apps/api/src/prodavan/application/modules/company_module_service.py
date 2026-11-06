@@ -18,27 +18,48 @@ from prodavan.domain.ownership import OwnerScope
 from prodavan.infrastructure.persistence.models.modules import ModuleCompanyGrantRow, ModuleRow
 
 
+def _company_owns(row: ModuleRow, company_id: str) -> bool:
+    """True when this company owns the module *definition* (not just an instance).
+
+    A platform module granted to a company is forked at the **data** level only:
+    ``ensure_company_instance`` copies the SoT rows. ``ModuleRow.name`` and the
+    meta documents stay shared with every other company the module is granted to,
+    so they must never be written through the company-scoped surface — that would
+    be a cross-tenant mutation of the platform catalog. Only a row the company
+    actually owns may be renamed / re-documented / deleted.
+    """
+    return row.owner_scope == OwnerScope.COMPANY and row.owner_company_id == company_id
+
+
 def _company_public_row(
     row: ModuleRow,
     *,
     company_id: str,
     cabinet_ids: list[str],
+    writable: bool,
     may_edit: bool,
     bind_kind: str | None,
 ) -> dict:
-    if bind_kind == ModuleBindKind.LOCAL and may_edit:
-        source = "company_local"
-    elif bind_kind == ModuleBindKind.GLOBAL or not may_edit:
+    """Project a module for a company actor.
+
+    ``writable`` answers "may this company change the module definition?" (name,
+    meta documents, delete) and is what the UI gates editing controls on. It is
+    owned-ness, not the SoT-instance flag: a local fork makes the company's *data*
+    editable, while the definition stays the platform's.
+
+    ``may_edit``/``child_may_edit`` remain the SoT-instance flag (data rows).
+    """
+    if not _company_owns(row, company_id):
         source = "platform_assigned"
     else:
-        source = "company_local" if may_edit else "platform_assigned"
+        source = "company_local"
     return {
         "id": row.id,
         "name": row.name,
         "status": row.status,
         "owner_scope": row.owner_scope,
         "owner_company_id": row.owner_company_id,
-        "writable": may_edit,
+        "writable": writable,
         "source": source,
         "bind_kind": bind_kind,
         "child_may_edit": may_edit,
@@ -83,6 +104,7 @@ class CompanyModuleService:
             row,
             company_id=company_id,
             cabinet_ids=cabinet_ids,
+            writable=_company_owns(row, company_id),
             may_edit=may_edit,
             bind_kind=bind_kind,
         )
@@ -140,9 +162,13 @@ class CompanyModuleService:
         cabinet_ids: list[str] | None = None,
     ) -> dict:
         row = await self._require_visible(company_id, module_id)
-        may_edit, _ = await self._bind_flags(company_id=company_id, module_id=module_id)
         if name is not None:
-            if not may_edit:
+            # Definition write: the row is shared with every other company the
+            # module is granted to, so only its owner may rename it. The
+            # instance-level flag (``_bind_flags``) is *not* enough here — it is
+            # true for a local fork and would let a company rename a platform
+            # module for everybody.
+            if not _company_owns(row, company_id):
                 raise AppError(code="FORBIDDEN", title="Forbidden", status=403, detail="module is read-only")
             trimmed = name.strip()
             if not trimmed:
@@ -178,9 +204,10 @@ class CompanyModuleService:
     async def put_meta_document(
         self, *, company_id: str, module_id: str, slug: str, body: object
     ) -> dict:
-        await self._require_visible(company_id, module_id)
-        may_edit, _ = await self._bind_flags(company_id=company_id, module_id=module_id)
-        if not may_edit:
+        row = await self._require_visible(company_id, module_id)
+        # Meta documents hang off the shared ModuleRow (see ``_company_owns``):
+        # definition write, owner only.
+        if not _company_owns(row, company_id):
             raise AppError(code="FORBIDDEN", title="Forbidden", status=403, detail="module meta is read-only")
         return await self._meta.put_document(module_id=module_id, slug=slug, body=body)
 

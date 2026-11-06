@@ -205,7 +205,10 @@ Future<
   final hasProject = projectId != null && projectId.isNotEmpty;
 
   if (!hasProject) {
-    // Force cabinet SoT for hubs even when tab seed says local.
+    // Hubs are project-scoped entry points. Without a selected project there is
+    // no runtime module bind (or project/session context) to open, so keep only
+    // cabinet rail tabs visible. This also prevents a cabinet meta tab from
+    // being mistaken for a project module and opened with the wrong scope.
     final cabinetRaw = await _loadRawCabinetNavEntries(
       cabinetId,
       forceBindKind: 'global',
@@ -214,12 +217,8 @@ Future<
       rail: _finalizeCabinetNavEntries(
         _filterPlacement(cabinetRaw, CabinetNavPlacement.rail),
       ),
-      management: _finalizeCabinetNavEntries(
-        _filterPlacement(cabinetRaw, CabinetNavPlacement.management),
-      ),
-      data: _finalizeCabinetNavEntries(
-        _filterPlacement(cabinetRaw, CabinetNavPlacement.data),
-      ),
+      management: const <CabinetNavEntry>[],
+      data: const <CabinetNavEntry>[],
     );
   }
 

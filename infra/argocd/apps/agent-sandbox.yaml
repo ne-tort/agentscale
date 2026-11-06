@@ -6,6 +6,14 @@ kind: Application
 metadata:
   name: agent-sandbox
   namespace: argocd
+  annotations:
+    # app-of-apps ordering: the platform (CRDs + controller + router) must be
+    # created BEFORE agentscale-dev/e2e (wave 0) — the *-sandboxes layer ships
+    # SandboxTemplate/SandboxWarmPool CRs and needs the
+    # extensions.agents.x-k8s.io CRDs registered first. Matches
+    # gitops-bootstrap.sh ("agent-sandbox app (sync-wave -5) must be Healthy
+    # before the platform app"). AppProjects go even earlier (wave -10).
+    argocd.argoproj.io/sync-wave: "-5"
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:

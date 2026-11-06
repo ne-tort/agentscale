@@ -62,17 +62,23 @@ class DetachedTurnRegistry:
     """Tracks autonomous turns keyed by turn id (idempotent start) + session."""
 
     def __init__(self) -> None:
-        self._by_turn: dict[str, DetachedTurn] = {}
+        self._by_turn: dict[tuple[str, str], DetachedTurn] = {}
         self._active_by_session: dict[str, str] = {}
 
-    def get(self, turn_id: str) -> DetachedTurn | None:
-        return self._by_turn.get(turn_id)
+    @staticmethod
+    def _key(session_id: str, turn_id: str) -> tuple[str, str]:
+        return session_id, turn_id
+
+    def get(self, turn_id: str, *, session_id: str | None = None) -> DetachedTurn | None:
+        if session_id is not None:
+            return self._by_turn.get(self._key(session_id, turn_id))
+        return next((t for (sid, tid), t in self._by_turn.items() if tid == turn_id), None)
 
     def active_for_session(self, session_id: str) -> DetachedTurn | None:
         turn_id = self._active_by_session.get(session_id)
         if turn_id is None:
             return None
-        turn = self._by_turn.get(turn_id)
+        turn = self._by_turn.get(self._key(session_id, turn_id))
         if turn is None or turn.finished:
             self._active_by_session.pop(session_id, None)
             return None
@@ -80,6 +86,32 @@ class DetachedTurnRegistry:
 
     def is_working(self, session_id: str) -> bool:
         return self.active_for_session(session_id) is not None
+
+    def remember_completed(
+        self,
+        *,
+        turn_id: str,
+        session_id: str,
+        project_id: str,
+        start_seq: int,
+        error_code: str | None = None,
+    ) -> DetachedTurn:
+        """Rehydrate a durable turn after an API restart without rerunning it."""
+        key = self._key(session_id, turn_id)
+        existing = self._by_turn.get(key)
+        if existing is not None:
+            return existing
+        turn = DetachedTurn(
+            turn_id=turn_id,
+            session_id=session_id,
+            project_id=project_id,
+            start_seq=start_seq,
+            finished=True,
+            error_code=error_code,
+        )
+        self._by_turn[key] = turn
+        self._prune()
+        return turn
 
     async def start(
         self,
@@ -95,12 +127,17 @@ class DetachedTurnRegistry:
         """Start a turn, or return the existing one for the same turn_id.
 
         Idempotency by ``turn_id`` makes a retried send (flaky network, HTTP
-        replay) reuse the same run instead of spawning a duplicate — and a
-        superseding send on the same session starts a fresh turn (the runtime
-        aborts the previous run on its own).
+        replay) reuse the same run/record instead of spawning a duplicate —
+        including retries arriving after completion while the record is kept.
+        A superseding send on the same session with a fresh id starts a fresh
+        turn (the runtime aborts the previous run on its own).
         """
-        existing = self._by_turn.get(turn_id)
-        if existing is not None and not existing.finished:
+        key = self._key(session_id, turn_id)
+        existing = self._by_turn.get(key)
+        if existing is not None:
+            # Keep idempotency after completion too. The completed record is
+            # deliberately retained for late tailers; restarting it on a
+            # delayed HTTP retry would persist a duplicate user turn.
             return existing
 
         turn = DetachedTurn(
@@ -111,7 +148,7 @@ class DetachedTurnRegistry:
             employee_id=employee_id,
             principal=principal,
         )
-        self._by_turn[turn_id] = turn
+        self._by_turn[key] = turn
         self._active_by_session[session_id] = turn_id
         turn.task = asyncio.create_task(self._run(turn, runner))
         return turn
@@ -149,7 +186,7 @@ class DetachedTurnRegistry:
             return
         # Drop the oldest finished records; a tailer keeps its own reference.
         for turn in finished[: len(finished) - _KEEP_FINISHED]:
-            self._by_turn.pop(turn.turn_id, None)
+            self._by_turn.pop(self._key(turn.session_id, turn.turn_id), None)
 
 
 # Process-wide registry (one API replica → authoritative for "working").

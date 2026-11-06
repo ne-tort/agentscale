@@ -30,6 +30,18 @@ from prodavan_ops.k8s import kubectl
 #: (инцидент 2026-10-29: DoT-резолвер хоста умер, xAI device-flow отдавал 502).
 REQUIRED_HOSTS = ("github.com", "auth.x.ai")
 
+#: Где искать под для проверки, в порядке приоритета. Dev-контур — основной
+#: (политика сред: работаем с dev), prod — только если dev-поды не поднялись.
+#: Раньше дефолтом был `agentscale`, и на чистом dev-кластере dns-check падал
+#: с «нет Running-пода» — то есть выглядел как мёртвый DNS, хотя подов там
+#: просто нет по построению.
+DEFAULT_NAMESPACES: tuple[str, ...] = (
+    "agentscale-dev",
+    "agentscale-dev-sandboxes",
+    "agentscale",
+    "agentscale-sandboxes",
+)
+
 #: Сколько последних секунд логов CoreDNS считать «свежими».
 _COREDNS_LOG_WINDOW_SEC = "120s"
 
@@ -73,22 +85,42 @@ def _pod_in(namespace: str) -> str | None:
 def resolve_from_pod(
     host: str,
     *,
-    namespace: str = "agentscale",
+    namespace: str | None = None,
     pod: str | None = None,
     timeout_sec: float = 25.0,
 ) -> str:
-    """Резолв `host` ИЗ ПОДА. Возвращает IP или бросает DnsCheckError."""
-    target = pod or _pod_in(namespace)
-    if not target:
-        raise DnsCheckError(
-            f"dns-check: в namespace {namespace} нет Running-пода — нечем проверить резолв"
-        )
+    """Резолв `host` ИЗ ПОДА. Возвращает IP или бросает DnsCheckError.
+
+    `namespace=None` — искать под в DEFAULT_NAMESPACES по порядку (dev первым):
+    команда должна работать и на чистом dev-кластере, где ns `agentscale` пуст
+    или отсутствует.
+    """
+    target = pod
+    ns = namespace
+    if target is None:
+        searched: list[str] = []
+        for candidate in ([namespace] if namespace else DEFAULT_NAMESPACES):
+            searched.append(candidate)
+            target = _pod_in(candidate)
+            if target:
+                ns = candidate
+                break
+        if not target:
+            raise DnsCheckError(
+                "dns-check: нет Running-пода ни в одном из namespace "
+                f"({', '.join(searched)}) — нечем проверить резолв. "
+                "Если кластер только что поставлен, сначала дождитесь "
+                "`prodavan-ops wait` (Argo ещё не раскатал платформу)."
+            )
+    elif ns is None:
+        # Явный --pod без --namespace: берём первый dev-namespace, а не `None`.
+        ns = DEFAULT_NAMESPACES[0]
     # python есть в api-образе; shell-однострочник без кавычек-ловушек.
     code = f"import socket;print(socket.gethostbyname({host!r}))"
     # `_pod_in` returns pod[/container]; kubectl exec takes them as separate
     # args (it does not accept the pod/container form used by kubectl logs).
     pod_name, _, container = target.partition("/")
-    exec_args = ["-n", namespace, "exec", pod_name]
+    exec_args = ["-n", ns, "exec", pod_name]
     if container:
         exec_args += ["-c", container]
     exec_args += ["--", "python3", "-c", code]
@@ -133,12 +165,14 @@ def coredns_timeouts(*, namespace: str = "kube-system") -> int:
 
 def check_dns(
     *,
-    namespace: str = "agentscale",
+    namespace: str | None = None,
     pod: str | None = None,
     hosts: tuple[str, ...] = REQUIRED_HOSTS,
     max_coredns_timeouts: int = 20,
 ) -> dict[str, str]:
     """Полная проверка: резолв из пода + поток таймаутов CoreDNS.
+
+    `namespace=None` — искать под по DEFAULT_NAMESPACES (dev первым).
 
     Возвращает {host: ip}. Бросает DnsCheckError с готовым диагнозом и
     подсказкой, что именно чинить.
@@ -163,14 +197,33 @@ def check_dns(
     if failures:
         raise DnsCheckError(
             "\n".join(failures)
-            + "\n\nКак чинить (проверено на инциденте 2026-10-22):\n"
-            "  1) CoreDNS форвардит на upstream из /etc/resolv.conf пода, а тот\n"
-            "     унаследован от хоста. Проверьте, что хостовый nameserver жив:\n"
+            + "\n\nКак чинить (проверено на инциденте 2026-10-22; с v14 DNS декларативен):\n"
+            "  1) Актуальная схема (terraform k3s-dev-host, v14-clean-install) — сначала\n"
+            "     проверьте её, ручные патчи не нужны:\n"
+            "     - CoreDNS: явные dns_upstreams (dev VM: 9.9.9.9 8.8.8.8; prod: туннельный\n"
+            "       DNS + 8.8.8.8 1.1.1.1) — forward-патч ensure_coredns_forward из\n"
+            "       post-k3s-heal.sh после КАЖДОГО старта k3s заменяет дефолт\n"
+            "       `forward . /etc/resolv.conf` на `forward . <upstreams> {\n"
+            "       policy sequential ... }`;\n"
+            "     - хостовый резолвер: управляемый drop-in\n"
+            "       /etc/systemd/resolved.conf.d/99-zz-agentscale-dns.conf\n"
+            "       ([Resolve] DNS=<те же upstream'ы>, null_resource.host_dns);\n"
+            "     - kubelet/k3s: resolv-conf указывает на /etc/k3s-resolv.conf\n"
+            "       (переменная k3s_resolv_conf) с прямыми upstream'ами, а не на хостовый\n"
+            "       /etc/resolv.conf.\n"
+            "     Проверка:\n"
+            "       kubectl -n kube-system get cm coredns -o jsonpath='{.data.Corefile}'\n"
+            "     — в `forward .` должны стоять dns_upstreams, не /etc/resolv.conf;\n"
+            "     terraform apply идемпотентен и возвращает всю схему в декларированное\n"
+            "     состояние.\n"
+            "  2) Если схема сломана руками или хост легаси: CoreDNS форвардит на upstream\n"
+            "     из /etc/resolv.conf пода, а тот унаследован от хоста. Проверьте, что\n"
+            "     хостовый nameserver жив:\n"
             "     dig +short @<host-nameserver> github.com\n"
-            "  2) Если мёртв — задайте CoreDNS явный список upstream вместо\n"
+            "  3) Если мёртв — задайте CoreDNS явный список upstream вместо\n"
             "     /etc/resolv.conf (forward . <живой> <резервные> { policy sequential }),\n"
             "     иначе один упавший резолвер выключает DNS всему кластеру.\n"
-            "  3) Проверяйте резолв ИЗ ПОДА, не с хоста: с хоста ClusterIP\n"
+            "  4) Проверяйте резолв ИЗ ПОДА, не с хоста: с хоста ClusterIP\n"
             "     10.43.0.10 недоступен по определению и даёт ложный таймаут."
         )
     return resolved

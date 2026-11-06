@@ -28,3 +28,25 @@ def test_pending_cleared_by_tool_result() -> None:
         {"type": AgentEventType.TOOL_RESULT, "data": {"id": "a1", "name": "shell.exec", "output": {}}},
     ]
     assert _pending_approvals_from_events(events) == []
+
+
+def test_late_approval_remains_pending_after_large_transcript() -> None:
+    """Approval state must be independent of the capped transcript tail."""
+    events = [
+        {"type": AgentEventType.TOOL_APPROVAL_REQUEST, "data": {"id": "old", "name": "shell.exec", "input": {}}},
+        {"type": AgentEventType.TOOL_RESULT, "data": {"id": "old", "output": {}}},
+        *[
+            {"type": AgentEventType.TEXT_DELTA, "data": {"text": str(index)}}
+            for index in range(600)
+        ],
+        {"type": AgentEventType.TOOL_APPROVAL_REQUEST, "data": {"id": "late", "name": "fs.write", "input": {"path": "a.txt"}}},
+    ]
+    # The state query used by the service returns only these control-plane
+    # events, regardless of transcript length.
+    control_plane = [event for event in events if event["type"] in {
+        AgentEventType.TOOL_APPROVAL_REQUEST,
+        AgentEventType.TOOL_RESULT,
+        PLATFORM_EVENT_TOOL_APPROVAL_DECISION,
+    }]
+    pending = _pending_approvals_from_events(control_plane)
+    assert [item["id"] for item in pending] == ["late"]

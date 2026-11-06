@@ -5,6 +5,7 @@ import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/app_snack_bar.dart';
 import 'package:prodavan/features/containers/container_workspace_api.dart';
+import 'package:prodavan/features/containers/workspace_download_error.dart';
 import 'package:prodavan/features/containers/workspace_file_utils.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
@@ -29,6 +30,7 @@ class ContainerWorkspaceFilePreviewPage extends StatefulWidget {
 class _ContainerWorkspaceFilePreviewPageState extends State<ContainerWorkspaceFilePreviewPage> {
   bool _loading = true;
   String? _content;
+  bool _truncated = false;
   bool _downloading = false;
 
   @override
@@ -44,6 +46,7 @@ class _ContainerWorkspaceFilePreviewPageState extends State<ContainerWorkspaceFi
       if (!mounted) return;
       setState(() {
         _content = body['content'] as String? ?? '';
+        _truncated = body['truncated'] == true;
         _loading = false;
       });
     } catch (e) {
@@ -58,15 +61,28 @@ class _ContainerWorkspaceFilePreviewPageState extends State<ContainerWorkspaceFi
     if (_downloading) return;
     setState(() => _downloading = true);
     try {
-      final bytes = await widget.api.downloadWorkspaceFile(path: widget.path);
+      final download = await widget.api.downloadWorkspaceFile(path: widget.path);
       if (!mounted) return;
-      final saved = await saveWorkspaceFileBytes(filename: widget.title, bytes: bytes);
+      final saved = await saveWorkspaceFileBytes(
+        filename: workspaceDownloadFilename(download, widget.title),
+        bytes: download.bytes,
+      );
       if (!mounted) return;
       if (saved) {
         AppSnackBar.success(context, AppLocalizations.of(context).projectWorkspaceDownloaded);
       }
     } catch (e) {
-      if (mounted) AppErrors.showSnack(context, e);
+      if (!mounted) return;
+      if (workspaceDownloadLimit(e) != null) {
+        final l10n = AppLocalizations.of(context);
+        AppSnackBar.warning(
+          context,
+          AppErrors.present(e, l10n).display,
+          copyOnTap: true,
+        );
+      } else {
+        AppErrors.showSnack(context, e);
+      }
     } finally {
       if (mounted) setState(() => _downloading = false);
     }
@@ -95,11 +111,54 @@ class _ContainerWorkspaceFilePreviewPageState extends State<ContainerWorkspaceFi
           ? const Center(child: CircularProgressIndicator())
           : Padding(
               padding: const EdgeInsets.all(AppSpacing.md),
-              child: SelectableText(
-                _content ?? '',
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      fontFamily: 'monospace',
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (_truncated)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+                      child: Material(
+                        color: Theme.of(context).colorScheme.errorContainer,
+                        borderRadius: BorderRadius.circular(6),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: AppSpacing.sm,
+                            vertical: AppSpacing.xs,
+                          ),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Icon(
+                                Icons.warning_amber_outlined,
+                                size: 18,
+                                color: Theme.of(context).colorScheme.onErrorContainer,
+                              ),
+                              const SizedBox(width: AppSpacing.xs),
+                              Expanded(
+                                child: Text(
+                                  l10n.projectPreviewTruncated,
+                                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                        color: Theme.of(context).colorScheme.onErrorContainer,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
                     ),
+                  Expanded(
+                    child: SingleChildScrollView(
+                      child: SelectableText(
+                        _content ?? '',
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                              fontFamily: 'monospace',
+                            ),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
     );

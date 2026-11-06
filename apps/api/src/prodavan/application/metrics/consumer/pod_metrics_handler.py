@@ -19,8 +19,17 @@ async def handle_pod_metrics_envelope(envelope: EventEnvelope) -> None:
     if envelope.event_type not in METRICS_EVENT_TYPES:
         return
     store = build_metrics_store()
-    if not await store.mark_event_processed(envelope.event_id):
+    if envelope.event_id and await store.is_event_complete(envelope.event_id):
         return
-    factory = get_session_factory()
-    async with factory() as session:
-        await MetricsCommand(session, store=store).ingest_envelope(envelope)
+    if envelope.event_id and not await store.claim_event(envelope.event_id):
+        raise RuntimeError(f"metrics event is already claimed: {envelope.event_id}")
+    try:
+        factory = get_session_factory()
+        async with factory() as session:
+            await MetricsCommand(session, store=store).ingest_envelope(envelope)
+        if envelope.event_id:
+            await store.complete_event(envelope.event_id)
+    except Exception:
+        if envelope.event_id:
+            await store.release_event_claim(envelope.event_id)
+        raise

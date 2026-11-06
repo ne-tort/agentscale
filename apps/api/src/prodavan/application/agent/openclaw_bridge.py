@@ -421,6 +421,48 @@ class OpenClawBridgeBootstrap:
                 url, json=body, headers=_runtime_request_headers(endpoint.headers)
             )
 
+    async def _cancel_runtime_turn(
+        self,
+        *,
+        endpoint: RuntimeEndpoint,
+        session_id: str,
+    ) -> bool:
+        """Best-effort cancel of the active turn owned by agent-runtime.
+
+        The bridge contract exposes cancellation as ``POST
+        /v1/sessions/{session_id}/cancel``.  Older runtimes may not expose this
+        endpoint yet; a 404/405 (or any transport failure) deliberately keeps
+        the existing fallback semantics: the API stream is closed and the
+        detached task remains cancelled, while the runtime may finish its
+        current turn.  Cancellation must never replace the original
+        ``CancelledError`` or turn shutdown path.
+        """
+        url = f"{endpoint.base_url}/v1/sessions/{session_id}/cancel"
+        try:
+            async with self._http_client(timeout=5.0) as client:
+                response = await client.post(
+                    url,
+                    headers=_runtime_request_headers(endpoint.headers),
+                )
+            if response.status_code in (200, 202, 204):
+                return True
+            if response.status_code in (404, 405):
+                logger.debug(
+                    "runtime cancel endpoint unavailable session=%s status=%s; "
+                    "falling back to stream closure",
+                    session_id,
+                    response.status_code,
+                )
+            else:
+                logger.warning(
+                    "runtime cancel failed session=%s status=%s",
+                    session_id,
+                    response.status_code,
+                )
+        except Exception as exc:  # noqa: BLE001 - cancellation is best-effort
+            logger.debug("runtime cancel request failed session=%s: %s", session_id, exc)
+        return False
+
     async def _patch_adapter_state(
         self,
         *,
@@ -733,6 +775,13 @@ class OpenClawBridgeBootstrap:
                         "retryable": True,
                     },
                 )
+        except asyncio.CancelledError:
+            # Closing the API-owned detached task only closes the HTTP stream;
+            # the runtime agent loop may otherwise continue using tools/LLM.
+            # Explicitly terminate the matching runtime turn before propagating
+            # cancellation so Stop has real runtime semantics.
+            await self._cancel_runtime_turn(endpoint=endpoint, session_id=session_id)
+            raise
         except httpx.TimeoutException as exc:
             # Read/connect/pool/write timeout — the runtime (or router) went
             # silent. Recoverable: iter_send_events re-registers and retries
@@ -767,25 +816,47 @@ class OpenClawBridgeBootstrap:
         approval_id: str,
         decision: str,
     ) -> bool:
-        """Forward HITL decision to agent-runtime."""
+        """Forward HITL decision to agent-runtime.
+
+        A sandbox can be re-adopted between the UI decision and this request.
+        In that case the router rejects the stale ``X-Sandbox-Id`` with 404/410,
+        so refresh the claim mapping and retry once before reporting the bridge
+        as unavailable. The caller can then keep the approval pending instead
+        of completing the turn against a runtime that never received it.
+        """
         if not settings.pod_agent_runtime_enabled:
             return False
         endpoint = await self._resolve_endpoint_for_project(project_id)
         if endpoint is None:
             return False
         bridge_decision = "allow" if decision == "approve" else "deny"
-        url = f"{endpoint.base_url}/v1/approvals/{approval_id}"
-        try:
-            async with self._http_client(timeout=10.0) as client:
-                response = await client.post(
-                    url,
-                    json={"decision": bridge_decision},
-                    headers=_runtime_request_headers(endpoint.headers),
-                )
-            return response.status_code in (200, 201)
-        except Exception as exc:
-            logger.debug("approval forward failed %s: %s", approval_id, exc)
-            return False
+        retried = False
+        while True:
+            url = f"{endpoint.base_url}/v1/approvals/{approval_id}"
+            try:
+                async with self._http_client(timeout=10.0) as client:
+                    response = await client.post(
+                        url,
+                        json={"decision": bridge_decision},
+                        headers=_runtime_request_headers(endpoint.headers),
+                    )
+                if response.status_code in (200, 201):
+                    return True
+                if response.status_code in (404, 410) and not retried:
+                    # The claim may have been re-adopted under a new sandbox
+                    # name. Drop the stale mapping and route the decision to
+                    # the current runtime once.
+                    await invalidate_sandbox_name_cache(
+                        sandbox_name=str(endpoint.headers.get("X-Sandbox-Id") or "") or None,
+                    )
+                    endpoint = await self._resolve_endpoint_for_project(project_id)
+                    if endpoint is not None:
+                        retried = True
+                        continue
+                return False
+            except Exception as exc:
+                logger.debug("approval forward failed %s: %s", approval_id, exc)
+                return False
 
     async def get_sidechain_transcript(
         self,

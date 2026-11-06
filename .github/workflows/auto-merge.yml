@@ -20,10 +20,18 @@ concurrency:
 
 jobs:
   squash:
+    # FORK GUARD: the repository is PUBLIC (visibility=public, fork PRs allowed),
+    # so without this condition an external fork PR that passes CI Gate would be
+    # squash-merged into main automatically and shipped to ghcr by CI Images.
+    # Only PRs whose head branch lives in THIS repository are auto-merged.
+    # (Separate hardening, outside .github: Settings → Actions → General →
+    # require approval for fork-PR workflow runs — self-hosted runners execute
+    # PR code with docker-group access on the cluster VM.)
     if: >
       github.event.workflow_run.event == 'pull_request' &&
       github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.head_branch != 'main'
+      github.event.workflow_run.head_branch != 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: [self-hosted, linux, docker]
     steps:
       - name: Squash-merge PR

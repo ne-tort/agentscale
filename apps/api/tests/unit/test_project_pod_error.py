@@ -321,6 +321,138 @@ def _launch_command(
 
 
 @pytest.mark.asyncio
+async def test_launch_materialization_failure_clears_preparing_marker(request: pytest.FixtureRequest) -> None:
+    session = AsyncMock()
+    row = _project()
+    row.agent_provider = "openrouter"
+    row.resolved_ai_key_id = "key_1"
+    cmd = _launch_command(
+        session,
+        row,
+        AsyncMock(return_value=None),
+        request=request,
+    )
+    cmd._materialize.materialize_project = AsyncMock(
+        side_effect=RuntimeError("workspace render boom")
+    )
+
+    with patch("prodavan.application.ai_keys.service.AiKeysService") as keys_cls:
+        keys_cls.return_value.resolve_credentials_for_project = AsyncMock()
+        with pytest.raises(AppError) as exc:
+            await cmd.launch(project_id=row.id, principal=_principal(), employee=None)
+
+    assert exc.value.code == "PROJECT_MATERIALIZE_FAILED"
+    assert exc.value.status == 502
+    assert "workspace render boom" in (exc.value.detail or "")
+    assert row.status == ProjectStatus.ERROR
+    assert row.launch_phase is None
+    session.commit.assert_awaited()
+    cmd._pods.provision_for_project.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_sync_materialization_failure_persists_error_and_clears_marker(
+    request: pytest.FixtureRequest,
+) -> None:
+    session = AsyncMock()
+    row = _project()
+    cmd = _launch_command(session, row, AsyncMock(), request=request)
+    cmd._get_live_pod = AsyncMock(return_value=MagicMock())
+    cmd._sync_project_workspace = AsyncMock(
+        side_effect=RuntimeError("workspace prune boom")
+    )
+
+    with pytest.raises(AppError) as exc:
+        await cmd.sync_project(project_id=row.id, principal=_principal(), employee=None)
+
+    assert exc.value.code == "PROJECT_MATERIALIZE_FAILED"
+    assert exc.value.status == 502
+    assert "workspace prune boom" in (exc.value.detail or "")
+    assert row.status == ProjectStatus.ERROR
+    assert row.launch_phase is None
+    assert row.workspace_outdated_at is not None
+    session.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_sync_retry_recovers_project_after_materialization_failure(
+    request: pytest.FixtureRequest,
+) -> None:
+    """An explicit retry succeeds only when it clears the prior ERROR state."""
+    session = AsyncMock()
+    row = _project()
+    cmd = _launch_command(session, row, AsyncMock(), request=request)
+    live_pod = MagicMock(hydrate_generation=3)
+    cmd._get_live_pod = AsyncMock(return_value=live_pod)
+    materialized = MagicMock(
+        workspace_root="/ws/root",
+        mcp_config_path="/ws/mcp.json",
+        status="materialized",
+        package_names=(),
+        sandbox_packages=(),
+        agents_source="default",
+    )
+    cmd._sync_project_workspace = AsyncMock(
+        side_effect=[RuntimeError("temporary render failure"), materialized]
+    )
+    cmd._pods.sync_desired = AsyncMock()
+
+    with pytest.raises(AppError) as exc:
+        await cmd.sync_project(project_id=row.id, principal=_principal(), employee=None)
+
+    assert exc.value.code == "PROJECT_MATERIALIZE_FAILED"
+    assert row.status == ProjectStatus.ERROR
+
+    with patch("prodavan.application.project_service.command.schedule_bootstrap_background") as schedule:
+        result = await cmd.sync_project(project_id=row.id, principal=_principal(), employee=None)
+
+    assert result["project_id"] == row.id
+    assert row.status == ProjectStatus.ACTIVE
+    assert row.launch_phase is None
+    cmd._pods.sync_desired.assert_awaited_once_with(
+        row.id,
+        PodDesiredState.RUNNING,
+        principal=_principal(),
+        reason="sync",
+    )
+    assert cmd._sync_project_workspace.await_count == 2
+    schedule.assert_called_once_with(project_id=row.id, op="sync")
+    assert session.commit.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_sync_runtime_failure_keeps_error_and_outdated_marker(
+    request: pytest.FixtureRequest,
+) -> None:
+    """A post-materialization pod failure remains retryable for explicit sync."""
+    session = AsyncMock()
+    row = _project(status=ProjectStatus.ERROR)
+    cmd = _launch_command(session, row, AsyncMock(), request=request)
+    live_pod = MagicMock(hydrate_generation=3)
+    cmd._get_live_pod = AsyncMock(return_value=live_pod)
+    materialized = MagicMock(
+        workspace_root="/ws/root",
+        mcp_config_path="/ws/mcp.json",
+        status="materialized",
+        package_names=(),
+        sandbox_packages=(),
+        agents_source="default",
+    )
+    cmd._sync_project_workspace = AsyncMock(return_value=materialized)
+    cmd._apply_post_rematerialize = AsyncMock(side_effect=RuntimeError("pod transition boom"))
+
+    with pytest.raises(AppError) as exc:
+        await cmd.sync_project(project_id=row.id, principal=_principal(), employee=None)
+
+    assert exc.value.code == "PROJECT_SYNC_RUNTIME_FAILED"
+    assert exc.value.status == 502
+    assert row.status == ProjectStatus.ERROR
+    assert row.launch_phase is None
+    assert row.workspace_outdated_at is not None
+    session.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_launch_failure_raises_502_and_persists_error(request: pytest.FixtureRequest) -> None:
     session = AsyncMock()
     row = _project()
@@ -400,7 +532,7 @@ async def test_pause_system_principal_without_pod_is_silent() -> None:
 
 
 @pytest.mark.asyncio
-async def test_pause_user_principal_without_pod_raises_422() -> None:
+async def test_pause_user_without_pod_raises_422() -> None:
     session = AsyncMock()
     row = _project()
     with patch(
@@ -416,6 +548,49 @@ async def test_pause_user_principal_without_pod_raises_422() -> None:
 
     assert exc.value.code == "VALIDATION_ERROR"
     assert exc.value.status == 422
+
+
+@pytest.mark.asyncio
+async def test_pause_does_not_stop_pod_when_workspace_checkpoint_fails() -> None:
+    session = AsyncMock()
+    row = _project()
+    pod = MagicMock()
+    with patch(
+        "prodavan.application.pod_service.command.build_pod_runtime",
+        return_value=MagicMock(),
+    ):
+        cmd = ProjectCommand(session)
+    cmd._access.require_access = AsyncMock(return_value=row)
+    cmd._get_live_pod = AsyncMock(return_value=pod)
+    cmd._pods = MagicMock()
+    cmd._pods.sync_desired = AsyncMock()
+    cmd._events = MagicMock()
+    cmd._events.emit = AsyncMock()
+
+    with (
+        patch(
+            "prodavan.application.project_service.command.checkpoint_project_workspace",
+            new=AsyncMock(side_effect=RuntimeError("object store unavailable")),
+        ) as checkpoint,
+        patch(
+            "prodavan.application.project_service.command.stop_project_runtime",
+            new=AsyncMock(),
+        ) as stop_sessions,
+    ):
+        with pytest.raises(AppError) as exc:
+            await cmd.pause(project_id=row.id, principal=_principal(), employee=None)
+
+    assert exc.value.code == "WORKSPACE_CHECKPOINT_FAILED"
+    assert exc.value.status == 502
+    assert "object store unavailable" in (exc.value.detail or "")
+    checkpoint.assert_awaited_once_with(
+        session, project_id=row.id, best_effort=False
+    )
+    stop_sessions.assert_not_awaited()
+    cmd._pods.sync_desired.assert_not_awaited()
+    cmd._events.emit.assert_not_awaited()
+    session.commit.assert_not_awaited()
+    assert row.status == ProjectStatus.ACTIVE
 
 
 @pytest.mark.asyncio

@@ -16,10 +16,12 @@ import 'package:prodavan/core/widgets/app_trailing_chevron.dart';
 import 'package:prodavan/core/widgets/project_metrics_wrap.dart';
 import 'package:prodavan/features/employee/project_about_page.dart';
 import 'package:prodavan/features/employee/project_ai_key_select_page.dart';
+import 'package:prodavan/features/employee/project_ai_provider_binding.dart';
 import 'package:prodavan/features/employee/project_container_page.dart';
 import 'package:prodavan/features/employee/project_dialogs_page.dart';
 import 'package:prodavan/features/employee/project_management_page.dart';
 import 'package:prodavan/features/employee/project_modules_list_page.dart';
+import 'package:prodavan/features/employee/project_schedules_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Project settings — name, about, launch/pause/resume, AI provider, modules nav.
@@ -44,6 +46,7 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
   Map<String, dynamic>? _runtime;
   bool _hasPod = false;
   List<Map<String, dynamic>> _availableKeys = const [];
+  bool _availableKeysLoaded = false;
   Map<String, dynamic>? _metrics;
   bool _loading = true;
   AppJobStatus? _seenJobStatus;
@@ -123,8 +126,10 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
     try {
       final project = await workContext.api.getProject(widget.projectId);
       List<Map<String, dynamic>> keys = const [];
+      var keysLoaded = false;
       try {
         keys = await workContext.api.listProjectAiKeys(widget.projectId);
+        keysLoaded = true;
       } catch (_) {}
       Map<String, dynamic>? metrics;
       try {
@@ -133,7 +138,7 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
       if (!mounted) return;
 
       var resolvedKeyId = project['resolved_ai_key_id'] as String?;
-      if (resolvedKeyId == null && keys.length == 1) {
+      if (resolvedKeyId == null && keysLoaded && keys.length == 1) {
         final onlyId = keys.first['id'] as String?;
         if (onlyId != null) {
           await workContext.api.patchProject(
@@ -153,6 +158,7 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
             : null;
         _hasPod = _runtime != null || projectHasLivePod(project);
         _availableKeys = keys;
+        _availableKeysLoaded = keysLoaded;
         _metrics = metrics;
         _loading = false;
       });
@@ -173,7 +179,16 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
     }
   }
 
-  bool get _configuredForLaunch => (_resolvedKeyId ?? '').isNotEmpty;
+  // A stored id is not enough: the API only lists keys that are active,
+  // project-allowed, and runtime-capable. Launch must stay disabled when the
+  // configured binding has gone stale instead of surfacing a guaranteed NO_AI_KEY.
+  bool get _configuredForLaunch =>
+      isProjectAiProviderBindingAvailable(_resolvedKeyId, _availableKeys);
+
+  bool get _hasStaleProviderBinding =>
+      _availableKeysLoaded &&
+      _resolvedKeyId != null &&
+      !_configuredForLaunch;
 
   bool get _isError => _status == 'error';
 
@@ -190,15 +205,18 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
   bool get _launched =>
       _status == 'active' || _status == 'paused' || _status == 'error' || _status == 'completed';
 
-  bool get _containerUnhealthy =>
-      _isError ||
-      (_status == 'active' &&
-          !containerRuntimeHealthy({
-            'runtime': _runtime,
-            'status': _status,
-            'last_error': _runtime?['last_error'],
-            'observed_state': _runtime?['observed_state'],
-          }));
+  bool get _containerUnhealthy {
+    final container = {
+      'runtime': _runtime,
+      'status': _status,
+      'last_error': _runtime?['last_error'],
+      'observed_state': _runtime?['observed_state'],
+    };
+    return _isError ||
+        (_status == 'active' &&
+            !containerIsPaused(container) &&
+            !containerRuntimeHealthy(container));
+  }
 
   bool get _showLaunch {
     if (_busy) return false;
@@ -216,7 +234,8 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
   }
 
   bool get _aiProviderNeedsSelection =>
-      _availableKeys.length >= 2 && (_resolvedKeyId ?? '').isEmpty;
+      _hasStaleProviderBinding ||
+      (_availableKeys.isNotEmpty && _selectedKeyName() == null);
 
   String? _selectedKeyName() {
     for (final k in _availableKeys) {
@@ -343,6 +362,19 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
     ).then((_) => _load());
   }
 
+  String _scheduleLabel(BuildContext context) =>
+      Localizations.localeOf(context).languageCode == 'ru' ? 'Расписания' : 'Schedules';
+
+  void _openSchedules() {
+    Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => ProjectSchedulesPage(
+          projectId: widget.projectId,
+        ),
+      ),
+    );
+  }
+
   void _openManagement() {
     Navigator.of(context).push<void>(
       MaterialPageRoute<void>(
@@ -375,7 +407,11 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
       );
     }
 
-    final paused = _status == 'paused';
+    final paused = containerIsPaused({
+      'status': _status,
+      'runtime': _runtime,
+      'observed_state': _runtime?['observed_state'],
+    });
     final selectedName = _selectedKeyName();
     final warning = context.appColors.warning;
     final error = context.appColors.danger;
@@ -414,25 +450,37 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
             icon: Icons.info_outline,
             onTap: _openAbout,
           ),
-          if (_availableKeys.isNotEmpty)
+          if (_availableKeys.isNotEmpty || _resolvedKeyId != null)
             AppPreferenceTile(
               title: l10n.projectPreferredAgentProvider,
               icon: Icons.smart_toy_outlined,
               accentColor: _aiProviderNeedsSelection ? warning : null,
               subtitle: Text(
-                selectedName ?? l10n.projectAiProviderNotSelected,
+                _hasStaleProviderBinding
+                    ? (_availableKeys.isEmpty
+                          ? l10n.projectAiProviderUnavailableNoOptions
+                          : l10n.projectAiProviderUnavailableReselect)
+                    : selectedName ?? l10n.projectAiProviderNotSelected,
                 style: _aiProviderNeedsSelection
                     ? TextStyle(color: warning)
                     : null,
               ),
-              trailing: const AppTrailingChevron(),
-              onTap: _pickAiKey,
+              trailing: _availableKeys.isEmpty
+                  ? null
+                  : const AppTrailingChevron(),
+              onTap: _availableKeys.isEmpty ? null : _pickAiKey,
             ),
           AppNavPreference(
             title: l10n.projectModulesLabel,
             icon: Icons.extension_outlined,
             enabled: !_busy,
             onTap: _openModules,
+          ),
+          AppNavPreference(
+            title: _scheduleLabel(context),
+            icon: Icons.schedule_outlined,
+            enabled: !_busy,
+            onTap: _openSchedules,
           ),
           // Single lifecycle progress control — replaces Launch / Reload / Resume.
           if (showProgress)

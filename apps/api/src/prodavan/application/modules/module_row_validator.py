@@ -100,8 +100,20 @@ def _normalize_field_value(name: str, value: Any, col: dict[str, Any]) -> Any:
     from prodavan.application.pod_service.workspace_paths import normalize_workspace_path
     from prodavan.domain.errors import AppError
 
+    # ``ui.normalize == "workspace_path"`` is the meta-row *editor* contract: the
+    # web form soft-normalizes the value before persist
+    # (``normalizeWorkspaceRelativePath`` — strip the OS root, unify separators),
+    # because the user types an address inside the workspace, not an absolute
+    # path. ``normalize_workspace_path`` is the hard workspace-API contract and
+    # refuses a leading slash outright, so calling it on the raw user input
+    # rejected values the editor had already accepted ("/prompts/rules/").
+    # Strip the root here and let the strict normalizer still own traversal
+    # rejection and canonical form, so nothing escapes /workspace.
+    text = value.strip().replace("\\", "/")
+    while text.startswith("/"):
+        text = text[1:]
     try:
-        return normalize_workspace_path(value)
+        return normalize_workspace_path(text)
     except AppError as exc:
         raise _row_error(f"{name}: {exc.detail}") from exc
 

@@ -1,0 +1,179 @@
+"""Static gates for host registration and the migration-only wiring boundary."""
+
+from __future__ import annotations
+
+import ast
+from pathlib import Path
+
+API_ROOT = Path(__file__).resolve().parents[3]
+PERSISTENCE_ZONE = API_ROOT / "src" / "prodavan" / "infrastructure" / "persistence" / "agent_control_plane"
+PERSISTENCE_ROOT = API_ROOT / "src" / "prodavan" / "infrastructure" / "persistence"
+MODELS_INIT = API_ROOT / "src" / "prodavan" / "infrastructure" / "persistence" / "models" / "__init__.py"
+REVISION = API_ROOT / "alembic" / "versions" / "2026110202_agent_control_plane_persistence.py"
+API_SOURCE = API_ROOT / "src" / "prodavan" / "api" / "migration_agent_runs" / "dependencies.py"
+PRODAVAN_SOURCE = API_ROOT / "src" / "prodavan"
+
+EXPECTED_MODELS = {
+    "AgentControlPlaneAggregateRow",
+    "AgentControlPlaneCommandRow",
+    "AgentControlPlaneEnqueueIntentRow",
+    "AgentControlPlaneEventRow",
+    "AgentControlPlaneOutboxEventRow",
+    "AgentControlPlaneRunScopeRow",
+}
+
+
+def _tree(path: Path) -> ast.Module:
+    return ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+
+
+def test_persistence_models_are_registered_once_and_remain_zone_owned() -> None:
+    tree = _tree(MODELS_INIT)
+    registration_imports = [
+        node
+        for node in tree.body
+        if isinstance(node, ast.ImportFrom)
+        and node.module == "prodavan.infrastructure.persistence.agent_control_plane.models"
+    ]
+    zone_tree = _tree(PERSISTENCE_ZONE / "models.py")
+    declared = {node.name for node in zone_tree.body if isinstance(node, ast.ClassDef)}
+    assert declared == EXPECTED_MODELS
+    assert len(registration_imports) == 1
+    imported_names = [alias.name for alias in registration_imports[0].names]
+    assert len(imported_names) == len(EXPECTED_MODELS)
+    assert set(imported_names) == EXPECTED_MODELS
+    assert all(alias.asname is None for alias in registration_imports[0].names)
+
+    exports = next(
+        ast.literal_eval(node.value)
+        for node in tree.body
+        if isinstance(node, ast.Assign)
+        and any(isinstance(target, ast.Name) and target.id == "__all__" for target in node.targets)
+    )
+    exported_control_plane_models = {
+        name for name in exports if name.startswith("AgentControlPlane") and name.endswith("Row")
+    }
+    assert exported_control_plane_models == EXPECTED_MODELS
+
+    import prodavan.infrastructure.persistence.models as models
+    from prodavan.infrastructure.persistence.models.base import Base
+
+    for class_name in EXPECTED_MODELS:
+        model = getattr(models, class_name)
+        assert Base.metadata.tables[model.__tablename__] is model.__table__
+        mapped_owners = [
+            mapper.class_ for mapper in Base.registry.mappers if mapper.local_table is model.__table__
+        ]
+        assert mapped_owners == [model]
+
+    declarations = {"AgentRunRow": [], "ApprovalRequestRow": []}
+    for path in PERSISTENCE_ROOT.rglob("*.py"):
+        for node in ast.walk(_tree(path)):
+            if isinstance(node, ast.ClassDef) and node.name in declarations:
+                declarations[node.name].append(path)
+    legacy_owner = PERSISTENCE_ROOT / "models" / "agent_control_plane.py"
+    assert declarations == {
+        "AgentRunRow": [legacy_owner],
+        "ApprovalRequestRow": [legacy_owner],
+    }
+    assert all((PERSISTENCE_ZONE / item).is_file() for item in ("models.py", "repository.py", "WIRING.md"))
+
+
+def test_migration_is_authored_against_current_head_but_not_executed_here() -> None:
+    tree = _tree(REVISION)
+    assignments = {}
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+            if node.targets[0].id in {"revision", "down_revision"}:
+                assignments[node.targets[0].id] = ast.literal_eval(node.value)
+    assert assignments == {"revision": "2026110202", "down_revision": "2026110201"}
+    assert "agent_runs" in REVISION.read_text(encoding="utf-8")
+    assert "agent_control_plane_enqueue_intents" in REVISION.read_text(encoding="utf-8")
+    wiring = (PERSISTENCE_ZONE / "WIRING.md").read_text(encoding="utf-8")
+    assert "revision `2026110202` is authored only and not executed in this worktree" in wiring
+
+
+def test_wiring_document_states_registration_and_dispatch_blockers() -> None:
+    wiring = (PERSISTENCE_ZONE / "WIRING.md").read_text(encoding="utf-8")
+    assert "Metadata registration is complete" in wiring
+    assert "revision `2026110202` is authored only and not executed in this worktree" in wiring
+    assert "dispatcher/repair consumer" in wiring
+    assert "RLS policy verification" in wiring
+    assert "explicit production approval" in wiring
+    assert "writes_enabled=False" in wiring
+    assert "No DDL, Alembic, live database action, or test execution was performed" in wiring
+
+
+def test_feature_gated_binding_keeps_writes_closed_by_default() -> None:
+    """The binding must stay closed unless *all* of the host gates pass.
+
+    This gate used to assert that the dependency returned
+    ``writes_enabled=False`` unconditionally with a hard-coded
+    ``agent_control_plane_dispatcher_unwired`` literal.  With the dispatcher and
+    consumer in place that literal is no longer the truth: writes are now gated
+    on the feature flag, metadata registration and database readiness, and the
+    default binding is still closed.  The assertions below are deliberately
+    structural so they survive renames of individual blocker codes.
+    """
+
+    models = _tree(MODELS_INIT)
+    imports = {
+        node.module: {alias.name for alias in node.names}
+        for node in models.body
+        if isinstance(node, ast.ImportFrom) and node.module is not None
+    }
+    assert imports["prodavan.infrastructure.persistence.agent_control_plane.models"] == EXPECTED_MODELS
+
+    dependency = API_SOURCE.read_text(encoding="utf-8")
+
+    # Order matters: a request must be refused for the cheapest reason first and
+    # may only touch the database after the flag and metadata gates pass.
+    flag_gate = dependency.index("if not _feature_enabled")
+    model_gate = dependency.index("missing = missing_model_tables(registered)")
+    db_probe = dependency.index('SELECT 1 FROM "{table_name}" LIMIT 0')
+    assert flag_gate < model_gate < db_probe
+
+    # The default is still closed, and every refusal path has a stable code.
+    assert "writes_enabled: bool = False" in dependency
+    assert "BLOCKER_FEATURE_FLAG_DISABLED" in dependency
+    assert "BLOCKER_MODELS_NOT_REGISTERED" in dependency
+    assert "BLOCKER_DATABASE_NOT_READY" in dependency
+
+    # Writes may only be enabled in the branch that took all three gates.
+    assert "if not self.writes_enabled:" in dependency
+    enable_index = dependency.index("writes_enabled=True")
+    assert db_probe < enable_index
+
+    # The retired blanket refusal must not survive.
+    assert "agent_control_plane_dispatcher_unwired" not in dependency
+
+
+def test_enqueue_intent_dispatch_consumer_is_zone_owned() -> None:
+    """The enqueue intents now have exactly one consumer, and it lives in the zone.
+
+    This gate replaced the earlier "no consumer exists yet" assertion.  The
+    handoff table must not be read by a second, unowned caller: the durable
+    consumer is the only piece of host wiring allowed to name the ORM row.
+    """
+
+    consumer = PERSISTENCE_ZONE / "intent_consumer.py"
+    assert consumer.is_file()
+
+    consumers = []
+    for path in PRODAVAN_SOURCE.rglob("*.py"):
+        if path in {PERSISTENCE_ZONE / "models.py", PERSISTENCE_ZONE / "repository.py", consumer}:
+            continue
+        if path == MODELS_INIT:
+            continue
+        if "AgentControlPlaneEnqueueIntentRow" in path.read_text(encoding="utf-8"):
+            consumers.append(path)
+    assert consumers == []
+
+    source = consumer.read_text(encoding="utf-8")
+    assert "FOR UPDATE SKIP LOCKED" in source
+    assert "lease_token" in source
+    assert "lease_until" in source
+
+    wiring = (PERSISTENCE_ZONE / "WIRING.md").read_text(encoding="utf-8")
+    assert "dispatcher/repair consumer" in wiring
+    assert "intent_consumer.py" in wiring

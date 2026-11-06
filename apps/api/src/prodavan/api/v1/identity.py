@@ -17,7 +17,7 @@ from prodavan.api.deps import (
 )
 from prodavan.application.identity.service import EntitlementService, IdentityCommandService
 from prodavan.domain.errors import AppError
-from prodavan.domain.identity import MembershipRole
+from prodavan.domain.identity import EmployeeStatus, MembershipRole
 from prodavan.infrastructure.keycloak.provisioning import get_provisioning
 from prodavan.infrastructure.persistence.models.identity import CompanyRow, EmployeeRow
 
@@ -83,7 +83,22 @@ async def me(
     if principal.is_company_principal:
         company = await svc.ensure_company_principal(principal)
     contours = svc.contours_for(principal, employee, company=company)
+    if principal.is_platform_admin:
+        active = True
+    elif principal.is_company_principal:
+        active = (
+            company is not None
+            and company.deleted_at is None
+            and company.status == "active"
+        )
+    else:
+        active = (
+            employee is not None
+            and employee.deleted_at is None
+            and employee.status == EmployeeStatus.ACTIVE
+        )
     return {
+        "active": active,
         "sub": principal.sub,
         "email": principal.email,
         "roles": sorted(principal.roles),
@@ -306,6 +321,50 @@ async def soft_delete_employee(
         employee_id=employee_id, principal=principal
     )
     return {"id": emp.id, "deleted": True, "soft": True, "status": emp.status}
+
+
+@router.post("/employees/{employee_id}/restore")
+async def restore_employee(
+    employee_id: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    actor: Annotated[EmployeeRow | None, Depends(get_current_employee)],
+) -> dict:
+    """Restore a soft-deleted employee to the visible, paused state."""
+    from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
+
+    from prodavan.application.employees.service import EmployeesCommandService
+
+    svc = EntitlementService(session)
+    if not principal.is_platform_admin:
+        q = await session.execute(
+            select(EmployeeRow)
+            .where(EmployeeRow.id == employee_id)
+            .options(selectinload(EmployeeRow.memberships))
+        )
+        target = q.scalar_one_or_none()
+        if target is None:
+            raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Employee not found")
+        if principal.is_company_principal:
+            company = await svc.ensure_company_principal(principal)
+            assert company is not None
+            target_companies = {m.company_id for m in target.memberships}
+            if company.id not in target_companies:
+                raise AppError(code="FORBIDDEN", title="Forbidden", status=403, detail="forbidden")
+        else:
+            if actor is None:
+                raise AppError(code="FORBIDDEN", title="Forbidden", status=403, detail="forbidden")
+            actor_companies = {
+                m.company_id for m in actor.memberships if m.role == MembershipRole.COMPANY_ADMIN
+            }
+            target_companies = {m.company_id for m in target.memberships}
+            if not actor_companies.intersection(target_companies):
+                raise AppError(code="FORBIDDEN", title="Forbidden", status=403, detail="forbidden")
+    emp = await EmployeesCommandService(session).restore(
+        employee_id=employee_id, principal=principal
+    )
+    return {"id": emp.id, "restored": True, "status": emp.status, "paused": True}
 
 
 @router.post("/session/switch-company")

@@ -117,3 +117,40 @@ async def test_delete_missing_row_raises_not_found() -> None:
     assert ei.value.status == 404
     session.commit.assert_not_awaited()
     mark.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_owner_row_actions_auto_index_tabular_in_owner_scope() -> None:
+    """Owner file rows trigger tabular indexing against the same owner instance."""
+    session = AsyncMock()
+    svc = OwnerModuleDataService(session)
+    executor = SimpleNamespace(
+        maybe_auto_probe_remote_sql=AsyncMock(),
+        maybe_auto_index_tabular=AsyncMock(),
+        maybe_auto_index_opensearch=AsyncMock(),
+    )
+
+    with patch(
+        "prodavan.application.modules.module_action_executor.ModuleActionExecutor",
+        return_value=executor,
+    ):
+        await svc._maybe_run_owner_row_actions(
+            owner_kind=OWNER_COMPANY,
+            owner_id="co_1",
+            module_id="mod_equipment",
+            table_slug="catalogs",
+            row_id="row_catalog",
+            previous_body={"status": "draft"},
+        )
+
+    executor.maybe_auto_index_tabular.assert_awaited_once_with(
+        cabinet_id="",
+        module_id="mod_equipment",
+        table_slug="catalogs",
+        row_id="row_catalog",
+        principal=executor.maybe_auto_probe_remote_sql.await_args.kwargs["principal"],
+        employee=None,
+        previous_body={"status": "draft"},
+        owner_kind=OWNER_COMPANY,
+        owner_id="co_1",
+    )

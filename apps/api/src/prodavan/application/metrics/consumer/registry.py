@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from prodavan.application.metrics.adapters.redis_counter_store import build_counter_store
+from prodavan.application.metrics.adapters.redis_metrics_store import build_metrics_store
 from prodavan.application.metrics.consumer.facts_handler import handle_facts_envelope
 from prodavan.application.metrics.consumer.pod_metrics_handler import handle_pod_metrics_envelope
 from prodavan.application.metrics.consumer.presence_handler import handle_presence_envelope
@@ -29,8 +31,26 @@ async def handle_platform_entity_facts(envelope: EventEnvelope) -> None:
     """Seed counters from platform lifecycle events when relations are absent."""
     if envelope.event_type != "project.created":
         return
+
+    event_id = (envelope.event_id or "").strip()
+    store = build_metrics_store()
+    dedup_id = f"platform_facts:{event_id}" if event_id else ""
+    if dedup_id and await store.is_event_complete(dedup_id):
+        return
+    if dedup_id and not await store.claim_event(dedup_id):
+        raise RuntimeError(f"metrics platform fact event is already claimed: {event_id}")
+    try:
+        await _apply_platform_entity_facts(envelope)
+        if dedup_id:
+            await store.complete_event(dedup_id)
+    except Exception:
+        if dedup_id:
+            await store.release_event_claim(dedup_id)
+        raise
+
+
+async def _apply_platform_entity_facts(envelope: EventEnvelope) -> None:
     from prodavan.application.metrics.accumulator import MetricsAccumulator
-    from prodavan.application.metrics.adapters.redis_counter_store import build_counter_store
     from prodavan.domain.metrics.types import (
         ENTITY_CABINET,
         ENTITY_COMPANY,

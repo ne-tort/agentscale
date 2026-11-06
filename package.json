@@ -1,0 +1,5 @@
+{
+  "name": "agentscale",
+  "private": true,
+  "scripts": {"web:dev": "pnpm --filter @agentscale/web dev", "web:build": "pnpm --filter @agentscale/web build", "web:test": "pnpm --filter @agentscale/web test"}
+}

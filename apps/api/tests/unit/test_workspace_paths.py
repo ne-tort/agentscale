@@ -20,6 +20,25 @@ def test_normalize_nested_path() -> None:
 
 
 def test_reject_parent_segments() -> None:
-    with pytest.raises(AppError) as exc:
-        normalize_workspace_path("../etc/passwd")
-    assert exc.value.status == 422
+    for raw in (
+        "../etc/passwd",
+        "assets/..",
+        "./../etc/passwd",
+        r"..\etc\passwd",
+        "%2e%2e%2fetc%2fpasswd",
+        "%252e%252e%252fetc%252fpasswd",
+        "/workspace/etc/passwd",
+        r"\workspace\etc\passwd",
+    ):
+        with pytest.raises(AppError) as exc:
+            normalize_workspace_path(raw)
+        assert exc.value.status == 422
+
+
+def test_normalize_windows_separators_without_escape() -> None:
+    assert normalize_workspace_path(r"assets\nested\hello.txt") == "assets/nested/hello.txt"
+
+
+def test_normalize_dot_path_to_workspace_root() -> None:
+    assert normalize_workspace_path(".") == ""
+    assert normalize_workspace_path("./") == ""

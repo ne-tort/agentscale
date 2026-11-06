@@ -195,6 +195,10 @@ class WorkerManager(LifespanResource):
                 "task": job_names.TRIGGER_DRAIN,
                 "schedule": interval,
             }
+        beat["prodavan-project-schedule-producer"] = {
+            "task": job_names.PRODUCE_PROJECT_SCHEDULES,
+            "schedule": schedule(run_every=max(15.0, float(self._trigger_interval_sec))),
+        }
         if self._schedule_idle_pause:
             beat["prodavan-idle-pause-sweep"] = {
                 "task": job_names.IDLE_PAUSE_SWEEP,

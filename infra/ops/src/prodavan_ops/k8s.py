@@ -121,13 +121,19 @@ def load_kube() -> None:
 
 
 def wait_k3s_api_ready(*, timeout_sec: int = 30, poll_sec: float = 2.0) -> None:
-    """Fail fast if k3s API is unreachable from the runner (no long CI waits)."""
+    """Fail fast if k3s API is unreachable from the runner (no long CI waits).
+
+    Probes /readyz, not `get ns agentscale-dev`: on a freshly installed cluster
+    the namespace does not exist until Argo syncs the platform, and the old
+    probe then reported "k3s API not ready" for a perfectly healthy API — which
+    made a slow first install look like a broken one.
+    """
     deadline = time.time() + timeout_sec
     attempt = 0
     last = ""
     while time.time() < deadline:
         attempt += 1
-        proc = kubectl(["get", "ns", "agentscale-dev", "--request-timeout=5s"], retries=1)
+        proc = kubectl(["get", "--raw=/readyz"], retries=1, request_timeout="5s")
         if proc.returncode == 0:
             if attempt > 1:
                 print(f"k3s API ready (attempt {attempt})")
@@ -138,7 +144,8 @@ def wait_k3s_api_ready(*, timeout_sec: int = 30, poll_sec: float = 2.0) -> None:
         time.sleep(poll_sec)
     raise TimeoutError(
         f"k3s API not ready within {timeout_sec}s ({last}). "
-        "On Windows host run elevated: infra/github-runner/Sync-KubeForDocker.ps1"
+        f"KUBECONFIG={resolve_kubeconfig_path()} — проверьте, что кластер запущен "
+        "(`sudo systemctl status k3s` на VM) и kubeconfig ведёт на живой :6443"
     )
 
 
@@ -260,9 +267,10 @@ def rollout_restart(
     """Patch pod-template annotation so kubelet re-pulls :latest (Always).
 
     By default restarts all DEPLOYMENT_TARGETS (agentscale-dev namespace:
-    api/web/celery-worker/celery-beat/celery-indexer; agentscale-dev-sandboxes:
-    agentscale-probe-pod). When `namespace` + `deployments` are passed,
-    overrides the default target set (legacy single-namespace call path).
+    api/web/celery-worker/celery-beat/celery-indexer/searchnet;
+    agentscale-dev-sandboxes: agentscale-probe-pod). When `namespace` +
+    `deployments` are passed, overrides the default target set (legacy
+    single-namespace call path).
     """
     require_k8s_api()
     load_kube()

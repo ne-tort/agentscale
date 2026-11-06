@@ -11,16 +11,19 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter
+from sqlalchemy import select
 from pydantic import BaseModel, Field
 
 from prodavan.api.agent_auth import PodBridgeDep
 from prodavan.api.deps import PlatformAdminDep, SessionDep
 from prodavan.api.rate_limit import enforce_rate_limit
+from prodavan.application.content.access_policy import AccessPolicyService
 from prodavan.application.documents.service import DocumentsService
 from prodavan.application.pod_identity.bridge import SCOPE_DOCUMENTS, PodBridgeClaims
 from prodavan.config.settings import settings
 from prodavan.domain.errors import AppError
 from prodavan.domain.identity import Principal
+from prodavan.infrastructure.persistence.models.content import ContentAssetRow, ContentBlobVersionRow
 from prodavan.infrastructure.persistence.models.identity import EmployeeRow
 
 router = APIRouter(tags=["documents"])
@@ -107,16 +110,54 @@ def _require(bridge: PodBridgeClaims, project_id: str) -> None:
     bridge.require_scope(SCOPE_DOCUMENTS)
 
 
-def _source_ref(body_ref: FileRefBody, fallback_filename: str | None) -> tuple[dict[str, Any], str]:
+async def _source_ref(
+    body_ref: FileRefBody,
+    fallback_filename: str | None,
+    *,
+    bridge: PodBridgeClaims,
+    session: SessionDep,
+    employee: EmployeeRow,
+) -> tuple[dict[str, Any], str]:
+    """Resolve an untrusted FileRef against this tenant's content records.
+
+    A caller-provided storage key is not an authorization token. Only resolve
+    version/asset IDs through the DB and enforce company ownership before the
+    document service reads the blob.
+    """
     ref = body_ref.model_dump()
-    filename = (fallback_filename or "").strip() or str(ref.get("filename") or "").strip()
-    if not ref.get("storage_key"):
+    asset_id = (body_ref.asset_id or "").strip()
+    version_id = (body_ref.version_id or body_ref.blob_version_id or "").strip()
+    if not asset_id and not version_id:
         raise AppError(
             code="VALIDATION_ERROR",
             title="Validation Error",
             status=422,
-            detail="file_ref.storage_key required",
+            detail="file_ref.asset_id or file_ref.version_id required",
         )
+    if version_id:
+        version = await session.get(ContentBlobVersionRow, version_id)
+        if version is None or (asset_id and version.asset_id != asset_id):
+            raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="file version not found")
+        asset_id = version.asset_id
+    else:
+        version = None
+    asset = await session.get(ContentAssetRow, asset_id)
+    if asset is None or asset.owner_company_id != bridge.company_id:
+        raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="file asset not found")
+    await AccessPolicyService(session).require_read_asset(
+        principal=_bridge_principal(bridge), employee=employee, asset=asset
+    )
+    if version is None:
+        q = await session.execute(
+            select(ContentBlobVersionRow)
+            .where(ContentBlobVersionRow.asset_id == asset.id)
+            .order_by(ContentBlobVersionRow.version.desc())
+            .limit(1)
+        )
+        version = q.scalar_one_or_none()
+    if version is None:
+        raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="file version not found")
+    filename = (fallback_filename or "").strip() or str(body_ref.filename or asset.title or "").strip()
     if not filename:
         raise AppError(
             code="VALIDATION_ERROR",
@@ -124,6 +165,16 @@ def _source_ref(body_ref: FileRefBody, fallback_filename: str | None) -> tuple[d
             status=422,
             detail="filename required",
         )
+    # Ignore all client-supplied blob metadata; use the canonical DB record.
+    ref.update(
+        asset_id=asset.id,
+        version_id=version.id,
+        blob_version_id=version.id,
+        storage_key=version.storage_key,
+        filename=filename,
+        size=version.size,
+        sha256=version.sha256,
+    )
     return ref, filename
 
 
@@ -143,7 +194,9 @@ async def convert_document(
         detail="documents convert rate limit exceeded for this project",
     )
     employee = await _bridge_employee(bridge, session)
-    source, filename = _source_ref(body.file_ref, body.filename)
+    source, filename = await _source_ref(
+        body.file_ref, body.filename, bridge=bridge, session=session, employee=employee
+    )
     service = DocumentsService(session)
     # session=None for emits: UploadService already committed the output, so
     # events/metrics publish directly to the bus instead of waiting for a
@@ -167,10 +220,14 @@ async def read_document(
     project_id: str,
     body: ReadBody,
     bridge: PodBridgeDep,
+    session: SessionDep,
 ) -> dict[str, Any]:
     """Structured read: xlsx sheets+rows, docx/pdf/text plain text."""
     _require(bridge, project_id)
-    source, filename = _source_ref(body.file_ref, body.filename)
+    employee = await _bridge_employee(bridge, session)
+    source, filename = await _source_ref(
+        body.file_ref, body.filename, bridge=bridge, session=session, employee=employee
+    )
     service = DocumentsService()
     return await service.read_document(
         source,
@@ -219,7 +276,13 @@ async def fill_document_template(
     """Fill a docx (context) / xlsx (cells) template and persist the output."""
     _require(bridge, project_id)
     employee = await _bridge_employee(bridge, session)
-    template, filename = _source_ref(body.template_ref, body.filename)
+    template, filename = await _source_ref(
+        body.template_ref,
+        body.filename,
+        bridge=bridge,
+        session=session,
+        employee=employee,
+    )
     service = DocumentsService(session)
     ref = await service.fill_template(
         template,

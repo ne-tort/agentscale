@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -89,6 +90,46 @@ void main() {
     await tester.pump();
     expect(sent, isNotEmpty);
     expect(sent.last, ['att_1', 'att_2']);
+  });
+
+  testWidgets('native picker uploads every selected file', (tester) async {
+    final api = _Api();
+    final sent = <List<String>>[];
+    await tester.pumpWidget(
+      _themed(
+        ChatComposer(
+          projectId: 'proj_1',
+          api: api,
+          filePicker: () async => [
+            PlatformFile(
+              name: 'first.txt',
+              size: 3,
+              bytes: Uint8List.fromList([1, 2, 3]),
+            ),
+            PlatformFile(
+              name: 'second.csv',
+              size: 2,
+              bytes: Uint8List.fromList([4, 5]),
+            ),
+          ],
+          onSend: (text, refs) => sent.add(refs),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byIcon(Icons.attach_file));
+    await tester.pumpAndSettle();
+
+    expect(api.uploads.map((upload) => upload['filename']),
+        ['first.txt', 'second.csv']);
+    expect(find.text('first.txt'), findsOneWidget);
+    expect(find.text('second.csv'), findsOneWidget);
+
+    await tester.enterText(find.byType(TextField), 'обработай оба');
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    expect(sent.single, ['att_1', 'att_2']);
   });
 
   testWidgets('attachDroppedFiles is a no-op while disabled', (tester) async {

@@ -7,14 +7,17 @@ import 'package:flutter/material.dart';
 import 'package:prodavan/core/preferences/app_preference_tile.dart';
 import 'package:prodavan/core/theme/app_color_tokens.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
+import 'package:prodavan/core/widgets/app_snack_bar.dart';
 import 'package:prodavan/core/widgets/app_trailing_chevron.dart';
+import 'package:prodavan/features/containers/workspace_file_utils.dart';
 import 'package:prodavan/features/meta/runtime/module_runtime_scope.dart';
+import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Upload file via owner-scoped content API; stores FileRef map in form state.
 ///
 /// Preference-tile chrome (same row pattern as [AppNavPreference]): tap to pick.
 /// When [warnWhenEmpty] and no file — title uses warning color and [subtitle] is omitted.
-class FileUploadField extends StatelessWidget {
+class FileUploadField extends StatefulWidget {
   const FileUploadField({
     super.key,
     required this.label,
@@ -37,39 +40,20 @@ class FileUploadField extends StatelessWidget {
   final String? subtitle;
   final bool warnWhenEmpty;
 
+  @override
+  State<FileUploadField> createState() => _FileUploadFieldState();
+}
+
+class _FileUploadFieldState extends State<FileUploadField> {
+  bool _downloading = false;
+
   Map<String, dynamic>? get _ref =>
-      value is Map ? Map<String, dynamic>.from(value as Map) : null;
+      widget.value is Map ? Map<String, dynamic>.from(widget.value as Map) : null;
 
   bool get _hasFile => _ref != null;
 
-  Future<void> _pick(BuildContext context) async {
-    final result = await FilePicker.platform.pickFiles(
-      withData: true,
-      type: FileType.custom,
-      allowedExtensions: _extensions(),
-    );
-    if (result == null || result.files.isEmpty) return;
-    final file = result.files.first;
-    final bytes = file.bytes;
-    if (bytes == null) return;
-    if (!context.mounted) return;
-    try {
-      final ref = await scope.uploadContent(
-        filename: file.name,
-        bytes: bytes,
-        mime: _guessMime(file.name),
-      );
-      final maybeFuture = onChanged(ref);
-      await maybeFuture;
-    } catch (e) {
-      if (context.mounted) {
-        AppErrors.showSnack(context, e);
-      }
-    }
-  }
-
   List<String>? _extensions() {
-    final accept = this.accept;
+    final accept = widget.accept;
     if (accept == null || accept.trim().isEmpty) return null;
     final parts = accept.split(',').map((e) => e.trim()).where((e) => e.isNotEmpty);
     final out = <String>[];
@@ -92,13 +76,74 @@ class FileUploadField extends StatelessWidget {
     return 'application/octet-stream';
   }
 
+  Future<void> _pick(BuildContext context) async {
+    final result = await FilePicker.platform.pickFiles(
+      withData: true,
+      type: FileType.custom,
+      allowedExtensions: _extensions(),
+    );
+    if (result == null || result.files.isEmpty) return;
+    final file = result.files.first;
+    final bytes = file.bytes;
+    if (bytes == null) return;
+    if (!context.mounted) return;
+    try {
+      final ref = await widget.scope.uploadContent(
+        filename: file.name,
+        bytes: bytes,
+        mime: _guessMime(file.name),
+      );
+      final maybeFuture = widget.onChanged(ref);
+      await maybeFuture;
+    } catch (e) {
+      if (context.mounted) {
+        AppErrors.showSnack(context, e);
+      }
+    }
+  }
+
+  Future<void> _download(BuildContext context) async {
+    final scope = widget.scope;
+    final ref = _ref;
+    final assetId = ref?['asset_id']?.toString() ?? '';
+    if (assetId.isEmpty || scope.downloadContentFn == null || _downloading) return;
+    setState(() => _downloading = true);
+    try {
+      final bytes = await scope.downloadContentAsset(
+        assetId: assetId,
+        versionId: ref?['version_id']?.toString(),
+        blobVersionId: ref?['blob_version_id']?.toString(),
+      );
+      var filename = ref?['filename']?.toString().trim() ?? '';
+      if (filename.isEmpty) filename = 'download';
+      final bool saved;
+      try {
+        saved = await saveWorkspaceFileBytes(filename: filename, bytes: bytes);
+      } catch (_) {
+        // Hosts without a save dialog (tests, unsupported platforms): the bytes
+        // were fetched, but there is nowhere to persist them.
+        return;
+      }
+      if (saved && context.mounted) {
+        AppSnackBar.success(
+          context,
+          AppLocalizations.of(context).projectWorkspaceDownloaded,
+        );
+      }
+    } catch (e) {
+      if (context.mounted) AppErrors.showSnack(context, e);
+    } finally {
+      if (mounted) setState(() => _downloading = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final empty = !_hasFile;
-    final warn = warnWhenEmpty && empty;
+    final warn = widget.warnWhenEmpty && empty;
     final tokens = context.appColors;
     final accent = warn ? tokens.warning : null;
-    String? effectiveSubtitle = subtitle;
+    String? effectiveSubtitle = widget.subtitle;
     if (!empty && (effectiveSubtitle == null || effectiveSubtitle.trim().isEmpty)) {
       final name = _ref?['filename']?.toString() ?? '';
       if (name.isNotEmpty) effectiveSubtitle = name;
@@ -108,27 +153,38 @@ class FileUploadField extends StatelessWidget {
         : null;
 
     return AppPreferenceTile(
-      title: label,
+      title: widget.label,
       icon: Icons.upload_file_outlined,
       accentColor: accent,
       subtitle: sub,
-      enabled: !readOnly,
-      trailing: readOnly
-          ? null
-          : Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (_hasFile)
-                  IconButton(
-                    tooltip: 'Clear',
-                    icon: const Icon(Icons.close),
-                    visualDensity: VisualDensity.compact,
-                    onPressed: () => onChanged(null),
-                  ),
-                const AppTrailingChevron(),
-              ],
+      enabled: !widget.readOnly || _hasFile,
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (_hasFile && widget.scope.downloadContentFn != null)
+            IconButton(
+              tooltip: 'Скачать файл',
+              icon: _downloading
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.download_outlined),
+              visualDensity: VisualDensity.compact,
+              onPressed: _downloading ? null : () => _download(context),
             ),
-      onTap: readOnly ? null : () => _pick(context),
+          if (_hasFile && !widget.readOnly)
+            IconButton(
+              tooltip: 'Clear',
+              icon: const Icon(Icons.close),
+              visualDensity: VisualDensity.compact,
+              onPressed: () => widget.onChanged(null),
+            ),
+          if (!widget.readOnly) const AppTrailingChevron(),
+        ],
+      ),
+      onTap: widget.readOnly ? null : () => _pick(context),
     );
   }
 }

@@ -60,6 +60,9 @@ class ActionInvokeBody(BaseModel):
     model_config = {"extra": "forbid"}
 
     row_id: str | None = None
+    # Per-invocation context overrides declarative action params (for example,
+    # a selected source hash or export option supplied by the owner editor).
+    params: dict[str, Any] | None = None
 
 
 @router.get("")
@@ -288,6 +291,8 @@ async def invoke_company_module_action(
         action_id=action_id,
         row_id=body.row_id,
         principal=principal,
+        employee=employee,
+        extra_params=body.params,
     )
 
 

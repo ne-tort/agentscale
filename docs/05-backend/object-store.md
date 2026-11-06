@@ -8,8 +8,7 @@ S3-compatible object storage для файловых артефактов Prodav
 
 | Environment | Implementation |
 |-------------|----------------|
-| dev (WSL) | MinIO single node |
-| dev (docker compose) | MinIO container |
+| dev (VM `www@172.31.156.203`, k3s) | MinIO single node (in-cluster, PVC `agentscale-minio-data`; docker-compose как кластер запрещён) |
 | staging/prod | Managed S3 (YC Object Storage / AWS S3 / MinIO HA) |
 
 API: **boto3** / **aioboto3** via `StorageService` port.

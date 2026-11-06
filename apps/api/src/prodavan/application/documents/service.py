@@ -253,11 +253,13 @@ class DocumentsService:
             ) from exc
         data = await self._read_source(source)
         self._check_input_size(data)
-        # pdf targets need LibreOffice (Gotenberg); other targets run in-proc.
-        converter = self._converter or resolve_default_converter()
-        if target == "pdf" and src_fmt != "pdf":
-            from prodavan.application.documents.adapters.local_converter import LocalConverter
+        # Gotenberg only implements office→PDF. Do not route local routes through
+        # it merely because the service is configured: doing so made e.g.
+        # xlsx→csv stop working in installations with Gotenberg enabled.
+        from prodavan.application.documents.adapters.local_converter import LocalConverter
 
+        if target == "pdf" and src_fmt != "pdf":
+            converter = self._converter or resolve_default_converter()
             if isinstance(converter, LocalConverter):
                 raise AppError(
                     code="CONVERSION_UNAVAILABLE",
@@ -265,6 +267,8 @@ class DocumentsService:
                     status=422,
                     detail=f"{src_fmt} -> pdf requires the gotenberg converter (not configured)",
                 )
+        else:
+            converter = LocalConverter()
         converted = await converter.convert(data, filename, target)
         self._check_output_size(converted.data)
         out_name = replace_extension(filename, target)

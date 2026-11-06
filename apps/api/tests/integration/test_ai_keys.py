@@ -77,7 +77,14 @@ def _run_ai_keys(coro_fn, tmp_path: Path) -> None:
 
 
 def _create_company_sync(name: str) -> str:
-    """Insert company via dedicated asyncpg connection (avoid shared SQLAlchemy loop)."""
+    """Insert company via dedicated asyncpg connection (avoid shared SQLAlchemy loop).
+
+    ``login_slug`` is NOT NULL since the login-handle work (#80): every company
+    row carries the slug its org principal logs in with. The raw INSERT has to
+    supply it, otherwise it models a row the API cannot produce.
+    """
+    from prodavan.domain.companies.login import slugify_company_name
+
     company_id = f"co_{uuid.uuid4().hex[:16]}"
     dsn = DATABASE_URL.replace("postgresql+asyncpg://", "postgresql://", 1)
     parsed = urlparse(dsn)
@@ -93,11 +100,14 @@ def _create_company_sync(name: str) -> str:
         try:
             await conn.execute(
                 """
-                INSERT INTO companies (id, name, status, subscription_lifetime)
-                VALUES ($1, $2, 'active', false)
+                INSERT INTO companies (id, name, status, subscription_lifetime, login_slug)
+                VALUES ($1, $2, 'active', false, $3)
                 """,
                 company_id,
                 name,
+                # Names are reused across tests in this file; the slug is unique per
+                # company, so suffix the id fragment to keep the insert repeatable.
+                f"{slugify_company_name(name)}-{company_id.removeprefix('co_')[:6]}",
             )
         finally:
             await conn.close()

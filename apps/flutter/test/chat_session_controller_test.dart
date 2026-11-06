@@ -11,6 +11,10 @@ class _FakeApi extends Fake implements ProdavanApi {
   final StreamController<Map<String, dynamic>>? stream;
   Object? cancelError;
   int cancelCalls = 0;
+  Object? approvalError;
+  int approvalCalls = 0;
+  String? approvalDecision;
+  List<Map<String, dynamic>> pending = const [];
 
   /// Responses for projectChatTranscript, keyed by afterSeq (null = full load).
   Map<int?, Map<String, dynamic>>? transcript;
@@ -40,7 +44,22 @@ class _FakeApi extends Fake implements ProdavanApi {
     required String projectId,
     required String sessionId,
   }) async {
-    return const [];
+    return pending;
+  }
+
+  @override
+  Future<Map<String, dynamic>> resolveToolApproval({
+    required String projectId,
+    required String sessionId,
+    required String approvalId,
+    required String decision,
+  }) async {
+    approvalCalls += 1;
+    approvalDecision = decision;
+    final err = approvalError;
+    if (err != null) throw err;
+    pending = const [];
+    return <String, dynamic>{'approval_id': approvalId, 'decision': decision};
   }
 
   @override
@@ -300,6 +319,32 @@ void main() {
       expect(controller.turnInProgress, isFalse);
       expect(controller.agentWorking, isFalse);
       expect(controller.showWorkingIndicator, isFalse);
+      controller.dispose();
+    });
+  });
+
+  group('approval delivery recovery', () {
+    test('normalizes allow and restores pending approval after delivery failure', () async {
+      final approval = <String, dynamic>{
+        'id': 'approval-1',
+        'name': 'shell.exec',
+        'input': <String, dynamic>{'cmd': 'ls'},
+      };
+      final api = _FakeApi()
+        ..pending = [approval]
+        ..approvalError = ProdavanApiException(503, '{"code":"APPROVAL_DELIVERY_FAILED"}');
+      final controller = ChatSessionController(
+        api: api,
+        projectId: 'prj_approval',
+        sessionId: 'sess_approval',
+      )..pendingApprovals = [approval];
+
+      await controller.resolveApproval('approval-1', 'allow');
+
+      expect(api.approvalCalls, 1);
+      expect(api.approvalDecision, 'approve');
+      expect(controller.pendingApprovals, contains(approval));
+      expect(controller.error, isA<ProdavanApiException>());
       controller.dispose();
     });
   });

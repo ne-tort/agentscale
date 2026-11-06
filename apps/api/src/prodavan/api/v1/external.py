@@ -12,7 +12,7 @@ principal), so the same surface serves apps and people.
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Header, Query
 from pydantic import BaseModel, Field
@@ -760,6 +760,11 @@ class CreateWebhookBody(BaseModel):
     project_id: str | None = None
 
 
+class UpdateWebhookBody(BaseModel):
+    model_config = {"extra": "forbid"}
+    enabled: bool
+
+
 @router.post("/webhooks", status_code=201)
 async def create_webhook(
     body: CreateWebhookBody,
@@ -812,6 +817,81 @@ async def list_webhooks(
     }
 
 
+@router.get("/webhook-deliveries")
+async def list_webhook_deliveries(
+    principal: PrincipalDep,
+    session: AsyncSession = SessionDep,
+    employee: EmployeeRow | None = _EmployeeDep,
+    # ``Query(...)`` may only supply metadata through ``Annotated``: as a bare
+    # default it stayed a ``Query`` instance and reached the service as the
+    # ``limit`` argument, so ``min(limit, 200)`` raised TypeError on every call.
+    limit: Annotated[int, Query(ge=1, le=200)] = 100,
+) -> dict:
+    _require_employee(employee)
+    company_id = await _employee_company_id(session, employee)
+    rows = await WebhookService(session).list_deliveries(company_id, limit=limit)
+    return {
+        "items": [
+            {
+                "id": delivery.id,
+                "subscription_id": delivery.subscription_id,
+                "url": subscription.url,
+                "subscription_enabled": subscription.enabled,
+                "event_type": delivery.event_type,
+                "status": delivery.status,
+                "attempts": delivery.attempts,
+                "retry_history": delivery.retry_history or [],
+                "response_status": delivery.response_status,
+                "last_error": delivery.last_error,
+                "created_at": delivery.created_at.isoformat() if delivery.created_at else None,
+                "next_attempt_at": delivery.next_attempt_at.isoformat() if delivery.next_attempt_at else None,
+                "delivered_at": delivery.delivered_at.isoformat() if delivery.delivered_at else None,
+            }
+            for delivery, subscription in rows
+        ]
+    }
+
+
+@router.post("/webhook-deliveries/{delivery_id}/retry")
+async def retry_webhook_delivery(
+    delivery_id: str,
+    principal: PrincipalDep,
+    session: AsyncSession = SessionDep,
+    employee: EmployeeRow | None = _EmployeeDep,
+) -> dict:
+    _require_employee(employee)
+    company_id = await _employee_company_id(session, employee)
+    ok = await WebhookService(session).retry_delivery(delivery_id, company_id=company_id)
+    if not ok:
+        raise AppError(
+            code="NOT_FOUND_OR_NOT_RETRYABLE",
+            title="Delivery Not Retryable",
+            status=409,
+            detail="delivery not found or not exhausted",
+        )
+    await session.commit()
+    return {"id": delivery_id, "status": "pending"}
+
+
+@router.patch("/webhooks/{subscription_id}")
+async def update_webhook(
+    subscription_id: str,
+    body: UpdateWebhookBody,
+    principal: PrincipalDep,
+    session: AsyncSession = SessionDep,
+    employee: EmployeeRow | None = _EmployeeDep,
+) -> dict:
+    _require_employee(employee)
+    company_id = await _employee_company_id(session, employee)
+    row = await WebhookService(session).set_enabled(
+        subscription_id, company_id=company_id, enabled=body.enabled
+    )
+    if row is None:
+        raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="subscription not found")
+    await session.commit()
+    return {"id": row.id, "enabled": row.enabled}
+
+
 @router.delete("/webhooks/{subscription_id}")
 async def delete_webhook(
     subscription_id: str,
@@ -826,3 +906,53 @@ async def delete_webhook(
         raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="subscription not found")
     await session.commit()
     return {"ok": True}
+
+
+@router.get("/webhooks/incoming")
+async def get_incoming_webhook_config(
+    principal: PrincipalDep,
+    session: AsyncSession = SessionDep,
+    employee: EmployeeRow | None = _EmployeeDep,
+) -> dict:
+    """Return configured flags for company-wide signed trigger ingress secrets."""
+    _require_employee(employee)
+    from prodavan.application.admin.company_service import AdminCompanyService
+
+    company_id = await _employee_company_id(session, employee)
+    return await AdminCompanyService(session).get_ingress_webhook_status(company_id)
+
+
+@router.post("/webhooks/incoming/{channel}/secret", status_code=201)
+async def rotate_incoming_webhook_secret(
+    channel: str,
+    principal: PrincipalDep,
+    session: AsyncSession = SessionDep,
+    employee: EmployeeRow | None = _EmployeeDep,
+) -> dict:
+    """Rotate company-wide ingress secret; the new value is returned once."""
+    _require_employee(employee)
+    from prodavan.application.admin.company_service import AdminCompanyService
+
+    company_id = await _employee_company_id(session, employee)
+    secret = await AdminCompanyService(session).rotate_ingress_webhook_secret(
+        company_id, channel=channel
+    )
+    return {"channel": channel, "secret": secret, "configured": True}
+
+
+@router.delete("/webhooks/incoming/{channel}/secret")
+async def clear_incoming_webhook_secret(
+    channel: str,
+    principal: PrincipalDep,
+    session: AsyncSession = SessionDep,
+    employee: EmployeeRow | None = _EmployeeDep,
+) -> dict:
+    """Disable one company-wide incoming signed-trigger channel."""
+    _require_employee(employee)
+    from prodavan.application.admin.company_service import AdminCompanyService
+
+    company_id = await _employee_company_id(session, employee)
+    await AdminCompanyService(session).clear_ingress_webhook_secret(
+        company_id, channel=channel
+    )
+    return {"ok": True, "channel": channel, "configured": False}

@@ -2975,6 +2975,14 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
 
             {
                 "table_slug": "procurement",
+                "name": "include_delivery",
+                "label": {"ru": "Включить доставку", "en": "Include delivery"},
+                "type": "bool",
+                "required": False,
+                "default": True,
+            },
+            {
+                "table_slug": "procurement",
                 "name": "delivery_rub",
                 "label": {"ru": "Доставка ₽", "en": "Delivery RUB"},
                 "type": "number",
@@ -4132,7 +4140,8 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "default": "draft",
                 "enum": {
                     # WAVE15: irrelevant — тендер не про технику/не наш профиль;
-                    # ставит агент (tender_upsert) при отбраковке, можно и вручную.
+                    # ставится вручную в таблице тендеров (MCP-инструмента
+                    # записи тендера нет: агент только берёт тендер в работу).
                     "values": ["draft", "active", "submitted", "won", "lost", "cancelled", "irrelevant"],
                     "labels": {
                         "draft": "Черновик",
@@ -5527,7 +5536,20 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "align": "end",
                             "max_width": 130,
                         },
-
+                        {
+                            "field": "margin_pct",
+                            "label": {"ru": "Маржа %", "en": "Margin %"},
+                            "align": "end",
+                            "max_width": 100,
+                            "editable": True,
+                        },
+                        {
+                            "field": "include_delivery",
+                            "label": {"ru": "Включить доставку", "en": "Include delivery"},
+                            "align": "center",
+                            "max_width": 130,
+                            "editable": True,
+                        },
                         {
                             "field": "delivery_rub",
                             "label": {"ru": "Доставка ₽", "en": "Delivery RUB"},
@@ -7007,6 +7029,12 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "max_width": 110,
                         },
                         {
+                            "field": "lead_time",
+                            "label": {"ru": "Срок / наличие", "en": "Lead time / stock"},
+                            "max_lines": 2,
+                            "max_width": 130,
+                        },
+                        {
                             "field": "price",
                             "label": {"ru": "Цена", "en": "Price"},
                             "format": "offer_price",
@@ -7814,7 +7842,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "budget_table": "budget_lines",
                     "procurement_table": "procurement",
                 },
-                "trigger": {"on": ["row.created", "row.updated"], "async": True},
+                "trigger": {"on": ["row.created", "row.updated", "row.deleted"], "async": True},
                 "ui": {"placement": ["scaffold"], "icon": "sync"},
             },
                 # WAVE7: единый пайплайн — материализация офферов из OpenSearch,
@@ -7907,7 +7935,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "params": {
                         "procurement_table": "procurement",
                     },
-                    "trigger": {"on": ["row.updated"], "async": True},
+                    "trigger": {"on": ["row.updated", "row.deleted"], "async": True},
                     "ui": {"placement": []},
                 },
                 # WAVE16: отправка письма из «Исходящих» (queued → sent/failed).
@@ -8163,21 +8191,9 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
             },
             {
                 "server": "prodavan-equipment",
-                "tool": "tender_upsert",
-                "label": "Запись тендера",
-                "description": "Создание или обновление тендера (состав — tender_positions_upsert)",
-            },
-            {
-                "server": "prodavan-equipment",
-                "tool": "tender_delete",
-                "label": "Удаление тендера",
-                "description": "Удаление тендера (позиции в чатах остаются)",
-            },
-            {
-                "server": "prodavan-equipment",
-                "tool": "tender_positions_upsert",
-                "label": "Позиции тендера",
-                "description": "Создание или обновление позиций тендера (lines_json)",
+                "tool": "tender_take_to_work",
+                "label": "Тендер в работу",
+                "description": "Взять тендер в работу: новый чат с позициями тендера",
             },
             {
                 "server": "prodavan-equipment",

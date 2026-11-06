@@ -43,7 +43,6 @@ class LifespanManager:
         for resource in self._resources:
             logger.info("lifespan startup: %s", resource.name)
             await resource.startup()
-
     async def shutdown_all(self) -> None:
         for resource in reversed(self._resources):
             logger.info("lifespan shutdown: %s", resource.name)
@@ -63,7 +62,15 @@ class LifespanManager:
         return report
 
     @asynccontextmanager
-    async def lifespan(self, _app: FastAPI) -> AsyncIterator[None]:
+    async def lifespan(self, app: FastAPI) -> AsyncIterator[None]:
+        # Some resources need the FastAPI app itself (for example to publish a
+        # runtime on ``app.state``).  ``startup()`` has no app argument, so bind
+        # it here — before any resource starts — instead of forcing every caller
+        # to subclass this manager.
+        for resource in self._resources:
+            bind = getattr(resource, "bind_app", None)
+            if callable(bind):
+                bind(app)
         await self.startup_all()
         try:
             yield

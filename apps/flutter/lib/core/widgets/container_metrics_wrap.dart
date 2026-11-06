@@ -8,6 +8,7 @@ import 'package:prodavan/core/preferences/app_value_preference.dart';
 import 'package:prodavan/core/theme/app_color_tokens.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_snack_bar.dart';
+import 'package:prodavan/core/widgets/metrics_series_chart.dart';
 import 'package:prodavan/core/widgets/stat_tile.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
@@ -18,11 +19,13 @@ class ContainerMetricsWrap extends StatelessWidget {
     required this.container,
     this.runtimeMetrics,
     this.projectMetrics,
+    this.runtimeMetricsError = false,
   });
 
   final Map<String, dynamic>? container;
   final Map<String, dynamic>? runtimeMetrics;
   final Map<String, dynamic>? projectMetrics;
+  final bool runtimeMetricsError;
 
   Map<String, dynamic>? get _latest {
     final latest = runtimeMetrics?['latest'];
@@ -261,6 +264,10 @@ class ContainerMetricsWrap extends StatelessWidget {
               ),
             ),
           ),
+        MetricsSeriesChart(
+          metrics: runtimeMetrics,
+          hasError: runtimeMetricsError,
+        ),
         if (resourceTiles.isNotEmpty)
           Wrap(
             spacing: AppSpacing.sm,

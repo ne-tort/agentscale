@@ -31,6 +31,17 @@ class CompanyApi {
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
+  Future<Map<String, dynamic>> getEmployeeMetrics({
+    required String companyId,
+    required String employeeId,
+  }) async {
+    final res = await AuthHttp.get(
+      _uri('/companies/$companyId/employees/$employeeId/metrics'),
+    );
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
   Future<Map<String, dynamic>> setCompanyPassword({
     required String companyId,
     required String password,
@@ -41,8 +52,14 @@ class CompanyApi {
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
-  Future<List<Map<String, dynamic>>> listEmployees(String companyId) async {
-    final res = await AuthHttp.get(_uri('/companies/$companyId/employees'));
+  Future<List<Map<String, dynamic>>> listEmployees(
+    String companyId, {
+    bool includeDeleted = false,
+  }) async {
+    final uri = _uri('/companies/$companyId/employees').replace(
+      queryParameters: includeDeleted ? {'include_deleted': 'true'} : null,
+    );
+    final res = await AuthHttp.get(uri);
     _throwIfError(res);
     final body = jsonDecode(res.body) as Map<String, dynamic>;
     final items = body['items'];
@@ -161,6 +178,20 @@ class CompanyApi {
 
   Future<Map<String, dynamic>> enableEmployee(String employeeId) async {
     final res = await AuthHttp.post(_uri('/employees/$employeeId/enable'));
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  /// Restore a soft-deleted employee into the company's visible, paused list.
+  ///
+  /// The backend restore route is employee-scoped. The company ID remains part
+  /// of this client contract so callers keep the selected company context; the
+  /// backend enforces that the employee belongs to the caller's company.
+  Future<Map<String, dynamic>> restoreEmployee({
+    required String companyId,
+    required String employeeId,
+  }) async {
+    final res = await AuthHttp.post(_uri('/employees/$employeeId/restore'));
     _throwIfError(res);
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
@@ -390,7 +421,7 @@ class CompanyApi {
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
-  Future<Uint8List> downloadWorkspaceFile({
+  Future<WorkspaceFileDownload> downloadWorkspaceFile({
     required String companyId,
     required String projectId,
     required String path,
@@ -401,7 +432,14 @@ class CompanyApi {
       ),
     );
     _throwIfError(res);
-    return res.bodyBytes;
+    return WorkspaceFileDownload(
+      bytes: res.bodyBytes,
+      normalizedPath: res.headers['x-workspace-path'],
+      size: int.tryParse(res.headers['x-workspace-size'] ?? ''),
+      filename: WorkspaceFileDownload.filenameFromContentDisposition(
+        res.headers['content-disposition'],
+      ),
+    );
   }
 
   Future<void> deleteContainer({
@@ -872,6 +910,24 @@ class CompanyApi {
     );
     _throwIfError(res);
     return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  /// Download a FileRef result through the API proxy.
+  Future<Uint8List> downloadContentAsset({
+    required String assetId,
+    String? versionId,
+    String? blobVersionId,
+  }) async {
+    var uri = _uri('/content/assets/$assetId/download');
+    uri = uri.replace(queryParameters: {
+      'proxy': '1',
+      if (versionId != null && versionId.isNotEmpty) 'version_id': versionId,
+      if (blobVersionId != null && blobVersionId.isNotEmpty)
+        'blob_version_id': blobVersionId,
+    });
+    final res = await AuthHttp.get(uri);
+    _throwIfError(res);
+    return res.bodyBytes;
   }
 
   void _throwIfError(http.Response res) {

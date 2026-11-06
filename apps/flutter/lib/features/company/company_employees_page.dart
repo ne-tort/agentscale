@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import 'package:prodavan/core/refresh/app_auto_refresh.dart';
 import 'package:prodavan/core/session/company_context.dart';
+import 'package:prodavan/core/widgets/app_confirm_page.dart';
 import 'package:prodavan/core/widgets/app_entity_collection.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_inline_add_field.dart';
@@ -31,6 +32,8 @@ class _CompanyEmployeesPageState extends State<CompanyEmployeesPage> {
   late final AppAutoRefreshBinder _autoRefresh;
   bool _loading = true;
   Object? _error;
+  bool _showRecycleBin = false;
+  String? _busyEmployeeId;
   List<Map<String, dynamic>> _employees = const [];
 
   @override
@@ -56,9 +59,13 @@ class _CompanyEmployeesPageState extends State<CompanyEmployeesPage> {
         _error = null;
       });
     }
+    final requestedRecycleBin = _showRecycleBin;
     try {
-      final items = await companyContext.api.listEmployees(widget.companyId);
-      if (!mounted) return;
+      final items = await companyContext.api.listEmployees(
+        widget.companyId,
+        includeDeleted: requestedRecycleBin,
+      );
+      if (!mounted || requestedRecycleBin != _showRecycleBin) return;
       if (silent && appRefreshDataEquals(_employees, items) && !_loading) return;
       setState(() {
         _employees = items;
@@ -111,6 +118,31 @@ class _CompanyEmployeesPageState extends State<CompanyEmployeesPage> {
     if (mounted) await _reload();
   }
 
+  Future<void> _restoreEmployee(AppEntityRow row) async {
+    final l10n = AppLocalizations.of(context);
+    final emp = _employees.firstWhere((e) => e['id'] == row.id);
+    final login = emp['login'] as String? ?? row.title;
+    final ok = await AppConfirmPage.push(
+      context,
+      title: l10n.companyRestoreEmployee,
+      message: l10n.companyRestoreEmployeeConfirm(login),
+      confirmLabel: l10n.companyRestoreEmployee,
+    );
+    if (!ok || !mounted) return;
+    setState(() => _busyEmployeeId = row.id);
+    try {
+      await companyContext.api.restoreEmployee(
+        companyId: widget.companyId,
+        employeeId: row.id,
+      );
+      if (mounted) await _reload();
+    } catch (e) {
+      if (mounted) AppErrors.showSnack(context, e);
+    } finally {
+      if (mounted) setState(() => _busyEmployeeId = null);
+    }
+  }
+
   void _openEmployee(AppEntityRow row) {
     final emp = _employees.firstWhere((e) => e['id'] == row.id);
     Navigator.of(context)
@@ -134,7 +166,8 @@ class _CompanyEmployeesPageState extends State<CompanyEmployeesPage> {
     final rows = _employees
         .map(
           (e) {
-            final disabled = e['status'] == 'disabled';
+            final deleted = e['deleted_at'] != null || _showRecycleBin;
+            final disabled = e['status'] == 'disabled' || deleted;
             final style = companyEntityWarningRowStyle(context, warning: disabled);
             return AppEntityRow(
               id: e['id'] as String,
@@ -149,6 +182,20 @@ class _CompanyEmployeesPageState extends State<CompanyEmployeesPage> {
               cellWidgets: {
                 'online': AppOnlineIndicator(online: e['online'] == true),
               },
+              trailing: deleted
+                  ? IconButton(
+                      tooltip: l10n.companyRestoreEmployee,
+                      icon: const Icon(Icons.restore_outlined),
+                      onPressed: _busyEmployeeId == e['id']
+                          ? null
+                          : () => _restoreEmployee(
+                                AppEntityRow(
+                                  id: e['id'] as String,
+                                  title: e['login'] as String? ?? e['id'] as String,
+                                ),
+                              ),
+                    )
+                  : null,
             );
           },
         )
@@ -162,12 +209,38 @@ class _CompanyEmployeesPageState extends State<CompanyEmployeesPage> {
               severity: AppStatusSeverity.error,
               message: AppErrors.localize(context, _error!),
             ),
-          AppInlineAddField(
-            title: l10n.companyAddEmployee,
-            hintText: l10n.companyAddEmployeeHint,
-            validator: (v) => v.trim().length >= 3,
-            invalidMessage: l10n.companyPasswordHint,
-            onSave: _createEmployee,
+          if (!_showRecycleBin)
+            AppInlineAddField(
+              title: l10n.companyAddEmployee,
+              hintText: l10n.companyAddEmployeeHint,
+              validator: (v) => v.trim().length >= 3,
+              invalidMessage: l10n.companyPasswordHint,
+              onSave: _createEmployee,
+            ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: SegmentedButton<bool>(
+              segments: [
+                ButtonSegment<bool>(
+                  value: false,
+                  label: Text(l10n.companyEmployeesTab),
+                  icon: const Icon(Icons.group_outlined),
+                ),
+                ButtonSegment<bool>(
+                  value: true,
+                  label: Text(l10n.companyEmployeeRecycleBin),
+                  icon: const Icon(Icons.delete_outline),
+                ),
+              ],
+              selected: {_showRecycleBin},
+              onSelectionChanged: (selected) {
+                setState(() {
+                  _showRecycleBin = selected.single;
+                  _employees = const [];
+                });
+                _reload();
+              },
+            ),
           ),
           Expanded(
             child: AppEntityCollection(
@@ -195,10 +268,20 @@ class _CompanyEmployeesPageState extends State<CompanyEmployeesPage> {
                   align: AppEntityColumnAlign.center,
                 ),
               ],
-              onOpen: _openEmployee,
+              rowActions: [
+                AppEntityRowAction(
+                  tooltip: l10n.companyRestoreEmployee,
+                  icon: Icons.restore_outlined,
+                  visible: (_) => _showRecycleBin,
+                  onPressed: _restoreEmployee,
+                ),
+              ],
+              onOpen: _showRecycleBin ? (_) {} : _openEmployee,
               empty: EmptyPlaceholder(
-                title: l10n.companyNoEmployees,
-                icon: Icons.group_outlined,
+                title: _showRecycleBin
+                    ? l10n.companyNoDeletedEmployees
+                    : l10n.companyNoEmployees,
+                icon: _showRecycleBin ? Icons.delete_outline : Icons.group_outlined,
               ),
             ),
           ),

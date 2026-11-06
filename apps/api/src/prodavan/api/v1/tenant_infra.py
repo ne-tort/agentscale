@@ -57,8 +57,11 @@ class SearchQueryBody(BaseModel):
     namespace: str
     index: str
     query: dict[str, Any] | None = None
+    filter: dict[str, Any] = Field(default_factory=dict)
+    sort: list[dict[str, Any]] | None = None
+    search_after: list[Any] | None = None
     from_: int = Field(default=0, ge=0, alias="from")
-    size: int = Field(default=20, ge=1, le=100)
+    size: int = Field(default=20, ge=1, le=200)
 
     model_config = {"populate_by_name": True}
 
@@ -389,6 +392,9 @@ async def search_query(
         namespace=body.namespace,
         index=body.index,
         query=body.query,
+        filter=body.filter,
+        sort=body.sort,
+        search_after=body.search_after,
         from_=body.from_,
         size=body.size,
         session=session,

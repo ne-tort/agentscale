@@ -102,6 +102,12 @@ def upload_workspace_tar(
                     rel,
                     member.size,
                 )
+                # Skipping the incoming version must not make the prune phase
+                # delete an older last-good copy of the same file. Keep the
+                # existing object until a future checkpoint can upload it.
+                kept_keys.add(
+                    workspace_object_key(workspace_key=workspace_key, relative_path=rel)
+                )
                 skipped += 1
                 continue
             extracted = archive.extractfile(member)

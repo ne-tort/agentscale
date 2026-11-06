@@ -23,9 +23,13 @@ spec:
         app.kubernetes.io/name: agentscale-userdb-init
     spec:
       restartPolicy: OnFailure
+      # ghcr mirror of docker.io library/postgres (Docker Hub rate-limit на
+      # холодной ноде) — тот же приватный package, что у Deployment postgres.
+      imagePullSecrets:
+        - name: ghcr-pull
       containers:
         - name: init
-          image: postgres:16.15
+          image: ghcr.io/ne-tort/postgres:16.15
           env:
             - name: PGPASSWORD
               value: agentscale

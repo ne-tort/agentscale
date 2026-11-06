@@ -26,6 +26,10 @@ const int kComposerDraftMinChars = 5;
 
 typedef ChatComposerSend = void Function(String text, List<String> attachmentRefs);
 
+/// Injectable picker source keeps multi-file selection testable without opening
+/// a platform dialog in widget tests.
+typedef ChatComposerFilePicker = Future<List<PlatformFile>> Function();
+
 class _PendingAttachment {
   const _PendingAttachment({required this.id, required this.filename});
 
@@ -58,6 +62,7 @@ class ChatComposer extends StatefulWidget {
     this.onUpdate,
     this.onDismissUpdate,
     this.clipboardReader,
+    this.filePicker,
   });
 
   final ChatComposerSend onSend;
@@ -91,6 +96,8 @@ class ChatComposer extends StatefulWidget {
   /// Clipboard source for paste-to-attach (Ctrl+V of files/images); defaults
   /// to the pasteboard-backed reader. Injectable for tests.
   final ChatClipboardReader? clipboardReader;
+  /// Optional test seam; production defaults to the platform file picker.
+  final ChatComposerFilePicker? filePicker;
   final bool updating;
   final VoidCallback? onUpdate;
   final VoidCallback? onDismissUpdate;
@@ -350,24 +357,37 @@ class ChatComposerState extends State<ChatComposer> {
     // which AppErrors maps to a themed snackbar. Picking any file here keeps
     // the UX consistent — unsupported types show a domain error, not a silent
     // no-op or a generic white snackbar.
-    FilePickerResult? result;
+    List<PlatformFile> files;
     try {
-      result = await FilePicker.platform.pickFiles(withData: true);
+      final testPicker = widget.filePicker;
+      if (testPicker != null) {
+        files = await testPicker();
+      } else {
+        final result = await FilePicker.platform.pickFiles(
+          withData: true,
+          allowMultiple: true,
+        );
+        files = result?.files ?? const <PlatformFile>[];
+      }
     } catch (e) {
       if (mounted) AppErrors.showSnack(context, e);
       return;
     }
-    if (result == null || result.files.isEmpty) return;
-    final file = result.files.first;
-    final bytes = file.bytes;
-    if (bytes == null) return;
-    if (!mounted) return;
-    await _uploadAttachment(
-      api: api,
-      projectId: projectId,
-      filename: file.name,
-      bytes: bytes,
-    );
+    if (files.isEmpty) return;
+    // API and composer support multiple attachments per message; do not silently
+    // discard every file after the first one selected in the native picker.
+    for (final file in files) {
+      if (!mounted) return;
+      final bytes = file.bytes;
+      if (bytes == null) continue;
+      if (!_checkAttachmentLimits(bytes)) return;
+      await _uploadAttachment(
+        api: api,
+        projectId: projectId,
+        filename: file.name,
+        bytes: bytes,
+      );
+    }
   }
 
   /// Files dropped onto the chat area (drag & drop) enter the exact same

@@ -61,6 +61,45 @@ async def test_rematerialize_background_bumps_hydrate_for_live_pod(monkeypatch: 
 
 
 @pytest.mark.asyncio
+async def test_rematerialize_background_recovers_error_before_runtime_sync(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = AsyncMock()
+    cmd = ProjectCommand(session)
+    row = SimpleNamespace(
+        id="proj_error",
+        cabinet_id="cab_1",
+        status=ProjectStatus.ERROR,
+        workspace_outdated_at=object(),
+    )
+    live_pod = SimpleNamespace(hydrate_generation=2)
+    mat = SimpleNamespace(
+        workspace_root="/ws",
+        mcp_config_path="/ws/mcp.json",
+        status="materialized",
+        package_names=(),
+    )
+
+    monkeypatch.setattr(cmd._access, "get_project_or_none", AsyncMock(return_value=row))
+    monkeypatch.setattr(cmd, "_get_live_pod", AsyncMock(return_value=live_pod))
+    monkeypatch.setattr(cmd, "_sync_project_workspace", AsyncMock(return_value=mat))
+    sync_desired = AsyncMock()
+    monkeypatch.setattr(cmd._pods, "sync_desired", sync_desired)
+    monkeypatch.setattr(
+        "prodavan.application.project_service.command.bootstrap_project_sessions",
+        AsyncMock(return_value={"registered": 0}),
+    )
+
+    out = await cmd.rematerialize_background(project_id="proj_error")
+
+    assert out["ok"] is True
+    assert row.status == ProjectStatus.ACTIVE
+    assert live_pod.hydrate_generation == 3
+    assert row.workspace_outdated_at is None
+    sync_desired.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_rematerialize_background_skips_hydrate_without_pod(monkeypatch: pytest.MonkeyPatch) -> None:
     session = AsyncMock()
     cmd = ProjectCommand(session)

@@ -1,5 +1,17 @@
-# WaitForFirstConsumer PVCs stay Pending until a pod schedules — treat as Healthy.
-# Traefik on k3s often omits status.loadBalancer — treat Ingress as Healthy.
+# Health customizations (argocd-cm). Patched resources and rationale:
+#
+# 1) PersistentVolumeClaim — WaitForFirstConsumer PVCs stay Pending until a pod
+#    schedules; the Argo default would keep the whole app Progressing forever,
+#    so Pending is treated as Healthy. Bound = Healthy (as default).
+#    Lost = Degraded — same as the Argo default; do NOT collapse it into
+#    Progressing, or a lost volume (e.g. local-path data gone after a rebuild)
+#    would hang the app in Progressing with no failure signal.
+#
+# 2) networking.k8s.io/Ingress — Traefik on k3s often omits
+#    status.loadBalancer (no cloud LB); the Argo default waits for it and the
+#    app never reaches Healthy. Treat any existing Ingress as Healthy.
+#
+# No other resource kinds are customized; everything else keeps Argo defaults.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -15,6 +27,11 @@ data:
     end
     if obj.status and obj.status.phase == "Bound" then
       hs.status = "Healthy"
+      return hs
+    end
+    if obj.status and obj.status.phase == "Lost" then
+      hs.status = "Degraded"
+      hs.message = "PVC Lost — backing volume gone"
       return hs
     end
     hs.status = "Progressing"

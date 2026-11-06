@@ -1,0 +1,37 @@
+{
+  "record_id": "MIG-M04E-PERSISTENCE-ADAPTER-01:blocked:2026-11-03:registered-source-review",
+  "task_id": "MIG-M04E-PERSISTENCE-ADAPTER-01",
+  "status": "blocked",
+  "canonical_positive_writes": false,
+  "implementation_paths": [
+    "apps/api/src/prodavan/infrastructure/persistence/migration_definition_version/adapter.py",
+    "apps/api/src/prodavan/infrastructure/persistence/migration_definition_version/__init__.py",
+    "apps/api/src/prodavan/infrastructure/persistence/migration_definition_version/promotion_readiness.json",
+    "apps/api/tests/migration/m04e_definition_version/persistence/test_definition_version_adapter.py"
+  ],
+  "registered_orm_sources_reviewed": {
+    "definition": "m04e_dynamic_app_definitions: id, tenant_id, app_id, scope_kind, scope_id, lifecycle, current_version_id, source_snapshot_id, source_digest",
+    "version": "m04e_dynamic_app_versions: id, definition_id, tenant_id, app_id, manifest_version, artifact_digest, artifact_uri, manifest, requested_capabilities, lifecycle, source_snapshot_id, source_digest, published_at",
+    "scope": "scope_registry typed tuple and retained tenant/cabinet/project anchors; ScopeOwnerMappingRow stores source_payload_digest, canonical_payload_digest and string checkpoint but no canonical_schema_version or durable source-snapshot checkpoint/CAS table; ScopeRegistryRow has no gate digests; MembershipRow has no lifecycle columns",
+    "promotion": "m04e_definition_version_promotion_evidence; only blocked/quarantined outcome and canonical_positive_writes=false",
+    "audit": "scope_owner_audit is M04 source-row audit only; dynamic_app_capability_audit is unregistered in models/__init__.py and its schema does not carry all resolver/current-link/artifact/transaction proof fields"
+  },
+  "implemented": [
+    "M04E ORM resolution performs exact tenant/app/manifest reads, duplicate/history checks, exact current-link equality, lifecycle checks and trusted content-port byte-digest equality inside a live SERIALIZABLE AsyncSession transaction; production authenticated GUC and reviewed M04E RLS manifest wiring are not bound.",
+    "The resolver facade still requires M04 scope proof and durable M04E audit proof; scope proof returns None absent the M04 promotion, checkpoint/schema lineage, reviewed policy-manifest, and actor-membership gates.",
+    "M04E proof and denial recording return None; no digest or positive proof is synthesized when the required resolver-audit table and append-only/RLS gate are absent."
+  ],
+  "gate_evidence": {
+    "m04_parent_promotion": "blocked: no registered m04_scope_promotion_evidence partition record, gate digest fields on scope_registry, reviewed RLS, canonical_schema_version mapping column, or durable checkpoint CAS schema",
+    "m04e_resolution_audit": "blocked: missing durable columns tenant_id, app_id, definition_id, version_id, manifest_version, artifact_digest, artifact_uri, artifact_content_digest, current_version_id, current_definition_id, current_manifest_version, current_artifact_digest, current_artifact_uri, current_lifecycle, current_match_count, transaction_id, correlation_id, event_kind, outcome, reason_code and recorded_at; no append-only trusted role or UPDATE/DELETE denial/RLS proof",
+    "authenticated_context": "blocked: no setup binds app.tenant_id, app.authenticated_subject_id, app.authenticated=true, app.correlation_id, and SERIALIZABLE isolation",
+    "actor_membership": "blocked: no authenticated-subject to active-tenant membership proof; MembershipRow declares no active/deleted lifecycle",
+    "artifact_content": "blocked: no production ArtifactContentPort adapter is registered; tests use fixture bytes only"
+  },
+  "acceptance_artifacts": [
+    "apps/api/tests/migration/m04e_definition_version/persistence/test_definition_version_adapter.py: exact hit, missing definition/version, duplicate definition/manifest, cross-tenant query/version, cross-definition version, current-link mismatch, artifact URI/digest mismatch, absent artifact port, absent M04E policy review, absent audit, non-serializable context, RLS bypass, and missing/permissive active-scope policy fixtures"
+  ],
+  "parent_report_delivery": "blocked: session exposes no send_message tool; this record is the emergency fallback, and a concise report is returned in the closing message",
+  "verification": "No tests, builds, compilation, lint, format, migrations, DDL, database writes, environment changes, or git checks were run. File editing tools emitted automatic lint feedback; this was a tool side effect, not a verification command or acceptance result.",
+  "rollback": "No database or external state was written. Preserve any future mapping, quarantine, audit and checkpoint evidence; keep legacy definitions/versions authoritative and repair forward."
+}

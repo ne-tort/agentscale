@@ -468,6 +468,9 @@ class TenantSearchService:
         namespace: str,
         index: str,
         query: dict[str, Any] | None = None,
+        filter: dict[str, Any] | None = None,
+        sort: list[dict[str, Any]] | None = None,
+        search_after: list[Any] | None = None,
         from_: int = 0,
         size: int = 20,
         session: AsyncSession | None = None,
@@ -482,60 +485,104 @@ class TenantSearchService:
                 status=422,
                 detail="namespace and index are required",
             )
-        # Equipment catalogs only for MVP allowlist (project-bound indexes).
-        if ns != OS_NAMESPACE:
-            raise AppError(
-                code="FORBIDDEN",
-                title="Forbidden",
-                status=403,
-                detail=f"namespace not allowed for pod search: {ns}",
-            )
-        if not idx.startswith("c_"):
-            raise AppError(
-                code="FORBIDDEN",
-                title="Forbidden",
-                status=403,
-                detail="index not allowed for pod search",
-            )
-        if session is None:
+        size = max(1, min(int(size or 20), 200))
+        from_ = max(0, int(from_ or 0))
+        if search_after and from_:
             raise AppError(
                 code="VALIDATION_ERROR",
                 title="Validation Error",
                 status=422,
-                detail="session required for equipment catalog ACL",
+                detail="from must be zero when search_after is supplied",
             )
-        # Same ACL as catalog-search: index must map to a ready catalog visible to project.
-        pod = EquipmentCatalogPodSearchService(session)
-        ready = await pod._ready_catalogs(project_id=project_id)
-        allowed = {str(c["id"]) for c in ready}
-        allowed_indexes = {catalog_os_index_name(cid) for cid in allowed}
-        if idx not in allowed_indexes:
-            raise AppError(
-                code="FORBIDDEN",
-                title="Forbidden",
-                status=403,
-                detail="catalog index not visible for this project",
+
+        # Equipment catalogs retain their project-bound ACL and fan-out semantics.
+        if ns == OS_NAMESPACE:
+            if not idx.startswith("c_"):
+                raise AppError(
+                    code="FORBIDDEN",
+                    title="Forbidden",
+                    status=403,
+                    detail="index not allowed for pod search",
+                )
+            if session is None:
+                raise AppError(
+                    code="VALIDATION_ERROR",
+                    title="Validation Error",
+                    status=422,
+                    detail="session required for equipment catalog ACL",
+                )
+            pod = EquipmentCatalogPodSearchService(session)
+            ready = await pod._ready_catalogs(project_id=project_id)
+            allowed = {str(c["id"]) for c in ready}
+            allowed_indexes = {catalog_os_index_name(cid) for cid in allowed}
+            if idx not in allowed_indexes:
+                raise AppError(
+                    code="FORBIDDEN",
+                    title="Forbidden",
+                    status=403,
+                    detail="catalog index not visible for this project",
+                )
+            svc = get_search_index_service()
+            result = await svc.search(
+                namespace=ns,
+                index=idx,
+                query=query,
+                from_=from_,
+                size=size,
+                company_id=bridge.company_id,
+                cabinet_id=bridge.cabinet_id,
+                project_id=None,
+                session=session,
+                sort=sort,
+                search_after=search_after,
             )
-        size = max(1, min(int(size or 20), 100))
-        from_ = max(0, int(from_ or 0))
-        svc = get_search_index_service()
-        result = await svc.search(
-            namespace=ns,
-            index=idx,
-            query=query,
-            from_=from_,
-            size=size,
-            company_id=bridge.company_id,
-            cabinet_id=bridge.cabinet_id,
-            project_id=None,
-            session=session,
-        )
+        else:
+            # Bridge callers can query tenant-owned Search Index BC indexes. Platform
+            # namespaces remain admin/in-process only; project and company tenancy is
+            # injected by SearchIndexService and cannot be replaced by ``filter``.
+            from prodavan.domain.search_index.types import PLATFORM_NAMESPACES, validate_index, validate_namespace
+
+            try:
+                ns = validate_namespace(ns)
+                idx = validate_index(idx)
+            except ValueError as exc:
+                raise AppError(
+                    code="VALIDATION_ERROR",
+                    title="Validation Error",
+                    status=422,
+                    detail=str(exc),
+                ) from exc
+            if ns in PLATFORM_NAMESPACES:
+                raise AppError(
+                    code="FORBIDDEN",
+                    title="Forbidden",
+                    status=403,
+                    detail=f"namespace not allowed for pod search: {ns}",
+                )
+            svc = get_search_index_service()
+            result = await svc.search(
+                namespace=ns,
+                index=idx,
+                query=query,
+                from_=from_,
+                size=size,
+                company_id=bridge.company_id,
+                cabinet_id=bridge.cabinet_id,
+                project_id=project_id,
+                filter=filter,
+                include_unscoped_project_docs=True,
+                session=session,
+                sort=sort,
+                search_after=search_after,
+            )
         return {
             "hits": [
-                {"id": h.doc_id, "score": h.score, "document": h.source} for h in result.hits
+                {"id": h.doc_id, "score": h.score, "document": h.source, "sort": h.sort}
+                for h in result.hits
             ],
             "total": result.total,
             "took_ms": result.took_ms,
+            "next_search_after": result.next_search_after,
         }
 
     async def health(
