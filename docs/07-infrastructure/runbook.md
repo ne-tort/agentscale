@@ -92,7 +92,9 @@ Terraform, checkout `~/git/agentscale` и `terraform.tfstate` живут на VM
 # Токен берётся на Windows (gh залогинен там; на VM gh НЕ залогинен):
 #   pwsh> gh auth token                            # read:packages
 ssh www@172.31.156.203
-cd ~/git/agentscale && git pull --ff-only          # нужен актуальный модуль
+# НЕ «git pull --ff-only» вслепую: checkout на VM обычно висит на уже
+# удалённой рабочей ветке, и pull падает «no such remote ref». Сначала main.
+cd ~/git/agentscale && git fetch origin && git checkout main && git pull --ff-only
 export TF_VAR_ghcr_token='<токен с Windows>'       # ОБЯЗАТЕЛЕН; не коммитить, на диск не писать
 terraform -chdir=infra/terraform/environments/vm init
 terraform -chdir=infra/terraform/environments/vm apply -auto-approve
@@ -165,7 +167,7 @@ data-dir) и входит в triggers `k3s_server`, поэтому пересо�
 **Шаг 2. Установка.**
 
 ```bash
-cd ~/git/agentscale && git pull --ff-only          # нужен актуальный модуль
+cd ~/git/agentscale && git fetch origin && git checkout main && git pull --ff-only
 cd infra/terraform/environments/vm
 export TF_VAR_ghcr_token='<токен>'                 # ОБЯЗАТЕЛЕН: пустой — падение сразу.
                                                    # Токен — с аутентифицированной машины

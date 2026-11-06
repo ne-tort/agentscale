@@ -52,6 +52,35 @@ sudo install -m 440 ~/git/agentscale/infra/.ssh/prodavan-terraform.sudoers /etc/
 
 Дальше — один Terraform:
 
+> **Провайдеры: реестр HashiCorp гео-блокирован с этой VM.** `terraform init`
+> безусловно обращается к `registry.terraform.io`, и с адресов, где CloudFront
+> отдаёт «Content not available in your region», он падает с
+> `Invalid provider registry host ... does not offer a Terraform provider
+> registry` — даже когда нужная версия уже лежит в `.terraform/providers`.
+> Обход (один раз на хост, переживает переустановки):
+>
+> ```bash
+> # провайдер уже скачан прошлым apply — раскладываем его в файловую миррорку
+> mkdir -p ~/.terraform.d/plugins/registry.terraform.io/hashicorp/null/3.3.2/linux_amd64
+> cp -a ~/git/agentscale/infra/terraform/environments/vm/.terraform/providers/registry.terraform.io/hashicorp/null/3.3.2/linux_amd64/* \
+>       ~/.terraform.d/plugins/registry.terraform.io/hashicorp/null/3.3.2/linux_amd64/
+> cat > ~/.terraformrc <<'EOF'
+> provider_installation {
+>   filesystem_mirror {
+>     path    = "/home/www/.terraform.d/plugins"
+>     include = ["registry.terraform.io/hashicorp/*"]
+>   }
+>   direct {
+>     exclude = ["registry.terraform.io/hashicorp/*"]
+>   }
+> }
+> EOF
+> ```
+>
+> Если кэша `.terraform/providers` на хосте ещё нет, `.terraformrc` не поможет —
+> провайдер придётся принести с машины, где реестр доступен, и положить в ту же
+> директорию миррорки вручную.
+
 ```bash
 cd ~/git/agentscale
 # gh на VM НЕ залогинен: токен (read:packages) получают на аутентифицированной
@@ -103,7 +132,11 @@ Terraform запускается **на VM** (там же `/usr/bin/terraform`, 
 
 ```bash
 ssh www@172.31.156.203
-cd ~/git/agentscale && git pull --ff-only           # нужен актуальный модуль
+# нужен актуальный модуль. Не «git pull --ff-only» вслепую: checkout на VM
+# исторически остаётся на уже удалённой рабочей ветке, и pull падает с
+# «no such remote ref». Сначала встаём на main:
+cd ~/git/agentscale && git status --short --branch
+git fetch origin && git checkout main && git pull --ff-only
 
 # --- 1. снос ---------------------------------------------------------------
 cd ~/git/agentscale/infra/terraform/environments/vm
