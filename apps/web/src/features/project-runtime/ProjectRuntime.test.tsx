@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ProjectRuntime } from "./ProjectRuntime";
 import type { ProjectRuntimeService, ProjectRuntimeSnapshot } from "./types";
+import { POLL_BUDGET_MS } from "../../test-support/poll-budget";
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 
@@ -59,7 +60,7 @@ async function mount(props: Partial<ComponentProps<typeof ProjectRuntime>> = {})
 }
 
 async function waitFor(condition: () => boolean): Promise<void> {
-  const deadline = Date.now() + 3000;
+  const deadline = Date.now() + POLL_BUDGET_MS;
   while (!condition()) {
     if (Date.now() >= deadline) throw new Error("Timed out waiting for ProjectRuntime state");
     await act(async () => { await new Promise((resolve) => window.setTimeout(resolve, 0)); });

@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, matchPath, useLocation } from "react-router-dom";
 import type { ApiClient, Project, ProjectRuntimeModule } from "../api/types";
 import { AppRouter, EMPLOYEE_PROJECT_CHILD_ROUTE_PATHS } from "./router";
+import { POLL_BUDGET_MS } from "../test-support/poll-budget";
 
 const harness = vi.hoisted(() => ({
   api: undefined as unknown,
@@ -84,7 +85,7 @@ async function mount(initialPath: string): Promise<void> {
 }
 
 async function waitFor(assertion: () => boolean): Promise<void> {
-  const deadline = Date.now() + 3000;
+  const deadline = Date.now() + POLL_BUDGET_MS;
   while (!assertion()) {
     if (Date.now() >= deadline) throw new Error("Timed out waiting for router state");
     await act(async () => { await new Promise((resolve) => window.setTimeout(resolve, 0)); });

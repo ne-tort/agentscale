@@ -7,6 +7,7 @@ import { useChatWorkspace } from "./hooks";
 import type { ChatWorkspaceController } from "./hooks";
 import type { ChatTranscriptResponse } from "../../api/types";
 import type { ChatEvent } from "./types";
+import { POLL_BUDGET_MS } from "../../test-support/poll-budget";
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 
@@ -84,7 +85,7 @@ async function mount(service: TestService): Promise<HTMLDivElement> {
 }
 
 async function waitFor(condition: () => boolean): Promise<void> {
-  const deadline = Date.now() + 3000;
+  const deadline = Date.now() + POLL_BUDGET_MS;
   while (!condition()) {
     if (Date.now() >= deadline) throw new Error("Timed out waiting for chat acceptance condition");
     await act(async () => { await new Promise((resolve) => window.setTimeout(resolve, 0)); });

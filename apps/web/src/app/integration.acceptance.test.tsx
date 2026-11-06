@@ -10,6 +10,7 @@ import { getSafeNextPath } from "./auth/redirect";
 import { RESOURCE_CONTRACT_BLOCKERS } from "../features/resources";
 import { emptyEquipmentWorkspace } from "../features/equipment";
 import { filesModuleFixture, promptModuleFixture } from "../features/modules/fixtures";
+import { POLL_BUDGET_MS } from "../test-support/poll-budget";
 
 const projectId = "project-71";
 const cabinetId = "cabinet-19";
@@ -199,7 +200,7 @@ function captureRegisteredApi(handler: (url: URL, request: CapturedRequest) => P
  * scope does. Prefer calling ``waitFor`` from outside an ``act`` block.
  */
 async function waitFor(assertion: () => boolean, message = "Timed out waiting for the acceptance condition"): Promise<void> {
-  const deadline = Date.now() + 3000;
+  const deadline = Date.now() + POLL_BUDGET_MS;
   for (;;) {
     let satisfied = false;
     await act(async () => {

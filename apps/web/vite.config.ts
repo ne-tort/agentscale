@@ -12,5 +12,13 @@ export default defineConfig({
   test: {
     include: ["src/**/*.{test,spec}.{ts,tsx}"],
     exclude: ["node_modules/**", "dist/**", "e2e/**", "test-results/**"],
+    // One self-hosted VM runs this suite next to the API suite (Postgres plus
+    // ~2000 tests) and the Flutter analyzer, so a component test that waits for
+    // a committed render can spend seconds queued for a core. The default 5s
+    // expired there and failed the gate with no assertion behind it; the poll
+    // budget the component tests use is `POLL_BUDGET_MS` in
+    // `src/test-support/poll-budget.ts`.
+    testTimeout: 30_000,
+    hookTimeout: 30_000,
   },
 });

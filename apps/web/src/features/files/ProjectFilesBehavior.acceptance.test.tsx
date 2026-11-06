@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
 import { ProjectFilesWorkspace } from "./ProjectFilesWorkspace";
 import type { WorkspaceEntry, WorkspaceListing, WorkspaceService, WorkspaceTextPreview } from "./contracts";
+import { POLL_BUDGET_MS } from "../../test-support/poll-budget";
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 
@@ -69,7 +70,7 @@ async function mount(service: WorkspaceService, url: string) {
 }
 
 async function waitFor(condition: () => boolean): Promise<void> {
-  const deadline = Date.now() + 3000;
+  const deadline = Date.now() + POLL_BUDGET_MS;
   while (!condition()) {
     if (Date.now() >= deadline) throw new Error("Timed out waiting for workspace acceptance condition");
     await act(async () => { await new Promise((resolve) => window.setTimeout(resolve, 0)); });

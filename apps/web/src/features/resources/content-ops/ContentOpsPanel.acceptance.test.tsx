@@ -7,6 +7,7 @@ import { ContentOpsPanel } from "./ContentOpsPanel";
 import { ContentOpsError, type ContentOpsService } from "./contracts";
 import type { ContentAsset, ContentAssetVersion } from "./types";
 import { CONTENT_UPLOAD_MAX_BYTES, contentFileFeedback } from "./validation";
+import { POLL_BUDGET_MS } from "../../../test-support/poll-budget";
 
 const asset = { id: "cast_asset-1", owner_scope: "company", owner_company_id: "company-1", visibility: "company", mime: "text/plain", title: "notes.txt", tags: [], created_by: "employee-1", latest_version: 1, created_at: "2026-10-01T12:00:00Z", updated_at: "2026-10-01T12:00:00Z" };
 
@@ -36,7 +37,7 @@ let anchorClickDescriptor: PropertyDescriptor | undefined;
  * three-second timeout on every interaction-based test, not a product failure.
  */
 async function waitFor(assertion: () => boolean): Promise<void> {
-  const deadline = Date.now() + 3000;
+  const deadline = Date.now() + POLL_BUDGET_MS;
   while (!assertion()) {
     if (Date.now() >= deadline) throw new Error("Timed out waiting for Content Ops UI");
     await act(async () => {

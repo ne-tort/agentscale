@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import { ModuleAdminPage } from "./ModuleAdminPage";
 import { createModuleAdminService } from "./service";
+import { POLL_BUDGET_MS } from "../../../test-support/poll-budget";
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 
@@ -110,7 +111,7 @@ async function mount(mode: "admin" | "company", api = makeApi()) {
 }
 
 async function waitFor(condition: () => boolean): Promise<void> {
-  const deadline = Date.now() + 3000;
+  const deadline = Date.now() + POLL_BUDGET_MS;
   while (!condition()) {
     if (Date.now() >= deadline) throw new Error("Timed out waiting for module binding acceptance condition");
     await act(async () => { await new Promise((resolve) => window.setTimeout(resolve, 0)); });

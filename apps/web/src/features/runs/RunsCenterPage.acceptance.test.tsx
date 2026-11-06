@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createRunsService, RunsRequestError } from "./service";
 import { RUN_DETAIL_POLL_INTERVAL_MS, RunsCenterPage } from "./RunsCenterPage";
 import type { AgentRunRecord, ApprovalInboxItem, ControlPlaneEvent } from "./contracts";
+import { POLL_BUDGET_MS } from "../../test-support/poll-budget";
 
 vi.mock("../../app/context", () => ({ useAuth: () => ({ tokens: { access_token: "journey-token" } }) }));
 
@@ -94,7 +95,7 @@ afterEach(async () => {
 });
 
 async function waitForPage(assertion: () => boolean): Promise<void> {
-  const deadline = Date.now() + 3000;
+  const deadline = Date.now() + POLL_BUDGET_MS;
   while (!assertion()) {
     if (Date.now() >= deadline) throw new Error("Timed out waiting for Runs Center acceptance condition");
     await act(async () => { await new Promise((resolve) => window.setTimeout(resolve, 0)); });

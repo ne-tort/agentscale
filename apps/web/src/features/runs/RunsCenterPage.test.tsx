@@ -21,6 +21,7 @@ import { AUTH_STORAGE_KEY } from "../../app/auth/lifecycle";
 import { AppProviders, useAuth } from "../../app/context";
 import { RunsCenterPage } from "./RunsCenterPage";
 import type { AgentRunRecord, ApprovalInboxItem, ControlPlaneEvent } from "./contracts";
+import { POLL_BUDGET_MS } from "../../test-support/poll-budget";
 
 function AuthenticatedRunsRoute() {
   const { isLoading, isAuthenticated } = useAuth();
@@ -151,7 +152,7 @@ function jsonResponse(payload: unknown, status = 200): Response {
 }
 
 async function waitFor(assertion: () => boolean): Promise<void> {
-  const deadline = Date.now() + 3000;
+  const deadline = Date.now() + POLL_BUDGET_MS;
   while (!assertion()) {
     if (Date.now() >= deadline) throw new Error("Timed out waiting for the RunsCenterPage acceptance condition");
     await act(async () => { await new Promise((resolve) => window.setTimeout(resolve, 0)); });

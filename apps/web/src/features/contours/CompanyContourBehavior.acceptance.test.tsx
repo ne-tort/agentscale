@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CompanyContour } from "./CompanyContour";
 import { createContourService, type ContourRow } from "./service";
+import { POLL_BUDGET_MS } from "../../test-support/poll-budget";
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 
@@ -117,7 +118,7 @@ async function mount(companyId = "co-1", api = makeApi()) {
 }
 
 async function waitFor(condition: () => boolean): Promise<void> {
-  const deadline = Date.now() + 3000;
+  const deadline = Date.now() + POLL_BUDGET_MS;
   while (!condition()) {
     if (Date.now() >= deadline) throw new Error("Timed out waiting for company employee acceptance condition");
     await act(async () => { await new Promise((resolve) => window.setTimeout(resolve, 0)); });
