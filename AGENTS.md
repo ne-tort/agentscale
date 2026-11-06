@@ -59,7 +59,7 @@ Legacy AI-канон: [`docs/target/`](docs/target/) (кроме as-built) — �
 
 - Поставка: PR → **CI Gate** → Auto-merge → **CI Images** → Argo CD sync → **Verify Dev**.
 - Bootstrap кластера: **SSH + Terraform** (`infra/terraform/environments/vm`) → UI **http://172.31.156.203:8088/**.
-- Императив только **`infra/ops`**: `validate` / `wait` / `rollout` / `smoke`.
+- Императив только **`infra/ops`** (`prodavan-ops`): `validate` / `wait` / `rollout` / `smoke` / `dns-check` / `heal` / `e2e run|cleanup` / `version`. `dns-check` — обязательный шаг **Verify Dev** (резолв из пода, отдельная проба): [`cli.py`](infra/ops/src/prodavan_ops/cli.py).
 - **Запрещены** `.sh` под `infra/`, docker-compose как кластер, k3d в git, recover/deploy shell.
 - Кластер: **k3s** + Argo (`infra/argocd` → `infra/k3s/overlays/dev`). **Работаем с dev** (`agentscale-dev`); prod — только по явному требованию (см. «Политика сред»).
 
