@@ -499,6 +499,14 @@ jobs:
           alembic upgrade head
 
       - name: Grant app role on migrated tables
+        # The suite's between-test fixture truncates every public table and has
+        # to step through the append-only guards to do it, and both `TRUNCATE`
+        # and `ALTER TABLE ... DISABLE TRIGGER` are ownership operations.
+        # Migrations run as the container superuser, so `agentscale_app` owned no
+        # table at all and every `tests/api` setup died with "must be owner of
+        # table agent_control_plane_events" (159 errors on an otherwise green
+        # run). Ownership of a throwaway CI database is the same state the local
+        # recipe produces, where `prodavan_app` creates the schema itself.
         run: |
           python - <<'PY'
           import asyncio, os, asyncpg
@@ -508,6 +516,24 @@ jobs:
               conn = await asyncpg.connect(f"postgresql://agentscale:agentscale@{host}:{port}/agentscale")
               await conn.execute("GRANT ALL ON ALL TABLES IN SCHEMA public TO agentscale_app")
               await conn.execute("GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO agentscale_app")
+              await conn.execute(
+                  """
+                  DO $$
+                  DECLARE r record;
+                  BEGIN
+                    FOR r IN SELECT tablename AS n FROM pg_tables
+                             WHERE schemaname = 'public' AND tableowner <> 'agentscale_app'
+                    LOOP
+                      EXECUTE format('ALTER TABLE public.%I OWNER TO agentscale_app', r.n);
+                    END LOOP;
+                    FOR r IN SELECT sequencename AS n FROM pg_sequences
+                             WHERE schemaname = 'public' AND sequenceowner <> 'agentscale_app'
+                    LOOP
+                      EXECUTE format('ALTER SEQUENCE public.%I OWNER TO agentscale_app', r.n);
+                    END LOOP;
+                  END $$;
+                  """
+              )
               await conn.execute(
                   "ALTER DEFAULT PRIVILEGES FOR ROLE agentscale IN SCHEMA public GRANT ALL ON TABLES TO agentscale_app"
               )

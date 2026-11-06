@@ -247,6 +247,24 @@ def _quote_ident(name: str) -> str:
     return '"' + name.replace('"', '""') + '"'
 
 
+#: ``ALTER TABLE ... DISABLE TRIGGER`` requires table **ownership**, not TRUNCATE
+#: privilege. Whether this session owns what it truncates is a property of the
+#: deployment, not of the suite: a superuser owns everything, while a dedicated
+#: app role that was granted DML by the migration step owns nothing. Ask the
+#: catalog instead of assuming, and let the TRUNCATE error speak when the guard
+#: is up and the role cannot step around it -- that is a real failure, not a
+#: privilege gap.
+_PUBLIC_OWNED_TABLES_SQL = """
+SELECT c.relname
+FROM pg_class c
+JOIN pg_namespace n ON n.oid = c.relnamespace
+WHERE n.nspname = 'public'
+  AND c.relkind IN ('r', 'p')
+  AND pg_catalog.pg_has_role(current_user, c.relowner, 'USAGE')
+ORDER BY 1
+"""
+
+
 async def _ensure_user_triggers_enabled(engine) -> None:
     """Re-enable USER triggers on every ``public`` table that has one disabled.
 
@@ -254,11 +272,20 @@ async def _ensure_user_triggers_enabled(engine) -> None:
     still works when the caller's transaction is aborted. It runs before the wipe
     (a previous crashed run must not make this run falsely green) and after it
     (this run must not hand a guard-less database to the next test).
+
+    Only owned tables are touched: ``ENABLE TRIGGER`` needs ownership just like
+    ``DISABLE`` does, and asking for a table this session cannot alter would turn
+    the repair pass itself into the failure.
     """
     async with engine.begin() as conn:
         await conn.execute(text("SET lock_timeout = '5s'"))
+        owned = {
+            row[0] for row in (await conn.execute(text(_PUBLIC_OWNED_TABLES_SQL))).all()
+        }
         result = await conn.execute(text(_PUBLIC_DISABLED_TRIGGER_TABLES_SQL))
         for (table_name,) in result.all():
+            if table_name not in owned:
+                continue
             await conn.execute(
                 text(f"ALTER TABLE public.{_quote_ident(table_name)} ENABLE TRIGGER USER")
             )
@@ -321,6 +348,11 @@ def _wipe_public_tables() -> None:
     restores the flags by itself); the repair pass in ``finally`` covers what a
     transaction cannot — a killed worker, or a committed-but-crashed run left
     behind by an earlier process.
+
+    Ownership decides whether the dance is possible at all: ``ALTER TABLE``
+    needs it, ``TRUNCATE`` does not. When the session owns the tables it steps
+    through the guards; when it does not, the guards stay up and a ``BEFORE
+    TRUNCATE`` one fails the wipe loudly instead of being silently skipped.
     """
 
     async def _wipe() -> None:
@@ -335,11 +367,24 @@ def _wipe_public_tables() -> None:
             async with engine.begin() as conn:
                 await conn.execute(text("SET lock_timeout = '5s'"))
                 await conn.execute(text("SET statement_timeout = '30s'"))
+                # Only tables this session can actually ALTER: DISABLE TRIGGER
+                # needs ownership, and a role with DML-only grants (the CI app
+                # role) would otherwise abort the wipe with "must be owner of
+                # table ...". A guard on a table this role cannot alter is left
+                # in place -- then TRUNCATE fails closed, which is the honest
+                # outcome rather than a silently downgraded invariant.
+                owned = {
+                    row[0]
+                    for row in (
+                        await conn.execute(text(_PUBLIC_OWNED_TABLES_SQL))
+                    ).all()
+                }
                 guarded = [
                     row[0]
                     for row in (
                         await conn.execute(text(_PUBLIC_TABLES_WITH_USER_TRIGGERS_SQL))
                     ).all()
+                    if row[0] in owned
                 ]
                 result = await conn.execute(
                     text(
