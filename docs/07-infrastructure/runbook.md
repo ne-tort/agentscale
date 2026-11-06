@@ -125,10 +125,19 @@ Terraform на VM ходит на localhost и использует `~/.ssh/prod
 **Шаг 1. Снос.**
 
 ```bash
-terraform state list          # ожидаем 4 ресурса: k3s_server, k3s_uninstall,
-                              #   gitops_bootstrap, host_dns (модуль k3s-dev-host)
+terraform state list          # 3 ресурса (k3s_server, k3s_uninstall, gitops_bootstrap)
+                              # либо 4 — с host_dns, если его уже создавал apply на
+                              # этом хосте (модуль k3s-dev-host)
 terraform destroy -auto-approve
 ```
+
+> **Перед сносом погасить CI на этой VM.** Раннеры (`actions.runner.*`) живут на
+> том же хосте, что и кластер, и делят с ним 15 ГиБ: `verify-dev` в промежутке
+> между `destroy` и `apply` гарантированно красный (кластера ещё нет), а два-три
+> тяжёлых pytest-джобы рядом с установкой — это ~90 % памяти. 2026-11-06 такой
+> расклад закончился тем, что хост перестал отвечать по SSH и ICMP на 20+ минут
+> прямо посреди гейта. Гасить — остановкой сервисов
+> (`systemctl stop 'actions.runner.*'`), а не удалением раннеров.
 
 `destroy` прогоняет destroy-provisioner'ы в обратном порядке
 (`gitops_bootstrap → k3s_uninstall → host_dns → k3s_server`). После `k3s_uninstall`
