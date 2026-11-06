@@ -16,7 +16,7 @@
 
 ```bash
 cd apps/api
-export DATABASE_URL=postgresql+asyncpg://prodavan:prodavan@127.0.0.1:5432/prodavan
+export DATABASE_URL=postgresql+asyncpg://agentscale:agentscale@127.0.0.1:5432/agentscale
 
 # 1. Изменить ORM-модель
 # 2. Сгенерировать ревизию из diff модель ↔ текущий head
@@ -45,7 +45,7 @@ PR merge → CI Images (API образ) → Argo sync
 
 | Место | Поведение |
 |-------|-----------|
-| `infra/k3s/base/prodavan-api/deployment.yaml` | initContainer `migrate` → `./scripts/migrate.sh` |
+| `infra/k3s/base/agentscale-api/deployment.yaml` | initContainer `migrate` → `./scripts/migrate.sh` |
 | `infra/k3s/overlays/dev/patch-dev-api.yaml` | `imagePullPolicy: Always` на **api и migrate** (иначе кэш старого `:latest` → upgrade noop) |
 | `apps/api/scripts/migrate.sh` | `upgrade head` → **current == head** → `alembic check` |
 | `apps/api/Dockerfile` | `src` + `alembic` в **одном COPY** (buildx cache не должен рассинхронить ORM и revisions) |
@@ -59,7 +59,7 @@ Readiness `/health/ready` проверяет доступность Postgres, **
 1. **Одна линейная цепочка** `down_revision` — без веток без явной необходимости.
 2. **Не править** уже применённые ревизии на dev/staging/prod — только новый файл.
 3. **Data migration** (UPDATE/backfill) — явный `op.execute` / batch; autogenerate не заменяет ревью.
-4. Role `prodavan_app`: CI выдаёт GRANT после migrate; в k3s — bootstrap/Terraform.
+4. Role `agentscale_app`: CI выдаёт GRANT (и владение таблицами) после migrate; в k3s — bootstrap/Terraform.
 5. **Product module seeds** (`product_module_seeds.py` → `PRODUCT_MODULES`): любая смена seeds → новая Alembic-ревизия, вызывающая `upsert_product_modules(conn)` из `product_module_upsert.py`. Не silent-overwrite meta из API bootstrap (затрёт ручные правки platform).
 
 ## Если миграция «не доехала»
