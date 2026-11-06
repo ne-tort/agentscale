@@ -214,7 +214,10 @@ void main() {
         await tester.pumpAndSettle();
         await tester.tap(find.text('Delete').last);
         await tester.pumpAndSettle();
-        await tester.tap(find.widgetWithText(FilledButton, 'Delete'));
+        // The confirmation is a page (AppConfirmPage), not a modal: the whole
+        // lib/features layer keeps dialogs off the tree so a picker or a
+        // confirm never traps the back gesture.
+        await tester.tap(find.text('Delete').last);
         await tester.pumpAndSettle();
         expect(find.text('No schedules yet'), findsOneWidget);
         expect(backend.requests.where((r) => r['method'] == 'DELETE').single, {

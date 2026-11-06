@@ -5,8 +5,10 @@ import 'package:flutter/material.dart';
 import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
+import 'package:prodavan/core/widgets/app_confirm_page.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
+import 'package:prodavan/core/widgets/app_status_banner.dart';
 
 /// CRUD for project-owned cron schedules.
 class ProjectSchedulesPage extends StatefulWidget {
@@ -46,9 +48,11 @@ class _ProjectSchedulesPageState extends State<ProjectSchedulesPage> {
   }
 
   Future<void> _edit([Map<String, dynamic>? schedule]) async {
-    final result = await showDialog<_ScheduleDraft>(
-      context: context,
-      builder: (_) => _ScheduleEditor(schedule: schedule),
+    // A full page, not a dialog: the editor carries four fields plus a switch,
+    // which a modal clips on a phone, and lib/features keeps every editor and
+    // picker on the navigation stack (see AppConfirmPage / AppSelectorPage).
+    final result = await Navigator.of(context).push<_ScheduleDraft>(
+      MaterialPageRoute(builder: (_) => _ScheduleEditorPage(schedule: schedule)),
     );
     if (result == null || !mounted) return;
     setState(() => _saving = true);
@@ -113,28 +117,19 @@ class _ProjectSchedulesPageState extends State<ProjectSchedulesPage> {
 
   Future<void> _delete(Map<String, dynamic> item) async {
     final l10n = AppLocalizations.of(context);
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(l10n.scheduleDeleteConfirmTitle),
-        content: Text(l10n.scheduleDeleteConfirmMessage),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: Text(l10n.scheduleCancel),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: Text(l10n.scheduleDelete),
-          ),
-        ],
-      ),
+    final scheduleId = item['id'] as String;
+    final ok = await AppConfirmPage.push(
+      context,
+      title: l10n.scheduleDeleteConfirmTitle,
+      message: l10n.scheduleDeleteConfirmMessage,
+      confirmLabel: l10n.scheduleDelete,
+      severity: AppStatusSeverity.warning,
     );
-    if (ok != true || !mounted) return;
+    if (!ok || !mounted) return;
     try {
       await workContext.api.deleteProjectSchedule(
         projectId: widget.projectId,
-        scheduleId: item['id'] as String,
+        scheduleId: scheduleId,
       );
       await _load();
     } catch (e) {
@@ -269,15 +264,15 @@ class _ScheduleDraft {
   final bool enabled;
 }
 
-class _ScheduleEditor extends StatefulWidget {
-  const _ScheduleEditor({required this.schedule});
+class _ScheduleEditorPage extends StatefulWidget {
+  const _ScheduleEditorPage({required this.schedule});
   final Map<String, dynamic>? schedule;
 
   @override
-  State<_ScheduleEditor> createState() => _ScheduleEditorState();
+  State<_ScheduleEditorPage> createState() => _ScheduleEditorPageState();
 }
 
-class _ScheduleEditorState extends State<_ScheduleEditor> {
+class _ScheduleEditorPageState extends State<_ScheduleEditorPage> {
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _name;
   late final TextEditingController _cron;
@@ -332,25 +327,28 @@ class _ScheduleEditorState extends State<_ScheduleEditor> {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    return AlertDialog(
+    return AppScaffold(
       title: Text(widget.schedule == null ? l10n.scheduleNew : l10n.scheduleEditTitle),
-      content: Form(
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: Text(l10n.scheduleCancel),
+        ),
+        FilledButton(onPressed: _save, child: Text(l10n.scheduleSave)),
+      ],
+      body: Form(
         key: _formKey,
-        child: SingleChildScrollView(
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
+        child: ListView(
+          padding: const EdgeInsets.all(AppSpacing.md),
+          children: [
             TextFormField(controller: _name, decoration: InputDecoration(labelText: l10n.scheduleName), validator: _required, maxLength: 200),
             TextFormField(controller: _cron, decoration: InputDecoration(labelText: l10n.scheduleCron, helperText: l10n.scheduleCronHelper), validator: _required, maxLength: 120),
             TextFormField(controller: _timezone, decoration: InputDecoration(labelText: l10n.scheduleTimezone, helperText: l10n.scheduleTimezoneHelper), validator: _required, maxLength: 64),
             TextFormField(controller: _payload, decoration: InputDecoration(labelText: l10n.schedulePayloadJson, errorText: _payloadError), minLines: 4, maxLines: 8, keyboardType: TextInputType.multiline),
             SwitchListTile(contentPadding: EdgeInsets.zero, title: Text(l10n.scheduleEnabled), value: _enabled, onChanged: (value) => setState(() => _enabled = value)),
-
-          ]),
+          ],
         ),
       ),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: Text(l10n.scheduleCancel)),
-        FilledButton(onPressed: _save, child: Text(l10n.scheduleSave)),
-      ],
     );
   }
 }
