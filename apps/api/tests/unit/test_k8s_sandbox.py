@@ -464,6 +464,45 @@ def test_build_pod_body_runtime_kwargs_override_bridge_alias() -> None:
     assert runtime["readinessProbe"]["httpGet"]["port"] == 4000
 
 
+def test_build_pod_body_bridge_branch_reuses_the_runtime_api_url() -> None:
+    """The bridge branch must not invent an API host of its own.
+
+    ``agent_runtime_image`` is None whenever ``pod_agent_runtime_enabled`` is
+    off — the default — and then the hydrate initContainer reads
+    ``agent_bridge_api_base_url``. That parameter used to default to a
+    hard-coded ``prodavan-api.prodavan.svc``, a Service no contour deploys, so
+    every sandbox pod died in ``Init:Error`` with ``Name or service not known``
+    while the configured URL sat right next to it unused. A caller that passes
+    the runtime URL gets it in both branches.
+    """
+
+    ctx = PodRuntimeContext(
+        pod_id="pod_abc",
+        project_id="prj_abc",
+        company_id="cmp_abc",
+        workspace_key="wk_demo",
+    )
+    body = build_pod_body(
+        runtime_ref="pod-wk-demo",
+        namespace="agentscale-dev-sandboxes",
+        context=ctx,
+        image="sandbox:latest",
+        hydrate_image="hydrate:latest",
+        service_account="agentscale-sandbox",
+        cpu_request="100m",
+        cpu_limit="1",
+        memory_request="256Mi",
+        memory_limit="1Gi",
+        agent_runtime_api_base_url="http://configured-api:8001/api/v1",
+    )
+
+    init_env = {
+        item["name"]: item.get("value")
+        for item in body["spec"]["initContainers"][0]["env"]
+    }
+    assert init_env["PRODAVAN_API_BASE_URL"] == "http://configured-api:8001/api/v1"
+
+
 def test_build_pod_body_bridge_auth_used_when_runtime_auth_missing() -> None:
     ctx = PodRuntimeContext(
         pod_id="pod_abc",
