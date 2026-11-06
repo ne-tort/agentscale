@@ -79,7 +79,9 @@ CI plan/apply **нет** — Terraform запускает оператор вр�
 ```bash
 # dev (на VM; токен — с Windows, gh на VM НЕ залогинен: pwsh> gh auth token):
 ssh www@172.31.156.203
-cd ~/git/agentscale && git pull --ff-only
+# Не «git pull --ff-only» вслепую: checkout на VM обычно висит на уже удалённой
+# рабочей ветке, и pull падает «no such remote ref». Сначала встаём на main.
+cd ~/git/agentscale && git fetch origin && git checkout main && git pull --ff-only
 export TF_VAR_ghcr_token='<токен с Windows>'      # ОБЯЗАТЕЛЕН
 terraform -chdir=infra/terraform/environments/vm init
 terraform -chdir=infra/terraform/environments/vm apply -auto-approve
