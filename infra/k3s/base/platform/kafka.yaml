@@ -63,15 +63,14 @@ spec:
       terminationGracePeriodSeconds: 90
       securityContext:
         fsGroup: 101
+      # ghcr mirror (Docker Hub anonymous pull rate-limit на холодной ноде,
+      # #299). Исходный docker.redpanda.com — Hub-backed прокси, отдававший
+      # 429 TOOMANYREQUESTS. Package приватный — pull через ghcr-pull.
+      imagePullSecrets:
+        - name: ghcr-pull
       containers:
         - name: redpanda
-          # docker.io, НЕ docker.redpanda.com: redpanda-реестр — Hub-backed
-          # прокси, который с 2026-11 анонимно отдаёт 429 TOOMANYREQUESTS
-          # («unauthenticated pull rate limit» — глобальная квота прокси
-          # исчерпана; проверено манифест-запросом). Прямой docker.io тянет
-          # тот же образ redpandadata/redpanda и делит квоту Hub с остальными
-          # платформенными образами ноды, а не с чужим прокси.
-          image: docker.io/redpandadata/redpanda:v24.2.4
+          image: ghcr.io/ne-tort/redpanda:v24.2.4
           command:
             - /bin/sh
             - -c
@@ -179,9 +178,11 @@ spec:
         app.kubernetes.io/part-of: agentscale
     spec:
       restartPolicy: OnFailure
+      imagePullSecrets:
+        - name: ghcr-pull
       containers:
         - name: rpk
-          image: docker.io/redpandadata/redpanda:v24.2.4
+          image: ghcr.io/ne-tort/redpanda:v24.2.4
           command:
             - /bin/sh
             - -c

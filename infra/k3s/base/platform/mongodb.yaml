@@ -74,9 +74,13 @@ spec:
       securityContext:
         fsGroup: 999
         fsGroupChangePolicy: OnRootMismatch
+      # ghcr mirror (Docker Hub anonymous pull rate-limit на холодной ноде,
+      # #299). Package приватный — pull через ghcr-pull.
+      imagePullSecrets:
+        - name: ghcr-pull
       containers:
         - name: mongodb
-          image: mongo:7.0.14
+          image: ghcr.io/ne-tort/mongo:7.0.14
           args:
             - --bind_ip_all
             - --auth
@@ -160,9 +164,11 @@ spec:
         app.kubernetes.io/part-of: agentscale
     spec:
       restartPolicy: OnFailure
+      imagePullSecrets:
+        - name: ghcr-pull
       containers:
         - name: mongosh
-          image: mongo:7.0.14
+          image: ghcr.io/ne-tort/mongo:7.0.14
           env:
             - name: MONGO_ROOT_USER
               valueFrom:

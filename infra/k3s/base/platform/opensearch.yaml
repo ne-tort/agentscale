@@ -77,9 +77,13 @@ spec:
       securityContext:
         fsGroup: 1000
         fsGroupChangePolicy: OnRootMismatch
+      # ghcr mirror (Docker Hub anonymous pull rate-limit на холодной ноде,
+      # #299). Package приватный — pull через ghcr-pull.
+      imagePullSecrets:
+        - name: ghcr-pull
       containers:
         - name: opensearch
-          image: opensearchproject/opensearch:2.17.1
+          image: ghcr.io/ne-tort/opensearch:2.17.1
           env:
             - name: cluster.name
               value: agentscale-opensearch
@@ -165,13 +169,15 @@ spec:
         app.kubernetes.io/part-of: agentscale
     spec:
       restartPolicy: OnFailure
+      imagePullSecrets:
+        - name: ghcr-pull
       containers:
         - name: curl
           # Docker Hub (curlimages/curl) недоступен с ноды: hook висел в
           # ImagePullBackOff и блокировал КАЖДЫЙ Argo sync (app OutOfSync/
           # Missing). Берём образ, который и так обязателен для StatefulSet
           # OpenSearch; в нём есть /usr/bin/curl, и он уже на ноде.
-          image: opensearchproject/opensearch:2.17.1
+          image: ghcr.io/ne-tort/opensearch:2.17.1
           imagePullPolicy: IfNotPresent
           command:
             - /bin/sh
