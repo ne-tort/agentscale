@@ -177,11 +177,33 @@ jobs:
           import asyncio, asyncpg, os
           host = os.environ["DB_HOST"]
           port = os.environ["PG_PORT"]
+
           async def main():
               conn = await asyncpg.connect(f"postgresql://agentscale:agentscale@{host}:{port}/agentscale")
               await conn.execute("GRANT ALL ON ALL TABLES IN SCHEMA public TO agentscale_app")
               await conn.execute("GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO agentscale_app")
+              # The suite truncates between tests, and several migrations install
+              # append-only guards (`runtime_materialization_audit`,
+              # `agent_control_plane_events`, the M04E/M06 ledgers) whose
+              # BEFORE TRUNCATE trigger raises. Stepping around a guard means
+              # `ALTER TABLE ... DISABLE TRIGGER`, which needs *ownership*, not
+              # DML grants -- so a DML-only app role turns every integration test
+              # into a setup error ("runtime_materialization_audit is append-only").
+              # Hand the tables over, exactly as ci-api.yml's "Grant app role on
+              # migrated tables" does for the same reason.
+              rows = await conn.fetch(
+                  """
+                  SELECT c.relname
+                  FROM pg_class c
+                  JOIN pg_namespace n ON n.oid = c.relnamespace
+                  WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p')
+                  """
+              )
+              for (name,) in rows:
+                  quoted = '"' + name.replace('"', '""') + '"'
+                  await conn.execute(f"ALTER TABLE public.{quoted} OWNER TO agentscale_app")
               await conn.close()
+
           asyncio.run(main())
           PY
 
