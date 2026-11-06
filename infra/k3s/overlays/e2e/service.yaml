@@ -1,0 +1,32 @@
+# Pod-surface endpoint for the e2e Job.
+#
+# Sandbox pods hydrate through `/api/v1/internal/pods/{pod_id}/workspace-archive`,
+# which lives only in `prodavan.main_pod` (port 8001). In the dev contour that
+# process is the `api-pod` container of the agentscale-api Deployment and the
+# sandbox pod reaches it as `agentscale-api...:8001`.
+#
+# The e2e Job runs the *test* app against its own database (`agentscale_e2e`),
+# so pointing its sandbox pods at the deployed API cannot work: that API reads
+# `agentscale` and answers 404 "pod not found" for every pod the Job created.
+# The Job therefore serves its own pod surface and this Service gives that pod a
+# name the sandbox namespace can resolve.
+apiVersion: v1
+kind: Service
+metadata:
+  name: agentscale-e2e-api
+  namespace: agentscale-dev
+  labels:
+    app.kubernetes.io/name: agentscale-e2e-runner
+    app.kubernetes.io/part-of: agentscale
+    app.kubernetes.io/component: e2e
+spec:
+  # The Job pod is the only endpoint; it is deleted with the Job, and then the
+  # Service simply has none. ClusterIP is enough — only in-cluster pods call it.
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: agentscale-e2e-runner
+  ports:
+    - name: pod-http
+      port: 8001
+      targetPort: pod-http
+      protocol: TCP
