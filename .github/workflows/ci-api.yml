@@ -188,7 +188,13 @@ jobs:
   postgres-integration:
     name: postgres-integration
     runs-on: [self-hosted, linux, docker]
-    timeout-minutes: 20
+    # Was 20. Every gate opens five jobs on one eight-core VM, and this suite is
+    # the slowest per test: each case creates and migrates real schemas, so it
+    # spent 19 of its 20 minutes in pytest and was cancelled by the job timer
+    # rather than failing an assertion -- in three consecutive gate runs. The
+    # `test` job next to it has no timeout at all and migration-suite has 45;
+    # this one now matches the latter.
+    timeout-minutes: 45
     defaults:
       run:
         working-directory: apps/api
