@@ -39,7 +39,7 @@ Issuer (dev overlay): `http://127.0.0.1:8089/realms/agentscale` — закреп
 | Sealed Secrets | `infra/argocd/sealed-secrets` + `overlays/dev/SECRETS.md` |
 | Ops CLI | [`infra/ops`](../../infra/ops): `validate` / `wait` / `rollout` / `smoke` / `dns-check` |
 
-Образы: `ghcr.io/ne-tort/agentscale-{api,web}:latest` (основной репо, CI Images), `ghcr.io/ne-tort/prodavan-agent-runtime` (агент-runtime — собирает **только** openclaw-images в подмодуле prodavan-claw, dev-оверлей пинит SHA; дубль-job в CI Images удалён 2026-09-24; см. [agent-runtime-delivery.md](agent-runtime-delivery.md)). `imagePullPolicy: Always`, secret `ghcr-pull`. Probe pod `agentscale-probe-pod` в `agentscale-dev-sandboxes` (см. §1.1).
+Образы: `ghcr.io/ne-tort/agentscale-{api,web}:latest` (основной репо, CI Images), `ghcr.io/ne-tort/prodavan-agent-runtime` (агент-runtime — собирает **только** openclaw-images в подмодуле prodavan-claw, dev-оверлей пинит SHA; дубль-job в CI Images удалён 2026-09-24; см. [agent-runtime-delivery.md](agent-runtime-delivery.md)). Secret `ghcr-pull`. `imagePullPolicy: Always` — у api/web/celery/searchnet; probe pod и dynamic `POD_AGENT_RUNTIME_IMAGE` пинятся по SHA (см. §1.1). Probe pod `agentscale-probe-pod` в `agentscale-dev-sandboxes` (см. §1.1).
 
 ---
 
@@ -66,14 +66,24 @@ prodavan-claw PR → openclaw-ci → auto-merge
   → openclaw-images (build prodavan-agent-runtime:latest → GHCR)
   → trigger-verify (dispatch Verify Dev in ne-tort/prodavan)
     → Verify Dev: prodavan-ops rollout
-      → restart agentscale-probe-pod (agentscale-dev-sandboxes, imagePullPolicy: Always)
-        → kubelet re-pulls свежий digest
+      → restart agentscale-probe-pod (agentscale-dev-sandboxes)
+        → тот же пиновый тег: образ НЕ переpull'ится (см. ниже)
       → wait Argo → smoke
 ```
 
-**Probe pod** (`agentscale-probe-pod` в namespace `agentscale-dev-sandboxes`) — это long-lived agent-runtime pod для проверки AI-ключей. Включён в `DEPLOYMENT_TARGETS` `prodavan-ops` (вместе с `agentscale-api`/`agentscale-web`/`agentscale-celery-worker`/`agentscale-celery-beat`/`agentscale-celery-indexer`/`searchnet` в `agentscale-dev`), поэтому `prodavan-ops rollout` перезапускает и его. `imagePullPolicy: Always` → при restart тянется свежий digest.
+**Probe pod** (`agentscale-probe-pod` в namespace `agentscale-dev-sandboxes`) — это long-lived agent-runtime pod для проверки AI-ключей. Включён в `DEPLOYMENT_TARGETS` `prodavan-ops` (вместе с `agentscale-api`/`agentscale-web`/`agentscale-celery-worker`/`agentscale-celery-beat`/`agentscale-celery-indexer`/`searchnet` в `agentscale-dev`), поэтому `prodavan-ops rollout` перезапускает и его.
 
-**Project sandbox pods** (динамические, per-project, создаются `pod_service` через `POD_AGENT_RUNTIME_IMAGE` env) — при создании нового sandbox pod подхватит свежий digest (Always + новый pod = новый pull). Уже запущенные sandbox pods обновляются при reload/sync проекта (recreate).
+> **Образ probe-pod запинен по SHA, а не `:latest`.** В
+> `overlays/dev/sandboxes/probe-pod.yaml` стоит
+> `ghcr.io/ne-tort/prodavan-agent-runtime:58211a516231` с
+> `imagePullPolicy: IfNotPresent`. Restart этого пода **не** подтягивает новый
+> образ: чтобы обновиться, надо сменить тег в манифесте и провести его через PR.
+> Автоматики, которая бы двигала этот пин, в этом репозитории нет — сборка
+> `prodavan-agent-runtime` живёт в `prodavan-claw`, и пин обновляется руками.
+> Проверить, что под действительно на новом коде:
+> `kubectl -n agentscale-dev-sandboxes get pod agentscale-probe-pod -o jsonpath='{.spec.containers[*].image}'`.
+
+**Project sandbox pods** (динамические, per-project, создаются `pod_service` через `POD_AGENT_RUNTIME_IMAGE` env). `imagePullPolicy: Always`, но образ приходит из `POD_AGENT_RUNTIME_IMAGE`, а там стоит **SHA-тег** (`…prodavan-agent-runtime:58211a516231`, base configmap и dev-оверлей). Поэтому `Always` перечитывает манифест тега, а не «подтягивает свежий digest»: новый код приедет только после смены тега в configmap. Уже запущенные sandbox-поды обновляются при reload/sync проекта (recreate) — и то на тот же SHA, пока тег не изменён.
 
 **Для cross-repo trigger** нужен секрет `PRODAVAN_REPO_TOKEN` в `prodavan-claw` репо (PAT с `actions:write` на `ne-tort/prodavan`). Без него trigger-verify выводит warning (образ запушен, но кластер подхватит при следующем Verify Dev из основного репо — теперь probe-pod в `DEPLOYMENT_TARGETS`, так что он тоже перезапустится).
 
@@ -122,26 +132,41 @@ Terraform на VM ходит на localhost и использует `~/.ssh/prod
 Контракт provisioner'ов — **`v14-clean-install`**. Все команды **на VM**
 (`ssh www@172.31.156.203`), из `~/git/agentscale/infra/terraform/environments/vm`.
 
+**Шаг 0 (обязательно). Погасить CI на этой VM.**
+
+Раннеры (`actions.runner.*`) живут на том же хосте, что и кластер, и делят с ним
+15 ГиБ. Между `destroy` и `apply` кластера ещё нет, поэтому `verify-dev` там
+гарантированно красный, а два-три тяжёлых pytest-джобы рядом с установкой — это
+~90 % памяти. 2026-11-06 такой расклад закончился тем, что хост перестал
+отвечать по SSH и ICMP на 20+ минут прямо посреди гейта.
+
+```bash
+sudo systemctl stop 'actions.runner.ne-tort-agentscale.*.service'
+systemctl is-active 'actions.runner.ne-tort-agentscale.vm-as-1.service'  # inactive
+```
+
+Гасить — остановкой сервисов, а не удалением раннеров. **Раннеры `vm-claw-*`
+не трогать** (у них свой репозиторий). Возврат — в конце, шаг 4б.
+
 **Шаг 1. Снос.**
 
 ```bash
-terraform state list          # 3 ресурса (k3s_server, k3s_uninstall, gitops_bootstrap)
-                              # либо 4 — с host_dns, если его уже создавал apply на
-                              # этом хосте (модуль k3s-dev-host)
+terraform state list          # ожидаем 4 ресурса: k3s_server, k3s_uninstall,
+                              #   gitops_bootstrap[0], host_dns[0]
+                              # Если host_dns[0] НЕТ — state старше v13: destroy его
+                              # не снимет, и managed drop-in останется на хосте
+                              # (см. «Снос старым state новым модулем» в
+                              # infra/terraform/environments/vm/README.md).
 terraform destroy -auto-approve
 ```
 
-> **Перед сносом погасить CI на этой VM.** Раннеры (`actions.runner.*`) живут на
-> том же хосте, что и кластер, и делят с ним 15 ГиБ: `verify-dev` в промежутке
-> между `destroy` и `apply` гарантированно красный (кластера ещё нет), а два-три
-> тяжёлых pytest-джобы рядом с установкой — это ~90 % памяти. 2026-11-06 такой
-> расклад закончился тем, что хост перестал отвечать по SSH и ICMP на 20+ минут
-> прямо посреди гейта. Гасить — остановкой сервисов
-> (`systemctl stop 'actions.runner.*'`), а не удалением раннеров.
-
-`destroy` прогоняет destroy-provisioner'ы в обратном порядке
-(`gitops_bootstrap → k3s_uninstall → host_dns → k3s_server`). После `k3s_uninstall`
-на хосте **не остаётся ничего кластерного** — следующий apply ставит с нуля:
+`destroy` прогоняет destroy-provisioner'ы в порядке, обратном зависимостям
+(`gitops_bootstrap → k3s_uninstall → k3s_server → host_dns`; `sshd` на этом
+профиле `count=0`). `host_dns` снимается **последним** — так и задумано:
+`k3s_server` объявлен с `depends_on = [sshd, host_dns]`, поэтому k3s ложится
+раньше, чем убирается хостовый DNS-конфиг (кластер не остаётся без резолвера
+посреди сноса). После `k3s_uninstall` на хосте **не остаётся ничего кластерного**
+— следующий apply ставит с нуля:
 
 - `/var/lib/rancher/k3s` — etcd/sqlite, containerd-образы, **данные local-path PVC**
   и TLS CA (`agentscale-tls/` уходит вместе с data-dir; новый CA генерируется при установке);
@@ -212,12 +237,38 @@ terraform apply -auto-approve
 
 ```bash
 export KUBECONFIG=~/.kube/prodavan-dev.yaml
-cd ~/git/agentscale/infra/ops && poetry install    # или python3 -m venv + pip install -e .
+cd ~/git/agentscale/infra/ops && poetry install    # см. примечание про PyPI ниже
 poetry run prodavan-ops validate    # контракт репо + kustomize render + пины образов (кластер не нужен)
 poetry run prodavan-ops wait        # Argo agentscale-dev Synced+Healthy
 poetry run prodavan-ops smoke       # /health/live, /health/ready, /api/v1/auth/config, /
 poetry run prodavan-ops dns-check   # резолв ИЗ пода; дефолт ищет под сначала в dev-контуре
-resolvectl status                   # Global показывает ровно 9.9.9.9 8.8.8.8 (DNS-контракт v14, §3.1)
+resolvectl dns                      # Global: 9.9.9.9 8.8.8.8 (DNS-контракт v14, §3.1)
+```
+
+> **`resolvectl status` — не проверка контракта.** Он показывает `Current DNS
+> Server` и итоговый список, а тот пуст, пока resolved ни разу не сходил на
+> upstream: на свежем хосте или после `restart systemd-resolved` Global может
+> быть пустым при полностью исправном DNS. Проверять надо `resolvectl dns`
+> (конфигурация, не состояние кэша) и фактический резолв —
+> `prodavan-ops dns-check`, он спрашивает изнутри пода.
+
+> **`poetry install` на этой VM не всегда проходит: PyPI по HTTPS отдаёт
+> `Failure when receiving data from the peer`.** Кэш poetry (`/cache/poetry`,
+> 25 МБ) на раннере уже прогрет прошлыми прогонами CI, поэтому офлайн-путь
+> надёжнее, чем сеть: либо `POETRY_VIRTUALENVS_PATH=/home/www/.cache/poetry-venvs`
+> с тем же кэшем, либо готовый venv раннера —
+> `/cache/poetry-venvs/prodavan-ops-*/bin/prodavan-ops` (он есть после того,
+> как джоба `infra` хоть раз прошла на этом хосте). Версия CLI видна по
+> `prodavan-ops version`.
+
+**Шаг 4б. Вернуть CI.**
+
+Раннеры, погашенные на шаге 0, надо поднять: без них следующий PR будет ждать
+раннера, а `verify-dev` не запустится.
+
+```bash
+sudo systemctl start 'actions.runner.ne-tort-agentscale.*.service'
+systemctl is-active 'actions.runner.ne-tort-agentscale.vm-as-{1,2,3,4,5}.service'
 ```
 
 `wait`/`rollout`/`smoke`/`dns-check` требуют живого кластера; `validate` — только
@@ -352,8 +403,11 @@ pod'ы перестали резолвить `auth.x.ai`, Grok OAuth отдав�
    triggers `null_resource`, так что `terraform apply` переустанавливает скрипт при
    их изменении.
 6. **Проверка**: `prodavan-ops dns-check` (ищет под в dev-ns первым; хосты
-   `github.com`, `auth.x.ai`) + после apply `resolvectl status` должен показывать
-   Global ровно `9.9.9.9 8.8.8.8`.
+   `github.com`, `auth.x.ai`) + после apply `resolvectl dns` показывает
+   Global `9.9.9.9 8.8.8.8`. Именно `dns`, не `status`: `status` печатает
+   текущее состояние резолвера, и его список пуст, пока resolved не сходил на
+   upstream — на свежем хосте это выглядит как нарушенный контракт при
+   полностью исправном DNS.
 
 Переменные модуля (значения для dev): `dns_upstreams = "9.9.9.9 8.8.8.8"`
 (1.1.1.1:53 из CoreDNS-пода ловит таймауты под нагрузкой searchnet — проверено

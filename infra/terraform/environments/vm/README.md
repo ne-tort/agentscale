@@ -145,10 +145,11 @@ terraform state list          # ожидаем 4 ресурса: k3s_server, k3s
                                 # поэтому destroy его НЕ снимет (см. «Снос старым state» ниже).
                                 # Если state потерян — шаг 1b
 terraform destroy -auto-approve
-# destroy прогоняет destroy-provisioner'ы в порядке зависимостей:
-#   gitops_bootstrap → k3s_uninstall → host_dns → (sshd) → k3s_server
-# k3s_uninstall объявлен с depends_on = [k3s_server], поэтому сносится ПЕРВЫМ
-# из пары: k3s ложится раньше, чем снимается хостовый DNS-конфиг.
+# destroy прогоняет destroy-provisioner'ы в порядке, обратном зависимостям:
+#   gitops_bootstrap → k3s_uninstall → k3s_server → host_dns
+#   (sshd на профиле vm — count=0, windows_kubeconfig также)
+# k3s_server объявлен с depends_on = [sshd, host_dns], поэтому host_dns
+# снимается ПОСЛЕДНИМ: k3s ложится раньше, чем убирается хостовый DNS-конфиг.
 # k3s_uninstall: k3s-uninstall.sh + явный rm. После него на хосте НЕ остаётся:
 #   /var/lib/rancher/k3s (etcd/sqlite, containerd-образы, local-path PVC-данные),
 #   /etc/rancher/k3s (включая config.yaml с resolv-conf), /var/lib/kubelet,

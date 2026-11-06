@@ -3,10 +3,19 @@
 #   kubectl apply -f infra/argocd/root-app.yaml
 #
 # Syncs the DEV contour only: AppProjects, agent-sandbox (platform),
-# agentscale-dev, agentscale-e2e. agentscale-prod.yaml is EXCLUDED — dev
-# bootstrap must never create/sync the prod Application (policy: prod only on
-# explicit demand); the prod contour is deployed solely by root-app-prod.yaml
-# on a dedicated prod host (terraform gitops_apps=prod).
+# agentscale-dev. agentscale-prod.yaml and agentscale-e2e.yaml are EXCLUDED.
+#
+# Why e2e is excluded: nothing ever syncs it. `prodavan-ops e2e run` applies
+# `infra/k3s/overlays/e2e` itself with `kubectl apply -k` (see e2e.py), so the
+# Application existed only to sit OutOfSync/Missing forever — a permanently
+# unhealthy child under agentscale-root, which is exactly the signal an
+# operator reads to tell "a real app broke" from "a real app did not". Apply it
+# by hand (`kubectl apply -f infra/argocd/apps/agentscale-e2e.yaml`) when an
+# Argo-driven e2e run is actually wanted.
+#
+# prod: dev bootstrap must never create/sync the prod Application (policy: prod
+# only on explicit demand); the prod contour is deployed solely by
+# root-app-prod.yaml on a dedicated prod host (terraform gitops_apps=prod).
 # NOTE: apps/ must stay a PLAIN directory (no kustomization.yaml) — Argo then
 # honours spec.source.directory.exclude (single glob, gobwas syntax).
 # WARNING: re-applying this file on a cluster where agentscale-prod was
@@ -27,7 +36,8 @@ spec:
     targetRevision: main
     path: infra/argocd/apps
     directory:
-      exclude: agentscale-prod.yaml
+      # gobwas/glob alternation — one pattern, two exclusions.
+      exclude: '{agentscale-prod.yaml,agentscale-e2e.yaml}'
   destination:
     server: https://kubernetes.default.svc
     namespace: argocd

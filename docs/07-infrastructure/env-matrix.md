@@ -3,9 +3,12 @@
 Сводная таблица переменных окружения и конфигурации по средам: **dev (VM `www@172.31.156.203`)**, **staging**, **prod**.
 
 > Таблица — сводка; источник истины для dev — `infra/k3s/overlays/dev/patch-dev-config.yaml`
-> и `infra/k3s/base/agentscale-api/configmap.yaml`. Часть имён ресурса исторически
-> переехала `prodavan.*` → `agentscale.*` (сервисы, топики, секреты) — при расхождении
-> верить манифестам.
+> и `infra/k3s/base/agentscale-api/configmap.yaml`. Имена ресурсов переехали
+> `prodavan.*` → `agentscale.*` (сервисы, секреты, а также топики
+> `document`/`search`); остальные Kafka-топики (`platform`, `project`,
+> `auth`) и consumer-группы **по-прежнему** `prodavan.*` — это дефолты
+> `settings.py`, и dev-оверлей их не переопределяет. При расхождении верить
+> манифестам и `settings.py`, не этой таблице.
 
 ---
 
@@ -28,10 +31,10 @@
 | `LOG_LEVEL` | debug | info | info | | Logging verbosity |
 | `DATABASE_URL` | ✓ | ✓ 🔒 | ✓ 🔒 | 🔒 | PostgreSQL async URL |
 | `MONGODB_URL` | ✓ | ✓ 🔒 | ✓ 🔒 | 🔒 | MongoDB URL (Document Store BC) |
-| `MONGODB_DB` | prodavan | prodavan | prodavan | | Logical database name |
+| `MONGODB_DB` | agentscale | agentscale | agentscale | | Logical database name |
 | `MONGODB_ENABLED` | true | true | true | | Lifespan connects when URL set |
 | `MONGODB_REQUIRED` | true | true | true | | Fail ready if Mongo down |
-| `OPENSEARCH_URL` | http://prodavan-opensearch:9200 | ✓ | ✓ | | OpenSearch HTTP endpoint (Search Index BC) |
+| `OPENSEARCH_URL` | http://agentscale-opensearch:9200 | ✓ | ✓ | | OpenSearch HTTP endpoint (Search Index BC) |
 | `OPENSEARCH_ENABLED` | true | true | true | | Lifespan connects when URL set |
 | `OPENSEARCH_REQUIRED` | true | true | true | | Fail ready if OpenSearch down |
 | `REDIS_URL` | ✓ | ✓ | ✓ | ○ | Rate limit cache / Celery broker |
@@ -52,13 +55,13 @@
 | Variable | dev | staging | prod | Secret | Description |
 |----------|-----|---------|------|--------|-------------|
 | `KAFKA_ENABLED` | true | true | true | | Dual-write + consumers |
-| `KAFKA_BOOTSTRAP_SERVERS` | prodavan-kafka:9092 | ✓ | ✓ | | |
+| `KAFKA_BOOTSTRAP_SERVERS` | agentscale-kafka:9092 | ✓ | ✓ | | |
 | `KAFKA_TOPIC_PLATFORM_EVENTS` | prodavan.platform.events | same | same | | Lifecycle / platform |
 | `KAFKA_TOPIC_PROJECT_TRIGGERS` | prodavan.project.triggers | same | same | | Trigger kick/dispatch |
 | `KAFKA_TOPIC_AUTH_COMMANDS` | prodavan.auth.commands | same | same | | Auth Service register |
 | `KAFKA_TOPIC_AUTH_EVENTS` | prodavan.auth.events | same | same | | registered / failed |
-| `KAFKA_TOPIC_DOCUMENT_EVENTS` | prodavan.document.events | same | same | | Document Store BC domain events |
-| `KAFKA_TOPIC_SEARCH_EVENTS` | prodavan.search.events | same | same | | Search Index BC domain events |
+| `KAFKA_TOPIC_DOCUMENT_EVENTS` | agentscale.document.events | same | same | | Document Store BC domain events |
+| `KAFKA_TOPIC_SEARCH_EVENTS` | agentscale.search.events | same | same | | Search Index BC domain events |
 | `KAFKA_CONSUMER_ENABLED` | true | true | true | | |
 | `KAFKA_CONSUMER_GROUP` | prodavan-api-triggers | same | same | | Project triggers |
 | `KAFKA_AUTH_COMMANDS_GROUP` | prodavan-auth-commands | same | same | | Auth register handler |
@@ -72,16 +75,16 @@
 | Variable | dev | staging | prod | Secret | Description |
 |----------|-----|---------|------|--------|-------------|
 | `OBJECT_STORE_BACKEND` | local / s3 | s3 | s3 | | `local` = FS under `STORAGE_ROOT`; `s3` = MinIO |
-| `S3_ENDPOINT_URL` | http://prodavan-minio:9000 | 🔒 | 🔒 | | S3 endpoint (in-cluster) |
-| `S3_ACCESS_KEY` | prodavan-api | 🔒 | 🔒 | 🔒 | MinIO service user (not root) |
-| `S3_SECRET_KEY` | prodavan-api-secret | 🔒 | 🔒 | 🔒 | |
-| `S3_BUCKET` | prodavan | prodavan | prodavan | | Created by `prodavan-minio-init` Job |
+| `S3_ENDPOINT_URL` | http://agentscale-minio:9000 | 🔒 | 🔒 | | S3 endpoint (in-cluster) |
+| `S3_ACCESS_KEY` | agentscale-api | 🔒 | 🔒 | 🔒 | MinIO service user (not root) |
+| `S3_SECRET_KEY` | agentscale-api-secret | 🔒 | 🔒 | 🔒 | |
+| `S3_BUCKET` | agentscale | agentscale | agentscale | | Created by `agentscale-minio-init` Job |
 | `S3_REGION` | us-east-1 | us-east-1 | ru-central1 | | |
 | `OBJECT_STORE_MIRROR_LOCAL` | true | false | false | | Mirror S3 blobs locally for agent cwd |
 | `OBJECT_STORE_REQUIRED` | false | true | true | | Fail startup if S3 unreachable |
 | `CONTENT_ATTACHMENTS_VIA_ASSETS` | false | false | ○ | | Mirror attachments into `content_assets` |
 
-MinIO root creds (`prodavan-minio` Secret) — только init Job / ops; API использует IAM user `prodavan-api`.
+MinIO root creds (`agentscale-minio` Secret) — только init Job / ops; API использует IAM user `agentscale-api`.
 
 ---
 
