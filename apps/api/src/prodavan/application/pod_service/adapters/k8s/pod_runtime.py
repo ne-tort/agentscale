@@ -97,6 +97,15 @@ class K8sPodRuntimeAdapter:
             ),
             agent_runtime_port=settings.pod_agent_runtime_port,
             agent_runtime_api_base_url=settings.pod_agent_runtime_api_base_url,
+            # `build_pod_body` picks the bridge URL instead whenever
+            # `agent_runtime_image` is None (`pod_agent_runtime_enabled=False`,
+            # the default), and that parameter has its own default pointing at
+            # `prodavan-api.prodavan.svc` — a Service no contour deploys. Not
+            # passing it here meant the hydrate initContainer silently got the
+            # stale host whenever the agent-runtime image was off, which is
+            # exactly the e2e configuration. Same setting either way: the bridge
+            # alias property returns the runtime URL.
+            agent_bridge_api_base_url=settings.pod_agent_bridge_api_base_url,
             agent_runtime_auth_secret=settings.pod_agent_runtime_auth_secret or None,
             agent_runtime_web_search_provider=settings.pod_agent_runtime_web_search_provider,
             agent_runtime_web_search_url=settings.pod_agent_runtime_web_search_url,

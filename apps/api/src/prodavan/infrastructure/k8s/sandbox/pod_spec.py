@@ -10,6 +10,14 @@ _MANAGED_BY = "pod-service"
 _WORKSPACE_MOUNT = "/workspace"
 _AGENT_RUNTIME_CONTAINER = "agent-runtime"
 
+#: In-cluster API endpoint a sandbox pod calls back to. Only a last-resort
+#: default for callers that pass nothing (see the note on
+#: ``agent_bridge_api_base_url``); real deployments pass
+#: ``settings.pod_agent_runtime_api_base_url``. It names the *dev* namespace
+#: because the prod contour overrides it via ConfigMap either way, and a wrong
+#: value here is a DNS failure the pod reports loudly.
+DEFAULT_API_BASE_URL = "http://agentscale-api.agentscale-dev.svc:8001/api/v1"
+
 
 def _build_agent_runtime_container(
     *,
@@ -147,15 +155,21 @@ def build_pod_body(
     minio_secret_name: str | None = None,
     agent_runtime_image: str | None = None,
     agent_runtime_port: int = 3921,
-    agent_runtime_api_base_url: str = "http://prodavan-api.prodavan.svc:8001/api/v1",
+    agent_runtime_api_base_url: str = DEFAULT_API_BASE_URL,
     agent_runtime_auth_secret: str | None = None,
     agent_runtime_web_search_provider: str = "",
     agent_runtime_web_search_url: str = "",
     agent_runtime_web_search_api_key: str = "",
-    # Legacy aliases (deprecated)
+    # Legacy aliases (deprecated). ``agent_bridge_api_base_url`` has no default
+    # of its own on purpose: it falls back to ``agent_runtime_api_base_url``.
+    # It used to carry the same literal as the runtime parameter, so the bridge
+    # branch handed out a hard-coded host that no caller had configured — and
+    # since the branch is chosen by ``agent_runtime_image is None`` (the default
+    # when ``pod_agent_runtime_enabled`` is off), that stale host was what
+    # sandbox pods actually got.
     agent_bridge_image: str | None = None,
     agent_bridge_port: int = 3921,
-    agent_bridge_api_base_url: str = "http://prodavan-api.prodavan.svc:8001/api/v1",
+    agent_bridge_api_base_url: str | None = None,
     agent_bridge_auth_secret: str | None = None,
     image_pull_secret: str | None = None,
 ) -> dict[str, Any]:
@@ -165,7 +179,7 @@ def build_pod_body(
         runtime_api = agent_runtime_api_base_url
     else:
         runtime_port = agent_bridge_port
-        runtime_api = agent_bridge_api_base_url
+        runtime_api = agent_bridge_api_base_url or agent_runtime_api_base_url
     runtime_auth = agent_runtime_auth_secret or agent_bridge_auth_secret
     labels = {
         "app.kubernetes.io/part-of": "prodavan",
