@@ -125,6 +125,7 @@ from prodavan.infrastructure.persistence.models.m04e_ledger import (
     M04EDefinitionVersionMappingRow as EVIDENCE_MAPPING_TABLE_MODEL,
     M04EDefinitionVersionQuarantineRow as EVIDENCE_QUARANTINE_TABLE_MODEL,
 )
+from prodavan.infrastructure.persistence.rls.policies import TRUSTED_SERVICE_ROLE
 
 # ---------------------------------------------------------------------------
 # Tables the adapters read (all registered; nothing is created here)
@@ -201,6 +202,36 @@ def _is_digest(value: object) -> bool:
     return all(char in "0123456789abcdef" for char in value[len(_SHA256_PREFIX):])
 
 
+def mapping_canonical_digest(value: object) -> str | None:
+    """The canonical digest an M04 source mapping records, or ``None``.
+
+    ``scope_owner_mappings`` has no ``canonical_schema_version`` column, so M04 packs
+    the canonical lineage *and* the digest into ``canonical_payload_digest`` as
+    ``v1|<schema>|<digest>`` (``m04_scope.scope_persistence.
+    encode_mapping_canonical_evidence``).  This port used to require that column to be a
+    bare ``sha256:`` value, which no mapping M04 ever writes can satisfy -- so MIG-M04-02
+    refused with "the mapped source row disagrees with the registry identity, digest or
+    checkpoint" for every scope that had actually been mapped, i.e. the two stages could
+    never agree.
+
+    The packed value is decoded with the *same* function that wrote it rather than a
+    second parser here: two decoders of one column would eventually disagree about what
+    the digest is.  A malformed or digestless value is ``None`` (a refusal), never a
+    guess.
+    """
+
+    from prodavan.application.migration.m04_scope.scope_persistence import (
+        ScopeBackfillPersistenceBlocked,
+        decode_mapping_canonical_evidence,
+    )
+
+    try:
+        _schema, digest = decode_mapping_canonical_evidence(value)
+    except (ScopeBackfillPersistenceBlocked, ValueError):
+        return None
+    return digest if _is_digest(digest) else None
+
+
 # ---------------------------------------------------------------------------
 # Refusals: typed, named, redacted
 # ---------------------------------------------------------------------------
@@ -222,6 +253,8 @@ class M04EPortReason(StrEnum):
     ROW_SECURITY_DISABLED = "m04e_row_security_disabled"
     TRANSACTION_ISOLATION_INSUFFICIENT = "m04e_transaction_isolation_insufficient"
     SESSION_FACTORY_MISSING = "m04e_backfill_session_factory_missing"
+    #: The session is not the ``prodavan_service`` role the trusted policies name.
+    DATABASE_ROLE_NOT_TRUSTED_SERVICE = "m04e_database_role_is_not_trusted_service"
     # -- reader -------------------------------------------------------------
     PAGE_LIMIT_OUT_OF_RANGE = "m04e_backfill_page_limit_out_of_range"
     PHASE_INVALID = "m04e_backfill_phase_invalid"
@@ -365,26 +398,53 @@ _APPLY_CONTEXT_SQL = text(
     "set_config('app.user_id', :user_id, true) AS user_id, "
     "set_config('app.role', :role, true) AS role, "
     "set_config('app.correlation_id', :correlation_id, true) AS correlation_id, "
-    "set_config('app.migration_role', 'true', true) AS migration_role"
+    "set_config('app.migration_role', 'true', true) AS migration_role, "
+    "set_config('app.trusted_service', 'true', true) AS trusted_service"
 )
 
 _READBACK_CONTEXT_SQL = text(
     "SELECT "
     "current_setting('app.tenant_id', true) AS tenant_id, "
     "current_setting('app.migration_role', true) AS migration_role, "
+    "current_setting('app.trusted_service', true) AS trusted_service, "
     "current_setting('row_security', true) AS row_security, "
-    "current_setting('transaction_isolation') AS transaction_isolation"
+    "current_setting('transaction_isolation') AS transaction_isolation, "
+    "current_user AS database_role, "
+    "(SELECT r.rolsuper OR r.rolbypassrls FROM pg_roles AS r WHERE r.rolname = current_user) "
+    "AS role_bypasses_rls"
 )
 
 
 async def bind_m04e_transaction_context(
     session: AsyncSession, context: BackfillContext, *, require_serializable: bool = False,
 ) -> None:
-    """Apply and prove the transaction-local tenant context for one M04E page read.
+    """Apply and prove the transaction-local context for one M04E page read or write.
 
     Raises :class:`M04EPortRefused` instead of degrading: a page read under an
     unbound tenant would return zero rows for ``FORCE ROW LEVEL SECURITY`` tables,
     which the backfill would interpret as a drained stream.
+
+    Why the trusted-service flag is bound as well
+    ---------------------------------------------
+    ``app.tenant_id`` alone is not enough to *see* the canonical scope.  The reviewed
+    tenant policy of ``scope_registry`` is
+
+    ``tenant_id = GUC AND (cabinet_id IS NULL OR cabinet_id = app.cabinet_id)
+    AND (project_id IS NULL OR project_id = app.project_id) AND owner_state='active'``
+
+    and a ``BackfillContext`` carries no cabinet/project, so every cabinet- or
+    project-scoped registry row evaluated NULL and disappeared -- together with the
+    cabinet/project anchors and the mapping that backs them.  MIG-M04-02 therefore
+    refused with ``exactly one active typed M04 registry row is required for this
+    scope`` on *every* non-tenant scope, on any database where the policies are
+    actually installed.  The migration is the cross-scope reader the trusted-service
+    policy exists for, so it binds ``app.trusted_service`` in the same transaction.
+
+    That flag alone is not authority: the trusted policy also requires
+    ``current_user = 'prodavan_service'``, and this binder re-reads both, refusing a
+    role that bypasses RLS (superuser/``BYPASSRLS``) or that is not the service role.
+    Setting the flag on some other role would otherwise read as "trusted" in the
+    evidence while granting nothing -- or, on a bypassing role, granting everything.
     """
 
     values = {
@@ -405,6 +465,27 @@ async def bind_m04e_transaction_context(
         raise M04EPortRefused(_refusal(
             M04EPortReason.TENANT_CONTEXT_UNBOUND,
             "the migration role marker was not applied transaction-locally",
+            context=context,
+        ))
+    if str(readback.get("trusted_service") or "") != "true":
+        raise M04EPortRefused(_refusal(
+            M04EPortReason.TENANT_CONTEXT_UNBOUND,
+            "the trusted-service marker was not applied transaction-locally, so the "
+            "cross-scope half of the reviewed policies would not apply",
+            context=context,
+        ))
+    if str(readback.get("database_role") or "") != TRUSTED_SERVICE_ROLE:
+        raise M04EPortRefused(_refusal(
+            M04EPortReason.DATABASE_ROLE_NOT_TRUSTED_SERVICE,
+            f"the M04E ports must run as {TRUSTED_SERVICE_ROLE!r}; the trusted-service "
+            "policy grants nothing to any other role",
+            context=context,
+        ))
+    if bool(readback.get("role_bypasses_rls")):
+        raise M04EPortRefused(_refusal(
+            M04EPortReason.ROW_SECURITY_DISABLED,
+            "the database role is a superuser or has BYPASSRLS, so the reviewed policies "
+            "would not bound this read",
             context=context,
         ))
     if str(readback.get("row_security") or "").lower() != "on":
@@ -1148,7 +1229,7 @@ async def read_typed_scope_evidence(
         or str(mapping.get("schema_version")) != str(registry.get("schema_version"))
         or str(mapping.get("source_payload_digest")) != str(registry.get("payload_digest"))
         or not _is_digest(mapping.get("source_payload_digest"))
-        or not _is_digest(mapping.get("canonical_payload_digest"))
+        or mapping_canonical_digest(mapping.get("canonical_payload_digest")) is None
         or not str(mapping.get("checkpoint") or "").strip()
     ):
         return _refusal(
@@ -2173,8 +2254,13 @@ def _observation_predicate(
     )
 
 
-def _checkpoint_from_row(row: Mapping[str, Any]) -> BackfillCheckpoint:
-    """Rebuild the contract's checkpoint value from one durable head row."""
+def checkpoint_from_row(row: Mapping[str, Any]) -> BackfillCheckpoint:
+    """Rebuild the contract's checkpoint value from one durable head row.
+
+    Public because the read side (:mod:`m04e_export_reader`) must rebuild the same value
+    from the same row: two decoders would eventually disagree about which column is the
+    cursor, and the ledger would then export a checkpoint nobody wrote.
+    """
 
     return BackfillCheckpoint(
         partition=(str(row["tenant_id"]), str(row["definition_id"])),
@@ -2267,7 +2353,7 @@ def _payload_artifact_digest(candidate: EvidenceCandidate) -> str | None:
     return digest if isinstance(digest, str) and digest.strip() else None
 
 
-def _record_from_mapping_row(
+def record_from_mapping_row(
     row: Mapping[str, Any], *, checkpoint: BackfillCheckpoint,
     outcome: BackfillOutcome, state: Mapping[str, Any] | None = None,
 ) -> BackfillRecord:
@@ -2338,7 +2424,7 @@ def _record_from_mapping_row(
     )
 
 
-def _record_from_observation_row(
+def record_from_observation_row(
     row: Mapping[str, Any], *, checkpoint: BackfillCheckpoint, reason_code: str,
 ) -> BackfillRecord:
     """Rebuild the conflict record one quarantine observation stands for.
@@ -2531,7 +2617,7 @@ class SqlM04EEvidenceStore(_SessionReads):
             checkpoint = await self._durable_checkpoint(
                 session, context, phase=str(row["phase"]),
             )
-        return _record_from_mapping_row(
+        return record_from_mapping_row(
             row, checkpoint=checkpoint, outcome=self._stored_outcome(row),
         )
 
@@ -2584,7 +2670,7 @@ class SqlM04EEvidenceStore(_SessionReads):
             checkpoint = await self._durable_checkpoint(
                 session, context, phase=str(row["phase"]),
             )
-        return _record_from_observation_row(
+        return record_from_observation_row(
             row, checkpoint=checkpoint, reason_code=reason_code,
         )
 
@@ -2726,7 +2812,7 @@ class SqlM04EEvidenceStore(_SessionReads):
             # replay of rows it already wrote or a stale request; both are decided by
             # ``_stale_or_replay_page`` so a retried page is not silently dropped.
             return await self._stale_or_replay_page(
-                session, context=context, durable=_checkpoint_from_row(head),
+                session, context=context, durable=checkpoint_from_row(head),
                 decisions=decisions, token=token,
             )
         if head is None:
@@ -2743,7 +2829,7 @@ class SqlM04EEvidenceStore(_SessionReads):
         else:
             observed_sequence = int(head["sequence"])
             observed_token = str(head["checkpoint_token"])
-            durable = _checkpoint_from_row(head)
+            durable = checkpoint_from_row(head)
 
         if (
             observed_sequence != expected_checkpoint.sequence
@@ -2989,7 +3075,7 @@ class SqlM04EEvidenceStore(_SessionReads):
     ) -> BackfillCheckpoint:
         row = await self._checkpoint_row(session, context, phase=phase)
         return (
-            _checkpoint_from_row(row) if row is not None
+            checkpoint_from_row(row) if row is not None
             else self._fresh_checkpoint(context, phase=phase)
         )
 
@@ -3242,13 +3328,13 @@ class SqlM04EEvidenceStore(_SessionReads):
                     # consumes its slot. ``run_page`` only accepts ``outcome=replay``
                     # beside ``status=conflict`` for a changed-digest reason, and
                     # inventing one here would be the store lying about its own row.
-                    return _record_from_mapping_row(
+                    return record_from_mapping_row(
                         existing, checkpoint=checkpoint, outcome=BackfillOutcome.CONFLICT,
                         state=state,
                     ), True, False, False
                 # An exact replay of the recorded classification: nothing is written
                 # and the cursor does not move.
-                return _record_from_mapping_row(
+                return record_from_mapping_row(
                     existing, checkpoint=checkpoint, outcome=BackfillOutcome.REPLAY,
                     state=state,
                 ), False, False, False
@@ -3327,7 +3413,7 @@ class SqlM04EEvidenceStore(_SessionReads):
                     sa.insert(EVIDENCE_QUARANTINE_TABLE_MODEL.__table__).values(**dict(values))
                 )
             observation = values
-        record = _record_from_observation_row(
+        record = record_from_observation_row(
             observation, checkpoint=checkpoint, reason_code=reason_code,
         )
         # An observation *is* a classification of this row, so it consumes a cursor
@@ -3801,11 +3887,14 @@ __all__ = [
     "bind_m04e_transaction_context",
     "build_m04e_evidence_store",
     "build_m04e_sql_ports",
+    "checkpoint_from_row",
     "definition_candidate",
     "legacy_status_to_state",
     "read_owner_evidence",
     "read_promotion_evidence",
     "read_typed_scope_evidence",
+    "record_from_mapping_row",
+    "record_from_observation_row",
     "require_partition",
     "require_usable_context",
     "version_candidate",

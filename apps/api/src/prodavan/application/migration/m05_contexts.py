@@ -50,7 +50,7 @@ The four builders, and what each one really needs
     prove answers ``False`` (deny), never ``True``.
 
 ``build_m05_upstream_evidence(*, tenant_id, app_definition_id, ...)``
-    ``M05UpstreamEvidence`` is three gate objects of one snapshot.  Two of them are
+    ``M05UpstreamEvidence`` is three gate objects of one snapshot.  All three are
     *derivable* from stored evidence and are built here:
 
     * :func:`build_m04_scope_gate` reads one ``m04_scope_promotion_evidence`` row (the
@@ -62,11 +62,22 @@ The four builders, and what each one really needs
       cross-checks in ``ready_for_import``), a reviewed static manifest of the nine
       security-review digests (:class:`ReviewedM05RuntimeGate`) and the partition's measured
       instance counts (:class:`M05InstanceCounts`).
+    * ``M05EvidenceExport`` is **read out of the M04E ledger**, not invented.  The accepted
+      rows it carries are the rows ``SqlM04EEvidenceStore`` really wrote to
+      ``m04e_definition_version_{mappings,quarantine,checkpoints,audit}`` (revision
+      ``2026110315``), and :class:`~prodavan.application.migration.m04e_export_reader
+      .SqlM04EEvidenceExportReader` hands them to the unchanged
+      ``export_m05_evidence``, which recomputes ``canonical_digest`` exactly as a page
+      commit does.  :func:`load_m04e_export` is the async step that performs that read;
+      a partition with **no ledger rows** is
+      ``m05_upstream_evidence_m04e_export_missing`` (and the reader's own, more specific
+      ``m04e_export_ledger_empty`` / ``m04e_export_checkpoint_missing`` /
+      ``m04e_export_digest_mismatch`` codes once a reader is bound).  What a marker alone
+      can never supply is the *rows*: its counts are not evidence.
 
-    The third -- ``M05EvidenceExport`` -- is **not** derivable: it carries the accepted
-    M04E ledger rows the marker only counts, and fabricating them would fabricate the
-    canonical digest M05 recomputes.  It is therefore an input, and its absence is
-    ``m05_upstream_evidence_m04e_export_missing``.
+    Because that third value is a database read, it is obtained by the async
+    :func:`load_partition_m05_contexts`; the sync :func:`build_partition_m05_contexts`
+    still refuses an export it was not given, and now says *how* to get one.
 
 Fail-closed rules honoured here
 ===============================
@@ -99,6 +110,10 @@ from prodavan.application.migration.evidence_ports import (
 from prodavan.application.migration.evidence_ports import digest as evidence_digest
 from prodavan.application.migration.m04e_definition_version.backfill import (
     M05EvidenceExport,
+)
+from prodavan.application.migration.m04e_export_reader import (
+    M04EEvidenceExportReader,
+    M04EExportRefused,
 )
 from prodavan.application.migration.m05_instance_runtime.instance_persistence import (
     RuntimeSessionOwnershipPort,
@@ -136,6 +151,7 @@ __all__ = [
     "M05_SESSION_OWNERSHIP_SESSION_FACTORY_MISSING",
     "M05_TENANT_CONTEXT_RESOLVER_MISSING",
     "M05_UPSTREAM_EVIDENCE_M04E_EXPORT_MISSING",
+    "M05_UPSTREAM_EVIDENCE_M04E_EXPORT_REFUSED",
     "M05_UPSTREAM_EVIDENCE_M04_SCOPE_MISSING",
     "M05_UPSTREAM_EVIDENCE_M05_RUNTIME_MISSING",
     "M05_UPSTREAM_EVIDENCE_PARTITION_MISMATCH",
@@ -154,6 +170,9 @@ __all__ = [
     "build_m05_tenant_context",
     "build_m05_upstream_evidence",
     "build_partition_m05_contexts",
+    "export_refusal_blocker",
+    "load_m04e_export",
+    "load_partition_m05_contexts",
 ]
 
 # ---------------------------------------------------------------------------
@@ -188,13 +207,22 @@ M05_IDENTITY_EVIDENCE_UNIT_OF_WORK_UNAVAILABLE: Final = (
     "m05_identity_evidence_unit_of_work_unavailable"
 )
 
-#: The three inputs of one ``M05UpstreamEvidence`` (see module notes for why the export is an
-#: input rather than a derivation).
+#: The three gates of one ``M05UpstreamEvidence`` (see module notes: the export is now read
+#: out of the M04E ledger by ``m04e_export_reader``, so an absent one means *this partition
+#: has no ledger rows*, not "the export cannot be derived").
 M05_UPSTREAM_EVIDENCE_M04_SCOPE_MISSING: Final = "m05_upstream_evidence_m04_scope_missing"
 M05_UPSTREAM_EVIDENCE_M04E_EXPORT_MISSING: Final = "m05_upstream_evidence_m04e_export_missing"
 M05_UPSTREAM_EVIDENCE_M05_RUNTIME_MISSING: Final = "m05_upstream_evidence_m05_runtime_missing"
 M05_UPSTREAM_EVIDENCE_PARTITION_MISMATCH: Final = (
     "m05_upstream_evidence_partition_mismatch"
+)
+
+#: The reader exists but the partition's ledger cannot produce an export (empty ledger, no
+#: cursor, a diverged digest).  One code, because the reader's own refusal -- a closed,
+#: greppable ``M04EExportRefusalCode`` -- is carried in the detail, so the operator sees the
+#: *specific* cause without this builder inventing a parallel vocabulary.
+M05_UPSTREAM_EVIDENCE_M04E_EXPORT_REFUSED: Final = (
+    "m05_upstream_evidence_m04e_export_refused"
 )
 
 #: The nine M05 security-review digests and the measured counts are not stored anywhere: a
@@ -1008,12 +1036,14 @@ def build_m05_upstream_evidence(
             _blocker(
                 M05_UPSTREAM_EVIDENCE_M04E_EXPORT_MISSING,
                 "m05_upstream_evidence.m04e_export",
-                "the M04E export carries the accepted ledger rows, the handoff marker and "
-                "the six handoff gates M05 re-checks; it is not reconstructible from a "
-                "marker (which stores counts only), and inventing the rows would invent the "
-                "canonical digest M05 recomputes",
+                "no M04E export was supplied and none was read: the export carries the "
+                "accepted ledger rows, and this partition has none in "
+                "m04e_definition_version_{mappings,quarantine,checkpoints,audit}.  The "
+                "rows are not reconstructible from a marker (which stores counts only), "
+                "and inventing them would invent the canonical digest M05 recomputes -- "
+                "read them with SqlM04EEvidenceExportReader instead",
                 "the M04E M05EvidenceExport (with its MIG-M04E-02 marker) of this "
-                "partition's snapshot",
+                "partition's snapshot, read by m04e_export_reader or stated by the host",
             )
         )
     if m05_runtime is None:
@@ -1081,6 +1111,13 @@ class M05ContextInputs:
     * ``m04_scope_row`` / ``m04e_export`` / ``review`` / ``instance_counts`` (or an explicit
       ``m05_runtime`` gate) -> ``m05_upstream_evidence``.
 
+    ``m04e_export_reader`` is the *optional* way to obtain ``m04e_export`` without stating
+    it: :func:`load_partition_m05_contexts` reads the partition's M04E ledger through it and
+    feeds the result into the same builder.  Stating ``m04e_export`` and binding a reader is
+    not a conflict -- the stated value is what a host that already holds it passes, and it
+    wins -- but a reader that refuses is never silently ignored: its refusal becomes a
+    named blocker.
+
     Every field defaults to ``None`` -- absence -- and absence always becomes a named
     blocker, never a substitute.
     """
@@ -1097,6 +1134,10 @@ class M05ContextInputs:
     session_factory: SessionFactory | None = None
     m04_scope_row: object | None = None
     m04e_export: M05EvidenceExport | None = None
+    #: The M04E ledger reader that *produces* ``m04e_export`` when the host does not hold it.
+    #: Only :func:`load_partition_m05_contexts` consumes it; a missing reader is absence,
+    #: exactly like a missing export.
+    m04e_export_reader: M04EEvidenceExportReader | None = None
     m05_runtime: M05RuntimeGateEvidence | None = None
     review: ReviewedM05RuntimeGate | None = None
     instance_counts: M05InstanceCounts | None = None
@@ -1138,6 +1179,8 @@ def build_partition_m05_contexts(
     key: PartitionChainKey,
     inputs: M05ContextInputs | None,
     session_factory: SessionFactory | None = None,
+    m04e_export: M05EvidenceExport | None = None,
+    export_blockers: tuple[M05ContextBlocker, ...] = (),
 ) -> M05PartitionContexts:
     """Build all four M05 contexts of **one** partition.
 
@@ -1148,10 +1191,21 @@ def build_partition_m05_contexts(
 
     ``session_factory`` is accepted separately so the planner can pass the same factory it
     used for every other port; ``inputs.session_factory`` wins when both are given.
+
+    ``m04e_export`` / ``export_blockers`` are how the **async** reader's result enters this
+    sync builder: :func:`load_partition_m05_contexts` reads the partition's M04E ledger and
+    passes exactly one of them.  A stated ``inputs.m04e_export`` still wins, and an empty
+    reader result (``None`` with no blockers) is the ordinary "the host stated neither"
+    absence, which the upstream builder names as
+    ``m05_upstream_evidence_m04e_export_missing``.  The two are mutually exclusive, so a
+    caller cannot ship an export next to the blocker that says it is missing.
     """
 
+    if m04e_export is not None and export_blockers:
+        raise ValueError("an M04E export and a blocker for the same export are exclusive")
     resolved = inputs or M05ContextInputs()
     factory = resolved.session_factory if resolved.session_factory is not None else session_factory
+    stated_export = resolved.m04e_export if resolved.m04e_export is not None else m04e_export
     blockers: list[M05ContextBlocker] = []
     built: list[str] = []
 
@@ -1197,7 +1251,7 @@ def build_partition_m05_contexts(
         tenant_id=key.tenant_id,
         app_definition_id=key.app_definition_id,
         m04_scope=scope_gate.value,  # type: ignore[arg-type]
-        m04e_export=resolved.m04e_export,
+        m04e_export=stated_export,
         m05_runtime=resolved.m05_runtime,
         review=resolved.review,
         counts=resolved.instance_counts,
@@ -1217,6 +1271,17 @@ def build_partition_m05_contexts(
             and blocker.code == M05_UPSTREAM_EVIDENCE_M04_SCOPE_MISSING
         )
     )
+    # Same one-cause-one-entry rule for the export: a reader that refused already says why
+    # (``m04e_export_ledger_empty``, ``m04e_export_digest_mismatch``, ...), so every generic
+    # "no export" entry -- the bundle's and the runtime gate's -- is dropped instead of being
+    # reported next to its own cause.
+    if export_blockers:
+        blockers.extend(export_blockers)
+        blockers = [
+            blocker
+            for blocker in blockers
+            if blocker.code != M05_UPSTREAM_EVIDENCE_M04E_EXPORT_MISSING
+        ]
     if upstream.value is not None:
         built.append("m05_upstream_evidence")
 
@@ -1237,4 +1302,114 @@ def build_partition_m05_contexts(
         identity_evidence=identity_evidence.value,
         built=tuple(built),
         blockers=tuple(blockers),
+    )
+
+
+# ---------------------------------------------------------------------------
+# 5. The M04E export, read out of the ledger
+# ---------------------------------------------------------------------------
+
+
+def export_refusal_blocker(
+    *, refused: M04EExportRefused, tenant_id: str, app_definition_id: str,
+) -> M05ContextBlocker:
+    """Turn one reader refusal into the builder's blocker vocabulary.
+
+    The reader's own code is preserved in the detail (it is a closed, greppable
+    ``M04EExportRefusalCode``), while the blocker carries one stable code so an operator who
+    greps for "why has this partition no export" gets one answer that names its own reason.
+    """
+
+    return _blocker(
+        M05_UPSTREAM_EVIDENCE_M04E_EXPORT_REFUSED,
+        "m05_upstream_evidence.m04e_export",
+        f"the M04E ledger of partition ({tenant_id}, {app_definition_id}) cannot produce an "
+        f"export: {refused.code.value}: {refused.detail}",
+        refused.needed,
+    )
+
+
+async def load_m04e_export(
+    *,
+    reader: M04EEvidenceExportReader,
+    tenant_id: str,
+    app_definition_id: str,
+    source_snapshot_digest: str | None = None,
+) -> tuple[M05EvidenceExport | None, tuple[M05ContextBlocker, ...]]:
+    """Read one partition's ``M05EvidenceExport``, or name why it cannot be read.
+
+    ``(export, ())`` or ``(None, (blocker,))`` -- never both, and never an export with empty
+    accepted rows invented to fill the gap.  A reader refusal is a *fact about the
+    partition* (no ledger, no cursor, a diverged digest), so it becomes data the builder
+    reports rather than an exception the caller has to catch.
+
+    Every other exception propagates: a broken connection or an unusable statement is not
+    evidence about the ledger, and swallowing it would report "this partition has no rows"
+    for a database outage.
+    """
+
+    try:
+        export = await reader.read_export(
+            tenant_id=tenant_id,
+            app_definition_id=app_definition_id,
+            source_snapshot_digest=source_snapshot_digest,
+        )
+    except M04EExportRefused as refused:
+        return None, (
+            export_refusal_blocker(
+                refused=refused, tenant_id=tenant_id, app_definition_id=app_definition_id,
+            ),
+        )
+    if (export.tenant_id, export.app_definition_id) != (tenant_id, app_definition_id):
+        return None, (
+            _blocker(
+                M05_UPSTREAM_EVIDENCE_PARTITION_MISMATCH,
+                "m05_upstream_evidence.m04e_export",
+                f"the reader returned an export of "
+                f"{(export.tenant_id, export.app_definition_id)!r}, not "
+                f"{(tenant_id, app_definition_id)!r}",
+                "an export of this exact partition",
+            ),
+        )
+    return export, ()
+
+
+async def load_partition_m05_contexts(
+    *,
+    key: PartitionChainKey,
+    inputs: M05ContextInputs | None,
+    session_factory: SessionFactory | None = None,
+) -> M05PartitionContexts:
+    """Build all four M05 contexts, reading the M04E export out of the partition's ledger.
+
+    This is the async counterpart of :func:`build_partition_m05_contexts` and the one a
+    per-partition operator uses: three of the four contexts are pure composition, and the
+    fourth needs one database read, which is why it cannot happen inside a sync builder.
+
+    The export comes from, in order:
+
+    1. ``inputs.m04e_export`` -- a host that already holds it (it wins, and no read happens);
+    2. ``inputs.m04e_export_reader`` -- the ledger reader of
+       :mod:`prodavan.application.migration.m04e_export_reader`;
+    3. nothing -- and then the export is absent, named exactly as before.
+
+    ``inputs.session_factory`` still needs its own export *or* reader: the two are
+    different collaborators, and a factory without a reader cannot read the ledger.
+    """
+
+    resolved = inputs or M05ContextInputs()
+    export = resolved.m04e_export
+    export_blockers: tuple[M05ContextBlocker, ...] = ()
+    if export is None and resolved.m04e_export_reader is not None:
+        export, export_blockers = await load_m04e_export(
+            reader=resolved.m04e_export_reader,
+            tenant_id=key.tenant_id,
+            app_definition_id=key.app_definition_id,
+        )
+    return build_partition_m05_contexts(
+        key=key,
+        inputs=resolved,
+        session_factory=session_factory,
+        m04e_export=export,
+        export_blockers=export_blockers,
     )

@@ -17,10 +17,16 @@ from collections.abc import Mapping
 from types import SimpleNamespace
 from typing import Any
 
+from prodavan.application.migration.m04_scope.scope_persistence import (
+    encode_mapping_canonical_evidence,
+)
 from prodavan.application.migration.m04e_definition_version.backfill import (
     BackfillContext,
     EvidenceCandidate,
 )
+
+#: The canonical schema lineage M04 stamps into ``scope_owner_mappings``.
+SCOPE_CANONICAL_SCHEMA = "scope-registry.v1"
 
 TENANT = "tenant-m04e-ports"
 OTHER_TENANT = "tenant-m04e-other"
@@ -158,7 +164,15 @@ def scope_mapping_row(**overrides: Any) -> dict[str, Any]:
         "source_id": TENANT,
         "schema_version": "m04.owner.v1",
         "source_payload_digest": SHA_B,
-        "canonical_payload_digest": SHA_C,
+        # What M04 really stores: the canonical lineage *and* digest packed into
+        # one column (``v1|scope-registry.v1|sha256:...``) by
+        # ``scope_persistence.encode_mapping_canonical_evidence`` — never a bare
+        # digest.  MIG-M04-02 decodes it with ``mapping_canonical_digest``; a
+        # fixture that spelled this column differently than the writer would let
+        # the two stages disagree unnoticed.
+        "canonical_payload_digest": encode_mapping_canonical_evidence(
+            SCOPE_CANONICAL_SCHEMA, SHA_C
+        ),
         "scope_registry_id": "sco_reg_1",
         "mapping_state": "mapped",
         "reason_code": None,
@@ -398,11 +412,18 @@ class FakeSession:
         key_counts: Mapping[str, int] | None = None,
     ) -> None:
         self.tables = {key: list(value) for key, value in (data or tables()).items()}
+        # The defaults model the *trusted writer*: the binder re-reads the
+        # transaction-local GUCs **and** the database role, refusing a session that
+        # is not ``prodavan_service`` or that bypasses RLS.  A fake without these
+        # keys would fail the readback for a reason no test means to exercise.
         self.readback = {
             "tenant_id": None,
             "migration_role": "true",
+            "trusted_service": "true",
             "row_security": "on",
             "transaction_isolation": "serializable",
+            "database_role": "prodavan_service",
+            "role_bypasses_rls": False,
         }
         self.readback.update(dict(readback or {}))
         self.order_rows = order_rows

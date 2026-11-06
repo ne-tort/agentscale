@@ -964,7 +964,7 @@ class BoundScopePage:
             and stored_checkpoint.source_snapshot_digest
             != expected_checkpoint.source_snapshot_digest
         ):
-            return self._conflict(
+            return await self._conflict(
                 context=context,
                 candidate=candidate,
                 checkpoint=expected_checkpoint,
@@ -982,7 +982,7 @@ class BoundScopePage:
                 )
             )
         if not cursor_matches:
-            return self._conflict(
+            return await self._conflict(
                 context=context,
                 candidate=candidate,
                 checkpoint=expected_checkpoint,
@@ -1067,11 +1067,12 @@ class BoundScopePage:
             stream=stream, expected=expected_checkpoint, next_checkpoint=next_checkpoint
         )
         if conflict is not None:
-            return self._conflict(
+            return await self._conflict(
                 context=context,
                 candidate=candidate,
                 checkpoint=expected_checkpoint,
                 reason=conflict,
+                audit_event_id=audit_id,
             )
         anchors = candidate.anchors
         return ScopeMigrationResult(
@@ -2300,14 +2301,39 @@ class BoundScopePage:
             canonical_positive_writes=False,
         )
 
-    def _conflict(
+    async def _conflict(
         self,
         *,
         context: MigrationEvidenceContext,
         candidate: ScopeSourceEvidence,
         checkpoint: BackfillCheckpoint,
         reason: str,
+        audit_event_id: str | None = None,
     ) -> ScopeMigrationResult:
+        """Report a conflict that left the caller's checkpoint in place.
+
+        Every conflict the coordinator accepts must carry an audit identity
+        (``durable conflict outcome must return an audit identity``).  A stale page or a
+        changed snapshot lineage is exactly the kind of event a reviewer has to be able
+        to find afterwards, and a result that omits it makes ``process_row`` raise a
+        ``RuntimeError`` *after* the page transaction has already committed -- on a path
+        the review explicitly allows.  That was the state of the two early conflict
+        sites (lineage changed, cursor CAS lost): they returned ``CONFLICT`` with no
+        audit row at all, so the only way to observe them was a crash in the caller.
+
+        ``audit_event_id`` lets a caller that has already appended its own audit row
+        (the changed-digest conflict in :meth:`_append_conflict`) hand that identity in
+        rather than writing a second, redundant event for one observation.
+        """
+
+        token = encode_checkpoint_token(checkpoint.sequence, checkpoint.after_source_id)
+        event_id = audit_event_id or await self._append_audit(
+            context=context,
+            candidate=candidate,
+            event_kind="scope_mapping_conflict",
+            reason_code=reason,
+            checkpoint=token,
+        )
         anchors = candidate.anchors
         return ScopeMigrationResult(
             outcome=BackfillOutcome.CONFLICT,
@@ -2324,6 +2350,7 @@ class BoundScopePage:
             correlation_id=context.correlation_id,
             writer_generation=context.writer_generation,
             canonical_positive_writes=False,
+            audit_event_id=event_id,
         )
 
 

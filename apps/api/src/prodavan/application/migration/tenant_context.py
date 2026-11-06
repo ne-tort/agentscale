@@ -119,11 +119,12 @@ redacted ``reason_code``.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Mapping, Sequence
+import re
+from collections.abc import AsyncIterator, Callable, Iterable, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import AsyncContextManager, AsyncIterator, Final, Protocol, runtime_checkable
+from datetime import UTC, datetime
+from typing import AsyncContextManager, Final, Protocol, runtime_checkable
 from weakref import WeakKeyDictionary
 
 from sqlalchemy import text
@@ -680,6 +681,34 @@ def _denies_without_context(predicate: str, gucs: Sequence[str]) -> bool:
     return all(f"nullif(current_setting('{name}', true), '')" in predicate for name in gucs)
 
 
+#: An ``EXISTS`` sub-select in a deparsed predicate, tolerant of the spacing PostgreSQL
+#: adds.  ``pg_get_expr`` renders the registry's ``EXISTS (SELECT 1 FROM parent ...)`` as
+#: ``EXISTS ( SELECT 1 FROM parent ...)`` -- note the space *after* the opening
+#: parenthesis -- so any literal match on the DDL text misses every real predicate.
+_PARENT_CHAIN_PREDICATE = re.compile(r"exists\s*\(\s*select\s+1\s+from\s+([a-z0-9_]+)")
+
+
+def _typed_parent_chain(predicate: str, spec: TablePolicySpec) -> bool:
+    """Is ``predicate`` the reviewed parent-chain ``EXISTS`` for ``spec``?
+
+    A table whose tenant scope is inherited has no tenant column, so its tenant policy
+    must resolve the scope through typed parents.  The check is not just "there is an
+    ``EXISTS`` somewhere": the first hop has to be the parent ``spec`` declares, which is
+    the hop that actually anchors the row.  Comparing the table name is what keeps a
+    predicate over an unrelated relation from counting as proof.
+
+    Returns ``False`` for a table without a chain, because the caller only asks about
+    those (``spec.tenant.chain`` is non-empty).
+    """
+
+    if spec.tenant is None or not spec.tenant.chain:
+        return False
+    match = _PARENT_CHAIN_PREDICATE.search(predicate)
+    if match is None:
+        return False
+    return match.group(1) == spec.tenant.chain[0].table
+
+
 async def _observe_manifest(
     session: object, specs: Sequence[TablePolicySpec]
 ) -> _PolicyManifestTruth:
@@ -729,8 +758,16 @@ async def _observe_manifest(
             command_ok and permissive_ok and denies
         )
         if spec.tenant is not None and spec.tenant.chain:
-            typed_parent_policy_enforced = typed_parent_policy_enforced and (
-                "exists (select 1 from" in using
+            # The previous check looked for the literal ``exists (select 1 from`` in the
+            # deparsed predicate.  ``pg_get_expr`` emits ``EXISTS ( SELECT 1 FROM ...``
+            # (a space after the parenthesis), so the substring was never present and
+            # this flag was *always* False for every chained table -- which made the M04
+            # coordinator's accepted path unreachable on any real PostgreSQL
+            # (``persistence port accepted a row without exact active parent evidence``
+            # after the row had already been committed).  ``_typed_parent_chain`` matches
+            # the shape the server actually renders and additionally pins the hop table.
+            typed_parent_policy_enforced = typed_parent_policy_enforced and _typed_parent_chain(
+                using, spec
             )
 
         if policy_named:
@@ -793,7 +830,7 @@ class _RlsContextAdapter:
             _reviewed_spec(relation) for relation in self._relations
         )
         self._principal_resolver = principal_resolver
-        self._clock = clock or (lambda: datetime.now(timezone.utc))
+        self._clock = clock or (lambda: datetime.now(UTC))
         # session -> (database transaction id, settings captured before the first bind)
         self._previous: WeakKeyDictionary[object, tuple[str, tuple[tuple[str, str], ...]]] = (
             WeakKeyDictionary()

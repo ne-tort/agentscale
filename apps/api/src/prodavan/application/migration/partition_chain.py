@@ -64,8 +64,11 @@ reviewed per-partition builder for exactly those four fields:
 * ``build_m05_upstream_evidence`` assembles ``M04ScopeGateEvidence`` +
   ``M05RuntimeGateEvidence`` from this partition's stored M04-02 row, a reviewed
   runtime-gate manifest and the measured instance counts, and takes the M04E
-  ``M05EvidenceExport`` as an input, because the accepted ledger rows it carries are not
-  reconstructible from the marker's counts.
+  ``M05EvidenceExport`` either as an input or read out of the partition's ledger by
+  ``m04e_export_reader.SqlM04EEvidenceExportReader`` (through
+  ``m05_contexts.load_partition_m05_contexts``).  The accepted rows are real ledger rows --
+  the marker's counts are still not evidence, but the rows they count now exist in
+  ``m04e_definition_version_{mappings,quarantine,checkpoints,audit}``.
 
 :class:`PartitionAssemblyOverrides` therefore accepts the whole bundle as one
 :class:`~prodavan.application.migration.m05_contexts.M05ContextInputs` value
@@ -123,6 +126,7 @@ from prodavan.application.migration.evidence_ports import (
 )
 from prodavan.application.migration.m04e_ports import build_m04e_sql_ports
 from prodavan.application.migration.m05_contexts import (
+    M05_UPSTREAM_EVIDENCE_M04E_EXPORT_MISSING,
     M05ContextBlocker,
     M05ContextInputs,
     build_m04_scope_gate,
@@ -764,6 +768,24 @@ def build_partition_chain(
         if upstream_build.value is not None and m05_upstream_evidence is None:
             m05_upstream_evidence = upstream_build.value
         m05_upstream_blockers = upstream_build.blockers
+        if m05_contexts.m04e_export is None and m05_contexts.m04e_export_reader is not None:
+            # This planner is synchronous, so it cannot perform the ledger read itself.  When
+            # the host bound a reader but no export, the useful report is not "the export is
+            # missing" but "read it": naming the async entry point is what makes the reader
+            # discoverable instead of looking like an unused field.
+            m05_upstream_blockers = tuple(
+                _blocker(
+                    blocker.code,
+                    blocker.dependency,
+                    f"{blocker.detail}; note: a reader is bound, so "
+                    "m05_contexts.load_partition_m05_contexts(key=..., inputs=...) can read "
+                    "this export instead of the host stating it",
+                    blocker.needed,
+                )
+                if blocker.code == M05_UPSTREAM_EVIDENCE_M04E_EXPORT_MISSING
+                else blocker
+                for blocker in m05_upstream_blockers
+            )
     if m05_upstream_evidence is None:
         for blocker in m05_upstream_blockers or (
             _blocker(

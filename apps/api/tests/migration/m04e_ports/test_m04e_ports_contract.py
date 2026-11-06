@@ -21,6 +21,9 @@ import inspect
 
 import pytest
 
+from prodavan.application.migration.m04_scope.scope_persistence import (
+    encode_mapping_canonical_evidence,
+)
 from prodavan.application.migration.m04e_definition_version.backfill import (
     BackfillCheckpoint,
     CandidateDecision,
@@ -54,6 +57,7 @@ from prodavan.application.migration.m04e_ports import (
     build_m04e_sql_ports,
     definition_candidate,
     legacy_status_to_state,
+    mapping_canonical_digest,
     read_promotion_evidence,
     require_partition,
     require_usable_context,
@@ -66,6 +70,7 @@ from .acceptance_fixtures import (
     MANIFEST_VERSION,
     OTHER_DEFINITION_ID,
     OTHER_TENANT,
+    SCOPE_CANONICAL_SCHEMA,
     SECRET_MARKER,
     SHA_A,
     SHA_B,
@@ -84,6 +89,7 @@ from .acceptance_fixtures import (
     expected_source_digest,
     promotion_row,
     registry_row,
+    scope_mapping_row,
     session,
     tables,
     version_row,
@@ -564,6 +570,64 @@ async def test_gate_evidence_is_reproducible_for_the_same_partition() -> None:
     second = await port.partition_gate(context=context())
 
     assert dict(first.probes) == dict(second.probes)
+
+
+def test_mapping_canonical_digest_decodes_exactly_what_m04_packs() -> None:
+    """The cross-stage digest contract: M04 packs, MIG-M04-02 unpacks — one spelling.
+
+    ``scope_owner_mappings`` has no ``canonical_schema_version`` column, so the M04
+    writer stores the canonical lineage *and* the digest as ``v1|<schema>|<digest>``
+    (``scope_persistence.encode_mapping_canonical_evidence``).  ``mapping_canonical_digest``
+    is the only M04E-side decoder of that column: it must return the digest for exactly
+    the spelling the writer produces, and ``None`` (a refusal, never a guess) for a bare
+    digest, a digestless pack, a malformed pack or a foreign prefix.  Before this
+    contract existed the port demanded a bare ``sha256:`` value no M04 write can
+    produce, so the two stages could never agree on a mapped scope.
+    """
+
+    packed = encode_mapping_canonical_evidence(SCOPE_CANONICAL_SCHEMA, SHA_C)
+    assert packed == f"v1|{SCOPE_CANONICAL_SCHEMA}|{SHA_C}"
+    assert mapping_canonical_digest(packed) == SHA_C
+
+    # A pack without a digest is a quarantined/deferred mapping: not an acceptance.
+    digestless = encode_mapping_canonical_evidence(SCOPE_CANONICAL_SCHEMA, None)
+    assert mapping_canonical_digest(digestless) is None
+
+    # Never a second, divergent reading of the column.
+    assert mapping_canonical_digest(SHA_C) is None
+    assert mapping_canonical_digest(None) is None
+    assert mapping_canonical_digest("") is None
+    assert mapping_canonical_digest("v1|scope-registry.v1|sha256:not-a-digest") is None
+    assert mapping_canonical_digest(f"v2|{SCOPE_CANONICAL_SCHEMA}|{SHA_C}") is None
+    assert mapping_canonical_digest(f"v1||{SHA_C}") is None
+
+
+async def test_gate_accepts_the_packed_m04_evidence_and_refuses_a_bare_digest() -> None:
+    """MIG-M04-02 end to end over the fixture the M04 writer's column shape models.
+
+    The default ``scope_mapping_row`` carries the packed value, so a complete
+    partition proves the typed-scope gate.  The same row with a bare ``sha256:``
+    digest in ``canonical_payload_digest`` — a spelling M04 never writes — must be
+    refused by name rather than silently accepted or mis-decoded.
+    """
+
+    _fake, factory = session(tables(promotion=[promotion_row(outcome="accepted")]))
+    evidence = await SqlM04EUpstreamGate(session_factory=factory).prove_partition(
+        context=context(),
+    )
+    assert evidence is not None and evidence.valid
+
+    _bare, bare_factory = session(tables(
+        scope_mappings=[scope_mapping_row(canonical_payload_digest=SHA_C)],
+        promotion=[promotion_row(outcome="accepted")],
+    ))
+    decision = await SqlM04EUpstreamGate(session_factory=bare_factory).partition_gate(
+        context=context(),
+    )
+    assert decision.evidence is None
+    assert decision.refusal is not None
+    assert decision.refusal.code is M04EPortReason.M04_02_TYPED_SCOPE_UNPROVEN
+    assert decision.refusal.gate_name == GATE_M04_02_TYPED_SCOPE
 
 
 async def test_promotion_evidence_read_is_bound_to_the_exact_partition() -> None:
