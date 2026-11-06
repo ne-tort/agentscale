@@ -5,12 +5,28 @@ on:
     - cron: "0 2 * * *"
   workflow_dispatch:
 
+# Least privilege by default: on a self-hosted runner the token reaches code from
+# every pull request, and nothing in this workflow writes to the repository.
+permissions:
+  contents: read
+
+# Cron and a manual dispatch can overlap: without a group the second run starts
+# beside the first, and both bind the same fixed container/port.
+concurrency:
+  group: ci-nightly
+  cancel-in-progress: false
+
 jobs:
   integration:
     runs-on: [self-hosted, linux, docker]
+    # Bounds a hung pull/pytest. The nightly also competes for RAM with the dev
+    # cluster, so it must not sit on a slot all night.
+    timeout-minutes: 45
     defaults:
       run:
         working-directory: apps/api
+    env:
+      PIP_CACHE_DIR: /cache/pip
     steps:
       - uses: actions/checkout@v4
 

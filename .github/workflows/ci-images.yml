@@ -43,6 +43,9 @@ env:
 jobs:
   build-api:
     runs-on: [self-hosted, linux, docker]
+    # The build push itself has a bounded step, but the job had no ceiling: a
+    # wedged buildx kept a runner slot for the six-hour default.
+    timeout-minutes: 60
     outputs:
       tag: ${{ steps.meta.outputs.tag }}
       push: ${{ steps.meta.outputs.push }}

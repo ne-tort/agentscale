@@ -28,6 +28,11 @@ on:
   workflow_dispatch:
 
 # All runners share one VM — supersede a pending run instead of stacking.
+# Least privilege by default: on a self-hosted runner the token reaches code from
+# every pull request, and nothing here writes to the repository.
+permissions:
+  contents: read
+
 concurrency:
   group: ci-web-${{ github.ref }}
   cancel-in-progress: true

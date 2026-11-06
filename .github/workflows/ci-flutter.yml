@@ -9,6 +9,11 @@ on:
       - ".github/workflows/ci-flutter.yml"
   workflow_dispatch:
 
+# Least privilege by default: on a self-hosted runner the token reaches code from
+# every pull request, and nothing in this workflow writes to the repository.
+permissions:
+  contents: read
+
 # One VM runs every runner: parallel Flutter analyze/test/build each spawn
 # several dart VMs (~1 GB each) and this is what exhausted the CI VM RAM.
 concurrency:
@@ -20,6 +25,9 @@ jobs:
     # github-hosted ubuntu-latest fails instantly in this org.
     # Flutter SDK + pub live on the CI VM /cache (see infra/github-runner-vm).
     runs-on: [self-hosted, linux, docker]
+    # Was unbounded: the default is six hours, and a hung `flutter pub get`
+    # would hold one of the five runner slots until the job was killed by hand.
+    timeout-minutes: 45
     defaults:
       run:
         working-directory: apps/flutter
