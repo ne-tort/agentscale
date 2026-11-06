@@ -274,7 +274,12 @@ def test_k8s_rematerialize_increments_generation(k8s_client: TestClient) -> None
     while time.time() < deadline:
         after = k8s_client.get(f"/api/v1/projects/{project_id}", headers=owner_h)
         runtime = after.json()["runtime"]
-        if int(runtime.get("hydrate_generation") or 0) >= 1:
+        # Rematerialize recreates the workload, so the generation increments
+        # while the pod is still `provisioning` — waiting only on the counter
+        # and then asserting `running` is a race the test loses whenever the
+        # recreate takes longer than one poll interval.
+        generation = int(runtime.get("hydrate_generation") or 0)
+        if generation >= 1 and runtime.get("status") == "running":
             break
         time.sleep(2.0)
     assert runtime["status"] == "running"
@@ -291,8 +296,15 @@ def test_k8s_rematerialize_increments_generation(k8s_client: TestClient) -> None
 def test_k8s_workspace_lists_sandbox_entries(k8s_client: TestClient) -> None:
     """Workspace list API reaches the live pod FS.
 
-    L3a overlay uses stub hydrate (no MinIO sync), so AGENTS.md from materialize is
-    not present in the pod — only sandbox image / emptyDir defaults (e.g. inbox, runs).
+    The workspace is served from the API the pod hydrates against, so what the
+    listing must show is the *materialized* project layout — ``mcp.json`` and the
+    ``packages`` tree that ``materialize`` writes — not the emptyDir defaults of
+    the sandbox image. Those defaults (``inbox``, ``runs``) only ever appeared
+    here while hydrate was a stub that fetched nothing; asserting on them now
+    would pass for a pod whose hydrate failed and wrote nothing.
+
+    ``.prodavan`` is the platform's own directory in the workspace, written by
+    the same materialize pass, so seeing it is evidence the archive arrived.
     """
     _, _, owner_h, project_id = _setup_project(k8s_client)
     _ensure_pod_running(k8s_client, owner_h, project_id)
@@ -312,7 +324,8 @@ def test_k8s_workspace_lists_sandbox_entries(k8s_client: TestClient) -> None:
         time.sleep(2.0)
     assert listed is not None and listed.status_code == 200
     assert names, "expected non-empty workspace listing from running sandbox pod"
-    assert "inbox" in names or "runs" in names, names
+    assert "mcp.json" in names, names
+    assert ".prodavan" in names, names
 
 
 def test_k8s_admin_force_kill_clears_runtime(k8s_client: TestClient) -> None:

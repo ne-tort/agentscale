@@ -54,6 +54,27 @@ spec:
               asyncio.run(main())
               PY
               alembic upgrade head
+              # Sandbox pods hydrate from a pod surface that must read the SAME
+              # database this Job just migrated. The dev API cannot serve them:
+              # it is backed by `agentscale`, while the rows below are written to
+              # `agentscale_e2e`, so every hydrate answered 404 "pod not found".
+              # Serve the pod surface here and advertise it through the
+              # agentscale-e2e-api Service (see service.yaml).
+              uvicorn prodavan.main_pod:app --host 0.0.0.0 --port 8001 \
+                --log-level warning >/tmp/pod-surface.log 2>&1 &
+              python - <<'PY'
+              import sys, time, urllib.request
+              deadline = time.time() + 120
+              while time.time() < deadline:
+                  try:
+                      with urllib.request.urlopen("http://127.0.0.1:8001/health/live", timeout=2):
+                          print("pod surface ready")
+                          sys.exit(0)
+                  except Exception:
+                      time.sleep(1)
+              print("pod surface did not become ready", file=sys.stderr)
+              sys.exit(1)
+              PY
               pytest tests/e2e/k8s -m k8s -v --tb=short
           env:
             - name: PG_ADMIN_URL
@@ -61,6 +82,11 @@ spec:
           envFrom:
             - configMapRef:
                 name: agentscale-e2e-config
+          ports:
+            # Named so service.yaml can target it; the pod surface the sandbox
+            # pods hydrate against lives on this port.
+            - name: pod-http
+              containerPort: 8001
           volumeMounts:
             - name: e2e-conftest
               mountPath: /e2e-pr/conftest

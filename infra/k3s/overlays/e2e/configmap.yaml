@@ -27,11 +27,13 @@ data:
   POD_SANDBOX_HYDRATE_IMAGE: ghcr.io/ne-tort/agentscale-api:latest
   # Where the hydrate initContainer fetches a workspace from. The code default is
   # `http://prodavan-api.prodavan.svc:8001/api/v1` — a Service that does not
-  # exist in any contour — so without this every sandbox pod dies in
-  # `Init:Error` with `hydrate initContainer failed … Name or service not known`,
-  # and the suite reports it as "project error while waiting for running".
-  # The dev overlay sets the same value; this Job runs inside agentscale-dev.
-  POD_AGENT_RUNTIME_API_BASE_URL: http://agentscale-api.agentscale-dev.svc:8001/api/v1
+  # exist in any contour — so leaving it unset made every sandbox pod die with
+  # `Name or service not known`. It must NOT point at the deployed agentscale-api
+  # either: that process reads the `agentscale` database, while this Job writes
+  # its pod rows to `agentscale_e2e`, so hydrate would answer 404 "pod not found".
+  # The Job serves its own pod surface on 8001 (see job.yaml) and this Service
+  # (see service.yaml) is how sandbox pods address it.
+  POD_AGENT_RUNTIME_API_BASE_URL: http://agentscale-e2e-api.agentscale-dev.svc:8001/api/v1
   # Redis is not optional while the bridge is strict: `bump_pod_bridge_generation`
   # treats a failed `cache_set` as "revocation did not happen" and raises 503, and
   # without a Redis manager `cache_set` always returns False. Every pause / stop /

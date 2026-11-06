@@ -3,6 +3,7 @@ kind: Kustomization
 resources:
   - rbac.yaml
   - configmap.yaml
+  - service.yaml
   - job.yaml
   - rbac-sandboxes.yaml
 transformers:
