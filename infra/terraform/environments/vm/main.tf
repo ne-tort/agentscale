@@ -76,6 +76,25 @@ variable "bootstrap_gitops" {
   default = true
 }
 
+variable "force_reinstall" {
+  type        = bool
+  default     = false
+  description = <<-EOT
+    Clean install from scratch: wipe the existing k3s (data dir with etcd/sqlite,
+    containerd images and local-path PVC data, TLS CA, kubeconfigs, boot-heal)
+    before installing.
+
+    Standard "снести → поставить" is `terraform destroy` + `terraform apply`, which
+    already wipes everything. This flag is for the case where a destroy is not
+    possible or not trusted (e.g. state was lost, or a previous destroy left a
+    dirty host) — it makes a plain apply reinstall over a live cluster.
+
+    Use: terraform apply -var force_reinstall=true, then immediately
+    terraform apply -var force_reinstall=false (the flip back only re-runs the
+    idempotent provisioners; it does not reinstall).
+  EOT
+}
+
 variable "ghcr_token" {
   type      = string
   default   = ""
@@ -103,22 +122,34 @@ module "k3s_dev" {
   ssh_private_key_path   = var.ssh_private_key_path
   remote_repo_path       = var.remote_repo_path
   bootstrap_gitops       = var.bootstrap_gitops
+  force_reinstall        = var.force_reinstall
   ghcr_token             = var.ghcr_token
   ghcr_username          = var.ghcr_username
   # Dev DNS: explicit public upstreams for CoreDNS and a plain-DNS host
   # drop-in. DoT/:853 is blocked here, and 1.1.1.1:53 is rate-limited from the
   # CoreDNS pod (timeouts under searchnet load) — use Quad9 + Google.
-  dns_upstreams                = "9.9.9.9 8.8.8.8"
-  host_dns_servers             = "9.9.9.9 8.8.8.8"
-  host_dns_over_tls            = "no"
-  host_dns_stub_listener_extra = var.ssh_host
+  dns_upstreams     = "9.9.9.9 8.8.8.8"
+  host_dns_servers  = "9.9.9.9 8.8.8.8"
+  host_dns_over_tls = "no"
+  # Node IP of systemd-resolved's extra listener; hosts (and CoreDNS, via
+  # /etc/k3s-resolv.conf) resolve through it. Must be the address the VM is
+  # reachable at, not the SSH host: SSH is 127.0.0.1 here, but a loopback-only
+  # stub listener is useless to pods.
+  host_dns_stub_listener_extra = local.api_host
+  # CoreDNS (dnsPolicy: Default) наследует kubelet resolv.conf. Содержимое
+  # /etc/k3s-resolv.conf terraform ведёт ДЕТЕРМИНИРОВАННО: прямые upstream'ы
+  # из host_dns_servers (файл переписывается при отличии содержимого), поэтому
+  # поды и штатный Corefile `forward . /etc/resolv.conf` не зависят от живости
+  # хостового systemd-resolved. Управляемый resolved drop-in (host_dns) при
+  # этом держит DNSStubListenerExtra=<IP VM> — он закрывает окно до первого
+  # apply; post-k3s-heal.sh перепинивает CoreDNS после каждого старта k3s.
+  k3s_resolv_conf = "/etc/k3s-resolv.conf"
 }
 
 locals {
   # Last SAN is the VM address (see api_tls_sans default).
   api_host = element(var.api_tls_sans, length(var.api_tls_sans) - 1)
 }
-
 output "kubeconfig_path" {
   value = module.k3s_dev.kubeconfig_path
 }

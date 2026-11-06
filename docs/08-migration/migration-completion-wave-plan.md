@@ -1,6 +1,6 @@
 # Migration completion — wave plan (continuing to functional replacement)
 
-Status: active. Owner: orchestrator agent. Updated: 2026-11-04.
+Status: active. Owner: orchestrator agent. Updated: 2026-11-05 (освежены цифры DDL-цепочки; см. сноску в разделе «DDL chain»).
 
 ## Verification freeze is LIFTED
 
@@ -65,7 +65,12 @@ called on a `Signature`, raw-text scans matching their own docstrings, substring
 checks against their own literals, and an anti-duplicate check that only compared
 `__init__` imports.
 
-## DDL chain (linear, single head `2026110310`, 193 revisions, no forks)
+## DDL chain (linear, single head `2026110320`, 211 revisions, no forks)
+
+> Цифры — факт на **2026-11-05**: 211 файлов ревизий в `alembic/versions/`, граф
+> линейный, единственная голова — `2026110320_dynamic_apps_baseline.py`. На момент
+> первой записи раздела голова была `2026110310` (193 ревизии); хвост 0311–0320
+> дописан в таблицу ниже, исторические измерения не переписывались.
 
 | Rev | Content |
 |---|---|
@@ -80,6 +85,16 @@ checks against their own literals, and an anti-duplicate check that only compare
 | `2026110308` | `VALIDATE CONSTRAINT` for the deferred FKs (M04E, 7× M05, grant→instance) |
 | `2026110309` | `agent_run_leases` — durable execution fence |
 | `2026110310` | re-applies the RLS registry so tables created after 0307 get policies |
+| `2026110311` | `agent_run_provider_attempts` — provider attempts journal |
+| `2026110312` | re-applies RLS after the attempt journal |
+| `2026110313` | `m04_scope_promotion_evidence` — scope promotion evidence |
+| `2026110314` | re-applies RLS after m04 scope evidence |
+| `2026110315` | M04E first-mapping ledger |
+| `2026110316` | M06 cutover evidence + source-tail tables |
+| `2026110317` | `auth_sessions` — durable auth store |
+| `2026110318` | RLS policy rename |
+| `2026110319` | equipment tenant anchors (`project_id`/`cabinet_id`) + RLS re-apply |
+| `2026110320` | dynamic apps baseline |
 
 Design invariants worth keeping:
 
@@ -167,7 +182,8 @@ the command says so rather than reporting "0 partitions" as though it had looked
 
 ## Verification baseline (measured, not asserted)
 
-On a database created empty and migrated with `alembic upgrade head` to `2026110319`:
+On a database created empty and migrated with `alembic upgrade head` to `2026110319`
+(измерение на эпоху головы `2026110319`; на 2026-11-05 голова — `2026110320`, 211 ревизий):
 
 | Suite | Result |
 |---|---|
@@ -248,4 +264,6 @@ future reader can tell a missing table from a deliberate trade-off.
   policies with no name over 63 characters; `downgrade 2026110318` and re-upgrade were
   run twice on `equipment_anchors` and once on the RLS rename, both deterministic. The
   PostgreSQL concurrency suite runs rather than skips. Nothing has been applied to any
-  shared environment.
+  shared environment. *(Замер на эпоху головы `2026110319`; на 2026-11-05 цепочка —
+  211 файлов ревизий, голова `2026110320_dynamic_apps_baseline.py`, числа 199/86 для
+  нового хвоста не перемерялись.)*

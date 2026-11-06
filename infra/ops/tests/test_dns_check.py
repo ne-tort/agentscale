@@ -168,3 +168,39 @@ def test_resolve_passes_container_as_separate_kubectl_arg(monkeypatch) -> None:
     assert ip == "8.6.112.0"
     assert seen and seen[0][:4] == ["-n", "agentscale-dev", "exec", "agentscale-api-abc"]
     assert seen[0][4:6] == ["-c", "api"]
+
+
+def test_resolve_explicit_pod_without_namespace_uses_dev(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`--pod` без `--namespace` не должен давать `-n None`."""
+    seen: list[list[str]] = []
+
+    def _fake(args, **_kw):
+        seen.append(list(args))
+        return _ok("1.2.3.4\n")
+
+    monkeypatch.setattr(dns_check, "kubectl", _fake)
+    ip = dns_check.resolve_from_pod("github.com", pod="api-0/api")
+    assert ip == "1.2.3.4"
+    assert seen[0][:4] == ["-n", "agentscale-dev", "exec", "api-0"]
+
+
+def test_resolve_without_namespace_searches_dev_first(monkeypatch: pytest.MonkeyPatch) -> None:
+    """На чистом dev-кластере ns `agentscale` пуст — ищем dev-контуры первыми."""
+    seen: list[list[str]] = []
+
+    def _fake(args, **_kw):
+        seen.append(list(args))
+        if "pods" in args:
+            if args[1] == "agentscale-dev":
+                return _ok('{"items": []}')
+            return _ok(
+                '{"items":[{"metadata":{"name":"web-1"},'
+                '"spec":{"containers":[{"name":"web"}]},"status":{"phase":"Running"}}]}'
+            )
+        return _ok("5.6.7.8\n")
+
+    monkeypatch.setattr(dns_check, "kubectl", _fake)
+    assert dns_check.resolve_from_pod("github.com") == "5.6.7.8"
+    ns_searched = [c[1] for c in seen if "pods" in c]
+    assert ns_searched[0] == "agentscale-dev"
+    assert seen[-1][:4] == ["-n", "agentscale-dev-sandboxes", "exec", "web-1"]

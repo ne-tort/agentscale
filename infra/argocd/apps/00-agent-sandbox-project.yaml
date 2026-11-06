@@ -7,6 +7,13 @@ kind: AppProject
 metadata:
   name: agent-sandbox
   namespace: argocd
+  annotations:
+    # app-of-apps ordering: every AppProject must exist before ANY Application
+    # is created (agent-sandbox wave -5, dev/e2e/prod wave 0) — otherwise the
+    # child apps start in "application referencing unknown project" state.
+    # NOTE: no resources-finalizer here — it is an Application-only mechanism;
+    # on an AppProject nothing would ever remove it (stuck Terminating).
+    argocd.argoproj.io/sync-wave: "-10"
 spec:
   description: agent-sandbox controller + sandbox-router (namespace scoped)
   sourceRepos:

@@ -13,8 +13,9 @@ DNS_UPSTREAMS="${dns_upstreams}"
 # сохранённый вручную фикс слетел после ребута.
 #
 # Здесь фикс навязывается после каждого старта k3s — до тех пор, пока задан
-# dns_upstreams (prod: DNS через туннель + публичные резервные). Пустое значение
-# (dev) поведение не меняет: там хостовый резолвер рабочий.
+# dns_upstreams (dev на VM: явные публичные 9.9.9.9/8.8.8.8 из environments/vm;
+# prod: DNS через туннель + публичные резервные). Пустое значение оставляет
+# дефолтный Corefile k3s (forward . /etc/resolv.conf) и поведение не меняет.
 ensure_coredns_forward() {
   [ -z "$DNS_UPSTREAMS" ] && return 0
   local corefile

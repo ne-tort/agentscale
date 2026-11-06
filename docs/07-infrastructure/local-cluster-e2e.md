@@ -1,13 +1,15 @@
 # Local cluster e2e (GitOps)
 
-Единственный путь: **k3s + Argo CD + kustomize**.
+Единственный путь: **k3s + Argo CD + kustomize**. Кластер поднимается на VM
+`www@172.31.156.203` через **Terraform** ([runbook.md §2](runbook.md); полный цикл
+«снести → поставить с нуля» — §2.2). Ручные `kubectl apply -k infra/argocd/...` —
+не операторский шаг: их выполняет terraform-bootstrap (provisioner `gitops_bootstrap`,
+включая секреты `ghcr-pull`/`repo-agentscale` из `TF_VAR_ghcr_token`).
 
-1. k3s running; `export KUBECONFIG=~/.kube/prodavan-dev.yaml`
-2. `kubectl apply -k infra/argocd/install`
-3. `kubectl apply -k infra/argocd/sealed-secrets`
-4. `kubectl apply -f infra/argocd/root-app.yaml`
-5. Seal/apply `ghcr-pull` — [`overlays/dev/SECRETS.md`](../../infra/k3s/overlays/dev/SECRETS.md)
-6. `cd infra/ops && poetry install && poetry run prodavan-ops wait && poetry run prodavan-ops smoke`
+1. `terraform apply` на VM — k3s + Argo CD + sealed-secrets + root-app + `ghcr-pull`
+2. На VM: `export KUBECONFIG=~/.kube/prodavan-dev.yaml`
+3. `cd infra/ops && poetry install && poetry run prodavan-ops validate && poetry run prodavan-ops wait && poetry run prodavan-ops smoke`
+4. Прогоны: `poetry run prodavan-ops e2e run` / `e2e cleanup` — см. [e2e.md](e2e.md)
 
 Day-2: merge to `main` → Argo sync.
 

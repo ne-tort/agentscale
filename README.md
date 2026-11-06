@@ -20,22 +20,28 @@ SaaS: **управление Pod'ами через UI**, внутри Pod — **
 
 ## Dev cluster (GitOps)
 
-Единственный путь — [`docs/07-infrastructure/runbook.md`](docs/07-infrastructure/runbook.md):
+Кластер живёт на VM `www@172.31.156.203`; Terraform выполняется **на VM** (SSH на
+localhost), Windows-хост — только клиент (SSH/scp/браузер). Единственный путь —
+[`docs/07-infrastructure/runbook.md`](docs/07-infrastructure/runbook.md):
 
 ```bash
-# k3s + Argo bootstrap (once)
-kubectl apply -k infra/argocd/install
-kubectl apply -k infra/argocd/sealed-secrets
-kubectl apply -f infra/argocd/root-app.yaml
+# bootstrap / полный цикл «снести → поставить с нуля» — runbook §2
+ssh www@172.31.156.203
+cd ~/git/agentscale && git pull --ff-only
+export TF_VAR_ghcr_token='<токен>'   # ОБЯЗАТЕЛЕН; значение — с аутентифицированной машины (Windows: gh auth token)
+terraform -chdir=infra/terraform/environments/vm init
+terraform -chdir=infra/terraform/environments/vm apply -auto-approve
 
-# verify
+# verify (на VM)
+export KUBECONFIG=~/.kube/prodavan-dev.yaml
 cd infra/ops && poetry install
 poetry run prodavan-ops wait && poetry run prodavan-ops smoke
 ```
 
-UI: `http://localhost:8088/`.
+UI: `http://172.31.156.203:8088/` (HTTPS `https://172.31.156.203/` — после импорта
+локального CA в браузер). Keycloak: `http://172.31.156.203:8089/`.
 
-Day-2: PR → CI Gate → merge → CI Images → Argo sync → Verify Dev.
+Day-2: PR → CI Gate → merge → CI Images → Argo sync → Verify Dev — **не** через terraform.
 
 ## Локальная разработка API/Flutter (без кластера)
 

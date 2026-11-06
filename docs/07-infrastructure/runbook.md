@@ -1,7 +1,7 @@
 # Ранбук DevOps (Prodavan) — GitOps
 
 Канон поставки: **git → Argo CD → kustomize → k3s**.  
-Императив только `poetry run prodavan-ops {validate|wait|rollout|smoke}`.  
+Императив только `poetry run prodavan-ops {validate|wait|rollout|smoke|dns-check}`.  
 **Запрещены:** `.sh` под `infra/`, docker-compose как кластер, k3d в git, recover/deploy shell.
 
 > ## Политика сред: работаем только с dev (2026-10-08)
@@ -19,8 +19,14 @@
 > Обычный PR завершается на **Verify Dev** (green) — дальше не идём. Промоция в prod — отдельный заход по прямой просьбе.
 
 Репозиторий: [ne-tort/agentscale](https://github.com/ne-tort/agentscale) (подмодуль `prodavan/`).  
-**UI:** http://127.0.0.1:8088/ (Traefik слушает `0.0.0.0:8088`, Ingress без фильтра `host`).  
-После bootstrap — единая форма логин/пароль (Keycloak ROPC). Platform Admin: `admin` / `admin`. Issuer: `http://127.0.0.1:8089/realms/prodavan` (hostPort).
+**Кластер и Terraform живут на VM `www@172.31.156.203`**; Windows-хост — только клиент
+(SSH/scp/браузер), WSL/portproxy/keepalive не нужны.  
+**UI:** http://172.31.156.203:8088/ (Traefik `web`, dev — wildcard Ingress) и
+https://172.31.156.203/ (`websecure`, сертификат локального CA — импорт
+`agentscale-dev-ca.crt` в браузер, см. [VM README](../../infra/terraform/environments/vm/README.md)).  
+После bootstrap — единая форма логин/пароль (Keycloak ROPC). Platform Admin: `admin` / `admin`.
+Issuer (dev overlay): `http://127.0.0.1:8089/realms/agentscale` — закреплён за 127.0.0.1
+специально; Keycloak hostPort 8089, с Windows доступен как `http://172.31.156.203:8089/`.
 
 ---
 
@@ -28,12 +34,12 @@
 
 | Компонент | Где |
 |-----------|-----|
-| Кластер | **k3s** на SSH-хосте. Workloads только из git. |
+| Кластер | **k3s** на VM `www@172.31.156.203` (Terraform выполняется на VM, SSH на localhost). Workloads только из git. |
 | Argo CD | `infra/argocd/install` → `root-app.yaml` → `apps/` → `infra/k3s/overlays/dev` |
 | Sealed Secrets | `infra/argocd/sealed-secrets` + `overlays/dev/SECRETS.md` |
-| Ops CLI | [`infra/ops`](../../infra/ops): `validate` / `wait` / `rollout` / `smoke` |
+| Ops CLI | [`infra/ops`](../../infra/ops): `validate` / `wait` / `rollout` / `smoke` / `dns-check` |
 
-Образы: `ghcr.io/ne-tort/prodavan-{api,web}:latest` (основной репо, CI Images), `ghcr.io/ne-tort/prodavan-agent-runtime:latest` (агент-runtime — собирает **только** openclaw-images в подмодуле prodavan-claw; дубль-job в CI Images удалён 2026-09-24; см. [agent-runtime-delivery.md](agent-runtime-delivery.md)). `imagePullPolicy: Always`, secret `ghcr-pull`. Probe pod в `prodavan-sandboxes` (см. §1.1).
+Образы: `ghcr.io/ne-tort/agentscale-{api,web}:latest` (основной репо, CI Images), `ghcr.io/ne-tort/prodavan-agent-runtime` (агент-runtime — собирает **только** openclaw-images в подмодуле prodavan-claw, dev-оверлей пинит SHA; дубль-job в CI Images удалён 2026-09-24; см. [agent-runtime-delivery.md](agent-runtime-delivery.md)). `imagePullPolicy: Always`, secret `ghcr-pull`. Probe pod `agentscale-probe-pod` в `agentscale-dev-sandboxes` (см. §1.1).
 
 ---
 
@@ -60,12 +66,12 @@ prodavan-claw PR → openclaw-ci → auto-merge
   → openclaw-images (build prodavan-agent-runtime:latest → GHCR)
   → trigger-verify (dispatch Verify Dev in ne-tort/prodavan)
     → Verify Dev: prodavan-ops rollout
-      → restart prodavan-probe-pod (prodavan-sandboxes, imagePullPolicy: Always)
-        → kubelet re-pulls :latest digest
+      → restart agentscale-probe-pod (agentscale-dev-sandboxes, imagePullPolicy: Always)
+        → kubelet re-pulls свежий digest
       → wait Argo → smoke
 ```
 
-**Probe pod** (`prodavan-probe-pod` в namespace `prodavan-sandboxes`) — это long-lived agent-runtime pod для проверки AI-ключей. Включён в `DEPLOYMENT_TARGETS` `prodavan-ops` (вместе с api/web/celery-worker/celery-beat), поэтому `prodavan-ops rollout` перезапускает и его. `imagePullPolicy: Always` → при restart тянется свежий digest.
+**Probe pod** (`agentscale-probe-pod` в namespace `agentscale-dev-sandboxes`) — это long-lived agent-runtime pod для проверки AI-ключей. Включён в `DEPLOYMENT_TARGETS` `prodavan-ops` (вместе с `agentscale-api`/`agentscale-web`/`agentscale-celery-worker`/`agentscale-celery-beat`/`agentscale-celery-indexer`/`searchnet` в `agentscale-dev`), поэтому `prodavan-ops rollout` перезапускает и его. `imagePullPolicy: Always` → при restart тянется свежий digest.
 
 **Project sandbox pods** (динамические, per-project, создаются `pod_service` через `POD_AGENT_RUNTIME_IMAGE` env) — при создании нового sandbox pod подхватит свежий digest (Always + новый pod = новый pull). Уже запущенные sandbox pods обновляются при reload/sync проекта (recreate).
 
@@ -75,28 +81,155 @@ prodavan-claw PR → openclaw-ci → auto-merge
 
 ## 2. Bootstrap кластера (канон)
 
-**Только два шага: SSH-хост + Terraform.**
+**Только два шага: SSH-хост + Terraform.** Dev: Terraform выполняется **на VM**
+(SSH на localhost, state на VM). Prod: apply идёт **с Windows-хоста** по SSH на сервер.
 
-### 2.1 Dev-кластер (общий хост, dev+prod контуры)
+### 2.1 Dev-кластер (VM `www@172.31.156.203`, dev+prod контуры на общем хосте)
+
+Terraform, checkout `~/git/agentscale` и `terraform.tfstate` живут на VM; с Windows — только SSH:
 
 ```bash
-cd infra/terraform/environments/vm
-export TF_VAR_ghcr_token="$(gh auth token)"
-terraform init
-terraform apply -auto-approve
+# Токен берётся на Windows (gh залогинен там; на VM gh НЕ залогинен):
+#   pwsh> gh auth token                            # read:packages
+ssh www@172.31.156.203
+cd ~/git/agentscale && git pull --ff-only          # нужен актуальный модуль
+export TF_VAR_ghcr_token='<токен с Windows>'       # ОБЯЗАТЕЛЕН; не коммитить, на диск не писать
+terraform -chdir=infra/terraform/environments/vm init
+terraform -chdir=infra/terraform/environments/vm apply -auto-approve
 # UI:
 #   https://172.31.156.203/  (или http://172.31.156.203:8088/)
 ```
 
-Подробности хоста/ключа: [`infra/terraform/environments/vm/README.md`](../../infra/terraform/environments/vm/README.md).
+Пустой `TF_VAR_ghcr_token` теперь падает **сразу** (в `gitops-bootstrap.sh`, с точной
+командой для исправления): без токена не создаются секреты `ghcr-pull` / `repo-agentscale`,
+Argo не может читать приватный репозиторий, а kubelet — тянуть образы. `gh` на VM
+**не залогинен** — значение токена генерируется на аутентифицированной машине
+(Windows: `gh auth token`) и передаётся в SSH-сессию.
 
-### 2.2 Prod-кластер (выделенный сервер, только prod)
+Первый apply «с нуля» идёт **~25–40 мин** (тайминги — §2.2). Повторный apply идемпотентен;
+работающий k3s не переустанавливается (day-2), но при изменении `/etc/rancher/k3s/config.yaml`
+сервис перезапускается (kubelet-arg/resolv-conf читаются только на старте).
+
+Два разных SSH-ключа, не перепутать: ключ на Windows — для входа **с Windows на VM**;
+Terraform на VM ходит на localhost и использует `~/.ssh/prodavan_tf` (`ssh_private_key_path`).
+
+Подробности хоста/ключа/CA: [`infra/terraform/environments/vm/README.md`](../../infra/terraform/environments/vm/README.md).
+
+### 2.2 Полный цикл: снести → поставить с нуля на dev-VM
+
+Контракт provisioner'ов — **`v14-clean-install`**. Все команды **на VM**
+(`ssh www@172.31.156.203`), из `~/git/agentscale/infra/terraform/environments/vm`.
+
+**Шаг 1. Снос.**
 
 ```bash
-cd infra/terraform/environments/prod
-export TF_VAR_ghcr_token="$(gh auth token)"
+terraform state list          # ожидаем 4 ресурса: k3s_server, k3s_uninstall,
+                              #   gitops_bootstrap, host_dns (модуль k3s-dev-host)
+terraform destroy -auto-approve
+```
+
+`destroy` прогоняет destroy-provisioner'ы в обратном порядке
+(`gitops_bootstrap → k3s_uninstall → host_dns → k3s_server`). После `k3s_uninstall`
+на хосте **не остаётся ничего кластерного** — следующий apply ставит с нуля:
+
+- `/var/lib/rancher/k3s` — etcd/sqlite, containerd-образы, **данные local-path PVC**
+  и TLS CA (`agentscale-tls/` уходит вместе с data-dir; новый CA генерируется при установке);
+- `/etc/rancher/k3s`, `/var/lib/kubelet`, `/var/lib/cni`, `/run/k3s`, `/run/flannel`,
+  `/var/log/pods`, `/var/log/containers`;
+- бинарники `/usr/local/bin/k3s*`, unit `k3s.service`(+env), boot-heal drop-in
+  (`/etc/systemd/system/k3s.service.d`) и скрипты `/usr/local/lib/prodavan`;
+- оба kubeconfig (`/home/www/.kube/prodavan-dev.yaml` и CI-раннерский
+  `/home/runner/.kube/prodavan-dev.yaml`) + экспорт CA `~/agentscale-dev-ca.crt`;
+- iptables-чистка: из сохранённых правил вырезаются `KUBE-`/`CNI-`/flannel-цепочки
+  (k3s-killall снимает только свои; чужой DNAT от прошлого кластера — классический
+  симптом «грязной» установки);
+- managed DNS drop-in `/etc/systemd/resolved.conf.d/99-zz-agentscale-dns.conf`
+  (destroy `host_dns`; legacy-файл `99-dot.conf` удаляется provisioner'ом при
+  следующей установке — DNS-контракт v14, §3.1).
+
+Destroy-provisioner `k3s_uninstall` **не** `on_failure = continue`: если снос не удался,
+`destroy` падает с ошибкой, а не «успешно» оставляет живой k3s на хосте.
+
+**Шаг 1b. Если state потерян, а кластер жив** — destroy нечего удалять; чистая установка
+поверх живого кластера делается одним флагом:
+
+```bash
+terraform apply -auto-approve -var force_reinstall=true
+terraform apply -auto-approve -var force_reinstall=false   # снять флаг
+```
+
+`force_reinstall` стирает предыдущее состояние **до** установки (k3s-uninstall + rm
+data-dir) и входит в triggers `k3s_server`, поэтому пересоздаёт provisioner'ы. Обратное
+переключение в `false` только перезапускает идемпотентные provisioner'ы — без переустановки.
+
+**Шаг 2. Установка.**
+
+```bash
+cd ~/git/agentscale && git pull --ff-only          # нужен актуальный модуль
+cd infra/terraform/environments/vm
+export TF_VAR_ghcr_token='<токен>'                 # ОБЯЗАТЕЛЕН: пустой — падение сразу.
+                                                   # Токен — с аутентифицированной машины
+                                                   # (Windows: gh auth token; на VM gh не залогинен)
 terraform init
 terraform apply -auto-approve
+```
+
+**Тайминги первого apply после сноса (суммарно ~25–40 мин):**
+
+После установки на хосте действует DNS-контракт v14 (drop-in `systemd-resolved`,
+`/etc/resolv.conf` → штатный stub-симлинк, `/etc/k3s-resolv.conf` с `9.9.9.9`/`8.8.8.8`
+напрямую) — детали и проверка в §3.1.
+
+| Этап | Бюджет ожидания |
+|------|-----------------|
+| Скачивание k3s (curl с ретраями) + установка | — |
+| k3s API `/readyz` (холодная VM: свежие containerd-кэш и образы) | до **540 с (9 мин)**; на таймауте в вывод печатаются `systemctl status k3s` и `journalctl` |
+| Node Ready (`kubectl wait`) | 300 с |
+| Argo CD: `argocd-server`, `argocd-repo-server` (по очереди) | по **600 с** |
+| `sealed-secrets-controller` | 300 с |
+| Application `agent-sandbox` (CRD должны встать до платформы) | 8 мин (48×10 с; если не успела — WARN с диагностикой, не fail) |
+| Application `agentscale-dev` Synced+Healthy (keycloak/postgres/opensearch/redpanda/mongo + pull всех образов) | **18 мин** (108×10 с); на провале — дамп Application/подов/событий и список частых причин |
+
+**Шаг 3. Если apply упал посередине** — просто повторить `terraform apply -auto-approve`.
+Все provisioner'ы идемпотентны, ни один шаг не требует «удалить state, чтобы повторить»;
+если платформа уже поднялась, `gitops-bootstrap.sh` коротко выходит на
+`gitops-already-healthy`. Частые причины провала: пустой/протухший `TF_VAR_ghcr_token`
+(ImagePullBackOff), память (CrashLoop keycloak/postgres), недоступный репозиторий
+(Argo OutOfSync).
+
+**Шаг 4. Верификация (на VM):**
+
+```bash
+export KUBECONFIG=~/.kube/prodavan-dev.yaml
+cd ~/git/agentscale/infra/ops && poetry install    # или python3 -m venv + pip install -e .
+poetry run prodavan-ops validate    # контракт репо + kustomize render + пины образов (кластер не нужен)
+poetry run prodavan-ops wait        # Argo agentscale-dev Synced+Healthy
+poetry run prodavan-ops smoke       # /health/live, /health/ready, /api/v1/auth/config, /
+poetry run prodavan-ops dns-check   # резолв ИЗ пода; дефолт ищет под сначала в dev-контуре
+resolvectl status                   # Global показывает ровно 9.9.9.9 8.8.8.8 (DNS-контракт v14, §3.1)
+```
+
+`wait`/`rollout`/`smoke`/`dns-check` требуют живого кластера; `validate` — только
+`kubectl`/`kustomize` на PATH. Готовность k3s API ops-CLI проверяет через `/readyz`
+(а не `get ns agentscale-dev` — на свежем кластере namespace появляется только после
+sync платформы, и старая проба выглядела как «API не готов» на здоровом кластере).
+
+**Шаг 5. UI и доступы:**
+
+- UI: **http://172.31.156.203:8088/** или **https://172.31.156.203/** (для HTTPS —
+  импорт `agentscale-dev-ca.crt` в доверенные корневые браузера, см. VM README);
+- Keycloak: **http://172.31.156.203:8089/** (realm `agentscale`, логин `admin` / `admin`);
+- kubectl с Windows: `scp www@172.31.156.203:.kube/prodavan-dev.yaml $env:USERPROFILE\.kube\prodavan-dev.yaml`
+  и заменить в файле `server: https://127.0.0.1:6443` → `https://172.31.156.203:6443`.
+
+### 2.3 Prod-кластер (выделенный сервер, только prod)
+
+Terraform для prod выполняется **с Windows-хоста** по SSH (на сервере terraform не нужен):
+
+```powershell
+$env:TF_VAR_ghcr_token = (gh auth token)
+terraform -chdir=infra/terraform/environments/prod init
+terraform -chdir=infra/terraform/environments/prod apply -auto-approve
 # UI: https://185.103.100.124/  (или http://185.103.100.124:30090/)
 ```
 
@@ -107,7 +240,7 @@ agentscale-prod (dev/e2e на этот хост не ставятся), Traefik 
 
 Day-2: merge в `main` + Argo. Не `kubectl apply -k infra/k3s/...` руками.
 
-### 2.3 Устойчивость старта кластера
+### 2.4 Устойчивость старта кластера
 
 После ребута ноды сервисы поднимаются неравномерно (postgres/opensearch/keycloak —
 минуты). Чтобы медленный старт не превращался в CrashLoop:
@@ -128,7 +261,9 @@ Day-2: merge в `main` + Argo. Не `kubectl apply -k infra/k3s/...` рукам�
 3. PVC local-path на диске узла.  
 4. ImagePullBackOff → `ghcr-pull`, не image import.
 
-Не ставить **Docker Engine** в тот же OS, где k3s (маскировать docker).  
+На VM (`host_profile = "vm"`) Docker Engine **сосуществует** с k3s — он нужен
+CI-раннерам на том же хосте, k3s его не трогает (не маскировать). Правило WSL-эры
+«маскировать docker» относится только к `host_profile = "wsl"` (исторический контур).  
 Не оставлять незалогиненный Tailscale рядом с CNI.
 
 ### 3.1 DNS кластера после ребута (инциденты 2026-10-22, 2026-10-23, 2026-10-29)
@@ -155,7 +290,7 @@ refresh) отдавал 502 «Сервер временно недоступен
 
 ```bash
 # резолв ИЗ ПОДА (не с хоста!)
-kubectl -n agentscale exec <pod> -- python3 -c \
+kubectl -n agentscale-dev exec <pod> -- python3 -c \
   "import socket;print(socket.gethostbyname('github.com'))"
 
 # поток таймаутов CoreDNS = мёртвый upstream
@@ -168,7 +303,11 @@ dig +short @<host-nameserver> github.com
 Или одной командой (падает с готовым диагнозом и инструкцией):
 
 ```bash
-prodavan-ops dns-check --namespace agentscale
+prodavan-ops dns-check
+# без --namespace под ищет в dev-контуре первым:
+#   agentscale-dev → agentscale-dev-sandboxes → agentscale → agentscale-sandboxes
+# (старый дефолт `agentscale` на чистом dev-кластере падал как «нет Running-пода»,
+# хотя DNS был жив — на dev-контуре подов в prod-ns просто нет)
 ```
 
 **Фикс (декларативный).** Не полагаться на единственный upstream из
@@ -176,21 +315,43 @@ prodavan-ops dns-check --namespace agentscale
 (инцидент 2026-10-29: `DNSOverTLS=yes` на `1.1.1.1:853`, порт заблокирован →
 pod'ы перестали резолвить `auth.x.ai`, Grok OAuth отдавал 502).
 
-Всё задаётся в Terraform-модуле `infra/terraform/modules/k3s-dev-host`:
+**DNS-контракт v14 (dev-VM после чистой установки).** Всё задаётся Terraform-модулем
+`infra/terraform/modules/k3s-dev-host`:
 
-- `dns_upstreams` — явный `forward . <живой> <резерв> { policy sequential; max_fails 1; health_check 5s }`
-  для CoreDNS. Для dev: `9.9.9.9 8.8.8.8` (1.1.1.1:53 из CoreDNS-пода
-  ловит таймауты под нагрузкой searchnet — проверено 2026-10-29).
-- `host_dns_servers` / `host_dns_over_tls` — managed drop-in
-  `/etc/systemd/resolved.conf.d/99-zz-agentscale-dns.conf` (plain DNS, без DoT)
-  и рестарт `systemd-resolved`. Для dev: `9.9.9.9 8.8.8.8`, `no`.
-- `post-k3s-heal.sh` (systemd `ExecStartPost` k3s) **переприменяет** CoreDNS
-  upstreams после каждого старта k3s, потому что k3s перезаписывает addon
-  ConfigMap. Значения upstream'ов входят в triggers `null_resource`, так что
-  `terraform apply` переустанавливает скрипт при их изменении.
-- `Verify Dev` прогоняет `prodavan-ops dns-check --namespace agentscale-dev`;
-  `REQUIRED_HOSTS` включает `auth.x.ai`, поэтому битый DNS валит деплой, а не
-  всплывает позже как «Сервер временно недоступен».
+1. **Хост**: `systemd-resolved`; управляемый drop-in
+   `/etc/systemd/resolved.conf.d/99-zz-agentscale-dns.conf` — сброс `DNS=` +
+   `DNS=9.9.9.9 8.8.8.8`, `DNSOverTLS=no`, пустой `FallbackDNS=`,
+   `DNSStubListenerExtra=172.31.156.203` (IP ноды, а не loopback — SSH-хост
+   `127.0.0.1` для stub-слушателя непригоден). Legacy-файл `99-dot.conf` (ручной
+   артефакт инцидента 2026-10-29, тащил `1.1.1.1` первым) **удаляется**
+   provisioner'ом.
+2. **`/etc/resolv.conf`**: штатный симлинк → `/run/systemd/resolve/stub-resolv.conf`
+   (`127.0.0.53`). Прежний ручной статический файл (`nameserver 172.31.156.203`)
+   нормализуется provisioner'ом.
+3. **`/etc/k3s-resolv.conf`**: terraform-управляемый **по содержимому**
+   (идемпотентно): `nameserver 9.9.9.9` + `nameserver 8.8.8.8` **напрямую**, без
+   stub — kubelet/CoreDNS (`dnsPolicy: Default`) не зависят от `systemd-resolved`.
+4. **k3s `config.yaml`**: `resolv-conf: /etc/k3s-resolv.conf` (дописывается
+   provisioner'ом; файл читается только на старте k3s — при дрейфе config.yaml
+   сервис перезапускается).
+5. **`post-k3s-heal.sh`** (systemd `ExecStartPost` k3s) патчит Corefile CoreDNS на
+   `forward . 9.9.9.9 8.8.8.8 { policy sequential; max_fails 1; health_check 5s }`
+   после каждого старта k3s (k3s перезаписывает addon ConfigMap) — остаётся
+   страховкой; стартовое окно больше не деградирует. Значения upstream'ов входят в
+   triggers `null_resource`, так что `terraform apply` переустанавливает скрипт при
+   их изменении.
+6. **Проверка**: `prodavan-ops dns-check` (ищет под в dev-ns первым; хосты
+   `github.com`, `auth.x.ai`) + после apply `resolvectl status` должен показывать
+   Global ровно `9.9.9.9 8.8.8.8`.
+
+Переменные модуля (значения для dev): `dns_upstreams = "9.9.9.9 8.8.8.8"`
+(1.1.1.1:53 из CoreDNS-пода ловит таймауты под нагрузкой searchnet — проверено
+2026-10-29), `host_dns_servers = "9.9.9.9 8.8.8.8"`, `host_dns_over_tls = "no"`,
+`host_dns_stub_listener_extra = 172.31.156.203`, `k3s_resolv_conf = "/etc/k3s-resolv.conf"`.
+
+`Verify Dev` прогоняет `prodavan-ops dns-check --namespace agentscale-dev`;
+`REQUIRED_HOSTS` включает `auth.x.ai`, поэтому битый DNS валит деплой, а не
+всплывает позже как «Сервер временно недоступен».
 
 **Break-glass (только если Terraform/boot-heal ещё не применён).** Патч
 ConfigMap руками; после этого всё равно привести состояние к Terraform:
@@ -302,10 +463,11 @@ kubelet-arg:
 **Проверка.**
 
 ```bash
-sudo k3s kubectl get node pc-for-ai -o jsonpath='{.status.allocatable.memory}'
-# 12806844Ki  (было 15608508Ki)
+NODE=$(sudo k3s kubectl get nodes -o jsonpath='{.items[0].metadata.name}')
+sudo k3s kubectl get node "$NODE" -o jsonpath='{.status.allocatable.memory}'
+# на момент инцидента 2026-10-23: 12806844Ki  (было 15608508Ki)
 
-sudo k3s kubectl get --raw /api/v1/nodes/pc-for-ai/proxy/configz \
+sudo k3s kubectl get --raw "/api/v1/nodes/$NODE/proxy/configz" \
   | python3 -c 'import json,sys; d=json.load(sys.stdin)["kubeletconfig"]; print(d["evictionHard"], d["systemReserved"])'
 
 sudo k3s kubectl get limitrange,resourcequota -n argocd
@@ -331,7 +493,7 @@ Keycloak 1.5 + Kafka 2 + searchnet 4 + MongoDB) — запас есть, но н
 | Verify Dev | `rollout` + `wait` + `dns-check` (github.com, auth.x.ai) + `smoke` |
 | Auto-merge | squash после Gate |
 
-Self-hosted runners и kubeconfig для Verify — только [`infra/github-runner/`](../../infra/github-runner/README.md) (не bootstrap UI).
+Self-hosted runners — на той же VM (systemd-сервисы `actions.runner.*`): [`infra/github-runner-vm/`](../../infra/github-runner-vm/README.md). Kubeconfig для Verify `/home/runner/.kube/prodavan-dev.yaml` кладёт тот же terraform apply (`runner_kubeconfig_path`, server `127.0.0.1:6443`); с Windows ничего синхронизировать не нужно. Исторический Docker Desktop-вариант — [`infra/github-runner/`](../../infra/github-runner/README.md) (не bootstrap UI).
 
 ---
 
@@ -339,19 +501,20 @@ Self-hosted runners и kubeconfig для Verify — только [`infra/github-
 
 | Компонент | Значение |
 |-----------|----------|
-| Bucket | `prodavan` (private, versioning off) |
-| Init Job | `prodavan-minio-init` — **Sync hook, wave 9** (до `prodavan-api` wave 10); bucket + IAM user `prodavan-api` |
-| API creds | `S3_ACCESS_KEY=prodavan-api` в `prodavan-api-secrets` |
-| Root creds | `prodavan-minio` Secret — только init / break-glass |
-| PVC | `prodavan-minio-data` (10Gi, RWO) — данные переживают pod reschedule |
+| Service | `agentscale-minio:9000` (консоль :9001), ns `agentscale-dev` |
+| Bucket | `agentscale` (private, versioning off) |
+| Init Job | `agentscale-minio-init` — **Sync hook, wave 9** (до `agentscale-api` wave 10); bucket + IAM user `agentscale-api` |
+| API creds | `S3_ACCESS_KEY=agentscale-api` в `agentscale-api-secrets` |
+| Root creds | `agentscale-minio` Secret — только init / break-glass |
+| PVC | `agentscale-minio-data` (10Gi, RWO) — данные переживают pod reschedule |
 
 **Ротация API creds (dev/staging):**
 
-1. Сгенерировать новый пароль; обновить `prodavan-minio` Secret (`api-password`) и `prodavan-api-secrets` (`S3_SECRET_KEY`) в git (SealedSecret на shared).
+1. Сгенерировать новый пароль; обновить `agentscale-minio` Secret (`api-password`) и `agentscale-api-secrets` (`S3_SECRET_KEY`) в git (SealedSecret на shared).
 2. Argo sync → init Job пересоздаёт/обновляет user policy (idempotent).
-3. Rollout `prodavan-api`; smoke `/health/ready`.
+3. Rollout `agentscale-api`; smoke `/health/ready`.
 
-**Verify PVC retain:** `prodavan-ops validate` проверяет наличие PVC `prodavan-minio-data` в overlay render.
+**Verify PVC retain:** `prodavan-ops validate` проверяет наличие PVC `agentscale-minio-data` (и Job `agentscale-minio-init` c hook Sync wave 9) в overlay render.
 
 API **не** вызывает `create_bucket` на startup — только `head_bucket` health.
 
@@ -361,14 +524,14 @@ API **не** вызывает `create_bucket` на startup — только `hea
 
 | Компонент | Значение |
 |-----------|----------|
-| Service | `prodavan-mongodb:27017` (ns `prodavan`) |
-| Init Job | `prodavan-mongodb-init` — Sync hook wave 9; app user `prodavan` + db `prodavan` |
-| API creds | `MONGODB_URL` в `prodavan-api-secrets` (app user, `authSource=admin`) |
-| Root creds | `prodavan-mongodb` Secret — только init / break-glass |
-| PVC | `prodavan-mongodb-data` (5Gi, RWO) |
+| Service | `agentscale-mongodb:27017` (ns `agentscale-dev`) |
+| Init Job | `agentscale-mongodb-init` — Sync hook wave 9; app user `agentscale` + db `agentscale` |
+| API creds | `MONGODB_URL` в `agentscale-api-secrets` (app user, `authSource=admin`) |
+| Root creds | `agentscale-mongodb` Secret — только init / break-glass |
+| PVC | `agentscale-mongodb-data` (5Gi, RWO) |
 | Sandbox | **нет** egress на 27017 — только API process |
 
-Document Store BC: in-proc Port + admin HTTP; Kafka bus `document` → `prodavan.document.events`.
+Document Store BC: in-proc Port + admin HTTP; Kafka bus `document` → `agentscale.document.events`.
 
 ---
 
@@ -376,14 +539,14 @@ Document Store BC: in-proc Port + admin HTTP; Kafka bus `document` → `prodavan
 
 | Компонент | Значение |
 |-----------|----------|
-| Service | `prodavan-opensearch:9200` (ns `prodavan`) |
-| Init Job | `prodavan-opensearch-init` — Sync hook wave 9; smoke `/_cluster/health` |
-| API | `OPENSEARCH_URL`, `OPENSEARCH_ENABLED`, `OPENSEARCH_REQUIRED` in `prodavan-config` |
+| Service | `agentscale-opensearch:9200` (ns `agentscale-dev`) |
+| Init Job | `agentscale-opensearch-init` — Sync hook wave 9; smoke `/_cluster/health` |
+| API | `OPENSEARCH_URL`, `OPENSEARCH_ENABLED`, `OPENSEARCH_REQUIRED` in `agentscale-config` |
 | Security | MVP: `DISABLE_SECURITY_PLUGIN=true`; ACL in Search Index BC |
-| PVC | `prodavan-opensearch-data` (10Gi, RWO) |
+| PVC | `agentscale-opensearch-data` (10Gi, RWO) |
 | Sandbox | **нет** egress на 9200 — только API process |
 
-Search Index BC: in-proc Port + admin HTTP `/admin/search-index`; Kafka bus `search` → `prodavan.search.events`.
+Search Index BC: in-proc Port + admin HTTP `/admin/search-index`; Kafka bus `search` → `agentscale.search.events`.
 
 ---
 
@@ -391,11 +554,11 @@ Search Index BC: in-proc Port + admin HTTP `/admin/search-index`; Kafka bus `sea
 
 | Компонент | Значение |
 |-----------|----------|
-| Public issuer | `http://127.0.0.1:8089/realms/prodavan` (Keycloak hostPort 8089) |
-| In-cluster Admin | `http://prodavan-keycloak:8080` |
-| Init Job | `prodavan-keycloak-init` — Sync hook wave 8 (до API); SA roles + user `admin`/`admin` |
+| Public issuer | `http://127.0.0.1:8089/realms/agentscale` (Keycloak hostPort 8089; с Windows — `http://172.31.156.203:8089/`) |
+| In-cluster Admin | `http://agentscale-keycloak:8080` |
+| Init Job | `agentscale-keycloak-init` — Sync hook wave 8 (до API); realm `agentscale` + clients + SA roles + user `admin`/`admin` |
 | Platform Admin | username `admin`, password `admin`, realm role `platform.admin` |
 | API | `AUTH_MODE=oidc`, `KEYCLOAK_INVITE_MODE=admin`, JWKS via in-cluster URL |
 
-Flutter login: ROPC (`grant_type=password`) на client `prodavan-flutter`. One-click test personas удалены.
+Flutter login: ROPC (`grant_type=password`) на client `agentscale-flutter`. One-click test personas удалены.
 

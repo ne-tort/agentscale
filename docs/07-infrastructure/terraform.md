@@ -1,221 +1,119 @@
-# Terraform
+# Terraform (as-built)
 
-Infrastructure as Code для базовой облачной инфраструктуры Prodavan. Kubernetes manifests и Helm charts — в `infra/k3s/`; Terraform — **cloud primitives** (VPC, nodes, managed DB, object storage).
+Живой Terraform в этом репозитории — **bootstrap/destroy кластеров** через один модуль
+[`modules/k3s-dev-host`](../../infra/terraform/modules/k3s-dev-host) (null_resource +
+SSH-provisioner'ы; контракт provisioner'ов — `v14-clean-install`, ревизия в
+`locals.k3s_rev`). Day-2 поставка — **не** через Terraform, а через GitOps
+(git → Argo CD → kustomize → k3s): [`runbook.md`](runbook.md).
 
----
-
-## Repository layout
-
-```text
-infra/terraform/
-├── README.md
-├── versions.tf
-├── backends.tf
-├── modules/
-│   ├── network/           # VPC, subnets, security groups
-│   ├── k3s-cluster/       # VM pool for k3s nodes
-│   ├── postgres/          # managed PostgreSQL
-│   ├── object-storage/    # S3 bucket + IAM
-│   ├── redis/             # managed Redis (optional)
-│   └── dns/               # records for api.prodavan.ru
-└── environments/
-    ├── dev/
-    │   ├── main.tf
-    │   ├── variables.tf
-    │   └── terraform.tfvars
-    ├── staging/
-    └── prod/
-```
+Облачные модули (`network`, `k3s-cluster`, `postgres`, `object-storage`) и окружения
+`environments/dev`, `environments/staging` — **неприменённые cloud skeletons**
+(заглушки дизайна, провайдеры не подключены). Не путать их с живыми окружениями ниже;
+`backends.tf` содержит реальный backend `local`, S3-backend закомментирован.
 
 ---
 
-## State management
+## Окружения (живые)
+
+| Окружение | Хост | Где выполняется terraform | State | Что ставит |
+|-----------|------|---------------------------|-------|------------|
+| [`environments/vm`](../../infra/terraform/environments/vm/README.md) | dev-VM `www@172.31.156.203` (Ubuntu 24.04, там же CI-раннеры) | **на VM** (SSH на localhost, ключ `~/.ssh/prodavan_tf`, checkout `~/git/agentscale`) | `backend "local"` → `terraform.tfstate` в каталоге env **на VM** | k3s + Traefik hostPort 8088/443 (локальный CA) + Argo CD + sealed-secrets + root-app (`gitops_apps = "all"`: dev+prod+e2e контуры) + kubeconfig'и (www + runner) |
+| [`environments/prod`](../../infra/terraform/environments/prod/README.md) | выделенный сервер `vzlet-ai@185.103.100.124:44345` | **с Windows-хоста** по SSH (ключ `~/.ssh/myserver_key`) | `backend "local"` → `terraform.tfstate` рядом с env (на Windows) | k3s + Traefik 80/443 + Argo + root-app-prod (`gitops_apps = "prod"`: только projects + agent-sandbox + agentscale-prod, из ветки `prod`) |
+| `environments/local` | исторический (Kali WSL — удалён) | — | — | не используется; сохранён как справка по `host_profile = "wsl"` |
+
+Команды полного цикла (destroy → apply с нуля, force_reinstall при потерянном state,
+тайминги, верификация) — [`runbook.md` §2](runbook.md) и README соответствующего окружения.
+
+---
+
+## State
 
 ```hcl
-# backends.tf
+# backends.tf (реальный backend; S3 закомментирован до появления облачного state)
 terraform {
-  backend "s3" {
-    bucket         = "prodavan-terraform-state"
-    key            = "env/${terraform.workspace}/terraform.tfstate"
-    region         = "ru-central1"
-    encrypt        = true
-    dynamodb_table = "prodavan-terraform-locks"
+  backend "local" {
+    path = "terraform.tfstate"
   }
 }
 ```
 
-Workspaces: `dev`, `staging`, `prod` — isolated state.
+State живёт там, где выполняется terraform: dev — на VM (`~/git/agentscale/infra/terraform/environments/vm/terraform.tfstate`),
+prod — на Windows. Workspaces не используются; изоляция сред — каталогами окружений.
+
+**Потеря state (dev) не блокирует снос/установку:** чистая установка поверх живого
+кластера делается флагом `force_reinstall` (см. runbook §2.2, шаг 1b).
 
 ---
 
-## Module: network
+## Модуль k3s-dev-host — что делают provisioner'ы
 
-```hcl
-module "network" {
-  source = "../../modules/network"
+Порядок create: `host_dns` → `k3s_server` → (`k3s_uninstall` — только destroy-time) →
+`gitops_bootstrap`. Порядок destroy — обратный.
 
-  vpc_cidr             = "10.0.0.0/16"
-  public_subnet_cidrs  = ["10.0.1.0/24", "10.0.2.0/24"]
-  private_subnet_cidrs = ["10.0.10.0/24", "10.0.11.0/24"]
+| Ресурс | Назначение |
+|--------|------------|
+| `null_resource.host_dns` | DNS-контракт v14 на хосте: managed drop-in `systemd-resolved` (сброс `DNS=` + `DNS=9.9.9.9 8.8.8.8`, `DNSOverTLS=no`, пустой `FallbackDNS=`, `DNSStubListenerExtra=<IP ноды>`), удаление legacy `99-dot.conf`, нормализация `/etc/resolv.conf` в штатный симлинк stub-resolv.conf + снятие drop-in при destroy |
+| `null_resource.k3s_server` | `/etc/k3s-resolv.conf` (terraform-управляемый по содержимому: `nameserver 9.9.9.9` + `nameserver 8.8.8.8` напрямую, без stub), sysctl unprivileged ports, config.yaml (kubelet-резервы/eviction-пороги + `resolv-conf:`), manifests (traefik-port, platform-guards), boot-heal drop-in (ExecStartPost), preflight/post-k3s-heal/TLS-скрипты, опциональный wipe (`force_reinstall`), установка k3s (get.k3s.io, retry) или рестарт при дрейфе config.yaml, wait `/readyz` **540 с** + node Ready 300 с, kubeconfig'и (оператор + CI runner) |
+| `null_resource.k3s_uninstall` | destroy-time полный wipe: k3s-uninstall.sh + явный rm (data-dir с etcd/sqlite, containerd-образами, local-path PVC и TLS CA; `/etc/rancher/k3s`, kubelet/cni/run-каталоги, бинарники, unit, boot-heal, `/usr/local/lib/prodavan`, kubeconfig'и, экспорт CA) + iptables-чистка `KUBE-`/`CNI-`/flannel. **Без** `on_failure = continue`: снос либо удался, либо destroy падает |
+| `null_resource.gitops_bootstrap` | Argo CD install (wait `argocd-server`/`argocd-repo-server` по **600 с**), секреты `repo-agentscale` + `ghcr-pull` (из `TF_VAR_ghcr_token`; **пустой токен — немедленное падение** с подсказкой), sealed-secrets (300 с), root-app, wait `agent-sandbox` 8 мин (WARN) и платформы (`agentscale-dev`/`agentscale-prod`) Synced+Healthy **18 мин** с диагностикой на провале. Идемпотентен: повторный apply при живой платформе выходит на `gitops-already-healthy` |
+| `null_resource.sshd` | только `host_profile = "wsl"` (кастомный sshd:2222); на VM не создаётся |
+| `null_resource.windows_kubeconfig` | только CI-легаси (`export_docker_kubeconfig = true`); в живых окружениях выключен |
 
-  tags = local.common_tags
-}
-```
+Ключевые переменные модуля: `host_profile` (vm|wsl), `force_reinstall`, `ghcr_token`
+(`TF_VAR_ghcr_token`, read:packages), `k3s_resolv_conf` (dev: `/etc/k3s-resolv.conf`),
+`dns_upstreams` / `host_dns_servers` / `host_dns_over_tls` / `host_dns_stub_listener_extra`
+(declarative DNS, см. runbook §3.1), `https_tls_sans` (локальный CA + leaf как default
+TLSStore Traefik), `k3s_tls_sans`, `runner_kubeconfig_path`, `gitops_apps` (all|prod),
+`bootstrap_gitops`, `k3s_version` (намеренно **не** в triggers — уже работающий k3s не
+переустанавливается).
 
-Outputs:
-- `vpc_id`
-- `public_subnet_ids`
-- `private_subnet_ids`
-- `default_security_group_id`
-
----
-
-## Module: k3s-cluster
-
-Provisions VM instances for k3s (not managed K8s — cost control).
-
-```hcl
-module "k3s" {
-  source = "../../modules/k3s-cluster"
-
-  cluster_name     = "prodavan-${var.env}"
-  server_count     = var.env == "prod" ? 3 : 1
-  agent_count      = var.worker_node_count
-  instance_type    = var.k3s_instance_type
-  subnet_ids       = module.network.private_subnet_ids
-  ssh_key_name     = var.ssh_key_name
-
-  # cloud-init installs k3s, joins agents
-  k3s_version      = "v1.29.5+k3s1"
-}
-```
-
-Outputs:
-- `kubeconfig` (sensitive → CI secret)
-- `server_ips`
-- `api_endpoint`
-
----
-
-## Module: postgres
-
-Managed PostgreSQL 16:
-
-```hcl
-module "postgres" {
-  source = "../../modules/postgres"
-
-  name               = "prodavan-${var.env}"
-  instance_class     = var.pg_instance_class
-  allocated_storage  = var.pg_storage_gb
-  subnet_ids         = module.network.private_subnet_ids
-  vpc_id             = module.network.vpc_id
-
-  databases = ["prodavan"]
-  extensions = ["pgcrypto", "uuid-ossp"]
-
-  backup_retention_days = var.env == "prod" ? 30 : 7
-}
-```
-
-Output: `connection_string` → K8s Secret via external-secrets operator.
-
----
-
-## Module: object-storage
-
-```hcl
-module "storage" {
-  source = "../../modules/object-storage"
-
-  bucket_name = "prodavan-${var.env}-files"
-  versioning  = var.env == "prod"
-  lifecycle_rules = [{
-    prefix = "tenants/*/cabinets/*/integrations/s4b-cache/"
-    expiration_days = 14
-  }]
-}
-```
-
-IAM policy: api + worker service accounts — scoped `s3:PutObject`, `s3:GetObject` on bucket prefix.
-
----
-
-## Environment: prod main.tf
-
-```hcl
-locals {
-  env  = "prod"
-  tags = { Project = "prodavan", Environment = local.env }
-}
-
-module "network" { ... }
-module "k3s" {
-  worker_node_count = 5
-  k3s_instance_type = "standard-4"
-}
-module "postgres" {
-  pg_instance_class = "db.r6g.large"
-  pg_storage_gb     = 200
-}
-module "storage" { ... }
-module "dns" {
-  records = {
-    "api.prodavan.ru" = module.k3s.api_endpoint
-  }
-}
-```
-
----
-
-## Variables (prod example)
-
-| Variable | prod | staging | dev |
-|----------|------|---------|-----|
-| `worker_node_count` | 5 | 2 | 1 |
-| `pg_instance_class` | db.r6g.large | db.t4g.medium | db.t4g.micro |
-| `pg_storage_gb` | 200 | 50 | 20 |
+Смена смысла provisioner'ов повышает `locals.k3s_rev` (сейчас `v14-clean-install`) —
+это пересоздаёт `k3s_server` и `gitops_bootstrap` при следующем apply.
 
 ---
 
 ## Apply workflow
 
+CI plan/apply **нет** — Terraform запускает оператор вручную:
+
 ```bash
-cd infra/terraform/environments/staging
-terraform init
-terraform plan -out=plan.tfplan
-terraform apply plan.tfplan
+# dev (на VM; токен — с Windows, gh на VM НЕ залогинен: pwsh> gh auth token):
+ssh www@172.31.156.203
+cd ~/git/agentscale && git pull --ff-only
+export TF_VAR_ghcr_token='<токен с Windows>'      # ОБЯЗАТЕЛЕН
+terraform -chdir=infra/terraform/environments/vm init
+terraform -chdir=infra/terraform/environments/vm apply -auto-approve
 ```
 
-CI: plan on PR, apply on merge to `main` with manual approval for prod.
+```powershell
+# prod (с Windows):
+$env:TF_VAR_ghcr_token = (gh auth token)
+terraform -chdir=infra/terraform/environments/prod init
+terraform -chdir=infra/terraform/environments/prod apply -auto-approve
+```
+
+Повторный apply идемпотентен; первый apply после сноса на dev занимает ~25–40 мин
+(тайминги по этапам — runbook §2.2).
 
 ---
 
-## What Terraform does NOT manage
+## Что Terraform НЕ управляет
 
-| Resource | Tool |
-|----------|------|
-| K8s Deployments | ArgoCD + `infra/k3s/` |
-| Application secrets rotation | Manual / external-secrets |
-| GitHub Runner VM | Separate tf module or manual |
-| ArgoCD apps | `infra/argocd/` |
+| Ресурс | Инструмент |
+|--------|------------|
+| K8s Deployments/сервисы платформы | Argo CD + `infra/k3s/` (PR → main → CI Images → sync) |
+| Секреты приложений | SealedSecrets (`infra/argocd/sealed-secrets`) / `ghcr-pull` из bootstrap |
+| CI-раннеры | [`infra/github-runner-vm/`](../../infra/github-runner-vm/README.md) (отдельный бутстрап, не terraform) |
+| Argo CD apps | `infra/argocd/` (root-app syncs `apps/`) |
 
----
-
-## Drift detection
-
-Weekly `terraform plan` in CI — alert on non-empty diff.
-
----
-
-## Local dev bypass
-
-Dev uses **docker compose** — no Terraform required. Optional `environments/dev` provisions cheap single VM.
+Кластер **нельзя** ставить docker-compose/k3d — это запрещено контрактом репо
+(`prodavan-ops validate`).
 
 ---
 
 ## Связанные документы
 
+- [runbook.md](runbook.md) — GitOps-канон, полный цикл «снести → поставить», DNS/OOM-инциденты
 - [topology.md](topology.md)
 - [k3s-services.md](k3s-services.md)
 - [argocd.md](argocd.md)

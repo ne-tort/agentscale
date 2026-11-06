@@ -11,8 +11,8 @@
 
 Подробнее: [`e2e.md`](e2e.md).
 
-Deploy is **Argo CD** from git. Runners: **Docker Desktop** pack ×4 ([`infra/github-runner`](../../infra/github-runner)).  
-After reboot: Admin `Sync-KubeForDocker.ps1` (or `Start-Runners.ps1`). Ops: [`infra/ops`](../../infra/ops).
+Deploy is **Argo CD** from git. Runners: **systemd-сервисы на dev-VM** (`vm-*`, [`infra/github-runner-vm`](../../infra/github-runner-vm/README.md); Docker Desktop pack [`infra/github-runner`](../../infra/github-runner) — исторический).  
+После ребута VM раннеры (`actions.runner.*`) поднимаются сами; kubeconfig `/home/runner/.kube/prodavan-dev.yaml` кладёт terraform — Windows-шаги (`Sync-KubeForDocker.ps1`, `Start-Runners.ps1`) не нужны (легаси Docker Desktop-эры). Ops: [`infra/ops`](../../infra/ops).
 
 ## PostgreSQL integration suite (`postgres-integration`)
 

@@ -68,6 +68,24 @@ spec:
         - name: beat
           imagePullPolicy: Always
 ---
+# Индексатор забыли в dev-патче при добавлении (wave «очередь indexing»):
+# base объявляет :latest + IfNotPresent, и без Always pod после любого
+# рестарта остаётся на кэшированном старом слое :latest — тот же инцидент
+# «фикс не работает», что задокументирован в searchnet.yaml.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agentscale-celery-indexer
+spec:
+  replicas: 1
+  template:
+    spec:
+      imagePullSecrets:
+        - name: ghcr-pull
+      containers:
+        - name: indexer
+          imagePullPolicy: Always
+---
 apiVersion: v1
 kind: ConfigMap
 metadata:

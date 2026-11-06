@@ -1,6 +1,6 @@
 # E2E testing strategy
 
-Единая трёхуровневая пирамида на **одном dev-контуре** (k3s + Argo `prodavan-dev`). Отдельного test-кластера нет.
+Единая трёхуровневая пирамида на **одном dev-контуре** (k3s + Argo `agentscale-dev`). Отдельного test-кластера нет.
 
 **Legacy (удалено, не использовать):**
 
@@ -16,17 +16,17 @@
 |---------|--------|-----|-------------|-----|
 | **L1 Unit** | — | `tests/unit/` | — | CI Gate (каждый PR) |
 | **L2 Integration** | `integration` | `tests/integration/` | Docker Postgres, stub pods | Nightly + opt-in E2E |
-| **L3a K8s runtime** | `k8s` | `tests/e2e/k8s/` | in-cluster Job, `prodavan-sandboxes` | opt-in E2E |
+| **L3a K8s runtime** | `k8s` | `tests/e2e/k8s/` | in-cluster Job, `agentscale-dev-sandboxes` | opt-in E2E |
 | **L3b Live API** | `live` | `tests/e2e/live/` | Traefik `:8088` | opt-in E2E |
 
-`prodavan-api` на dev **`POD_RUNTIME_MODE=k8s`** (overlay `infra/k3s/overlays/dev/`). K8s pod-тесты — in-process в ephemeral Job (`infra/k3s/overlays/e2e/`), без переключения боевого Deployment отдельно.
+API на dev работает с **`POD_RUNTIME_MODE=sandbox`** (overlay `infra/k3s/overlays/dev/`). K8s pod-тесты — in-process в ephemeral Job с `POD_RUNTIME_MODE=k8s` (`infra/k3s/overlays/e2e/`), без переключения боевого Deployment отдельно.
 
 ### Ответственность слоёв
 
 | Слой | Что проверяет | Чего не делает |
 |------|---------------|----------------|
 | **L2** | Бизнес-логика API, PG, stub pod lifecycle | Real k8s, ingress, OIDC |
-| **L3a** | Real Pod create/pause/kill в `prodavan-sandboxes` | Не трогает `prodavan-api` Deployment |
+| **L3a** | Real Pod create/pause/kill в `agentscale-dev-sandboxes` | Не трогает `agentscale-api` Deployment |
 | **L3b** | Deployed stack: Traefik, auth config, agent chat | Не подменяет L2 unit/integration |
 | **Verify Dev** | HTTP smoke `/health/*`, auth config | Не pytest, не pod lifecycle |
 
@@ -59,12 +59,14 @@ pytest tests/integration/test_pod_service_e2e.py -m integration -q
 
 ```bash
 cd apps/api
+# на VM (раннеры/оператор): Traefik и Keycloak доступны на 127.0.0.1;
+# с Windows-хоста — http://172.31.156.203:8088 / :8089
 export PRODAVAN_E2E_BASE_URL=http://127.0.0.1:8088
 export PRODAVAN_E2E_KC_URL=http://127.0.0.1:8089
 pytest tests/e2e/live -m live -q
 ```
 
-**Auth в L3b:** реальные OIDC-токены Keycloak (не HS256 mint). Platform Admin — ROPC `admin`/`admin` через client `prodavan-flutter`. Owner/peer — `POST /companies/{id}/employees` с `login`/`password`, затем `POST /auth/login`. Хелпер: [`tests/e2e/live/keycloak_auth.py`](../../apps/api/tests/e2e/live/keycloak_auth.py).
+**Auth в L3b:** реальные OIDC-токены Keycloak (не HS256 mint). Platform Admin — ROPC `admin`/`admin` через client `agentscale-flutter`. Owner/peer — `POST /companies/{id}/employees` с `login`/`password`, затем `POST /auth/login`. Хелпер: [`tests/e2e/live/keycloak_auth.py`](../../apps/api/tests/e2e/live/keycloak_auth.py).
 
 ### L3a — k8s pods (in-cluster Job)
 
@@ -75,7 +77,7 @@ poetry run prodavan-ops e2e run --suite k8s
 poetry run prodavan-ops e2e cleanup
 ```
 
-Job создаёт БД `prodavan_e2e` на in-cluster Postgres (не трогает dev `prodavan`).
+Job создаёт БД `agentscale_e2e` на in-cluster Postgres (не трогает dev `agentscale`).
 
 ### Все маркеры
 
@@ -103,12 +105,14 @@ pytest -m "integration or k8s or live"
 
 **Все** workflows (`ci-gate`, `ci-e2e`, `verify-dev`, `auto-merge`) — `runs-on: [self-hosted, linux, docker]`.
 
-Это **Docker Desktop runners на Windows-хосте**, не pods в k3s. Они **не должны** жить в кластере — так не грузим dev-сервер обычной сборкой.
+Это **systemd-раннеры на dev-VM** (`vm-*`, лейблы `self-hosted,linux,docker,ci-vm`;
+[`infra/github-runner-vm/`](../../infra/github-runner-vm/README.md)), не pods в k3s. Они **не должны** жить в кластере. Раннеры делят VM с кластером, поэтому kubectl/Traefik/Keycloak доступны на `127.0.0.1`. Исторический вариант «Docker Desktop runners на Windows-хосте» ([`infra/github-runner/`](../../infra/github-runner/README.md)) заменён.
 
-Доступ к кластеру с runner (сейчас):
+Доступ к кластеру с runner:
 
-- `~/.kube/prodavan-dev.yaml` + rewrite на `host.docker.internal:6443` ([`prodavan_ops/k8s.py`](../../infra/ops/src/prodavan_ops/k8s.py))
-- HTTP smoke/live: `PRODAVAN_CI_HOST=host.docker.internal` → `:8088` / `:8089`
+- `/home/runner/.kube/prodavan-dev.yaml` — кладёт terraform apply (`runner_kubeconfig_path`), server `127.0.0.1:6443`
+- HTTP smoke/live: `SMOKE_ADDR=127.0.0.1` → `:8088` (Traefik) / `:8089` (Keycloak)
+- rewrite kubeconfig на `host.docker.internal` ([`prodavan_ops/k8s.py`](../../infra/ops/src/prodavan_ops/k8s.py)) включается только при `PRODAVAN_CI_HOST=host.docker.internal` — легаси Docker Desktop-раннеров, на VM не используется
 
 **L3a k8s** — runner **снаружи** кластера: `kubectl apply` ephemeral Job, pytest **in-cluster** в Job pod (код из образа `ghcr.io/.../prodavan-api:latest` + pip install pytest). Runner только оркестрирует Job и читает логи.
 
@@ -158,18 +162,18 @@ CI Gate **не** замедляется e2e по умолчанию.
 
 ```
 infra/k3s/overlays/e2e/
-├── job.yaml          # prodavan-e2e-runner — pytest -m k8s
-├── configmap.yaml    # POD_RUNTIME_MODE=k8s, DATABASE_URL→prodavan_e2e
-├── rbac.yaml         # SA prodavan-e2e-runner
+├── job.yaml          # agentscale-e2e-runner — pytest -m k8s
+├── configmap.yaml    # POD_RUNTIME_MODE=k8s, DATABASE_URL→agentscale_e2e
+├── rbac.yaml         # SA agentscale-e2e-runner
 └── rbac-sandboxes.yaml
 ```
 
-Argo Application [`prodavan-e2e`](../../infra/argocd/apps/prodavan-e2e.yaml) — **manual sync only**. Runner: `prodavan-ops e2e run`.
+Argo Application [`agentscale-e2e`](../../infra/argocd/apps/agentscale-e2e.yaml) — **manual sync only**. Runner: `prodavan-ops e2e run`.
 
 ## Cleanup
 
 - Job: `ttlSecondsAfterFinished: 3600`
-- K8s tests: teardown Pods по `prodavan.io/project-id` в `prodavan-sandboxes`
+- K8s tests: teardown Pods по `prodavan.io/project-id` в `agentscale-dev-sandboxes`
 - `prodavan-ops e2e cleanup` — удаляет Job и overlay resources
 
 ---

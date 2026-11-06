@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 
 import pytest
 from prodavan_ops.k8s import DEPLOYMENT_TARGETS, FIRST_PARTY_DEPLOYMENTS, assert_kubeconfig_docker_ready
 from prodavan_ops.validate import (
     FIRST_PARTY_LATEST,
-    REQUIRED_SNIPPETS,
     assert_no_compose_or_k3d,
     assert_no_shell_scripts,
     verify_image_pins,
@@ -156,6 +156,46 @@ quay.io/keycloak/keycloak:26.0
     verify_image_pins(manifest)
 
 
+@pytest.mark.parametrize(
+    "opensearch_pin,keycloak_pin",
+    [
+        ("opensearchproject/opensearch:2.17.1", "quay.io/keycloak/keycloak:26.0"),
+        ("ghcr.io/ne-tort/opensearch:2.17.1", "ghcr.io/ne-tort/keycloak:26.0"),
+        # Смешанное состояние: зеркала переключаются по одному.
+        ("ghcr.io/ne-tort/opensearch:2.17.1", "quay.io/keycloak/keycloak:26.0"),
+        ("opensearchproject/opensearch:2.17.1", "ghcr.io/ne-tort/keycloak:26.0"),
+    ],
+)
+def test_verify_image_pins_accepts_mirrored_and_upstream_pins(
+    opensearch_pin: str, keycloak_pin: str
+) -> None:
+    """Пины не должны зависеть от реестра: ghcr-зеркало или upstream (#299)."""
+    manifest = f"""
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agentscale-api
+spec:
+  template:
+    spec:
+      containers:
+        - name: api
+          image: ghcr.io/ne-tort/agentscale-api:latest
+        - name: web
+          image: ghcr.io/ne-tort/agentscale-web:latest
+---
+# pins
+postgres:16.15
+redis:7.4.11-alpine
+ghcr.io/ne-tort/minio:RELEASE.2024-10-02T17-50-41Z
+mongo:7.0.14
+{opensearch_pin}
+redpanda:v24.2.4
+{keycloak_pin}
+"""
+    verify_image_pins(manifest)
+
+
 def test_verify_image_pins_rejects_infra_latest() -> None:
     manifest = """
 apiVersion: v1
@@ -277,9 +317,81 @@ def test_k3s_dev_host_crlf_strip_not_nested_in_bash_lc_quotes() -> None:
         / "k3s-dev-host"
         / "main.tf"
     ).read_text(encoding="utf-8")
-    assert 'rev       = "v13-dns"' in main_tf
+    # Ревизия provisioner-контракта живёт в locals (k3s_rev) и оттуда берётся
+    # в triggers k3s_server — проверяем смысл, а не выравнивание terraform fmt
+    # (буквальное `rev       = "v14-clean-install"` разъехалось бы с `rev =
+    # local.k3s_rev` + `k3s_rev = "v14-clean-install"`).
+    assert re.search(r'^\s*k3s_rev\s*=\s*"v14-clean-install"', main_tf, re.M)
+    assert re.search(r"^\s*rev\s*=\s*local\.k3s_rev\s*$", main_tf, re.M)
     assert "prodavan-k3s-preflight.lf" in main_tf
     assert "read_bytes().replace" in main_tf
     assert "tr -d '\\r' < /tmp/prodavan-k3s-preflight.sh" not in main_tf
     assert "tr -d '\\r' < /tmp/prodavan-post-k3s-heal.sh" not in main_tf
+
+
+def test_k3s_uninstall_trigger_has_only_ssh_coords() -> None:
+    """Добавление любого ключа в triggers k3s_uninstall пересоздаёт ресурс.
+
+    Пересоздание = прогон destroy-provisioner'а, то есть k3s-uninstall посреди
+    обычного apply. Поэтому там только SSH-координаты; пути для очистки
+    выводятся внутри скрипта из ssh_user.
+    """
+    main_tf = (
+        Path(__file__).resolve().parents[2]
+        / "terraform"
+        / "modules"
+        / "k3s-dev-host"
+        / "main.tf"
+    ).read_text(encoding="utf-8")
+    start = main_tf.index('resource "null_resource" "k3s_uninstall"')
+    end = main_tf.index('resource "null_resource" "gitops_bootstrap"')
+    block = main_tf[start:end]
+    t_start = block.index("triggers = {") + len("triggers = {")
+    t_end = block.index("\n  }", t_start)
+    keys = {
+        line.strip().split("=")[0].strip()
+        for line in block[t_start:t_end].splitlines()
+        if "=" in line and not line.strip().startswith("#")
+    }
+    assert keys == {"cluster", "ssh_host", "ssh_port", "ssh_user", "ssh_key_path"}
+    # Снос должен быть полным, а не «только k3s-uninstall.sh».
+    code_lines = [ln for ln in block.splitlines() if not ln.strip().startswith("#")]
+    code = "\n".join(code_lines)
+    assert "on_failure = continue" not in code
+    assert "/var/lib/rancher/k3s" in block
+    assert "/usr/local/lib/prodavan" in block
+
+
+def test_force_reinstall_wipes_before_install() -> None:
+    """Чистая установка: wipe обязан стоять ДО curl get.k3s.io и записи config."""
+    main_tf = (
+        Path(__file__).resolve().parents[2]
+        / "terraform"
+        / "modules"
+        / "k3s-dev-host"
+        / "main.tf"
+    ).read_text(encoding="utf-8")
+    wipe = main_tf.index('FORCE-REINSTALL: wiping previous k3s state')
+    # Инсталлер качается curl с флагами ретраев для холодной VM (--retry и т.п.) —
+    # проверяем сам факт скачивания с get.k3s.io, а не точный набор флагов.
+    install_match = re.search(r"curl[^\n]*https://get\.k3s\.io", main_tf)
+    assert install_match, "в main.tf нет скачивания установщика k3s с get.k3s.io"
+    install = install_match.start()
+    cfg = main_tf.index("prodavan-k3s-config.yaml /etc/rancher/k3s/config.yaml")
+    assert wipe < install, "wipe должен быть до установки k3s"
+    assert wipe < cfg, "wipe удаляет /etc/rancher/k3s — config.yaml пишется после"
+
+
+def test_gitops_bootstrap_fails_loudly_without_ghcr_token() -> None:
+    """Пустой TF_VAR_ghcr_token — понятная ошибка, а не 12-минутный таймаут."""
+    tpl = (
+        Path(__file__).resolve().parents[2]
+        / "terraform"
+        / "modules"
+        / "k3s-dev-host"
+        / "templates"
+        / "gitops-bootstrap.sh.tpl"
+    ).read_text(encoding="utf-8")
+    assert "TF_VAR_ghcr_token is empty" in tpl
+    assert "WARN: no TF_VAR_ghcr_token" not in tpl
 

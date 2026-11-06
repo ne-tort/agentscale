@@ -28,16 +28,23 @@ FORBIDDEN_INFRA_LATEST = re.compile(
     r"^(postgres:(16|latest)|redis:(7-alpine|7|latest)|mongo:(7|latest)|ne-tort/minio:latest|ne-tort/mc:latest|"
     r"quay.io/keycloak/keycloak:latest)$"
 )
+# Пины проверяются по фрагменту, а НЕ по полному имени образа: платформенные
+# образы зеркалируются в ghcr.io/ne-tort/<name> (Docker Hub/quay анонимно
+# упираются в rate limit на холодной ноде, #299), и сниппет с префиксом реестра
+# ломался бы на каждом таком переключении. Имя пакета + тег здесь и есть
+# контракт; реестр — дело зеркала.
 REQUIRED_SNIPPETS = (
     "postgres:16.15",
     "redis:7.4.11-alpine",
     "ghcr.io/ne-tort/minio:RELEASE.2024-10-02T17-50-41Z",
     "mongo:7.0.14",
-    "opensearchproject/opensearch:2.17.1",
+    # Может быть opensearchproject/opensearch или ghcr.io/ne-tort/opensearch.
+    "opensearch:2.17.1",
     # curlimages/curl больше не используется: opensearch-init ходит через
     # opensearch-образ (Docker Hub с ноды недоступен, #299).
     "redpanda:v24.2.4",
-    "quay.io/keycloak/keycloak:26.0",
+    # Может быть quay.io/keycloak/keycloak или ghcr.io/ne-tort/keycloak.
+    "keycloak:26.0",
 )
 FORBIDDEN_BITNAMI_PUBLIC = re.compile(r"^bitnami/")
 

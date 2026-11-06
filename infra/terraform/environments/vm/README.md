@@ -54,7 +54,11 @@ sudo install -m 440 ~/git/agentscale/infra/.ssh/prodavan-terraform.sudoers /etc/
 
 ```bash
 cd ~/git/agentscale
-export TF_VAR_ghcr_token="$(gh auth token)"   # read:packages; только для ghcr-pull секрета
+# gh на VM НЕ залогинен: токен (read:packages) получают на аутентифицированной
+# машине и кладут на VM файлом вне git. С Windows (PowerShell):
+#   gh auth token | ssh www@172.31.156.203 "umask 077; mkdir -p ~/.config; cat > ~/.config/ghcr-token"
+# затем на VM:
+export TF_VAR_ghcr_token="$(cat ~/.config/ghcr-token)"   # только для ghcr-pull секрета
 terraform -chdir=infra/terraform/environments/vm init
 terraform -chdir=infra/terraform/environments/vm apply -auto-approve
 ```
@@ -66,12 +70,113 @@ terraform -chdir=infra/terraform/environments/vm apply -auto-approve
 Раннеры CI на этой же VM (`infra/github-runner-vm/`) получают kubeconfig
 `/home/runner/.kube/prodavan-dev.yaml` из того же apply.
 
+Два разных ключа, не перепутать: `ci_vm_key` на Windows — это SSH **с Windows на
+VM**; Terraform же ходит по localhost и использует `~/.ssh/prodavan_tf`
+(`ssh_private_key_path`), который создаётся на VM шагом 2.
+
+### Проверка после установки
+
+```bash
+ssh www@172.31.156.203
+export KUBECONFIG=~/.kube/prodavan-dev.yaml
+cd ~/git/agentscale/infra/ops && poetry install   # или python3 -m venv + pip install -e .
+poetry run prodavan-ops validate    # контракт репо + kustomize render + пины образов
+poetry run prodavan-ops wait        # Argo agentscale-dev Synced+Healthy
+poetry run prodavan-ops smoke       # /health/live, /health/ready, /api/v1/auth/config, /
+poetry run prodavan-ops dns-check   # резолв ИЗ пода (dev ns первым)
+```
+
+`validate` не требует кластера (нужны `kubectl`/`kustomize` на PATH); остальные
+команды — после того как `wait` зелёный.
+
 kubectl с Windows-хоста:
 
 ```powershell
 scp www@172.31.156.203:.kube/prodavan-dev.yaml $env:USERPROFILE\.kube\prodavan-dev.yaml
 # заменить в файле server: https://127.0.0.1:6443 → https://172.31.156.203:6443
 ```
+
+## Полный цикл «снести → поставить с нуля»
+
+Terraform запускается **на VM** (там же `/usr/bin/terraform`, checkout `~/git/agentscale`
+и `terraform.tfstate`). С Windows — только SSH.
+
+```bash
+ssh www@172.31.156.203
+cd ~/git/agentscale && git pull --ff-only           # нужен актуальный модуль
+
+# --- 1. снос ---------------------------------------------------------------
+cd ~/git/agentscale/infra/terraform/environments/vm
+terraform state list          # ожидаем 4 ресурса: k3s_server, k3s_uninstall, gitops_bootstrap[0], host_dns[0].
+                                # В старом state (до v13) их 3 — без host_dns; destroy отработает корректно.
+                                # Если state потерян — шаг 1b
+terraform destroy -auto-approve
+# destroy прогоняет destroy-provisioner'ы в обратном порядке:
+#   gitops_bootstrap → k3s_uninstall → host_dns → (sshd) → k3s_server
+# k3s_uninstall: k3s-uninstall.sh + явный rm. После него на хосте НЕ остаётся:
+#   /var/lib/rancher/k3s (etcd/sqlite, containerd-образы, local-path PVC-данные),
+#   /etc/rancher/k3s, /var/lib/kubelet, /var/lib/cni, /run/k3s, /run/flannel,
+#   /etc/systemd/system/k3s.service.d (boot-heal), /usr/local/lib/prodavan,
+#   /usr/local/bin/k3s*, TLS CA (/var/lib/rancher/k3s/agentscale-tls —
+#   уходит вместе с data-dir) и оба kubeconfig (www + runner).
+# Provisioner больше НЕ `on_failure = continue`: если снос не удался, destroy
+# падает с ошибкой, а не «успешно» оставляет живой k3s.
+
+# --- 1b. если state потерян, а кластер жив --------------------------------
+# destroy нечего удалять. Ставим заново поверх живого кластера одной командой:
+terraform apply -auto-approve -var force_reinstall=true
+terraform apply -auto-approve -var force_reinstall=false   # снять флаг
+# force_reinstall стирает предыдущее состояние перед установкой (k3s-uninstall
+# + rm data-dir) и входит в triggers, поэтому пересоздаёт provisioner'ы.
+
+# --- 2. установка ----------------------------------------------------------
+# gh на VM НЕ залогинен — токен заранее лежит в ~/.config/ghcr-token (см. «Bootstrap»)
+export TF_VAR_ghcr_token="$(cat ~/.config/ghcr-token)"   # read:packages — ОБЯЗАТЕЛЕН
+terraform init
+terraform apply -auto-approve
+```
+
+Пустой `TF_VAR_ghcr_token` теперь падает **сразу** в `gitops-bootstrap.sh` с
+объяснением и точной командой (раньше печатался один WARN, и через 12 минут
+apply падал по таймауту — выглядело как сломанный кластер).
+
+### Схема DNS (детерминированная, управляется terraform)
+
+- `host_dns` (create): drop-in `/etc/systemd/resolved.conf.d/99-zz-agentscale-dns.conf`
+  — пустой `DNS=` (сброс накопленного systemd списка) + `DNS=9.9.9.9 8.8.8.8`,
+  `FallbackDNS=` (пусто, осознанно), `DNSOverTLS=no`, `DNSStubListenerExtra=172.31.156.203`;
+  удаляет ручной legacy-артефакт `99-dot.conf` (инцидент 2026-10-29: его rate-limited
+  1.1.1.1 накапливался ПЕРЕД нашими upstream) и нормализует `/etc/resolv.conf`
+  в штатный симлинк на `/run/systemd/resolve/stub-resolv.conf` (статический файл
+  с единственным nameserver=stub-IP был точкой отказа хостового резолва).
+  Проверка готовности: `getent hosts github.com` (20×1с), иначе apply падает с диагностикой.
+- `/etc/k3s-resolv.conf` (k3s_server): управляемый файл — ПРЯМЫЕ upstream'ы
+  (`nameserver 9.9.9.9`, `nameserver 8.8.8.8`), переписывается при отличии содержимого
+  (tmp + mv). kubelet/CoreDNS (dnsPolicy: Default) не зависят от живости resolved.
+- `post-k3s-heal.sh`: страховка — явный `forward` в CoreDNS Corefile после каждого старта k3s.
+- `host_dns` (destroy): удаляет только управляемый drop-in и рестартует resolved.
+  До следующего apply у хоста нет управляемых upstream — apply нужно запускать сразу
+  за destroy (штатный сценарий «снести → поставить»).
+
+### Если apply упал посередине
+
+Просто повторите `terraform apply -auto-approve` — все provisioner'ы
+идемпотентны:
+
+| Что упало | Что будет при повторе |
+|-----------|------------------------|
+| k3s install / curl | ставит заново; уже установленный k3s не переустанавливается |
+| k3s не поднялся за 540 с | падает с `systemctl status`/`journalctl` в выводе |
+| Argo install (образы) | `apply -k` идемпотентен, wait 600 с на каждый deployment |
+| платформа не Healthy за 18 мин | падает с дампом Application/подов/событий; повторный apply идёт с начала скрипта и выходит на `gitops-already-healthy`, если платформа успела встать |
+
+Ни один шаг не требует «удалить state, чтобы повторить».
+
+**Замечание про повторный apply при живом k3s:** `k3s_server` не переустанавливает
+работающий k3s (это day-2 поведение), но теперь **перезапускает** k3s, если
+изменился `/etc/rancher/k3s/config.yaml` (kubelet-arg/resolv-conf читаются только
+на старте — раньше правка молча не применялась до ребута). Для установки именно
+с нуля нужен `destroy` (шаг 1) или `force_reinstall` (шаг 1b).
 
 ## Day-2
 

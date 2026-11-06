@@ -56,6 +56,13 @@ spec:
         app.kubernetes.io/component: redis
     spec:
       terminationGracePeriodSeconds: 30
+      # ghcr mirror of docker.io library/redis (Docker Hub anonymous pull
+      # rate-limit: на холодной ноде после сноса кластера кэш образов пуст, и
+      # анонимные pull'ы с одного IP упираются в лимит Hub — TOOMANYREQUESTS;
+      # прецедент #299). Package приватный на ghcr — pull через контурный
+      # ghcr-pull секрет (паттерн minio.yaml).
+      imagePullSecrets:
+        - name: ghcr-pull
       initContainers:
         # Self-heal AOF after unclean shutdown (node reboot / hard kill): a
         # truncated appendonly manifest otherwise keeps redis in
@@ -63,7 +70,7 @@ spec:
         # failure (redis ConnectionError at lifespan startup). Declarative
         # repair in-pod (canon: state fixed by init containers, not hosts).
         - name: aof-repair
-          image: redis:7.4.11-alpine
+          image: ghcr.io/ne-tort/redis:7.4.11-alpine
           command:
             - sh
             - -c
@@ -81,7 +88,7 @@ spec:
               mountPath: /data
       containers:
         - name: redis
-          image: redis:7.4.11-alpine
+          image: ghcr.io/ne-tort/redis:7.4.11-alpine
           args:
             - redis-server
             - --appendonly

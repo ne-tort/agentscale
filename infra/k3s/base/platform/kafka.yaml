@@ -65,7 +65,13 @@ spec:
         fsGroup: 101
       containers:
         - name: redpanda
-          image: docker.redpanda.com/redpandadata/redpanda:v24.2.4
+          # docker.io, НЕ docker.redpanda.com: redpanda-реестр — Hub-backed
+          # прокси, который с 2026-11 анонимно отдаёт 429 TOOMANYREQUESTS
+          # («unauthenticated pull rate limit» — глобальная квота прокси
+          # исчерпана; проверено манифест-запросом). Прямой docker.io тянет
+          # тот же образ redpandadata/redpanda и делит квоту Hub с остальными
+          # платформенными образами ноды, а не с чужим прокси.
+          image: docker.io/redpandadata/redpanda:v24.2.4
           command:
             - /bin/sh
             - -c
@@ -175,7 +181,7 @@ spec:
       restartPolicy: OnFailure
       containers:
         - name: rpk
-          image: docker.redpanda.com/redpandadata/redpanda:v24.2.4
+          image: docker.io/redpandadata/redpanda:v24.2.4
           command:
             - /bin/sh
             - -c

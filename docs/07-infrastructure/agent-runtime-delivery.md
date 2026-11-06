@@ -38,7 +38,7 @@ Pod проекта: pod_service создаёт Pod c POD_AGENT_RUNTIME_IMAGE (:l
 ## 2. GHCR и секреты
 
 - Образ: `ghcr.io/ne-tort/prodavan-agent-runtime` (`{sha12,latest}`). GHCR-**package принадлежит репо `prodavan-claw`** → пуш из workflows prodavan возможен только через PAT `PRODAVAN_CLAW_TOKEN` (`write:packages`); `GITHUB_TOKEN` prodavan прав не имеет. Тот же PAT используется для клона приватного claw (GITHUB_TOKEN не умеет cross-repo).
-- In-cluster pull: secret **`ghcr-pull`** (`kubernetes.io/dockerconfigjson`) в ns `prodavan` и `prodavan-sandboxes`. Источники: SealedSecrets (`overlays/dev/SECRETS.md`) и Terraform bootstrap (`gitops-bootstrap.sh.tpl`, `TF_VAR_ghcr_token`). Ссылается из platform Deployment'ов и из Pod-спеки песочниц (`POD_SANDBOX_IMAGE_PULL_SECRET`).
+- In-cluster pull: secret **`ghcr-pull`** (`kubernetes.io/dockerconfigjson`) в ns `agentscale-dev` и `agentscale-dev-sandboxes` (bootstrap на общем хосте кладёт его также в `agentscale`/`agentscale-sandboxes`). Источники: SealedSecrets (`overlays/dev/SECRETS.md`) и Terraform bootstrap (`gitops-bootstrap.sh.tpl`, `TF_VAR_ghcr_token`). Ссылается из platform Deployment'ов и из Pod-спеки песочниц (`POD_SANDBOX_IMAGE_PULL_SECRET`).
 
 ## 3. Слой образа (Dockerfile as-built)
 

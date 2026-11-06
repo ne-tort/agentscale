@@ -50,7 +50,10 @@
       "redirectUris": [
         "http://127.0.0.1:*",
         "http://localhost:*",
-        "agentscale://*"
+        "https://localhost/*",
+        "agentscale://*",
+        "http://172.31.156.203:8088/*",
+        "https://agentscale.dev/*"
       ],
       "webOrigins": ["+"],
       "attributes": {

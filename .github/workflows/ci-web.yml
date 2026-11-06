@@ -1,0 +1,71 @@
+name: CI Web
+
+# apps/web — React+TS workspace (pnpm), added by the agent-sandbox migration.
+# Before this workflow CI did not look at apps/web at all: no typecheck, no
+# tests — while the merge delivers hundreds of its files to main.
+#
+# Runner notes (self-hosted VM, infra/github-runner-vm):
+#   * Node 22 lives in RUNNER_TOOL_CACHE=/cache/toolcache (setup-node finds it,
+#     no download); pnpm is activated through corepack (bundled with Node 22)
+#     and cached in the runner's HOME (~/.cache/node/corepack).
+#   * The pnpm content store is /cache/pnpm-store (same filesystem as the
+#     workspace, so hardlinks work) — package downloads happen once per VM.
+#   * Playwright e2e (apps/web/e2e) is deliberately NOT part of the gate:
+#     browser downloads are heavy and need a preview server. The devDependency
+#     @playwright/test installs as a plain package (no browsers) and is only
+#     used by `pnpm test:e2e`, which CI does not run.
+
+on:
+  workflow_call:
+  push:
+    branches: [main]
+    paths:
+      - "apps/web/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - ".github/workflows/ci-web.yml"
+  workflow_dispatch:
+
+# All runners share one VM — supersede a pending run instead of stacking.
+concurrency:
+  group: ci-web-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  web:
+    # github-hosted ubuntu-latest fails instantly (empty steps) in this org
+    runs-on: [self-hosted, linux, docker]
+    timeout-minutes: 20
+    env:
+      PNPM_VERSION: "10.30.3" # keep in sync with the local dev environment
+      PNPM_STORE: /cache/pnpm-store
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Node 22 (runner tool cache)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: pnpm (corepack, persistent)
+        run: |
+          set -euo pipefail
+          mkdir -p "${PNPM_STORE}"
+          if command -v pnpm >/dev/null 2>&1 && [ "$(pnpm --version)" = "${PNPM_VERSION}" ]; then
+            echo "==> pnpm cache HIT: $(pnpm --version)"
+          else
+            echo "==> activating pnpm ${PNPM_VERSION} via corepack"
+            corepack enable
+            corepack prepare "pnpm@${PNPM_VERSION}" --activate
+          fi
+          pnpm --version
+
+      - name: Install workspace deps (frozen lockfile)
+        run: pnpm install --frozen-lockfile --store-dir "${PNPM_STORE}"
+
+      - name: Typecheck + build (tsc --noEmit && vite build)
+        run: pnpm --filter @agentscale/web build
+
+      - name: Unit tests (vitest)
+        run: pnpm --filter @agentscale/web test

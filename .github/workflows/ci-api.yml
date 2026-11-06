@@ -377,3 +377,182 @@ jobs:
       - name: Dump service logs on failure
         if: failure()
         run: docker logs "${{ job.services.postgres.id }}" 2>&1 | tail -50 || true
+
+  # ------------------------------------------------------------------------- #
+  # MIG-CI-SUITE-01 — the agent-sandbox migration's own acceptance suites.
+  #
+  # tests/migration (~200 files: m04/m04e/m05/m06, agent_runs, rls seams,
+  # cutover rehearsal, web_contract_parity, …) and tests/api (route acceptance
+  # contracts) were authored on the migration branch, but CI selected only
+  # tests/migration/postgres_integration (dedicated job above) and
+  # `pytest tests/unit/` never sees them. Merging the branch would therefore
+  # deliver that code to main WITHOUT its acceptance suites ever executing.
+  # This job runs them against the same ephemeral Postgres pattern the `test`
+  # job uses (alembic upgrade head first, app role granted).
+  #
+  # Suites that demand PRODAVAN_TEST_DATABASE_URL (postgres_integration —
+  # covered by the job above; rls live acceptance; cutover_rehearsal) skip here
+  # BY DESIGN: this job deliberately does not set that variable. Suites keyed
+  # on DATABASE_URL (content_api and the requires_postgres-marked tests) DO run
+  # against this job's migrated Postgres. `-rs` prints every skip reason so the
+  # log shows exactly what did not run.
+  #
+  # RAM: the CI VM (15 GiB) also hosts the live dev cluster (~12 GiB). This job
+  # is chained AFTER `test` (needs:) so two full pytest+Postgres runs never peak
+  # simultaneously; postgres-integration stays parallel (pre-existing layout).
+  # ------------------------------------------------------------------------- #
+  migration-suite:
+    name: migration-suite
+    needs: [test]
+    runs-on: [self-hosted, linux, docker]
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: apps/api
+    env:
+      PIP_CACHE_DIR: /cache/pip
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Python venv (self-hosted)
+        run: |
+          set -euo pipefail
+          python3 --version
+          # api requires >=3.12 (Docker runner image must ship 3.12)
+          python3 -c 'import sys; assert sys.version_info >= (3, 12), sys.version'
+          mkdir -p "${PIP_CACHE_DIR:-/cache/pip}"
+          python3 -m venv "${{ runner.temp }}/venv"
+          echo "${{ runner.temp }}/venv/bin" >> "${GITHUB_PATH}"
+          "${{ runner.temp }}/venv/bin/python" -m pip install -U pip
+
+      - name: Warm postgres image (registry TLS flakiness)
+        run: |
+          set -euo pipefail
+          for i in 1 2 3 4 5; do
+            if docker pull postgres:16.15; then break; fi
+            echo "retry $i postgres:16.15"
+            sleep 10
+          done
+          docker image inspect postgres:16.15 >/dev/null
+
+      - name: Start Postgres
+        id: pg
+        timeout-minutes: 5
+        run: |
+          set -euo pipefail
+          PG_HOST="${PRODAVAN_CI_HOST:-127.0.0.1}"
+          NAME="agentscale-ci-pg-${{ github.run_id }}-${{ github.job }}"
+          docker rm -f "$NAME" 2>/dev/null || true
+          # ephemeral host port avoids collisions with the parallel `test` job
+          docker run -d --name "$NAME" \
+            -e POSTGRES_USER=agentscale \
+            -e POSTGRES_PASSWORD=agentscale \
+            -e POSTGRES_DB=agentscale \
+            -p 0:5432 \
+            postgres:16.15
+          PORT="$(docker port "$NAME" 5432/tcp | head -1 | awk -F: '{print $NF}')"
+          echo "PG_HOST=$PG_HOST" >> "${GITHUB_ENV}"
+          echo "PG_PORT=$PORT" >> "${GITHUB_ENV}"
+          echo "PG_CONTAINER=$NAME" >> "${GITHUB_ENV}"
+          echo "DATABASE_URL=postgresql+asyncpg://agentscale_app:agentscale@${PG_HOST}:${PORT}/agentscale" >> "${GITHUB_ENV}"
+          echo "PG_ADMIN_URL=postgresql+asyncpg://agentscale:agentscale@${PG_HOST}:${PORT}/agentscale" >> "${GITHUB_ENV}"
+          echo "Postgres $NAME on ${PG_HOST}:${PORT}"
+          for i in $(seq 1 15); do
+            if docker exec "$NAME" pg_isready -U agentscale -d agentscale; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Postgres did not become ready" >&2
+          exit 1
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Ensure app role
+        run: |
+          python - <<'PY'
+          import asyncio, os, asyncpg
+          async def main():
+              host = os.environ["PG_HOST"]
+              port = os.environ["PG_PORT"]
+              conn = await asyncpg.connect(f"postgresql://agentscale:agentscale@{host}:{port}/agentscale")
+              try:
+                  await conn.execute("CREATE ROLE agentscale_app LOGIN PASSWORD 'agentscale'")
+              except Exception:
+                  pass
+              await conn.execute("GRANT ALL ON SCHEMA public TO agentscale_app")
+              await conn.execute("GRANT ALL ON DATABASE agentscale TO agentscale_app")
+              await conn.close()
+          asyncio.run(main())
+          PY
+
+      - name: Run migrations
+        run: |
+          export DATABASE_URL="${PG_ADMIN_URL}"
+          alembic upgrade head
+
+      - name: Grant app role on migrated tables
+        run: |
+          python - <<'PY'
+          import asyncio, os, asyncpg
+          async def main():
+              host = os.environ["PG_HOST"]
+              port = os.environ["PG_PORT"]
+              conn = await asyncpg.connect(f"postgresql://agentscale:agentscale@{host}:{port}/agentscale")
+              await conn.execute("GRANT ALL ON ALL TABLES IN SCHEMA public TO agentscale_app")
+              await conn.execute("GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO agentscale_app")
+              await conn.execute(
+                  "ALTER DEFAULT PRIVILEGES FOR ROLE agentscale IN SCHEMA public GRANT ALL ON TABLES TO agentscale_app"
+              )
+              await conn.execute(
+                  "ALTER DEFAULT PRIVILEGES FOR ROLE agentscale IN SCHEMA public GRANT ALL ON SEQUENCES TO agentscale_app"
+              )
+              await conn.close()
+          asyncio.run(main())
+          PY
+
+      - name: Pytest (migration + api acceptance suites)
+        run: |
+          set -euo pipefail
+          pytest tests/migration tests/api \
+            --ignore=tests/migration/postgres_integration \
+            -q --no-header -rs \
+            --junitxml="${RUNNER_TEMP}/migration-suite.xml"
+
+      - name: Assert the suite actually collected
+        # Unlike the postgres-integration job, skips are ALLOWED here (the
+        # PRODAVAN_TEST_DATABASE_URL-gated suites skip by design). What must
+        # never happen is a green run that collected nothing — a renamed path
+        # would otherwise silently drop the whole migration suite from CI.
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import os
+          import sys
+          import xml.etree.ElementTree as ET
+
+          path = os.path.join(os.environ["RUNNER_TEMP"], "migration-suite.xml")
+          if not os.path.exists(path):
+              sys.exit(f"no JUnit report at {path}: pytest did not run")
+          root = ET.parse(path).getroot()
+          cases = list(root.iter("testcase"))
+          skipped = sum(1 for c in cases if c.find("skipped") is not None)
+          failed = sum(
+              1 for c in cases
+              if c.find("failure") is not None or c.find("error") is not None
+          )
+          print(f"collected={len(cases)} passed={len(cases) - skipped - failed} "
+                f"skipped={skipped} failed={failed}")
+          if not cases:
+              sys.exit("migration suite collected 0 tests — the paths are wrong "
+                       "or collection errored")
+          print("OK — migration + api suites executed")
+          PY
+
+      - name: Stop Postgres
+        if: always()
+        run: |
+          # -v is REQUIRED: postgres images declare VOLUME (see the `test` job).
+          docker rm -fv "${PG_CONTAINER:-}" 2>/dev/null || true
+          docker volume prune -f >/dev/null 2>&1 || true

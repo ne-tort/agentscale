@@ -1,6 +1,24 @@
-# Sealed Secrets controller (Bitnami) — declarative install
+# Sealed Secrets controller (Bitnami) — declarative install.
+#
+# Manifest is VENDORED (controller-v0.27.3.yaml) instead of the remote
+# GitHub-releases URL: `kubectl apply -k` with a remote resource fetches over
+# HTTPS at bootstrap time, and gitops-bootstrap.sh runs under `set -eu` — a
+# flaky fetch fails the whole cold install. Same rationale as the vendored
+# ../install/upstream-install.yaml.
+#
+# Cold-start facts (verified 2026-11-05):
+# - image docker.io/bitnami/sealed-secrets-controller:0.27.3 — public, pinned,
+#   tag active on Docker Hub (amd64+arm64), imagePullPolicy IfNotPresent.
+# - Deployment `sealed-secrets-controller` in kube-system — matches the
+#   bootstrap wait (`kubectl -n kube-system wait --for=condition=Available
+#   deployment/sealed-secrets-controller`).
+# - The controller generates a FRESH RSA key per cluster install (no key
+#   backup in git). Nothing currently depends on unsealing: repo has no
+#   SealedSecret manifests and bootstrap creates ghcr-pull imperatively as a
+#   plain docker-registry secret — so a rebuilt cluster cannot get stuck on
+#   "SealedSecrets sealed with the old key".
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: kube-system
 resources:
-  - https://github.com/bitnami-labs/sealed-secrets/releases/download/v0.27.3/controller.yaml
+  - controller-v0.27.3.yaml

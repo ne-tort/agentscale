@@ -101,18 +101,18 @@ locals {
 module "k3s_dev" {
   source = "../../modules/k3s-dev-host"
 
-  cluster_name           = var.cluster_name
-  http_port              = var.http_port
-  https_port             = var.https_port
-  kubeconfig_path        = var.kubeconfig_path
-  ssh_host               = var.ssh_host
-  ssh_port               = var.ssh_port
-  ssh_user               = var.ssh_user
-  ssh_private_key_path   = local.ssh_key
-  remote_repo_path       = local.remote_repo_path
-  bootstrap_gitops       = var.bootstrap_gitops
-  ghcr_token             = var.ghcr_token
-  ghcr_username          = var.ghcr_username
+  cluster_name         = var.cluster_name
+  http_port            = var.http_port
+  https_port           = var.https_port
+  kubeconfig_path      = var.kubeconfig_path
+  ssh_host             = var.ssh_host
+  ssh_port             = var.ssh_port
+  ssh_user             = var.ssh_user
+  ssh_private_key_path = local.ssh_key
+  remote_repo_path     = local.remote_repo_path
+  bootstrap_gitops     = var.bootstrap_gitops
+  ghcr_token           = var.ghcr_token
+  ghcr_username        = var.ghcr_username
 }
 
 output "kubeconfig_path" {

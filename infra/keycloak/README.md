@@ -3,6 +3,32 @@
 Канон: [docs/target/10-identity-keycloak](../../docs/target/10-identity-keycloak/).  
 Brokers (VK/Yandex): [identity-brokers.md](../../docs/target/10-identity-keycloak/identity-brokers.md).
 
+## Auth flow as-built (важно для redirectUris/issuer)
+
+**Логин НЕбраузерный**: Flutter (web/desktop) ходит только в API (`POST /api/v1/auth/login`,
+`apps/api/src/prodavan/api/v1/auth.py` — «Flutter never talks to Keycloak»); API выполняет
+ROPC (`password_grant`, client `agentscale-flutter`, `directAccessGrantsEnabled=true`)
+in-cluster на `KEYCLOAK_URL=http://agentscale-keycloak:8080`. `/api/v1/auth/config`
+намеренно НЕ отдаёт issuer/token/revoke URL. Валидация токена — строгое строковое сравнение
+`iss` с `KEYCLOAK_ISSUER_URL` + JWKS in-cluster (`infrastructure/auth/jwt.py`).
+
+Поэтому:
+
+- **issuer `http://127.0.0.1:8089/realms/agentscale` — внутренняя константа контура**, а не
+  адрес, по которому кто-то ходит из браузера. Он должен совпадать в трёх местах:
+  `KC_HOSTNAME` (STS) = `KEYCLOAK_ISSUER_URL` (base configmap и patch-dev) = фактический `iss`
+  в токенах. Логин работает одинаково со всех origin'ов UI (http://172.31.156.203:8088,
+  http://localhost:8088, https://agentscale.dev) — origin не участвует в обмене токенов.
+  Prod-контур пинит свой issuer через `overlays/prod` (hostPort **8099**) — не смешивать.
+- **redirectUris** участвуют только в единственном code-flow — Identity Broker
+  (`GET /api/v1/auth/broker/{idp}/start`, redirect_uri = публичный origin API +
+  `/api/v1/auth/broker/callback`). Сейчас брокеры ВЫКЛЮЧЕНЫ (`identityProviders: []`,
+  init Job не создаёт IdP), т.е. redirectUris — страховка на будущее включение VK/Yandex:
+  список в init Job и в обоих JSON покрывает все dev-origin'ы (VM-IP:8088, agentscale.dev,
+  localhost http/https, 127.0.0.1, deeplink `agentscale://`). Функциональный источник
+  списка — **init Job** (`infra/k3s/base/platform/keycloak.yaml`); JSON-файлы —
+  документация, держать в синхроне (см. «Import» ниже).
+
 ## Сущности (realm roles)
 
 | Role | Кто | Contour |

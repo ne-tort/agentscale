@@ -117,9 +117,9 @@ module "k3s_prod" {
   # подов не резолвилось ни одно внешнее имя, и агент не мог дойти до
   # провайдера ИИ. post-k3s-heal.sh навязывает этот список после каждого
   # старта k3s (k3s перезаписывает свой CoreDNS-манифест при каждом старте).
-  dns_upstreams          = "172.19.0.2 8.8.8.8 1.1.1.1"
-  ghcr_token             = var.ghcr_token
-  ghcr_username          = var.ghcr_username
+  dns_upstreams = "172.19.0.2 8.8.8.8 1.1.1.1"
+  ghcr_token    = var.ghcr_token
+  ghcr_username = var.ghcr_username
 }
 
 locals {

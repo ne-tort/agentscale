@@ -23,6 +23,9 @@
 # Числа подобраны под 14.9 ГиБ allocatable: запас 1.5 ГиБ на систему + 1.2 ГиБ
 # аварийного порога оставляют рабочим подам ~12 ГиБ, при фактическом
 # потреблении 7.9 ГиБ — двойной запас.
+#
+# ВАЖНО: файл остаётся чистым YAML (его парсят тесты в infra/ops). `resolv-conf`
+# дописывается provisioner'ом (k3s_resolv_conf != "") — см. main.tf.
 kubelet-arg:
   - "system-reserved=memory=1024Mi,cpu=250m"
   - "kube-reserved=memory=512Mi,cpu=250m"

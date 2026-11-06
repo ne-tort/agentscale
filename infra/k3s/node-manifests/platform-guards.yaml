@@ -17,6 +17,28 @@
 # LimitRange здесь даёт двум самым уязвимым namespace'ам непустые requests и
 # потолок на контейнер. Важно: значения применяются при СОЗДАНИИ пода, текущие
 # поды не перезапускаются — правка безопасна для работающего кластера.
+#
+# Namespace-объекты ниже — часть того же фикса для ХОЛОДНОГО старта: k3s
+# применяет этот файл add-on'ом при первом же запуске, КОГДА ns argocd и
+# agent-sandbox-system ещё не существуют (их создают позже bootstrap-kubectl и
+# Argo соответственно). Без Namespace'ов apply LimitRange падал («namespace not
+# found»), и до следующего ретраи add-on'а argocd-поды успевали создаться БЕЗ
+# requests/limits (BestEffort) — LimitRange на уже созданные поды не
+# распространяется, т.е. защита от OOM (ради которой файл существует) не
+# действовала ровно в самый опасный момент — пик холодного старта. Создание ns
+# здесь идемпотентно: bootstrap `kubectl apply -k infra/argocd/install` и Argo
+# (CreateNamespace=true + свой Namespace-манифест) применяют те же ПУСТЫЕ
+# (без меток) Namespace-объекты — ни конфликта, ни дрейфа полей.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: argocd
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: agent-sandbox-system
+---
 apiVersion: v1
 kind: LimitRange
 metadata:

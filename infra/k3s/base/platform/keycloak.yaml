@@ -281,10 +281,20 @@ spec:
                 fi
               }
 
+              # redirectUris: основной логин — ROPC через API (Auth Service),
+              # браузерных редиректов нет, и эти URI в нём не участвуют. Они
+              # нужны единственному code-flow — Identity Broker (/api/v1/auth/
+              # broker/{idp}/start, redirect_uri = публичный origin API +
+              # /api/v1/auth/broker/callback, строится из request.url_for).
+              # Поэтому покрыты ВСЕ dev-origin'ы, с которых UI реально
+              # открывается: VM-IP:8088 (web entrypoint), agentscale.dev и
+              # localhost (websecure-пины priority 100), плюс loopback/deeplink
+              # для десктопного Flutter. Prod-контур пинит свой issuer 8099
+              # через overlays/prod — этот список на него не влияет.
               ensure_client agentscale-flutter \
                 -s name="Agentscale Flutter" -s enabled=true -s publicClient=true \
                 -s directAccessGrantsEnabled=true -s standardFlowEnabled=true \
-                -s 'redirectUris=["http://127.0.0.1:*","http://localhost:*","agentscale://*"]' \
+                -s 'redirectUris=["http://127.0.0.1:*","http://localhost:*","https://localhost/*","agentscale://*","http://172.31.156.203:8088/*","https://agentscale.dev/*"]' \
                 -s 'webOrigins=["+"]' -s fullScopeAllowed=true
               FLUTTER_TMP=$("$KC" get clients -r agentscale -q clientId=agentscale-flutter --fields id --format csv --noquotes \
                 | grep -E '^[0-9a-f-]{8,}' | head -1 || true)
