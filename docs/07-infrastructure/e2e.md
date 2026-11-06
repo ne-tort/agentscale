@@ -45,7 +45,7 @@ poetry run pytest tests/unit/ -q
 
 ```bash
 cd apps/api
-export DATABASE_URL=postgresql+asyncpg://prodavan_app:prodavan@127.0.0.1:5432/prodavan
+export DATABASE_URL=postgresql+asyncpg://agentscale_app:agentscale@127.0.0.1:5432/agentscale
 alembic upgrade head
 pytest -m integration -q
 # точечно:
@@ -94,9 +94,9 @@ pytest -m "integration or k8s or live"
 
 | Workflow | Когда | Что гоняет |
 |----------|-------|------------|
-| [`ci-gate.yml`](../../.github/workflows/ci-gate.yml) | каждый PR | L1 unit + kustomize validate (incl. `overlays/e2e`) |
-| [`ci-nightly.yml`](../../.github/workflows/ci-nightly.yml) | cron 02:00 UTC | L2 `pytest -m integration` |
-| [`ci-e2e.yml`](../../.github/workflows/ci-e2e.yml) | **opt-in** | L2 + L3a + L3b |
+| [`ci-gate.yml`](../../.github/workflows/ci-gate.yml) | каждый PR | пять job'ов: `infra` (`prodavan-ops validate` — kustomize render dev + `overlays/e2e` + argocd, пины образов), `api` (L1 unit + PG-сьюты), `web`, `flutter`, `schemas`; `gate` требует все зелёными |
+| [`ci-nightly.yml`](../../.github/workflows/ci-nightly.yml) | cron 02:00 UTC | L2: `pytest tests/integration -m integration` (эфемерный Postgres, порт 55433) |
+| [`ci-e2e.yml`](../../.github/workflows/ci-e2e.yml) | **opt-in** | L2 + L3a + L3b (+ `bridge`, non-blocking) |
 | [`ci-images.yml`](../../.github/workflows/ci-images.yml) | post-merge / dispatch | GHCR `:latest` + SHA |
 | [`verify-dev.yml`](../../.github/workflows/verify-dev.yml) | post-merge | HTTP smoke (не pytest) |
 | [`auto-merge.yml`](../../.github/workflows/auto-merge.yml) | после **CI Gate** | squash-merge + dispatch Images |
@@ -114,7 +114,7 @@ pytest -m "integration or k8s or live"
 - HTTP smoke/live: `SMOKE_ADDR=127.0.0.1` → `:8088` (Traefik) / `:8089` (Keycloak)
 - rewrite kubeconfig на `host.docker.internal` ([`prodavan_ops/k8s.py`](../../infra/ops/src/prodavan_ops/k8s.py)) включается только при `PRODAVAN_CI_HOST=host.docker.internal` — легаси Docker Desktop-раннеров, на VM не используется
 
-**L3a k8s** — runner **снаружи** кластера: `kubectl apply` ephemeral Job, pytest **in-cluster** в Job pod (код из образа `ghcr.io/.../prodavan-api:latest` + pip install pytest). Runner только оркестрирует Job и читает логи.
+**L3a k8s** — runner **снаружи** кластера: `kubectl apply` ephemeral Job, pytest **in-cluster** в Job pod (код из образа `ghcr.io/ne-tort/agentscale-api:latest` + pip install pytest). Runner только оркестрирует Job и читает логи. Перед запуском CI дополнительно кладёт **исходники тестов из PR** в ConfigMaps `agentscale-e2e-conftest` / `agentscale-e2e-k8s-tests` — Job копирует их поверх `/app/tests/e2e/…` из образа, поэтому тестовый код — из PR, а код приложения — из `:latest` (main).
 
 **L3b live** — pytest **на runner**, HTTP в **уже задеплоенный** dev (`:8088`). Код PR **не** деплоится перед этим шагом.
 
@@ -132,7 +132,7 @@ PR opened
 merge → CI Images → Argo sync → Verify Dev (HTTP smoke на deployed dev)
 ```
 
-\* L3a Job сейчас использует `:latest` образ; для проверки **diff PR** в k8s нужен либо push образа из PR, либо post-merge прогон. L2 integration закрывает бизнес-логику на коде PR.
+\* L3a Job использует `:latest` образ (код приложения — из main), но **тестовый код берётся из PR**: job `k8s` кладёт `conftest.py` и `tests/e2e/k8s` в ConfigMaps, Job копирует их поверх образа. То есть проверяются PR-тесты против main-кода; полноценная проверка diff'а приложения в k8s — только post-merge. L2 integration закрывает бизнес-логику на коде PR.
 
 ### Когда нужен post-merge E2E
 
@@ -152,7 +152,14 @@ merge → CI Images → Argo sync → Verify Dev (HTTP smoke на deployed dev)
 
 1. **Label `e2e`** на PR — основной способ
 2. **`[e2e]`** в заголовке PR
-3. **`workflow_dispatch`** — suite: `all` | `integration` | `k8s` | `live`
+3. **`workflow_dispatch`** — suite: `all` | `integration` | `k8s` | `live` | `bridge`
+
+Job'ы `ci-e2e.yml`: `gate` (определяет, что запускать) → `integration`, `dev-preflight`
+(только для k8s/live) → `k8s`, `live`, `bridge` → `done` (сводка; падает, если
+запрошенный и упавший слой не `success`). `bridge` помечен `continue-on-error: true`
+и в сводку не входит: он собирает образ `prodavan-agent-runtime:e2e` из клона
+`prodavan-claw` и гоняет `tests/e2e/bridge -m bridge_e2e` против внешнего
+OpenAI-совместимого провайдера.
 
 CI Gate **не** замедляется e2e по умолчанию.
 
@@ -162,19 +169,22 @@ CI Gate **не** замедляется e2e по умолчанию.
 
 ```
 infra/k3s/overlays/e2e/
-├── job.yaml          # agentscale-e2e-runner — pytest -m k8s
-├── configmap.yaml    # POD_RUNTIME_MODE=k8s, DATABASE_URL→agentscale_e2e
-├── rbac.yaml         # SA agentscale-e2e-runner
-└── rbac-sandboxes.yaml
+├── job.yaml                  # agentscale-e2e-runner — pytest -m k8s
+├── configmap.yaml            # POD_RUNTIME_MODE=k8s, DATABASE_URL→agentscale_e2e
+├── rbac.yaml                 # SA agentscale-e2e-runner (ns agentscale-dev)
+├── rbac-sandboxes.yaml       # SA agentscale-project-pod (ns agentscale-dev-sandboxes)
+├── sandboxes-bootstrap.yaml  # NS + SA/secret для sandbox-подов (применяется до overlay)
+├── namespace-transformer.yaml
+└── kustomization.yaml
 ```
 
-Argo Application [`agentscale-e2e`](../../infra/argocd/apps/agentscale-e2e.yaml) — **manual sync only**. Runner: `prodavan-ops e2e run`.
+Argo Application [`agentscale-e2e`](../../infra/argocd/apps/agentscale-e2e.yaml) — **manual sync only**. Runner: `prodavan-ops e2e run` (применяет `sandboxes-bootstrap.yaml`, затем `overlays/e2e`, ждёт Job, печатает логи при провале).
 
 ## Cleanup
 
 - Job: `ttlSecondsAfterFinished: 3600`
-- K8s tests: teardown Pods по `prodavan.io/project-id` в `agentscale-dev-sandboxes`
-- `prodavan-ops e2e cleanup` — удаляет Job и overlay resources
+- `prodavan-ops e2e cleanup` — удаляет Job и `kubectl delete -k overlays/e2e`; с `--unsync` дополнительно удаляет Argo Application `agentscale-e2e`. Бутстрап sandbox-NS (`sandboxes-bootstrap.yaml`) cleanup намеренно **не** трогает.
+- CI-шаг `Cleanup k8s e2e` (`if: always()`) делает то же самое плюс удаляет ConfigMaps с PR-тестами (`agentscale-e2e-conftest`, `agentscale-e2e-k8s-tests`).
 
 ---
 
