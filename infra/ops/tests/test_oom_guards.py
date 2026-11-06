@@ -94,6 +94,47 @@ def test_app_namespace_budget_is_wired_into_gitops() -> None:
     assert quota["spec"]["hard"]["requests.memory"] == "12Gi"
 
 
+def test_cpu_ceiling_leaves_room_for_the_e2e_job() -> None:
+    """``limits.cpu`` — потолок, и он же отклоняет создание подов.
+
+    Платформа занимает 11050m. При потолке 14 не оставалось места под
+    e2e-джобу (2 ядра), и ``ci-e2e`` падал с ``exceeded quota: app-budget``
+    вместо того, чтобы запускать тесты — то есть квота, поставленная как
+    OOM-гард, блокировала сам инструмент проверки. Требование слабое, но
+    конкретное: после платформы должно оставаться место на джобу с её
+    лимитом из ``overlays/e2e/job.yaml``.
+    """
+
+    docs = [
+        d for d in yaml.safe_load_all(
+            (_K3S / "base/guards/app-budget.yaml").read_text(encoding="utf-8")
+        ) if d
+    ]
+    quota = next(d for d in docs if d["kind"] == "ResourceQuota")
+    ceiling_milli = int(quota["spec"]["hard"]["limits.cpu"]) * 1000
+
+    job_docs = [
+        d for d in yaml.safe_load_all(
+            (_K3S / "overlays/e2e/job.yaml").read_text(encoding="utf-8")
+        ) if d
+    ]
+    job = next(d for d in job_docs if d["kind"] == "Job")
+    job_cpu_milli = 0
+    for container in job["spec"]["template"]["spec"]["containers"]:
+        cpu = container.get("resources", {}).get("limits", {}).get("cpu")
+        if cpu:
+            job_cpu_milli += int(cpu[:-1]) if cpu.endswith("m") else int(float(cpu) * 1000)
+
+    # Замер живого namespace 2026-11-06: 11050m у платформы. Держим это
+    # константой, потому что манифесты платформы меняются по одному, а
+    # сумма важна только целиком.
+    platform_milli = 11050
+    assert ceiling_milli >= platform_milli + job_cpu_milli, (
+        f"limits.cpu={ceiling_milli}m не оставляет места под e2e-джобу "
+        f"({job_cpu_milli}m) после платформы ({platform_milli}m)"
+    )
+
+
 def test_oom_guards_are_installed_by_terraform() -> None:
     """Файлы должны реально доезжать до ноды, иначе манифесты — мёртвый груз."""
     main_tf = (_TERRAFORM / "modules/k3s-dev-host/main.tf").read_text(encoding="utf-8")
