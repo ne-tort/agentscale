@@ -642,7 +642,16 @@ async def test_promotion_evidence_read_is_bound_to_the_exact_partition() -> None
     assert refusal.code is M04EPortReason.M04E_01_PROMOTION_ABSENT
     sql, params = fake.executed("FROM m04e_definition_version_promotion_evidence")[0]
     assert "tenant_id = :tenant_id" in sql and "definition_id = :definition_id" in sql
-    assert params == {"tenant_id": TENANT, "definition_id": DEFINITION_ID}
+    # The gate reads one kind of envelope. The same table carries M05 handoff
+    # markers and M05 promotion records, both stamped ``outcome='blocked'``, so
+    # without this predicate the newest append would shadow a positive
+    # promotion and the gate would refuse a partition it had already approved.
+    assert "gate_evidence ->> 'schema' = :backfill_schema" in sql
+    assert params == {
+        "tenant_id": TENANT,
+        "definition_id": DEFINITION_ID,
+        "backfill_schema": "m04e-backfill-page.v1",
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -989,7 +998,14 @@ async def test_evidence_store_reads_the_partition_promotion_record_exactly() -> 
     assert record.source_digest == SNAPSHOT_DIGEST
     (sql, params), = fake.executed("FROM m04e_definition_version_promotion_evidence")
     assert "tenant_id = :tenant_id" in sql and "definition_id = :definition_id" in sql
-    assert params == {"tenant_id": TENANT, "definition_id": DEFINITION_ID}
+    # Same envelope filter as the gate above: the store and the gate must read
+    # the same row, or one of them reports a promotion the other cannot see.
+    assert "gate_evidence ->> 'schema' = :backfill_schema" in sql
+    assert params == {
+        "tenant_id": TENANT,
+        "definition_id": DEFINITION_ID,
+        "backfill_schema": "m04e-backfill-page.v1",
+    }
 
 
 async def test_evidence_store_returns_none_only_for_an_absent_partition_record() -> None:
