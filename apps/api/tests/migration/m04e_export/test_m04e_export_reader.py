@@ -46,14 +46,10 @@ import sqlalchemy as sa
 
 from prodavan.application.migration import m04e_export_reader as reader_module
 from prodavan.application.migration.evidence_ports import (
-    handoff_marker_row_values,
     is_sha256,
 )
 from prodavan.application.migration.m04_scope.scope_persistence import (
     encode_mapping_canonical_evidence,
-)
-from prodavan.application.migration.m04e_definition_version import (
-    backfill as backfill_module,
 )
 from prodavan.application.migration.m04e_definition_version.backfill import (
     BackfillOutcome,
@@ -66,8 +62,8 @@ from prodavan.application.migration.m04e_export_reader import (
     IDENTITY_ARITY,
     MAPPING_OUTCOMES,
     QUARANTINE_STATES,
-    M04EExportRefused,
     M04EExportRefusalCode,
+    M04EExportRefused,
     SqlM04EEvidenceExportReader,
     build_m04e_export_reader,
     select_mappings,
@@ -89,15 +85,6 @@ from prodavan.application.migration.m05_contexts import (
     load_partition_m05_contexts,
 )
 from prodavan.application.migration.partition_chain import PartitionChainKey
-from prodavan.infrastructure.persistence.models.dynamic_app_definition_version import (
-    M04EDefinitionVersionPromotionEvidenceRow,
-)
-from prodavan.infrastructure.persistence.models.m04e_ledger import (
-    M04EDefinitionVersionAuditRow,
-    M04EDefinitionVersionCheckpointRow,
-    M04EDefinitionVersionMappingRow,
-    M04EDefinitionVersionQuarantineRow,
-)
 
 from . import ledger_fixtures as fx
 from .ledger_fixtures import (
@@ -108,11 +95,8 @@ from .ledger_fixtures import (
     OTHER_TENANT,
     PROMOTION_TABLE,
     QUARANTINE_TABLE,
-    SHA_A,
     SHA_C,
     TENANT,
-    VERSION_TWO,
-    definition_candidate,
     version_candidate,
 )
 
@@ -301,6 +285,9 @@ async def test_each_record_carries_the_page_cursor_it_was_classified_under(
     assert version.checkpoint.after_source_id == version.source_id
     assert definition.checkpoint.phase_complete is False
     assert version.checkpoint.phase_complete is True
+    # The pages are ordered, so the cursor they report is ordered too: the definition page
+    # was classified before the version page.
+    assert definition.checkpoint.sequence < version.checkpoint.sequence
     # Lineage is the head's, on every record of every page.
     for record in ledger.records:
         assert record.checkpoint.source_snapshot_id == ledger.checkpoint.source_snapshot_id
@@ -1108,13 +1095,13 @@ def test_the_two_stages_agree_on_the_same_stored_column() -> None:
     assert mapping_canonical_digest(packed) == SHA_C
 
     # And the MIG-M04-02 gate accepts the packed spelling while refusing the bare one.
+    from prodavan.application.migration.m04e_ports import SqlM04EUpstreamGate
     from tests.migration.m04e_ports.acceptance_fixtures import (
         promotion_row,
         scope_mapping_row,
         session,
         tables,
     )
-    from prodavan.application.migration.m04e_ports import SqlM04EUpstreamGate
 
     gate = SqlM04EUpstreamGate
     loop = asyncio.new_event_loop()

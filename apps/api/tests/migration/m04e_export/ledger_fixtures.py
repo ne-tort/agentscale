@@ -28,7 +28,6 @@ from prodavan.application.migration.evidence_ports import (
 )
 from prodavan.application.migration.m04e_definition_version.backfill import (
     BackfillCheckpoint,
-    BackfillContext,
     BackfillRecord,
     CandidateDecision,
     CandidateProof,
