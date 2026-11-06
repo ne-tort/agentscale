@@ -9,7 +9,19 @@ resources:
 transformers:
   - namespace-transformer.yaml
 patches:
-  - path: patch-dev.yaml
+  # Один ресурс на файл, намеренно. `kubectl kustomize` из kubectl 1.29 несёт
+  # kustomize v5.0.4, который НЕ разбирает много-документный patch-файл
+  # («unable to parse SM or JSON patch from [...]» — весь файл уходит в
+  # SM-парсер как один документ). Argo рендерит своим, более новым kustomize и
+  # такое стерпел бы, но `prodavan-ops validate` — штатная пост-установочная
+  # проверка — рендерит именно хостовым kubectl и на этом падал.
+  - path: patch-dev-api.yaml
+  - path: patch-dev-web.yaml
+  - path: patch-dev-celery-worker.yaml
+  - path: patch-dev-celery-beat.yaml
+  - path: patch-dev-celery-indexer.yaml
+  - path: patch-dev-config.yaml
+  - path: patch-dev-ingress.yaml
 # First-party: movable :latest. IfNotPresent + node image cache survives reboot.
 # Kubelet pulls from GHCR via SealedSecret ghcr-pull — no image import.
 # Third-party brokers are version-pinned in base/platform + postgres.yaml — not :latest.
