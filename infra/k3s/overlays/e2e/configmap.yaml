@@ -25,6 +25,13 @@ data:
   POD_K8S_REQUIRED: "true"
   POD_SANDBOX_IMAGE: ghcr.io/ne-tort/agentscale-api:latest
   POD_SANDBOX_HYDRATE_IMAGE: ghcr.io/ne-tort/agentscale-api:latest
+  # Where the hydrate initContainer fetches a workspace from. The code default is
+  # `http://prodavan-api.prodavan.svc:8001/api/v1` — a Service that does not
+  # exist in any contour — so without this every sandbox pod dies in
+  # `Init:Error` with `hydrate initContainer failed … Name or service not known`,
+  # and the suite reports it as "project error while waiting for running".
+  # The dev overlay sets the same value; this Job runs inside agentscale-dev.
+  POD_AGENT_RUNTIME_API_BASE_URL: http://agentscale-api.agentscale-dev.svc:8001/api/v1
   # Redis is not optional while the bridge is strict: `bump_pod_bridge_generation`
   # treats a failed `cache_set` as "revocation did not happen" and raises 503, and
   # without a Redis manager `cache_set` always returns False. Every pause / stop /
