@@ -188,6 +188,13 @@ jobs:
   postgres-integration:
     name: postgres-integration
     runs-on: [self-hosted, linux, docker]
+    # Serialised behind `test`, like migration-suite already is. The runners and
+    # the dev cluster share one 15 GiB VM, and the cluster holds ~12 GiB of it;
+    # three pytest+Postgres suites starting together is what took the host down
+    # on 2026-11-06 -- three jobs on three different runners all died at the
+    # 21-minute mark and the VM stopped answering on SSH and ICMP at once.
+    # Wall clock grows; a gate that kills the machine it runs on costs more.
+    needs: [test]
     # Was 20. Every gate opens five jobs on one eight-core VM, and this suite is
     # the slowest per test: each case creates and migrates real schemas, so it
     # spent 19 of its 20 minutes in pytest and was cancelled by the job timer
@@ -403,13 +410,14 @@ jobs:
   # against this job's migrated Postgres. `-rs` prints every skip reason so the
   # log shows exactly what did not run.
   #
-  # RAM: the CI VM (15 GiB) also hosts the live dev cluster (~12 GiB). This job
-  # is chained AFTER `test` (needs:) so two full pytest+Postgres runs never peak
-  # simultaneously; postgres-integration stays parallel (pre-existing layout).
+  # RAM: the CI VM (15 GiB) also hosts the live dev cluster (~12 GiB). All three
+  # pytest suites are chained -- test -> postgres-integration -> this job -- so
+  # at most one of them peaks at a time. They used to overlap, and on 2026-11-06
+  # that combination took the host down mid-run.
   # ------------------------------------------------------------------------- #
   migration-suite:
     name: migration-suite
-    needs: [test]
+    needs: [test, postgres-integration]
     runs-on: [self-hosted, linux, docker]
     timeout-minutes: 45
     defaults:
