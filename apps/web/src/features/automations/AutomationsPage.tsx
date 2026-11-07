@@ -17,6 +17,7 @@ import {
   type WebhookSubscription,
 } from "./types";
 import { useI18n } from "../../i18n/useT";
+import { formatDateTime } from "../../i18n/format";
 import type { Translate } from "../../i18n/catalogue";
 import type { Locale } from "../../preferences/settings";
 import "./automations.css";
@@ -59,17 +60,124 @@ function eventWord(t: Translate, eventType: string): string {
   return eventType;
 }
 
+/**
+ * What to say about a failed request.
+ *
+ * The service reports a code, not a sentence, so the wording is chosen here in
+ * the interface language. Server text — `server_message` — is passed through
+ * exactly as it arrived: it is the server's own words, and translating them
+ * would mean putting words in its mouth.
+ */
+function requestErrorText(t: Translate, error: AutomationRequestError): string {
+  switch (error.code) {
+    case "NETWORK_ERROR":
+      return t("automations.errorNetwork");
+    case "HTTP_ERROR":
+      return t("automations.errorHttp", { status: error.status ?? 0 });
+    case "INVALID_RESPONSE":
+      return error.detail ? t("automations.errorInvalidResponseField", { field: error.detail }) : t("automations.errorInvalidResponse");
+    case "RESPONSE_OTHER_PROJECT":
+      return t("automations.errorOtherProject");
+    case "RETRY_NOT_CONFIRMED":
+      return t("automations.errorRetryNotConfirmed");
+    case "PAYLOAD_NOT_JSON":
+      return t("automations.errorJson");
+    case "PAYLOAD_NOT_OBJECT":
+      return t("automations.errorJsonObject");
+    default:
+      if (error.serverMessage) return error.serverMessage;
+      if (error.status) return t("automations.errorHttp", { status: error.status });
+      return t("automations.errorUnknown");
+  }
+}
+
 function errorMessage(t: Translate, error: unknown): string {
   if (error instanceof AutomationRequestError) {
     const support = error.traceId ? ` ${t("automations.supportCode", { id: error.traceId })}` : "";
-    return `${error.message}${support}`;
+    return `${requestErrorText(t, error)}${support}`;
   }
   return error instanceof Error ? error.message : t("automations.errorUnknown");
 }
 
 function dateTime(value: string | null | undefined, locale: Locale, t: Translate): string {
-  if (!value || !Number.isFinite(Date.parse(value))) return t("automations.notProvided");
-  return new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+  return formatDateTime(value, locale) || t("automations.notProvided");
+}
+
+/** "14:05" out of the two cron fields that carry it, or nothing when they are a pattern. */
+function clockTime(hour: string, minute: string): string | undefined {
+  if (!/^\d{1,2}$/.test(hour) || !/^\d{1,2}$/.test(minute)) return undefined;
+  const hours = Number(hour);
+  const minutes = Number(minute);
+  if (hours > 23 || minutes > 59) return undefined;
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+}
+
+/** 0 is Sunday, matching cron; formatted in the interface language, not the system one. */
+function weekdayName(locale: Locale, index: number): string {
+  return new Intl.DateTimeFormat(locale, { weekday: "long", timeZone: "UTC" }).format(
+    new Date(Date.UTC(2024, 0, 7 + index)),
+  );
+}
+
+/** `1-5`, `0,6`, `1,3,5` as weekday numbers; `undefined` for anything richer than that. */
+function weekdayIndexes(field: string): number[] | undefined {
+  const values: number[] = [];
+  for (const chunk of field.split(",")) {
+    const range = /^(\d)-(\d)$/.exec(chunk);
+    if (range) {
+      const from = Number(range[1]);
+      const to = Number(range[2]);
+      if (from > to) return undefined;
+      for (let value = from; value <= to; value += 1) values.push(value % 7);
+      continue;
+    }
+    if (/^\d$/.test(chunk)) {
+      values.push(Number(chunk) % 7);
+      continue;
+    }
+    return undefined;
+  }
+  return values.length > 0 ? [...new Set(values)].sort((left, right) => left - right) : undefined;
+}
+
+/**
+ * "0 9 * * 1-5" in words: "On weekdays at 09:00 (Europe/Moscow)".
+ *
+ * Only the shapes people actually schedule by are translated. Anything else
+ * falls back to the expression itself, because that is the only honest answer
+ * to "when does this fire" — guessing a reading for an unfamiliar pattern would
+ * be a lie about when it runs. The time zone is part of the answer: 09:00 is
+ * not a time without one.
+ */
+function describeWhen(schedule: Schedule, locale: Locale, t: Translate): string {
+  const fields = schedule.cron.trim().split(/\s+/);
+  const custom = t("automations.whenCustom", { cron: schedule.cron, timezone: schedule.timezone });
+  if (fields.length !== 5) return custom;
+  const [minute, hour, dayOfMonth, month, dayOfWeek] = fields;
+  const time = clockTime(hour, minute);
+  const everyDay = dayOfMonth === "*" && month === "*";
+  let days: string | undefined;
+  if (everyDay && dayOfWeek === "*") {
+    days = t("automations.whenEveryDay");
+  } else if (everyDay) {
+    const indexes = weekdayIndexes(dayOfWeek);
+    if (indexes) {
+      if (indexes.length === 5 && indexes.every((value) => value >= 1 && value <= 5)) {
+        days = t("automations.whenWeekdays");
+      } else if (indexes.length === 2 && indexes[0] === 0 && indexes[1] === 6) {
+        days = t("automations.whenWeekend");
+      } else {
+        days = t("automations.whenWeekdayList", {
+          days: indexes.map((value) => weekdayName(locale, value)).join(", "),
+        });
+      }
+    }
+  }
+  if (!days && dayOfWeek === "*" && month === "*" && /^\d{1,2}$/.test(dayOfMonth)) {
+    days = t("automations.whenDayOfMonth", { day: dayOfMonth });
+  }
+  if (!days) return custom;
+  return time ? t("automations.whenAt", { days, time, timezone: schedule.timezone }) : days;
 }
 
 function formatJson(value: JsonObject): string {
@@ -98,8 +206,17 @@ function StatePill({ value, tone }: { value: string; tone?: "positive" | "warnin
   return <span className={`automation-pill automation-pill--${tone ?? "neutral"}`}><span aria-hidden="true" />{value}</span>;
 }
 
-function SectionHeader({ headingId, eyebrow, title, detail, action }: { headingId?: string; eyebrow: string; title: string; detail: string; action?: ReactNode }) {
-  return <div className="automation-section-heading"><div><p className="automation-eyebrow">{eyebrow}</p><h2 id={headingId}>{title}</h2><p>{detail}</p></div>{action}</div>;
+/**
+ * One honesty claim, short enough to sit beside the thing it qualifies. The
+ * sentence behind it is the tooltip and, always, a line inside the card's own
+ * details — a claim nobody can reach is a claim that was deleted.
+ */
+function Caveat({ label, detail }: { label: string; detail: string }) {
+  return <span className="automation-caveat" title={detail}>{label}</span>;
+}
+
+function SectionHeader({ headingId, eyebrow, title, detail, action }: { headingId?: string; eyebrow: string; title: string; detail?: string; action?: ReactNode }) {
+  return <div className="automation-section-heading"><div><p className="automation-eyebrow">{eyebrow}</p><h2 id={headingId}>{title}</h2>{detail && <p className="automation-section-detail">{detail}</p>}</div>{action}</div>;
 }
 
 function CollectionState({ status, error, empty, children, onRetry, loadingLabel, unavailableLabel }: {
@@ -162,6 +279,11 @@ function ScheduleEditor({ schedule, busy, onSave, onCancel }: {
   </form>;
 }
 
+/**
+ * A schedule at a glance: what it is, when it fires, whether it is on and what
+ * happened last. Everything the API also returns — the run parameters, the
+ * expression, the record id — sits one click below in a closed section.
+ */
 function ScheduleCard({ schedule, busy, onEdit, onToggle, onDelete }: {
   schedule: Schedule;
   busy: boolean;
@@ -170,12 +292,13 @@ function ScheduleCard({ schedule, busy, onEdit, onToggle, onDelete }: {
   onDelete: () => void;
 }) {
   const { locale, t } = useI18n();
+  const hint = t("automations.scheduleHint");
   return <article className="automation-card" aria-label={t("automations.scheduleAria", { name: schedule.name })}>
-    <div className="automation-card-heading"><div><span className="automation-card-icon" aria-hidden="true">◷</span><div className="automation-card-title"><h3>{schedule.name}</h3><code>{schedule.cron}</code></div></div><StatePill value={schedule.enabled ? t("automations.enabled") : t("automations.disabled")} tone={schedule.enabled ? "positive" : "neutral"} /></div>
-    <dl className="automation-facts"><div><dt>{t("automations.fieldTimezone")}</dt><dd>{schedule.timezone}</dd></div><div><dt>{t("automations.nextRun")}</dt><dd>{schedule.enabled ? dateTime(schedule.next_run_at, locale, t) : t("automations.switchedOff")}</dd></div><div><dt>{t("automations.lastRun")}</dt><dd>{dateTime(schedule.last_run_at, locale, t)}</dd></div></dl>
-    <p className="automation-capability-hint">{t("automations.scheduleHint")}</p>
-    <details className="automation-review"><summary>{t("automations.reviewPayload")}</summary><pre>{formatJson(schedule.payload)}</pre></details>
+    <div className="automation-card-heading"><div><span className="automation-card-icon" aria-hidden="true">◷</span><div className="automation-card-title"><h3>{schedule.name}</h3><p className="automation-when">{describeWhen(schedule, locale, t)}</p></div></div><StatePill value={schedule.enabled ? t("automations.enabled") : t("automations.disabled")} tone={schedule.enabled ? "positive" : "neutral"} /></div>
+    <dl className="automation-facts automation-facts--pair"><div><dt>{t("automations.nextRun")}</dt><dd>{schedule.enabled ? dateTime(schedule.next_run_at, locale, t) : t("automations.switchedOff")}</dd></div><div><dt>{t("automations.lastRun")}</dt><dd>{schedule.last_run_at ? dateTime(schedule.last_run_at, locale, t) : t("automations.neverFired")}</dd></div></dl>
+    <div className="automation-caveats"><Caveat label={t("automations.caveatScheduleFired")} detail={hint} /></div>
     <div className="automation-card-actions"><button type="button" className="automation-button automation-button--quiet" onClick={onToggle} disabled={busy} aria-label={schedule.enabled ? t("automations.toggleOffAria", { name: schedule.name }) : t("automations.toggleOnAria", { name: schedule.name })}>{busy ? t("automations.updating") : schedule.enabled ? t("automations.toggleOff") : t("automations.toggleOn")}</button><button type="button" className="automation-button automation-button--quiet" onClick={onEdit} disabled={busy}>{t("common.edit")}</button><button type="button" className="automation-button automation-button--danger-quiet" onClick={onDelete} disabled={busy}>{t("common.delete")}</button></div>
+    <details className="automation-review"><summary>{t("automations.reviewPayload")}</summary><p className="automation-caveat-note">{hint}</p><pre>{formatJson(schedule.payload)}</pre><dl><div><dt>{t("automations.fieldCron")}</dt><dd>{schedule.cron}</dd></div><div><dt>{t("automations.fieldTimezone")}</dt><dd>{schedule.timezone}</dd></div><div><dt>{t("automations.recordId")}</dt><dd>{schedule.id}</dd></div></dl></details>
   </article>;
 }
 
@@ -214,12 +337,14 @@ function TriggerCard({ trigger }: { trigger: ProjectTrigger }) {
     : INBOUND_EVENT_KINDS.has(trigger.kind)
       ? t("automations.originInbound")
       : t("automations.originCommand");
+  const queuedDetail = t("automations.triggerQueuedDetail");
+  const failedDetail = t("automations.triggerFailedHint");
   return <article className="automation-card automation-trigger-card" aria-label={t("automations.triggerAria", { kind: triggerKindLabel(t, trigger.kind) })}>
-    <div className="automation-card-heading"><div><span className="automation-card-icon" aria-hidden="true">↗</span><div className="automation-card-title"><h3>{triggerKindLabel(t, trigger.kind)}</h3><code>{origin}</code></div></div><TriggerStatus trigger={trigger} /></div>
-    <dl className="automation-facts automation-facts--trigger"><div><dt>{t("automations.created")}</dt><dd>{dateTime(trigger.created_at, locale, t)}</dd></div><div><dt>{t("automations.attempts")}</dt><dd>{trigger.attempts === undefined ? t("automations.notProvided") : trigger.attempts}</dd></div><div><dt>{t("automations.nextAttempt")}</dt><dd>{dateTime(trigger.available_at, locale, t)}</dd></div></dl>
+    <div className="automation-card-heading"><div><span className="automation-card-icon" aria-hidden="true">↗</span><div className="automation-card-title"><h3>{triggerKindLabel(t, trigger.kind)}</h3><p className="automation-when">{origin} · {dateTime(trigger.created_at, locale, t)}</p></div></div><TriggerStatus trigger={trigger} /></div>
+    <dl className="automation-facts automation-facts--pair"><div><dt>{t("automations.attempts")}</dt><dd>{trigger.attempts === undefined ? t("automations.notProvided") : trigger.attempts}</dd></div><div><dt>{t("automations.nextAttempt")}</dt><dd>{dateTime(trigger.available_at, locale, t)}</dd></div></dl>
     {trigger.last_error && <div className="automation-trigger-error" role="alert"><strong>{t("automations.lastError")}</strong><p>{trigger.last_error}</p></div>}
-    {trigger.status === "failed" && <p className="automation-capability-hint">{t("automations.triggerFailedHint")}</p>}
-    <details className="automation-review"><summary>{t("automations.reviewEvent")}</summary><pre>{formatJson(trigger.payload)}</pre><dl><div><dt>{t("automations.lockedUntil")}</dt><dd>{dateTime(trigger.lease_until, locale, t)}</dd></div><div><dt>{t("automations.handler")}</dt><dd>{trigger.leased_by || t("automations.notProvided")}</dd></div></dl></details>
+    {(trigger.status === "queued" || trigger.status === "failed") && <div className="automation-caveats">{trigger.status === "failed" ? <Caveat label={t("automations.caveatTriggerNoRetry")} detail={failedDetail} /> : <Caveat label={t("automations.caveatTriggerQueued")} detail={queuedDetail} />}</div>}
+    <details className="automation-review"><summary>{t("automations.reviewEvent")}</summary><p className="automation-caveat-note">{trigger.status === "failed" ? failedDetail : queuedDetail}</p><pre>{formatJson(trigger.payload)}</pre><dl><div><dt>{t("automations.lockedUntil")}</dt><dd>{dateTime(trigger.lease_until, locale, t)}</dd></div><div><dt>{t("automations.handler")}</dt><dd>{trigger.leased_by || t("automations.notProvided")}</dd></div><div><dt>{t("automations.recordId")}</dt><dd>{trigger.id}</dd></div></dl></details>
   </article>;
 }
 
@@ -262,14 +387,32 @@ function WebhookComposer({ projectId, busy, onCreate }: { projectId: string; bus
   </form>;
 }
 
-function WebhookCard({ subscription, busy, onToggle, onDelete }: { subscription: WebhookSubscription; busy: boolean; onToggle: () => void; onDelete: () => void }) {
+/**
+ * A subscription at a glance: where it sends, which events in words, whether it
+ * is on and how the last delivery ended. The event codes, the id and the fail
+ * counter's caveat are one click down.
+ */
+function WebhookCard({ subscription, lastDelivery, lastDeliveryKnown, busy, onToggle, onDelete }: {
+  subscription: WebhookSubscription;
+  lastDelivery?: WebhookDelivery;
+  /** Whether the delivery log actually answered: an unreachable log is not "nothing ever sent". */
+  lastDeliveryKnown: boolean;
+  busy: boolean;
+  onToggle: () => void;
+  onDelete: () => void;
+}) {
   const { locale, t } = useI18n();
+  const createdDetail = t("automations.webhookCreatedDetail");
+  const counterDetail = t("automations.webhookHintCount");
+  const lastDeliveryValue = lastDelivery
+    ? <DeliveryState status={lastDelivery.status} />
+    : lastDeliveryKnown ? t("automations.noDeliveries") : t("automations.notProvided");
   return <article className="automation-card" aria-label={t("automations.webhookAria", { url: subscription.url })}>
-    <div className="automation-card-heading"><div><span className="automation-card-icon" aria-hidden="true">⇧</span><div className="automation-card-title"><h3>{subscription.url}</h3></div></div><StatePill value={subscription.enabled ? t("automations.webhookOn") : t("automations.webhookOff")} tone={subscription.enabled ? "positive" : "neutral"} /></div>
-    <div className="automation-event-list" aria-label={t("automations.eventsLabel")}>{subscription.events.map((eventName) => <code key={eventName}>{eventName}</code>)}</div>
-    <dl className="automation-facts"><div><dt>{t("automations.failCount")}</dt><dd>{subscription.fail_count === undefined ? t("automations.notProvided") : subscription.fail_count}</dd></div><div><dt>{t("automations.created")}</dt><dd>{dateTime(subscription.created_at, locale, t)}</dd></div></dl>
-    <p className="automation-capability-hint">{t("automations.webhookHintCount")}</p>
+    <div className="automation-card-heading"><div><span className="automation-card-icon" aria-hidden="true">⇧</span><div className="automation-card-title"><h3>{subscription.url}</h3><p className="automation-when">{subscription.events.map((eventName) => eventWord(t, eventName)).join(" · ")}</p></div></div><StatePill value={subscription.enabled ? t("automations.webhookOn") : t("automations.webhookOff")} tone={subscription.enabled ? "positive" : "neutral"} /></div>
+    <dl className="automation-facts automation-facts--pair"><div><dt>{t("automations.lastDelivery")}</dt><dd>{lastDeliveryValue}</dd></div><div><dt>{t("automations.failCount")}</dt><dd>{subscription.fail_count === undefined ? t("automations.notProvided") : subscription.fail_count}</dd></div></dl>
+    <div className="automation-caveats"><Caveat label={t("automations.caveatWebhookCreated")} detail={createdDetail} /><Caveat label={t("automations.caveatFailCount")} detail={counterDetail} /></div>
     <div className="automation-card-actions"><button type="button" className="automation-button automation-button--quiet" onClick={onToggle} disabled={busy} aria-label={subscription.enabled ? t("automations.webhookTurnOffAria", { url: subscription.url }) : t("automations.webhookTurnOnAria", { url: subscription.url })}>{busy ? t("automations.updating") : subscription.enabled ? t("automations.webhookTurnOff") : t("automations.webhookTurnOn")}</button><button type="button" className="automation-button automation-button--danger-quiet" onClick={onDelete} disabled={busy}>{t("common.delete")}</button></div>
+    <details className="automation-review"><summary>{t("automations.reviewSubscription")}</summary><p className="automation-caveat-note">{createdDetail}</p><p className="automation-caveat-note">{counterDetail}</p><dl><div><dt>{t("automations.eventsLabel")}</dt><dd>{subscription.events.join(", ")}</dd></div><div><dt>{t("automations.recordId")}</dt><dd>{subscription.id}</dd></div><div><dt>{t("automations.created")}</dt><dd>{dateTime(subscription.created_at, locale, t)}</dd></div></dl></details>
   </article>;
 }
 
@@ -292,6 +435,20 @@ function DeliveryCard({ delivery, busy, retryAllowed, onRetry }: { delivery: Web
       ? <div className="automation-card-actions"><button type="button" className="automation-button automation-button--quiet" onClick={onRetry} disabled={busy}>{busy ? t("automations.retrying") : t("automations.retryDelivery")}</button></div>
       : <p className="automation-capability-hint">{t("automations.retryBlocked")}</p>)}
   </article>;
+}
+
+/** The most recent row per subscription, so a card can say what happened last. */
+function latestPerSubscription(deliveries: WebhookDelivery[]): Map<string, WebhookDelivery> {
+  const latest = new Map<string, WebhookDelivery>();
+  for (const item of deliveries) {
+    const current = latest.get(item.subscription_id);
+    const nextAt = Date.parse(item.created_at ?? "");
+    const currentAt = Date.parse(current?.created_at ?? "");
+    if (!current || (Number.isFinite(nextAt) && (!Number.isFinite(currentAt) || nextAt > currentAt))) {
+      latest.set(item.subscription_id, item);
+    }
+  }
+  return latest;
 }
 
 export function AutomationsView({ projectId, service }: AutomationsViewProps) {
@@ -535,6 +692,7 @@ export function AutomationsView({ projectId, service }: AutomationsViewProps) {
 
   const projectDeliveries = deliveries.items.filter((item) => deliveryProjectSubscriptionIds.has(item.subscription_id));
   const shownDeliveries = deliveryScope === "company" ? deliveries.items : projectDeliveries;
+  const lastDeliveryBySubscription = useMemo(() => latestPerSubscription(deliveries.items), [deliveries.items]);
 
   return <main className="automations-page">
     <header className="automations-header"><div><p className="automation-eyebrow">{t("automations.eyebrow")}</p><h1>{t("automations.title")}</h1><p>{t("automations.subtitle")}</p></div><button type="button" className="automation-button automation-button--quiet" onClick={refreshAll} disabled={busy !== undefined}>{t("automations.refresh")}</button></header>
@@ -542,7 +700,7 @@ export function AutomationsView({ projectId, service }: AutomationsViewProps) {
     {operationError && <div className="automation-notice automation-notice--error" role="alert"><div><strong>{t("automations.noticeErrorTitle")}</strong><span>{operationError}</span></div><button type="button" className="automation-button automation-button--quiet" onClick={refreshAll}>{t("automations.checkState")}</button></div>}
 
     <section className="automation-panel" aria-labelledby="schedules-heading">
-      <SectionHeader headingId="schedules-heading" eyebrow={t("automations.schedulesEyebrow")} title={t("automations.schedulesTitle")} detail={t("automations.schedulesDetail")} action={<button type="button" className="automation-button automation-button--primary" onClick={() => { setEditingSchedule(undefined); setCreatingSchedule((value) => !value); clearFeedback(); }} disabled={busy !== undefined}>{creatingSchedule ? t("automations.closeForm") : t("automations.newSchedule")}</button>} />
+      <SectionHeader headingId="schedules-heading" eyebrow={t("automations.schedulesEyebrow")} title={t("automations.schedulesTitle")} action={<button type="button" className="automation-button automation-button--primary" onClick={() => { setEditingSchedule(undefined); setCreatingSchedule((value) => !value); clearFeedback(); }} disabled={busy !== undefined}>{creatingSchedule ? t("automations.closeForm") : t("automations.newSchedule")}</button>} />
       {creatingSchedule && <ScheduleEditor key="new-schedule" busy={busy === "schedule:create"} onSave={saveSchedule} onCancel={() => setCreatingSchedule(false)} />}
       {editingSchedule && <ScheduleEditor key={editingSchedule.id} schedule={editingSchedule} busy={busy === `schedule:${editingSchedule.id}`} onSave={saveSchedule} onCancel={() => setEditingSchedule(undefined)} />}
       <CollectionState status={schedules.status} error={schedules.error} empty={schedules.items.length === 0 && !creatingSchedule && !editingSchedule} onRetry={() => void reloadSchedules()} loadingLabel={t("automations.schedulesLoading")} unavailableLabel={t("automations.schedulesUnavailable")}>
@@ -551,56 +709,77 @@ export function AutomationsView({ projectId, service }: AutomationsViewProps) {
     </section>
 
     <section className="automation-panel" aria-labelledby="triggers-heading">
-      <SectionHeader headingId="triggers-heading" eyebrow={t("automations.triggersEyebrow")} title={t("automations.triggersTitle")} detail={t("automations.triggersDetail")} action={<div className="automation-header-actions"><button type="button" className="automation-button automation-button--quiet" onClick={() => void reloadTriggers()} disabled={triggers.status === "loading"}>{triggers.status === "loading" ? t("automations.updating") : t("automations.refreshQueue")}</button><button type="button" className="automation-button automation-button--primary" onClick={() => void dispatchNextTrigger()} disabled={busy !== undefined}>{busy === "trigger:dispatch" ? t("automations.dispatching") : t("automations.dispatchNext")}</button></div>} />
+      <SectionHeader headingId="triggers-heading" eyebrow={t("automations.triggersEyebrow")} title={t("automations.triggersTitle")} action={<div className="automation-header-actions"><button type="button" className="automation-button automation-button--quiet" onClick={() => void reloadTriggers()} disabled={triggers.status === "loading"}>{triggers.status === "loading" ? t("automations.updating") : t("automations.refreshQueue")}</button><button type="button" className="automation-button automation-button--primary" onClick={() => void dispatchNextTrigger()} disabled={busy !== undefined}>{busy === "trigger:dispatch" ? t("automations.dispatching") : t("automations.dispatchNext")}</button></div>} />
       <TriggerComposer busy={busy === "trigger:create"} onEnqueue={enqueueTrigger} />
       <CollectionState status={triggers.status} error={triggers.error} empty={triggers.items.length === 0} onRetry={() => void reloadTriggers()} loadingLabel={t("automations.triggersLoading")} unavailableLabel={t("automations.triggersUnavailable")}>
         {triggers.items.length === 0 ? t("automations.triggersEmpty") : <div className="automation-card-grid">{triggers.items.map((trigger) => <TriggerCard key={trigger.id} trigger={trigger} />)}</div>}
       </CollectionState>
-      <div className="automation-boundary-note automation-boundary-note--warning" role="note"><strong>{t("automations.triggerBoundaryTitle")}</strong><span>{t("automations.triggerBoundaryDetail")}</span></div>
-      <div className="automation-boundary-note" role="note"><strong>{t("automations.runsBoundaryTitle")}</strong><span>{t("automations.runsBoundaryDetail")}</span></div>
-      <CollectionState status={runs.status} error={runs.error} empty={runs.items.length === 0} onRetry={() => void reloadRuns()} loadingLabel={t("automations.runsLoading")} unavailableLabel={t("automations.runsUnavailable")}>
-        {runs.items.length === 0 ? t("automations.runsEmpty") : <div className="automation-card-grid">{runs.items.map((run) => <article className="automation-card" aria-label={t("automations.runAria")} key={run.id}><div className="automation-card-heading"><div><span className="automation-card-icon" aria-hidden="true">◉</span><div className="automation-card-title"><h3>{runStatusWord(t, run.status)}</h3></div></div><StatePill value={t("automations.runAttempt", { count: run.attempt })} /></div><dl className="automation-facts"><div><dt>{t("automations.runStarted")}</dt><dd>{dateTime(run.created_at, locale, t)}</dd></div><div><dt>{t("automations.runFinished")}</dt><dd>{dateTime(run.finished_at, locale, t)}</dd></div><div><dt>{t("automations.runSequence")}</dt><dd>{run.sequence}</dd></div></dl>{(run.failure_code || run.failure_message) && <div className="automation-trigger-error" role="alert"><strong>{run.failure_code || t("automations.runErrorTitle")}</strong><p>{run.failure_message || t("automations.runErrorMessage")}</p></div>}{run.output_payload && <details className="automation-review"><summary>{t("automations.runOutput")}</summary><pre>{formatJson(run.output_payload)}</pre></details>}</article>)}</div>}
-      </CollectionState>
-      <div className="automation-form-actions"><span>{t("automations.runsFooter")}</span><button type="button" className="automation-button automation-button--quiet" onClick={() => void reloadRuns()} disabled={runs.status === "loading"}>{runs.status === "loading" ? t("automations.updating") : t("automations.refreshRuns")}</button></div>
     </section>
 
     <section className="automation-panel" aria-labelledby="webhooks-heading">
-      <SectionHeader headingId="webhooks-heading" eyebrow={t("automations.webhooksEyebrow")} title={t("automations.webhooksTitle")} detail={t("automations.webhooksDetail")} action={<button type="button" className="automation-button automation-button--quiet" onClick={() => { void reloadWebhooks(); void reloadDeliveries(); }} disabled={webhooks.status === "loading" || deliveries.status === "loading"}>{webhooks.status === "loading" || deliveries.status === "loading" ? t("automations.updating") : t("automations.refreshSubscriptions")}</button>} />
+      <SectionHeader headingId="webhooks-heading" eyebrow={t("automations.webhooksEyebrow")} title={t("automations.webhooksTitle")} action={<button type="button" className="automation-button automation-button--quiet" onClick={() => { void reloadWebhooks(); void reloadDeliveries(); }} disabled={webhooks.status === "loading" || deliveries.status === "loading"}>{webhooks.status === "loading" || deliveries.status === "loading" ? t("automations.updating") : t("automations.refreshSubscriptions")}</button>} />
       {createdSecret && <div className="automation-secret-note" role="status"><strong>{t("automations.secretTitle")}</strong><span>{t("automations.secretBody")}</span><button type="button" className="automation-button automation-button--primary" onClick={() => { void copyOneTimeSecret(t, createdSecret).then(() => { setSecretCopyMessage(t("automations.secretCopied")); setCreatedSecret(undefined); }, () => setSecretCopyMessage(t("automations.secretCopyFailed"))); }} aria-label={t("automations.secretCopyAria")}>{t("automations.secretCopy")}</button><button type="button" className="automation-button automation-button--quiet" onClick={() => { setCreatedSecret(undefined); setSecretCopyMessage(t("automations.secretHidden")); }}>{t("automations.secretHide")}</button>{secretCopyMessage && <span role="status">{secretCopyMessage}</span>}</div>}
       {!createdSecret && secretCopyMessage && <p className="automation-capability-hint" role="status">{secretCopyMessage}</p>}
       <WebhookComposer projectId={projectId} busy={busy === "webhook:create"} onCreate={createWebhook} />
       <CollectionState status={webhooks.status} error={webhooks.error} empty={webhooks.items.length === 0} onRetry={() => void reloadWebhooks()} loadingLabel={t("automations.webhooksLoading")} unavailableLabel={t("automations.webhooksUnavailable")}>
-        {webhooks.items.length === 0 ? t("automations.webhooksEmpty") : <div className="automation-card-grid">{webhooks.items.map((subscription) => <WebhookCard key={subscription.id} subscription={subscription} busy={busy === `webhook:${subscription.id}`} onToggle={() => void toggleWebhook(subscription)} onDelete={() => void deleteWebhook(subscription)} />)}</div>}
+        {webhooks.items.length === 0 ? t("automations.webhooksEmpty") : <div className="automation-card-grid">{webhooks.items.map((subscription) => <WebhookCard key={subscription.id} subscription={subscription} lastDelivery={lastDeliveryBySubscription.get(subscription.id)} lastDeliveryKnown={deliveries.status === "ready"} busy={busy === `webhook:${subscription.id}`} onToggle={() => void toggleWebhook(subscription)} onDelete={() => void deleteWebhook(subscription)} />)}</div>}
       </CollectionState>
-      <SectionHeader eyebrow={t("automations.deliveriesEyebrow")} title={t("automations.deliveriesTitle")} detail={t("automations.deliveriesDetail")} />
-      {deliveries.status === "ready" && <div className="automation-delivery-summary" role="note">
-        <strong>{t("automations.deliverySummaryCapped", { returned: deliveryReturnedCount })}</strong>
-        {webhooks.status === "ready"
-          ? <span>{t("automations.deliverySummaryMatches", { matched: projectDeliveries.length, rest: Math.max(0, deliveryReturnedCount - projectDeliveries.length) })}</span>
-          : <span>{t("automations.deliverySummaryNoSubscriptions")}</span>}
-        <span>{t("automations.deliverySummaryScope")}</span>
-      </div>}
-      <div className="automation-delivery-scope" role="group" aria-label={t("automations.deliveryScopeLabel")}>
-        <button type="button" className={deliveryScope === "company" ? "is-active" : ""} aria-pressed={deliveryScope === "company"} onClick={() => setDeliveryScope("company")}>{t("automations.deliveryScopeCompany", { count: deliveries.items.length })}</button>
-        <button type="button" className={deliveryScope === "project" ? "is-active" : ""} aria-pressed={deliveryScope === "project"} disabled={webhooks.status !== "ready"} onClick={() => setDeliveryScope("project")}>{t("automations.deliveryScopeProject", { count: webhooks.status === "ready" ? projectDeliveries.length : "—" })}</button>
-      </div>
-      <CollectionState status={deliveries.status} error={deliveries.error} empty={deliveries.items.length === 0} onRetry={() => void reloadDeliveries()} loadingLabel={t("automations.deliveriesLoading")} unavailableLabel={t("automations.deliveriesUnavailable")}>
-        {deliveries.items.length === 0 ? t("automations.deliveriesEmpty") : (() => {
-          if (deliveryScope === "project" && webhooks.status !== "ready") return <p>{t("automations.deliveryProjectUnavailable")}</p>;
-          return shownDeliveries.length === 0
-            ? <p>{t("automations.deliveryNoMatches")}</p>
-            : <div className="automation-card-grid">{shownDeliveries.map((delivery) => <DeliveryCard key={delivery.id} delivery={delivery} busy={busy === `delivery:${delivery.id}`} retryAllowed={webhooks.status === "ready" && deliveryProjectSubscriptionIds.has(delivery.subscription_id)} onRetry={() => void retryWebhookDelivery(delivery)} />)}</div>;
-        })()}
-      </CollectionState>
-      <div className="automation-boundary-note automation-boundary-note--warning" role="note"><strong>{t("automations.deliveryGateTitle")}</strong><span>{t("automations.deliveryGateDetail")}</span></div>
     </section>
 
-    <section className="automation-panel automation-ingress-panel" aria-labelledby="ingress-heading">
-      <SectionHeader headingId="ingress-heading" eyebrow={t("automations.ingressEyebrow")} title={t("automations.ingressTitle")} detail={t("automations.ingressDetail")} />
-      <div className="automation-ingress-grid"><article><StatePill value={t("automations.ingressIn")} tone="warning" /><h3>{t("automations.ingressInTitle")}</h3><p>{t("automations.ingressInBody")}</p></article><article><StatePill value={t("automations.ingressOut")} tone="positive" /><h3>{t("automations.ingressOutTitle")}</h3><p>{t("automations.ingressOutBody")}</p></article></div>
-      <p className="automation-capability-hint">{t("automations.ingressHint")}</p>
-    </section>
-    <footer className="automation-footer">{t("automations.footer")}</footer>
+    <details className="automation-advanced">
+      <summary>{t("automations.advancedTitle")}</summary>
+      <div className="automation-advanced-body">
+        <section className="automation-advanced-block" aria-labelledby="runs-heading">
+          <SectionHeader headingId="runs-heading" eyebrow={t("automations.runsEyebrow")} title={t("automations.runsBoundaryTitle")} detail={t("automations.runsBoundaryDetail")} action={<button type="button" className="automation-button automation-button--quiet" onClick={() => void reloadRuns()} disabled={runs.status === "loading"}>{runs.status === "loading" ? t("automations.updating") : t("automations.refreshRuns")}</button>} />
+          <div className="automation-caveats"><Caveat label={t("automations.caveatRunNoEvent")} detail={t("automations.runsBoundaryDetail")} /></div>
+          <CollectionState status={runs.status} error={runs.error} empty={runs.items.length === 0} onRetry={() => void reloadRuns()} loadingLabel={t("automations.runsLoading")} unavailableLabel={t("automations.runsUnavailable")}>
+            {runs.items.length === 0 ? t("automations.runsEmpty") : <div className="automation-card-grid">{runs.items.map((run) => <article className="automation-card" aria-label={t("automations.runAria")} key={run.id}><div className="automation-card-heading"><div><span className="automation-card-icon" aria-hidden="true">◉</span><div className="automation-card-title"><h3>{runStatusWord(t, run.status)}</h3></div></div><StatePill value={t("automations.runAttempt", { count: run.attempt })} /></div><dl className="automation-facts"><div><dt>{t("automations.runStarted")}</dt><dd>{dateTime(run.created_at, locale, t)}</dd></div><div><dt>{t("automations.runFinished")}</dt><dd>{dateTime(run.finished_at, locale, t)}</dd></div><div><dt>{t("automations.runSequence")}</dt><dd>{run.sequence}</dd></div></dl>{(run.failure_code || run.failure_message) && <div className="automation-trigger-error" role="alert"><strong>{run.failure_code || t("automations.runErrorTitle")}</strong><p>{run.failure_message || t("automations.runErrorMessage")}</p></div>}{run.output_payload && <details className="automation-review"><summary>{t("automations.runOutput")}</summary><pre>{formatJson(run.output_payload)}</pre></details>}</article>)}</div>}
+          </CollectionState>
+          <div className="automation-boundary-note automation-boundary-note--warning" role="note"><strong>{t("automations.deliveryGateTitle")}</strong><span>{t("automations.deliveryGateDetail")}</span></div>
+          <p className="automation-capability-hint">{t("automations.runsFooter")}</p>
+        </section>
+
+        <section className="automation-advanced-block" aria-labelledby="deliveries-heading">
+          <SectionHeader headingId="deliveries-heading" eyebrow={t("automations.deliveriesEyebrow")} title={t("automations.deliveriesTitle")} detail={t("automations.deliveriesDetail")} />
+          {deliveries.status === "ready" && <div className="automation-delivery-summary" role="note">
+            <strong>{t("automations.deliverySummaryCapped", { returned: deliveryReturnedCount })}</strong>
+            {webhooks.status === "ready"
+              ? <span>{t("automations.deliverySummaryMatches", { matched: projectDeliveries.length, rest: Math.max(0, deliveryReturnedCount - projectDeliveries.length) })}</span>
+              : <span>{t("automations.deliverySummaryNoSubscriptions")}</span>}
+            <span>{t("automations.deliverySummaryScope")}</span>
+          </div>}
+          <div className="automation-delivery-scope" role="group" aria-label={t("automations.deliveryScopeLabel")}>
+            <button type="button" className={deliveryScope === "company" ? "is-active" : ""} aria-pressed={deliveryScope === "company"} onClick={() => setDeliveryScope("company")}>{t("automations.deliveryScopeCompany", { count: deliveries.items.length })}</button>
+            <button type="button" className={deliveryScope === "project" ? "is-active" : ""} aria-pressed={deliveryScope === "project"} disabled={webhooks.status !== "ready"} onClick={() => setDeliveryScope("project")}>{t("automations.deliveryScopeProject", { count: webhooks.status === "ready" ? projectDeliveries.length : "—" })}</button>
+          </div>
+          <CollectionState status={deliveries.status} error={deliveries.error} empty={deliveries.items.length === 0} onRetry={() => void reloadDeliveries()} loadingLabel={t("automations.deliveriesLoading")} unavailableLabel={t("automations.deliveriesUnavailable")}>
+            {deliveries.items.length === 0 ? t("automations.deliveriesEmpty") : (() => {
+              if (deliveryScope === "project" && webhooks.status !== "ready") return <p>{t("automations.deliveryProjectUnavailable")}</p>;
+              return shownDeliveries.length === 0
+                ? <p>{t("automations.deliveryNoMatches")}</p>
+                : <div className="automation-card-grid">{shownDeliveries.map((delivery) => <DeliveryCard key={delivery.id} delivery={delivery} busy={busy === `delivery:${delivery.id}`} retryAllowed={webhooks.status === "ready" && deliveryProjectSubscriptionIds.has(delivery.subscription_id)} onRetry={() => void retryWebhookDelivery(delivery)} />)}</div>;
+            })()}
+          </CollectionState>
+        </section>
+
+        <section className="automation-advanced-block" aria-labelledby="ingress-heading">
+          <SectionHeader headingId="ingress-heading" eyebrow={t("automations.ingressEyebrow")} title={t("automations.ingressTitle")} detail={t("automations.ingressDetail")} />
+          <div className="automation-ingress-grid"><article><StatePill value={t("automations.ingressIn")} tone="warning" /><h3>{t("automations.ingressInTitle")}</h3><p>{t("automations.ingressInBody")}</p></article><article><StatePill value={t("automations.ingressOut")} tone="positive" /><h3>{t("automations.ingressOutTitle")}</h3><p>{t("automations.ingressOutBody")}</p></article></div>
+          <p className="automation-capability-hint">{t("automations.ingressHint")}</p>
+        </section>
+
+        <section className="automation-advanced-block" aria-labelledby="limits-heading">
+          <SectionHeader headingId="limits-heading" eyebrow={t("automations.limitsEyebrow")} title={t("automations.limitsTitle")} />
+          <dl className="automation-limits">
+            <div><dt>{t("automations.schedulesTitle")}</dt><dd>{t("automations.schedulesDetail")}</dd></div>
+            <div><dt>{t("automations.triggersTitle")}</dt><dd>{t("automations.triggersDetail")}</dd></div>
+            <div><dt>{t("automations.triggerBoundaryTitle")}</dt><dd>{t("automations.triggerBoundaryDetail")}</dd></div>
+            <div><dt>{t("automations.webhooksTitle")}</dt><dd>{t("automations.webhooksDetail")}</dd></div>
+            <div><dt>{t("automations.footerTitle")}</dt><dd>{t("automations.footer")}</dd></div>
+          </dl>
+        </section>
+      </div>
+    </details>
   </main>;
 }
 

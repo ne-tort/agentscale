@@ -72,6 +72,9 @@ afterEach(async () => {
   root = undefined;
   host?.remove();
   host = undefined;
+  // The locale tests switch the stored preference; without clearing it the
+  // Russian-copy assertions below would run against an English panel.
+  window.localStorage.clear();
   if (createObjectURLDescriptor) Object.defineProperty(URL, "createObjectURL", createObjectURLDescriptor);
   else Reflect.deleteProperty(URL, "createObjectURL");
   restoreBlobUrlDescriptors({ createObjectURL: createObjectURLDescriptor, revokeObjectURL: revokeObjectURLDescriptor });
@@ -113,6 +116,27 @@ describe("Content operations acceptance surface", () => {
     expect(accepted).toMatchObject({ accepted: true, mime: "application/x-example" });
     expect(rejected).toMatchObject({ accepted: false, message: "The Content API accepts uploads up to 100 MiB." });
     expect(fallback.mime).toBe("application/octet-stream");
+  });
+
+  it("writes the asset's created and updated stamps in the interface's language", () => {
+    // The panel used to call `toLocaleString()` with no locale, so the stamp
+    // followed the *browser* setting: an English browser showed English months
+    // inside a Russian screen, and a Russian browser showed Cyrillic months in
+    // the English one. Both are rendered here from the same asset.
+    window.localStorage.setItem("agentscale.locale", "ru");
+    const russian = renderToStaticMarkup(withSettings(<ContentOpsPanel companyId="company-1" service={service} initialAssets={[asset]} />));
+    expect(russian).toContain("окт");
+
+    window.localStorage.setItem("agentscale.locale", "en");
+    const english = renderToStaticMarkup(withSettings(<ContentOpsPanel companyId="company-1" service={service} initialAssets={[asset]} />));
+    expect(english).toContain("Oct");
+    expect(english).not.toMatch(/[А-Яа-яЁё]/);
+  });
+
+  it("shows an unreadable timestamp as it arrived instead of dropping it", () => {
+    window.localStorage.setItem("agentscale.locale", "ru");
+    const markup = renderToStaticMarkup(withSettings(<ContentOpsPanel companyId="company-1" service={service} initialAssets={[{ ...asset, created_at: "не дата" }]} />));
+    expect(markup).toContain("не дата");
   });
 
   it("shows company asset loading, empty, safe error, and refresh retry states", async () => {

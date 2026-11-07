@@ -22,4 +22,12 @@ The adapter checks that the module is present in the admin module catalog, parse
 
 Freshness uses `last_indexed_at` and `reindex_interval_hours` from the row. Errors preserve a visible warning and last successful time when provided. The backend row has no independent last-good timestamp; successful `last_indexed_at` is retained by the backend indexer across failures.
 
+## Failures are codes, not sentences
+
+`EquipmentSourcesRequestError` carries a `code` (`EquipmentSourcesErrorCode`), the HTTP `status` when there was a response, and an optional `detail` — the server's own `detail`/`title`, kept as data and shown only as a second line under the translated sentence. The technical `message` stays for logs and the stack and is never rendered.
+
+The page maps each code with `SOURCE_ERROR_KEYS` to `equipment.srcErr<Code>`; the detail is scrubbed by `sanitizeCatalogMessage` exactly like any other server text. Adding a failure means adding a code, a key in both locales of `i18n/units/equipment.ts`, and an entry in that map.
+
+Dates come from `catalogFreshness(body, locale, now)` and `i18n/format`, never from `toLocaleString()`: the interface language is what the reader sees, and it is not the browser's.
+
 Tests cover metadata discovery, action gating, real route/payload contracts, multipart upload, secret references, freshness, error redaction, and blocked pause behavior. Per migration freeze these tests have not been executed.

@@ -1,10 +1,67 @@
+import type { Translate } from "../../i18n/catalogue";
+import type { Locale } from "../../preferences/settings";
+import { formatDateTime } from "../../i18n/format";
 import type { AgentRunCancelled, AgentRunCreated, AgentRunRecord, ApprovalCommandInput, ApprovalDecisionResult, ApprovalInboxItem, CancelRunBody, CancelRunCommandInput, ControlPlaneEvent, CreateRunBody, CursorPage, RunCreateResult, RunEventsOptions, RunPageOptions, RunSession, RunTranscript, RunsService, RunsServiceOptions, SessionApproval, SessionApprovalDecision, WorkspaceFile, WriteOutcome } from "./contracts";
 
+/**
+ * What went wrong, as a code rather than a sentence.
+ *
+ * The service used to describe its own failures in English, which then appeared
+ * inside a Russian screen. A code crosses that boundary unharmed: the screen
+ * turns it into `runs.err<Code>` in whatever language the reader chose. The
+ * backend's own message is not copy and does not get translated — it travels
+ * beside the code as `detail`.
+ */
+export type RunsErrorCode =
+  | "network"
+  | "unauthorized"
+  | "forbidden"
+  | "notFound"
+  | "invalidRequest"
+  | "conflict"
+  | "unavailable"
+  | "server"
+  | "invalidResponse";
+
 export class RunsRequestError extends Error {
-  constructor(readonly status: number, readonly code: string, message: string) {
-    super(message);
+  constructor(
+    readonly status: number,
+    readonly code: RunsErrorCode,
+    /** The server's own message, passed through untouched: data, not copy. */
+    readonly detail?: string,
+    /** The machine code the backend sent (`AGENT_RUN_CONFLICT` …), kept for support. */
+    readonly serverCode?: string,
+  ) {
+    super(detail ?? code);
     this.name = "RunsRequestError";
   }
+}
+
+/** HTTP status → the code the screen knows how to say. */
+function codeForStatus(status: number): RunsErrorCode {
+  if (status === 401) return "unauthorized";
+  if (status === 403) return "forbidden";
+  if (status === 404) return "notFound";
+  if (status === 409) return "conflict";
+  if (status === 408 || status === 429 || status === 503) return "unavailable";
+  if (status >= 500) return "server";
+  return "invalidRequest";
+}
+
+async function readErrorBody(response: Response): Promise<Record<string, unknown>> {
+  try {
+    const body = await response.json() as unknown;
+    return body && typeof body === "object" ? body as Record<string, unknown> : {};
+  } catch { return {}; }
+}
+
+/** A failed response as a code plus whatever the server chose to say. */
+function responseError(response: Response, body: Record<string, unknown>): RunsRequestError {
+  const serverCode = typeof body.code === "string" && body.code.trim() ? body.code : undefined;
+  const message = typeof body.detail === "string" && body.detail.trim() ? body.detail
+    : typeof body.title === "string" && body.title.trim() ? body.title
+    : response.statusText || undefined;
+  return new RunsRequestError(response.status, codeForStatus(response.status), message, serverCode);
 }
 
 export function createIdempotencyKey(): string {
@@ -18,9 +75,19 @@ export function createRunsService(options: RunsServiceOptions = {}): RunsService
   const baseUrl = options.baseUrl ?? "/api/v1";
   const fetcher = options.fetcher ?? fetch;
 
+  /** A transport-level failure becomes a code; a deliberate abort stays an abort. */
+  const send = async (url: string, init?: RequestInit): Promise<Response> => {
+    try {
+      return await fetcher(url, init);
+    } catch (error) {
+      if (init?.signal?.aborted) throw error;
+      throw new RunsRequestError(0, "network", error instanceof Error ? error.message : String(error));
+    }
+  };
+
   async function requestResponse(path: string, init?: RequestInit): Promise<Response> {
     const token = options.getAccessToken?.();
-    const response = await fetcher(`${baseUrl}${path}`, {
+    const response = await send(`${baseUrl}${path}`, {
       ...init,
       headers: {
         Accept: "application/json",
@@ -29,23 +96,29 @@ export function createRunsService(options: RunsServiceOptions = {}): RunsService
         ...init?.headers,
       },
     });
-    if (!response.ok) {
-      let body: Record<string, unknown> = {};
-      try { body = await response.json() as Record<string, unknown>; } catch { /* keep HTTP fallback */ }
-      throw new RunsRequestError(response.status, String(body.code ?? "HTTP_ERROR"), String(body.detail ?? body.title ?? response.statusText));
-    }
+    if (!response.ok) throw responseError(response, await readErrorBody(response));
     return response;
   }
 
   async function request<T>(path: string, init?: RequestInit): Promise<T> {
     const response = await requestResponse(path, init);
     if (response.status === 204) return undefined as T;
-    return await response.json() as T;
+    try {
+      return await response.json() as T;
+    } catch {
+      throw new RunsRequestError(response.status, "invalidResponse");
+    }
   }
 
   async function cursorPage<T>(path: string, signal?: AbortSignal): Promise<CursorPage<T>> {
     const response = await requestResponse(path, signal ? { signal } : undefined);
-    const body = await response.json() as { items: T[]; has_more?: boolean };
+    let body: { items?: T[]; has_more?: boolean };
+    try {
+      body = await response.json() as { items?: T[]; has_more?: boolean };
+    } catch {
+      throw new RunsRequestError(response.status, "invalidResponse");
+    }
+    if (!body || !Array.isArray(body.items)) throw new RunsRequestError(response.status, "invalidResponse");
     const header = response.headers.get("X-Has-More");
     return {
       items: body.items,
@@ -77,7 +150,7 @@ export function createRunsService(options: RunsServiceOptions = {}): RunsService
   };
   const isStatus = (error: unknown, status: number) => error instanceof RunsRequestError && error.status === status;
   const isPersistenceBlocked = (error: unknown) => error instanceof RunsRequestError
-    && (error.code === "AGENT_RUN_PERSISTENCE_BLOCKED" || error.code === "AGENT_RUN_API_DISABLED" || error.code === "AGENT_RUN_PERSISTENCE_NOT_READY");
+    && (error.serverCode === "AGENT_RUN_PERSISTENCE_BLOCKED" || error.serverCode === "AGENT_RUN_API_DISABLED" || error.serverCode === "AGENT_RUN_PERSISTENCE_NOT_READY");
   const isCommandEvent = (event: ControlPlaneEvent, commandKey: string) => {
     const controlPlane = event.payload.control_plane;
     return Boolean(controlPlane && typeof controlPlane === "object"
@@ -135,7 +208,7 @@ export function createRunsService(options: RunsServiceOptions = {}): RunsService
       } catch (error) { writeError = error; }
 
       if (responseRun && !matchesCreate(responseRun, projectId, body)) {
-        return { kind: "conflict", error: new RunsRequestError(409, "AGENT_RUN_CONFLICT", "Idempotency key is already bound to a different run payload."), current: responseRun };
+        return { kind: "conflict", error: new RunsRequestError(409, "conflict", undefined, "AGENT_RUN_CONFLICT"), current: responseRun };
       }
       try {
         const saved = responseRun
@@ -143,17 +216,17 @@ export function createRunsService(options: RunsServiceOptions = {}): RunsService
           : await findRunByIdempotencyKey(projectId, idempotencyKey);
         if (saved) {
           if (!matchesCreate(saved, projectId, body)) {
-            return { kind: "conflict", error: new RunsRequestError(409, "AGENT_RUN_CONFLICT", "Idempotency key is already bound to a different run payload."), current: saved };
+            return { kind: "conflict", error: new RunsRequestError(409, "conflict", undefined, "AGENT_RUN_CONFLICT"), current: saved };
           }
           return { kind: "confirmed", run: saved, duplicate: duplicate || Boolean(writeError), queueIntentsRecorded };
         }
         if (writeError && isStatus(writeError, 409)) return { kind: "conflict", error: asError(writeError) };
         if (writeError && isPersistenceBlocked(writeError)) return { kind: "blocked", error: asError(writeError) };
-        return { kind: "unknown", error: asError(writeError ?? new Error("Run write response had no persisted record.")) };
+        return { kind: "unknown", error: asError(writeError ?? new RunsRequestError(0, "invalidResponse", undefined, "AGENT_RUN_WRITE_UNCONFIRMED")) };
       } catch (readbackError) {
         if (writeError && isStatus(writeError, 409)) return { kind: "conflict", error: asError(writeError), readbackError: asError(readbackError) };
         if (writeError && isPersistenceBlocked(writeError)) return { kind: "blocked", error: asError(writeError), readbackError: asError(readbackError) };
-        return { kind: "unknown", error: asError(writeError ?? new Error("Run write needs readback.")), readbackError: asError(readbackError) };
+        return { kind: "unknown", error: asError(writeError ?? new RunsRequestError(0, "invalidResponse", undefined, "AGENT_RUN_WRITE_UNCONFIRMED")), readbackError: asError(readbackError) };
       }
     },
     cancelRun: (projectId: string, runId: string, body: CancelRunBody, idempotencyKey: string) => request<AgentRunCancelled>(`${runPath(projectId, runId)}/cancel`, {
@@ -191,11 +264,11 @@ export function createRunsService(options: RunsServiceOptions = {}): RunsService
         if (cancelled && current.status === "cancelled") return { kind: "confirmed", value: current, duplicate };
         if (writeError && isStatus(writeError, 409)) return { kind: "conflict", error: asError(writeError), current };
         if (writeError && isPersistenceBlocked(writeError)) return { kind: "blocked", error: asError(writeError) };
-        return { kind: "unknown", error: asError(writeError ?? new Error("Cancellation was not confirmed by the run event timeline.")) };
+        return { kind: "unknown", error: asError(writeError ?? new RunsRequestError(0, "invalidResponse", undefined, "AGENT_RUN_CANCEL_UNCONFIRMED")) };
       } catch (readbackError) {
         if (writeError && isStatus(writeError, 409)) return { kind: "conflict", error: asError(writeError), readbackError: asError(readbackError) };
         if (writeError && isPersistenceBlocked(writeError)) return { kind: "blocked", error: asError(writeError), readbackError: asError(readbackError) };
-        return { kind: "unknown", error: asError(writeError ?? new Error("Cancellation needs readback.")), readbackError: asError(readbackError) };
+        return { kind: "unknown", error: asError(writeError ?? new RunsRequestError(0, "invalidResponse", undefined, "AGENT_RUN_CANCEL_UNCONFIRMED")), readbackError: asError(readbackError) };
       }
     },
     decideAgentApproval: (projectId: string, input: ApprovalCommandInput) => request<ApprovalDecisionResult>(`${project(projectId)}/agent/approvals/${encodeURIComponent(input.item.approval.id)}/decision`, {
@@ -231,18 +304,18 @@ export function createRunsService(options: RunsServiceOptions = {}): RunsService
         }
         if (writeError && isStatus(writeError, 409)) return { kind: "conflict", error: asError(writeError) };
         if (writeError && isPersistenceBlocked(writeError)) return { kind: "blocked", error: asError(writeError) };
-        return { kind: "unknown", error: asError(writeError ?? new Error("Approval decision was not confirmed by its event timeline.")) };
+        return { kind: "unknown", error: asError(writeError ?? new RunsRequestError(0, "invalidResponse", undefined, "AGENT_RUN_DECISION_UNCONFIRMED")) };
       } catch (readbackError) {
         if (writeError && isStatus(writeError, 409)) return { kind: "conflict", error: asError(writeError), readbackError: asError(readbackError) };
         if (writeError && isPersistenceBlocked(writeError)) return { kind: "blocked", error: asError(writeError), readbackError: asError(readbackError) };
-        return { kind: "unknown", error: asError(writeError ?? new Error("Approval decision needs readback.")), readbackError: asError(readbackError) };
+        return { kind: "unknown", error: asError(writeError ?? new RunsRequestError(0, "invalidResponse", undefined, "AGENT_RUN_DECISION_UNCONFIRMED")), readbackError: asError(readbackError) };
       }
     },
     async listSessions(projectId): Promise<RunSession[]> {
       const response = await request<{ items: RunSession[] }>(`${project(projectId)}/agent/sessions`);
       return response.items;
     },
-    getSession: (projectId, sessionId) => request<RunSession>(`${session(projectId, sessionId)}`),
+    getSession: (projectId, sessionId) => request<RunSession>(session(projectId, sessionId)),
     getTranscript: (projectId, sessionId, query = {}) => {
       const params = new URLSearchParams({ session_id: sessionId, limit: "500" });
       if (query.beforeSeq !== undefined) params.set("before_seq", String(query.beforeSeq));
@@ -266,34 +339,42 @@ export function createRunsService(options: RunsServiceOptions = {}): RunsService
     async downloadWorkspaceFile(projectId, path) {
       const token = options.getAccessToken?.();
       const params = new URLSearchParams({ path });
-      const response = await fetcher(`${baseUrl}${project(projectId)}/container/workspace/content?${params}`, {
+      const response = await send(`${baseUrl}${project(projectId)}/container/workspace/content?${params}`, {
         headers: { Accept: "application/octet-stream", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       });
-      if (!response.ok) {
-        let body: Record<string, unknown> = {};
-        try { body = await response.json() as Record<string, unknown>; } catch { /* keep HTTP fallback */ }
-        throw new RunsRequestError(response.status, String(body.code ?? "HTTP_ERROR"), String(body.detail ?? body.title ?? response.statusText));
-      }
+      if (!response.ok) throw responseError(response, await readErrorBody(response));
       return response.blob();
     },
   };
 }
 
-export function transcriptRunStatus(transcript?: RunTranscript, session?: RunSession): string {
-  if (transcript?.turn_in_progress) return "Turn running";
-  if (session?.status === "cancelled") return "Session cancelled";
-  if (session?.status === "closed") return "Session closed";
-  if (session?.status === "suspended") return "Session suspended";
-  if (session?.status === "active") return "Session active";
-  return "Run status unavailable";
+/**
+ * What a chat transcript says about the run behind it, in the reader's language.
+ *
+ * The values are copy, not data: they belonged in the catalogue, not in a
+ * helper that only knows English.
+ */
+export function transcriptRunStatus(t: Translate, transcript?: RunTranscript, session?: RunSession): string {
+  if (transcript?.turn_in_progress) return t("runs.turnRunning");
+  if (session?.status === "cancelled") return t("runs.statusCancelled");
+  if (session?.status === "closed") return t("runs.statusClosed");
+  if (session?.status === "suspended") return t("runs.statusSuspended");
+  if (session?.status === "active") return t("runs.statusActive");
+  return t("runs.statusUnavailable");
 }
 
-export function approvalExpiryLabel(expiresAt?: string | null, now = Date.now()): string {
-  if (!expiresAt) return "Expiry not provided by backend";
+/**
+ * When an approval stops being decidable, in the reader's language.
+ *
+ * The date itself goes through `formatDateTime`, so a Russian interface shows
+ * "12 нояб. 2026 г." even on an English machine.
+ */
+export function approvalExpiryLabel(t: Translate, locale: Locale, expiresAt?: string | null, now = Date.now()): string {
+  if (!expiresAt) return t("runs.noExpiry");
   const timestamp = Date.parse(expiresAt);
-  if (!Number.isFinite(timestamp)) return "Expiry value is invalid";
-  if (timestamp <= now) return "Expired";
-  return `Expires ${new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(timestamp)}`;
+  if (!Number.isFinite(timestamp)) return t("runs.expiryInvalid");
+  if (timestamp <= now) return t("runs.expired");
+  return t("runs.expiresAt", { date: formatDateTime(timestamp, locale) });
 }
 
 export function extractApprovalContext(transcript: RunTranscript | undefined, approval: SessionApproval): string | undefined {

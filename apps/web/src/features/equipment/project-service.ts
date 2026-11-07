@@ -1,5 +1,5 @@
 import type { ApiClient, JsonObject, ProjectSelection } from "../../api/types";
-import { EquipmentServiceError, type EquipmentProjectService, type EquipmentProcurementExport, type EquipmentServiceErrorCode, type EquipmentWorkspaceScope, type EquipmentSourceCatalog } from "./live-contract";
+import { EquipmentServiceError, type EquipmentProjectService, type EquipmentProcurementExport, type EquipmentServiceErrorCode, type EquipmentWorkspaceBlocker, type EquipmentWorkspaceScope, type EquipmentSourceCatalog } from "./live-contract";
 import { calculateProcurement } from "./calculations";
 
 /**
@@ -49,16 +49,20 @@ function rows(value: unknown, label: string): Row[] {
     return { row_id: item.row_id, body: item.body, ...(typeof item.session_id === "string" || item.session_id === null ? { session_id: item.session_id } : {}), ...(typeof item.created_at === "string" || item.created_at === null ? { created_at: item.created_at } : {}), ...(typeof item.created_by === "string" ? { created_by: item.created_by } : {}) };
   });
 }
+/**
+ * Почему источник в таком состоянии. Код, а не предложение: подпись берётся из
+ * единицы copy на экране, потому что сервис языка не знает.
+ */
 function freshness(catalog?: Row): { state: OfferFreshness; stale: boolean; indexedAt?: string; reason?: string } {
-  if (!catalog) return { state: "unknown", stale: false, reason: "Source catalog row could not be joined to this offer." };
+  if (!catalog) return { state: "unknown", stale: false, reason: "catalog_missing" };
   const indexedAt = text(catalog.body.last_indexed_at);
   const when = indexedAt ? Date.parse(indexedAt) : Number.NaN;
-  if (catalog.body.status === "error") return { state: "stale", stale: true, ...(Number.isFinite(when) ? { indexedAt } : {}), reason: "The latest catalog indexing attempt failed." };
-  if (catalog.body.status !== "ready" || !Number.isFinite(when)) return { state: "unknown", stale: false, reason: "The catalog has no confirmed successful indexing time." };
+  if (catalog.body.status === "error") return { state: "stale", stale: true, ...(Number.isFinite(when) ? { indexedAt } : {}), reason: "index_failed" };
+  if (catalog.body.status !== "ready" || !Number.isFinite(when)) return { state: "unknown", stale: false, reason: "never_indexed" };
   if (catalog.body.source_kind !== "remote") return { state: "fresh", stale: false, indexedAt };
   const hours = Math.max(1, num(catalog.body.reindex_interval_hours) ?? 24);
   const stale = Date.now() - when >= hours * 3600000;
-  return { state: stale ? "stale" : "fresh", stale, indexedAt, ...(stale ? { reason: `Remote catalog exceeds its ${hours} hour reindex interval.` } : {}) };
+  return { state: stale ? "stale" : "fresh", stale, indexedAt, ...(stale ? { reason: "reindex_overdue" } : {}) };
 }
 function kind(value: unknown): MatchKind { return value === "exact" || value === "analog" || value === "doubt" ? value : "doubt"; }
 function ensureAction(context: Resolved, kindValue: string): Action {
@@ -76,7 +80,7 @@ function requireWritable(context: Resolved): void {
 export function createEquipmentProjectService(api: EquipmentApiPort, projectId: string): EquipmentProjectService {
   let context: Resolved | undefined;
   let resolving: Promise<Resolved> | undefined;
-  let blocker: string | undefined;
+  let blocker: EquipmentWorkspaceBlocker | undefined;
   let revision = 0;
 
   async function resolve(force = false): Promise<Resolved> {
@@ -127,7 +131,7 @@ export function createEquipmentProjectService(api: EquipmentApiPort, projectId: 
     const resolved = await resolve(true);
     if (runPipeline) {
       try { await invoke("equipment.pipeline"); blocker = undefined; }
-      catch (error) { blocker = `Offer refresh failed: ${error instanceof Error ? error.message : "equipment.pipeline is unavailable"}`; }
+      catch { blocker = "refresh_failed"; }
     }
     const sessionId = resolved.scope.sessionId;
     const allChats = { chats: "all" as const };
@@ -138,7 +142,7 @@ export function createEquipmentProjectService(api: EquipmentApiPort, projectId: 
       api.listProjectRuntimeModuleData(projectId, "mod_equipment", "budget_lines", allChats, sessionId),
       api.listProjectRuntimeModuleData(projectId, "mod_equipment", "procurement", { chats: "all" }, sessionId),
     ]);
-    const requestLines = rows(lineData, "request lines").filter((row) => row.session_id === sessionId).map((row) => ({ id: row.row_id, title: text(row.body.title) || "Untitled request line", ...(text(row.body.part_number) ? { partNumber: text(row.body.part_number) } : {}), quantity: num(row.body.qty ?? row.body.quantity) ?? Number.NaN, ...(text(row.body.note ?? row.body.notes) ? { notes: text(row.body.note ?? row.body.notes) } : {}), authoredBy: "unknown" as const, selectedOfferId: typeof row.body.selected_offer_id === "string" ? row.body.selected_offer_id : null, ...(row.session_id ? { sessionId: row.session_id } : {}) }));
+    const requestLines = rows(lineData, "request lines").filter((row) => row.session_id === sessionId).map((row) => ({ id: row.row_id, title: text(row.body.title), ...(text(row.body.part_number) ? { partNumber: text(row.body.part_number) } : {}), quantity: num(row.body.qty ?? row.body.quantity) ?? Number.NaN, ...(text(row.body.note ?? row.body.notes) ? { notes: text(row.body.note ?? row.body.notes) } : {}), authoredBy: "unknown" as const, selectedOfferId: typeof row.body.selected_offer_id === "string" ? row.body.selected_offer_id : null, ...(row.session_id ? { sessionId: row.session_id } : {}) }));
     const groupRows = rows(groupData, "candidate groups").filter((row) => row.session_id === sessionId);
     const groups: EquipmentCandidateGroup[] = groupRows.flatMap((row) => {
       const lineId = text(row.body.line_id);
@@ -156,10 +160,10 @@ export function createEquipmentProjectService(api: EquipmentApiPort, projectId: 
       const seller = text(row.body.seller);
       const manual = record(row.body.manual) ? row.body.manual : {};
       return [{
-        id: row.row_id, lineId, groupId, title: text(row.body.title) || "Untitled offer",
+        id: row.row_id, lineId, groupId, title: text(row.body.title),
         ...(text(row.body.part_number) ? { sku: text(row.body.part_number) } : {}),
         price: { amountOriginal: num(row.body.price_orig), currency: text(row.body.currency) || null, amountRub: num(row.body.price) },
-        provenance: { supplier: seller, source: text(catalog?.body.name) || text(row.body.source_catalog) || "Equipment catalog", ...(catalogId ? { sourceId: catalogId, sourceRef: text(row.body.src_hash) || catalogId } : {}), ...(freshnessInfo.indexedAt ? { sourceIndexAt: freshnessInfo.indexedAt } : {}), sourceKind: "catalog", freshness: freshnessInfo.state, isStale: row.body.is_stale === true || freshnessInfo.stale, ...(freshnessInfo.reason ? { staleReason: freshnessInfo.reason } : {}) },
+        provenance: { supplier: seller, source: text(catalog?.body.name) || text(row.body.source_catalog) || "", ...(catalogId ? { sourceId: catalogId, sourceRef: text(row.body.src_hash) || catalogId } : {}), ...(freshnessInfo.indexedAt ? { sourceIndexAt: freshnessInfo.indexedAt } : {}), sourceKind: "catalog", freshness: freshnessInfo.state, isStale: row.body.is_stale === true || freshnessInfo.stale, ...(freshnessInfo.reason ? { staleReason: freshnessInfo.reason } : {}) },
         available: row.body.in_stock === true ? "in_stock" as const : "unknown" as const,
         ...(num(row.body.lead_time) !== null ? { leadTimeDays: num(row.body.lead_time) } : {}),
         platformAuthoritative: Boolean(seller && groupId && lineId && text(row.body.src_hash)),
@@ -207,7 +211,7 @@ export function createEquipmentProjectService(api: EquipmentApiPort, projectId: 
         const state = freshness(row);
         return {
           id: row.row_id,
-          name: text(row.body.name) || "Unnamed catalog",
+          name: text(row.body.name),
           kind: row.body.source_kind === "local" || row.body.source_kind === "remote" ? row.body.source_kind : "unknown",
           status: text(row.body.status) || "unknown",
           paused: row.body.paused === true,

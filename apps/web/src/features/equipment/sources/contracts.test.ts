@@ -3,6 +3,7 @@ import {
   catalogFreshness,
   catalogMappingReady,
   catalogSourceColumns,
+  displayCatalogValue,
   parseEquipmentCatalogMetadata,
   sanitizeCatalogMessage,
   secretRef,
@@ -66,9 +67,17 @@ describe("equipment catalog contracts", () => {
 
   it("warns for stale/error/unknown freshness and retains the last successful time", () => {
     const now = Date.parse("2026-11-02T12:00:00Z");
-    expect(catalogFreshness({ source_kind: "remote", status: "ready", last_indexed_at: "2026-11-02T11:30:00Z", reindex_interval_hours: 1 }, now).freshness).toBe("fresh");
-    expect(catalogFreshness({ source_kind: "remote", status: "error", last_indexed_at: "2026-11-01T10:00:00Z" }, now)).toMatchObject({ freshness: "stale", lastGoodLabel: expect.any(String) });
-    expect(catalogFreshness({ source_kind: "remote", status: "ready" }, now)).toMatchObject({ freshness: "unknown", reason: "never-indexed" });
+    expect(catalogFreshness({ source_kind: "remote", status: "ready", last_indexed_at: "2026-11-02T11:30:00Z", reindex_interval_hours: 1 }, "ru", now).freshness).toBe("fresh");
+    expect(catalogFreshness({ source_kind: "remote", status: "error", last_indexed_at: "2026-11-01T10:00:00Z" }, "ru", now)).toMatchObject({ freshness: "stale", lastGoodLabel: expect.any(String) });
+    expect(catalogFreshness({ source_kind: "remote", status: "ready" }, "ru", now)).toMatchObject({ freshness: "unknown", reason: "never-indexed" });
+  });
+
+  it("writes the last good index in the interface's language, not the browser's", () => {
+    const body = { source_kind: "remote", status: "error", last_indexed_at: "2026-11-01T10:00:00Z" };
+    const now = Date.parse("2026-11-02T12:00:00Z");
+
+    expect(catalogFreshness(body, "ru", now).lastGoodLabel).toMatch(/нояб/i);
+    expect(catalogFreshness(body, "en", now).lastGoodLabel).toMatch(/Nov/);
   });
 
   it("accepts only nonempty secret references and sanitizes credentials from API errors", () => {
@@ -77,5 +86,16 @@ describe("equipment catalog contracts", () => {
     expect(sanitizeCatalogMessage("connection failed postgresql://alice:s3cr3t@db.internal/catalog")).toBe("connection failed postgresql://***@db.internal/catalog");
     expect(sanitizeCatalogMessage("secret file://cabinet_secrets/abc")).toContain("[секрет скрыт]");
     expect(sanitizeCatalogMessage('{"secret_ref":"vault://module_secrets/platform/platform/id"}')).not.toContain("module_secrets/platform/platform/id");
+  });
+
+  it("takes the fallback wording from the translator instead of a hard-coded language", () => {
+    const translate = (key: string) => `[${key}]`;
+
+    expect(sanitizeCatalogMessage(undefined)).toBe("");
+    expect(sanitizeCatalogMessage(undefined, [], translate)).toBe("[equipment.srcMessageMissing]");
+    expect(displayCatalogValue(null)).toBe("");
+    expect(displayCatalogValue(null, translate)).toBe("[equipment.srcValueMissing]");
+    expect(displayCatalogValue({ secret_ref: "x" }, translate)).toBe("[equipment.srcValueConfigured]");
+    expect(displayCatalogValue("inventory", translate)).toBe("inventory");
   });
 });

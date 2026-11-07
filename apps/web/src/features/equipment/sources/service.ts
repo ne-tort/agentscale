@@ -13,10 +13,53 @@ import {
 export const EQUIPMENT_MODULE_ID = "mod_equipment";
 export const EQUIPMENT_CATALOGS_TABLE = "catalogs";
 
+/**
+ * Why a request to the catalog API failed.
+ *
+ * A code rather than a sentence: the screen turns it into words in the
+ * reader's language (`equipment.srcErr<Code>`), and the same failure reads the
+ * same way wherever it is reported. Before this, the service threw technical
+ * Russian/English sentences that the screen printed verbatim.
+ */
+export type EquipmentSourcesErrorCode =
+  | "network"
+  | "http"
+  | "invalidList"
+  | "invalidRow"
+  | "invalidJson"
+  | "moduleMissing"
+  | "moduleUnconfirmed"
+  | "actionUndefined"
+  | "actionDisabled"
+  | "uploadRejected"
+  | "uploadIncomplete"
+  | "secretIncomplete"
+  | "serviceUnavailable";
+
+export interface EquipmentSourcesRequestErrorOptions {
+  /** HTTP status, when the failure came from a response. */
+  readonly status?: number;
+  /**
+   * The server's own `detail`/`title`, passed through untouched. It is data:
+   * the screen shows it as a second line, never as the explanation itself, and
+   * sanitises it like any other server text.
+   */
+  readonly detail?: string;
+  /** Technical message for logs and the stack; never rendered. */
+  readonly message?: string;
+}
+
 export class EquipmentSourcesRequestError extends Error {
-  constructor(message: string, readonly status?: number) {
-    super(message);
+  readonly status?: number;
+  readonly detail?: string;
+  constructor(
+    readonly code: EquipmentSourcesErrorCode,
+    options: EquipmentSourcesRequestErrorOptions = {},
+  ) {
+    super(options.message ?? code);
     this.name = "EquipmentSourcesRequestError";
+    if (options.status !== undefined) this.status = options.status;
+    if (options.detail !== undefined) this.detail = options.detail;
   }
 }
 
@@ -41,13 +84,13 @@ function encode(value: string): string {
 
 function listItems(value: unknown): Record<string, unknown>[] {
   const rows = Array.isArray(value) ? value : isRecord(value) && Array.isArray(value.items) ? value.items : undefined;
-  if (!rows) throw new EquipmentSourcesRequestError("API вернул некорректный список.");
+  if (!rows) throw new EquipmentSourcesRequestError("invalidList", { message: "the response is neither a list nor { items }" });
   return rows.filter(isRecord);
 }
 
 function catalogRow(value: unknown): EquipmentCatalogRow {
   if (!isRecord(value) || typeof value.row_id !== "string" || !isRecord(value.body)) {
-    throw new EquipmentSourcesRequestError("API вернул некорректную строку каталога.");
+    throw new EquipmentSourcesRequestError("invalidRow", { message: "a catalog row has no row_id/body" });
   }
   return { row_id: value.row_id, body: value.body };
 }
@@ -60,6 +103,18 @@ function metaDocument(value: Record<string, unknown>): EquipmentCatalogMetaDocum
 function moduleId(value: Record<string, unknown>): string | undefined {
   if (typeof value.id === "string") return value.id;
   if (typeof value.module_id === "string") return value.module_id;
+  return undefined;
+}
+
+/** The server's own explanation of a failed response, if it sent one. */
+async function responseDetail(response: Response): Promise<string | undefined> {
+  try {
+    const payload: unknown = await response.json();
+    if (!isRecord(payload)) return undefined;
+    const details = isRecord(payload.error) ? payload.error : payload;
+    if (typeof details.detail === "string" && details.detail.trim()) return details.detail;
+    if (typeof details.title === "string" && details.title.trim()) return details.title;
+  } catch { /* No readable body: the status code is all we have. */ }
   return undefined;
 }
 
@@ -81,23 +136,26 @@ export function createEquipmentSourcesService(options: EquipmentSourcesServiceOp
         },
       });
     } catch (error) {
-      throw new EquipmentSourcesRequestError(error instanceof Error ? `API connection failed: ${error.message}` : "API connection failed.");
+      throw new EquipmentSourcesRequestError("network", {
+        message: error instanceof Error ? error.message : `request to ${path} failed`,
+      });
     }
     if (!response.ok) {
-      let message = response.statusText || `API returned HTTP ${response.status}.`;
-      try {
-        const payload: unknown = await response.json();
-        if (isRecord(payload)) {
-          const details = isRecord(payload.error) ? payload.error : payload;
-          if (typeof details.detail === "string") message = details.detail;
-          else if (typeof details.title === "string") message = details.title;
-        }
-      } catch { /* Keep the HTTP fallback. */ }
-      throw new EquipmentSourcesRequestError(message, response.status);
+      const detail = await responseDetail(response);
+      throw new EquipmentSourcesRequestError("http", {
+        status: response.status,
+        ...(detail ? { detail } : {}),
+        message: `${init.method ?? "GET"} ${path} responded ${response.status}`,
+      });
     }
     if (response.status === 204) return undefined as T;
     try { return await response.json() as T; }
-    catch { throw new EquipmentSourcesRequestError("API вернул некорректный JSON.", response.status); }
+    catch {
+      throw new EquipmentSourcesRequestError("invalidJson", {
+        status: response.status,
+        message: `${init.method ?? "GET"} ${path} responded with unreadable JSON`,
+      });
+    }
   }
 
   function modulePath(): string { return `/admin/modules/${encode(EQUIPMENT_MODULE_ID)}`; }
@@ -105,10 +163,12 @@ export function createEquipmentSourcesService(options: EquipmentSourcesServiceOp
   async function loadWorkspace(): Promise<EquipmentCatalogWorkspace> {
     const modules = listItems(await request<unknown>("/admin/modules"));
     const equipment = modules.find((item) => moduleId(item) === EQUIPMENT_MODULE_ID);
-    if (!equipment) throw new EquipmentSourcesRequestError("Модуль mod_equipment отсутствует в admin module catalog.", 404);
+    if (!equipment) {
+      throw new EquipmentSourcesRequestError("moduleMissing", { message: `${EQUIPMENT_MODULE_ID} is absent from the admin module catalog` });
+    }
     const module = await request<unknown>(modulePath());
     if (!isRecord(module) || moduleId(module) !== EQUIPMENT_MODULE_ID) {
-      throw new EquipmentSourcesRequestError("Admin module API не подтвердил mod_equipment.");
+      throw new EquipmentSourcesRequestError("moduleUnconfirmed", { message: `the admin module API did not confirm ${EQUIPMENT_MODULE_ID}` });
     }
     const [metaValue, rowsValue] = await Promise.all([
       request<unknown>(`${modulePath()}/meta/documents`),
@@ -148,8 +208,12 @@ export function createEquipmentSourcesService(options: EquipmentSourcesServiceOp
       tables: workspace.metadata.tablesAction,
       index: workspace.metadata.indexAction,
     }[operation];
-    if (!action) throw new EquipmentSourcesRequestError(`В metadata не объявлено действие ${operation}.`);
-    if (!action.enabled) throw new EquipmentSourcesRequestError(`Действие ${action.id} отключено в metadata.`);
+    if (!action) {
+      throw new EquipmentSourcesRequestError("actionUndefined", { message: `metadata declares no ${operation} action` });
+    }
+    if (!action.enabled) {
+      throw new EquipmentSourcesRequestError("actionDisabled", { message: `metadata disables the ${action.id} action` });
+    }
     return request<unknown>(`${modulePath()}/actions/${encode(action.id)}/invoke`, {
       method: "POST",
       body: JSON.stringify({ row_id: rowId }),
@@ -168,13 +232,27 @@ export function createEquipmentSourcesService(options: EquipmentSourcesServiceOp
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
     } catch (error) {
-      throw new EquipmentSourcesRequestError(error instanceof Error ? `Upload connection failed: ${error.message}` : "Upload connection failed.");
+      throw new EquipmentSourcesRequestError("network", {
+        message: error instanceof Error ? error.message : "the upload request failed",
+      });
     }
-    if (!response.ok) throw new EquipmentSourcesRequestError(`Загрузка файла отклонена API (HTTP ${response.status}).`, response.status);
-    const value: unknown = await response.json();
+    if (!response.ok) {
+      throw new EquipmentSourcesRequestError("uploadRejected", {
+        status: response.status,
+        message: `the upload endpoint responded ${response.status}`,
+      });
+    }
+    let value: unknown;
+    try { value = await response.json(); }
+    catch {
+      throw new EquipmentSourcesRequestError("invalidJson", {
+        status: response.status,
+        message: "the upload endpoint returned unreadable JSON",
+      });
+    }
     if (!isRecord(value) || typeof value.asset_id !== "string" || typeof value.version_id !== "string"
       || typeof value.storage_key !== "string" || typeof value.filename !== "string") {
-      throw new EquipmentSourcesRequestError("Upload API не вернул полный FileRef.");
+      throw new EquipmentSourcesRequestError("uploadIncomplete", { status: response.status, message: "the upload response is not a complete FileRef" });
     }
     return value as CatalogFileRef;
   }
@@ -185,7 +263,7 @@ export function createEquipmentSourcesService(options: EquipmentSourcesServiceOp
       body: JSON.stringify({ secret, label }),
     });
     if (!isRecord(result) || typeof result.secret_ref !== "string" || !result.secret_ref.trim()) {
-      throw new EquipmentSourcesRequestError("Secrets API не вернул secret reference.");
+      throw new EquipmentSourcesRequestError("secretIncomplete", { message: "the secrets endpoint returned no secret_ref" });
     }
     return { secret_ref: result.secret_ref };
   }

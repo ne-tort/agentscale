@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { buildProcurementExport, calculateProcurement } from "./calculations";
+import { createTranslator } from "../../i18n/catalogue";
+import { calculateProcurement, buildProcurementExport, formatObservedAt, matchKindLabel } from "./calculations";
 import type { EquipmentWorkspace } from "./types";
+
+const ru = createTranslator("ru");
+const en = createTranslator("en");
 
 const baseWorkspace: EquipmentWorkspace = {
   revision: 0,
@@ -149,7 +153,7 @@ describe("equipment procurement calculations", () => {
   });
 
   it("exports provenance and warnings without inventing missing values", () => {
-    const exported = buildProcurementExport(baseWorkspace);
+    const exported = buildProcurementExport(baseWorkspace, en);
 
     expect(exported.filename).toBe("equipment-procurement.csv");
     expect(exported.contents).toContain("price_original,currency,price_rub");
@@ -159,5 +163,25 @@ describe("equipment procurement calculations", () => {
     expect(exported.contents).toContain("budget_subtotal_rub");
     expect(exported.contents).toContain("not_selected");
     expect(exported.contents).not.toContain("offer-unknown-price,USB-C dock alternative,Supplier C");
+  });
+
+  it("writes the warnings column in the reader's language, not as codes or English prose", () => {
+    const exported = buildProcurementExport(baseWorkspace, ru);
+
+    expect(exported.contents).toContain(ru("equipment.blockerNoSelection"));
+    expect(exported.contents).not.toContain("No human selection has been recorded");
+    expect(exported.contents).not.toContain("no_selection");
+    expect(calculateProcurement(baseWorkspace).blockers.every((blocker) => !/\s/.test(blocker.message))).toBe(true);
+  });
+
+  it("renders dates and match kinds in the language the screen is in", () => {
+    expect(formatObservedAt("2026-11-01T10:00:00Z", "ru")).toMatch(/нояб/i);
+    expect(formatObservedAt("2026-11-01T10:00:00Z", "en")).toMatch(/Nov/);
+    expect(formatObservedAt(undefined, "ru")).toBe("");
+    expect(formatObservedAt("not a date", "ru")).toBe("not a date");
+
+    expect(matchKindLabel("exact")).toBe("exact");
+    expect(matchKindLabel("exact", ru)).toBe("Точное совпадение");
+    expect(matchKindLabel("analog", ru)).toBe("Аналог");
   });
 });

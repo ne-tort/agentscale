@@ -1,3 +1,6 @@
+import type { Translate } from "../../i18n/catalogue";
+import type { Locale } from "../../i18n/core";
+import { formatDateTime, formatNumber } from "../../i18n/format";
 import {
   type EquipmentAuthoritativeOffer,
   type EquipmentCandidateGroup,
@@ -14,8 +17,8 @@ import {
 } from "./types";
 
 /** Сумма в валюте платформы; `locale` задаёт вид чисел, а не текст подписи. */
-export function formatEquipmentMoney(amount: number | null | undefined, currency = "RUB", locale = "ru"): string {
-  if (amount === null || amount === undefined || !Number.isFinite(amount)) return "Price unavailable";
+export function formatEquipmentMoney(amount: number | null | undefined, currency = "RUB", locale: Locale = "ru"): string {
+  if (amount === null || amount === undefined || !Number.isFinite(amount)) return "";
   try {
     return new Intl.NumberFormat(locale, {
       style: "currency",
@@ -23,19 +26,28 @@ export function formatEquipmentMoney(amount: number | null | undefined, currency
       maximumFractionDigits: 2,
     }).format(amount);
   } catch {
-    return `${amount.toLocaleString(locale)} ${currency}`;
+    return `${formatNumber(amount, locale) || String(amount)} ${currency}`;
   }
 }
 
-export function formatObservedAt(value?: string): string {
-  if (!value) return "Observed time unavailable";
-  const parsed = Date.parse(value);
-  if (!Number.isFinite(parsed)) return value;
-  return new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(parsed);
+/**
+ * Когда за предложением наблюдали: дата в конвенциях `locale`.
+ *
+ * Пустая строка для отсутствующего значения и исходная строка для
+ * нечитаемого — решает вызывающий, что показать вместо них.
+ */
+export function formatObservedAt(value: string | undefined, locale: Locale): string {
+  if (!value?.trim()) return "";
+  return formatDateTime(value, locale) || value;
 }
 
-export function matchKindLabel(kind: MatchKind): string {
-  return kind === "exact" ? "Exact" : kind === "analog" ? "Analog" : "Doubt";
+/**
+ * Название вида совпадения. Без `translate` возвращается код (`exact`), а не
+ * английское слово: код — это данные, а предложение должно быть переведено.
+ */
+export function matchKindLabel(kind: MatchKind, translate?: Translate): string {
+  if (!translate) return kind;
+  return translate(kind === "exact" ? "equipment.matchExact" : kind === "analog" ? "equipment.matchAnalog" : "equipment.matchDoubt");
 }
 
 export function priceIsKnown(price: EquipmentOfferPrice): boolean {
@@ -61,18 +73,49 @@ function selectedOfferForLine(workspace: EquipmentWorkspace, lineId: EquipmentId
   return workspace.offers.find((offer) => offer.id === line.selectedOfferId);
 }
 
+/**
+ * Sentence for each blocker code. Shared with the procurement screen so the
+ * notice and the CSV warning say the same thing.
+ */
+export const PROCUREMENT_BLOCKER_TEXT_KEYS: Record<ProcurementBlocker["code"], string> = {
+  no_selection: "equipment.blockerNoSelection",
+  selected_offer_missing: "equipment.blockerSelectedOfferMissing",
+  selection_mismatch: "equipment.blockerSelectionMismatch",
+  stale_selection: "equipment.blockerStaleSelection",
+  stale_offer: "equipment.blockerStaleOffer",
+  non_authoritative_offer: "equipment.blockerNonAuthoritativeOffer",
+  missing_source: "equipment.blockerMissingSource",
+  missing_observed_at: "equipment.blockerMissingObservedAt",
+  unknown_price: "equipment.blockerUnknownPrice",
+  invalid_price: "equipment.blockerInvalidPrice",
+  missing_currency: "equipment.blockerMissingCurrency",
+  missing_delivery: "equipment.blockerMissingDelivery",
+};
+
+/**
+ * A blocker's message, in the reader's language when a translator is at hand.
+ *
+ * Without one the code itself is returned: the CSV and the screen both have a
+ * translator, and a code is data rather than a sentence in the wrong language.
+ */
+function blockerMessage(code: ProcurementBlocker["code"], translate?: Translate): string {
+  return translate ? translate(PROCUREMENT_BLOCKER_TEXT_KEYS[code]) : code;
+}
+
 function blockerForItem(
   lineId: EquipmentId,
   offer: EquipmentAuthoritativeOffer,
   quantity: number,
+  translate?: Translate,
 ): ProcurementBlocker | undefined {
   if (offer.provenance.isStale || offer.provenance.freshness !== "fresh") {
+    const code = offer.provenance.isStale ? "stale_selection" : "stale_offer";
     return {
-      code: offer.provenance.isStale ? "stale_selection" : "stale_offer",
+      code,
       lineId,
       offerId: offer.id,
       supplier: offer.provenance.supplier,
-      message: "Selection needs a fresh platform observation before procurement.",
+      message: blockerMessage(code, translate),
     };
   }
   if (!offer.platformAuthoritative) {
@@ -81,7 +124,7 @@ function blockerForItem(
       lineId,
       offerId: offer.id,
       supplier: offer.provenance.supplier || undefined,
-      message: "This row is visible for review but was not materialized by the platform.",
+      message: blockerMessage("non_authoritative_offer", translate),
     };
   }
   if (!offerHasSource(offer)) {
@@ -90,7 +133,7 @@ function blockerForItem(
       lineId,
       offerId: offer.id,
       supplier: offer.provenance.supplier || undefined,
-      message: "Supplier, source, and source reference are required before this offer can enter a budget.",
+      message: blockerMessage("missing_source", translate),
     };
   }
   const observedAt = offer.provenance.observedAt;
@@ -100,7 +143,7 @@ function blockerForItem(
       lineId,
       offerId: offer.id,
       supplier: offer.provenance.supplier || undefined,
-      message: "Observed time is required to establish offer freshness.",
+      message: blockerMessage("missing_observed_at", translate),
     };
   }
   if (offer.price.amountRub === null) {
@@ -109,7 +152,7 @@ function blockerForItem(
       lineId,
       offerId: offer.id,
       supplier: offer.provenance.supplier,
-      message: "The platform has no RUB conversion for this source price; total is unresolved.",
+      message: blockerMessage("unknown_price", translate),
     };
   }
   if (offer.price.amountOriginal === null || !offer.price.currency?.trim()) {
@@ -118,7 +161,7 @@ function blockerForItem(
       lineId,
       offerId: offer.id,
       supplier: offer.provenance.supplier,
-      message: "The original source amount and its currency are required; total cannot be trusted.",
+      message: blockerMessage("missing_currency", translate),
     };
   }
   if (offer.price.amountOriginal !== null && (!Number.isFinite(offer.price.amountOriginal) || offer.price.amountOriginal < 0)) {
@@ -127,7 +170,7 @@ function blockerForItem(
       lineId,
       offerId: offer.id,
       supplier: offer.provenance.supplier,
-      message: "The original source amount is invalid.",
+      message: blockerMessage("invalid_price", translate),
     };
   }
   if (!Number.isFinite(offer.price.amountRub) || offer.price.amountRub < 0 || !Number.isFinite(quantity) || quantity < 0) {
@@ -136,7 +179,7 @@ function blockerForItem(
       lineId,
       offerId: offer.id,
       supplier: offer.provenance.supplier,
-      message: "The offer price or request quantity is invalid.",
+      message: blockerMessage("invalid_price", translate),
     };
   }
   return undefined;
@@ -165,7 +208,7 @@ function sumOrNull(values: Array<number | null>): number | null {
     : values.reduce<number>((total, value) => total + (value ?? 0), 0);
 }
 
-export function calculateProcurement(workspace: EquipmentWorkspace): ProcurementCalculation {
+export function calculateProcurement(workspace: EquipmentWorkspace, translate?: Translate): ProcurementCalculation {
   const itemsBySupplier = new Map<string, ProcurementItem[]>();
   const blockers: ProcurementBlocker[] = [];
   let selectedLineCount = 0;
@@ -176,7 +219,7 @@ export function calculateProcurement(workspace: EquipmentWorkspace): Procurement
       blockers.push({
         code: "no_selection",
         lineId: line.id,
-        message: "No human selection has been recorded for this request line.",
+        message: blockerMessage("no_selection", translate),
       });
       continue;
     }
@@ -187,7 +230,7 @@ export function calculateProcurement(workspace: EquipmentWorkspace): Procurement
         code: "selected_offer_missing",
         lineId: line.id,
         offerId: line.selectedOfferId,
-        message: "The selected offer is not present in the current platform snapshot.",
+        message: blockerMessage("selected_offer_missing", translate),
       });
       continue;
     }
@@ -197,12 +240,12 @@ export function calculateProcurement(workspace: EquipmentWorkspace): Procurement
         lineId: line.id,
         offerId: offer.id,
         supplier: offer.provenance.supplier || undefined,
-        message: "The selected offer is not attached to a candidate group for this request line.",
+        message: blockerMessage("selection_mismatch", translate),
       });
       continue;
     }
     if (offer.provenance.isStale || offer.provenance.freshness !== "fresh") staleCount += 1;
-    const blocker = blockerForItem(line.id, offer, line.quantity);
+    const blocker = blockerForItem(line.id, offer, line.quantity, translate);
     if (blocker) blockers.push(blocker);
     const lineTotalRub = offer.price.amountRub === null
       || !Number.isFinite(offer.price.amountRub)
@@ -220,7 +263,9 @@ export function calculateProcurement(workspace: EquipmentWorkspace): Procurement
       lineTotalRub,
       ...(blocker ? { blocker } : {}),
     };
-    const supplier = offer.provenance.supplier || "Supplier unavailable";
+    // Без поставщика строка остаётся блокером, но подпись берётся из единицы
+    // copy: английское "Supplier unavailable" раньше попадало прямо на экран.
+    const supplier = offer.provenance.supplier || translate?.("equipment.sellerUnresolved") || "";
     itemsBySupplier.set(supplier, [...(itemsBySupplier.get(supplier) ?? []), item]);
   }
 
@@ -241,7 +286,7 @@ export function calculateProcurement(workspace: EquipmentWorkspace): Procurement
         blockers.push({
           code: "missing_delivery",
           supplier,
-          message: "Delivery is enabled but no authoritative delivery amount is recorded.",
+          message: blockerMessage("missing_delivery", translate),
         });
       }
     }
@@ -299,8 +344,12 @@ function manualOverrideLabel(offer: EquipmentAuthoritativeOffer): string {
   return [...new Set(fields)].join(";");
 }
 
-export function buildProcurementExport(workspace: EquipmentWorkspace): EquipmentExport {
-  const calculation = calculateProcurement(workspace);
+/**
+ * CSV-выгрузка закупки. `translate` обязателен: колонка `warnings` — это
+ * текст для человека, и без переводчика в файл попадали бы коды.
+ */
+export function buildProcurementExport(workspace: EquipmentWorkspace, translate: Translate): EquipmentExport {
+  const calculation = calculateProcurement(workspace, translate);
   const header = [
     "request_line_id",
     "request_title",

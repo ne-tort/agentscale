@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ProjectsOverview } from "./ProjectsOverview";
 import type { ProjectOverviewService } from "./service";
 import type { ProjectSummary } from "../../../api/types";
+import { SettingsProvider } from "../../../preferences/SettingsProvider";
 
 const project: ProjectSummary = {
   id: "p-1", cabinet_id: "cab-1", name: "Market study", status: "draft", selected: false, new_chat_enabled: false,
@@ -34,7 +35,9 @@ async function mount(element: ReactNode): Promise<void> {
   host = document.createElement("div");
   document.body.appendChild(host);
   root = createRoot(host);
-  await act(async () => { root?.render(element); });
+  // The rows read the interface language to format `updated_at`, so the page needs
+  // the settings the app's root provider supplies at runtime.
+  await act(async () => { root?.render(<SettingsProvider>{element}</SettingsProvider>); });
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
 }
 
@@ -72,7 +75,7 @@ const service: ProjectOverviewService = {
 
 describe("ProjectsOverview acceptance surface", () => {
   it("starts with an explicit loading state and requires a real service contract", () => {
-    const markup = renderToStaticMarkup(<MemoryRouter><ProjectsOverview service={service} employeeId="employee-1" /></MemoryRouter>);
+    const markup = renderToStaticMarkup(<SettingsProvider><MemoryRouter><ProjectsOverview service={service} employeeId="employee-1" /></MemoryRouter></SettingsProvider>);
     expect(markup).toContain("Проекты");
     expect(markup).toContain("Загрузка кабинетов");
     expect(markup).not.toContain("Open placeholder project");
@@ -275,6 +278,27 @@ describe("ProjectsOverview acceptance surface", () => {
     </MemoryRouter>);
     expect(vi.mocked(api.listProjects).mock.calls.some(([cabinetId]) => cabinetId === "cab-2")).toBe(true);
     expect(document.querySelector<HTMLSelectElement>(".projects-cabinet-picker select")?.value).toBe("cab-2");
+  });
+
+  it("writes the 'changed' date in the interface's language instead of always Russian", async () => {
+    // The row hardcoded `ru-RU`, so an English screen read a Russian month. The
+    // copy of this page is still Russian, but the date must follow the setting.
+    const dated: ProjectSummary = { ...project, updated_at: "2026-10-30T12:00:00Z" };
+    const api = makeService({ listProjects: vi.fn(async () => [dated]) });
+
+    window.localStorage.setItem("agentscale.locale", "ru");
+    await mount(<MemoryRouter><ProjectsOverview service={api} employeeId="employee-1" /></MemoryRouter>);
+    expect(document.body.textContent).toContain("окт");
+
+    if (root) await act(async () => root?.unmount());
+    root = undefined;
+    host?.remove();
+    host = undefined;
+
+    window.localStorage.setItem("agentscale.locale", "en");
+    await mount(<MemoryRouter><ProjectsOverview service={api} employeeId="employee-1" /></MemoryRouter>);
+    expect(document.body.textContent).toContain("Oct");
+    expect(document.body.textContent).not.toContain("окт");
   });
 
   it("renders lifecycle controls appropriate to draft, active, paused, completed, and error records", async () => {

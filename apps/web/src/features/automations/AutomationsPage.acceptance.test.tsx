@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { SettingsProvider } from "../../preferences/SettingsProvider";
 import { AutomationsView } from "./AutomationsPage";
 import { AutomationRequestError } from "./service";
-import type { AutomationService, Schedule, WebhookDelivery, WebhookSubscription } from "./types";
+import type { AutomationService, ProjectTrigger, Schedule, WebhookDelivery, WebhookSubscription } from "./types";
 
 function createService(overrides: Partial<AutomationService> = {}): AutomationService {
   return {
@@ -47,6 +47,29 @@ async function mount(serviceOverride: AutomationService): Promise<HTMLDivElement
 
 async function flush(): Promise<void> {
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+}
+
+/**
+ * What a reader sees without opening anything: the element's text with every
+ * `<details>` subtree taken out. The caveats are allowed to exist — they are not
+ * allowed to be the first thing on the card.
+ */
+function firstScreenText(element: Element): string {
+  const clone = element.cloneNode(true) as Element;
+  for (const details of [...clone.querySelectorAll("details")]) details.remove();
+  return clone.textContent ?? "";
+}
+
+/** The page-level "Дополнительно" block, opened the way a click opens it. */
+async function openAdvanced(container: HTMLElement): Promise<HTMLDetailsElement> {
+  const advanced = container.querySelector<HTMLDetailsElement>(".automation-advanced");
+  if (!advanced) throw new Error("Advanced block missing");
+  expect(advanced.open).toBe(false);
+  await act(async () => {
+    advanced.open = true;
+    advanced.dispatchEvent(new Event("toggle"));
+  });
+  return advanced;
 }
 
 function button(label: string): HTMLButtonElement {
@@ -91,6 +114,11 @@ describe("project automations acceptance surface", () => {
     expect(html).toContain("Отредактировать, удалить или повторить отдельное событие нельзя");
     expect(html).toContain("связать запуск с конкретным событием нельзя");
     expect(html).toContain("Входящие события — отдельный поток");
+    // The caveats are still on the page — inside closed sections, so a person
+    // scanning the screen reads cards, not paragraphs. Nothing is ever opened
+    // by default: an opened panel would put the paragraphs back on screen one.
+    expect(html).toContain("Дополнительно");
+    expect(html).not.toContain("<details open");
     // The one-time-secret controls belong to the post-create state only; a freshly
     // mounted, still-loading screen has no secret to copy and must not offer one.
     // That flow is pinned by "never renders the one-time webhook secret and offers
@@ -102,6 +130,83 @@ describe("project automations acceptance surface", () => {
     expect(html).not.toContain("trigger id");
     expect(html).not.toContain("payload");
     expect(html).not.toContain("endpoint");
+  });
+
+  it("shows name, when it fires, on/off and the last result on the first screen, with the caveats closed", async () => {
+    const schedule: Schedule = {
+      id: "schedule-calm", project_id: "project-1", name: "Nightly digest", cron: "0 9 * * 1-5",
+      timezone: "Europe/Moscow", payload: { text: "digest" }, enabled: true,
+      next_run_at: "2026-02-02T06:00:00Z", last_run_at: "2026-02-01T06:00:00Z",
+    };
+    const trigger: ProjectTrigger = {
+      id: "trigger-calm", project_id: "project-1", kind: "system.schedule",
+      payload: { at: "2026-02-01T06:00:00Z" }, status: "queued", created_at: "2026-02-01T06:00:00Z",
+    };
+    const subscription: WebhookSubscription = {
+      id: "webhook-calm", url: "https://hook.test/calm", events: ["chat.message.completed"],
+      project_id: "project-1", enabled: true, fail_count: 0,
+    };
+    const liveService = createService({
+      listSchedules: async () => [schedule],
+      listTriggers: async () => [trigger],
+      listWebhooks: async () => [subscription],
+    });
+    const container = await mount(liveService);
+
+    // Nothing on the page is expanded by default.
+    expect(container.querySelector("details[open]")).toBeNull();
+
+    const scheduleCard = container.querySelector('[aria-label="Расписание «Nightly digest»"]');
+    if (!scheduleCard) throw new Error("Schedule card missing");
+    const scheduleHead = firstScreenText(scheduleCard);
+    expect(scheduleHead).toContain("Nightly digest");
+    // The expression is a raw parameter and lives in the details; the head says
+    // when it fires in words, with the time zone 09:00 belongs to.
+    expect(scheduleHead).toContain("по будням в 09:00");
+    expect(scheduleHead).toContain("Europe/Moscow");
+    expect(scheduleHead).not.toContain("0 9 * * 1-5");
+    expect(scheduleHead).toContain("Включено");
+    expect(scheduleHead).toContain("Последнее срабатывание");
+    expect(scheduleHead).toContain("2026");
+    expect(scheduleHead).not.toContain("Ещё не срабатывало");
+    // The sentence stays, but behind the badge and inside the card's details.
+    expect(scheduleHead).not.toContain("Время говорит о том");
+    const scheduleBadge = scheduleCard.querySelector(".automation-caveat");
+    expect(scheduleBadge?.textContent).toBe("Запуск ≠ выполнение");
+    expect(scheduleBadge?.getAttribute("title")).toBe("Время говорит о том, что расписание сработало, но не о том, чем закончился запуск.");
+    const scheduleDetails = scheduleCard.querySelector("details");
+    if (!scheduleDetails) throw new Error("Schedule details missing");
+    expect(scheduleDetails.open).toBe(false);
+    expect(scheduleDetails.textContent).toContain("Время говорит о том");
+    expect(scheduleDetails.textContent).toContain("Проверить параметры запуска");
+    expect(scheduleDetails.textContent).toContain("digest");
+    expect(scheduleDetails.textContent).toContain("schedule-calm");
+
+    const triggerCard = container.querySelector('[aria-label="Событие «Срабатывание расписания»"]');
+    if (!triggerCard) throw new Error("Trigger card missing");
+    const triggerHead = firstScreenText(triggerCard);
+    expect(triggerHead).toContain("Из расписания");
+    expect(triggerHead).toContain("В очереди");
+    expect(triggerHead).toContain("Пока не выполнено");
+    expect(triggerHead).not.toContain("Событие записано в очередь");
+    const triggerDetails = triggerCard.querySelector("details");
+    expect(triggerDetails?.open).toBe(false);
+    expect(triggerDetails?.textContent).toContain("Событие записано в очередь");
+    expect(triggerDetails?.textContent).toContain("trigger-calm");
+
+    const webhookCard = container.querySelector('[aria-label="Вебхук https://hook.test/calm"]');
+    if (!webhookCard) throw new Error("Webhook card missing");
+    const webhookHead = firstScreenText(webhookCard);
+    expect(webhookHead).toContain("https://hook.test/calm");
+    expect(webhookHead).toContain("Агент ответил");
+    expect(webhookHead).toContain("Включён");
+    expect(webhookHead).toContain("Доставок ещё не было");
+    expect(webhookHead).not.toContain("Подписка создана");
+    const webhookDetails = webhookCard.querySelector("details");
+    expect(webhookDetails?.open).toBe(false);
+    expect(webhookDetails?.textContent).toContain("Подписка создана");
+    expect(webhookDetails?.textContent).toContain("Счётчик показывает");
+    expect(webhookDetails?.textContent).toContain("webhook-calm");
   });
 
   it("creates, updates, and deletes a schedule with GET readback", async () => {
@@ -172,6 +277,18 @@ describe("project automations acceptance surface", () => {
     expect(container.textContent).toContain("а не выполнения");
     expect(container.textContent).not.toContain("результат Agent Run trigger-1");
     expect(triggers).toHaveLength(1);
+
+    // The card says the state in a badge; the sentence that qualifies it —
+    // "recorded, not run" — is one click down and took no room on the card.
+    const card = container.querySelector('[aria-label="Событие «Сообщение агенту»"]');
+    if (!card) throw new Error("Trigger card missing");
+    expect(firstScreenText(card)).toContain("В очереди");
+    expect(firstScreenText(card)).toContain("Пока не выполнено");
+    const caveats = card.querySelector("details");
+    if (!caveats) throw new Error("Trigger caveat block missing");
+    expect(caveats.open).toBe(false);
+    expect(caveats.textContent).toContain("Событие записано в очередь");
+    expect(firstScreenText(card)).not.toContain("Событие записано в очередь");
   });
 
   it("shows delivery errors and only offers retry for exhausted deliveries", async () => {
@@ -187,6 +304,7 @@ describe("project automations acceptance surface", () => {
       },
     });
     const container = await mount(liveService);
+    await openAdvanced(container);
     expect(container.textContent).toContain("http 500");
     expect(container.textContent).toContain("История попыток");
     await act(async () => button("Повторить доставку").click());
@@ -207,6 +325,7 @@ describe("project automations acceptance surface", () => {
     const deliveries = [makeDelivery("delivery-project", ownSubscription.id), ...Array.from({ length: 199 }, (_, index) => makeDelivery(`delivery-company-${index}`, `opaque-subscription-${index}`))];
     const liveService = createService({ listWebhooks: async () => [ownSubscription], listWebhookDeliveries: async () => deliveries });
     const container = await mount(liveService);
+    await openAdvanced(container);
 
     expect(container.textContent).toContain("Последние доставки по всей компании");
     expect(container.textContent).toContain("Получено от сервиса: 200 из максимум 200 строк");
@@ -230,6 +349,7 @@ describe("project automations acceptance surface", () => {
       listWebhookDeliveries: async () => [delivery],
     });
     const container = await mount(liveService);
+    await openAdvanced(container);
     expect(container.textContent).toContain("project subscriptions unavailable");
     expect(container.textContent).toContain("Получено от сервиса: 1 из максимум 200 строк");
     expect(container.textContent).toContain("https://company.test");
@@ -384,9 +504,10 @@ describe("project automations acceptance surface", () => {
     const liveService = createService({
       listWebhooks: async () => [subscription],
       listWebhookDeliveries: async () => [delivery],
-      retryWebhookDelivery: async () => { throw new AutomationRequestError("delivery not found or not exhausted", { status: 409, code: "NOT_FOUND_OR_NOT_RETRYABLE" }); },
+      retryWebhookDelivery: async () => { throw new AutomationRequestError("NOT_FOUND_OR_NOT_RETRYABLE", { status: 409, server_message: "delivery not found or not exhausted" }); },
     });
     const container = await mount(liveService);
+    await openAdvanced(container);
     await act(async () => button("Повторить доставку").click());
     await flush();
     expect(container.textContent).toContain("delivery not found or not exhausted");

@@ -137,12 +137,23 @@ export interface AutomationCollection<T> {
   error?: string;
 }
 
+/**
+ * What a failed request carries.
+ *
+ * There is no message field here on purpose: a message is a sentence, and a
+ * sentence written here would be written in one language for a screen that
+ * speaks two. `code` says what happened, `detail` is a machine token a person
+ * only needs when something is wrong (a field path such as `run.status`, an
+ * HTTP status), and `server_message` is text the server itself sent — that one
+ * is passed through untranslated, because translating somebody else's words
+ * would be inventing them.
+ */
 export interface AutomationRequestErrorShape {
   code?: string;
-  title?: string;
-  detail?: string;
   status?: number;
   trace_id?: string;
+  detail?: string;
+  server_message?: string;
 }
 
 export interface AutomationService {

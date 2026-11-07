@@ -1,6 +1,6 @@
 """Probe an AI key via the platform probe pod (PROBE-P3).
 
-The platform runs a single long-lived agent-runtime pod (`prodavan-probe-pod`)
+The platform runs a single long-lived agent-runtime pod (`agentscale-probe-pod`)
 owned by the platform (not a project sandbox). It exposes the same bridge API
 as project pods: POST /v1/credentials/leases (push secret into in-memory store),
 GET /v1/models?adapter=...&key_id=... (list models via the vendor SDK/HTTP

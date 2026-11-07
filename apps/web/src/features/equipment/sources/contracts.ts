@@ -1,3 +1,7 @@
+import type { Translate } from "../../../i18n/catalogue";
+import type { Locale } from "../../../i18n/core";
+import { formatDateTime } from "../../../i18n/format";
+
 export type CatalogRowBody = Record<string, unknown>;
 
 export interface EquipmentCatalogRow {
@@ -42,6 +46,7 @@ export type CatalogFreshnessReason = "never-indexed" | "error" | "local" | "stal
 export interface CatalogFreshnessState {
   readonly freshness: CatalogFreshness;
   readonly reason: CatalogFreshnessReason;
+  /** Last successful index, already written in `locale`'s date conventions. */
   readonly lastGoodLabel?: string;
 }
 
@@ -159,9 +164,16 @@ function parseDate(value: unknown): number | undefined {
   return Number.isFinite(result) ? result : undefined;
 }
 
-export function catalogFreshness(body: CatalogRowBody, now = Date.now()): CatalogFreshnessState {
+/**
+ * Freshness of a catalog row, with the last good index written in `locale`.
+ *
+ * `locale` is a parameter because this module has no React context, and the
+ * interface language is not the browser's: `toLocaleString()` here once showed
+ * an English date inside a Russian screen.
+ */
+export function catalogFreshness(body: CatalogRowBody, locale: Locale, now = Date.now()): CatalogFreshnessState {
   const timestamp = parseDate(body.last_indexed_at);
-  const lastGoodLabel = timestamp === undefined ? undefined : new Date(timestamp).toLocaleString();
+  const lastGoodLabel = timestamp === undefined ? undefined : formatDateTime(timestamp, locale) || undefined;
   if (body.status === "error") return {
     freshness: timestamp === undefined ? "unknown" : "stale",
     reason: timestamp === undefined ? "never-indexed" : "error",
@@ -183,8 +195,20 @@ export function catalogFreshness(body: CatalogRowBody, now = Date.now()): Catalo
   };
 }
 
-export function sanitizeCatalogMessage(value: unknown, sensitiveValues: readonly string[] = []): string {
-  let text = typeof value === "string" ? value : "Операция не выполнена.";
+/**
+ * Redacts credentials a server message may echo back.
+ *
+ * `translate` is optional because this also runs outside React (tests, any
+ * caller that only needs the redaction). With it, the fallback for a message
+ * that is not text comes from the equipment unit; without it, the fallback is
+ * empty rather than a sentence in a language the reader may not use.
+ */
+export function sanitizeCatalogMessage(
+  value: unknown,
+  sensitiveValues: readonly string[] = [],
+  translate?: Translate,
+): string {
+  let text = typeof value === "string" ? value : translate?.("equipment.srcMessageMissing") ?? "";
   for (const secret of sensitiveValues) {
     if (secret) text = text.split(secret).join("[секрет скрыт]");
   }
@@ -194,8 +218,13 @@ export function sanitizeCatalogMessage(value: unknown, sensitiveValues: readonly
     .slice(0, 500);
 }
 
-export function displayCatalogValue(value: unknown): string {
-  if (value === null || value === undefined || value === "") return "Не указано";
-  if (typeof value === "object") return "Настроено";
+/**
+ * A catalog value as a person should read it: the value itself, or a word
+ * saying why there is nothing to read. `translate` is optional for the same
+ * reason as in `sanitizeCatalogMessage`.
+ */
+export function displayCatalogValue(value: unknown, translate?: Translate): string {
+  if (value === null || value === undefined || value === "") return translate?.("equipment.srcValueMissing") ?? "";
+  if (typeof value === "object") return translate?.("equipment.srcValueConfigured") ?? "";
   return String(value);
 }

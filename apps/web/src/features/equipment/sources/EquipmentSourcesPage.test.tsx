@@ -1,11 +1,13 @@
 // @vitest-environment jsdom
+import { act } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { createRoot } from "react-dom/client";
 import type { ReactElement } from "react";
 import { describe, expect, it } from "vitest";
 import { SettingsProvider } from "../../../preferences/SettingsProvider";
 import { EquipmentSourcesPage } from "./EquipmentSourcesPage";
 import type { EquipmentCatalogWorkspace } from "./contracts";
-import type { EquipmentSourcesService } from "./service";
+import { EquipmentSourcesRequestError, type EquipmentSourcesService } from "./service";
 
 const service = {} as EquipmentSourcesService;
 
@@ -89,5 +91,55 @@ describe("equipment catalog source UI", () => {
     expect(markup).toContain("Индексация недоступна");
     expect(markup).toContain("Часть проверок отключена");
     expect(markup.toLowerCase()).not.toContain("успешно выполнено");
+  });
+
+  it("writes the last indexed date in Russian when the interface is Russian", () => {
+    const markup = render(<EquipmentSourcesPage initialWorkspace={workspace} service={service} />);
+
+    // Строка каталога проиндексирована 2000-01-01: месяц берётся из языка
+    // интерфейса, а не из локали браузера (раньше здесь был `toLocaleString()`).
+    expect(markup).toMatch(/янв/i);
+    expect(markup).not.toContain("Jan");
+  });
+
+  it("writes the same date in English when the interface is English", () => {
+    window.localStorage.setItem("agentscale.locale", "en");
+    try {
+      const markup = render(<EquipmentSourcesPage initialWorkspace={workspace} service={service} />);
+      expect(markup).toContain("Jan");
+      expect(markup).not.toMatch(/янв/i);
+    } finally {
+      window.localStorage.removeItem("agentscale.locale");
+    }
+  });
+
+  it("turns a service error code into a sentence and keeps the server detail as a second line", async () => {
+    Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+    const failing = {
+      loadWorkspace: () => Promise.reject(new EquipmentSourcesRequestError("http", {
+        status: 500,
+        detail: "index worker unavailable",
+        message: "GET /admin/modules responded 500",
+      })),
+    } as unknown as EquipmentSourcesService;
+
+    try {
+      await act(async () => {
+        root.render(<SettingsProvider><EquipmentSourcesPage service={failing} /></SettingsProvider>);
+      });
+      await act(async () => { await Promise.resolve(); });
+
+      const text = host.textContent ?? "";
+      expect(text).toContain("Сервер не выполнил запрос");
+      expect(text).toContain("index worker unavailable");
+      // Техническое сообщение остаётся в журнале, а не на экране.
+      expect(text).not.toContain("responded 500");
+    } finally {
+      await act(async () => root.unmount());
+      host.remove();
+    }
   });
 });

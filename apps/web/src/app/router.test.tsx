@@ -219,13 +219,29 @@ describe("AppRouter workspace integration", () => {
   it("rejects a module absent from the current project's active runtime module list", async () => {
     (harness.api as ApiClient).listProjectRuntimeModules = vi.fn().mockResolvedValue({ items: [{ id: "mod-files", module_id: "mod-files-older", name: "Not the requested module" }] });
     await mount("/projects/project-71/modules/mod-files/files");
-    await waitFor(() => host?.textContent?.includes("Модуль не подключен к проекту") === true);
+    await waitFor(() => host?.textContent?.includes("Модуль не подключён к проекту") === true);
     expect(host?.querySelector("[data-testid='page-module']")).toBeNull();
     expect(host?.querySelector(".workspace-shell__context-module")).toBeNull();
   });
 
-  it("recovers project loading failures with a retry", async () => {
-    (harness.api as ApiClient).getProject = vi.fn().mockRejectedValueOnce(new Error("project API unavailable")).mockResolvedValue(project);
+  it("says why a module is refused in the interface's own language", async () => {
+    (harness.api as ApiClient).listProjectRuntimeModules = vi.fn().mockResolvedValue({ items: [] });
+    window.localStorage.setItem("agentscale.locale", "en");
+    try {
+      await mount("/projects/project-71/modules/mod-files/files");
+      await waitFor(() => host?.textContent?.includes("This module is not connected") === true);
+      // The whole refusal, not just the heading: the sentence naming the module
+      // and the way out were Russian literals in the route file.
+      expect(host?.textContent).toContain("mod-files");
+      expect(host?.textContent).toContain("Back to the project");
+      expect(host?.textContent).toContain("Sign out");
+      expect(host?.textContent).not.toMatch(/[А-Яа-я]/);
+    } finally {
+      window.localStorage.removeItem("agentscale.locale");
+    }
+  });
+
+  it("recovers project loading failures with a retry", async () => {    (harness.api as ApiClient).getProject = vi.fn().mockRejectedValueOnce(new Error("project API unavailable")).mockResolvedValue(project);
     await mount("/projects/project-71");
     await waitFor(() => host?.querySelector("[role='alert']") !== null);
     expect(host?.textContent).toContain("project API unavailable");

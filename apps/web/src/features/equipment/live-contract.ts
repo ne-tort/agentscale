@@ -23,6 +23,12 @@ export interface EquipmentWorkspaceScope {
   readonly childMayEdit: boolean;
 }
 
+/**
+ * Why a workspace refresh did not complete. A code, because the service has no
+ * translator: the screen turns it into a sentence in the reader's language.
+ */
+export type EquipmentWorkspaceBlocker = "refresh_failed";
+
 export interface EquipmentSourceCatalog {
   readonly id: string;
   readonly name: string;
@@ -31,6 +37,7 @@ export interface EquipmentSourceCatalog {
   readonly paused: boolean;
   readonly lastIndexedAt?: string;
   readonly freshness: "fresh" | "stale" | "unknown";
+  /** A code the screen translates (`catalog_missing`, `index_failed`, …), not a sentence. */
   readonly freshnessReason?: string;
 }
 
@@ -43,7 +50,7 @@ export interface EquipmentProcurementExport {
 
 export interface EquipmentProjectService {
   readonly scope?: EquipmentWorkspaceScope;
-  readonly blocker?: string;
+  readonly blocker?: EquipmentWorkspaceBlocker;
   getWorkspace(): Promise<EquipmentWorkspace>;
   getSourceCatalogs(): Promise<EquipmentSourceCatalog[]>;
   createRequest(title: string, partNumber: string, quantity: number): Promise<EquipmentWorkspace>;

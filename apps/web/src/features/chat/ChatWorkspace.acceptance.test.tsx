@@ -62,9 +62,9 @@ let root: Root | undefined;
 let host: HTMLDivElement | undefined;
 let latestController: ChatWorkspaceController | undefined;
 
-function Harness({ service }: { service: TestService }) {
+function Harness({ service, cabinetId }: { service: TestService; cabinetId?: string }) {
   const [sessionId, setSessionId] = useState<string | undefined>("session-1");
-  const controller = useChatWorkspace({ projectId: "project-1", initialSessionId: "session-1", service: service as never });
+  const controller = useChatWorkspace({ projectId: "project-1", cabinetId, initialSessionId: "session-1", service: service as never });
   latestController = controller;
   useEffect(() => { void controller.actions.selectSession(sessionId); }, [controller.actions.selectSession, sessionId]);
   return <>
@@ -74,7 +74,7 @@ function Harness({ service }: { service: TestService }) {
   </>;
 }
 
-async function mount(service: TestService, locale = "en"): Promise<HTMLDivElement> {
+async function mount(service: TestService, locale = "en", cabinetId?: string): Promise<HTMLDivElement> {
   // The workspace reads its copy through `useT`, so the tests pin a locale and
   // the assertions below stay about chat behaviour rather than translation.
   window.localStorage.setItem("agentscale.locale", locale);
@@ -84,7 +84,7 @@ async function mount(service: TestService, locale = "en"): Promise<HTMLDivElemen
     Object.defineProperty(HTMLDivElement.prototype, "scrollIntoView", { configurable: true, value: vi.fn() });
   }
   root = createRoot(host);
-  await act(async () => root?.render(<SettingsProvider><Harness service={service} /></SettingsProvider>));
+  await act(async () => root?.render(<SettingsProvider><Harness service={service} cabinetId={cabinetId} /></SettingsProvider>));
   return host;
 }
 
@@ -115,6 +115,36 @@ describe("Chat session workflow acceptance", () => {
     expect(container.textContent).toContain("Проекты");
     expect(container.querySelector("textarea")?.getAttribute("placeholder")).toBe("Напишите агенту…");
     expect(container.textContent).toContain("Рабочее пространство");
+  });
+
+  it("writes the last-message clock in the interface's language, not the browser's", async () => {
+    // `formatTime` used `toLocaleTimeString([], …)`, which follows the browser, so a
+    // Russian screen could show "02:05 PM" and an English one "14:05".
+    const sidebar = {
+      cabinet_id: "cabinet-1",
+      projects: [{
+        project_id: "project-1",
+        project_name: "Project",
+        new_chat_enabled: true,
+        chats: [{ session_id: "session-1", title: "Chat", has_draft: false, pinned: false, last_message_at: "2026-10-01T14:05:00Z" }],
+      }],
+      project_chats: [],
+    };
+    const russianContainer = await mount(makeService({ getSidebar: vi.fn(async () => sidebar) }), "ru", "cabinet-1");
+    await waitFor(() => russianContainer.querySelector(".chat-tree__session-meta") !== null);
+    const russian = russianContainer.querySelector(".chat-tree__session-meta")?.textContent ?? "";
+    expect(russian).toMatch(/^\d{2}:\d{2}$/);
+
+    if (root) await act(async () => root?.unmount());
+    root = undefined;
+    host?.remove();
+    host = undefined;
+
+    const englishContainer = await mount(makeService({ getSidebar: vi.fn(async () => sidebar) }), "en", "cabinet-1");
+    await waitFor(() => englishContainer.querySelector(".chat-tree__session-meta") !== null);
+    const english = englishContainer.querySelector(".chat-tree__session-meta")?.textContent ?? "";
+    expect(english).toMatch(/\d{1,2}:\d{2}/);
+    expect(english).toMatch(/[AP]M/i);
   });
 
   it("ignores a late transcript success from the previous session and loads the selected session", async () => {

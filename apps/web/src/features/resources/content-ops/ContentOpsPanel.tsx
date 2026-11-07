@@ -3,7 +3,9 @@ import { ContentOpsError, type ContentOpsService } from "./contracts";
 import { contentFileFeedback, CONTENT_UPLOAD_MAX_BYTES } from "./validation";
 import type { ContentAclEntry, ContentAsset, ContentAssetVersion, ContentVisibility } from "./types";
 import { useI18n } from "../../../i18n/useT";
+import { formatDateTime } from "../../../i18n/format";
 import type { Translate } from "../../../i18n/catalogue";
+import type { Locale } from "../../../preferences/settings";
 import "./content-ops.css";
 
 type UploadMode = "new" | "existing";
@@ -16,10 +18,15 @@ export interface ContentOpsPanelProps {
   workspaceBindingHref?: string;
 }
 
-function dateLabel(value: string | null | undefined, t: Translate): string {
+/**
+ * A timestamp in the language the interface is in.
+ *
+ * The server sends ISO strings; a value that cannot be read is shown as it came
+ * rather than silently dropped, because a broken timestamp is still evidence.
+ */
+function dateLabel(value: string | null | undefined, locale: Locale, t: Translate): string {
   if (!value) return t("resources.contentNotProvided");
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+  return formatDateTime(value, locale) || value;
 }
 
 function safeFailure(error: unknown, t: Translate): string {
@@ -72,7 +79,7 @@ function downloadBlob(blob: Blob, filename: string): void {
 }
 
 export function ContentOpsPanel({ companyId, service, initialAssets = [], workspaceBindingHref }: ContentOpsPanelProps) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const [assets, setAssets] = useState<ContentAsset[]>(() => companyAssets(initialAssets, companyId));
   const [versions, setVersions] = useState<ContentAssetVersion[]>([]);
   const [selectedAssetId, setSelectedAssetId] = useState(() => companyAssets(initialAssets, companyId)[0]?.id ?? "");
@@ -335,12 +342,12 @@ export function ContentOpsPanel({ companyId, service, initialAssets = [], worksp
         <div className="content-ops__section-head"><div><h2 id="content-asset-title">{t("resources.contentAssetAndVersion")}</h2><p>{t("resources.contentAssetAndVersionHint")}</p></div></div>
         <label>{t("resources.contentAsset")}<select value={selectedAssetId} onChange={(event) => setSelectedAssetId(event.target.value)} disabled={!scopedAssets.length}><option value="">{t("resources.contentNoAssetSelected")}</option>{scopedAssets.map((asset) => <option value={asset.id} key={asset.id}>{assetLabel(asset, t)}{asset.latest_version ? ` · v${asset.latest_version}` : ""}</option>)}</select></label>
         {selectedAsset ? <>
-        <div className="content-ops__asset-meta" title={selectedAsset.id}><div><span>{t("resources.contentAssetTitle")}</span><strong>{assetLabel(selectedAsset, t)}</strong></div><div><span>MIME</span><strong>{selectedAsset.mime || t("resources.contentNotProvided")}</strong></div><div><span>{t("resources.contentLatestVersion")}</span><strong>{selectedAsset.latest_version ? `v${selectedAsset.latest_version}` : t("resources.contentNoVersions")}</strong></div><div><span>{t("resources.contentVisibility")}</span><strong>{visibilityLabel(t, selectedAsset.visibility)}</strong></div><div><span>{t("resources.contentUploadedBy")}</span><code title={selectedAsset.created_by ?? undefined}>{selectedAsset.created_by || t("resources.contentNotProvided")}</code></div><div><span>{t("resources.contentCreated")}</span><strong>{dateLabel(selectedAsset.created_at, t)}</strong></div><div><span>{t("resources.contentUpdated")}</span><strong>{dateLabel(selectedAsset.updated_at, t)}</strong></div></div>
+        <div className="content-ops__asset-meta" title={selectedAsset.id}><div><span>{t("resources.contentAssetTitle")}</span><strong>{assetLabel(selectedAsset, t)}</strong></div><div><span>MIME</span><strong>{selectedAsset.mime || t("resources.contentNotProvided")}</strong></div><div><span>{t("resources.contentLatestVersion")}</span><strong>{selectedAsset.latest_version ? `v${selectedAsset.latest_version}` : t("resources.contentNoVersions")}</strong></div><div><span>{t("resources.contentVisibility")}</span><strong>{visibilityLabel(t, selectedAsset.visibility)}</strong></div><div><span>{t("resources.contentUploadedBy")}</span><code title={selectedAsset.created_by ?? undefined}>{selectedAsset.created_by || t("resources.contentNotProvided")}</code></div><div><span>{t("resources.contentCreated")}</span><strong>{dateLabel(selectedAsset.created_at, locale, t)}</strong></div><div><span>{t("resources.contentUpdated")}</span><strong>{dateLabel(selectedAsset.updated_at, locale, t)}</strong></div></div>
           <label>{t("resources.version")}<select value={selectedVersionId} onChange={(event) => { setSelectedVersionId(event.target.value); setDownloadFailedVersionId(""); setError(""); }} disabled={!assetVersions.length}><option value="">{selectedAsset.latest_version ? `v${selectedAsset.latest_version} · ${t("resources.contentVersionDetailsUnavailable")}` : t("resources.contentNoVersionDetails")}</option>{assetVersions.map((version) => <option key={version.id} value={version.id}>v{version.version}</option>)}</select></label>
           <p className="content-ops__hint">{t("resources.contentVersionHistoryBlocked")}</p>
           {!assetVersions.length && <p className="content-ops__empty">{t("resources.contentNoExactVersion")}</p>}
           {selectedVersion && <>
-            <dl className="content-ops__version-details" title={selectedVersion.id}><div><dt>{t("resources.contentVersionId")}</dt><dd>v{selectedVersion.version}</dd></div><div><dt>{t("resources.contentSize")}</dt><dd>{t("resources.contentSizeBytes", { count: selectedVersion.size })}</dd></div><div><dt>SHA-256</dt><dd><code>{selectedVersion.sha256 || t("resources.contentNotProvided")}</code></dd></div><div><dt>ETag</dt><dd><code>{selectedVersion.etag || t("resources.contentNotProvided")}</code></dd></div><div><dt>{t("resources.contentVersionCreated")}</dt><dd>{dateLabel(selectedVersion.created_at, t)}</dd></div><div><dt>{t("resources.contentObjectMetadata")}</dt><dd><code>{Object.keys(selectedVersion.object_metadata).length ? JSON.stringify(selectedVersion.object_metadata) : t("resources.contentNotProvided")}</code></dd></div></dl>
+            <dl className="content-ops__version-details" title={selectedVersion.id}><div><dt>{t("resources.contentVersionId")}</dt><dd>v{selectedVersion.version}</dd></div><div><dt>{t("resources.contentSize")}</dt><dd>{t("resources.contentSizeBytes", { count: selectedVersion.size })}</dd></div><div><dt>SHA-256</dt><dd><code>{selectedVersion.sha256 || t("resources.contentNotProvided")}</code></dd></div><div><dt>ETag</dt><dd><code>{selectedVersion.etag || t("resources.contentNotProvided")}</code></dd></div><div><dt>{t("resources.contentVersionCreated")}</dt><dd>{dateLabel(selectedVersion.created_at, locale, t)}</dd></div><div><dt>{t("resources.contentObjectMetadata")}</dt><dd><code>{Object.keys(selectedVersion.object_metadata).length ? JSON.stringify(selectedVersion.object_metadata) : t("resources.contentNotProvided")}</code></dd></div></dl>
             <p className="content-ops__provenance">{t("resources.contentProvenanceHint")}</p>
             <button type="button" className="content-ops__button content-ops__button--quiet" onClick={() => void downloadSelectedVersion()} disabled={busy}>{busy ? t("resources.contentDownloading") : downloadFailedVersionId === selectedVersion.id ? t("resources.contentDownloadRetry") : t("resources.contentDownload")}</button>
           </>}
