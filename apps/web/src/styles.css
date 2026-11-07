@@ -1,4 +1,43 @@
-:root { font-family: Inter, ui-sans-serif, system-ui, sans-serif; color: #17232b; background: #f4f6f5; font-synthesis: none; }
+:root { font-family: Inter, ui-sans-serif, system-ui, sans-serif; color: #17232b; background: #f4f6f5; font-synthesis: none; color-scheme: light; }
+
+/* Design tokens for the parts that follow the theme. Declared once here and
+   overridden under [data-theme="dark"], so a component never needs a
+   per-theme rule of its own. `SettingsProvider` sets the attribute on <html>. */
+:root {
+  --bg: #f4f6f5;
+  --surface: #ffffff;
+  --surface-muted: #eef3f1;
+  --border: #d9e2df;
+  --border-strong: #c2cfcb;
+  --text: #17232b;
+  --text-muted: #64736f;
+  --accent: #126b63;
+  --accent-contrast: #ffffff;
+  --accent-soft: #e2eeeb;
+  --danger-bg: #fff0ee;
+  --danger-border: #e9b7b0;
+  --danger-text: #a33c31;
+  --shadow-card: 0 14px 40px rgba(16, 32, 39, .09);
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0c1214;
+  --surface: #131c1f;
+  --surface-muted: #1a2529;
+  --border: #26343a;
+  --border-strong: #33454c;
+  --text: #e7efec;
+  --text-muted: #93a6a1;
+  --accent: #45b3a4;
+  --accent-contrast: #06211e;
+  --accent-soft: #17302e;
+  --danger-bg: #3a1e1b;
+  --danger-border: #6d3a33;
+  --danger-text: #f0a59b;
+  --shadow-card: 0 18px 46px rgba(0, 0, 0, .5);
+  color: var(--text);
+  background: var(--bg);
+}
 * { box-sizing: border-box; }
 body { margin: 0; min-width: 320px; }
 button, input, textarea { font: inherit; }
@@ -28,11 +67,149 @@ h1 { font-size: clamp(29px, 4vw, 44px); letter-spacing: -.02em; line-height: 1.0
 .chat-surface { min-height: 420px; display: flex; flex-direction: column; justify-content: flex-end; }
 .composer { display: flex; gap: 10px; margin-top: 26px; }
 .composer textarea { border: 1px solid #ccd9d5; border-radius: 5px; min-height: 82px; padding: 12px; resize: vertical; width: 100%; }
-.login-page { align-items: center; display: flex; justify-content: center; min-height: 100vh; padding: 24px; }
-.login-panel { background: #fff; border: 1px solid #d9e2df; border-radius: 6px; max-width: 430px; padding: 40px; width: 100%; }
-.login-panel h1 { font-size: 32px; }
-.stack { display: grid; gap: 18px; margin-top: 28px; }
+/* Form chrome shared by the workspace pages. The login card overrides these
+   with `.pref-input` (borderless) and `.login-form .error`. */
 label { color: #334742; display: grid; font-size: 13px; font-weight: 700; gap: 7px; }
 input { border: 1px solid #cbd8d4; border-radius: 5px; padding: 11px 12px; }
 .error { background: #fff0ee; border: 1px solid #e9b7b0; border-radius: 4px; color: #a33c31; font-size: 13px; padding: 10px; }
-@media (max-width: 700px) { .topbar { padding: 0 18px; } .crumb { display: none; } .shell-content { padding: 30px 18px 56px; } .page-heading { align-items: flex-start; flex-direction: column; } .workspace-grid { grid-template-columns: 1fr; } .login-panel { padding: 28px 22px; } }
+
+/* --- Login ---------------------------------------------------------------
+   Centred card with a section header ("Вход" + settings), two preference rows
+   (icon, label, borderless field) and a submit row — the layout the Flutter
+   login screen used, so the two clients read as one product. */
+
+.login-page {
+  align-items: center;
+  background: var(--bg);
+  color: var(--text);
+  display: flex;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 24px;
+}
+.login-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-card);
+  max-width: 420px;
+  padding: 8px 6px 20px;
+  width: 100%;
+}
+.login-header {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 10px 16px 4px;
+  position: relative;
+}
+.login-title {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -.01em;
+  margin: 0;
+}
+.login-form { display: grid; gap: 2px; padding: 0 4px; }
+
+/* Preference row: leading icon, label above a borderless input, optional
+   trailing action. Mirrors AppPreferenceTile from the Flutter app. */
+.pref-row {
+  align-items: flex-start;
+  border-radius: 8px;
+  display: flex;
+  gap: 16px;
+  padding: 10px 12px;
+  transition: background-color .12s ease;
+}
+.pref-row:focus-within { background: var(--surface-muted); }
+.pref-leading { color: var(--text-muted); display: flex; padding-top: 3px; }
+.pref-body { display: grid; flex: 1 1 auto; gap: 2px; min-width: 0; }
+.pref-title { color: var(--text-muted); font-size: 12px; font-weight: 650; letter-spacing: .01em; }
+.pref-trailing { align-items: center; display: flex; padding-top: 2px; }
+.pref-input {
+  background: transparent;
+  border: 0;
+  color: var(--text);
+  font-size: 15px;
+  min-width: 0;
+  outline: none;
+  padding: 4px 0;
+  width: 100%;
+}
+.pref-input::placeholder { color: var(--text-muted); opacity: .7; }
+
+.icon-button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  color: var(--text-muted);
+  display: inline-flex;
+  height: 36px;
+  justify-content: center;
+  padding: 0;
+  width: 36px;
+}
+.icon-button:hover { background: var(--surface-muted); color: var(--text); }
+.icon-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.pref-icon { display: block; }
+
+.login-submit {
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  color: var(--accent-contrast);
+  font-weight: 700;
+  margin: 12px 8px 0;
+  padding: 12px 16px;
+  width: calc(100% - 16px);
+}
+.login-submit:hover:not(:disabled) { filter: brightness(1.06); }
+.login-form .error {
+  background: var(--danger-bg);
+  border: 1px solid var(--danger-border);
+  border-radius: 8px;
+  color: var(--danger-text);
+  font-size: 13px;
+  margin: 10px 8px 0;
+  padding: 10px 12px;
+}
+
+/* Settings popover: anchored under the header button, two choice groups. */
+.settings-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow-card);
+  display: grid;
+  gap: 14px;
+  min-width: 240px;
+  padding: 14px 16px 16px;
+  position: absolute;
+  right: 12px;
+  top: calc(100% + 6px);
+  z-index: 20;
+}
+.settings-group { display: grid; gap: 8px; }
+.settings-group-label { color: var(--text-muted); font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.settings-choices { display: flex; flex-wrap: wrap; gap: 6px; }
+.settings-choice {
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  color: var(--text);
+  font-size: 13px;
+  padding: 7px 14px;
+}
+.settings-choice:hover { border-color: var(--accent); }
+.settings-choice[aria-pressed="true"] {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 650;
+}
+@supports (border-color: color-mix(in srgb, red 50%, blue)) {
+  :root[data-theme="dark"] .settings-choice[aria-pressed="true"] { color: var(--text); }
+}
+@media (max-width: 700px) { .topbar { padding: 0 18px; } .crumb { display: none; } .shell-content { padding: 30px 18px 56px; } .page-heading { align-items: flex-start; flex-direction: column; } .workspace-grid { grid-template-columns: 1fr; } .login-card { padding: 4px 2px 16px; } }
