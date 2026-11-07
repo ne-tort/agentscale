@@ -199,7 +199,7 @@ export function ProjectsOverview({ service, employeeId, initialCabinetId }: Proj
         setSelectedProjectId(selected && projectsResult.value.some((project) => project.id === selected) ? selected : undefined);
       } else {
         setSelectedProjectId(undefined);
-        setProjectError(`Список проектов загружен, но выбранный проект не удалось получить: ${readableError(selectionResult.reason)}`);
+        setProjectError(`Список проектов загружен, но выбранный проект не открылся: ${readableError(selectionResult.reason)}`);
       }
     }
     setIsProjectsLoading(false);
@@ -359,7 +359,7 @@ export function ProjectsOverview({ service, employeeId, initialCabinetId }: Proj
     try {
       const actionResult = await service.lifecycle(project.id, action);
       if (actionResult.id !== project.id || actionResult.cabinet_id !== targetCabinetId) {
-        throw new Error("Backend вернул результат для другого проекта или кабинета.");
+        throw new Error("Результат относится к другому проекту или кабинету — обновите список.");
       }
       const routeResultMatchesAction = action === "resume"
         && (actionResult.status === "paused" || actionResult.status === "completed")
@@ -379,8 +379,8 @@ export function ProjectsOverview({ service, employeeId, initialCabinetId }: Proj
       }
       const targetReached = lifecycleTargetReached(action, readback.status);
       setNotice({ tone: targetReached ? "success" : "warning", message: targetReached
-        ? `«${projectActionLabels[action]}» подтверждено backend. Статус проекта: «${projectStatusLabels[readback.status]}». Состояние Pod проверяется отдельно.`
-        : `Команда «${projectActionLabels[action]}» принята, но целевой статус ещё не достигнут. Backend сообщает «${projectStatusLabels[readback.status]}». Состояние Pod не считается готовым.` });
+        ? `«${projectActionLabels[action]}» выполнено. Статус проекта: «${projectStatusLabels[readback.status]}». Среда запускается отдельно и может отставать.`
+        : `Команда «${projectActionLabels[action]}» принята — статус ещё меняется: «${projectStatusLabels[readback.status]}». Среда запускается отдельно не считается готовым.` });
     } catch (error) {
       if (mutationId === mutationNumber.current && cabinetIdRef.current === targetCabinetId) {
         setProjectError(`Не удалось выполнить действие «${projectActionLabels[action].toLocaleLowerCase()}»: ${readableError(error)}`);

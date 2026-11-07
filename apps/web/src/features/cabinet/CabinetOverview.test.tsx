@@ -1,5 +1,8 @@
+// @vitest-environment jsdom
 import { renderToStaticMarkup } from "react-dom/server";
+import type { ReactElement } from "react";
 import { describe, expect, it, vi } from "vitest";
+import { SettingsProvider } from "../../preferences/SettingsProvider";
 import { CabinetOverview } from "./CabinetOverview";
 import type { CabinetOverviewService, CabinetOverviewSnapshot } from "./contracts";
 
@@ -16,9 +19,13 @@ const snapshot: CabinetOverviewSnapshot = {
 
 const service: CabinetOverviewService = { load: vi.fn(async () => snapshot) };
 
+function render(element: ReactElement): string {
+  return renderToStaticMarkup(<SettingsProvider>{element}</SettingsProvider>);
+}
+
 describe("CabinetOverview", () => {
   it("starts with an explicit loading state and does not render fabricated metrics during SSR", () => {
-    const markup = renderToStaticMarkup(<CabinetOverview cabinetId="cabinet-1" cabinetName="Operations" service={service} onNavigate={() => undefined} />);
+    const markup = render(<CabinetOverview cabinetId="cabinet-1" cabinetName="Operations" service={service} onNavigate={() => undefined} />);
     expect(markup).toContain("Загрузка обзора кабинета");
     expect(markup).not.toContain("Northwind");
     expect(markup).not.toContain("42");
@@ -26,19 +33,27 @@ describe("CabinetOverview", () => {
 
   it("declares a scoped surface for confirmed context, projects, activity, and module navigation", () => {
     const immediateService: CabinetOverviewService = { load: () => Promise.resolve(snapshot) };
-    const markup = renderToStaticMarkup(<CabinetOverview cabinetId="cabinet-1" cabinetName="Operations" initialSnapshot={snapshot} service={immediateService} onNavigate={() => undefined} />);
+    const markup = render(<CabinetOverview cabinetId="cabinet-1" cabinetName="Operations" initialSnapshot={snapshot} service={immediateService} onNavigate={() => undefined} />);
     expect(markup).toContain("Operations");
     expect(markup).toContain("Проекты");
     expect(markup).toContain("Активность и присутствие");
     expect(markup).toContain("Управление");
     expect(markup).toContain("Данные");
-    expect(markup).toContain("Только подтверждённые API-данные");
+    expect(markup).toContain("Только подтверждённые данные");
+  });
+
+  it("describes the project state in words instead of printing the raw status and runtime values", () => {
+    const immediateService: CabinetOverviewService = { load: () => Promise.resolve(snapshot) };
+    const markup = render(<CabinetOverview cabinetId="cabinet-1" cabinetName="Operations" initialSnapshot={snapshot} service={immediateService} onNavigate={() => undefined} />);
+    expect(markup).toContain("Среда: Работает");
+    expect(markup).not.toContain("Среда: running");
+    expect(markup).not.toContain(">active<");
   });
 
   it("renders explicit empty states when the API confirms no projects and no modules", () => {
     const empty: CabinetOverviewSnapshot = { ...snapshot, projects: [], modules: [], moduleTabs: {}, errors: {} };
     const immediateService: CabinetOverviewService = { load: () => Promise.resolve(empty) };
-    const markup = renderToStaticMarkup(<CabinetOverview cabinetId="cabinet-1" cabinetName="Operations" initialSnapshot={empty} service={immediateService} onNavigate={() => undefined} />);
+    const markup = render(<CabinetOverview cabinetId="cabinet-1" cabinetName="Operations" initialSnapshot={empty} service={immediateService} onNavigate={() => undefined} />);
     expect(markup).toContain("В этом кабинете пока нет проектов");
     expect(markup).toContain("Нет подключённых разделов");
   });

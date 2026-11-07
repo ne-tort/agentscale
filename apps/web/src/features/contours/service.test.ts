@@ -126,8 +126,8 @@ describe("contour service", () => {
       return response({ detail: "unhandled" }, 404);
     });
     const service = createContourService({ fetcher });
-    await expect(service.disableEmployee("co-1", "employee-1")).rejects.toThrow("mismatched employee ID");
-    await expect(service.disableEmployee("co-2", "employee-1")).rejects.toThrow("not linked to this company");
+    await expect(service.disableEmployee("co-1", "employee-1")).rejects.toThrow("Сервер вернул другого сотрудника");
+    await expect(service.disableEmployee("co-2", "employee-1")).rejects.toThrow("не относится к компании");
     expect(requests.filter((path) => path === "/api/v1/employees/employee-1/disable")).toHaveLength(1);
   });
 
@@ -158,7 +158,7 @@ describe("contour service", () => {
       if (path === "/api/v1/employees/employee-1/disable") return response({ id: "employee-1", status: "disabled" });
       return response({ detail: "unhandled" }, 404);
     }) });
-    await expect(staleReadback.disableEmployee("co-1", "employee-1")).rejects.toThrow("could not be verified");
+    await expect(staleReadback.disableEmployee("co-1", "employee-1")).rejects.toThrow("Не удалось подтвердить изменение");
   });
 
   it("does not call the identity lifecycle route when the company scope becomes stale during preflight", async () => {
@@ -176,7 +176,7 @@ describe("contour service", () => {
     const pending = service.disableEmployee("co-1", "employee-1", () => current);
     current = false;
     release?.([]);
-    await expect(pending).rejects.toThrow("scope changed");
+    await expect(pending).rejects.toThrow("Контекст компании изменился");
     expect(requests.some((path) => path === "/api/v1/employees/employee-1/disable")).toBe(false);
   });
 
@@ -198,7 +198,7 @@ describe("contour service", () => {
       return response({ detail: "unhandled" }, 404);
     });
     const service = createContourService({ fetcher });
-    await expect(service.deleteEmployee("co-1", "employee-1")).rejects.toThrow("deletion state is inconsistent");
+    await expect(service.deleteEmployee("co-1", "employee-1")).rejects.toThrow("не совпадает состояние удаления");
   });
 
   it("preserves company-scoped contact and password routes and verifies employee state after each edit", async () => {

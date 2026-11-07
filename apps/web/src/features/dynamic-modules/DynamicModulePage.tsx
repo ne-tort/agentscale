@@ -2,6 +2,7 @@ import { useMemo, useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useApi } from "../../app/context";
 import { describeDynamicModulesApi } from "../../api/dynamic";
+import { useI18n } from "../../i18n/useT";
 import { Breadcrumbs, Button, StatusBadge } from "../../shared/ui";
 import { ConfirmationDialog, TextAreaField } from "../../shared/ui/forms/index";
 import { useDynamicModuleAccess } from "./access";
@@ -14,7 +15,6 @@ import {
   definitionSubtitle,
   formatDateTime,
   isArchived,
-  ROUTES_UNAVAILABLE,
   UNKNOWN_VALUE,
 } from "./mapping";
 import { createDynamicModulesService, DynamicModuleServiceError, type DynamicModulesService } from "./service";
@@ -32,8 +32,9 @@ export function DynamicModulePage() {
   const { definitionId = "" } = useParams();
   const api = useApi();
   const access = useDynamicModuleAccess();
+  const { t } = useI18n();
   const availability = useMemo(() => describeDynamicModulesApi(api), [api]);
-  const service = useMemo(() => createDynamicModulesService({ api, access }), [api, access]);
+  const service = useMemo(() => createDynamicModulesService({ api, access, translate: t }), [api, access, t]);
   return <ManageDynamicModule
     access={access}
     availability={availability}
@@ -55,6 +56,7 @@ export function ManageDynamicModule({
   availability = { available: true, missing: [] },
   definitionId,
 }: ManageDynamicModuleProps) {
+  const { t, locale, plural } = useI18n();
   const [revision, setRevision] = useState(0);
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [archiveReason, setArchiveReason] = useState("");
@@ -82,46 +84,46 @@ export function ManageDynamicModule({
 
   if (!definitionId) {
     return <main className="dynamic-modules"><div className="dynamic-modules__inner">
-      <Breadcrumbs items={[{ label: "Dynamic modules", href: "/dynamic-modules" }, { label: "Definition" }]} />
-      <h1 className="dynamic-modules__title">Definition unavailable</h1>
+      <Breadcrumbs items={[{ label: t("dynamicModules.title"), href: "/dynamic-modules" }, { label: t("dynamicModules.definitionHeading") }]} label={t("dynamicModules.breadcrumb")} />
+      <h1 className="dynamic-modules__title">{t("dynamicModules.definitionUnavailable")}</h1>
       <DynamicModuleErrorNotice error={new DynamicModuleServiceError(
         "DYNAMIC_MODULES_VALIDATION_FAILED",
-        "This route carries no definition id, so no registry lookup was attempted.",
+        t("dynamicModules.noDefinitionId"),
       )} />
-      <p><Link to="/dynamic-modules">Back to definitions</Link></p>
+      <p><Link to="/dynamic-modules">{t("dynamicModules.backToDefinitions")}</Link></p>
     </div></main>;
   }
 
   if (!access.canRead) {
     return <main className="dynamic-modules"><div className="dynamic-modules__inner">
-      <Breadcrumbs items={[{ label: "Dynamic modules", href: "/dynamic-modules" }, { label: definitionId }]} />
-      <h1 className="dynamic-modules__title">Definition</h1>
+      <Breadcrumbs items={[{ label: t("dynamicModules.title"), href: "/dynamic-modules" }, { label: definitionId }]} label={t("dynamicModules.breadcrumb")} />
+      <h1 className="dynamic-modules__title">{t("dynamicModules.definitionHeading")}</h1>
       <CapabilityDeniedNotice missing={access.missing} operation="read" />
     </div></main>;
   }
 
   if (!availability.available) {
     return <main className="dynamic-modules"><div className="dynamic-modules__inner">
-      <Breadcrumbs items={[{ label: "Dynamic modules", href: "/dynamic-modules" }, { label: definitionId }]} />
-      <h1 className="dynamic-modules__title">Definition</h1>
+      <Breadcrumbs items={[{ label: t("dynamicModules.title"), href: "/dynamic-modules" }, { label: definitionId }]} label={t("dynamicModules.breadcrumb")} />
+      <h1 className="dynamic-modules__title">{t("dynamicModules.definitionHeading")}</h1>
       <DynamicModulesApiNotice missing={availability.missing} />
     </div></main>;
   }
 
   if (detail.state.status === "loading") {
     return <main className="dynamic-modules"><div className="dynamic-modules__inner">
-      <Breadcrumbs items={[{ label: "Dynamic modules", href: "/dynamic-modules" }, { label: definitionId }]} />
-      <DynamicModulesLoading label="Loading definition, versions and grants…" />
+      <Breadcrumbs items={[{ label: t("dynamicModules.title"), href: "/dynamic-modules" }, { label: definitionId }]} label={t("dynamicModules.breadcrumb")} />
+      <DynamicModulesLoading label={t("dynamicModules.loadingDefinition")} />
     </div></main>;
   }
 
   if (detail.state.status === "error") {
     const notFound = detail.state.error.status === 404;
     return <main className="dynamic-modules"><div className="dynamic-modules__inner">
-      <Breadcrumbs items={[{ label: "Dynamic modules", href: "/dynamic-modules" }, { label: definitionId }]} />
-      <h1 className="dynamic-modules__title">{notFound ? "Definition not found" : "Definition unavailable"}</h1>
-      <DynamicModuleErrorNotice error={detail.state.error} onRetry={detail.reload} retryLabel="Reload definition" />
-      <p><Link to="/dynamic-modules">Back to definitions</Link></p>
+      <Breadcrumbs items={[{ label: t("dynamicModules.title"), href: "/dynamic-modules" }, { label: definitionId }]} label={t("dynamicModules.breadcrumb")} />
+      <h1 className="dynamic-modules__title">{notFound ? t("dynamicModules.definitionNotFound") : t("dynamicModules.definitionUnavailable")}</h1>
+      <DynamicModuleErrorNotice error={detail.state.error} onRetry={detail.reload} retryLabel={t("dynamicModules.reloadDefinition")} />
+      <p><Link to="/dynamic-modules">{t("dynamicModules.backToDefinitions")}</Link></p>
     </div></main>;
   }
 
@@ -129,7 +131,7 @@ export function ManageDynamicModule({
   const archived = isArchived(definition);
 
   async function confirmArchive() {
-    const nextErrors = validateArchiveForm({ reason: archiveReason });
+    const nextErrors = validateArchiveForm({ reason: archiveReason }, t);
     setArchiveErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) return;
     const ok = await archive.run(async () => {
@@ -138,7 +140,7 @@ export function ManageDynamicModule({
         values: { reason: archiveReason.trim() || ARCHIVE_REASON_CODE },
         ...(definition.latestVersion ? { expectedVersion: definition.latestVersion } : {}),
       });
-      archive.succeed(`Definition archived (${updated.status}). New installations are denied and active instances drain.`);
+      archive.succeed(t("dynamicModules.archiveDone", { status: definitionStatusLabel(updated.status, t) }));
       refresh();
     });
     if (ok) {
@@ -149,45 +151,46 @@ export function ManageDynamicModule({
 
   return <main className="dynamic-modules" aria-labelledby="dynamic-module-title">
     <div className="dynamic-modules__inner">
-      <Breadcrumbs items={[{ label: "Dynamic modules", href: "/dynamic-modules" }, { label: definition.displayName }]} />
+      <Breadcrumbs items={[{ label: t("dynamicModules.title"), href: "/dynamic-modules" }, { label: definition.displayName }]} label={t("dynamicModules.breadcrumb")} />
       <header className="dynamic-modules__header">
         <div>
-          <p className="dynamic-modules__eyebrow">Definition · {definition.id}</p>
+          <p className="dynamic-modules__eyebrow" title={definition.id}>{t("dynamicModules.definitionHeading")}</p>
           <h1 className="dynamic-modules__title" id="dynamic-module-title">{definition.displayName}</h1>
-          <p className="dynamic-modules__subtitle">{definitionSubtitle(definition)}</p>
+          <p className="dynamic-modules__subtitle">{definitionSubtitle(definition, t, plural)}</p>
           {definition.description && <p className="dynamic-modules__description">{definition.description}</p>}
         </div>
         <div className="dynamic-modules__header-actions">
-          <StatusBadge variant={definitionStatusTone(definition.status)}>{definitionStatusLabel(definition.status)}</StatusBadge>
-          <Button onClick={refresh} variant="secondary">Refresh</Button>
-          {access.canManage && !archived && <Button onClick={() => { archive.reset(); setArchiveErrors({}); setArchiveOpen(true); }} variant="danger">Archive</Button>}
+          <StatusBadge variant={definitionStatusTone(definition.status)}>{definitionStatusLabel(definition.status, t)}</StatusBadge>
+          <Button onClick={refresh} variant="secondary">{t("dynamicModules.refresh")}</Button>
+          {access.canManage && !archived && <Button onClick={() => { archive.reset(); setArchiveErrors({}); setArchiveOpen(true); }} variant="danger">{t("dynamicModules.archiveAction")}</Button>}
         </div>
       </header>
 
       {archived && <p className="dynamic-modules__notice dynamic-modules__notice--warning" role="status">
-        This definition is archived{definition.archivedAt ? ` since ${formatDateTime(definition.archivedAt)}` : ""}. New
-        installations are denied; existing instances drain. Archived definitions are immutable and read-only here.
+        {definition.archivedAt
+          ? t("dynamicModules.archivedNoticeSince", { date: formatDateTime(definition.archivedAt, locale) })
+          : t("dynamicModules.archivedNotice")}
       </p>}
       {archive.error && <DynamicModuleErrorNotice error={archive.error} />}
       {archive.notice && <p className="dynamic-modules__notice" role="status">{archive.notice}</p>}
 
       <dl className="dynamic-modules__facts">
-        <div><dt>App id</dt><dd><code>{definition.appId}</code></dd></div>
-        <div><dt>Kind</dt><dd>{definitionKindLabel(definition.kind)}</dd></div>
-        <div><dt>Latest version</dt><dd><code>{definition.latestVersion ?? UNKNOWN_VALUE}</code></dd></div>
-        <div><dt>Created</dt><dd>{formatDateTime(definition.createdAt)}</dd></div>
-        <div><dt>Updated</dt><dd>{formatDateTime(definition.updatedAt)}</dd></div>
-        <div><dt>Created by</dt><dd>{definition.createdBy ?? UNKNOWN_VALUE}</dd></div>
+        <div><dt>{t("dynamicModules.factAppId")}</dt><dd><code>{definition.appId}</code></dd></div>
+        <div><dt>{t("dynamicModules.factKind")}</dt><dd>{definitionKindLabel(definition.kind, t)}</dd></div>
+        <div><dt>{t("dynamicModules.factLatestVersion")}</dt><dd><code>{definition.latestVersion ?? UNKNOWN_VALUE}</code></dd></div>
+        <div><dt>{t("dynamicModules.factCreated")}</dt><dd>{formatDateTime(definition.createdAt, locale)}</dd></div>
+        <div><dt>{t("dynamicModules.factUpdated")}</dt><dd>{formatDateTime(definition.updatedAt, locale)}</dd></div>
+        <div><dt>{t("dynamicModules.factCreatedBy")}</dt><dd>{definition.createdBy ?? UNKNOWN_VALUE}</dd></div>
       </dl>
 
-      <section className="dynamic-modules__panel" aria-label="Definition routes">
-        <h2>Registered routes</h2>
+      <section className="dynamic-modules__panel" aria-label={t("dynamicModules.routesAria")}>
+        <h2>{t("dynamicModules.routesHeading")}</h2>
         {definition.routes === undefined
-          ? <p className="dynamic-modules__hint">{ROUTES_UNAVAILABLE}</p>
+          ? <p className="dynamic-modules__hint">{t("dynamicModules.routesNotReported")}</p>
           : definition.routes.length === 0
-            ? <p className="dynamic-modules__hint">This definition declares no routes, so it cannot be opened from the shell navigation.</p>
+            ? <p className="dynamic-modules__hint">{t("dynamicModules.routesEmpty")}</p>
             : <ul className="dynamic-modules__route-list">
-              {definition.routes.map((route) => <li key={route.path}><code>{route.path}</code><span>screen {route.screenId}</span></li>)}
+              {definition.routes.map((route) => <li key={route.path}><code>{route.path}</code><span>{t("dynamicModules.routeScreen", { screen: route.screenId })}</span></li>)}
             </ul>}
       </section>
 
@@ -224,19 +227,19 @@ export function ManageDynamicModule({
 
       <ConfirmationDialog
         busy={archive.busy}
-        confirmLabel="Archive definition"
-        description="Archiving is a server operation with an audit trail: new installations are denied, active instances drain, and published versions stay immutable. This cannot be undone from this screen."
+        confirmLabel={t("dynamicModules.archiveConfirmLabel")}
+        description={t("dynamicModules.archiveDescription")}
         onCancel={() => { if (!archive.busy) setArchiveOpen(false); }}
         onConfirm={() => void confirmArchive()}
         open={archiveOpen}
-        title={`Archive ${definition.displayName}?`}
+        title={t("dynamicModules.archiveTitle", { name: definition.displayName })}
       >
         <form className="dynamic-modules__form" noValidate onSubmit={(event: FormEvent<HTMLFormElement>) => { event.preventDefault(); void confirmArchive(); }}>
           <TextAreaField
             error={archiveErrors.reason}
-            hint={`Optional audit reason code (a-z, 0-9, underscore). Empty records ${ARCHIVE_REASON_CODE}. Free text is not sent: audit records stay redactable.`}
+            hint={t("dynamicModules.archiveReasonHint", { code: ARCHIVE_REASON_CODE })}
             id="dynamic-modules-archive-reason"
-            label="Archive reason code"
+            label={t("dynamicModules.archiveReasonLabel")}
             maxLength={64}
             onChange={(event) => setArchiveReason(event.currentTarget.value)}
             rows={2}

@@ -3,6 +3,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it } from "vitest";
+import { SettingsProvider } from "../preferences/SettingsProvider";
 import { MemoryRouter, useLocation, useNavigate } from "react-router-dom";
 import {
   assertWorkspaceRouteContract,
@@ -11,9 +12,11 @@ import {
   getWorkspaceBreadcrumbs,
   getWorkspaceNavigation,
   resolveWorkspaceRoute,
+  WORKSPACE_NAV_GROUPS,
   WORKSPACE_NAV_ITEMS,
   WORKSPACE_ROUTE_KEYS,
   WorkspaceShell,
+  workspaceNavLabelKey,
   workspaceRouteMatches,
   type WorkspaceRouteContract,
 } from "./workspace-shell";
@@ -51,10 +54,12 @@ async function mountShell(initialEntries: string[], initialIndex = initialEntrie
   root = createRoot(host);
   await act(async () => root?.render(
     <MemoryRouter initialEntries={initialEntries} initialIndex={initialIndex}>
-      <WorkspaceShell {...props}>
-        <div data-testid="route-child">Scoped project content</div>
-      </WorkspaceShell>
-      <LocationControls />
+      <SettingsProvider>
+        <WorkspaceShell {...props}>
+          <div data-testid="route-child">Scoped project content</div>
+        </WorkspaceShell>
+        <LocationControls />
+      </SettingsProvider>
     </MemoryRouter>,
   ));
   return host;
@@ -179,8 +184,10 @@ describe("workspace shell route contract", () => {
 
     expect(breadcrumbs).toEqual([
       { label: "Northwind", current: false },
-      { label: "Signal Lab · signal-lab", href: "/projects/signal-lab", current: false },
-      { label: "Files", current: true },
+      { label: "Signal Lab", href: "/projects/signal-lab", current: false },
+      // The section is an i18n key, not an English word: the crumb is rendered
+      // by a component that knows the active locale.
+      { labelKey: "workspace.navFiles", current: true },
     ]);
   });
 
@@ -216,6 +223,29 @@ describe("workspace shell route contract", () => {
     expect(getWorkspaceNavigation(contractFor()).some((item) => item.key === "module")).toBe(false);
   });
 
+  it("keeps the daily path visible and files the rest under a disclosure", () => {
+    // Thirteen equal links read as a list of subsystems. The split is about what
+    // a person opens daily; nothing is removed, so both groups must cover every
+    // destination exactly once.
+    const [primary, more] = WORKSPACE_NAV_GROUPS;
+    expect(primary.id).toBe("primary");
+    expect(primary.items.map((item) => item.key).sort()).toEqual(["approvals", "chat", "files", "module", "overview", "runs"]);
+    expect(more.id).toBe("more");
+    const covered = [...primary.items, ...more.items].map((item) => item.key);
+    expect(covered.sort()).toEqual([...WORKSPACE_ROUTE_KEYS].sort());
+    // Settings belongs with the advanced destinations, not on the daily path.
+    expect(more.items.map((item) => item.key)).toContain("settings");
+  });
+
+  it("names a destination by an i18n key unless the data supplies a name", () => {
+    expect(workspaceNavLabelKey("approvals")).toBe("workspace.navApprovals");
+    const contract = createWorkspaceRouteContract({ projectId: "project-42", moduleId: "mod-files", moduleLabel: "Files module" });
+    const moduleItem = getWorkspaceNavigation(contract).find((item) => item.key === "module");
+    expect(moduleItem).toMatchObject({ label: "Files module" });
+    const overview = getWorkspaceNavigation(contract).find((item) => item.key === "overview");
+    expect(overview?.label).toBeUndefined();
+  });
+
   it("offers a module destination only for a confirmed module scope", () => {
     const contract = createWorkspaceRouteContract({ projectId: "project-42", moduleId: "mod-files", moduleLabel: "Files module" });
     expect(contract.module).toMatchObject({ href: "/projects/project-42/modules/mod-files", scopeId: "mod-files" });
@@ -231,7 +261,7 @@ describe("workspace shell route contract", () => {
 
   it("renders the typed context, route links, and active state as one shell", () => {
     const markup = renderToString(
-      <MemoryRouter initialEntries={["/projects/project-42/files/artifact-9"]}>
+      <MemoryRouter initialEntries={["/projects/project-42/files/artifact-9"]}><SettingsProvider>
         <WorkspaceShell
           account={{ displayName: "Ada Lovelace", email: "ada@example.test", role: "Platform admin" }}
           cabinet={{ id: "cabinet-1", name: "Northwind" }}
@@ -241,7 +271,7 @@ describe("workspace shell route contract", () => {
         >
           <div>Files view</div>
         </WorkspaceShell>
-      </MemoryRouter>,
+      </SettingsProvider></MemoryRouter>,
     );
 
     expect(markup).toContain("Northwind");
@@ -251,7 +281,7 @@ describe("workspace shell route contract", () => {
     expect(markup).toContain('href="/projects/project-42/files"');
     expect(markup).toContain('aria-current="page"');
     expect(markup).toContain('data-active="true"');
-    expect(markup).toContain('aria-label="Workspace navigation"');
+    expect(markup).toContain('aria-label="Навигация проекта"');
     expect(markup).toContain('data-route-state="ready"');
   });
 
@@ -276,15 +306,15 @@ describe("workspace shell route contract", () => {
   it("does not render children from a mismatched project URL and offers scoped recovery", async () => {
     const container = await mountShell(["/projects/project-other/chat/session-9"]);
     expect(container.querySelector("[data-route-state='project-mismatch']")).toBeTruthy();
-    expect(container.textContent).toContain("This shell is scoped to Signal Lab (project-42)");
-    expect(container.textContent).toContain("project-other");
+    expect(container.textContent).toContain("Этот адрес открывает проект, который сейчас не выбран");
+    expect(container.querySelector("[data-testid='location']")?.textContent).toContain("project-other");
     expect(container.querySelector("[data-testid='route-child']")).toBeNull();
     // Scope the lookup to the recovery panel's own action row. ``data-route-state``
     // sits on the shell root and the header brand link shares the same href, so any
     // broader selector asserts on the wrong anchor.
     expect(
       container.querySelector(".workspace-shell__route-actions a[href='/projects/project-42']")?.textContent,
-    ).toBe("Open Signal Lab");
+    ).toBe("Открыть Signal Lab");
     expect(container.querySelector("[data-testid='location']")?.textContent).toBe("/projects/project-other/chat/session-9");
   });
 
@@ -294,15 +324,15 @@ describe("workspace shell route contract", () => {
       routeContract: contractFor("project-99"),
     });
     expect(container.querySelector("[data-route-state='project-context-mismatch']")).toBeTruthy();
-    expect(container.textContent).toContain("route is scoped to project project-99");
-    expect(container.textContent).toContain("selected project context is project-42");
+    expect(container.textContent).toContain("Адрес относится к другому проекту, чем выбранный сейчас");
+    expect(container.textContent).toContain("Содержимое не загружено");
     expect(container.querySelector("[data-testid='route-child']")).toBeNull();
   });
 
   it("keeps unknown project paths in the URL and shows a 404 recovery state", async () => {
     const container = await mountShell(["/projects/project-42/new-route?keep=1"]);
     expect(container.querySelector("[data-route-state='unsupported']")).toBeTruthy();
-    expect(container.textContent).toContain("Unsupported workspace route");
+    expect(container.textContent).toContain("Такого раздела нет");
     expect(container.querySelector("[data-testid='route-child']")).toBeNull();
     expect(container.querySelector("[data-testid='location']")?.textContent).toBe("/projects/project-42/new-route?keep=1");
   });
@@ -322,9 +352,9 @@ describe("workspace shell route contract", () => {
   it("shows the project and module identifiers when a module deep link is active", () => {
     const contract = createWorkspaceRouteContract({ projectId: "project-42", moduleId: "mod-files", moduleLabel: "Files module" });
     const markup = renderToString(
-      <MemoryRouter initialEntries={["/projects/project-42/modules/mod-files/files"]}>
+      <MemoryRouter initialEntries={["/projects/project-42/modules/mod-files/files"]}><SettingsProvider>
         <WorkspaceShell {...shellProps} routeContract={contract}><div>Module view</div></WorkspaceShell>
-      </MemoryRouter>,
+      </SettingsProvider></MemoryRouter>,
     );
     expect(markup).toContain("project-42");
     expect(markup).toContain("mod-files");
@@ -335,12 +365,15 @@ describe("workspace shell route contract", () => {
   it("does not render child content when a module URL scope differs", () => {
     const contract = createWorkspaceRouteContract({ projectId: "project-42", moduleId: "mod-files", moduleLabel: "Files module" });
     const markup = renderToString(
-      <MemoryRouter initialEntries={["/projects/project-42/modules/mod-prompts/files"]}>
+      <MemoryRouter initialEntries={["/projects/project-42/modules/mod-prompts/files"]}><SettingsProvider>
         <WorkspaceShell {...shellProps} routeContract={contract}><div>Wrong module content</div></WorkspaceShell>
-      </MemoryRouter>,
+      </SettingsProvider></MemoryRouter>,
     );
     expect(markup).toContain('data-route-state="module-mismatch"');
-    expect(markup).toContain("requests module mod-prompts");
+    // The panel names the situation in the user's language and no longer prints
+    // the module identifier the URL happened to carry.
+    expect(markup).toContain("Адрес открывает модуль, которого нет в этом проекте");
+    expect(markup).not.toContain("mod-prompts");
     expect(markup).not.toContain("Wrong module content");
   });
 });

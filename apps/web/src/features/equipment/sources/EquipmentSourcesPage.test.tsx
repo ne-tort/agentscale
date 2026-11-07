@@ -1,11 +1,18 @@
 // @vitest-environment jsdom
 import { renderToStaticMarkup } from "react-dom/server";
+import type { ReactElement } from "react";
 import { describe, expect, it } from "vitest";
+import { SettingsProvider } from "../../../preferences/SettingsProvider";
 import { EquipmentSourcesPage } from "./EquipmentSourcesPage";
 import type { EquipmentCatalogWorkspace } from "./contracts";
 import type { EquipmentSourcesService } from "./service";
 
 const service = {} as EquipmentSourcesService;
+
+/** Копия берётся из провайдера настроек: по умолчанию экран говорит по-русски. */
+function render(element: ReactElement): string {
+  return renderToStaticMarkup(<SettingsProvider>{element}</SettingsProvider>);
+}
 
 const workspace: EquipmentCatalogWorkspace = {
   module: { id: "mod_equipment", name: "Подбор техники" },
@@ -44,21 +51,21 @@ const workspace: EquipmentCatalogWorkspace = {
 
 describe("equipment catalog source UI", () => {
   it("shows real source, mapping and lifecycle values without exposing secret references or values", () => {
-    const markup = renderToStaticMarkup(<EquipmentSourcesPage initialWorkspace={workspace} service={service} />);
+    const markup = render(<EquipmentSourcesPage initialWorkspace={workspace} service={service} />);
 
     expect(markup).toContain("Каталоги источников");
     expect(markup).toContain("Primary supplier");
     expect(markup).toContain("public.items");
-    expect(markup).toContain("Нужно обновить");
+    expect(markup).toContain("Устарело");
     expect(markup).not.toContain("vault://module_secrets");
     expect(markup.toLowerCase()).not.toContain("secret-1");
-    expect(markup).toContain("Сохранённый DSN не отображается");
-    expect(markup).toContain("Секрет сохранён через secrets API");
+    expect(markup).toContain("Сохранённая строка подключения не отображается");
+    expect(markup).toContain("Строка подключения сохранена, значение скрыто");
     expect(markup).toContain("Переиндексировать");
   });
 
   it("keeps pause/resume blocked even when metadata declares a UI pause toggle", () => {
-    const markup = renderToStaticMarkup(<EquipmentSourcesPage initialWorkspace={workspace} service={service} />);
+    const markup = render(<EquipmentSourcesPage initialWorkspace={workspace} service={service} />);
     const container = document.createElement("div");
     container.innerHTML = markup;
     const pauseButton = Array.from(container.querySelectorAll("button"))
@@ -67,8 +74,8 @@ describe("equipment catalog source UI", () => {
     expect(pauseButton?.getAttribute("role") ?? pauseButton?.localName).toBe("button");
     expect(pauseButton?.getAttribute("aria-label") ?? pauseButton?.textContent?.trim()).toBe("Пауза недоступна");
     expect(pauseButton?.disabled).toBe(true);
-    expect(pauseButton?.title).toBe("API gap: отдельного pause/resume endpoint нет; catalogs PATCH запускает auto-index action");
-    expect(container.textContent).toContain("Pause/resume заблокированы: отдельного API действия нет, а PATCH строки каталога запускает auto-index action.");
+    expect(pauseButton?.title).toBe("Приостановить источник нельзя: отдельного действия для этого нет");
+    expect(container.textContent).toContain("Приостановить источник отсюда нельзя");
   });
 
   it("explains disabled probe/index actions and mapping requirements from metadata gaps", () => {
@@ -76,11 +83,11 @@ describe("equipment catalog source UI", () => {
       ...workspace,
       metadata: { mappingFields: [], pauseSupported: false },
     };
-    const markup = renderToStaticMarkup(<EquipmentSourcesPage initialWorkspace={missingMetadata} service={service} />);
-    expect(markup).toContain("Metadata не объявляет schema для column_map");
-    expect(markup).toContain("Переиндексация заблокирована");
-    expect(markup).toContain("Действие индексации отсутствует в actions metadata");
-    expect(markup).toContain("Действие отключено или не объявлено в actions metadata");
+    const markup = render(<EquipmentSourcesPage initialWorkspace={missingMetadata} service={service} />);
+    expect(markup).toContain("не описаны поля сопоставления");
+    expect(markup).toContain("Переиндексация недоступна");
+    expect(markup).toContain("Индексация недоступна");
+    expect(markup).toContain("Часть проверок отключена");
     expect(markup.toLowerCase()).not.toContain("успешно выполнено");
   });
 });

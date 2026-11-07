@@ -1,10 +1,18 @@
+// @vitest-environment jsdom
 import { renderToStaticMarkup } from "react-dom/server";
+import type { ReactElement } from "react";
 import { describe, expect, it } from "vitest";
+import { SettingsProvider } from "../../preferences/SettingsProvider";
 import { EquipmentProcurementView } from "./EquipmentProcurementPage";
 import { emptyEquipmentWorkspace, type EquipmentWorkspace } from "./types";
 import type { EquipmentProjectService, EquipmentWorkspaceScope } from "./live-contract";
 import type { EquipmentCatalogWorkspace } from "./sources/contracts";
 import type { EquipmentSourcesService } from "./sources/service";
+
+/** Копия приходит из провайдера настроек (по умолчанию — русский), поэтому оборачиваем рендер. */
+function render(element: ReactElement): string {
+  return renderToStaticMarkup(<SettingsProvider>{element}</SettingsProvider>);
+}
 
 /** Сервис через renderToStaticMarkup не вызывается: снимок приходит пропом. */
 const service: EquipmentProjectService = {
@@ -75,48 +83,48 @@ describe("equipment workspace integration", () => {
       ...emptyEquipmentWorkspace(),
       requestLines: [{ id: "req-1", title: "Industrial pump", quantity: 2, authoredBy: "user", selectedOfferId: null }],
     };
-    const markup = renderToStaticMarkup(<EquipmentProcurementView heading="Equipment procurement" initialScope={localScope} initialWorkspace={workspace} service={service} />);
+    const markup = render(<EquipmentProcurementView heading="Equipment procurement" initialScope={localScope} initialWorkspace={workspace} service={service} />);
 
-    expect(markup).toContain("Procurement workflow");
-    expect(markup).toContain("Source configuration");
-    expect(markup).toContain("Requests");
-    expect(markup).toContain("Candidate groups");
-    expect(markup).toContain("Offers &amp; review");
-    expect(markup).toContain("Procurement / budget");
+    expect(markup).toContain("Подбор и закупка");
+    expect(markup).toContain("Настройка источников");
+    expect(markup).toContain("Заявки");
+    expect(markup).toContain("Группы кандидатов");
+    expect(markup).toContain("Предложения и проверка");
+    expect(markup).toContain("Закупка и бюджет");
     expect(markup).toContain("Northwind project");
-    expect(markup).toContain("0/1 selected");
-    expect(markup).toContain("Needs selection");
+    expect(markup).toContain("0/1 выбрано");
+    expect(markup).toContain("Нужно выбрать");
   });
 
   it("presents supplied source data as a read-only snapshot without an admin service", () => {
     // Source configuration открывается только после того, как загружен workspace:
     // без снимка workspace экран честно остаётся в состоянии загрузки.
-    const markup = renderToStaticMarkup(<EquipmentProcurementView heading="Equipment procurement" initialScope={localScope} initialSourcesWorkspace={sourceWorkspace} initialWorkspace={emptyEquipmentWorkspace()} initialWorkspaceView="sources" service={service} />);
+    const markup = render(<EquipmentProcurementView heading="Equipment procurement" initialScope={localScope} initialSourcesWorkspace={sourceWorkspace} initialWorkspace={emptyEquipmentWorkspace()} initialWorkspaceView="sources" service={service} />);
 
     expect(markup).toContain("Northwind catalog");
-    expect(markup).not.toContain("Select this offer");
+    expect(markup).not.toContain("Выбрать предложение");
     // Без admin-сервиса запись не изобретается: экран остаётся снимком.
     expect(markup).not.toContain("Создать источник");
   });
 
   it("keeps selected-line totals and freshness visible in the procurement context", () => {
-    const markup = renderToStaticMarkup(<EquipmentProcurementView heading="Equipment procurement" initialScope={localScope} initialWorkspace={selectedWorkspace} service={service} />);
+    const markup = render(<EquipmentProcurementView heading="Equipment procurement" initialScope={localScope} initialWorkspace={selectedWorkspace} service={service} />);
 
-    expect(markup).toContain("1/1 selected");
-    expect(markup).toContain("1 source-current · 0 stale · 0 freshness unknown");
-    expect(markup).toContain("RUB");
+    expect(markup).toContain("1/1 выбрано");
+    expect(markup).toContain("Актуальных: 1 · устаревших: 0 · без данных: 0");
+    expect(markup).toMatch(/RUB|₽/);
   });
 
   it("marks every writable stage read-only when the binding forbids child edits", () => {
-    const markup = renderToStaticMarkup(<EquipmentProcurementView heading="Equipment procurement" initialScope={readOnlyScope} initialWorkspace={selectedWorkspace} service={service} />);
+    const markup = render(<EquipmentProcurementView heading="Equipment procurement" initialScope={readOnlyScope} initialWorkspace={selectedWorkspace} service={service} />);
 
-    expect(markup).toContain("Read-only binding");
-    expect(markup).toContain("Project binding is read-only");
+    expect(markup).toContain("Только чтение");
+    expect(markup).toContain("Привязка модуля только для чтения");
   });
 
   it("mounts the existing source configuration screen only with its typed service", () => {
     const sourcesService = {} as EquipmentSourcesService;
-    const markup = renderToStaticMarkup(<EquipmentProcurementView heading="Equipment procurement" initialScope={localScope} initialSourcesWorkspace={sourceWorkspace} initialWorkspace={emptyEquipmentWorkspace()} initialWorkspaceView="sources" service={service} sourcesService={sourcesService} />);
+    const markup = render(<EquipmentProcurementView heading="Equipment procurement" initialScope={localScope} initialSourcesWorkspace={sourceWorkspace} initialWorkspace={emptyEquipmentWorkspace()} initialWorkspaceView="sources" service={service} sourcesService={sourcesService} />);
 
     expect(markup).toContain("Каталоги источников");
     expect(markup).not.toContain("Northwind catalog");

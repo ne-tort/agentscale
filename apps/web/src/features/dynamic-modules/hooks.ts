@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useI18n } from "../../i18n/useT";
 import { toDynamicModuleError, type DynamicModuleErrorCode, type DynamicModuleServiceError } from "./service";
 
 export type ResourceState<T> =
@@ -23,6 +24,11 @@ export function useResource<T>(
   key: string,
   options: { readonly enabled?: boolean } = {},
 ): ResourceResult<T> {
+  const { t } = useI18n();
+  // The translator is read through a ref: a language switch must re-render the labels,
+  // not abort and refetch every resource the screen is showing.
+  const translateRef = useRef(t);
+  translateRef.current = t;
   const enabled = options.enabled ?? true;
   const loadRef = useRef(load);
   loadRef.current = load;
@@ -47,7 +53,9 @@ export function useResource<T>(
       },
       (error: unknown) => {
         if (!active || controller.signal.aborted) return;
-        const mapped = toDynamicModuleError(error);
+        // A cancelled request is not a failure to show: the screen already moved on.
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        const mapped = toDynamicModuleError(error, translateRef.current);
         if (mapped.code === "DYNAMIC_MODULES_REQUEST_FAILED" && /cancell?ed/i.test(mapped.message)) return;
         setState({ key, attempt, value: { status: "error", error: mapped } });
       },
@@ -88,6 +96,7 @@ export interface SubmitController extends SubmitState {
  * typed error/notice state, and no silent retries.
  */
 export function useSubmitController(): SubmitController {
+  const { t } = useI18n();
   const [state, setState] = useState<SubmitState>({ busy: false });
   const generation = useRef(0);
 
@@ -99,11 +108,11 @@ export function useSubmitController(): SubmitController {
       if (generation.current === current) setState((previous) => ({ busy: false, ...(previous.notice ? { notice: previous.notice } : {}) }));
       return true;
     } catch (error) {
-      const mapped = toDynamicModuleError(error);
+      const mapped = toDynamicModuleError(error, t);
       if (generation.current === current) setState({ busy: false, error: mapped });
       return false;
     }
-  }, []);
+  }, [t]);
 
   const reset = useCallback(() => {
     generation.current += 1;

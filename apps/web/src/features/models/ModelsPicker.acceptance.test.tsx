@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
-import { act } from "react";
+import { act, type ReactElement } from "react";
 import { createRoot } from "react-dom/client";
 import { describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
+import { SettingsProvider } from "../../preferences/SettingsProvider";
 import { ModelsPicker } from "./ModelsPicker";
 import type { AvailableAiKey, LiveModelsResponse, ModelProject, ModelsService } from "./types";
 
@@ -59,9 +60,14 @@ const service: ModelsService = {
   patchProject: async (_projectId, patch) => ({ ...project, ...patch }),
 };
 
+/** Copy comes from the settings provider (Russian by default), so every render is wrapped. */
+function render(element: ReactElement): string {
+  return renderToStaticMarkup(<SettingsProvider>{element}</SettingsProvider>);
+}
+
 describe("AI provider/key/model picker acceptance surface", () => {
   it("renders current selection, searches, capability labels, stale/probe warning, save language and secret safety", () => {
-    const markup = renderToStaticMarkup(
+    const markup = render(
       <ModelsPicker
         projectId="project-42"
         service={service}
@@ -73,21 +79,21 @@ describe("AI provider/key/model picker acceptance surface", () => {
       />,
     );
 
-    expect(markup).toContain("Provider, key и model");
+    expect(markup).toContain("Провайдер, ключ и модель");
     expect(markup).toContain("Team Codex");
     expect(markup).toContain("Текущий");
     expect(markup).toContain("GPT-5");
     expect(markup).toContain("Совместимость подтверждена");
-    expect(markup).toContain("Live capability");
-    expect(markup).toContain("Ошибка probe");
-    expect(markup).toContain("Stale");
+    expect(markup).toContain("Модели подтверждены");
+    expect(markup).toContain("Ошибка проверки");
     expect(markup).toContain("Проверка устарела");
     expect(markup).toContain("PROBE_TIMEOUT");
-    expect(markup).toContain("Сохранить provider и key");
-    expect(markup).toContain("Применить model");
+    expect(markup).toContain("Сохранить провайдера и ключ");
+    expect(markup).toContain("Применить модель");
     expect(markup).toContain("/projects/:projectId/ai-keys/available");
     expect(markup).toContain("/projects/:projectId/models/live");
-    expect(markup).toContain("Secret values не отображаются");
+    expect(markup).toContain("Секреты не показываются");
+    expect(markup.replace(/\u00a0/g, " ")).toContain("128 000 токенов контекста");
     expect(markup.toLowerCase()).not.toContain("secret_ref");
     expect(markup.toLowerCase()).not.toContain("token");
     expect(markup).toContain('id="models-key-search"');
@@ -95,21 +101,20 @@ describe("AI provider/key/model picker acceptance surface", () => {
   });
 
   it("keeps model application behind the explicit host boundary because project PATCH has no model field", () => {
-    const markup = renderToStaticMarkup(
+    const markup = render(
       <ModelsPicker projectId="project-42" service={service} initialProject={project} initialKeys={keys} initialModels={liveModels} initialModelId="gpt-5" />,
     );
 
-    expect(markup).toContain("Host callback для применения model не подключён");
-    expect(markup).toContain("PATCH project model не заявляет");
+    expect(markup).toContain("Применение модели здесь недоступно");
+    expect(markup).toContain("Применить модель");
   });
 
   it("shows a clear incompatibility warning before applying an unmatched live model", () => {
-    const markup = renderToStaticMarkup(<ModelsPicker projectId="project-42" service={service} initialProject={project} initialKeys={keys} initialModels={liveModels} initialModelId="vendor-experimental" onModelChange={() => undefined} />);
+    const markup = render(<ModelsPicker projectId="project-42" service={service} initialProject={project} initialKeys={keys} initialModels={liveModels} initialModelId="vendor-experimental" onModelChange={() => undefined} />);
 
     expect(markup).toContain("Совместимость не подтверждена");
-    expect(markup).toContain("catalog compatibility не подтверждена");
-    expect(markup).toContain("Выберите подтверждённую model или подтвердите риск перед применением.");
-    expect(markup).toContain("Я понимаю, что catalog compatibility не подтверждена.");
+    expect(markup).toContain("Я понимаю, что совместимость не подтверждена.");
+    expect(markup).toContain("Выберите другую модель или подтвердите риск.");
   });
 
   it("blocks an unmatched model until the user explicitly acknowledges the warning", async () => {
@@ -121,26 +126,28 @@ describe("AI provider/key/model picker acceptance surface", () => {
 
     await act(async () => {
       root.render(
-        <ModelsPicker
-          projectId="project-42"
-          service={service}
-          initialProject={project}
-          initialKeys={keys}
-          initialModels={liveModels}
-          initialModelId="gpt-5"
-          onModelChange={onModelChange}
-        />,
+        <SettingsProvider>
+          <ModelsPicker
+            projectId="project-42"
+            service={service}
+            initialProject={project}
+            initialKeys={keys}
+            initialModels={liveModels}
+            initialModelId="gpt-5"
+            onModelChange={onModelChange}
+          />
+        </SettingsProvider>,
       );
     });
 
     const experimentalModel = container.querySelector<HTMLButtonElement>(
-      'button[aria-label="Выбрать модель Vendor Experimental"]',
+      'button[aria-label="Выбрать модель «Vendor Experimental»"]',
     );
     expect(experimentalModel).not.toBeNull();
     await act(async () => experimentalModel?.click());
 
     const applyButton = Array.from(container.querySelectorAll("button")).find((button) =>
-      button.textContent?.includes("Применить model"),
+      button.textContent?.includes("Применить модель"),
     );
     const acknowledgement = container.querySelector<HTMLInputElement>('input[type="checkbox"]');
     expect(container.textContent).toContain("Совместимость не подтверждена");
@@ -162,10 +169,28 @@ describe("AI provider/key/model picker acceptance surface", () => {
 
   it("shows a clear stale current-model warning when live capability no longer contains it", () => {
     const staleModels: LiveModelsResponse = { models: [{ id: "new-model", label: "New model", catalog_matched: true }], source: "live" };
-    const markup = renderToStaticMarkup(<ModelsPicker projectId="project-42" service={service} initialProject={project} initialKeys={keys} initialModels={staleModels} initialModelId="gpt-5" onModelChange={() => undefined} />);
+    const markup = render(<ModelsPicker projectId="project-42" service={service} initialProject={project} initialKeys={keys} initialModels={staleModels} initialModelId="gpt-5" onModelChange={() => undefined} />);
 
-    expect(markup).toContain("Текущая model не подтверждена live");
+    expect(markup).toContain("Текущей модели нет в списке");
     expect(markup).toContain("gpt-5");
-    expect(markup).toContain("старый выбор не будет молча сохранён");
+    expect(markup).toContain("прежний выбор не сохранится молча");
+  });
+
+  it("speaks English end to end when the reader chose English", () => {
+    window.localStorage.setItem("agentscale.locale", "en");
+    try {
+      const markup = render(
+        <ModelsPicker projectId="project-42" service={service} initialProject={project} initialKeys={keys} initialModels={liveModels} initialModelId="gpt-5" onModelChange={() => undefined} />,
+      );
+
+      expect(markup).toContain("Save provider and key");
+      expect(markup).toContain("Apply model");
+      expect(markup).toContain("Compatibility confirmed");
+      expect(markup).toContain("Advanced");
+      // The screen a person reads must not leak the Russian unit when English is chosen.
+      expect(markup).not.toMatch(/[А-Яа-я]/);
+    } finally {
+      window.localStorage.removeItem("agentscale.locale");
+    }
   });
 });

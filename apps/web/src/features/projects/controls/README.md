@@ -34,6 +34,17 @@ The matrix is intersected with the backend-observed runtime state when that stat
 
 Disabled commands expose the reason through their accessible label and tooltip. Completing a project requires an inline confirmation.
 
+## What the screen shows first
+
+The page answers "what is this project and what can I do with it": the name, the state
+in words, when it last changed, and the lifecycle actions. Everything diagnostic — the raw
+runtime value, the environment reference, the project id, the settings form — sits in a
+collapsed `<details>` labelled "Дополнительно" / "Advanced". Nothing is removed, so every
+control stays reachable, but none of it competes with the actions for attention.
+
+Copy comes from the `projects` i18n unit; state values are translated there rather than
+printed as backend enums.
+
 ## Host integration
 
 The parent can create the authenticated service and mount the panel without modifying this feature boundary:
@@ -51,4 +62,4 @@ Links default to the concrete project routes already declared by the host app (`
 
 ## Tests
 
-Service tests cover the exact GET/PATCH and lifecycle routes, auth headers, supported payload fields, backend errors, and malformed success payloads. View-model tests cover the full state/capability matrix, links, and nullable/zero budget semantics. Operations tests cover write/readback ordering, authoritative readback, explicit unverified state, and write failure behavior. The acceptance test covers the rendered project summary, form fields, lifecycle gating, loading state, and links. These tests are authored but not run during the verification freeze.
+Service tests cover the exact GET/PATCH and lifecycle routes, auth headers, supported payload fields, backend errors, and malformed success payloads. View-model tests cover the full state/capability matrix, links, and nullable/zero budget semantics. Operations tests cover write/readback ordering, authoritative readback, explicit unverified state, and write failure behavior. The acceptance test covers the summary, the collapsed disclosure, the settings form fields, lifecycle gating, loading state, and links.

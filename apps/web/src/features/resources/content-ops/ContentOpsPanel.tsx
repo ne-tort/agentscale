@@ -2,6 +2,8 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { ContentOpsError, type ContentOpsService } from "./contracts";
 import { contentFileFeedback, CONTENT_UPLOAD_MAX_BYTES } from "./validation";
 import type { ContentAclEntry, ContentAsset, ContentAssetVersion, ContentVisibility } from "./types";
+import { useI18n } from "../../../i18n/useT";
+import type { Translate } from "../../../i18n/catalogue";
 import "./content-ops.css";
 
 type UploadMode = "new" | "existing";
@@ -14,19 +16,39 @@ export interface ContentOpsPanelProps {
   workspaceBindingHref?: string;
 }
 
-function dateLabel(value: string | null | undefined): string {
-  if (!value) return "Not provided by API";
+function dateLabel(value: string | null | undefined, t: Translate): string {
+  if (!value) return t("resources.contentNotProvided");
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
 }
 
-function safeFailure(error: unknown): string {
+function safeFailure(error: unknown, t: Translate): string {
   if (error instanceof ContentOpsError) return error.message;
-  return "The content operation failed. Try again.";
+  return t("resources.contentFailed");
 }
 
-function assetLabel(asset: ContentAsset): string {
-  return asset.title || asset.id;
+function assetLabel(asset: ContentAsset, t: Translate): string {
+  return asset.title || t("resources.contentUntitled");
+}
+
+/** The ACL stores `employee`, `company`, `platform`, `cabinet`, `project`, `role`. */
+function principalKindLabel(t: Translate, kind: ContentAclEntry["principal_kind"]): string {
+  switch (kind) {
+    case "company": return t("resources.contentPrincipalCompany");
+    case "platform": return t("resources.contentPrincipalPlatform");
+    case "cabinet": return t("resources.contentPrincipalCabinet");
+    case "project": return t("resources.contentPrincipalProject");
+    case "role": return t("resources.contentPrincipalRole");
+    default: return t("resources.contentPrincipalEmployee");
+  }
+}
+
+function permissionLabel(t: Translate, permission: ContentAclEntry["permission"]): string {
+  return permission === "write" ? t("resources.contentPermWrite") : permission === "admin" ? t("resources.contentPermAdmin") : t("resources.contentPermRead");
+}
+
+function visibilityLabel(t: Translate, visibility: string): string {
+  return visibility === "private" ? t("resources.contentVisibilityPrivate") : t("resources.contentVisibilityCompany");
 }
 
 function sortVersions(items: ContentAssetVersion[]): ContentAssetVersion[] {
@@ -50,6 +72,7 @@ function downloadBlob(blob: Blob, filename: string): void {
 }
 
 export function ContentOpsPanel({ companyId, service, initialAssets = [], workspaceBindingHref }: ContentOpsPanelProps) {
+  const { t } = useI18n();
   const [assets, setAssets] = useState<ContentAsset[]>(() => companyAssets(initialAssets, companyId));
   const [versions, setVersions] = useState<ContentAssetVersion[]>([]);
   const [selectedAssetId, setSelectedAssetId] = useState(() => companyAssets(initialAssets, companyId)[0]?.id ?? "");
@@ -78,7 +101,7 @@ export function ContentOpsPanel({ companyId, service, initialAssets = [], worksp
   const selectedAsset = scopedAssets.find((asset) => asset.id === selectedAssetId);
   const assetVersions = sortVersions(versions.filter((version) => version.asset_id === selectedAssetId));
   const selectedVersion = assetVersions.find((version) => version.id === selectedVersionId);
-  const feedback = file ? contentFileFeedback(file) : null;
+  const feedback = file ? contentFileFeedback(file, t) : null;
   const uploadDraftDirty = Boolean(file || title || visibility !== "company" || mode !== "new");
 
   async function reloadAssets(): Promise<void> {
@@ -89,7 +112,7 @@ export function ContentOpsPanel({ companyId, service, initialAssets = [], worksp
       setAssets(result);
       setSelectedAssetId((current) => result.some((asset) => asset.id === current) ? current : result[0]?.id ?? "");
     } catch (cause) {
-      setError(safeFailure(cause));
+      setError(safeFailure(cause, t));
     } finally {
       setLoading(false);
     }
@@ -125,8 +148,8 @@ export function ContentOpsPanel({ companyId, service, initialAssets = [], worksp
     setAttempt(null);
     setError("");
     setNotice(abandoned
-      ? "Form cleared. The Content API has no delete route for an unfinished upload; any staged asset or version remains on the server."
-      : "Form cleared.");
+      ? t("resources.contentFormClearedStaged")
+      : t("resources.contentFormCleared"));
     if (fileInput.current) fileInput.current.value = "";
   }
 
@@ -140,19 +163,19 @@ export function ContentOpsPanel({ companyId, service, initialAssets = [], worksp
   async function submitUpload(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     if (!file || !feedback) {
-      setError("Choose a file to upload.");
+      setError(t("resources.contentChooseFile"));
       return;
     }
     if (!feedback.accepted) {
-      setError("The file exceeds the 100 MiB upload limit.");
+      setError(t("resources.contentFileTooLarge"));
       return;
     }
     if (attempt && (attempt.fileName !== file.name || attempt.fileSize !== file.size)) {
-      setError("Clear the previous attempt before choosing a different file.");
+      setError(t("resources.contentClearPrevious"));
       return;
     }
     if (mode === "existing" && (!selectedAsset || selectedAsset.id !== selectedAssetId)) {
-      setError("Select an asset in this company before uploading a new version.");
+      setError(t("resources.contentSelectAssetFirst"));
       return;
     }
 
@@ -171,7 +194,7 @@ export function ContentOpsPanel({ companyId, service, initialAssets = [], worksp
             tags: [],
           });
           if (asset.owner_company_id !== companyId) {
-            throw new ContentOpsError("INVALID_RESPONSE", 0, "The Content Service returned an asset outside this company.");
+            throw new ContentOpsError("INVALID_RESPONSE", 0, t("resources.contentAssetOutsideCompany"));
           }
           current = { assetId: asset.id, fileName: file.name, fileSize: file.size };
           setAttempt(current);
@@ -199,14 +222,14 @@ export function ContentOpsPanel({ companyId, service, initialAssets = [], worksp
       setFile(null);
       setTitle("");
       if (fileInput.current) fileInput.current.value = "";
-      setNotice(`Uploaded v${saved.version}. SHA-256 ${saved.sha256 ?? "not provided"}.`);
+      setNotice(t("resources.contentUploaded", { version: saved.version, digest: saved.sha256 ?? t("resources.contentNotProvided") }));
       try {
         setAssets(companyAssets(await service.listAssets(companyId), companyId));
       } catch {
-        setNotice(`Uploaded v${saved.version}; asset list refresh failed. Use Refresh to reload it.`);
+        setNotice(t("resources.contentUploadedRefreshFailed", { version: saved.version }));
       }
     } catch (cause) {
-      setError(safeFailure(cause));
+      setError(safeFailure(cause, t));
     } finally {
       setBusy(false);
     }
@@ -225,10 +248,10 @@ export function ContentOpsPanel({ companyId, service, initialAssets = [], worksp
       const result = await service.downloadVersion(selectedAsset.id, selectedVersion.id, selectedAsset.title || "download");
       downloadBlob(result.blob, result.filename);
       setDownloadFailedVersionId("");
-      setNotice(`Downloaded v${selectedVersion.version}.`);
+      setNotice(t("resources.contentDownloaded", { version: selectedVersion.version }));
     } catch (cause) {
       setDownloadFailedVersionId(selectedVersion.id);
-      setError(safeFailure(cause));
+      setError(safeFailure(cause, t));
     } finally {
       setBusy(false);
     }
@@ -244,7 +267,7 @@ export function ContentOpsPanel({ companyId, service, initialAssets = [], worksp
       setAclBaseline(loadedEntries);
       setAclLoadedFor(selectedAsset.id);
     } catch (cause) {
-      setAclError(safeFailure(cause));
+      setAclError(safeFailure(cause, t));
     } finally {
       setAclBusy(false);
     }
@@ -255,7 +278,7 @@ export function ContentOpsPanel({ companyId, service, initialAssets = [], worksp
     const normalizedId = principalId.trim();
     if (!normalizedId) return;
     if (aclEntries.some((entry) => entry.principal_kind === principalKind && entry.principal_id === normalizedId && entry.permission === permission)) {
-      setAclError("That access grant is already listed.");
+      setAclError(t("resources.contentGrantDuplicate"));
       return;
     }
     setAclEntries((entries) => [...entries, { principal_kind: principalKind, principal_id: normalizedId, permission }]);
@@ -271,78 +294,78 @@ export function ContentOpsPanel({ companyId, service, initialAssets = [], worksp
       const savedEntries = await service.replaceAcl(selectedAsset.id, aclEntries);
       setAclEntries(savedEntries);
       setAclBaseline(savedEntries);
-      setNotice("Asset access list replaced.");
+      setNotice(t("resources.contentAclReplaced"));
     } catch (cause) {
-      setAclError(safeFailure(cause));
+      setAclError(safeFailure(cause, t));
     } finally {
       setAclBusy(false);
     }
   }
 
   return <main className="content-ops" aria-labelledby="content-ops-title">
-    <header className="content-ops__heading">
-      <div><p className="content-ops__eyebrow">Resources · Content Service · Company {companyId}</p><h1 id="content-ops-title">Assets</h1></div>
-      <button type="button" className="content-ops__button content-ops__button--quiet" onClick={() => void reloadAssets()} disabled={loading || busy}>{loading ? "Refreshing..." : "Refresh assets"}</button>
+    <header className="content-ops__heading" title={companyId}>
+      <div><p className="content-ops__eyebrow">{t("resources.contentEyebrow")}</p><h1 id="content-ops-title">{t("resources.contentTitle")}</h1></div>
+      <button type="button" className="content-ops__button content-ops__button--quiet" onClick={() => void reloadAssets()} disabled={loading || busy}>{loading ? t("resources.contentRefreshing") : t("resources.contentRefresh")}</button>
     </header>
-    {error && <div className="content-ops__notice content-ops__notice--error" role="alert">{error}{attempt && file && <button type="button" onClick={() => void retryUpload()} disabled={busy}>Retry upload</button>}</div>}
+    {error && <div className="content-ops__notice content-ops__notice--error" role="alert">{error}{attempt && file && <button type="button" onClick={() => void retryUpload()} disabled={busy}>{t("resources.contentRetryUpload")}</button>}</div>}
     {notice && <p className="content-ops__notice" role="status">{notice}</p>}
 
     <div className="content-ops__layout">
       <section className="content-ops__section" aria-labelledby="content-upload-title">
-        <div className="content-ops__section-head"><div><h2 id="content-upload-title">Upload</h2><p>Choose a new asset or append a version to an existing asset.</p></div></div>
-        <div className="content-ops__segmented" role="group" aria-label="Upload destination">
-          <button type="button" aria-pressed={mode === "new"} onClick={() => chooseMode("new")} disabled={Boolean(attempt)}>New asset</button>
-          <button type="button" aria-pressed={mode === "existing"} onClick={() => chooseMode("existing")} disabled={Boolean(attempt)}>Existing asset</button>
+        <div className="content-ops__section-head"><div><h2 id="content-upload-title">{t("resources.contentUploadTitle")}</h2><p>{t("resources.contentUploadHint")}</p></div></div>
+        <div className="content-ops__segmented" role="group" aria-label={t("resources.contentUploadDestination")}>
+          <button type="button" aria-pressed={mode === "new"} onClick={() => chooseMode("new")} disabled={Boolean(attempt)}>{t("resources.contentNewAsset")}</button>
+          <button type="button" aria-pressed={mode === "existing"} onClick={() => chooseMode("existing")} disabled={Boolean(attempt)}>{t("resources.contentExistingAsset")}</button>
         </div>
         <form className="content-ops__form" onSubmit={(event) => void submitUpload(event)}>
           {mode === "new" ? <>
-            <label>Asset title<input value={title} onChange={(event) => setTitle(event.target.value)} maxLength={260} placeholder="Defaults to file name" disabled={Boolean(attempt)} /></label>
-            <label>Visibility<select value={visibility} onChange={(event) => setVisibility(event.target.value as ContentVisibility)} disabled={Boolean(attempt)}><option value="company">Company</option><option value="private">Private</option></select></label>
-          </> : <label>Asset<select value={selectedAssetId} onChange={(event) => setSelectedAssetId(event.target.value)} disabled={!scopedAssets.length || Boolean(attempt)} required><option value="">Select an asset</option>{scopedAssets.map((asset) => <option value={asset.id} key={asset.id}>{assetLabel(asset)}{asset.latest_version ? ` · v${asset.latest_version}` : ""}</option>)}</select></label>}
-          <label className="content-ops__file-field">File<input ref={fileInput} type="file" onChange={(event) => { setFile(event.currentTarget.files?.[0] ?? null); setError(""); setNotice(""); }} disabled={Boolean(attempt) || busy} /></label>
-          {feedback && <div className={`content-ops__file-feedback${feedback.accepted ? "" : " content-ops__file-feedback--error"}`} role="status"><strong>{feedback.mime}</strong><span>{feedback.sizeLabel} of 100 MiB</span><span>{feedback.message}</span></div>}
-          <p className="content-ops__hint">The backend restricts size to 100 MiB but does not publish a MIME allowlist. A blank browser MIME type is sent as application/octet-stream.</p>
-          {attempt && <p className="content-ops__hint">Retry reuses the staged asset/version when the API returned its ID. Clearing does not delete staged server records.</p>}
-{uploadDraftDirty && <p className="content-ops__hint" role="status">Unsaved upload changes · local draft only. No server asset is created until upload starts.</p>}
-          <div className="content-ops__actions"><button type="button" className="content-ops__button content-ops__button--quiet" onClick={resetForm} disabled={busy}>Clear</button><button type="submit" className="content-ops__button content-ops__button--primary" disabled={busy || !file || !feedback?.accepted}>{busy ? "Uploading..." : attempt ? "Retry upload" : "Upload version"}</button></div>
+            <label>{t("resources.contentAssetTitle")}<input value={title} onChange={(event) => setTitle(event.target.value)} maxLength={260} placeholder={t("resources.contentAssetTitlePlaceholder")} disabled={Boolean(attempt)} /></label>
+            <label>{t("resources.contentVisibility")}<select value={visibility} onChange={(event) => setVisibility(event.target.value as ContentVisibility)} disabled={Boolean(attempt)}><option value="company">{t("resources.contentVisibilityCompany")}</option><option value="private">{t("resources.contentVisibilityPrivate")}</option></select></label>
+          </> : <label>{t("resources.contentAsset")}<select value={selectedAssetId} onChange={(event) => setSelectedAssetId(event.target.value)} disabled={!scopedAssets.length || Boolean(attempt)} required><option value="">{t("resources.contentSelectAsset")}</option>{scopedAssets.map((asset) => <option value={asset.id} key={asset.id}>{assetLabel(asset, t)}{asset.latest_version ? ` · v${asset.latest_version}` : ""}</option>)}</select></label>}
+          <label className="content-ops__file-field">{t("resources.contentFile")}<input ref={fileInput} type="file" onChange={(event) => { setFile(event.currentTarget.files?.[0] ?? null); setError(""); setNotice(""); }} disabled={Boolean(attempt) || busy} /></label>
+          {feedback && <div className={`content-ops__file-feedback${feedback.accepted ? "" : " content-ops__file-feedback--error"}`} role="status"><strong>{feedback.mime}</strong><span>{t("resources.contentFileSizeOf", { size: feedback.sizeLabel })}</span><span>{feedback.message}</span></div>}
+          <p className="content-ops__hint">{t("resources.contentFileHint")}</p>
+          {attempt && <p className="content-ops__hint">{t("resources.contentRetryHint")}</p>}
+{uploadDraftDirty && <p className="content-ops__hint" role="status">{t("resources.contentUnsavedUpload")}</p>}
+          <div className="content-ops__actions"><button type="button" className="content-ops__button content-ops__button--quiet" onClick={resetForm} disabled={busy}>{t("resources.contentClear")}</button><button type="submit" className="content-ops__button content-ops__button--primary" disabled={busy || !file || !feedback?.accepted}>{busy ? t("resources.contentUploading") : attempt ? t("resources.contentRetryUpload") : t("resources.contentUploadVersion")}</button></div>
         </form>
       </section>
 
       <section className="content-ops__section" aria-labelledby="content-asset-title">
-        <div className="content-ops__section-head"><div><h2 id="content-asset-title">Asset and version</h2><p>Select an asset and an exact version known to this session.</p></div></div>
-        <label>Asset<select value={selectedAssetId} onChange={(event) => setSelectedAssetId(event.target.value)} disabled={!scopedAssets.length}><option value="">No asset selected</option>{scopedAssets.map((asset) => <option value={asset.id} key={asset.id}>{assetLabel(asset)}{asset.latest_version ? ` · v${asset.latest_version}` : ""}</option>)}</select></label>
+        <div className="content-ops__section-head"><div><h2 id="content-asset-title">{t("resources.contentAssetAndVersion")}</h2><p>{t("resources.contentAssetAndVersionHint")}</p></div></div>
+        <label>{t("resources.contentAsset")}<select value={selectedAssetId} onChange={(event) => setSelectedAssetId(event.target.value)} disabled={!scopedAssets.length}><option value="">{t("resources.contentNoAssetSelected")}</option>{scopedAssets.map((asset) => <option value={asset.id} key={asset.id}>{assetLabel(asset, t)}{asset.latest_version ? ` · v${asset.latest_version}` : ""}</option>)}</select></label>
         {selectedAsset ? <>
-        <div className="content-ops__asset-meta"><div><span>Asset ID</span><code>{selectedAsset.id}</code></div><div><span>MIME</span><strong>{selectedAsset.mime || "Not provided"}</strong></div><div><span>Reported latest</span><strong>{selectedAsset.latest_version ? `v${selectedAsset.latest_version}` : "No versions"}</strong></div><div><span>Visibility</span><strong>{selectedAsset.visibility}</strong></div><div><span>Created by</span><code>{selectedAsset.created_by || "Not provided"}</code></div><div><span>Asset created</span><strong>{dateLabel(selectedAsset.created_at)}</strong></div><div><span>Asset updated</span><strong>{dateLabel(selectedAsset.updated_at)}</strong></div></div>
-          <label>Version<select value={selectedVersionId} onChange={(event) => { setSelectedVersionId(event.target.value); setDownloadFailedVersionId(""); setError(""); }} disabled={!assetVersions.length}><option value="">{selectedAsset.latest_version ? `v${selectedAsset.latest_version} details unavailable from API` : "No version details available"}</option>{assetVersions.map((version) => <option key={version.id} value={version.id}>v{version.version} · {version.id}</option>)}</select></label>
-          <p className="content-ops__hint">Version history is blocked: the API reports the latest version number but has no version-list route. Existing version IDs, history pages and metadata cannot be loaded. The selector contains only exact versions uploaded in this session.</p>
-          {!assetVersions.length && <p className="content-ops__empty">No exact version is available in this session. Existing-version inspection is unavailable.</p>}
+        <div className="content-ops__asset-meta" title={selectedAsset.id}><div><span>{t("resources.contentAssetTitle")}</span><strong>{assetLabel(selectedAsset, t)}</strong></div><div><span>MIME</span><strong>{selectedAsset.mime || t("resources.contentNotProvided")}</strong></div><div><span>{t("resources.contentLatestVersion")}</span><strong>{selectedAsset.latest_version ? `v${selectedAsset.latest_version}` : t("resources.contentNoVersions")}</strong></div><div><span>{t("resources.contentVisibility")}</span><strong>{visibilityLabel(t, selectedAsset.visibility)}</strong></div><div><span>{t("resources.contentUploadedBy")}</span><code title={selectedAsset.created_by ?? undefined}>{selectedAsset.created_by || t("resources.contentNotProvided")}</code></div><div><span>{t("resources.contentCreated")}</span><strong>{dateLabel(selectedAsset.created_at, t)}</strong></div><div><span>{t("resources.contentUpdated")}</span><strong>{dateLabel(selectedAsset.updated_at, t)}</strong></div></div>
+          <label>{t("resources.version")}<select value={selectedVersionId} onChange={(event) => { setSelectedVersionId(event.target.value); setDownloadFailedVersionId(""); setError(""); }} disabled={!assetVersions.length}><option value="">{selectedAsset.latest_version ? `v${selectedAsset.latest_version} · ${t("resources.contentVersionDetailsUnavailable")}` : t("resources.contentNoVersionDetails")}</option>{assetVersions.map((version) => <option key={version.id} value={version.id}>v{version.version}</option>)}</select></label>
+          <p className="content-ops__hint">{t("resources.contentVersionHistoryBlocked")}</p>
+          {!assetVersions.length && <p className="content-ops__empty">{t("resources.contentNoExactVersion")}</p>}
           {selectedVersion && <>
-            <dl className="content-ops__version-details"><div><dt>Version ID</dt><dd><code>{selectedVersion.id}</code></dd></div><div><dt>Version</dt><dd>v{selectedVersion.version}</dd></div><div><dt>Size</dt><dd>{selectedVersion.size} bytes</dd></div><div><dt>SHA-256</dt><dd><code>{selectedVersion.sha256 || "Not provided"}</code></dd></div><div><dt>ETag</dt><dd><code>{selectedVersion.etag || "Not provided"}</code></dd></div><div><dt>Version created</dt><dd>{dateLabel(selectedVersion.created_at)}</dd></div><div><dt>Object metadata</dt><dd><code>{Object.keys(selectedVersion.object_metadata).length ? JSON.stringify(selectedVersion.object_metadata) : "Not provided"}</code></dd></div></dl>
-            <p className="content-ops__provenance"><strong>Provenance available from API:</strong> asset creator/time and version creation time. No source-system provenance route is exposed.</p>
-            <button type="button" className="content-ops__button content-ops__button--quiet" onClick={() => void downloadSelectedVersion()} disabled={busy}>{busy ? "Downloading..." : downloadFailedVersionId === selectedVersion.id ? "Retry download selected version" : "Download selected version"}</button>
+            <dl className="content-ops__version-details" title={selectedVersion.id}><div><dt>{t("resources.contentVersionId")}</dt><dd>v{selectedVersion.version}</dd></div><div><dt>{t("resources.contentSize")}</dt><dd>{t("resources.contentSizeBytes", { count: selectedVersion.size })}</dd></div><div><dt>SHA-256</dt><dd><code>{selectedVersion.sha256 || t("resources.contentNotProvided")}</code></dd></div><div><dt>ETag</dt><dd><code>{selectedVersion.etag || t("resources.contentNotProvided")}</code></dd></div><div><dt>{t("resources.contentVersionCreated")}</dt><dd>{dateLabel(selectedVersion.created_at, t)}</dd></div><div><dt>{t("resources.contentObjectMetadata")}</dt><dd><code>{Object.keys(selectedVersion.object_metadata).length ? JSON.stringify(selectedVersion.object_metadata) : t("resources.contentNotProvided")}</code></dd></div></dl>
+            <p className="content-ops__provenance">{t("resources.contentProvenanceHint")}</p>
+            <button type="button" className="content-ops__button content-ops__button--quiet" onClick={() => void downloadSelectedVersion()} disabled={busy}>{busy ? t("resources.contentDownloading") : downloadFailedVersionId === selectedVersion.id ? t("resources.contentDownloadRetry") : t("resources.contentDownload")}</button>
           </>}
-          <div className="content-ops__binding"><div><h3>Workspace binding</h3><p>The Content API has no workspace-binding endpoint. This link is supplied by the host Resources UI.</p></div>{workspaceBindingHref ? <a href={workspaceBindingHref}>Open workspace binding</a> : <span>Not linked by host UI</span>}</div>
-        </> : <p className="content-ops__empty">{loading ? "Loading company assets..." : "No assets returned for this company."}</p>}
+          <div className="content-ops__binding"><div><h3>{t("resources.contentWorkspaceBinding")}</h3><p>{t("resources.contentWorkspaceBindingHint")}</p></div>{workspaceBindingHref ? <a href={workspaceBindingHref}>{t("resources.contentOpenBinding")}</a> : <span>{t("resources.contentNotLinked")}</span>}</div>
+        </> : <p className="content-ops__empty">{loading ? t("resources.contentLoadingAssets") : t("resources.contentNoAssets")}</p>}
       </section>
     </div>
 
     {selectedAsset && <section className="content-ops__section content-ops__acl" aria-labelledby="content-acl-title">
-      <div className="content-ops__section-head"><div><h2 id="content-acl-title">Asset access</h2><p>ACL replacement sends the complete list to the Content API.</p></div><button type="button" className="content-ops__button content-ops__button--quiet" onClick={() => void loadAcl()} disabled={aclBusy}>{aclBusy ? "Loading..." : "Load access list"}</button></div>
+      <div className="content-ops__section-head"><div><h2 id="content-acl-title">{t("resources.contentAclTitle")}</h2><p>{t("resources.contentAclHint")}</p></div><button type="button" className="content-ops__button content-ops__button--quiet" onClick={() => void loadAcl()} disabled={aclBusy}>{aclBusy ? t("common.loading") : t("resources.contentLoadAcl")}</button></div>
       {aclError && <p className="content-ops__notice content-ops__notice--error" role="alert">{aclError}</p>}
       {aclLoadedFor === selectedAsset.id && <>
-        {JSON.stringify(aclEntries.map(({ principal_kind, principal_id, permission }) => ({ principal_kind, principal_id, permission }))) !== JSON.stringify(aclBaseline.map(({ principal_kind, principal_id, permission }) => ({ principal_kind, principal_id, permission }))) && <p className="content-ops__hint" role="status">Unsaved access-list changes · local draft only.</p>}
-        <ul className="content-ops__acl-list">{aclEntries.map((entry, index) => <li key={entry.id ?? `${entry.principal_kind}-${entry.principal_id}-${entry.permission}-${index}`}><span>{entry.principal_kind}</span><code>{entry.principal_id}</code><strong>{entry.permission}</strong><button type="button" aria-label={`Remove ${entry.principal_kind} ${entry.principal_id}`} onClick={() => setAclEntries((current) => current.filter((_, row) => row !== index))}>Remove</button></li>)}</ul>
+        {JSON.stringify(aclEntries.map(({ principal_kind, principal_id, permission }) => ({ principal_kind, principal_id, permission }))) !== JSON.stringify(aclBaseline.map(({ principal_kind, principal_id, permission }) => ({ principal_kind, principal_id, permission }))) && <p className="content-ops__hint" role="status">{t("resources.contentUnsavedAcl")}</p>}
+        <ul className="content-ops__acl-list">{aclEntries.map((entry, index) => <li key={entry.id ?? `${entry.principal_kind}-${entry.principal_id}-${entry.permission}-${index}`}><span>{principalKindLabel(t, entry.principal_kind)}</span><code>{entry.principal_id}</code><strong>{permissionLabel(t, entry.permission)}</strong><button type="button" aria-label={t("resources.contentRemoveGrant", { principal: entry.principal_id })} onClick={() => setAclEntries((current) => current.filter((_, row) => row !== index))}>{t("resources.contentRemove")}</button></li>)}</ul>
         <form className="content-ops__acl-form" onSubmit={addAclEntry}>
-          <label>Principal type<select value={principalKind} onChange={(event) => setPrincipalKind(event.target.value as ContentAclEntry["principal_kind"])}><option value="employee">Employee</option><option value="company">Company</option><option value="platform">Platform</option></select></label>
-          <label>Principal ID<input value={principalId} onChange={(event) => setPrincipalId(event.target.value)} required /></label>
-          <label>Permission<select value={permission} onChange={(event) => setPermission(event.target.value as ContentAclEntry["permission"])}><option value="read">Read</option><option value="write">Write</option><option value="admin">Admin</option></select></label>
-          <button type="submit" className="content-ops__button content-ops__button--quiet">Add grant</button>
+          <label>{t("resources.contentPrincipalType")}<select value={principalKind} onChange={(event) => setPrincipalKind(event.target.value as ContentAclEntry["principal_kind"])}><option value="employee">{t("resources.contentPrincipalEmployee")}</option><option value="company">{t("resources.contentPrincipalCompany")}</option><option value="platform">{t("resources.contentPrincipalPlatform")}</option></select></label>
+          <label>{t("resources.contentPrincipalId")}<input value={principalId} onChange={(event) => setPrincipalId(event.target.value)} required /></label>
+          <label>{t("resources.contentPermission")}<select value={permission} onChange={(event) => setPermission(event.target.value as ContentAclEntry["permission"])}><option value="read">{t("resources.contentPermRead")}</option><option value="write">{t("resources.contentPermWrite")}</option><option value="admin">{t("resources.contentPermAdmin")}</option></select></label>
+          <button type="submit" className="content-ops__button content-ops__button--quiet">{t("resources.contentAddGrant")}</button>
         </form>
-        <div className="content-ops__actions"><button type="button" className="content-ops__button content-ops__button--primary" onClick={() => void saveAcl()} disabled={aclBusy}>{aclBusy ? "Saving..." : "Replace access list"}</button></div>
+        <div className="content-ops__actions"><button type="button" className="content-ops__button content-ops__button--primary" onClick={() => void saveAcl()} disabled={aclBusy}>{aclBusy ? t("common.saving") : t("resources.contentReplaceAcl")}</button></div>
       </>}
-      {aclLoadedFor !== selectedAsset.id && <p className="content-ops__hint">Load the current list before editing; replacement is not an incremental grant operation.</p>}
+      {aclLoadedFor !== selectedAsset.id && <p className="content-ops__hint">{t("resources.contentAclLoadFirst")}</p>}
     </section>}
 
-    <p className="content-ops__footnote">Upload limit: {CONTENT_UPLOAD_MAX_BYTES / (1024 * 1024)} MiB. Upload URLs and storage keys returned internally by the backend are discarded and never rendered.</p>
+    <p className="content-ops__footnote">{t("resources.contentFootnote", { size: CONTENT_UPLOAD_MAX_BYTES / (1024 * 1024) })}</p>
   </main>;
 }

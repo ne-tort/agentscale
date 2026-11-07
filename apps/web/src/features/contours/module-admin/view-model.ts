@@ -6,33 +6,41 @@ function text(value: unknown): string | undefined {
   return undefined;
 }
 
+/** What the company may do with the module. Rendered as words by the screen. */
+export type ModuleRights = "writable" | "readOnly" | "childMayEdit" | "childReadOnly";
+
+/** A value the catalog did not return. The screen says which one is missing. */
+export type ModuleGap = "source" | "version" | "rights";
+
 export interface ModuleEvidence {
   source?: string;
   version?: string;
-  rights?: string;
-  bindKind?: string;
+  rights?: ModuleRights;
+  bindKind?: "local" | "global";
   childMayEdit?: boolean;
-  gaps: string[];
+  gaps: ModuleGap[];
 }
 
+/**
+ * Only values the API actually returned are reported here. When one of them is
+ * missing the screen names the missing value — it used to print "API contract
+ * gap", which told the reader nothing they could act on.
+ */
 export function moduleEvidence(row: ModuleAdminRow, mode: ModuleAdminMode): ModuleEvidence {
   const source = text(row.source);
   const version = text(row.version) ?? text(row.module_version) ?? text(row.content_version);
   const bindKind = row.bind_kind === "local" || row.bind_kind === "global" ? row.bind_kind : undefined;
   const childMayEdit = typeof row.child_may_edit === "boolean" ? row.child_may_edit : undefined;
-  let rights: string | undefined;
+  let rights: ModuleRights | undefined;
   if (mode === "company" && typeof row.writable === "boolean") {
-    rights = row.writable ? "Writable (API)" : "Read only (API)";
+    rights = row.writable ? "writable" : "readOnly";
   } else if (mode === "admin" && childMayEdit !== undefined) {
-    rights = childMayEdit ? "Child may edit (API)" : "Child read only (API)";
+    rights = childMayEdit ? "childMayEdit" : "childReadOnly";
   }
-  const gaps: string[] = [];
-  // These surface on a screen a company administrator reads. "API contract gap"
-  // was a note to the frontend team that ended up in front of a customer; what
-  // they need to know is simply that the value is missing.
-  if (!source) gaps.push("Источник не указан.");
-  if (!version) gaps.push("Версия модуля не указана.");
-  if (!rights) gaps.push("Права не указаны.");
+  const gaps: ModuleGap[] = [];
+  if (!source) gaps.push("source");
+  if (!version) gaps.push("version");
+  if (!rights) gaps.push("rights");
   return { source, version, rights, bindKind, childMayEdit, gaps };
 }
 
@@ -41,7 +49,7 @@ export function recordId(row: ModuleAdminRow, fallback = ""): string {
 }
 
 export function displayValue(value: unknown): string {
-  if (value === null || value === undefined || value === "") return "Not provided by API";
+  if (value === null || value === undefined || value === "") return "—";
   if (typeof value === "object") return JSON.stringify(value);
   return String(value);
 }

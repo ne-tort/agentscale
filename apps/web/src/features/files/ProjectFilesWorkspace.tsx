@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ChangeEvent, type FormEvent, type ReactNode } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import type { Translate } from "../../i18n/catalogue";
+import { useI18n } from "../../i18n/useT";
 import {
   classifyWorkspaceError,
   sortWorkspaceEntries,
@@ -86,70 +88,70 @@ function getInitialOffline(): boolean {
   return typeof navigator !== "undefined" && navigator.onLine === false;
 }
 
-function sizeLabel(size: number | null): string {
+function sizeLabel(size: number | null, t: Translate): string {
   if (size === null || !Number.isFinite(size)) return "—";
-  if (size < 1024) return `${size} B`;
-  if (size < 1024 * 1024) return `${(size / 1024).toFixed(size < 10240 ? 1 : 0)} KB`;
-  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+  if (size < 1024) return t("files.sizeBytes", { size });
+  if (size < 1024 * 1024) return t("files.sizeKilobytes", { size: (size / 1024).toFixed(size < 10240 ? 1 : 0) });
+  return t("files.sizeMegabytes", { size: (size / (1024 * 1024)).toFixed(1) });
 }
 
-function modifiedLabel(value: string | null): string {
+function modifiedLabel(value: string | null, locale: string): string {
   if (!value) return "—";
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? "—" : date.toLocaleString();
+  return Number.isNaN(date.getTime()) ? "—" : date.toLocaleString(locale);
 }
 
-function availabilityLabel(kind: FilesAvailability): string {
+function availabilityLabel(kind: FilesAvailability, t: Translate): string {
   switch (kind) {
     case "loading":
-      return "Loading";
+      return t("files.statusLoading");
     case "empty":
-      return "Empty";
+      return t("files.statusEmpty");
     case "offline":
-      return "Offline";
+      return t("files.statusOffline");
     case "paused":
-      return "Paused";
+      return t("files.statusPaused");
     case "pod-unavailable":
-      return "Pod unavailable";
+      return t("files.statusPodUnavailable");
     case "error":
-      return "Unavailable";
+      return t("files.statusError");
     default:
-      return "Live Pod";
+      return t("files.statusReady");
   }
 }
 
-function availabilityTitle(kind: FilesAvailability): string {
+function availabilityTitle(kind: FilesAvailability, t: Translate): string {
   switch (kind) {
     case "offline":
-      return "Workspace is offline";
+      return t("files.unavailableOfflineTitle");
     case "paused":
-      return "Project is paused";
+      return t("files.unavailablePausedTitle");
     case "pod-unavailable":
-      return "Pod is not running";
+      return t("files.unavailablePodTitle");
     case "error":
-      return "Workspace is unavailable";
+      return t("files.unavailableErrorTitle");
     default:
-      return "Files unavailable";
+      return t("files.unavailableDefaultTitle");
   }
 }
 
-function availabilityDetail(kind: FilesAvailability): string {
+function availabilityDetail(kind: FilesAvailability, t: Translate): string {
   switch (kind) {
     case "offline":
-      return "The live Pod workspace cannot be reached while the browser is offline. Reconnect to try again.";
+      return t("files.unavailableOfflineDetail");
     case "paused":
-      return "Resume this project before opening its live Pod workspace.";
+      return t("files.unavailablePausedDetail");
     case "pod-unavailable":
-      return "This project Pod is not running or ready. Start the Pod to access files.";
+      return t("files.unavailablePodDetail");
     case "error":
-      return "The live Pod workspace returned an error. Try again when the Pod is available.";
+      return t("files.unavailableErrorDetail");
     default:
-      return "Select a file to view its contents.";
+      return t("files.unavailableDefaultDetail");
   }
 }
 
-function errorNotice(error: unknown): Notice {
-  return { kind: "error", message: workspaceErrorMessage(error) };
+function errorNotice(error: unknown, t: Translate): Notice {
+  return { kind: "error", message: workspaceErrorMessage(error, t) };
 }
 
 function TreeNode({
@@ -176,6 +178,7 @@ function TreeNode({
   const isExpanded = expanded.has(path);
   const hasKnownChildren = snapshot?.status === "ready" && children.length > 0;
   const isCurrent = currentPath === path;
+  const { t } = useI18n();
 
   return (
     <div className="files-tree-node" role="treeitem" aria-expanded={isExpanded} aria-selected={isCurrent}>
@@ -183,7 +186,7 @@ function TreeNode({
         <button
           type="button"
           className="files-tree-toggle"
-          aria-label={`${isExpanded ? "Collapse" : "Expand"} ${label}`}
+          aria-label={isExpanded ? t("files.treeCollapse", { name: label }) : t("files.treeExpand", { name: label })}
           onClick={() => onToggle(path)}
           disabled={snapshot?.status === "loading"}
         >
@@ -192,14 +195,14 @@ function TreeNode({
         <button type="button" className="files-tree-label" onClick={() => onNavigate(path)}>
           <span aria-hidden="true">{isExpanded ? "▾" : "▸"}</span>
           <span>{label}</span>
-          {snapshot?.status === "loading" && <span className="files-inline-spinner" aria-label="Loading" />}
+          {snapshot?.status === "loading" && <span className="files-inline-spinner" aria-label={t("files.treeLoadingAria")} />}
         </button>
       </div>
       {isExpanded && (
         <div className="files-tree-children" role="group">
           {snapshot?.status === "error" && (
             <p className="files-tree-hint" style={{ paddingInlineStart: `${(depth + 1) * 14 + 28}px` }}>
-              Unable to load this folder
+              {t("files.treeErrorHint")}
             </p>
           )}
           {hasKnownChildren &&
@@ -218,7 +221,7 @@ function TreeNode({
             ))}
           {snapshot?.status === "ready" && children.length === 0 && (
             <p className="files-tree-hint" style={{ paddingInlineStart: `${(depth + 1) * 14 + 28}px` }}>
-              Empty
+              {t("files.treeEmptyHint")}
             </p>
           )}
         </div>
@@ -229,6 +232,7 @@ function TreeNode({
 
 function ModalShell({ title, children, onClose }: { title: string; children: ReactNode; onClose: () => void }) {
   const dialogRef = useRef<HTMLDivElement>(null);
+  const { t } = useI18n();
 
   useEffect(() => {
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
@@ -263,7 +267,7 @@ function ModalShell({ title, children, onClose }: { title: string; children: Rea
       <div ref={dialogRef} className="files-modal" role="dialog" aria-modal="true" aria-labelledby="files-dialog-title" onKeyDown={handleKeyDown}>
         <div className="files-modal-header">
           <h2 id="files-dialog-title">{title}</h2>
-          <button type="button" className="files-icon-button" aria-label="Close dialog" onClick={onClose}>
+          <button type="button" className="files-icon-button" aria-label={t("files.closeDialog")} onClick={onClose}>
             ×
           </button>
         </div>
@@ -277,9 +281,11 @@ export function ProjectFilesWorkspace({
   projectId,
   service,
   initialPath,
-  title = "Files",
+  title,
   className = "",
 }: ProjectFilesWorkspaceProps) {
+  const { t, locale, plural } = useI18n();
+  const heading = title ?? t("files.title");
   const location = useLocation();
   const navigate = useNavigate();
   const routeState = useMemo(() => {
@@ -327,6 +333,11 @@ export function ProjectFilesWorkspace({
   const allowRouteChangeRef = useRef(false);
   const directoryRequestIdsRef = useRef(0);
   const directoryRequestsRef = useRef(new Map<string, { id: number; controller: AbortController }>());
+  // The route guard below runs on navigation, not on a language switch: reading the
+  // translator through a ref keeps the copy current without adding it to the effect's
+  // dependencies, which would re-run the reset for no reason.
+  const tRef = useRef(t);
+  tRef.current = t;
 
   useEffect(() => {
     directoriesRef.current = directories;
@@ -343,9 +354,9 @@ export function ProjectFilesWorkspace({
     if ((projectChanged || routeChanged) && dirty && !allowRouteChangeRef.current) {
       setDialog({
         kind: "confirm",
-        title: "Discard unsaved changes?",
-        message: "Your text changes will be lost if you leave this file.",
-        confirmLabel: "Discard changes",
+        title: tRef.current("files.discardTitle"),
+        message: tRef.current("files.discardLeaveFile"),
+        confirmLabel: tRef.current("files.discardConfirm"),
         destructive: true,
         onConfirm: () => {
           allowRouteChangeRef.current = true;
@@ -443,8 +454,10 @@ export function ProjectFilesWorkspace({
   const markUnavailable = useCallback(
     (error: unknown) => {
       setDirectoryError(currentPath, error);
-      setNotice(errorNotice(error));
+      setNotice(errorNotice(error, tRef.current));
     },
+    // Same reason as the loader: the preview effect depends on this callback, and a
+    // language switch must not reset an editor with unsaved text.
     [currentPath, setDirectoryError],
   );
 
@@ -452,16 +465,16 @@ export function ProjectFilesWorkspace({
     async (path: string, force = false, requireSuccess = false): Promise<WorkspaceListing | undefined> => {
       const normalizedPath = normalizeWorkspacePath(path);
       if (projectIdRef.current !== projectId) {
-        if (requireSuccess) throw new Error("Workspace project changed before readback completed");
+        if (requireSuccess) throw new Error(tRef.current("files.errorMutationUnconfirmed"));
         return undefined;
       }
       const requestKey = `${projectId}\u0000${normalizedPath}`;
       if (networkOffline) {
         const offline = new WorkspaceServiceError({
           code: "OFFLINE",
-          title: "Workspace is offline",
+          title: tRef.current("files.statusOffline"),
           status: 0,
-          detail: "The workspace service could not be reached.",
+          detail: tRef.current("files.errorOffline"),
         });
         setDirectoryError(normalizedPath, offline);
         if (requireSuccess) throw offline;
@@ -497,6 +510,8 @@ export function ProjectFilesWorkspace({
         if (directoryRequestsRef.current.get(requestKey)?.id === requestId) directoryRequestsRef.current.delete(requestKey);
       }
     },
+    // `t` is read through the ref so a language switch does not re-run the directory
+    // loader and refetch every open folder.
     [networkOffline, projectId, service, setDirectoryError],
   );
 
@@ -524,7 +539,7 @@ export function ProjectFilesWorkspace({
         setPreview({
           kind: "error",
           path: selectedPath,
-          error: new WorkspaceServiceError({ code: "OFFLINE", title: "Workspace is offline", status: 0 }),
+          error: new WorkspaceServiceError({ code: "OFFLINE", title: tRef.current("files.statusOffline"), status: 0 }),
         });
       }
       return;
@@ -597,9 +612,9 @@ export function ProjectFilesWorkspace({
       if (dirty) {
         setDialog({
           kind: "confirm",
-          title: "Discard unsaved changes?",
-          message: "Your text changes will be lost if you leave this file.",
-          confirmLabel: "Discard changes",
+          title: t("files.discardTitle"),
+          message: t("files.discardLeaveFile"),
+          confirmLabel: t("files.discardConfirm"),
           destructive: true,
           onConfirm: () => {
             setDirty(false);
@@ -610,7 +625,7 @@ export function ProjectFilesWorkspace({
       }
       applyPath(normalizedPath);
     },
-    [applyPath, dirty],
+    [applyPath, dirty, t],
   );
 
   const handleToggleDirectory = useCallback(
@@ -636,9 +651,9 @@ export function ProjectFilesWorkspace({
       if (dirty && selectedPath !== entry.path) {
         setDialog({
           kind: "confirm",
-          title: "Discard unsaved changes?",
-          message: "Your text changes will be lost if you open another file.",
-          confirmLabel: "Discard changes",
+          title: t("files.discardTitle"),
+          message: t("files.discardOpenOther"),
+          confirmLabel: t("files.discardConfirm"),
           destructive: true,
           onConfirm: () => {
             setDirty(false);
@@ -649,7 +664,7 @@ export function ProjectFilesWorkspace({
       }
       selectPath(entry.path);
     },
-    [dirty, navigateTo, selectPath, selectedPath],
+    [dirty, navigateTo, selectPath, selectedPath, t],
   );
 
   const handleOperationError = useCallback(
@@ -657,7 +672,7 @@ export function ProjectFilesWorkspace({
       const kind = classifyWorkspaceError(error);
       if (kind === "offline") setNetworkOffline(true);
       if (kind === "offline" || kind === "paused" || kind === "pod-unavailable") markUnavailable(error);
-      else setNotice(errorNotice(error));
+      else setNotice(errorNotice(error, tRef.current));
     },
     [markUnavailable],
   );
@@ -666,10 +681,10 @@ export function ProjectFilesWorkspace({
     async (paths: string[]) => {
       const uniquePaths = [...new Set(paths.map(normalizeWorkspacePath))];
       const readbacks = await Promise.all(uniquePaths.map((path) => loadDirectory(path, true, true)));
-      if (readbacks.some((readback) => readback === undefined)) throw new Error("Workspace readback could not be confirmed");
+      if (readbacks.some((readback) => readback === undefined)) throw new Error(t("files.errorReadbackUnconfirmed"));
       return readbacks as WorkspaceListing[];
     },
-    [loadDirectory],
+    [loadDirectory, t],
   );
 
   const runMutation = useCallback(
@@ -682,7 +697,7 @@ export function ProjectFilesWorkspace({
         await mutation();
         if (projectIdRef.current !== operationProjectId || routeKeyRef.current !== operationRouteKey) return;
         const readbacks = await refreshDirectories(pathsToRefresh);
-        if (verify && !verify(readbacks)) throw new Error("Workspace mutation was not confirmed by the server readback. Refresh and retry before assuming it succeeded.");
+        if (verify && !verify(readbacks)) throw new Error(t("files.errorMutationUnconfirmed"));
         if (projectIdRef.current !== operationProjectId) return;
         onSuccess?.();
         setNotice({ kind: "success", message: successMessage });
@@ -692,7 +707,7 @@ export function ProjectFilesWorkspace({
         if (projectIdRef.current === operationProjectId) setOperationBusy(false);
       }
     },
-    [currentPath, handleOperationError, projectId, refreshDirectories],
+    [currentPath, handleOperationError, projectId, refreshDirectories, t],
   );
 
   const handleDownload = useCallback(
@@ -707,7 +722,7 @@ export function ProjectFilesWorkspace({
       try {
         const download = await service.download(projectId, entry.path, { signal: controller.signal });
         if (projectIdRef.current !== requestProjectId || routeKeyRef.current !== requestRouteKey) return;
-        if (typeof URL.createObjectURL !== "function") throw new Error("Downloads are not supported by this browser");
+        if (typeof URL.createObjectURL !== "function") throw new Error(t("files.errorDownloadUnsupported"));
         const url = URL.createObjectURL(download.blob);
         const anchor = document.createElement("a");
         anchor.href = url;
@@ -717,14 +732,14 @@ export function ProjectFilesWorkspace({
         anchor.click();
         anchor.remove();
         window.setTimeout(() => URL.revokeObjectURL(url), 0);
-        setNotice({ kind: "success", message: `Downloaded ${download.filename}` });
+        setNotice({ kind: "success", message: t("files.noticeDownloaded", { name: download.filename }) });
       } catch (error) {
         if (!controller.signal.aborted && projectIdRef.current === requestProjectId && routeKeyRef.current === requestRouteKey) handleOperationError(error);
       } finally {
         if (projectIdRef.current === requestProjectId) setOperationBusy(false);
       }
     },
-    [handleOperationError, projectId, service],
+    [handleOperationError, projectId, service, t],
   );
 
   const handleSave = useCallback(() => {
@@ -734,11 +749,11 @@ export function ProjectFilesWorkspace({
     const content = editorValue;
     let readback: WorkspaceTextPreview | undefined;
     void runMutation(
-      `Saved ${saveName}`,
+      t("files.noticeSaved", { name: saveName }),
       async () => {
         await service.upload(projectId, savePath, content);
         readback = await service.previewText(projectId, savePath);
-        if (readback.truncated || readback.content !== content) throw new Error("Saved file contents did not match the server readback. Your editor changes are still available.");
+        if (readback.truncated || readback.content !== content) throw new Error(t("files.errorSavedMismatch"));
       },
       [currentPath],
       () => {
@@ -748,14 +763,14 @@ export function ProjectFilesWorkspace({
         setDirty(false);
       },
     );
-  }, [currentPath, dirty, editorValue, preview, projectId, runMutation, selectedPath, service]);
+  }, [currentPath, dirty, editorValue, preview, projectId, runMutation, selectedPath, service, t]);
 
   const handlePathSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     try {
       navigateTo(pathInput);
     } catch (error) {
-      setNotice({ kind: "error", message: error instanceof Error ? error.message : "Invalid workspace path" });
+      setNotice({ kind: "error", message: error instanceof Error ? error.message : t("files.errorInvalidPath") });
     }
   };
 
@@ -767,8 +782,8 @@ export function ProjectFilesWorkspace({
     let target: string;
     try {
       target = joinWorkspacePath(currentPath, name);
-    } catch (error) {
-      setDialog({ ...dialog, error: error instanceof Error ? error.message : "Enter a valid file name" });
+    } catch {
+      setDialog({ ...dialog, error: name ? t("files.errorFileNameInvalid") : t("files.errorFileNameRequired") });
       return;
     }
     let mutationStarted = false;
@@ -776,11 +791,13 @@ export function ProjectFilesWorkspace({
       setDialog(undefined);
       mutationStarted = true;
       void runMutation(
-        `${replace ? "Saved" : "Created"} ${target.split("/").pop() ?? target}`,
+        replace
+          ? t("files.noticeSaved", { name: target.split("/").pop() ?? target })
+          : t("files.noticeCreated", { name: target.split("/").pop() ?? target }),
         async () => {
           await service.upload(projectId, target, fileDialog.content);
           const readback = await service.previewText(projectId, target);
-          if (readback.truncated || readback.content !== fileDialog.content) throw new Error("Created file contents did not match the server readback.");
+          if (readback.truncated || readback.content !== fileDialog.content) throw new Error(t("files.errorCreatedMismatch"));
         },
         [currentPath],
         undefined,
@@ -795,20 +812,20 @@ export function ProjectFilesWorkspace({
       if (controller.signal.aborted || projectIdRef.current !== requestProjectId || routeKeyRef.current !== requestRouteKey || dialog !== fileDialog) return;
       const existing = listing.entries.find((entry) => entry.path === target);
       if (existing?.kind === "dir") {
-        setDialog({ ...fileDialog, error: `${target} is a folder. Choose a file name.` });
+        setDialog({ ...fileDialog, error: t("files.errorNameIsFolder", { path: target }) });
       } else if (existing) {
         setDialog({
           kind: "confirm",
-          title: "Replace existing file?",
-          message: `${target} already exists. Replacing it will overwrite its contents.`,
-          confirmLabel: "Replace file",
+          title: t("files.replaceFileTitle"),
+          message: t("files.replaceFileMessage", { path: target }),
+          confirmLabel: t("files.replaceFileConfirm"),
           destructive: true,
           onConfirm: () => create(true),
         });
       } else create(false);
     }).catch((error: unknown) => {
       if (!controller.signal.aborted && projectIdRef.current === requestProjectId && routeKeyRef.current === requestRouteKey) {
-        setDialog({ ...fileDialog, error: `Could not check for an existing file: ${workspaceErrorMessage(error)}` });
+        setDialog({ ...fileDialog, error: t("files.errorExistingFileCheck", { detail: workspaceErrorMessage(error, t) }) });
         handleOperationError(error);
       }
     }).finally(() => {
@@ -822,14 +839,14 @@ export function ProjectFilesWorkspace({
     const folderDialog = dialog;
     const folderName = dialog.name.trim();
     if (!folderName || folderName === "." || folderName === ".." || /[\\/]/.test(folderName)) {
-      setDialog({ ...dialog, error: "Enter one folder name without path separators." });
+      setDialog({ ...dialog, error: t("files.errorFolderNameSeparators") });
       return;
     }
     let target: string;
     try {
       target = joinWorkspacePath(currentPath, folderName);
-    } catch (error) {
-      setDialog({ ...dialog, error: error instanceof Error ? error.message : "Enter a valid folder name" });
+    } catch {
+      setDialog({ ...dialog, error: t("files.errorFolderNameInvalid") });
       return;
     }
     const requestProjectId = projectId;
@@ -845,18 +862,20 @@ export function ProjectFilesWorkspace({
       if (existing) {
         setDialog({
           ...folderDialog,
-          error: existing.kind === "dir" ? `${target} is already a folder.` : `${target} is an existing file. Choose another name.`,
+          error: existing.kind === "dir"
+            ? t("files.errorFolderExists", { path: target })
+            : t("files.errorFileExists", { path: target }),
         });
         return;
       }
       setDialog(undefined);
       mutationStarted = true;
       void runMutation(
-        `Created ${target.split("/").pop() ?? target}`,
+        t("files.noticeCreated", { name: target.split("/").pop() ?? target }),
         async () => {
           const result = await service.createDirectory(projectId, target);
           if (result.created !== true || result.path !== target) {
-            throw new Error("The server did not confirm creation of the requested folder.");
+            throw new Error(t("files.errorFolderNotConfirmed"));
           }
         },
         [currentPath],
@@ -865,7 +884,7 @@ export function ProjectFilesWorkspace({
       );
     }).catch((error: unknown) => {
       if (!controller.signal.aborted && projectIdRef.current === requestProjectId && routeKeyRef.current === requestRouteKey) {
-        setDialog({ ...folderDialog, error: `Could not check for an existing folder: ${workspaceErrorMessage(error)}` });
+        setDialog({ ...folderDialog, error: t("files.errorExistingFolderCheck", { detail: workspaceErrorMessage(error, t) }) });
         handleOperationError(error);
       }
     }).finally(() => {
@@ -879,11 +898,20 @@ export function ProjectFilesWorkspace({
     let destination: string;
     try {
       destination = normalizeWorkspacePath(dialog.destination);
-      if (!destination) throw new Error("A destination path is required");
-      if (destination === dialog.entry.path) throw new Error("Choose a different destination path");
-      if (dialog.entry.kind === "dir" && destination.startsWith(`${dialog.entry.path}/`)) throw new Error("A folder cannot be moved or copied into itself");
-    } catch (error) {
-      setDialog({ ...dialog, error: error instanceof Error ? error.message : "Enter a valid destination path" });
+    } catch {
+      setDialog({ ...dialog, error: t("files.errorDestinationInvalid") });
+      return;
+    }
+    if (!destination) {
+      setDialog({ ...dialog, error: t("files.errorDestinationRequired") });
+      return;
+    }
+    if (destination === dialog.entry.path) {
+      setDialog({ ...dialog, error: t("files.errorDestinationSame") });
+      return;
+    }
+    if (dialog.entry.kind === "dir" && destination.startsWith(`${dialog.entry.path}/`)) {
+      setDialog({ ...dialog, error: t("files.errorDestinationInsideFolder") });
       return;
     }
     const destinationDialog = dialog;
@@ -891,21 +919,29 @@ export function ProjectFilesWorkspace({
     const entry = dialog.entry;
     const showConfirmation = (existingDestination?: WorkspaceEntry) => {
       if (existingDestination?.kind === "dir") {
-        setDialog((previous) => previous?.kind === "destination" ? { ...previous, error: "The destination path is an existing folder. Choose a new full path to avoid ambiguous overwrite behavior." } : previous);
+        setDialog((previous) => previous?.kind === "destination" ? { ...previous, error: t("files.errorDestinationIsFolder") } : previous);
         return;
       }
       const destinationExists = existingDestination !== undefined;
       setDialog({
         kind: "confirm",
-        title: destinationExists ? "Replace existing destination?" : operation === "move" ? "Move this item?" : "Copy this item?",
+        title: destinationExists
+          ? t("files.replaceDestinationTitle")
+          : operation === "move" ? t("files.moveTitle") : t("files.copyTitle"),
         message: destinationExists
-          ? `${destination} already exists in the live Pod workspace. Replace it with ${entry.path}?`
-          : `${operation === "move" ? "Move" : "Copy"} ${entry.path} to ${destination}?`,
-        confirmLabel: destinationExists ? "Replace destination" : operation === "move" ? "Move item" : "Copy item",
+          ? t("files.replaceDestinationMessage", { destination, path: entry.path })
+          : operation === "move"
+            ? t("files.moveMessage", { path: entry.path, destination })
+            : t("files.copyMessage", { path: entry.path, destination }),
+        confirmLabel: destinationExists
+          ? t("files.replaceDestinationConfirm")
+          : operation === "move" ? t("files.moveConfirm") : t("files.copyConfirm"),
         destructive: destinationExists || operation === "move",
         onConfirm: () => {
           void runMutation(
-            `${operation === "move" ? "Moved" : "Copied"} ${entry.name}`,
+            operation === "move"
+              ? t("files.noticeMoved", { name: entry.name })
+              : t("files.noticeCopied", { name: entry.name }),
             () => (operation === "move" ? service.moveEntry(projectId, entry.path, destination) : service.copyEntry(projectId, entry.path, destination)).then(() => undefined),
             [currentPath, parentWorkspacePath(entry.path), parentWorkspacePath(destination)],
             operation === "move" && selectedPath && (selectedPath === entry.path || selectedPath.startsWith(`${entry.path}/`)) ? clearSelection : undefined,
@@ -933,7 +969,7 @@ export function ProjectFilesWorkspace({
       if (!controller.signal.aborted && projectIdRef.current === lookupProjectId && routeKeyRef.current === lookupRouteKey) {
         setDialog((previous) => previous?.kind === "destination" ? {
           ...previous,
-          error: `Could not check the destination before writing: ${workspaceErrorMessage(error)}`,
+          error: t("files.errorDestinationCheck", { detail: workspaceErrorMessage(error, t) }),
         } : previous);
         handleOperationError(error);
       }
@@ -945,13 +981,13 @@ export function ProjectFilesWorkspace({
   const handleDelete = (entry: WorkspaceEntry) => {
     setDialog({
       kind: "confirm",
-      title: `Delete ${entry.kind === "dir" ? "folder" : "file"}?`,
-      message: `${entry.path} will be deleted from the live Pod workspace. This action cannot be undone.`,
-      confirmLabel: "Delete",
+      title: entry.kind === "dir" ? t("files.deleteFolderTitle") : t("files.deleteFileTitle"),
+      message: t("files.deleteMessage", { path: entry.path }),
+      confirmLabel: t("files.actionDelete"),
       destructive: true,
       onConfirm: () => {
         void runMutation(
-          `Deleted ${entry.name}`,
+          t("files.noticeDeleted", { name: entry.name }),
           () => service.deleteEntry(projectId, entry.path).then(() => undefined),
           [currentPath, ...(parentWorkspacePath(entry.path) === currentPath ? [] : [parentWorkspacePath(entry.path)])],
           selectedPath && (selectedPath === entry.path || selectedPath.startsWith(`${entry.path}/`)) ? clearSelection : undefined,
@@ -968,8 +1004,8 @@ export function ProjectFilesWorkspace({
     const targets = (() => {
       try {
         return files.map((file) => ({ file, path: joinWorkspacePath(currentPath, file.name) }));
-      } catch (error) {
-        setNotice({ kind: "error", message: error instanceof Error ? error.message : "Invalid upload file name" });
+      } catch {
+        setNotice({ kind: "error", message: t("files.errorUploadName") });
         return [];
       }
     })();
@@ -979,7 +1015,7 @@ export function ProjectFilesWorkspace({
       setDialog(undefined);
       mutationStarted = true;
       void runMutation(
-        `Uploaded ${files.length} file${files.length === 1 ? "" : "s"}`,
+        plural("files.noticeUploaded", files.length),
         async () => {
           for (const target of targets) {
             await service.upload(projectId, target.path, target.file);
@@ -988,7 +1024,7 @@ export function ProjectFilesWorkspace({
             const expected = new Uint8Array(uploadedBytes);
             const actual = new Uint8Array(readbackBytes);
             if (readback.path !== target.path || expected.length !== actual.length || expected.some((byte, index) => byte !== actual[index])) {
-              throw new Error(`Upload readback for ${target.path} did not match the selected file.`);
+              throw new Error(t("files.errorUploadMismatch", { name: target.path }));
             }
           }
         },
@@ -1009,16 +1045,16 @@ export function ProjectFilesWorkspace({
       if (conflicts.length) {
         setDialog({
           kind: "confirm",
-          title: "Replace existing files?",
-          message: `${conflicts.map(({ path }) => path).join(", ")} already exist${conflicts.length === 1 ? "s" : ""}. Uploading will overwrite them in the live Pod workspace.`,
-          confirmLabel: "Replace and upload",
+          title: t("files.replaceFilesTitle"),
+          message: t("files.replaceFilesMessage", { paths: conflicts.map(({ path }) => path).join(", ") }),
+          confirmLabel: t("files.replaceFilesConfirm"),
           destructive: true,
           onConfirm: upload,
         });
       } else upload();
     }).catch((error: unknown) => {
       if (!controller.signal.aborted && projectIdRef.current === requestProjectId && routeKeyRef.current === requestRouteKey) {
-        setNotice({ kind: "error", message: `Could not check for upload conflicts: ${workspaceErrorMessage(error)}` });
+        setNotice({ kind: "error", message: t("files.errorExistingFileCheck", { detail: workspaceErrorMessage(error, t) }) });
         handleOperationError(error);
       }
     }).finally(() => {
@@ -1037,10 +1073,10 @@ export function ProjectFilesWorkspace({
       <div className={`files-availability files-availability-${kind}`} role="status">
         <div className="files-availability-mark" aria-hidden="true">{kind === "offline" ? "×" : "!"}</div>
         <div>
-          <h3>{availabilityTitle(kind)}</h3>
-          <p>{availability === "error" ? workspaceErrorMessage(snapshot.error) : availabilityDetail(kind)}</p>
+          <h3>{availabilityTitle(kind, t)}</h3>
+          <p>{availability === "error" ? workspaceErrorMessage(snapshot.error, t) : availabilityDetail(kind, t)}</p>
           <button type="button" className="files-button files-button-primary" onClick={() => void loadDirectory(currentPath, true)} disabled={operationBusy || networkOffline}>
-            {networkOffline ? "Reconnect to retry" : "Retry"}
+            {networkOffline ? t("files.reconnectToRetry") : t("common.retry")}
           </button>
         </div>
       </div>
@@ -1049,23 +1085,23 @@ export function ProjectFilesWorkspace({
 
   const renderPreview = () => {
     if (!selectedPath || !selectedEntry) {
-      return <div className="files-preview-placeholder"><span className="files-placeholder-icon" aria-hidden="true">▧</span><h3>Select a file</h3><p>Choose a text file to preview and edit it in the live Pod workspace.</p></div>;
+      return <div className="files-preview-placeholder"><span className="files-placeholder-icon" aria-hidden="true">▧</span><h3>{t("files.selectFileTitle")}</h3><p>{t("files.selectFileHint")}</p></div>;
     }
     // ``idle`` carries no path at all, so it must be tested before the path
     // comparison: otherwise the union is not narrowed and ``preview.path`` is read
     // off a variant that does not declare it.
     if (preview.kind === "idle" || preview.kind === "loading" || preview.path !== selectedPath) {
-      return <div className="files-preview-message" role="status" aria-live="polite"><span className="files-spinner" aria-hidden="true" />Loading preview…</div>;
+      return <div className="files-preview-message" role="status" aria-live="polite"><span className="files-spinner" aria-hidden="true" />{t("files.previewLoading")}</div>;
     }
     if (preview.kind === "error") {
       const kind = classifyWorkspaceError(preview.error);
       return (
         <div className="files-preview-message files-preview-error" role="alert">
-          <h3>{kind === "unsupported" ? "Preview unavailable" : "Could not load preview"}</h3>
-          <p>{workspaceErrorMessage(preview.error)}</p>
+          <h3>{kind === "unsupported" ? t("files.previewUnavailableTitle") : t("files.previewErrorTitle")}</h3>
+          <p>{workspaceErrorMessage(preview.error, t)}</p>
           <div className="files-preview-actions">
-            <button type="button" className="files-button" onClick={() => setPreviewNonce((value) => value + 1)} disabled={operationBusy}>Retry preview</button>
-            <button type="button" className="files-button" onClick={() => void handleDownload(selectedEntry)} disabled={operationBusy || unavailable || networkOffline}>Download file</button>
+            <button type="button" className="files-button" onClick={() => setPreviewNonce((value) => value + 1)} disabled={operationBusy}>{t("common.retry")}</button>
+            <button type="button" className="files-button" onClick={() => void handleDownload(selectedEntry)} disabled={operationBusy || unavailable || networkOffline}>{t("files.downloadFile")}</button>
           </div>
         </div>
       );
@@ -1075,7 +1111,7 @@ export function ProjectFilesWorkspace({
     // say so explicitly: reading ``preview.preview`` off the union left ``idle`` in
     // play and the access was unchecked.
     if (preview.kind !== "ready") {
-      return <div className="files-preview-message" role="status" aria-live="polite"><span className="files-spinner" aria-hidden="true" />Loading preview…</div>;
+      return <div className="files-preview-message" role="status" aria-live="polite"><span className="files-spinner" aria-hidden="true" />{t("files.previewLoading")}</div>;
     }
     return (
       <div className="files-editor-wrap">
@@ -1083,15 +1119,15 @@ export function ProjectFilesWorkspace({
           className="files-editor"
           value={editorValue}
           onChange={(event) => { setEditorValue(event.target.value); setDirty(true); }}
-          aria-label={`Editing ${preview.preview.name}`}
+          aria-label={t("files.editorAria", { name: preview.preview.name })}
           spellCheck={false}
           readOnly={preview.preview.truncated || unavailable || networkOffline}
         />
-        {preview.preview.truncated && <p className="files-editor-note">This preview is truncated at the server limit. Download the complete file before editing it.</p>}
+        {preview.preview.truncated && <p className="files-editor-note">{t("files.editorTruncated")}</p>}
         <div className="files-preview-actions">
-          <button type="button" className="files-button" onClick={() => void handleDownload(selectedEntry)} disabled={operationBusy || unavailable || networkOffline}>Download</button>
+          <button type="button" className="files-button" onClick={() => void handleDownload(selectedEntry)} disabled={operationBusy || unavailable || networkOffline}>{t("files.download")}</button>
           <button type="button" className="files-button files-button-primary" onClick={handleSave} disabled={operationBusy || !dirty || preview.preview.truncated || unavailable || networkOffline}>
-            {operationBusy ? "Saving…" : "Save changes"}
+            {operationBusy ? t("common.saving") : t("files.saveChanges")}
           </button>
         </div>
       </div>
@@ -1102,66 +1138,66 @@ export function ProjectFilesWorkspace({
     <section className={`files-workspace ${className}`} aria-labelledby="files-workspace-title" aria-busy={snapshot.status === "loading" || operationBusy}>
       <header className="files-header">
         <div>
-          <p className="files-eyebrow">Project workspace</p>
+          <p className="files-eyebrow">{t("files.eyebrow")}</p>
           <div className="files-title-line">
-            <h1 id="files-workspace-title">{title}</h1>
-            <span className={`files-status files-status-${availability}`} role="status">{availabilityLabel(availability)}</span>
+            <h1 id="files-workspace-title">{heading}</h1>
+            <span className={`files-status files-status-${availability}`} role="status">{availabilityLabel(availability, t)}</span>
           </div>
-          <p className="files-subtitle">Live files from the project Pod</p>
+          <p className="files-subtitle">{t("files.subtitle")}</p>
         </div>
         <div className="files-header-actions">
           <button type="button" className="files-button" onClick={() => void loadDirectory(currentPath, true)} disabled={operationBusy || networkOffline}>
-            {snapshot.status === "loading" ? "Refreshing…" : "Refresh"}
+            {snapshot.status === "loading" ? t("files.refreshing") : t("files.refresh")}
           </button>
-          <button type="button" className="files-button" onClick={openCreateFile} disabled={writeDisabled}>New file</button>
-          <button type="button" className="files-button" onClick={openCreateFolder} disabled={writeDisabled} title="Create a folder" aria-label="Create a folder">New folder</button>
-          <button type="button" className="files-button files-button-primary" onClick={() => uploadInputRef.current?.click()} disabled={writeDisabled}>Upload</button>
-          <input ref={uploadInputRef} className="files-visually-hidden" type="file" multiple onChange={handleUploadInput} aria-label="Upload files" />
+          <button type="button" className="files-button" onClick={openCreateFile} disabled={writeDisabled}>{t("files.newFile")}</button>
+          <button type="button" className="files-button" onClick={openCreateFolder} disabled={writeDisabled} title={t("files.createFolderAria")} aria-label={t("files.createFolderAria")}>{t("files.newFolder")}</button>
+          <button type="button" className="files-button files-button-primary" onClick={() => uploadInputRef.current?.click()} disabled={writeDisabled}>{t("files.upload")}</button>
+          <input ref={uploadInputRef} className="files-visually-hidden" type="file" multiple onChange={handleUploadInput} aria-label={t("files.uploadFilesAria")} />
         </div>
       </header>
 
-      {networkOffline && snapshot.status === "ready" && <div className="files-offline-banner" role="status">You are offline. Cached directory contents are shown; write actions are paused until the connection returns.</div>}
+      {networkOffline && snapshot.status === "ready" && <div className="files-offline-banner" role="status">{t("files.offlineBanner")}</div>}
       {notice && <div className={`files-notice files-notice-${notice.kind}`} role={notice.kind === "error" ? "alert" : "status"}>{notice.message}</div>}
 
       <form className="files-pathbar" onSubmit={handlePathSubmit}>
-        <label htmlFor="files-path-input">Path</label>
-        <button type="button" className="files-path-home" onClick={() => navigateTo("")} aria-label="Go to workspace root">Workspace</button>
+        <label htmlFor="files-path-input">{t("files.pathLabel")}</label>
+        <button type="button" className="files-path-home" onClick={() => navigateTo("")} aria-label={t("files.goToRoot")}>{t("files.rootName")}</button>
         <span className="files-path-separator" aria-hidden="true">/</span>
-        <input id="files-path-input" value={pathInput} onChange={(event) => setPathInput(event.target.value)} placeholder="folder/subfolder" autoComplete="off" />
-        <button type="submit" className="files-button" disabled={operationBusy}>Go</button>
+        <input id="files-path-input" value={pathInput} onChange={(event) => setPathInput(event.target.value)} placeholder={t("files.pathPlaceholder")} autoComplete="off" />
+        <button type="submit" className="files-button" disabled={operationBusy}>{t("files.go")}</button>
       </form>
 
       <div className="files-layout">
-        <aside className="files-sidebar" aria-label="Workspace folders">
-          <div className="files-panel-heading"><h2>Folders</h2><span>{projectId}</span></div>
-          <div className="files-tree" role="tree" aria-label="Project folders">
-            <TreeNode path="" label="Workspace" depth={0} directories={directories} expanded={expanded} currentPath={currentPath} onToggle={handleToggleDirectory} onNavigate={navigateTo} />
+        <aside className="files-sidebar" aria-label={t("files.sidebarAria")}>
+          <div className="files-panel-heading"><h2>{t("files.foldersHeading")}</h2><span title={projectId}>{t("files.sidebarPodLabel")}</span></div>
+          <div className="files-tree" role="tree" aria-label={t("files.treeAria")}>
+            <TreeNode path="" label={t("files.rootName")} depth={0} directories={directories} expanded={expanded} currentPath={currentPath} onToggle={handleToggleDirectory} onNavigate={navigateTo} />
           </div>
-          <p className="files-sidebar-note">Only the live project Pod is used for these files.</p>
+          <p className="files-sidebar-note">{t("files.sidebarNote")}</p>
         </aside>
 
         <section className="files-list-panel" aria-labelledby="files-list-title">
           <div className="files-panel-heading">
-            <div><h2 id="files-list-title">{currentPath || "Workspace"}</h2><span>{snapshot.status === "loading" ? "Loading…" : `${entries.length} item${entries.length === 1 ? "" : "s"}`}</span></div>
-            {currentPath && <button type="button" className="files-button files-button-quiet" onClick={() => navigateTo(parentWorkspacePath(currentPath))}>Up</button>}
+            <div><h2 id="files-list-title">{currentPath || t("files.rootName")}</h2><span>{snapshot.status === "loading" ? t("common.loading") : plural("files.itemCount", entries.length)}</span></div>
+            {currentPath && <button type="button" className="files-button files-button-quiet" onClick={() => navigateTo(parentWorkspacePath(currentPath))}>{t("files.up")}</button>}
           </div>
           {unavailable ? renderAvailability() : (snapshot.status === "idle" || snapshot.status === "loading") && entries.length === 0 ? (
-            <div className="files-list-state" role="status"><span className="files-spinner" aria-hidden="true" />Loading workspace…</div>
+            <div className="files-list-state" role="status"><span className="files-spinner" aria-hidden="true" />{t("files.listLoading")}</div>
           ) : snapshot.status === "ready" && entries.length === 0 ? (
-            <div className="files-list-state files-list-empty"><span className="files-placeholder-icon" aria-hidden="true">□</span><h3>This folder is empty</h3><p>Create a file or upload one to get started.</p></div>
+            <div className="files-list-state files-list-empty"><span className="files-placeholder-icon" aria-hidden="true">□</span><h3>{t("files.listEmptyTitle")}</h3><p>{t("files.listEmptyHint")}</p></div>
           ) : (
-            <div className="files-entry-list" role="list" aria-label={`Contents of ${currentPath || "workspace"}`}>
+            <div className="files-entry-list" role="list" aria-label={t("files.listAria", { path: currentPath || t("files.rootName") })}>
               {entries.map((entry) => (
                 <div className={`files-entry-row${selectedPath === entry.path ? " is-selected" : ""}`} role="listitem" key={entry.path}>
                   <button type="button" className="files-entry-main" onClick={() => handleEntryOpen(entry)} aria-current={selectedPath === entry.path ? "true" : undefined}>
                     <span className={`files-entry-icon files-entry-icon-${entry.kind}`} aria-hidden="true">{entry.kind === "dir" ? "▰" : "▤"}</span>
-                    <span className="files-entry-name"><strong>{entry.name}</strong><small>{entry.kind === "dir" ? "Folder" : `${sizeLabel(entry.size)} · ${modifiedLabel(entry.modified_at)}`}</small></span>
+                    <span className="files-entry-name"><strong>{entry.name}</strong><small>{entry.kind === "dir" ? t("files.kindFolder") : `${sizeLabel(entry.size, t)} · ${modifiedLabel(entry.modified_at, locale)}`}</small></span>
                   </button>
                   <div className="files-entry-actions">
-                    {entry.kind === "file" && <button type="button" className="files-action-button" onClick={() => void handleDownload(entry)} disabled={operationBusy || unavailable || networkOffline}>Download</button>}
-                    <button type="button" className="files-action-button" onClick={() => setDialog({ kind: "destination", operation: "move", entry, destination: entry.path })} disabled={writeDisabled}>Move</button>
-                    <button type="button" className="files-action-button" onClick={() => setDialog({ kind: "destination", operation: "copy", entry, destination: entry.path })} disabled={writeDisabled}>Copy</button>
-                    <button type="button" className="files-action-button files-action-danger" onClick={() => handleDelete(entry)} disabled={writeDisabled}>Delete</button>
+                    {entry.kind === "file" && <button type="button" className="files-action-button" onClick={() => void handleDownload(entry)} disabled={operationBusy || unavailable || networkOffline}>{t("files.actionDownload")}</button>}
+                    <button type="button" className="files-action-button" onClick={() => setDialog({ kind: "destination", operation: "move", entry, destination: entry.path })} disabled={writeDisabled}>{t("files.actionMove")}</button>
+                    <button type="button" className="files-action-button" onClick={() => setDialog({ kind: "destination", operation: "copy", entry, destination: entry.path })} disabled={writeDisabled}>{t("files.actionCopy")}</button>
+                    <button type="button" className="files-action-button files-action-danger" onClick={() => handleDelete(entry)} disabled={writeDisabled}>{t("files.actionDelete")}</button>
                   </div>
                 </div>
               ))}
@@ -1171,8 +1207,8 @@ export function ProjectFilesWorkspace({
 
         <section className="files-preview-panel" aria-labelledby="files-preview-title">
           <div className="files-panel-heading">
-            <div><h2 id="files-preview-title">Preview</h2><span>{selectedEntry?.path ?? "No file selected"}</span></div>
-            {selectedEntry && <span className="files-preview-kind">{selectedEntry.kind === "file" ? "Text or binary" : "Folder"}</span>}
+            <div><h2 id="files-preview-title">{t("files.previewHeading")}</h2><span>{selectedEntry?.path ?? t("files.previewNoSelection")}</span></div>
+            {selectedEntry && <span className="files-preview-kind">{selectedEntry.kind === "file" ? t("files.previewKindText") : t("files.kindFolder")}</span>}
           </div>
           {renderPreview()}
         </section>
@@ -1181,38 +1217,38 @@ export function ProjectFilesWorkspace({
       {dialog?.kind === "confirm" && (
         <ModalShell title={dialog.title} onClose={() => !operationBusy && setDialog(undefined)}>
           <div className="files-modal-body"><p>{dialog.message}</p></div>
-          <div className="files-modal-actions"><button type="button" className="files-button" onClick={() => setDialog(undefined)} disabled={operationBusy}>Cancel</button><button type="button" className={`files-button ${dialog.destructive ? "files-button-danger" : "files-button-primary"}`} onClick={() => { const action = dialog.onConfirm; setDialog(undefined); void action(); }} disabled={operationBusy}>{dialog.confirmLabel}</button></div>
+          <div className="files-modal-actions"><button type="button" className="files-button" onClick={() => setDialog(undefined)} disabled={operationBusy}>{t("common.cancel")}</button><button type="button" className={`files-button ${dialog.destructive ? "files-button-danger" : "files-button-primary"}`} onClick={() => { const action = dialog.onConfirm; setDialog(undefined); void action(); }} disabled={operationBusy}>{dialog.confirmLabel}</button></div>
         </ModalShell>
       )}
 
       {dialog?.kind === "create-file" && (
-        <ModalShell title="Create file" onClose={() => setDialog(undefined)}>
+        <ModalShell title={t("files.createFileTitle")} onClose={() => setDialog(undefined)}>
           <form className="files-modal-form" onSubmit={handleCreateFile}>
-            <label htmlFor="files-create-file-name">File name<input id="files-create-file-name" autoFocus value={dialog.name} onChange={(event) => setDialog({ ...dialog, name: event.target.value, error: undefined })} placeholder="notes.txt" /></label>
-            <label htmlFor="files-create-file-content">Initial content<textarea id="files-create-file-content" value={dialog.content} onChange={(event) => setDialog({ ...dialog, content: event.target.value })} placeholder="Optional" /></label>
+            <label htmlFor="files-create-file-name">{t("files.fileNameLabel")}<input id="files-create-file-name" autoFocus value={dialog.name} onChange={(event) => setDialog({ ...dialog, name: event.target.value, error: undefined })} placeholder={t("files.fileNamePlaceholder")} /></label>
+            <label htmlFor="files-create-file-content">{t("files.fileContentLabel")}<textarea id="files-create-file-content" value={dialog.content} onChange={(event) => setDialog({ ...dialog, content: event.target.value })} placeholder={t("files.fileContentPlaceholder")} /></label>
             {dialog.error && <p className="files-form-error" role="alert">{dialog.error}</p>}
-            <div className="files-modal-actions"><button type="button" className="files-button" onClick={() => setDialog(undefined)}>Cancel</button><button type="submit" className="files-button files-button-primary">Create file</button></div>
+            <div className="files-modal-actions"><button type="button" className="files-button" onClick={() => setDialog(undefined)}>{t("common.cancel")}</button><button type="submit" className="files-button files-button-primary">{t("files.createFileSubmit")}</button></div>
           </form>
         </ModalShell>
       )}
 
       {dialog?.kind === "create-folder" && (
-        <ModalShell title="Create folder" onClose={() => setDialog(undefined)}>
+        <ModalShell title={t("files.createFolderTitle")} onClose={() => setDialog(undefined)}>
           <form className="files-modal-form" onSubmit={handleCreateFolder}>
-            <label htmlFor="files-create-folder-name">Folder name<input id="files-create-folder-name" autoFocus value={dialog.name} onChange={(event) => setDialog({ ...dialog, name: event.target.value, error: undefined })} placeholder="docs" /></label>
+            <label htmlFor="files-create-folder-name">{t("files.folderNameLabel")}<input id="files-create-folder-name" autoFocus value={dialog.name} onChange={(event) => setDialog({ ...dialog, name: event.target.value, error: undefined })} placeholder={t("files.folderNamePlaceholder")} /></label>
             {dialog.error && <p className="files-form-error" role="alert">{dialog.error}</p>}
-            <div className="files-modal-actions"><button type="button" className="files-button" onClick={() => setDialog(undefined)}>Cancel</button><button type="submit" className="files-button files-button-primary">Create folder</button></div>
+            <div className="files-modal-actions"><button type="button" className="files-button" onClick={() => setDialog(undefined)}>{t("common.cancel")}</button><button type="submit" className="files-button files-button-primary">{t("files.createFolderSubmit")}</button></div>
           </form>
         </ModalShell>
       )}
 
       {dialog?.kind === "destination" && (
-        <ModalShell title={`${dialog.operation === "move" ? "Move" : "Copy"} item`} onClose={() => setDialog(undefined)}>
+        <ModalShell title={dialog.operation === "move" ? t("files.moveItemTitle") : t("files.copyItemTitle")} onClose={() => setDialog(undefined)}>
           <form className="files-modal-form" onSubmit={handleDestinationSubmit}>
-            <p className="files-dialog-path">Source: <code>{dialog.entry.path}</code></p>
-            <label htmlFor="files-destination-path">Destination path<input id="files-destination-path" autoFocus value={dialog.destination} onChange={(event) => setDialog({ ...dialog, destination: event.target.value, error: undefined })} /></label>
+            <p className="files-dialog-path">{t("files.destinationSourceLabel")} <code>{dialog.entry.path}</code></p>
+            <label htmlFor="files-destination-path">{t("files.destinationPathLabel")}<input id="files-destination-path" autoFocus value={dialog.destination} onChange={(event) => setDialog({ ...dialog, destination: event.target.value, error: undefined })} /></label>
             {dialog.error && <p className="files-form-error" role="alert">{dialog.error}</p>}
-            <div className="files-modal-actions"><button type="button" className="files-button" onClick={() => setDialog(undefined)}>Cancel</button><button type="submit" className="files-button files-button-primary">Continue</button></div>
+            <div className="files-modal-actions"><button type="button" className="files-button" onClick={() => setDialog(undefined)}>{t("common.cancel")}</button><button type="submit" className="files-button files-button-primary">{t("files.continue")}</button></div>
           </form>
         </ModalShell>
       )}

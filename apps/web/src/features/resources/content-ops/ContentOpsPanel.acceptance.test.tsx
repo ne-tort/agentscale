@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act } from "react";
+import { act, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -7,6 +7,7 @@ import { ContentOpsPanel } from "./ContentOpsPanel";
 import { ContentOpsError, type ContentOpsService } from "./contracts";
 import type { ContentAsset, ContentAssetVersion } from "./types";
 import { CONTENT_UPLOAD_MAX_BYTES, contentFileFeedback } from "./validation";
+import { SettingsProvider } from "../../../preferences/SettingsProvider";
 import { POLL_BUDGET_MS } from "../../../test-support/poll-budget";
 import { restoreBlobUrlDescriptors } from "../../../test-support/blob-url-stubs";
 
@@ -27,6 +28,11 @@ let host: HTMLDivElement | undefined;
 let createObjectURLDescriptor: PropertyDescriptor | undefined;
 let revokeObjectURLDescriptor: PropertyDescriptor | undefined;
 let anchorClickDescriptor: PropertyDescriptor | undefined;
+
+/** The panel now reads copy through the i18n hook, so it needs the settings provider. */
+function withSettings(ui: ReactElement): ReactElement {
+  return <SettingsProvider>{ui}</SettingsProvider>;
+}
 
 /**
  * Poll until the UI reflects the action.
@@ -56,7 +62,7 @@ async function mountPanel(testService: ContentOpsService, assets = [asset]): Pro
   // when the enclosing act exits, so an assertion nested inside the same scope waits
   // for a render that cannot happen yet and times out.
   await act(async () => {
-    root?.render(<ContentOpsPanel companyId="company-1" service={testService} initialAssets={assets} />);
+    root?.render(withSettings(<ContentOpsPanel companyId="company-1" service={testService} initialAssets={assets} />));
   });
   await waitFor(() => document.querySelectorAll(".content-ops__asset-meta, .content-ops__empty").length > 0);
 }
@@ -79,24 +85,24 @@ afterEach(async () => {
 
 describe("Content operations acceptance surface", () => {
   it("renders upload, asset/version selection, ACL, and the host-provided workspace link", () => {
-    const markup = renderToStaticMarkup(<ContentOpsPanel companyId="company-1" service={service} initialAssets={[asset]} workspaceBindingHref="/projects/project-1" />);
+    const markup = renderToStaticMarkup(withSettings(<ContentOpsPanel companyId="company-1" service={service} initialAssets={[asset]} workspaceBindingHref="/projects/project-1" />));
 
-    expect(markup).toContain("New asset");
-    expect(markup).toContain("Existing asset");
-    expect(markup).toContain("Asset and version");
-    expect(markup).toContain("Load access list");
-    expect(markup).toContain("Open workspace binding");
-    expect(markup).toContain("Created by");
-    expect(markup).toContain("Asset created");
-    expect(markup).toContain("Version history is blocked");
-    expect(markup).toContain("no workspace-binding endpoint");
-    expect(markup).toContain("Load the current list before editing; replacement is not an incremental grant operation.");
+    expect(markup).toContain("Новый материал");
+    expect(markup).toContain("Новая версия");
+    expect(markup).toContain("Материал и версия");
+    expect(markup).toContain("Загрузить список доступа");
+    expect(markup).toContain("Открыть в проекте");
+    expect(markup).toContain("Загрузил");
+    expect(markup).toContain("Создан");
+    expect(markup).toContain("История версий недоступна");
+    expect(markup).toContain("Связать материал с проектом можно на странице проекта.");
+    expect(markup).toContain("Сначала загрузите текущий список: сохранение заменяет его целиком.");
     expect(markup.toLowerCase()).not.toContain("upload_url");
     expect(markup.toLowerCase()).not.toContain("storage_key");
-    expect(markup).toContain("Company company-1");
-    expect(markup).toContain("Existing version IDs, history pages and metadata cannot be loaded.");
-    expect(markup).toContain("No exact version is available in this session. Existing-version inspection is unavailable.");
-    expect(markup).toContain("no workspace-binding endpoint");
+    // The company id is kept for whoever debugs the request, but only as a tooltip.
+    expect(markup).toContain('title="company-1"');
+    expect(markup).toContain("Здесь показаны лишь версии, загруженные за эту сессию.");
+    expect(markup).toContain("В этой сессии нет загруженных версий — посмотреть существующие нельзя.");
   });
 
   it("reports MIME and size, enforces the API 100 MiB limit, and allows unlisted MIME types", () => {
@@ -123,14 +129,14 @@ describe("Content operations acceptance surface", () => {
       },
     };
     await mountPanel(testService, []);
-    expect(document.body.textContent).toContain("Loading company assets...");
+    expect(document.body.textContent).toContain("Загружаем материалы…");
 
     await act(async () => { resolveInitial?.([]); });
-    await waitFor(() => document.body.textContent?.includes("No assets returned for this company.") ?? false);
-    const refresh = [...document.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "Refresh assets");
+    await waitFor(() => document.body.textContent?.includes("У этой компании пока нет материалов.") ?? false);
+    const refresh = [...document.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "Обновить");
     await act(async () => { refresh?.click(); });
-    await waitFor(() => calls === 2 && (document.body.textContent?.includes("Loading company assets...") ?? false));
-    expect(document.body.textContent).toContain("Loading company assets...");
+    await waitFor(() => calls === 2 && (document.body.textContent?.includes("Загружаем материалы…") ?? false));
+    expect(document.body.textContent).toContain("Загружаем материалы…");
     await act(async () => {
       rejectRefresh?.(new ContentOpsError("OFFLINE", 0, "The Content Service could not be reached. Try again."));
     });
@@ -139,7 +145,7 @@ describe("Content operations acceptance surface", () => {
 
     await act(async () => { refresh?.click(); });
     await waitFor(() => calls === 3 && document.querySelector('[role="alert"]') === null);
-    expect(document.body.textContent).toContain("No assets returned for this company.");
+    expect(document.body.textContent).toContain("У этой компании пока нет материалов.");
   });
 
   it("orders session-known versions, downloads the selected exact version, and excludes other-company assets", async () => {
@@ -166,7 +172,7 @@ describe("Content operations acceptance surface", () => {
     await mountPanel(testService, [asset, otherCompanyAsset]);
 
     expect(document.body.textContent).not.toContain("must not appear");
-    const existingMode = [...document.querySelectorAll<HTMLButtonElement>(".content-ops__segmented button")].find((button) => button.textContent === "Existing asset");
+    const existingMode = [...document.querySelectorAll<HTMLButtonElement>(".content-ops__segmented button")].find((button) => button.textContent === "Новая версия");
     await act(async () => existingMode?.click());
 
     for (const version of versions) {
@@ -179,7 +185,7 @@ describe("Content operations acceptance surface", () => {
       await act(async () => {
         document.querySelector<HTMLFormElement>(".content-ops__form")?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
       });
-      await waitFor(() => document.body.textContent?.includes(`Uploaded v${version.version}.`) ?? false);
+      await waitFor(() => document.body.textContent?.includes(`Загружена версия v${version.version}.`) ?? false);
     }
 
     const versionSelect = [...document.querySelectorAll<HTMLSelectElement>("select")].find((select) => select.querySelector("option[value='version-1']"));
@@ -195,20 +201,20 @@ describe("Content operations acceptance surface", () => {
       versionSelect!.dispatchEvent(new Event("change", { bubbles: true }));
     });
     await act(async () => {
-      const download = [...document.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "Download selected version");
+      const download = [...document.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "Скачать версию");
       download?.click();
     });
-    await waitFor(() => [...document.querySelectorAll<HTMLButtonElement>("button")].some((button) => button.textContent === "Retry download selected version"));
+    await waitFor(() => [...document.querySelectorAll<HTMLButtonElement>("button")].some((button) => button.textContent === "Повторить скачивание"));
     expect(downloadVersion).toHaveBeenCalledWith(asset.id, "version-2", "notes.txt");
-    expect(document.querySelector('[role="alert"]')?.textContent).toContain("The content operation failed. Try again.");
+    expect(document.querySelector('[role="alert"]')?.textContent).toContain("Не удалось выполнить действие с материалом. Попробуйте ещё раз.");
     expect(document.body.textContent).not.toContain("offline detail must not be rendered");
     await act(async () => {
-      [...document.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "Retry download selected version")?.click();
+      [...document.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "Повторить скачивание")?.click();
     });
-    await waitFor(() => document.body.textContent?.includes("Downloaded v2.") ?? false);
+    await waitFor(() => document.body.textContent?.includes("Скачана версия v2.") ?? false);
     expect(downloadVersion).toHaveBeenCalledTimes(2);
     await act(async () => { await new Promise((resolve) => window.setTimeout(resolve, 1010)); });
     expect(document.body.textContent).toContain('{"source":"upload"}');
-    expect(document.body.textContent).toContain("Version created");
+    expect(document.body.textContent).toContain("Версия создана");
   });
 });

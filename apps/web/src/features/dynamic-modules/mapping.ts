@@ -14,50 +14,27 @@ import type {
   DynamicModuleVersionStatus,
   DynamicModuleInstanceStatus,
 } from "../../api/dynamic";
+import type { Translate } from "../../i18n/catalogue";
+import type { Plural } from "../../i18n/useT";
 import type { StatusVariant } from "../../shared/ui";
 
 export const UNKNOWN_VALUE = "—";
 
 /**
- * Shown when the API could not report a field at all.
- *
- * These are deliberately distinct from a status label: "not reported" is an absence of
- * evidence, and presenting it as a value (or as a default kind) would tell the operator
- * something the server never said.
+ * Status labels are words on screen, never the API's own enum value: an operator
+ * should read "Опубликовано", not "published". The translator is passed in rather
+ * than imported so the label follows the language the page is rendered in.
  */
-export const KIND_UNAVAILABLE = "Kind not reported by the server";
-export const ROUTES_UNAVAILABLE = "Route table not reported by the server";
-export const MANIFEST_UNAVAILABLE = "Manifest body not reported by the server; the digest is the immutable evidence.";
-
-const STATUS_LABELS: Readonly<Record<DynamicModuleStatus, string>> = {
-  draft: "Draft",
-  validated: "Validated",
-  approved: "Approved",
-  published: "Published",
-  disabled: "Disabled",
-  archived: "Archived",
-  revoked: "Revoked",
-};
-
-const VERSION_STATUS_LABELS: Readonly<Record<DynamicModuleVersionStatus, string>> = {
-  draft: "Draft",
-  validated: "Validated",
-  approved: "Approved",
-  published: "Published",
-  rejected: "Rejected",
-  rolled_back: "Rolled back",
-};
-
-const INSTANCE_STATUS_LABELS: Readonly<Record<DynamicModuleInstanceStatus, string>> = {
-  installing: "Installing",
-  active: "Active",
-  draining: "Draining",
-  disabled: "Disabled",
-  failed: "Failed",
-};
-
-export function definitionStatusLabel(status: DynamicModuleStatus): string {
-  return STATUS_LABELS[status];
+export function definitionStatusLabel(status: DynamicModuleStatus, t: Translate): string {
+  switch (status) {
+    case "draft": return t("dynamicModules.statusDraft");
+    case "validated": return t("dynamicModules.statusValidated");
+    case "approved": return t("dynamicModules.statusApproved");
+    case "published": return t("dynamicModules.statusPublished");
+    case "disabled": return t("dynamicModules.statusDisabled");
+    case "archived": return t("dynamicModules.statusArchived");
+    case "revoked": return t("dynamicModules.statusRevoked");
+  }
 }
 
 export function definitionStatusTone(status: DynamicModuleStatus): StatusVariant {
@@ -72,8 +49,15 @@ export function definitionStatusTone(status: DynamicModuleStatus): StatusVariant
   }
 }
 
-export function versionStatusLabel(status: DynamicModuleVersionStatus): string {
-  return VERSION_STATUS_LABELS[status];
+export function versionStatusLabel(status: DynamicModuleVersionStatus, t: Translate): string {
+  switch (status) {
+    case "draft": return t("dynamicModules.statusDraft");
+    case "validated": return t("dynamicModules.statusValidated");
+    case "approved": return t("dynamicModules.statusApproved");
+    case "published": return t("dynamicModules.statusPublished");
+    case "rejected": return t("dynamicModules.versionStatusRejected");
+    case "rolled_back": return t("dynamicModules.versionStatusRolledBack");
+  }
 }
 
 export function versionStatusTone(status: DynamicModuleVersionStatus): StatusVariant {
@@ -87,8 +71,14 @@ export function versionStatusTone(status: DynamicModuleVersionStatus): StatusVar
   }
 }
 
-export function instanceStatusLabel(status: DynamicModuleInstanceStatus): string {
-  return INSTANCE_STATUS_LABELS[status];
+export function instanceStatusLabel(status: DynamicModuleInstanceStatus, t: Translate): string {
+  switch (status) {
+    case "installing": return t("dynamicModules.instanceStatusInstalling");
+    case "active": return t("dynamicModules.instanceStatusActive");
+    case "draining": return t("dynamicModules.instanceStatusDraining");
+    case "disabled": return t("dynamicModules.statusDisabled");
+    case "failed": return t("dynamicModules.instanceStatusFailed");
+  }
 }
 
 export function instanceStatusTone(status: DynamicModuleInstanceStatus): StatusVariant {
@@ -101,11 +91,12 @@ export function instanceStatusTone(status: DynamicModuleInstanceStatus): StatusV
   }
 }
 
-export function formatDateTime(value: string | undefined): string {
+/** Dates follow the interface language, not the OS locale the browser happened to pick. */
+export function formatDateTime(value: string | undefined, locale?: string): string {
   if (!value) return UNKNOWN_VALUE;
   const parsed = Date.parse(value);
   if (!Number.isFinite(parsed)) return UNKNOWN_VALUE;
-  return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(parsed));
+  return new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(new Date(parsed));
 }
 
 /** `routes` есть только у полного definition; у summary его нет, а не-массив — мусор. */
@@ -113,16 +104,23 @@ function routeCountOf(routes: unknown): number | undefined {
   return Array.isArray(routes) ? routes.length : undefined;
 }
 
-export function definitionSubtitle(definition: DynamicModuleDefinitionSummary): string {
+export function definitionSubtitle(
+  definition: DynamicModuleDefinitionSummary,
+  t: Translate,
+  plural: Plural,
+): string {
   // Список определений (summary) не содержит routes — они приходят только в полном
   // definition. Поэтому длина маршрутов читается, только если поле реально пришло.
   const routeCount = "routes" in definition ? routeCountOf(definition.routes) : undefined;
+  // Counts the server did not report are left out instead of being shown as zero.
   const parts = [
-    definition.kind === "declarative-app" ? "Declarative app" : "Isolated plugin",
-    `${definition.versionCount} ${definition.versionCount === 1 ? "version" : "versions"}`,
-    `${definition.requestedCapabilityCount} requested ${definition.requestedCapabilityCount === 1 ? "capability" : "capabilities"}`,
+    definition.kind === "declarative-app" ? t("dynamicModules.kindDeclarativeApp") : t("dynamicModules.kindIsolatedPlugin"),
   ];
-  if (routeCount !== undefined) parts.push(`${routeCount} ${routeCount === 1 ? "route" : "routes"}`);
+  if (definition.versionCount !== undefined) parts.push(plural("dynamicModules.versionCount", definition.versionCount));
+  if (definition.requestedCapabilityCount !== undefined) {
+    parts.push(plural("dynamicModules.capabilityCount", definition.requestedCapabilityCount));
+  }
+  if (routeCount !== undefined) parts.push(plural("dynamicModules.routeCount", routeCount));
   return parts.join(" · ");
 }
 
@@ -281,12 +279,12 @@ export function grantStateTone(state: GrantState): StatusVariant {
   }
 }
 
-export function grantStateLabel(state: GrantState): string {
+export function grantStateLabel(state: GrantState, t: Translate): string {
   switch (state) {
-    case "active": return "Granted";
-    case "expired": return "Expired";
-    case "denied": return "Denied";
-    case "revoked": return "Revoked";
+    case "active": return t("dynamicModules.grantStateGranted");
+    case "expired": return t("dynamicModules.grantStateExpired");
+    case "denied": return t("dynamicModules.grantStateDenied");
+    case "revoked": return t("dynamicModules.grantStateRevoked");
   }
 }
 
@@ -304,21 +302,23 @@ export function sortGrants(grants: readonly DynamicModuleGrant[]): readonly Dyna
     || left.id.localeCompare(right.id));
 }
 
-export function instanceScopeLabel(instance: DynamicModuleInstance): string {
-  if (instance.projectId) return `Project ${instance.projectId}`;
+export function instanceScopeLabel(instance: DynamicModuleInstance, t: Translate): string {
+  if (instance.projectId) return t("dynamicModules.scopeProject", { id: instance.projectId });
   // ``normalizeScope`` guarantees exactly one of the two for every accepted row;
   // the fallback keeps a malformed DTO from rendering "Cabinet undefined".
-  return instance.cabinetId ? `Cabinet ${instance.cabinetId}` : "Unknown scope";
+  return instance.cabinetId
+    ? t("dynamicModules.scopeCabinet", { id: instance.cabinetId })
+    : t("dynamicModules.scopeUnknown");
 }
 
 /**
  * The definition row has no `kind` column, so the API cannot send one. The screen
  * says so instead of labelling every app with a default it did not read.
  */
-export function definitionKindLabel(kind: DynamicModuleDefinition["kind"]): string {
-  if (kind === "declarative-app") return "Declarative app";
-  if (kind === "isolated-code-plugin") return "Isolated code plugin";
-  return KIND_UNAVAILABLE;
+export function definitionKindLabel(kind: DynamicModuleDefinition["kind"], t: Translate): string {
+  if (kind === "declarative-app") return t("dynamicModules.kindDeclarativeApp");
+  if (kind === "isolated-code-plugin") return t("dynamicModules.kindIsolatedCodePlugin");
+  return t("dynamicModules.kindNotReported");
 }
 
 export function sortInstances(instances: readonly DynamicModuleInstance[]): readonly DynamicModuleInstance[] {

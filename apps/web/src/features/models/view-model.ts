@@ -1,3 +1,5 @@
+import type { Translate } from "../../i18n/catalogue";
+import type { Locale } from "../../preferences/settings";
 import type {
   AiKeyProbe,
   AvailableAiKey,
@@ -48,44 +50,67 @@ export function probePresentation(probe?: AiKeyProbe, now = Date.now()): ProbePr
   return "unchecked";
 }
 
-export function keyAvailability(key: AvailableAiKey, now = Date.now()): KeyAvailability {
+/** The support code a person can quote, appended only when the backend sent one. */
+export function probeCodeNote(probe: AiKeyProbe | undefined, t: Translate): string {
+  return probe?.error_code ? ` ${t("models.errorTrace", { code: probe.error_code })}` : "";
+}
+
+export function keyAvailability(key: AvailableAiKey, t: Translate, now = Date.now()): KeyAvailability {
   if (key.status && key.status !== "active") {
-    return { tone: "danger", label: "Недоступен", detail: `Статус ключа: ${key.status}.` };
+    return { tone: "danger", label: t("models.availabilityUnavailable"), detail: t("models.availabilityUnavailableDetail") };
   }
   if (!key.has_secret) {
-    return { tone: "danger", label: "Нет секрета", detail: "Backend не подтвердил настроенный секрет." };
+    return { tone: "danger", label: t("models.availabilityNoSecret"), detail: t("models.availabilityNoSecretDetail") };
   }
   const probe = probePresentation(key.last_probe, now);
   if (probe === "error") {
-    return { tone: "warning", label: "Ошибка проверки", detail: `Проверка ключа завершилась ошибкой${key.last_probe?.error_code ? ` (${key.last_probe.error_code})` : ""}.` };
+    return {
+      tone: "warning",
+      label: t("models.availabilityCheckError"),
+      detail: `${t("models.availabilityCheckErrorDetail")}${probeCodeNote(key.last_probe, t)}`,
+    };
   }
   if (probe === "unavailable") {
-    return { tone: "warning", label: "Проверка недоступна", detail: "Provider probe не подтвердил capability сейчас." };
+    return { tone: "warning", label: t("models.availabilityCheckUnavailable"), detail: t("models.availabilityCheckUnavailableDetail") };
   }
   if (probe === "stale") {
-    return { tone: "warning", label: "Проверка устарела", detail: `Последний probe старше 24 часов или помечен stale${key.last_probe?.error_code ? ` (${key.last_probe.error_code})` : ""}.` };
+    return {
+      tone: "warning",
+      label: t("models.availabilityStale"),
+      detail: `${t("models.availabilityStaleDetail")}${probeCodeNote(key.last_probe, t)}`,
+    };
   }
-  if (probe === "verified") return { tone: "positive", label: "Проверен", detail: "Последняя проверка provider завершилась успешно." };
-  return { tone: "neutral", label: "Проверка не выполнялась", detail: "Live capability ещё не подтверждена probe." };
+  if (probe === "verified") return { tone: "positive", label: t("models.availabilityVerified"), detail: t("models.availabilityVerifiedDetail") };
+  return { tone: "neutral", label: t("models.availabilityUnchecked"), detail: t("models.availabilityUncheckedDetail") };
 }
 
-export function modelCapabilityLabel(model: LiveModel): { tone: "positive" | "warning" | "neutral"; label: string } {
-  if (model.catalog_matched === true) return { tone: "positive", label: "Совместимость подтверждена" };
-  if (model.catalog_matched === false) return { tone: "warning", label: "Совместимость не подтверждена" };
-  return { tone: "neutral", label: "Capability live" };
+export function modelCapabilityLabel(model: LiveModel, t: Translate): { tone: "positive" | "warning" | "neutral"; label: string } {
+  if (model.catalog_matched === true) return { tone: "positive", label: t("models.capabilityConfirmed") };
+  if (model.catalog_matched === false) return { tone: "warning", label: t("models.capabilityUnconfirmed") };
+  return { tone: "neutral", label: t("models.capabilityLive") };
 }
 
-export function modelsAvailability(response?: LiveModelsResponse): { tone: "positive" | "warning" | "neutral"; label: string; detail: string } {
-  if (!response) return { tone: "neutral", label: "Не загружено", detail: "Выберите сохранённый key, чтобы получить live models." };
-  if (response.stale || response.error_code) return { tone: "warning", label: "Live список устарел или с ошибкой", detail: response.error_code ? `Backend сообщил ${response.error_code}; перечитайте live capability перед выбором.` : "Backend пометил список моделей stale; перечитайте его перед выбором." };
-  if (response.source !== "live") return { tone: "warning", label: "Live models недоступны", detail: "Список не подтверждён live runtime provider." };
-  if (!response.models.length) return { tone: "warning", label: "Модели не найдены", detail: "Provider не вернул доступных моделей для выбранного key." };
-  return { tone: "positive", label: "Live capability", detail: `${response.models.length} моделей подтверждены endpoint /models/live.` };
+export function modelsAvailability(response: LiveModelsResponse | undefined, t: Translate): { tone: "positive" | "warning" | "neutral"; label: string; detail: string } {
+  if (!response) {
+    return { tone: "neutral", label: t("models.modelsNotLoaded"), detail: t("models.modelsNotLoadedDetail") };
+  }
+  if (response.stale || response.error_code) {
+    return {
+      tone: "warning",
+      label: response.stale ? t("models.modelsStale") : t("models.modelsSourceStale"),
+      detail: response.error_code
+        ? `${t("models.modelsStaleDetail")} ${t("models.errorTrace", { code: response.error_code })}`
+        : t("models.modelsStaleDetail"),
+    };
+  }
+  if (response.source !== "live") return { tone: "warning", label: t("models.modelsSourceStale"), detail: t("models.modelsSourceStaleDetail") };
+  if (!response.models.length) return { tone: "warning", label: t("models.modelsNone"), detail: t("models.modelsNoneDetail") };
+  return { tone: "positive", label: t("models.modelsLive"), detail: t("models.modelsLiveDetail", { count: response.models.length }) };
 }
 
-export function formatContext(value?: number): string {
+export function formatContext(value: number | undefined, t: Translate, locale: Locale): string {
   if (value === undefined) return "";
-  return `${new Intl.NumberFormat("ru-RU").format(value)} токенов контекста`;
+  return t("models.contextTokens", { count: new Intl.NumberFormat(locale).format(value) });
 }
 
 export function formatPrice(value?: number): string {

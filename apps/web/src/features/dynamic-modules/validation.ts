@@ -7,6 +7,9 @@
  * unknown top-level fields, unknown capability names, embedded URLs and non-semver
  * versions are rejected before the request leaves the browser. The server remains the
  * authority; a payload that passed here can still be rejected there.
+ *
+ * Messages are translated where they are produced: a field error is read by the
+ * operator, so it has to be in their language and name the field in their words.
  */
 
 import {
@@ -19,6 +22,7 @@ import {
   type DynamicModuleManifest,
   type DynamicModuleScope,
 } from "../../api/dynamic";
+import type { Translate } from "../../i18n/catalogue";
 
 export interface ValidationIssue {
   readonly path: string;
@@ -81,91 +85,91 @@ export function validationMessage(issues: readonly ValidationIssue[]): string {
   return issueText(issues);
 }
 
-function checkRoute(route: unknown, index: number, issues: ValidationIssue[]): void {
+function checkRoute(route: unknown, index: number, issues: ValidationIssue[], t: Translate): void {
   const path = `routes[${index}]`;
   if (!isRecord(route)) {
-    issues.push(fail(path, "route entry must be an object"));
+    issues.push(fail(path, t("dynamicModules.validationRouteObject")));
     return;
   }
   for (const key of Object.keys(route)) {
-    if (key !== "path" && key !== "screen") issues.push(fail(`${path}.${key}`, "unknown route field"));
+    if (key !== "path" && key !== "screen") issues.push(fail(`${path}.${key}`, t("dynamicModules.validationRouteUnknownField")));
   }
   if (typeof route.path !== "string" || !route.path.startsWith("/") || route.path.startsWith("//")) {
-    issues.push(fail(`${path}.path`, "route path must be absolute and start with a single '/'"));
+    issues.push(fail(`${path}.path`, t("dynamicModules.validationRoutePathAbsolute")));
   } else if (/[\\?#\u0000-\u001f\u007f]/.test(route.path) || route.path.split("/").some((segment) => segment === "." || segment === "..")) {
-    issues.push(fail(`${path}.path`, "route path must not contain a query, fragment, backslash or traversal segment"));
+    issues.push(fail(`${path}.path`, t("dynamicModules.validationRoutePathContent")));
   }
   if (typeof route.screen !== "string" || route.screen.trim().length === 0) {
-    issues.push(fail(`${path}.screen`, "route must reference a screen id"));
+    issues.push(fail(`${path}.screen`, t("dynamicModules.validationRouteScreen")));
   }
 }
 
-function checkCapability(capability: unknown, index: number, issues: ValidationIssue[]): void {
+function checkCapability(capability: unknown, index: number, issues: ValidationIssue[], t: Translate): void {
   const path = `requested_capabilities[${index}]`;
   if (!isRecord(capability)) {
-    issues.push(fail(path, "capability entry must be an object"));
+    issues.push(fail(path, t("dynamicModules.validationCapabilityObject")));
     return;
   }
   for (const key of Object.keys(capability)) {
-    if (key !== "id" && key !== "version") issues.push(fail(`${path}.${key}`, "unknown capability field"));
+    if (key !== "id" && key !== "version") issues.push(fail(`${path}.${key}`, t("dynamicModules.validationCapabilityUnknownField")));
   }
   if (typeof capability.id !== "string" || !DYNAMIC_MODULE_CAPABILITY_PATTERN.test(capability.id)) {
-    issues.push(fail(`${path}.id`, "capability id must be a dotted lowercase identifier"));
+    issues.push(fail(`${path}.id`, t("dynamicModules.validationCapabilityId")));
   }
   const version = typeof capability.version === "number" ? String(capability.version) : capability.version;
   if (typeof version !== "string" || !DYNAMIC_MODULE_CAPABILITY_VERSION_PATTERN.test(version)) {
-    issues.push(fail(`${path}.version`, "capability version must be a positive integer"));
+    issues.push(fail(`${path}.version`, t("dynamicModules.validationCapabilityVersion")));
   }
 }
 
-function checkLimits(limits: unknown, issues: ValidationIssue[]): void {
+function checkLimits(limits: unknown, issues: ValidationIssue[], t: Translate): void {
   if (limits === undefined) return;
   if (!isRecord(limits)) {
-    issues.push(fail("limits", "limits must be an object"));
+    issues.push(fail("limits", t("dynamicModules.validationLimitsObject")));
     return;
   }
   for (const key of Object.keys(limits)) {
-    if (!(LIMIT_KEYS as readonly string[]).includes(key)) issues.push(fail(`limits.${key}`, "unknown limit field"));
+    if (!(LIMIT_KEYS as readonly string[]).includes(key)) issues.push(fail(`limits.${key}`, t("dynamicModules.validationLimitUnknownField")));
   }
   for (const key of LIMIT_KEYS) {
     const value = limits[key];
     if (value === undefined) continue;
-    if (!Number.isInteger(value) || (value as number) <= 0) issues.push(fail(`limits.${key}`, "limit must be a positive integer"));
+    if (!Number.isInteger(value) || (value as number) <= 0) issues.push(fail(`limits.${key}`, t("dynamicModules.validationLimitPositive")));
   }
 }
 
-function checkDataPolicy(policy: unknown, issues: ValidationIssue[]): void {
+function checkDataPolicy(policy: unknown, issues: ValidationIssue[], t: Translate): void {
   if (!isRecord(policy)) {
-    issues.push(fail("data_policy", "data policy must be an object"));
+    issues.push(fail("data_policy", t("dynamicModules.validationPolicyObject")));
     return;
   }
   for (const key of Object.keys(policy)) {
-    if (key !== "project_scope" && key !== "session_scope") issues.push(fail(`data_policy.${key}`, "unknown data policy field"));
+    if (key !== "project_scope" && key !== "session_scope") issues.push(fail(`data_policy.${key}`, t("dynamicModules.validationPolicyUnknownField")));
   }
   for (const key of ["project_scope", "session_scope"] as const) {
     const value = policy[key];
     if (value === undefined) continue;
     if (typeof value !== "string" || !(DATA_POLICY_SCOPE_VALUES as readonly string[]).includes(value)) {
-      issues.push(fail(`data_policy.${key}`, `data policy scope must be one of ${DATA_POLICY_SCOPE_VALUES.join(", ")}`));
+      issues.push(fail(`data_policy.${key}`, t("dynamicModules.validationPolicyScope", { values: DATA_POLICY_SCOPE_VALUES.join(", ") })));
     }
   }
 }
 
-function checkScreens(screens: unknown, issues: ValidationIssue[]): void {
+function checkScreens(screens: unknown, issues: ValidationIssue[], t: Translate): void {
   if (screens === undefined) return;
   if (!Array.isArray(screens)) {
-    issues.push(fail("screens", "screens must be an array"));
+    issues.push(fail("screens", t("dynamicModules.validationScreensArray")));
     return;
   }
   const seen = new Set<string>();
   screens.forEach((screen, index) => {
     if (!isRecord(screen) || typeof screen.id !== "string" || screen.id.trim().length === 0) {
-      issues.push(fail(`screens[${index}].id`, "screen must declare an id"));
+      issues.push(fail(`screens[${index}].id`, t("dynamicModules.validationScreenId")));
       return;
     }
-    if (seen.has(screen.id)) issues.push(fail(`screens[${index}].id`, "duplicate screen id"));
+    if (seen.has(screen.id)) issues.push(fail(`screens[${index}].id`, t("dynamicModules.validationScreenDuplicate")));
     seen.add(screen.id);
-    if (!isRecord(screen.root)) issues.push(fail(`screens[${index}].root`, "screen must declare a declarative root node"));
+    if (!isRecord(screen.root)) issues.push(fail(`screens[${index}].root`, t("dynamicModules.validationScreenRoot")));
   });
 }
 
@@ -177,73 +181,74 @@ function checkScreens(screens: unknown, issues: ValidationIssue[]): void {
 export function validateManifestValue(
   value: unknown,
   expected: { readonly appId: string; readonly kind?: DynamicModuleKind },
+  t: Translate,
 ): ManifestValidation {
   const issues: ValidationIssue[] = [];
   if (!isRecord(value)) {
-    return { ok: false, issues: [fail("manifest", "manifest must be a JSON object")] };
+    return { ok: false, issues: [fail("manifest", t("dynamicModules.validationManifestObject"))] };
   }
 
   for (const key of Object.keys(value)) {
     if (!(MANIFEST_ALLOWED_KEYS as readonly string[]).includes(key)) {
-      issues.push(fail(key, "unknown manifest field"));
+      issues.push(fail(key, t("dynamicModules.validationUnknownField")));
     }
   }
   for (const key of MANIFEST_REQUIRED_KEYS) {
-    if (value[key] === undefined) issues.push(fail(key, "required manifest field is missing"));
+    if (value[key] === undefined) issues.push(fail(key, t("dynamicModules.validationRequiredField")));
   }
 
   if (value.kind !== undefined && value.kind !== expected.kind) {
-    issues.push(fail("kind", `manifest kind must match the definition kind (${expected.kind})`));
+    issues.push(fail("kind", t("dynamicModules.validationKindMismatch", { kind: expected.kind ?? "—" })));
   }
   if (value.schema_version !== undefined && value.schema_version !== SCHEMA_VERSION) {
-    issues.push(fail("schema_version", `unsupported schema version; expected ${SCHEMA_VERSION}`));
+    issues.push(fail("schema_version", t("dynamicModules.validationSchemaVersion", { version: SCHEMA_VERSION })));
   }
   if (value.app_id !== undefined) {
     if (typeof value.app_id !== "string" || !DYNAMIC_MODULE_APP_ID_PATTERN.test(value.app_id)) {
-      issues.push(fail("app_id", "app_id must be a lowercase slug of 3-64 characters"));
+      issues.push(fail("app_id", t("dynamicModules.validationAppIdFormat")));
     } else if (value.app_id !== expected.appId) {
-      issues.push(fail("app_id", "manifest app_id must match this definition"));
+      issues.push(fail("app_id", t("dynamicModules.validationAppIdMismatch")));
     }
   }
   if (value.version !== undefined) {
     if (typeof value.version !== "string" || !DYNAMIC_MODULE_SEMVER_PATTERN.test(value.version)) {
-      issues.push(fail("version", "version must be a semantic version such as 1.2.0"));
+      issues.push(fail("version", t("dynamicModules.validationSemver")));
     }
   }
   if (value.artifact_digest !== undefined) {
     const digest = value.artifact_digest;
     if (typeof digest !== "string" || !/^sha256:[0-9a-f]{64}$/.test(digest)) {
-      issues.push(fail("artifact_digest", "artifact digest must be sha256:<64 lowercase hex characters>"));
+      issues.push(fail("artifact_digest", t("dynamicModules.validationDigest")));
     }
   }
   if (value.metadata !== undefined) {
     if (!isRecord(value.metadata) || Object.values(value.metadata).some((entry) => typeof entry !== "string")) {
-      issues.push(fail("metadata", "metadata must be a flat object of strings"));
+      issues.push(fail("metadata", t("dynamicModules.validationMetadata")));
     }
   }
 
   if (Array.isArray(value.routes)) {
-    if (value.routes.length === 0) issues.push(fail("routes", "manifest must declare at least one route"));
-    value.routes.forEach((route, index) => checkRoute(route, index, issues));
+    if (value.routes.length === 0) issues.push(fail("routes", t("dynamicModules.validationRoutesRequired")));
+    value.routes.forEach((route, index) => checkRoute(route, index, issues, t));
     const paths = value.routes.filter((route) => isRecord(route) && typeof route.path === "string").map((route) => (route as { path: string }).path);
-    if (new Set(paths).size !== paths.length) issues.push(fail("routes", "duplicate route path"));
+    if (new Set(paths).size !== paths.length) issues.push(fail("routes", t("dynamicModules.validationRouteDuplicate")));
   } else if (value.routes !== undefined) {
-    issues.push(fail("routes", "routes must be an array"));
+    issues.push(fail("routes", t("dynamicModules.validationRoutesArray")));
   }
 
   if (Array.isArray(value.requested_capabilities)) {
-    value.requested_capabilities.forEach((capability, index) => checkCapability(capability, index, issues));
+    value.requested_capabilities.forEach((capability, index) => checkCapability(capability, index, issues, t));
     const ids = value.requested_capabilities
       .filter((capability) => isRecord(capability) && typeof capability.id === "string")
       .map((capability) => `${(capability as { id: string }).id}@${String((capability as { version: unknown }).version)}`);
-    if (new Set(ids).size !== ids.length) issues.push(fail("requested_capabilities", "duplicate capability request"));
+    if (new Set(ids).size !== ids.length) issues.push(fail("requested_capabilities", t("dynamicModules.validationCapabilityDuplicate")));
   } else if (value.requested_capabilities !== undefined) {
-    issues.push(fail("requested_capabilities", "requested_capabilities must be an array"));
+    issues.push(fail("requested_capabilities", t("dynamicModules.validationCapabilitiesArray")));
   }
 
-  if (value.data_policy !== undefined) checkDataPolicy(value.data_policy, issues);
-  checkLimits(value.limits, issues);
-  checkScreens(value.screens, issues);
+  if (value.data_policy !== undefined) checkDataPolicy(value.data_policy, issues, t);
+  checkLimits(value.limits, issues, t);
+  checkScreens(value.screens, issues, t);
 
   if (issues.length > 0) return { ok: false, issues };
   return { ok: true, manifest: value as DynamicModuleManifest, issues: [] };
@@ -256,18 +261,19 @@ export function validateManifestValue(
 export function parseManifestText(
   text: string,
   expected: { readonly appId: string; readonly kind?: DynamicModuleKind },
+  t: Translate,
 ): ManifestValidation {
   if (text.trim().length === 0) {
-    return { ok: false, issues: [fail("manifest", "manifest JSON is required")] };
+    return { ok: false, issues: [fail("manifest", t("dynamicModules.validationManifestRequired"))] };
   }
   let parsed: unknown;
   try {
     parsed = JSON.parse(text) as unknown;
   } catch (cause) {
-    const detail = cause instanceof Error ? cause.message : "invalid JSON";
-    return { ok: false, issues: [fail("manifest", `manifest is not valid JSON (${detail})`)] };
+    const detail = cause instanceof Error ? cause.message : "JSON";
+    return { ok: false, issues: [fail("manifest", t("dynamicModules.validationInvalidJson", { detail }))] };
   }
-  return validateManifestValue(parsed, expected);
+  return validateManifestValue(parsed, expected, t);
 }
 
 export function manifestDraftText(manifest: DynamicModuleManifest | undefined): string {
@@ -348,66 +354,74 @@ export const REASON_CODE_PATTERN = /^[a-z][a-z0-9_]{2,63}$/;
 
 const MAX_NOTES_LENGTH = 2000;
 
-function checkReasonCode(value: string, errors: Record<string, string>, field = "reason"): void {
+function checkReasonCode(value: string, errors: Record<string, string>, t: Translate, field = "reason"): void {
   const trimmed = value.trim();
   if (!trimmed) return;
   if (!REASON_CODE_PATTERN.test(trimmed)) {
-    errors[field] = "Use a lowercase reason code (a-z, 0-9, underscore), 3-64 characters, for example onboarding_review.";
+    errors[field] = t("dynamicModules.validationReasonCode");
   }
 }
 
-export function validatePublishForm(values: PublishFormValues, expected: { appId: string; kind?: DynamicModuleKind }): FieldErrors {
+export function validatePublishForm(
+  values: PublishFormValues,
+  expected: { appId: string; kind?: DynamicModuleKind },
+  t: Translate,
+): FieldErrors {
   const errors: Record<string, string> = {};
-  const manifest = parseManifestText(values.manifestText, expected);
+  const manifest = parseManifestText(values.manifestText, expected, t);
   if (!manifest.ok) errors.manifest = validationMessage(manifest.issues);
-  if (values.notes.trim().length > MAX_NOTES_LENGTH) errors.notes = `Release notes must be at most ${MAX_NOTES_LENGTH} characters.`;
+  if (values.notes.trim().length > MAX_NOTES_LENGTH) errors.notes = t("dynamicModules.validationNotesTooLong", { max: MAX_NOTES_LENGTH });
   return errors;
 }
 
-export function validateInstallForm(values: InstallFormValues, knownVersionIds: readonly string[]): FieldErrors {
+export function validateInstallForm(
+  values: InstallFormValues,
+  knownVersionIds: readonly string[],
+  t: Translate,
+): FieldErrors {
   const errors: Record<string, string> = {};
-  if (!values.versionId) errors.versionId = "Select the immutable version to install.";
-  else if (!knownVersionIds.includes(values.versionId)) errors.versionId = "That version is not part of this definition.";
-  if (!values.cabinetId) errors.cabinetId = "Select the cabinet that owns this installation.";
-  if (!values.scope) errors.scope = "Choose a cabinet or project scope.";
-  if (values.scope === "project" && !values.projectId) errors.projectId = "Project scope requires a project.";
-  if (values.scope === "cabinet" && values.projectId) errors.projectId = "Cabinet scope must not carry a project.";
+  if (!values.versionId) errors.versionId = t("dynamicModules.validationSelectVersion");
+  else if (!knownVersionIds.includes(values.versionId)) errors.versionId = t("dynamicModules.validationUnknownVersion");
+  if (!values.cabinetId) errors.cabinetId = t("dynamicModules.validationSelectCabinet");
+  if (!values.scope) errors.scope = t("dynamicModules.validationSelectScope");
+  if (values.scope === "project" && !values.projectId) errors.projectId = t("dynamicModules.validationProjectRequired");
+  if (values.scope === "cabinet" && values.projectId) errors.projectId = t("dynamicModules.validationProjectNotForCabinet");
   return errors;
 }
 
-export function validateGrantForm(values: GrantFormValues): FieldErrors {
+export function validateGrantForm(values: GrantFormValues, t: Translate): FieldErrors {
   const errors: Record<string, string> = {};
-  if (!values.capabilityId.trim()) errors.capabilityId = "Capability id is required.";
+  if (!values.capabilityId.trim()) errors.capabilityId = t("dynamicModules.validationCapabilityRequired");
   else if (!DYNAMIC_MODULE_CAPABILITY_PATTERN.test(values.capabilityId.trim())) {
-    errors.capabilityId = "Use a dotted lowercase capability id such as equipment.offers.read.";
+    errors.capabilityId = t("dynamicModules.validationCapabilityIdFormat");
   }
-  if (!values.capabilityVersion.trim()) errors.capabilityVersion = "Capability version is required.";
+  if (!values.capabilityVersion.trim()) errors.capabilityVersion = t("dynamicModules.validationCapabilityVersionRequired");
   else if (!DYNAMIC_MODULE_CAPABILITY_VERSION_PATTERN.test(values.capabilityVersion.trim())) {
-    errors.capabilityVersion = "Capability version must be a positive integer.";
+    errors.capabilityVersion = t("dynamicModules.validationCapabilityVersionPositive");
   }
-  if (!values.cabinetId) errors.cabinetId = "Select the cabinet scope for this grant.";
-  if (!values.scope) errors.scope = "Choose a cabinet or project scope.";
-  else if (!(DYNAMIC_MODULE_SCOPES as readonly string[]).includes(values.scope)) errors.scope = "Scope must be cabinet or project.";
-  if (values.scope === "project" && !values.projectId) errors.projectId = "Project scope requires a project.";
-  if (values.scope === "cabinet" && values.projectId) errors.projectId = "Cabinet scope must not carry a project.";
+  if (!values.cabinetId) errors.cabinetId = t("dynamicModules.validationCabinetRequired");
+  if (!values.scope) errors.scope = t("dynamicModules.validationSelectScope");
+  else if (!(DYNAMIC_MODULE_SCOPES as readonly string[]).includes(values.scope)) errors.scope = t("dynamicModules.validationScopeInvalid");
+  if (values.scope === "project" && !values.projectId) errors.projectId = t("dynamicModules.validationProjectRequired");
+  if (values.scope === "cabinet" && values.projectId) errors.projectId = t("dynamicModules.validationProjectNotForCabinet");
   if (values.expiresAt.trim()) {
     const parsed = Date.parse(values.expiresAt.trim());
-    if (!Number.isFinite(parsed)) errors.expiresAt = "Expiry must be an ISO-8601 date and time.";
-    else if (parsed <= Date.now()) errors.expiresAt = "Expiry must be in the future.";
+    if (!Number.isFinite(parsed)) errors.expiresAt = t("dynamicModules.validationExpiryFormat");
+    else if (parsed <= Date.now()) errors.expiresAt = t("dynamicModules.validationExpiryFuture");
   }
-  checkReasonCode(values.reason, errors);
+  checkReasonCode(values.reason, errors, t);
   return errors;
 }
 
-export function validateRevokeForm(values: RevokeFormValues): FieldErrors {
+export function validateRevokeForm(values: RevokeFormValues, t: Translate): FieldErrors {
   const errors: Record<string, string> = {};
-  checkReasonCode(values.reason, errors);
+  checkReasonCode(values.reason, errors, t);
   return errors;
 }
 
-export function validateArchiveForm(values: ArchiveFormValues): FieldErrors {
+export function validateArchiveForm(values: ArchiveFormValues, t: Translate): FieldErrors {
   const errors: Record<string, string> = {};
-  checkReasonCode(values.reason, errors);
+  checkReasonCode(values.reason, errors, t);
   return errors;
 }
 

@@ -2,6 +2,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { SettingsProvider } from "../../preferences/SettingsProvider";
 import { CompanyContour } from "./CompanyContour";
 import { createContourService, type ContourRow } from "./service";
 import { POLL_BUDGET_MS } from "../../test-support/poll-budget";
@@ -113,7 +114,7 @@ async function mount(companyId = "co-1", api = makeApi()) {
   document.body.append(host);
   root = createRoot(host);
   const service = createContourService({ fetcher: api.fetcher });
-  await act(async () => root?.render(<CompanyContour companyId={companyId} service={service} />));
+  await act(async () => root?.render(<SettingsProvider><CompanyContour companyId={companyId} service={service} /></SettingsProvider>));
   return { container: host, api, service };
 }
 
@@ -167,7 +168,7 @@ describe("company employee lifecycle acceptance", () => {
     const api = makeApi();
     const release = api.holdCompanyOneList();
     const { container } = await mount("co-1", api);
-    expect(container.textContent).toContain("Loading…");
+    expect(container.textContent).toContain("Загрузка…");
     await act(async () => { release(); });
     await waitFor(() => container.textContent?.includes("Alex") ?? false);
   });
@@ -177,7 +178,7 @@ describe("company employee lifecycle acceptance", () => {
     api.failNextEmployeeList();
     const { container } = await mount("co-1", api);
     await waitFor(() => container.querySelector("[role=alert]")?.textContent?.includes("employee list unavailable") ?? false);
-    await clickButton(container, "Retry");
+    await clickButton(container, "Повторить");
     await waitFor(() => container.textContent?.includes("Alex") ?? false);
   });
 
@@ -185,54 +186,54 @@ describe("company employee lifecycle acceptance", () => {
     const emptyApi = makeApi();
     emptyApi.emptyCompanyOne();
     const emptyMount = await mount("co-1", emptyApi);
-    await waitFor(() => emptyMount.container.textContent?.includes("No employees are linked to this company.") ?? false);
+    await waitFor(() => emptyMount.container.textContent?.includes("У этой компании нет сотрудников.") ?? false);
     expect(emptyMount.container.querySelector("table")).toBeNull();
   });
 
   it("creates employees with role/contact email, preserves the active list, and clears the password control", async () => {
     const { container, api } = await mount();
     await waitFor(() => container.textContent?.includes("Alex") ?? false);
-    await clickButton(container, "Add employee");
-    await setInput(inputFor(container, "Login"), "sam");
-    await setInput(inputFor(container, "Password"), "do-not-show-this");
-    await setInput(inputFor(container, "Display name"), "Sam Example");
-    await setSelect(container.querySelector<HTMLSelectElement>("select[aria-label='Role']")!, "company.admin");
-    await setInput(inputFor(container, "Contact email"), "sam@example.test");
-    await clickButton(container, "Create employee");
-    await waitFor(() => container.textContent?.includes("Employee created and verified.") ?? false);
+    await clickButton(container, "Добавить сотрудника");
+    await setInput(inputFor(container, "Логин"), "sam");
+    await setInput(inputFor(container, "Пароль"), "do-not-show-this");
+    await setInput(inputFor(container, "Имя"), "Sam Example");
+    await setSelect(container.querySelector<HTMLSelectElement>("select[aria-label='Роль']")!, "company.admin");
+    await setInput(inputFor(container, "Контактный email"), "sam@example.test");
+    await clickButton(container, "Создать сотрудника");
+    await waitFor(() => container.textContent?.includes("Сотрудник создан и проверен.") ?? false);
     expect(container.textContent).toContain("Alex");
     expect(container.textContent).toContain("Sam Example");
     expect(container.textContent).not.toContain("do-not-show-this");
     const createRequest = api.requests.find((request) => request.method === "POST" && request.path === "/api/v1/companies/co-1/employees");
     expect(createRequest?.body).toEqual({ login: "sam", password: "do-not-show-this", display_name: "Sam Example", role: "company.admin", contact_email: "sam@example.test" });
-    await clickButton(container, "Add employee");
-    expect(inputFor(container, "Password").value).toBe("");
+    await clickButton(container, "Добавить сотрудника");
+    expect(inputFor(container, "Пароль").value).toBe("");
   });
 
   it("confirms disable/delete/restore, keeps a disabled employee in the active table, and retries failures", async () => {
     const api = makeApi();
     const { container } = await mount("co-1", api);
     await waitFor(() => container.textContent?.includes("Alex") ?? false);
-    await clickButton(container, "Disable");
-    expect(container.textContent).toContain("Confirm disable");
-    await clickButton(container, "Confirm disable");
-    await waitFor(() => container.textContent?.includes("Employee disabled and verified.") ?? false);
+    await clickButton(container, "Отключить");
+    expect(container.textContent).toContain("Подтвердить отключение");
+    await clickButton(container, "Подтвердить отключение");
+    await waitFor(() => container.textContent?.includes("Сотрудник отключён и проверен.") ?? false);
     expect(container.textContent).toContain("Alex");
-    expect(container.textContent).toContain("disabled");
-    expect([...container.querySelectorAll("button")].some((button) => button.textContent === "Enable")).toBe(true);
-    await clickButton(container, "Enable");
-    await waitFor(() => container.textContent?.includes("Employee enabled and verified.") ?? false);
-    expect(container.textContent).toContain("active");
+    expect(container.textContent).toContain("Отключён");
+    expect([...container.querySelectorAll("button")].some((button) => button.textContent === "Включить")).toBe(true);
+    await clickButton(container, "Включить");
+    await waitFor(() => container.textContent?.includes("Сотрудник включён и проверен.") ?? false);
+    expect(container.textContent).toContain("Активен");
 
     api.failNextDelete();
-    await clickButton(container, "Delete");
-    expect(container.textContent).toContain("Confirm delete");
-    await clickButton(container, "Confirm delete");
+    await clickButton(container, "Удалить");
+    expect(container.textContent).toContain("Подтвердить удаление");
+    await clickButton(container, "Подтвердить удаление");
     await waitFor(() => container.querySelector("[role=alert]")?.textContent?.includes("delete temporarily unavailable") ?? false);
     expect(container.textContent).toContain("Alex");
-    expect([...container.querySelectorAll("button")].some((button) => button.textContent === "Retry")).toBe(true);
-    await clickButton(container, "Retry");
-    await waitFor(() => container.textContent?.includes("Employee deleted and verified.") ?? false);
+    expect([...container.querySelectorAll("button")].some((button) => button.textContent === "Повторить")).toBe(true);
+    await clickButton(container, "Повторить");
+    await waitFor(() => container.textContent?.includes("Сотрудник удалён и проверен.") ?? false);
     expect(container.textContent).not.toContain("Alex");
 
     const listFilter = container.querySelector<HTMLSelectElement>("select");
@@ -240,14 +241,14 @@ describe("company employee lifecycle acceptance", () => {
     await setSelect(listFilter!, "deleted");
     await waitFor(() => container.textContent?.includes("Alex") ?? false);
     expect(container.textContent).toContain("2026-11-03T10:00:00Z");
-    await clickButton(container, "Restore");
-    expect(container.textContent).toContain("Confirm restore");
-    await clickButton(container, "Confirm restore");
-    await waitFor(() => container.textContent?.includes("Employee restored and verified.") ?? false);
+    await clickButton(container, "Восстановить");
+    expect(container.textContent).toContain("Подтвердить восстановление");
+    await clickButton(container, "Подтвердить восстановление");
+    await waitFor(() => container.textContent?.includes("Сотрудник восстановлен и проверен.") ?? false);
     expect(container.textContent).not.toContain("Alex");
     await setSelect(listFilter!, "active");
     await waitFor(() => container.textContent?.includes("Alex") ?? false);
-    expect(container.textContent).toContain("disabled");
+    expect(container.textContent).toContain("Отключён");
   });
 
   it("preserves contact/password editing, clears and redacts passwords, and retains retry on failure", async () => {
@@ -255,38 +256,38 @@ describe("company employee lifecycle acceptance", () => {
     api.failNextPassword();
     const { container } = await mount("co-1", api);
     await waitFor(() => container.textContent?.includes("Alex") ?? false);
-    const editButton = [...container.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "Edit contact / password");
+    const editButton = [...container.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "Изменить контакты и пароль");
     expect(editButton).toBeTruthy();
     await act(async () => editButton!.click());
-    await setInput(inputFor(container, "Contact email"), "new@example.test");
-    await setInput(inputFor(container, "New password"), "another-secret");
-    await clickButton(container, "Save employee");
+    await setInput(inputFor(container, "Контактный email"), "new@example.test");
+    await setInput(inputFor(container, "Новый пароль"), "another-secret");
+    await clickButton(container, "Сохранить сотрудника");
     // The fixture's 422 echoes the submitted password inside `detail` — the exact
     // shape a careless backend produces. Production must therefore surface a
     // failure *and* drop the message: expecting the echoed detail here asserted
     // the opposite of the redaction this test also verifies.
-    await waitFor(() => container.querySelector("[role=alert]")?.textContent?.includes("Employee operation failed.") ?? false);
+    await waitFor(() => container.querySelector("[role=alert]")?.textContent?.includes("Не удалось выполнить действие с сотрудником.") ?? false);
     expect(container.textContent).not.toContain("another-secret");
-    expect(inputFor(container, "New password").value).toBe("");
-    await setInput(inputFor(container, "New password"), "another-secret");
-    await clickButton(container, "Save employee");
-    await waitFor(() => container.textContent?.includes("Employee details saved and verified.") ?? false);
+    expect(inputFor(container, "Новый пароль").value).toBe("");
+    await setInput(inputFor(container, "Новый пароль"), "another-secret");
+    await clickButton(container, "Сохранить сотрудника");
+    await waitFor(() => container.textContent?.includes("Данные сотрудника сохранены и проверены.") ?? false);
     expect(container.textContent).not.toContain("another-secret");
     expect(api.requests.some((request) => request.method === "PATCH" && request.path.endsWith("/contact-email"))).toBe(true);
     expect(api.requests.some((request) => request.method === "PUT" && request.path.endsWith("/password"))).toBe(true);
 
     const employeeListGets = api.requests.filter((request) => request.method === "GET" && request.path === "/api/v1/companies/co-1/employees").length;
     expect(employeeListGets).toBeGreaterThan(0);
-    const updatedEditButton = [...container.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "Edit contact / password");
+    const updatedEditButton = [...container.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "Изменить контакты и пароль");
     await act(async () => updatedEditButton?.click());
-    expect(inputFor(container, "New password").value).toBe("");
+    expect(inputFor(container, "Новый пароль").value).toBe("");
   });
 
   it("ignores stale employee-list responses after company scope changes", async () => {
     const api = makeApi();
     const release = api.holdCompanyOneList();
     const { container, service } = await mount("co-1", api);
-    await act(async () => root?.render(<CompanyContour companyId="co-2" service={service} />));
+    await act(async () => root?.render(<SettingsProvider><CompanyContour companyId="co-2" service={service} /></SettingsProvider>));
     await waitFor(() => container.textContent?.includes("Bea") ?? false);
     expect(container.textContent).not.toContain("Alex");
     await act(async () => { release(); await new Promise((resolve) => window.setTimeout(resolve, 0)); });
@@ -299,11 +300,11 @@ describe("company employee lifecycle acceptance", () => {
     const { container, service } = await mount("co-1", api);
     await waitFor(() => container.textContent?.includes("Alex") ?? false);
     const release = api.holdCompanyOneList();
-    await clickButton(container, "Disable");
-    await clickButton(container, "Confirm disable");
+    await clickButton(container, "Отключить");
+    await clickButton(container, "Подтвердить отключение");
     await waitFor(() => api.requests.filter((request) => request.path === "/api/v1/companies/co-1/employees").length >= 2);
 
-    await act(async () => root?.render(<CompanyContour companyId="co-2" service={service} />));
+    await act(async () => root?.render(<SettingsProvider><CompanyContour companyId="co-2" service={service} /></SettingsProvider>));
     await waitFor(() => container.textContent?.includes("Bea") ?? false);
     await act(async () => { release(); await new Promise((resolve) => window.setTimeout(resolve, 0)); });
     expect(api.requests.some((request) => request.path === "/api/v1/employees/employee-1/disable")).toBe(false);

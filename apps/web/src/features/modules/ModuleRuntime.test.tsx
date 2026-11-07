@@ -1,14 +1,20 @@
 // @vitest-environment jsdom
-import { act } from "react";
+import { act, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { SettingsProvider } from "../../preferences/SettingsProvider";
 import { ModuleRuntime } from "./ModuleRuntime";
 import type { ModuleManifest, ModuleRuntimeLoadResult, ModuleRuntimeProps, ModuleRuntimeService } from "./contracts";
 import { equipmentModuleFixture, filesModuleFixture, type ModuleSeedFixture } from "./fixtures";
 import { createModuleSlotRegistry } from "./slots";
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+
+/** Copy comes from the settings provider (Russian by default), so every render is wrapped. */
+function withSettings(element: ReactElement): ReactElement {
+  return <SettingsProvider>{element}</SettingsProvider>;
+}
 
 /**
  * Fixture documents keep their bodies as `unknown` JSON on purpose: they mirror the
@@ -81,7 +87,7 @@ function initialRuntimeFor(fixture = filesModuleFixture, props: Partial<ModuleRu
 function renderStaticRuntime(fixture = filesModuleFixture, props: Partial<ModuleRuntimeProps> = {}) {
   const service = props.service ?? serviceFor(fixture);
   const initialRuntime = "initialRuntime" in props ? props.initialRuntime : initialRuntimeFor(fixture, props);
-  return renderToStaticMarkup(<ModuleRuntime projectId={fixture.project.id} moduleId={fixture.module.id} sessionId={fixture.sessionId} service={service} initialRuntime={initialRuntime} {...props} />);
+  return renderToStaticMarkup(withSettings(<ModuleRuntime projectId={fixture.project.id} moduleId={fixture.module.id} sessionId={fixture.sessionId} service={service} initialRuntime={initialRuntime} {...props} />));
 }
 
 const mountedRoots: Root[] = [];
@@ -94,7 +100,7 @@ async function mountRuntime(fixture = filesModuleFixture, props: Partial<ModuleR
   const root = createRoot(container);
   mountedRoots.push(root);
   await act(async () => {
-    root.render(<ModuleRuntime projectId={fixture.project.id} moduleId={fixture.module.id} sessionId={"sessionId" in props ? props.sessionId : fixture.sessionId} service={service} initialRuntime={initialRuntime} {...props} />);
+    root.render(withSettings(<ModuleRuntime projectId={fixture.project.id} moduleId={fixture.module.id} sessionId={"sessionId" in props ? props.sessionId : fixture.sessionId} service={service} initialRuntime={initialRuntime} {...props} />));
   });
   return { container, service };
 }
@@ -110,7 +116,7 @@ describe("ModuleRuntime", () => {
   it("loads module and collection rows in the browser instead of remaining on the SSR loading state", async () => {
     const service = serviceFor();
     const serverMarkup = renderStaticRuntime(filesModuleFixture, { service });
-    expect(serverMarkup).toContain("Загружаем страницу данных");
+    expect(serverMarkup).toContain("Загружаем данные");
     expect(serverMarkup).not.toContain("guide.pdf");
     expect(service.listRows).not.toHaveBeenCalled();
 
@@ -119,7 +125,7 @@ describe("ModuleRuntime", () => {
     expect(service.listRows).toHaveBeenCalled();
     expect(container.textContent).toContain("guide.pdf");
     expect(container.textContent).toContain("Путь");
-    expect(container.textContent).not.toContain("Загружаем страницу данных");
+    expect(container.textContent).not.toContain("Загружаем данные");
   });
 
   it("keeps loading until asynchronous module initialization fails, then shows the manifest error", async () => {
@@ -135,16 +141,17 @@ describe("ModuleRuntime", () => {
 
   it("renders a typed collection with current local editability and file refs", async () => {
     const { container } = await mountRuntime();
-    expect(container.textContent).toContain("Local bind");
+    expect(container.textContent).toContain("Данные проекта");
     expect(container.textContent).toContain("guide.pdf");
     expect(container.textContent).toContain("Путь");
     expect(container.textContent).toContain("Удалить");
     expect(container.textContent).toContain("Поиск по данным");
+    expect(container.textContent).toContain("Дополнительно");
   });
 
   it("shows the read-only global-binding notice on the route hub without offering CRUD", async () => {
     const { container } = await mountRuntime(equipmentModuleFixture, { initialViewSlug: "equipment_hub" });
-    expect(container.textContent).toContain("Global bind");
+    expect(container.textContent).toContain("Общие данные доступны только для чтения");
     expect(container.textContent).toContain("Общие данные доступны только для чтения");
     expect(container.textContent).not.toContain("Удалить");
     expect(container.textContent).not.toContain("Создать");
@@ -185,7 +192,7 @@ describe("ModuleRuntime", () => {
     await act(async () => { form!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); });
     expect(service.createRow).toHaveBeenCalledWith(expect.objectContaining({ projectId: "project-beta", moduleId: "mod_files", sessionId: "session-beta" }), "files", expect.objectContaining({ name: "created.pdf" }));
     expect(service.listRows).toHaveBeenCalledWith(expect.objectContaining({ projectId: "project-beta", moduleId: "mod_files", sessionId: "session-beta" }), "files", expect.objectContaining({ page: 1, pageSize: 200, chats: "all" }));
-    expect(container.textContent).toContain("Запись создана и подтверждена повторным чтением backend.");
+    expect(container.textContent).toContain("Запись создана и подтверждена сервером.");
   });
 
   it("opens an exact collection row in its declared editable form and retains the row body", async () => {
@@ -246,8 +253,8 @@ describe("ModuleRuntime", () => {
     await act(async () => { actionForm.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); });
     expect(service.invokeAction).toHaveBeenCalledWith(expect.objectContaining({ moduleId: "mod_files", projectId: "project-beta", sessionId: "session-beta" }), "files_export", { rowId: "file_row", params: { target: "workbook", format: "xlsx", include_archived: false, count: 3 } });
     expect(service.listRows).toHaveBeenCalledWith(expect.objectContaining({ projectId: "project-beta", moduleId: "mod_files", sessionId: "session-beta" }), "files", expect.objectContaining({ page: 1, pageSize: 200, chats: "all" }));
-    expect(container.textContent).toContain("Backend GET confirmed row file_row.");
-    expect(container.textContent).toContain("Результат backend");
+    expect(container.textContent).toContain("Изменения подтверждены сервером.");
+    expect(container.textContent).toContain("Дополнительно");
     expect(container.textContent).toContain('"exported":true');
   });
 
@@ -280,5 +287,21 @@ describe("ModuleRuntime", () => {
     expect(registry.resolve("mod_equipment", "catalogs_list", "catalog_picker")).toBe(renderer);
     dispose();
     expect(registry.resolve("mod_equipment", "catalogs_list", "catalog_picker")).toBeUndefined();
+  });
+
+  it("speaks English for the runtime's own words without translating the module's manifest copy", async () => {
+    window.localStorage.setItem("agentscale.locale", "en");
+    try {
+      const { container } = await mountRuntime(filesModuleFixture, { initialViewSlug: "files_primary" });
+      const text = container.textContent ?? "";
+
+      expect(text).toContain("Search the data");
+      expect(text).toContain("Advanced");
+      expect(text).toContain("Project data");
+      // The fixture's own labels stay as the module author wrote them.
+      expect(text).toContain("Новый файл");
+    } finally {
+      window.localStorage.removeItem("agentscale.locale");
+    }
   });
 });

@@ -13,13 +13,25 @@ export function formatContentBytes(size: number): string {
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export function contentFileFeedback(file: Pick<File, "size" | "type">): ContentFileFeedback {
+/**
+ * Size and type check for a chosen file.
+ *
+ * `translate` is optional because this is also called outside React (tests, the
+ * upload guard). With it, the message comes from the resources unit; without it,
+ * the English default is returned so the pure function stays usable on its own.
+ */
+export function contentFileFeedback(
+  file: Pick<File, "size" | "type">,
+  translate?: (key: string) => string,
+): ContentFileFeedback {
   const mime = file.type.trim() || "application/octet-stream";
   const accepted = file.size <= CONTENT_UPLOAD_MAX_BYTES;
   return {
     mime,
     sizeLabel: formatContentBytes(file.size),
     accepted,
-    message: accepted ? "File type is not restricted by the Content API." : "The Content API accepts uploads up to 100 MiB.",
+    message: accepted
+      ? translate?.("resources.contentTypeAllowed") ?? "File type is not restricted by the Content API."
+      : translate?.("resources.contentFileTooLarge") ?? "The Content API accepts uploads up to 100 MiB.",
   };
 }

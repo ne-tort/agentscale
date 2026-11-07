@@ -6,8 +6,8 @@ export {
   type ProjectRuntimeServiceOptions,
 } from "./service";
 export {
-  ACTION_LABELS,
-  PHASE_LABELS,
+  PHASE_KEYS,
+  phaseLabel,
   phaseOf,
   readableError,
 } from "./ProjectRuntime";

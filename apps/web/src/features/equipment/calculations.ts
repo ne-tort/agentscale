@@ -13,16 +13,17 @@ import {
   type ProcurementSupplierSummary,
 } from "./types";
 
-export function formatEquipmentMoney(amount: number | null | undefined, currency = "RUB"): string {
+/** Сумма в валюте платформы; `locale` задаёт вид чисел, а не текст подписи. */
+export function formatEquipmentMoney(amount: number | null | undefined, currency = "RUB", locale = "ru"): string {
   if (amount === null || amount === undefined || !Number.isFinite(amount)) return "Price unavailable";
   try {
-    return new Intl.NumberFormat("en", {
+    return new Intl.NumberFormat(locale, {
       style: "currency",
       currency,
       maximumFractionDigits: 2,
     }).format(amount);
   } catch {
-    return `${amount.toLocaleString("en")} ${currency}`;
+    return `${amount.toLocaleString(locale)} ${currency}`;
   }
 }
 

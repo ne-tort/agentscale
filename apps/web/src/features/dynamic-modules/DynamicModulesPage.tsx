@@ -7,6 +7,7 @@ import {
   type DynamicModuleDefinitionSummary,
   type DynamicModuleStatus,
 } from "../../api/dynamic";
+import { useI18n } from "../../i18n/useT";
 import { Breadcrumbs, Button, StatusBadge, TableToolbar } from "../../shared/ui";
 import { SelectField } from "../../shared/ui/forms/index";
 import { useDynamicModuleAccess } from "./access";
@@ -49,10 +50,6 @@ export function definitionHref(definitionId: string): string {
   return `/dynamic-modules/${encodeURIComponent(definitionId)}`;
 }
 
-function statusOptions(): ReadonlyArray<{ readonly value: DynamicModuleStatus; readonly label: string }> {
-  return DYNAMIC_MODULE_STATUSES.map((status) => ({ value: status, label: definitionStatusLabel(status) }));
-}
-
 export function DynamicModulesScreen({
   service,
   access,
@@ -60,6 +57,7 @@ export function DynamicModulesScreen({
   initialSearch = "",
   initialStatus,
 }: DynamicModulesScreenProps) {
+  const { t, locale, plural } = useI18n();
   const titleId = useId();
   const [searchInput, setSearchInput] = useState(initialSearch);
   const [search, setSearch] = useState(initialSearch);
@@ -98,10 +96,14 @@ export function DynamicModulesScreen({
   const items: readonly DynamicModuleDefinitionSummary[] = state.data?.items ?? [];
   const hasFilter = search.length > 0 || status !== "";
   const loading = state.status === "loading";
+  const statusOptions = DYNAMIC_MODULE_STATUSES.map((value) => ({ value, label: definitionStatusLabel(value, t) }));
 
   return <main className="dynamic-modules" aria-labelledby={titleId}>
     <div className="dynamic-modules__inner">
-      <Breadcrumbs items={[{ label: "Workspace", href: "/projects" }, { label: "Dynamic modules" }]} />
+      <Breadcrumbs
+        items={[{ label: t("dynamicModules.breadcrumbWorkspace"), href: "/projects" }, { label: t("dynamicModules.title") }]}
+        label={t("dynamicModules.breadcrumb")}
+      />
       <DynamicModulesHeader
         busy={loading}
         onRefresh={reload}
@@ -109,48 +111,49 @@ export function DynamicModulesScreen({
       />
 
       <TableToolbar
-        label="Dynamic module definitions"
-        placeholder="Search by name or app id"
+        label={t("dynamicModules.toolbarLabel")}
+        searchLabel={t("dynamicModules.searchLabel")}
+        placeholder={t("dynamicModules.searchPlaceholder")}
         query={searchInput}
         onQueryChange={setSearchInput}
         resultCount={state.status === "ready" ? items.length : undefined}
-        resultLabel={(count) => `${count} ${count === 1 ? "definition" : "definitions"}`}
+        resultLabel={(count) => plural("dynamicModules.resultCount", count)}
       >
         <SelectField
           className="dynamic-modules__status-filter"
           id="dynamic-modules-status-filter"
-          label="Status"
+          label={t("dynamicModules.statusFilterLabel")}
           onValueChange={(value) => setStatus((value ?? "") as DynamicModuleStatus | "")}
-          options={statusOptions()}
-          placeholder="All statuses"
+          options={statusOptions}
+          placeholder={t("dynamicModules.statusFilterAll")}
           value={status}
         />
       </TableToolbar>
 
-      {state.status === "error" && <DynamicModuleErrorNotice error={state.error} onRetry={reload} retryLabel="Reload definitions" />}
+      {state.status === "error" && <DynamicModuleErrorNotice error={state.error} onRetry={reload} retryLabel={t("dynamicModules.reloadDefinitions")} />}
 
       {loading && <DynamicModulesLoading />}
 
       {!loading && state.status === "ready" && items.length === 0 && <DynamicModulesEmpty
         description={hasFilter
-          ? "No definition matches the current search and status filter. Clear the filters to see the whole registry page."
-          : "Publish a manifest version to register the first definition. Requested capabilities become a grant only after an explicit decision."}
-        title={hasFilter ? "No matching definitions" : "No dynamic module definitions yet"}
+          ? t("dynamicModules.emptyFilteredDescription")
+          : t("dynamicModules.emptyDescription")}
+        title={hasFilter ? t("dynamicModules.emptyFilteredTitle") : t("dynamicModules.emptyTitle")}
       />}
 
-      {!loading && items.length > 0 && <section className="dynamic-modules__table-section" aria-label="Dynamic module definitions">
+      {!loading && items.length > 0 && <section className="dynamic-modules__table-section" aria-label={t("dynamicModules.tableAria")}>
         <table className="ui-table dynamic-modules__table">
-          <caption>Dynamic module definitions visible in this tenant scope</caption>
+          <caption>{t("dynamicModules.tableCaption")}</caption>
           <thead>
             <tr>
-              <th scope="col">Definition</th>
-              <th scope="col">Kind</th>
-              <th scope="col">Status</th>
-              <th scope="col">Latest version</th>
-              <th scope="col">Versions</th>
-              <th scope="col">Capabilities</th>
-              <th scope="col">Updated</th>
-              <th scope="col"><span className="dynamic-modules__sr-only">Open</span></th>
+              <th scope="col">{t("dynamicModules.colDefinition")}</th>
+              <th scope="col">{t("dynamicModules.colKind")}</th>
+              <th scope="col">{t("dynamicModules.colStatus")}</th>
+              <th scope="col">{t("dynamicModules.colLatestVersion")}</th>
+              <th scope="col">{t("dynamicModules.colVersions")}</th>
+              <th scope="col">{t("dynamicModules.colCapabilities")}</th>
+              <th scope="col">{t("dynamicModules.colUpdated")}</th>
+              <th scope="col"><span className="dynamic-modules__sr-only">{t("dynamicModules.colOpen")}</span></th>
             </tr>
           </thead>
           <tbody>
@@ -159,22 +162,21 @@ export function DynamicModulesScreen({
                 <Link className="dynamic-modules__name-link" to={definitionHref(definition.id)}>{definition.displayName}</Link>
                 <code className="dynamic-modules__app-id">{definition.appId}</code>
               </th>
-              <td>{definition.kind === "declarative-app" ? "Declarative app" : "Isolated plugin"}</td>
-              <td><StatusBadge variant={definitionStatusTone(definition.status)}>{definitionStatusLabel(definition.status)}</StatusBadge></td>
+              <td>{definition.kind === "declarative-app" ? t("dynamicModules.kindDeclarativeApp") : t("dynamicModules.kindIsolatedPlugin")}</td>
+              <td><StatusBadge variant={definitionStatusTone(definition.status)}>{definitionStatusLabel(definition.status, t)}</StatusBadge></td>
               <td><code>{definition.latestVersion ?? UNKNOWN_VALUE}</code></td>
               <td>{definition.versionCount}</td>
               <td>{definition.requestedCapabilityCount}</td>
-              <td>{formatDateTime(definition.updatedAt)}</td>
+              <td>{formatDateTime(definition.updatedAt, locale)}</td>
               <td className="dynamic-modules__row-action">
-                <Link aria-label={`Open definition ${definition.displayName}`} className="ui-button ui-button--secondary ui-button--small" to={definitionHref(definition.id)}>Open</Link>
-                <span className="dynamic-modules__row-subtitle">{definitionSubtitle(definition)}</span>
+                <Link aria-label={t("dynamicModules.openDefinitionAria", { name: definition.displayName })} className="ui-button ui-button--secondary ui-button--small" to={definitionHref(definition.id)}>{t("dynamicModules.colOpen")}</Link>
+                <span className="dynamic-modules__row-subtitle">{definitionSubtitle(definition, t, plural)}</span>
               </td>
             </tr>)}
           </tbody>
         </table>
         {state.data?.nextCursor && <p className="dynamic-modules__hint" role="status">
-          Showing the first {LIST_LIMIT} definitions. Narrow the search or status filter to reach the rest;
-          this screen does not claim a complete registry snapshot.
+          {t("dynamicModules.nextPageHint", { limit: LIST_LIMIT })}
         </p>}
       </section>}
     </div>
@@ -182,17 +184,17 @@ export function DynamicModulesScreen({
 }
 
 function DynamicModulesHeader({ titleId, onRefresh, busy }: { readonly titleId: string; readonly onRefresh?: () => void; readonly busy: boolean }) {
+  const { t } = useI18n();
   return <header className="dynamic-modules__header">
     <div>
-      <p className="dynamic-modules__eyebrow">Platform registry</p>
-      <h1 id={titleId}>Dynamic modules</h1>
+      <p className="dynamic-modules__eyebrow">{t("dynamicModules.eyebrow")}</p>
+      <h1 id={titleId}>{t("dynamicModules.title")}</h1>
       <p className="dynamic-modules__subtitle">
-        Declarative app and isolated plugin definitions, their immutable versions, installations
-        and capability grants. Published artifacts are immutable; edits create a new version.
+        {t("dynamicModules.subtitle")}. {t("dynamicModules.subtitleDetail")}
       </p>
     </div>
     {onRefresh && <div className="dynamic-modules__header-actions">
-      <Button loading={busy} onClick={onRefresh} variant="secondary">{busy ? "Refreshing…" : "Refresh"}</Button>
+      <Button loading={busy} onClick={onRefresh} variant="secondary">{busy ? t("dynamicModules.refreshing") : t("dynamicModules.refresh")}</Button>
     </div>}
   </header>;
 }
@@ -201,8 +203,9 @@ function DynamicModulesHeader({ titleId, onRefresh, busy }: { readonly titleId: 
 export function DynamicModulesPage() {
   const api = useApi();
   const access = useDynamicModuleAccess();
+  const { t } = useI18n();
   const availability = useMemo(() => describeDynamicModulesApi(api), [api]);
-  const service = useMemo(() => createDynamicModulesService({ api, access }), [api, access]);
+  const service = useMemo(() => createDynamicModulesService({ api, access, translate: t }), [api, access, t]);
   const [searchParams] = useSearchParams();
   const statusParam = searchParams.get("status");
   const initialStatus = statusParam && (DYNAMIC_MODULE_STATUSES as readonly string[]).includes(statusParam)

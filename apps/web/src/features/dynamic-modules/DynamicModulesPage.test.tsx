@@ -15,6 +15,7 @@ import type { DynamicModuleDefinitionPage, DynamicModuleDefinitionSummary } from
 import { DynamicModulesScreen } from "./DynamicModulesPage";
 import { createDynamicModuleAccess } from "./capability";
 import { DynamicModulesApiUnavailableError } from "../../api/dynamic";
+import { SettingsProvider } from "../../preferences/SettingsProvider";
 import type { DynamicModulesService } from "./service";
 
 const definition = (overrides: Partial<DynamicModuleDefinitionSummary> = {}): DynamicModuleDefinitionSummary => ({
@@ -65,7 +66,7 @@ async function mount(element: ReactElement): Promise<void> {
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
-  await act(async () => root?.render(<MemoryRouter>{element}</MemoryRouter>));
+  await act(async () => root?.render(<SettingsProvider><MemoryRouter>{element}</MemoryRouter></SettingsProvider>));
   // Flush the pending resource promise and the debounced search timer.
   await act(async () => { await Promise.resolve(); });
 }
@@ -75,10 +76,14 @@ afterEach(async () => {
   root = undefined;
   host?.remove();
   host = undefined;
+  window.localStorage.clear();
 });
 
 beforeEach(() => {
   document.body.replaceChildren();
+  // The screen renders through the i18n catalogue; the assertions below read the
+  // English wording, so the locale is pinned the way the shell stores it.
+  window.localStorage.setItem("agentscale.locale", "en");
 });
 
 describe("dynamic module definition list", () => {
@@ -141,7 +146,7 @@ describe("dynamic module definition list", () => {
     />);
 
     const text = host?.textContent ?? "";
-    expect(text).toContain("Dynamic module API is not wired in this shell build");
+    expect(text).toContain("The dynamic module section is not connected in this build");
     expect(text).toContain("listDefinitions");
     expect(text).toContain("No request was sent");
     expect(service.listDefinitions).not.toHaveBeenCalled();

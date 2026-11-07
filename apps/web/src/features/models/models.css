@@ -166,6 +166,12 @@
 .models-empty strong { color: #3b554d; font-size: 13px; }
 .models-empty span { font-size: 11px; line-height: 1.45; }
 .models-footer { color: var(--models-subtle); display: flex; flex-wrap: wrap; font-size: 10px; gap: 8px 24px; justify-content: space-between; padding: 0 2px; }
+/* Model ids and API paths are reference material, not the choice itself, so they stay closed. */
+.models-advanced { color: var(--models-muted); font-size: 11px; margin-top: 12px; overflow-wrap: anywhere; }
+.models-advanced > summary { color: var(--models-muted); cursor: pointer; font-weight: 700; }
+.models-advanced p { margin: 8px 0 0; }
+.models-footer details summary { color: var(--models-subtle); cursor: pointer; }
+.models-footer details span { display: block; margin-top: 6px; }
 .models-loading,
 .models-error-page { align-items: center; display: grid; justify-items: center; min-height: 420px; padding: 40px; text-align: center; }
 .models-loading { color: var(--models-muted); gap: 8px; }

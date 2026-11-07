@@ -1,13 +1,17 @@
 import { describe, expect, it } from "vitest";
+import { createTranslator } from "../../i18n/catalogue";
 import {
   filterKeys,
   filterModels,
+  formatContext,
   keyAvailability,
   modelCapabilityLabel,
   modelsAvailability,
   probePresentation,
 } from "./view-model";
 import type { AvailableAiKey, LiveModel } from "./types";
+
+const t = createTranslator("ru");
 
 const key = (overrides: Partial<AvailableAiKey> = {}): AvailableAiKey => ({
   id: "key-1",
@@ -46,16 +50,24 @@ describe("models capability acceptance view model", () => {
     expect(probePresentation({ status: "unavailable", models: [] }, now)).toBe("unavailable");
     expect(probePresentation(undefined, now)).toBe("unchecked");
 
-    expect(keyAvailability(key({ last_probe: { status: "ok", models: [] } }))).toMatchObject({ tone: "positive", label: "Проверен" });
-    expect(keyAvailability(key({ last_probe: { status: "ok", models: [], stale: true } }))).toMatchObject({ tone: "warning", label: "Проверка устарела" });
-    expect(keyAvailability(key({ last_probe: { status: "error", models: [], error_code: "PROBE_TIMEOUT" } }))).toMatchObject({ tone: "warning", label: "Ошибка проверки" });
+    expect(keyAvailability(key({ last_probe: { status: "ok", models: [] } }), t)).toMatchObject({ tone: "positive", label: "Проверен" });
+    expect(keyAvailability(key({ last_probe: { status: "ok", models: [], stale: true } }), t)).toMatchObject({ tone: "warning", label: "Проверка устарела" });
+    expect(keyAvailability(key({ last_probe: { status: "error", models: [], error_code: "PROBE_TIMEOUT" } }), t)).toMatchObject({ tone: "warning", label: "Проверка не прошла" });
   });
 
   it("requires live source and catalog match to claim capability", () => {
-    expect(modelsAvailability({ models: [model()], source: "live" })).toMatchObject({ tone: "positive", label: "Live capability" });
-    expect(modelsAvailability({ models: [model()], source: "catalog" })).toMatchObject({ tone: "warning", label: "Live models недоступны" });
-    expect(modelsAvailability({ models: [model()], source: "live", error_code: "MODELS_UNAVAILABLE" })).toMatchObject({ tone: "warning" });
-    expect(modelCapabilityLabel(model({ catalog_matched: true }))).toMatchObject({ tone: "positive" });
-    expect(modelCapabilityLabel(model({ catalog_matched: false }))).toMatchObject({ tone: "warning", label: "Совместимость не подтверждена" });
+    expect(modelsAvailability({ models: [model()], source: "live" }, t)).toMatchObject({ tone: "positive", label: "Модели подтверждены" });
+    expect(modelsAvailability({ models: [model()], source: "catalog" }, t)).toMatchObject({ tone: "warning", label: "Список не подтверждён" });
+    expect(modelsAvailability({ models: [model()], source: "live", error_code: "MODELS_UNAVAILABLE" }, t)).toMatchObject({ tone: "warning" });
+    expect(modelCapabilityLabel(model({ catalog_matched: true }), t)).toMatchObject({ tone: "positive" });
+    expect(modelCapabilityLabel(model({ catalog_matched: false }), t)).toMatchObject({ tone: "warning", label: "Совместимость не подтверждена" });
+  });
+
+  it("spells out the context window in the reader's own words", () => {
+    // `Intl` groups thousands with a non-breaking space; normalising it keeps a typographic
+    // choice from reading as a copy regression.
+    const plain = (value: string) => value.replace(/\u00a0/g, " ");
+    expect(plain(formatContext(128000, t, "ru"))).toBe("128 000 токенов контекста");
+    expect(formatContext(undefined, t, "ru")).toBe("");
   });
 });

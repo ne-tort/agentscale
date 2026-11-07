@@ -1,5 +1,8 @@
+// @vitest-environment jsdom
+import type { ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import { SettingsProvider } from "../../preferences/SettingsProvider";
 import { ResourceWorkspace } from "./ResourceWorkspace";
 import { resourceWorkspaceFixture } from "./fixtures";
 import type { ContentOpsService } from "./content-ops/contracts";
@@ -16,64 +19,73 @@ const contentOpsService: ContentOpsService = {
   replaceAcl: async () => [],
 };
 
+/** The app's default locale is Russian, so that is what an unconfigured screen shows. */
+function render(ui: ReactElement): string {
+  return renderToStaticMarkup(<SettingsProvider>{ui}</SettingsProvider>);
+}
 
 describe("ResourceWorkspace", () => {
   it("renders the profile overview, lifecycle navigation, and generation evidence from a typed snapshot", () => {
-    const markup = renderToStaticMarkup(<ResourceWorkspace initialSnapshot={resourceWorkspaceFixture} />);
+    const markup = render(<ResourceWorkspace initialSnapshot={resourceWorkspaceFixture} />);
 
     expect(markup).toContain("Operations reviewer");
-    expect(markup).toContain("Prompts · files · MCP");
-    expect(markup).toContain("Materialization");
-    expect(markup).toContain("g4");
-    expect(markup).toContain("Contract ready");
+    expect(markup).toContain("Промпты · файлы · MCP");
+    expect(markup).toContain("Публикация");
+    expect(markup).toContain("План 4 · применено 3");
+    expect(markup).toContain("Всё подключено");
   });
 
   it("renders blockers and no fabricated data when the service cannot load an authoritative snapshot", () => {
-    const markup = renderToStaticMarkup(<ResourceWorkspace profileId="profile-ops" />);
+    const markup = render(<ResourceWorkspace profileId="profile-ops" />);
 
-    expect(markup).toContain("Contract blockers");
-    expect(markup).toContain("No data was invented");
-    expect(markup).toContain("resource_web_facade_missing");
+    expect(markup).toContain("Что мешает работе");
+    // Static rendering does not run effects, so the screen is still in its
+    // pre-load state: the blocked title and its hint, not a fabricated profile.
+    expect(markup).toContain("Ресурсы пока нельзя показать");
+    expect(markup).toContain("Страница откроется, когда подключим сервис ресурсов.");
+    expect(markup).toContain("Нет подтверждённого источника ресурсов");
+    // The service code stays available to whoever picks up the ticket, but only as
+    // a tooltip: it is not what the person reading the screen is shown.
+    expect(markup).toContain('title="resource_web_facade_missing · api"');
     expect(markup).not.toContain("Review policy");
   });
 
   it("keeps assets reachable without a resource snapshot and blocks them without company service context", () => {
-    const markup = renderToStaticMarkup(<ResourceWorkspace profileId="profile-ops" initialTab="assets" />);
+    const markup = render(<ResourceWorkspace profileId="profile-ops" initialTab="assets" />);
 
-    expect(markup).toContain("Assets");
-    expect(markup).toContain("Asset operations require authenticated company scope");
-    expect(markup).toContain("no asset request was made");
-    expect(markup).not.toContain("Upload version");
+    expect(markup).toContain("Материалы");
+    expect(markup).toContain("Материалы недоступны");
+    expect(markup).toContain("Только просмотр: запрос не отправлялся.");
+    expect(markup).not.toContain("Загрузить версию");
   });
 
   it("integrates ContentOpsPanel for explicit company scope and shows resource mutations as blocked", () => {
-    const markup = renderToStaticMarkup(<ResourceWorkspace initialSnapshot={resourceWorkspaceFixture} initialTab="assets" companyId="company-1" contentOpsService={contentOpsService} initialAssets={[asset]} />);
+    const markup = render(<ResourceWorkspace initialSnapshot={resourceWorkspaceFixture} initialTab="assets" companyId="company-1" contentOpsService={contentOpsService} initialAssets={[asset]} />);
 
-    expect(markup).toContain("Company company-1");
-    expect(markup).toContain("Upload");
-    expect(markup).toContain("API reports the latest version number but has no version-list route");
+    expect(markup).toContain("Материалы компании");
+    expect(markup).toContain("Загрузка");
+    expect(markup).toContain("История версий недоступна");
   });
 
   it("shows immutable version inspection and explicit unsupported create, bind, plan, and sync reasons", () => {
-    const markup = renderToStaticMarkup(<ResourceWorkspace initialSnapshot={resourceWorkspaceFixture} initialTab="resources" />);
+    const markup = render(<ResourceWorkspace initialSnapshot={resourceWorkspaceFixture} initialTab="resources" />);
 
-    expect(markup).toContain("Version to inspect");
+    expect(markup).toContain("Какую версию посмотреть");
     expect(markup).toContain("sha256:new");
-    expect(markup).toContain("project-ops");
     expect(markup).toContain("Operations");
-    expect(markup).toContain("Local · child can diverge");
-    expect(markup).toContain("Version creation is disabled: the resource API and version CAS contract are not connected.");
-    expect(markup).toContain("Binding is read-only: no confirmed project-binding endpoint or typed scope-admission contract is connected.");
-    expect(markup).toContain("Create is disabled: no confirmed resource create endpoint is connected.");
-    expect(markup).toContain("Version comparison is disabled: no exact-version diff API is connected.");
+    expect(markup).toContain("Отдельно · в проекте можно менять");
+    expect(markup).toContain("Создание версий недоступно: подключение к сервису ресурсов ещё не готово.");
+    expect(markup).toContain("Привязка недоступна: подключение к сервису ресурсов ещё не готово.");
+    expect(markup).toContain("Создание недоступно: подключение к сервису ресурсов ещё не готово.");
+    expect(markup).toContain("Сравнение версий недоступно: данные для сравнения ещё не подключены.");
   });
 
   it("keeps exact scope, binding mode, generation, digest, and provenance visible", () => {
-    const markup = renderToStaticMarkup(<ResourceWorkspace initialSnapshot={resourceWorkspaceFixture} initialTab="materialization" />);
+    const markup = render(<ResourceWorkspace initialSnapshot={resourceWorkspaceFixture} initialTab="materialization" />);
 
-    expect(markup).toContain("Desired generation");
-    expect(markup).toContain("Applied generation");
-    expect(markup).toContain("Source revision");
-    expect(markup).toContain("Plan and sync are unavailable: no reviewed materialization-plan adapter or atomic generation-checked apply API is connected.");
+    expect(markup).toContain("Нужное состояние");
+    expect(markup).toContain("Опубликовано");
+    expect(markup).toContain("Ревизия источника");
+    expect(markup).toContain("Сборка плана и публикация пока недоступны: подключение к сервису ресурсов ещё не готово.");
   });
 });

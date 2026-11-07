@@ -38,6 +38,8 @@ import {
 } from "../../api/dynamic";
 import type { ApiClient } from "../../api/types";
 import { CapabilityDeniedError } from "../../capabilities/boundary";
+import { fallbackFor } from "../../i18n/core";
+import type { Translate } from "../../i18n/catalogue";
 import { requireDynamicModuleAccess, type DynamicModuleAccess } from "./capability";
 import {
   validateArchiveForm,
@@ -84,8 +86,14 @@ export class DynamicModuleValidationError extends DynamicModuleServiceError {
   }
 }
 
-const UNAVAILABLE_MESSAGE =
-  "The dynamic module API is not exposed by this shell build yet. No request was sent and nothing was changed.";
+const UNAVAILABLE_KEY = "dynamicModules.apiUnavailableBody";
+
+/**
+ * Fallback translator for a service built outside a screen (tests, tooling): it
+ * renders the key's own words instead of leaving a key name on screen. A mounted
+ * screen always passes its real translator through `translate`.
+ */
+const UNTRANSLATED: Translate = (key) => fallbackFor(key);
 
 function isConflict(error: unknown): boolean {
   return error instanceof ApiRequestError
@@ -93,32 +101,38 @@ function isConflict(error: unknown): boolean {
 }
 
 /** Maps any thrown value to a typed, redacted service error. */
-export function toDynamicModuleError(error: unknown): DynamicModuleServiceError {
+export function toDynamicModuleError(error: unknown, translate: Translate = UNTRANSLATED): DynamicModuleServiceError {
   if (error instanceof DynamicModuleServiceError) return error;
   if (error instanceof CapabilityDeniedError) {
-    return new DynamicModuleServiceError("CAPABILITY_DENIED", `Capability is not granted: ${error.capability}`);
+    return new DynamicModuleServiceError(
+      "CAPABILITY_DENIED",
+      translate("dynamicModules.errorCapabilityNotGranted", { capability: error.capability }),
+    );
   }
   if (error instanceof DynamicModulesApiUnavailableError) {
-    return new DynamicModuleServiceError(error.code, UNAVAILABLE_MESSAGE);
+    return new DynamicModuleServiceError(error.code, translate(UNAVAILABLE_KEY));
   }
   if (error instanceof DynamicModulesProtocolError) {
-    return new DynamicModuleServiceError(error.code, `The registry returned an unexpected payload (${error.field}). No state was applied.`);
+    return new DynamicModuleServiceError(
+      error.code,
+      translate("dynamicModules.errorUnexpectedResponse", { field: error.field }),
+    );
   }
   if (error instanceof ApiRequestError) {
     const payload = error.error;
     return new DynamicModuleServiceError(
       "DYNAMIC_MODULES_REQUEST_FAILED",
-      payload.detail ?? payload.title ?? "The dynamic module request failed.",
+      payload.detail ?? payload.title ?? translate("dynamicModules.errorRequestFailed"),
       payload.status,
       typeof payload.trace_id === "string" ? payload.trace_id : undefined,
     );
   }
   if (error instanceof DOMException && error.name === "AbortError") {
-    return new DynamicModuleServiceError("DYNAMIC_MODULES_REQUEST_FAILED", "The request was cancelled.");
+    return new DynamicModuleServiceError("DYNAMIC_MODULES_REQUEST_FAILED", translate("dynamicModules.errorCancelled"));
   }
   return new DynamicModuleServiceError(
     "DYNAMIC_MODULES_REQUEST_FAILED",
-    error instanceof Error && error.message ? error.message : "The dynamic module request failed.",
+    error instanceof Error && error.message ? error.message : translate("dynamicModules.errorRequestFailed"),
   );
 }
 
@@ -196,6 +210,8 @@ export interface DynamicModulesServiceOptions {
   readonly access: DynamicModuleAccess;
   readonly gateway?: DynamicModulesGateway;
   readonly now?: () => number;
+  /** Copy for the errors the service raises itself (validation, cancellation). */
+  readonly translate?: Translate;
 }
 
 function assertValid(errors: FieldErrors): void {
@@ -205,6 +221,7 @@ function assertValid(errors: FieldErrors): void {
 export function createDynamicModulesService(options: DynamicModulesServiceOptions): DynamicModulesService {
   const gateway = options.gateway ?? createDynamicModulesGateway(options.api);
   const access = options.access;
+  const translate = options.translate ?? UNTRANSLATED;
   const pendingKeys = new Map<string, string>();
 
   const retainedKey = (scope: string): string => {
@@ -232,7 +249,7 @@ export function createDynamicModulesService(options: DynamicModulesServiceOption
 
     async loadDefinition(definitionId, requestOptions) {
       requireDynamicModuleAccess(access, "read");
-      if (!definitionId) throw new DynamicModuleServiceError("DYNAMIC_MODULES_VALIDATION_FAILED", "A definition id is required.");
+      if (!definitionId) throw new DynamicModuleServiceError("DYNAMIC_MODULES_VALIDATION_FAILED", translate("dynamicModules.errorDefinitionIdRequired"));
       const [definition, versions] = await Promise.all([
         gateway.getDefinition(definitionId, requestOptions),
         gateway.listVersions(definitionId, requestOptions),
@@ -255,8 +272,8 @@ export function createDynamicModulesService(options: DynamicModulesServiceOption
     async publishVersion(request, requestOptions) {
       requireDynamicModuleAccess(access, "manage");
       const { definitionId, appId, kind, values } = request;
-      assertValid(validatePublishForm(values, { appId, kind }));
-      const parsed = parseManifestText(values.manifestText, { appId, kind });
+      assertValid(validatePublishForm(values, { appId, kind }, translate));
+      const parsed = parseManifestText(values.manifestText, { appId, kind }, translate);
       if (!parsed.ok) throw new DynamicModuleValidationError({ manifest: validationMessage(parsed.issues) });
       const scope = `publish:${definitionId}`;
       const expectedVersion = values.expectedVersion?.trim();
@@ -272,7 +289,7 @@ export function createDynamicModulesService(options: DynamicModulesServiceOption
     async installInstance(request, requestOptions) {
       requireDynamicModuleAccess(access, "manage");
       const { definitionId, values, knownVersionIds } = request;
-      assertValid(validateInstallForm(values, knownVersionIds));
+      assertValid(validateInstallForm(values, knownVersionIds, translate));
       const scope = `install:${definitionId}`;
       const input: InstallDynamicModuleInstanceInput = {
         definitionId,
@@ -288,7 +305,7 @@ export function createDynamicModulesService(options: DynamicModulesServiceOption
     async grantCapability(request, requestOptions) {
       requireDynamicModuleAccess(access, "manage");
       const { definitionId, values, instanceId } = request;
-      assertValid(validateGrantForm(values));
+      assertValid(validateGrantForm(values, translate));
       const scope = `grant:${definitionId}`;
       const input: GrantDynamicModuleCapabilityInput = {
         definitionId,
@@ -308,8 +325,8 @@ export function createDynamicModulesService(options: DynamicModulesServiceOption
     async revokeGrant(request, requestOptions) {
       requireDynamicModuleAccess(access, "manage");
       const { definitionId, grantId, values } = request;
-      if (!grantId) throw new DynamicModuleValidationError({ grantId: "A grant must be selected before revoking." });
-      assertValid(validateRevokeForm(values));
+      if (!grantId) throw new DynamicModuleValidationError({ grantId: translate("dynamicModules.validationGrantRequired") });
+      assertValid(validateRevokeForm(values, translate));
       const scope = `revoke:${grantId}`;
       const input: RevokeDynamicModuleGrantInput = {
         definitionId,
@@ -323,7 +340,7 @@ export function createDynamicModulesService(options: DynamicModulesServiceOption
     async archiveDefinition(request, requestOptions) {
       requireDynamicModuleAccess(access, "manage");
       const { definitionId, values, expectedVersion } = request;
-      assertValid(validateArchiveForm(values));
+      assertValid(validateArchiveForm(values, translate));
       const scope = `archive:${definitionId}`;
       const input: ArchiveDynamicModuleDefinitionInput = {
         ...(values.reason.trim() ? { reason: values.reason.trim() } : {}),

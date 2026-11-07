@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ChatWorkspace } from "./ChatWorkspace";
 import { useChatWorkspace } from "./hooks";
 import type { ChatWorkspaceController } from "./hooks";
+import { SettingsProvider } from "../../preferences/SettingsProvider";
 import type { ChatTranscriptResponse } from "../../api/types";
 import type { ChatEvent } from "./types";
 import { POLL_BUDGET_MS } from "../../test-support/poll-budget";
@@ -73,14 +74,17 @@ function Harness({ service }: { service: TestService }) {
   </>;
 }
 
-async function mount(service: TestService): Promise<HTMLDivElement> {
+async function mount(service: TestService, locale = "en"): Promise<HTMLDivElement> {
+  // The workspace reads its copy through `useT`, so the tests pin a locale and
+  // the assertions below stay about chat behaviour rather than translation.
+  window.localStorage.setItem("agentscale.locale", locale);
   host = document.createElement("div");
   document.body.append(host);
   if (!HTMLDivElement.prototype.scrollIntoView) {
     Object.defineProperty(HTMLDivElement.prototype, "scrollIntoView", { configurable: true, value: vi.fn() });
   }
   root = createRoot(host);
-  await act(async () => root?.render(<Harness service={service} />));
+  await act(async () => root?.render(<SettingsProvider><Harness service={service} /></SettingsProvider>));
   return host;
 }
 
@@ -99,10 +103,20 @@ afterEach(async () => {
   host?.remove();
   host = undefined;
   window.sessionStorage.clear();
+  window.localStorage.clear();
   vi.restoreAllMocks();
 });
 
 describe("Chat session workflow acceptance", () => {
+  it("renders the workspace in Russian for a Russian reader", async () => {
+    const container = await mount(makeService(), "ru");
+    await waitFor(() => (container.textContent ?? "").includes("Чаты"));
+    expect(container.querySelector("h1")?.textContent).toBe("Чаты");
+    expect(container.textContent).toContain("Проекты");
+    expect(container.querySelector("textarea")?.getAttribute("placeholder")).toBe("Напишите агенту…");
+    expect(container.textContent).toContain("Рабочее пространство");
+  });
+
   it("ignores a late transcript success from the previous session and loads the selected session", async () => {
     let resolveFirst!: (transcript: ChatTranscriptResponse) => void;
     const firstTranscript = new Promise<ChatTranscriptResponse>((resolve) => { resolveFirst = resolve; });

@@ -58,6 +58,7 @@ const APP_FRAME_STYLES = `
 .employee-cabinet-list a span{color:var(--text-muted);font-size:12px}
 .employee-not-found{padding:20px 0}
 .employee-not-found>a{color:var(--accent);font-weight:700}
+.employee-not-found__path{color:var(--text-muted);display:block;font-size:12px;margin-top:12px;overflow-wrap:anywhere}
 .employee-auth-state{padding:40px;text-align:center}
 .employee-blocker-note{border-left:3px solid #ad5d4c;color:#724138;margin:18px 0;padding:9px 13px}
 @media(max-width:900px){.employee-app-header{gap:8px 14px;grid-template-columns:auto minmax(0,1fr)}.employee-app-navigation{grid-column:1/-1;grid-row:2}.employee-app-account{grid-column:2;grid-row:1;justify-self:end}.employee-app-content{min-height:calc(100vh - 108px);padding:24px 16px 60px}}
@@ -84,24 +85,26 @@ function AppFrame() {
   const isProjectWorkspace = matchPath("/projects/:projectId", location.pathname) !== null
     || matchPath("/projects/:projectId/*", location.pathname) !== null;
   // The bar shows what this account can actually do. A platform administrator
-  // has no company and no cabinets, so those links led to "unavailable" screens;
-  // an employee has no business in the platform catalog.
+  // has no company and no cabinets, and a company account has no employee, so
+  // both used to be offered links to screens that answered "unavailable".
   const links = auth.isPlatformAdmin
     ? [{ to: "/admin", label: t("nav.admin") }]
-    : [
-        { to: "/projects", label: t("nav.projects") },
-        { to: "/cabinets", label: t("nav.cabinets") },
-        { to: "/company", label: t("nav.company") },
-      ];
+    : auth.isCompany
+      ? [{ to: "/company", label: t("nav.company") }]
+      : [
+          { to: "/projects", label: t("nav.projects") },
+          { to: "/cabinets", label: t("nav.cabinets") },
+          { to: "/company", label: t("nav.company") },
+        ];
   return <div className="employee-app-frame">
     <style>{APP_FRAME_STYLES}</style>
     {!isProjectWorkspace && <header className="employee-app-header">
-      <Link to={auth.isPlatformAdmin ? "/admin" : "/projects"} className="employee-app-brand">agentscale</Link>
+      <Link to={homePathFor(auth.isPlatformAdmin, auth.isCompany)} className="employee-app-brand">agentscale</Link>
       <nav aria-label={t("nav.menu")} className="employee-app-navigation">
         {links.map((link) => <Link key={link.to} to={link.to}>{link.label}</Link>)}
       </nav>
       <div className="employee-app-account">
-        <span>{auth.isPlatformAdmin ? t("nav.accountAdmin") : auth.employee?.display_name ?? t("nav.accountEmployee")}</span>
+        <span>{auth.isPlatformAdmin ? t("nav.accountAdmin") : auth.isCompany ? t("nav.accountCompany") : auth.employee?.display_name ?? t("nav.accountEmployee")}</span>
         <button type="button" onClick={auth.signOut}>{t("nav.signOut")}</button>
       </div>
     </header>}
@@ -120,23 +123,24 @@ function isWidePage(pathname: string): boolean {
   return pathname === "/admin" || pathname.startsWith("/admin/") || pathname.startsWith("/projects/");
 }
 
-/**
- * Where an account lands.
- *
- * A platform administrator has no projects and no company, so the old default
- * dropped them on an empty employee screen and left them to find their way. The
- * landing page follows the role.
- */
+/** Where an account lands, by the contour it signed in with. */
+function homePathFor(isPlatformAdmin: boolean, isCompany: boolean): string {
+  if (isPlatformAdmin) return "/admin";
+  if (isCompany) return "/company";
+  return "/projects";
+}
+
 function HomeRedirect() {
   const auth = useAuth();
-  return <Navigate replace to={auth.isPlatformAdmin ? "/admin" : "/projects"} />;
+  return <Navigate replace to={homePathFor(auth.isPlatformAdmin, auth.isCompany)} />;
 }
 
 function ProjectsGate() {
   const auth = useAuth();
-  // A platform administrator who types /projects is not refused — they are sent
-  // to the only area their account can act in.
+  // An administrator has no projects; a company account has no employee. Both
+  // are sent to where they actually work instead of to a list that errors.
   if (auth.isPlatformAdmin) return <Navigate replace to="/admin" />;
+  if (auth.isCompany) return <Navigate replace to="/company" />;
   return <ProjectsPage />;
 }
 

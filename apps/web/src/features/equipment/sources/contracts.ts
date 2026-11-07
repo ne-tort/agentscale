@@ -33,9 +33,15 @@ export interface EquipmentCatalogMetadata {
 
 export type CatalogFreshness = "fresh" | "stale" | "unknown" | "not-applicable";
 
+/**
+ * Why the freshness is what it is. A code rather than a sentence: the screen
+ * turns it into words in the reader's language.
+ */
+export type CatalogFreshnessReason = "never-indexed" | "error" | "local" | "stale" | "fresh";
+
 export interface CatalogFreshnessState {
   readonly freshness: CatalogFreshness;
-  readonly label: string;
+  readonly reason: CatalogFreshnessReason;
   readonly lastGoodLabel?: string;
 }
 
@@ -158,21 +164,21 @@ export function catalogFreshness(body: CatalogRowBody, now = Date.now()): Catalo
   const lastGoodLabel = timestamp === undefined ? undefined : new Date(timestamp).toLocaleString();
   if (body.status === "error") return {
     freshness: timestamp === undefined ? "unknown" : "stale",
-    label: timestamp === undefined ? "Нет успешной индексации" : "Последняя попытка завершилась ошибкой",
+    reason: timestamp === undefined ? "never-indexed" : "error",
     ...(lastGoodLabel ? { lastGoodLabel } : {}),
   };
   if (body.source_kind !== "remote") return {
     freshness: timestamp === undefined ? "unknown" : "not-applicable",
-    label: timestamp === undefined ? "Индекс ещё не подтверждён" : "Локальный источник",
+    reason: timestamp === undefined ? "never-indexed" : "local",
     ...(lastGoodLabel ? { lastGoodLabel } : {}),
   };
-  if (timestamp === undefined) return { freshness: "unknown", label: "Нет успешной индексации" };
+  if (timestamp === undefined) return { freshness: "unknown", reason: "never-indexed" };
   const interval = typeof body.reindex_interval_hours === "number" && Number.isFinite(body.reindex_interval_hours)
     ? Math.max(1, body.reindex_interval_hours) : 24;
   const stale = now - timestamp >= interval * 60 * 60 * 1000;
   return {
     freshness: stale ? "stale" : "fresh",
-    label: stale ? "Нужно обновить" : "Актуальный снимок",
+    reason: stale ? "stale" : "fresh",
     ...(lastGoodLabel ? { lastGoodLabel } : {}),
   };
 }

@@ -67,10 +67,20 @@ function accessTokenExpiry(accessToken: string): number | undefined {
   }
 }
 
-function employeeFromCurrentUser(user: CurrentUserResponse): Employee {
+/**
+ * The employee behind this session, or `undefined` when there is none.
+ *
+ * A company account signs in as the company: `/me` answers with `employee: null`
+ * and `company` filled in. This function used to build an Employee anyway, from
+ * the email or the token subject, which made every screen that gates on "is
+ * this an employee?" answer yes — and then call employee-only endpoints with a
+ * company token and show the 403 it got back.
+ */
+function employeeFromCurrentUser(user: CurrentUserResponse): Employee | undefined {
   const employeeId = user.employee_id ?? user.employee?.id;
+  if (!employeeId && !user.employee) return undefined;
   const identity = employeeId ?? user.id ?? user.subject ?? user.sub ?? "unknown";
-  const displayName = user.display_name?.trim() || user.email?.trim() || user.subject || user.sub || identity;
+  const displayName = user.display_name?.trim() || user.employee?.contact_email || user.employee?.email || user.email?.trim() || identity;
   return {
     id: identity,
     display_name: displayName,
