@@ -8538,6 +8538,19 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
         ],
         "container_env": [],
         "container_env_secrets": [],
+        # Workspace roots a project sync may prune before rewriting. Without this
+        # the only cleanup was the path list recorded in `materialize_manifest`,
+        # which is consulted when a module is *disabled* — so a renamed or removed
+        # MCP package kept its `packages/<old-name>/` tree in every enabled
+        # project's workspace for ever. Prompt files are written through
+        # `prompt_paths`, whose target paths come from rows, so their roots cannot
+        # be declared here; those files are removed through the manifest.
+        "materialize_roots": {
+            "workspace_roots": [
+                "catalogs/",
+                "packages/",
+            ]
+        },
         "seed_rows": {
             "items": [
                 {
