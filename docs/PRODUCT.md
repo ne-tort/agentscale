@@ -293,6 +293,8 @@ Plugin Definition (registry)
 
 Подробно: [`architecture/plugin-modules.md`](architecture/plugin-modules.md).
 
+**Работа на main (dev):** миграция ведётся сразу на `main`, без feature-веток. Правила: [`workflow/main-branch-workflow.md`](workflow/main-branch-workflow.md).
+
 ### Работа на main (dev)
 
 Миграция plugin-modules ведётся **сразу на dev ветке (main)**, без отдельных feature-веток. Правила: [`workflow/main-branch-workflow.md`](workflow/main-branch-workflow.md).
