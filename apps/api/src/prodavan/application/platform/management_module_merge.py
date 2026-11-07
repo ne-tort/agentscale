@@ -43,6 +43,7 @@ import sqlalchemy as sa
 from prodavan.application.platform.product_module_seeds import (
     LEGACY_MERGED_MODULE_IDS,
     MANAGEMENT_MODULE_ID,
+    PRODUCT_MODULE_COMPANY_GRANT_SCOPE,
 )
 
 OWNER_PLATFORM = "platform"
@@ -145,11 +146,30 @@ _SQL_SEED_ROWS_FROM_TEMPLATE = """
 INSERT INTO module_instance_data_rows
     (id, instance_id, table_slug, row_id, body, created_by)
 SELECT
-    'midr_' || substr(md5(random()::text || :instance_id || s.ord || s.item->>'table_slug' || s.item->>'row_id'), 1, 16),
+    -- Every operand is parenthesised on purpose: `->>` binds looser than `||`,
+    -- so `s.ord || s.item->>'table_slug'` parses as `(s.ord || s.item) ->> '…'`
+    -- and Postgres answers "operator does not exist: text ->> unknown". An empty
+    -- database never evaluates this list, which is why it only failed on a
+    -- database that already had the merged seed document.
+    'midr_' || substr(
+        md5(
+            random()::text
+            || (:instance_id)::text
+            || (s.ord)::text
+            || (s.item->>'table_slug')
+            || (s.item->>'row_id')
+        ),
+        1,
+        16
+    ),
     :instance_id,
     s.item->>'table_slug',
     s.item->>'row_id',
-    COALESCE(s.item->'body', '{}'::jsonb),
+    -- A seed body is an object; anything else (missing or JSON null) seeds {}.
+    CASE
+        WHEN jsonb_typeof(s.item->'body') = 'object' THEN s.item->'body'
+        ELSE '{}'::jsonb
+    END,
     'module_seed'
 FROM (
     SELECT ordinality AS ord, item
@@ -188,6 +208,20 @@ ON CONFLICT (module_id, company_id) DO NOTHING
 
 _SQL_ARCHIVE_MODULE = """
 UPDATE modules SET status = 'archived' WHERE id = :id AND status <> 'archived'
+"""
+
+#: Give the merged module the reach its predecessors had. This is the one moment
+#: it can be applied: the row already exists (created by revision 2026082711,
+#: which predates the column, or by the upsert whose ON CONFLICT branch leaves an
+#: existing scope alone), so neither of those paths sets it.
+#:
+#: Guarded on the schema default, which is "nobody has decided yet". An
+#: administrator's choice is never the default value, so a re-run — or a database
+#: where someone has already picked a scope for «Управление» — is left alone.
+_SQL_INHERIT_GRANT_SCOPE = """
+UPDATE modules SET company_grant_scope = :scope
+WHERE id = :module_id
+  AND company_grant_scope = 'selected'
 """
 
 _SQL_DELETE_CABINET_BINDING = """
@@ -266,6 +300,9 @@ class MergePlan:
     revoke_project_bindings: list[dict[str, str]] = field(default_factory=list)
     revoke_company_grants: list[dict[str, str]] = field(default_factory=list)
     archive_modules: list[str] = field(default_factory=list)
+    #: The scope the product seed declares for the merged module; `None` to leave
+    #: the stored value untouched.
+    inherit_grant_scope: str | None = None
 
     @property
     def creates_instances(self) -> bool:
@@ -650,8 +687,7 @@ def plan_merge(state: MergeState) -> MergePlan:
     # has is kept exactly as stored: an admin may have edited it after an
     # earlier partial run.
     grouped_cabinets = _group_bindings(
-        state.cabinet_bindings, legacy_ids=legacy_ids, existing=state.cabinet_bindings,
-        merged_id=MANAGEMENT_MODULE_ID,
+        state.cabinet_bindings, legacy_ids=legacy_ids, merged_id=MANAGEMENT_MODULE_ID,
     )
     for cabinet_id, binding in sorted(grouped_cabinets.items()):
         if binding is not None:
@@ -670,8 +706,7 @@ def plan_merge(state: MergeState) -> MergePlan:
                 )
 
     grouped_projects = _group_bindings(
-        state.project_bindings, legacy_ids=legacy_ids, existing=state.project_bindings,
-        merged_id=MANAGEMENT_MODULE_ID,
+        state.project_bindings, legacy_ids=legacy_ids, merged_id=MANAGEMENT_MODULE_ID,
     )
     for project_id, binding in sorted(grouped_projects.items()):
         if binding is not None:
@@ -690,8 +725,7 @@ def plan_merge(state: MergeState) -> MergePlan:
                 )
 
     grouped_companies = _group_bindings(
-        state.company_grants, legacy_ids=legacy_ids, existing=state.company_grants,
-        merged_id=MANAGEMENT_MODULE_ID,
+        state.company_grants, legacy_ids=legacy_ids, merged_id=MANAGEMENT_MODULE_ID,
     )
     for company_id, grant in sorted(grouped_companies.items()):
         if grant is not None:
@@ -713,14 +747,22 @@ def plan_merge(state: MergeState) -> MergePlan:
         if (state.modules.get(module_id) or {}).get("status") != "archived":
             plan.archive_modules.append(module_id)
 
+    # Apply the reach the seed declares for the merged module, while its scope is
+    # still the schema default (see _SQL_INHERIT_GRANT_SCOPE).
+    plan.inherit_grant_scope = declared_grant_scope(MANAGEMENT_MODULE_ID)
+
     return plan
+
+
+def declared_grant_scope(module_id: str) -> str | None:
+    """The scope the product seed declares for a module, or `None` if it declares none."""
+    return PRODUCT_MODULE_COMPANY_GRANT_SCOPE.get(module_id)
 
 
 def _group_bindings(
     bindings: dict[tuple[str, str], dict[str, Any]],
     *,
     legacy_ids: list[str],
-    existing: dict[tuple[str, str], dict[str, Any]],
     merged_id: str,
 ) -> dict[str, dict[str, Any] | None]:
     """Union legacy bindings per owner: ``{owner_id: binding or None}``.
@@ -751,7 +793,7 @@ def _group_bindings(
 
     out: dict[str, dict[str, Any] | None] = {}
     for owner_id, binding in per_owner.items():
-        if (merged_id, owner_id) in existing:
+        if (merged_id, owner_id) in bindings:
             out[owner_id] = None  # already bound: keep the stored row
             continue
         out[owner_id] = dict(binding)
@@ -801,11 +843,6 @@ def apply_plan(conn: sa.Connection, plan: MergePlan) -> None:
         # New instances need the merged meta documents; the seed documents are
         # the single source of truth for them.
         conn.execute(sa.text(_SQL_COPY_TEMPLATE_META), {"module_id": MANAGEMENT_MODULE_ID})
-        for instance in plan.create_instances:
-            conn.execute(
-                sa.text(_SQL_SEED_ROWS_FROM_TEMPLATE),
-                {"module_id": MANAGEMENT_MODULE_ID, "instance_id": instance.id},
-            )
     for row in plan.copy_rows:
         conn.execute(
             sa.text(_SQL_INSERT_DATA_ROW),
@@ -819,6 +856,17 @@ def apply_plan(conn: sa.Connection, plan: MergePlan) -> None:
                 "created_by": row.created_by,
             },
         )
+    if plan.create_instances:
+        # Template rows go in **after** the copied ones: both statements are
+        # ``ON CONFLICT DO NOTHING``, so this order is what keeps a real,
+        # edited row (say a renamed ``profile_default``) from being shadowed by
+        # the same-id template row. The seed only fills the gaps — a from-base
+        # install, where there was nothing to copy.
+        for instance in plan.create_instances:
+            conn.execute(
+                sa.text(_SQL_SEED_ROWS_FROM_TEMPLATE),
+                {"module_id": MANAGEMENT_MODULE_ID, "instance_id": instance.id},
+            )
     for meta in plan.copy_instance_meta:
         conn.execute(
             sa.text(_SQL_INSERT_INSTANCE_META),
@@ -838,6 +886,13 @@ def apply_plan(conn: sa.Connection, plan: MergePlan) -> None:
         conn.execute(
             sa.text(_SQL_INSERT_PROJECT_BINDING),
             {"id": f"mpb_{_new_id()}", **_sql_params(binding)},
+        )
+    # Before any grant is copied and before archiving: the guard compares against
+    # the untouched schema default (see _SQL_INHERIT_GRANT_SCOPE).
+    if plan.inherit_grant_scope:
+        conn.execute(
+            sa.text(_SQL_INHERIT_GRANT_SCOPE),
+            {"scope": plan.inherit_grant_scope, "module_id": MANAGEMENT_MODULE_ID},
         )
     for grant in plan.copy_company_grants:
         conn.execute(
