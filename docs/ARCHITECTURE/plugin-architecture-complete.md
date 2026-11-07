@@ -663,7 +663,323 @@ async def register_mcp(token: str = Depends(get_capability_token)):
 
 ---
 
-## 9. Open Questions (требуют решения)
+## 9. External Routing & Scale-to-Zero
+
+### 9.1 Внешний адрес (path-based, не subdomain)
+
+**Проблема с `{pluginid}.appname.com`:**
+- Требует integration с DNS провайдером (reg.ru, Cloudflare и т.д.)
+- Wildcard certificate `*.appname.com`
+- Сложность управления DNS records при grant/revoke
+
+**Решение: Path-based routing на `agentscale.dev`**
+
+```
+https://agentscale.dev/webhook/{plugin}/{company}/*
+https://agentscale.dev/pluginpage/{plugin}/{company}/*
+```
+
+**Plugin Gateway** (отдельный сервис, всегда running, 1–2 реплики):
+
+```python
+# plugin-gateway/main.py
+from fastapi import FastAPI, Request, Response, HTTPException
+import httpx
+import re
+
+app = FastAPI()
+
+@app.api_route("/webhook/{plugin}/{company}/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
+async def webhook_proxy(plugin: str, company: str, path: str, request: Request):
+    # 1. Проверка grant (capability token в Redis / БД)
+    grant = await get_grant(plugin, company)
+    if not grant or not grant.active:
+        raise HTTPException(404, "Plugin not granted to company")
+
+    # 2. Backend URL (Knative Service)
+    backend_url = f"http://plugin-{plugin}-backend.tenant-{company}.svc.cluster.local:8080/webhook/{path}"
+
+    # 3. Проксирование (с capability token в заголовке)
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.request(
+            method=request.method,
+            url=backend_url,
+            headers={
+                "X-Plugin-ID": plugin,
+                "X-Company-ID": company,
+                "X-Plugin-Capability-Token": grant.capability_token,
+                **{k: v for k, v in request.headers.items() if k.lower() not in ["host", "authorization"]}
+            },
+            content=await request.body()
+        )
+        return Response(
+            content=response.content,
+            status_code=response.status_code,
+            headers={k: v for k, v in response.headers.items() if k.lower() not in ["content-length", "transfer-encoding"]}
+        )
+
+@app.api_route("/pluginpage/{plugin}/{company}/{path:path}", methods=["GET", "POST"])
+async def pluginpage_proxy(plugin: str, company: str, path: str, request: Request):
+    # Аналогично, но:
+    # - GET /pluginpage/{plugin}/{company}/ → MinIO (static frontend)
+    # - GET/POST /pluginpage/{plugin}/{company}/api/* → backend (Knative)
+    pass
+```
+
+**Ingress (Traefik):**
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: plugins-gateway
+  annotations:
+    traefik.ingress.kubernetes.io/router.tls: "true"
+spec:
+  rules:
+    - host: agentscale.dev
+      http:
+        paths:
+          - path: /webhook/
+            pathType: Prefix
+            backend:
+              service:
+                name: plugin-gateway
+                port:
+                  number: 8080
+          - path: /pluginpage/
+            pathType: Prefix
+            backend:
+              service:
+                name: plugin-gateway
+                port:
+                  number: 8080
+```
+
+**Преимущества path-based:**
+- Не требует integration с DNS провайдером (reg.ru)
+- Один wildcard certificate (`*.agentscale.dev`)
+- Простая интеграция с существующим Ingress
+- Легко версионировать: `/v1/webhook/{plugin}/{company}/*`
+
+**Недостатки:**
+- URL длиннее: `https://agentscale.dev/webhook/mod_equipment/co_123/external`
+- Не "красивый" subdomain
+
+### 9.2 Scale-to-Zero (Knative Serving)
+
+**Backend плагина = Knative Service** (minScale=0):
+
+```yaml
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: plugin-mod-equipment-backend
+  namespace: tenant-co-123
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/minScale: "0"      # scale-to-zero
+        autoscaling.knative.dev/maxScale: "5"      # защита от DoS
+        autoscaling.knative.dev/target: "1"        # 1 pod при нагрузке
+        autoscaling.knative.dev/scale-up-delay: "0s"  # мгновенный wake-up
+        autoscaling.knative.dev/initial-scale: "1"    # минимум 1 pod при wake-up
+    spec:
+      containers:
+        - image: plugin-mod-equipment-backend:v1.2.0
+          env:
+            - name: PLUGIN_CAPABILITY_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: plugin-mod-equipment-co-123
+                  key: token
+            - name: TENANT_DB_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: tenant-co-123
+                  key: dsn
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          resources:
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+```
+
+**Scale-to-zero поведение:**
+- При отсутствии запросов > 60s (Knative default) → pod удаляется
+- При первом HTTP запросе → Knative создаёт pod (cold start 100–500ms)
+- `scale-up-delay: 0s` → не ждать, а сразу создавать pod
+
+**Cold start optimization:**
+- Distroless / alpine образы (меньше init time)
+- Pre-warm container registry (image pull latency)
+- Health check endpoint (`/health`) с быстрым ответом
+
+### 9.3 Wake-up mechanism
+
+**Автоматический wake-up (Knative):**
+- Любой HTTP запрос на Knative Service URL → автоматический scale-up
+- Cold start latency: 100–500ms
+
+**Явный wake-up API (опционально):**
+```http
+POST /adapters/plugins/wake
+Authorization: Bearer <admin_token>
+Content-Type: application/json
+
+{
+  "module_id": "mod_equipment",
+  "company_id": "co_123"
+}
+```
+
+Gateway:
+1. Проверяет admin capability
+2. Делает HTTP HEAD на backend URL
+3. Knative создаёт pod (если спит)
+4. Возвращает `202 Accepted` + `estimated_wake_up_ms: 500`
+
+**Использование:**
+- CronJob (перед scheduled task)
+- Admin UI (кнопка "Wake up plugin")
+- Monitoring alert (если plugin не отвечает > 5min)
+
+### 9.4 Routing для `/webhook/{plugin}/{company}/*`
+
+**Plugin Gateway** (всегда running) проксирует:
+```
+https://agentscale.dev/webhook/mod_equipment/co_123/external
+→ http://plugin-mod-equipment-backend.tenant-co-123.svc.cluster.local:8080/webhook/external
+```
+
+**Headers:**
+- `X-Plugin-ID: mod_equipment`
+- `X-Company-ID: co_123`
+- `X-Plugin-Capability-Token: eyJhbGciOi...` (из grant)
+
+**Backend плагина** обрабатывает:
+```python
+@app.post("/webhook/external")
+async def handle_webhook(
+    payload: dict,
+    plugin_id: str = Header("X-Plugin-ID"),
+    company_id: str = Header("X-Company-ID"),
+    token: str = Header("X-Plugin-Capability-Token")
+):
+    # Валидация (опционально, Gateway уже проверил)
+    return {"status": "ok"}
+```
+
+### 9.5 Routing для `/pluginpage/{plugin}/{company}/*`
+
+**Frontend (статический):**
+```
+https://agentscale.dev/pluginpage/mod_equipment/co_123/index.html
+→ MinIO: tenant-co-123/plugins/mod_equipment/index.html
+```
+
+**Backend (динамический):**
+```
+https://agentscale.dev/pluginpage/mod_equipment/co_123/api/*
+→ http://plugin-mod-equipment-backend.tenant-co-123.svc.cluster.local:8080/api/*
+```
+
+**Plugin Gateway** определяет:
+- Если path начинается с `/pluginpage/{plugin}/{company}/api/*` → проксировать на backend
+- Иначе → проксировать на MinIO (static)
+
+**Iframe (опционально):**
+```html
+<iframe
+  src="https://agentscale.dev/pluginpage/mod_equipment/co_123/index.html?token=..."
+  sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+/>
+```
+
+**Преимущества iframe:**
+- Изоляция (CSP, sandbox)
+- Нет доступа к shared cookies / localStorage
+
+**Недостатки iframe:**
+- Проблемы с navigation (back button, deep linking)
+- Cross-origin communication (postMessage)
+
+**Альтернатива:** Прямой redirect (не iframe) — пользователь видит URL `agentscale.dev/pluginpage/...` в address bar.
+
+### 9.6 Scale-to-zero для backend (Knative)
+
+```yaml
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: plugin-mod-equipment-backend
+  namespace: tenant-co-123
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/minScale: "0"      # scale-to-zero
+        autoscaling.knative.dev/maxScale: "5"      # защита от DoS
+        autoscaling.knative.dev/target: "1"
+        autoscaling.knative.dev/scale-up-delay: "0s"
+    spec:
+      containers:
+        - image: plugin-mod-equipment-backend:v1.2.0
+          env:
+            - name: PLUGIN_CAPABILITY_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: plugin-mod-equipment-co-123
+                  key: token
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 30
+```
+
+**Wake-up triggers:**
+1. **HTTP запрос** (автоматически, cold start 100–500ms)
+2. **Cron trigger** (Knative просыпает перед срабатыванием CronJob)
+3. **Event trigger** (Kafka → HTTP POST → wake-up)
+4. **Явный wake-up** (`POST /adapters/plugins/wake`)
+
+### 9.7 Wake-up API (явный)
+
+```http
+POST /adapters/plugins/wake
+Authorization: Bearer <admin_token>
+Content-Type: application/json
+
+{
+  "module_id": "mod_equipment",
+  "company_id": "co_123"
+}
+```
+
+Gateway:
+1. Проверяет admin capability
+2. Делает HTTP HEAD на backend URL
+3. Knative создаёт pod (если спит)
+4. Возвращает `202 Accepted` + `estimated_wake_up_ms: 500`
+
+**Использование:**
+- CronJob (перед scheduled task)
+- Admin UI (кнопка "Wake up plugin")
+- Monitoring alert (если plugin не отвечает > 5min)
+
+---
+
+## 10. Open Questions (требуют решения)
 
 1. ** versioning plugin DB schema** — как плагин узнаёт, какая версия схемы уже применена? (таблица `plugin_migrations` — OK, но нужно версионирование самого плагина)
 2. **Rollback миграций** — поддерживать ли `DOWN` миграции? (сложно, пока не поддерживаем)
