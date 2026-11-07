@@ -1,0 +1,39 @@
+# The SPA half of the dev HTTPS router. Lower priority than the API ingress so a
+# request for /api can never reach nginx, which answers every unknown path with
+# index.html. See patch-dev-ingress-api.yaml for why this is split in two.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: agentscale-https-web
+  annotations:
+    argocd.argoproj.io/sync-wave: "25"
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+    traefik.ingress.kubernetes.io/router.priority: "100"
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - agentscale.dev
+        - localhost
+  rules:
+    - host: agentscale.dev
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: agentscale-web
+                port:
+                  number: 80
+    - host: localhost
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: agentscale-web
+                port:
+                  number: 80

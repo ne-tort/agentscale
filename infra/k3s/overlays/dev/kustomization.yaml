@@ -5,6 +5,10 @@ resources:
   - ../../base
   - postgres.yaml
   - userdb-init.yaml
+  # The dev HTTPS route: two Ingresses so `/api` and `/` can carry different
+  # Traefik priorities. See ingress-https-api.yaml for why.
+  - ingress-https-api.yaml
+  - ingress-https-web.yaml
   - sandboxes
 transformers:
   - namespace-transformer.yaml
