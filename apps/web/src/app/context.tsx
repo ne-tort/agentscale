@@ -4,6 +4,7 @@ import { createApiClient } from "../api/client";
 import type { ApiClient, Cabinet, Employee, Id, Project, SessionTokens } from "../api/types";
 import { AuthLifecycle, type AuthSnapshot, type AuthStatus } from "./auth/lifecycle";
 import { getSafeNextPath } from "./auth/redirect";
+import { SettingsProvider } from "../preferences/SettingsProvider";
 
 interface AuthContextValue {
   employee?: Employee;
@@ -88,7 +89,7 @@ export function AppProviders({ children }: PropsWithChildren) {
     },
   }), [authSnapshot, lifecycle, location.search]);
 
-  return <ApiContext.Provider value={api}><AuthContext.Provider value={auth}><WorkContext.Provider value={work}>{children}</WorkContext.Provider></AuthContext.Provider></ApiContext.Provider>;
+  return <SettingsProvider><ApiContext.Provider value={api}><AuthContext.Provider value={auth}><WorkContext.Provider value={work}>{children}</WorkContext.Provider></AuthContext.Provider></ApiContext.Provider></SettingsProvider>;
 }
 
 export function useApi(): ApiClient {

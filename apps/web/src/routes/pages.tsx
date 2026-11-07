@@ -1,7 +1,6 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useApi, useAuth } from "../app/context";
-import { getSafeNextPath } from "../app/auth/redirect";
 import type { ApiClient, Cabinet, Project } from "../api/types";
 import { ProjectsOverview, createProjectOverviewService } from "../features/projects/overview";
 import { ProjectControlsPanel, createDefaultProjectControlsService } from "../features/projects/controls";
@@ -55,41 +54,10 @@ async function createModelSession(api: Pick<ApiClient, "createSession">, project
   return session.id;
 }
 
-export function LoginPage() {
-  const api = useApi();
-  const auth = useAuth();
-  const location = useLocation();
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState<string>();
-  const [busy, setBusy] = useState(false);
-  const next = getSafeNextPath(location.search) ?? "/projects";
-
-  async function submit(event: FormEvent) {
-    event.preventDefault();
-    setBusy(true);
-    setError(undefined);
-    try {
-      const tokens = await api.login(username, password);
-      auth.signIn(tokens);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Unable to sign in.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  if (auth.isAuthenticated) return <Navigate to={next} replace />;
-  return <main className="login-page"><section className="login-panel">
-    <p className="eyebrow">Employee workspace</p><h1>Sign in to agentscale</h1>
-    <form className="stack" onSubmit={(event) => void submit(event)}>
-      <label>Email or username<input autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} required /></label>
-      <label>Password<input autoComplete="current-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} required /></label>
-      {error && <p className="error" role="alert">{error}</p>}
-      <button className="primary" disabled={busy}>{busy ? "Signing in…" : "Sign in"}</button>
-    </form>
-  </section></main>;
-}
+// The login screen has its own module: it owns preference state (language,
+// theme) and a settings popover, which does not belong in this barrel of
+// workspace pages.
+export { LoginPage } from "./LoginPage";
 
 export function ProjectsPage() {
   const auth = useAuth();

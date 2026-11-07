@@ -400,16 +400,23 @@ describe("employee workspace integration acceptance", () => {
     });
 
     await mountApp(`/projects/${projectId}/chat/${sessionId}?model=test-model`);
-    await waitFor(() => pageText().includes("Sign in to agentscale"));
+    // Russian is the default UI language; the login card's only heading is "Вход".
+    await waitFor(() => pageText().includes("Вход"));
     expect(requests.some((request) => request.path.startsWith("/api/v1/projects/"))).toBe(false);
 
     const inputs = document.querySelectorAll<HTMLInputElement>(".login-page input");
     expect(inputs).toHaveLength(2);
+    // The fields arrive prefilled with the dev platform admin, so both values
+    // are replaced rather than typed into an empty box.
+    expect(inputs[0].value).toBe("admin");
+    expect(inputs[1].value).toBe("admin");
     await setValue(inputs[0], "ada@example.test");
     await setValue(inputs[1], "test-password");
-    // After submit the button reads "Signing in…" and the form unmounts on success, so
-    // waiting for it to say "Sign in" again can never become true. Wait for the outcome.
-    await click(".login-page button", () => pageText().includes("Inspect notes.md"));
+    // Target the submit row explicitly: the header also carries a settings
+    // button, so `.login-page button` is no longer the submit.
+    // After submit the label reads "Входим…" and the form unmounts on success,
+    // so waiting for "Вход" to return can never become true. Wait for the outcome.
+    await click(".login-submit", () => pageText().includes("Inspect notes.md"));
     await waitFor(() => pageText().includes("Inspect notes.md"));
 
     expect(pageText()).toContain("Chats");
