@@ -11,8 +11,22 @@ metadata:
     argocd.argoproj.io/sync-wave: "10"
 spec:
   replicas: 1
+  # `Recreate` guarantees a window with zero ready pods on every deploy, and
+  # Traefik reacts badly to it: it rebuilds its config while the Service has no
+  # endpoints, drops the paths that point at it, and does not re-add them until
+  # the Ingress itself changes. The symptom is not a 503 — `agentscale.dev`
+  # keeps serving the SPA while `POST /api/v1/auth/login` falls through to the
+  # web container, which answers 405, so the login page renders and cannot log
+  # in. That is how it looked in production for the better part of an hour.
+  #
+  # Mirroring the old pod before removing it keeps endpoints non-empty. The
+  # migration initContainer runs in both pods during the overlap; Alembic takes a
+  # lock, so the second one waits rather than racing.
   strategy:
-    type: Recreate
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
   selector:
     matchLabels:
       app: agentscale-api

@@ -123,7 +123,7 @@ jobs:
         run: poetry run prodavan-ops dns-check --namespace agentscale-dev
 
       - name: Smoke HTTP
-        timeout-minutes: 2
+        timeout-minutes: 3
         working-directory: infra/ops
         run: |
           set -euo pipefail
@@ -131,3 +131,8 @@ jobs:
           ADDR="${PRODAVAN_CI_HOST:-${SMOKE_ADDR:-127.0.0.1}}"
           echo "smoke addr=$ADDR port=${HTTP_PORT}"
           poetry run prodavan-ops smoke --addr "$ADDR" --port "${HTTP_PORT}"
+          # The flat :8088 check uses Traefik's `web` entrypoint with Host:
+          # localhost — a different router than the one browsers use. When the
+          # TLS router stops sending /api to the API, :8088 stays green while
+          # https://agentscale.dev loads and cannot log in. Check that path too.
+          poetry run prodavan-ops smoke --addr "$ADDR" --public-host agentscale.dev
