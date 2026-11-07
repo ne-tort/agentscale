@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import time
 from datetime import UTC, datetime, timedelta
 
@@ -84,8 +85,19 @@ def _wait_runtime_running(
     owner_h: dict[str, str],
     project_id: str,
     *,
-    wait_sec: float = 180.0,
+    wait_sec: float | None = None,
 ) -> dict:
+    # Sandbox pods pull their image with `imagePullPolicy: Always` (three
+    # containers, ~73 MB each), so a create can spend minutes in Pending before
+    # the pod exists at all — the API reports `observed_state: pulling`. A fixed
+    # 180 s budget is enough on an idle node and not enough when another e2e job
+    # is building images on the same VM, which is how the last two tests of a run
+    # came to fail on a timeout while the first six passed.
+    #
+    # The budget follows the platform's own pull timeout rather than a number
+    # invented here, so the test cannot wait longer than the API is willing to.
+    if wait_sec is None:
+        wait_sec = float(os.getenv("POD_IMAGE_PULL_TIMEOUT_SEC", "600")) + 60.0
     deadline = time.time() + wait_sec
     last: dict = {}
     while time.time() < deadline:
@@ -98,7 +110,9 @@ def _wait_runtime_running(
         if runtime is not None and runtime.get("status") == "running":
             return runtime
         time.sleep(2.0)
-    raise AssertionError(f"timeout waiting for running runtime: {last}")
+    raise AssertionError(
+        f"timeout after {wait_sec:.0f}s waiting for running runtime: {last}"
+    )
 
 
 def _configure_and_launch(client: TestClient, owner_h: dict[str, str], project_id: str) -> dict:

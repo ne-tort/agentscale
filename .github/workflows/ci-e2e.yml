@@ -381,9 +381,13 @@ jobs:
             -n agentscale-dev
 
       - name: Run k8s e2e Job (L3a)
-        timeout-minutes: 20
+        # Each test creates a sandbox pod whose three containers pull with
+        # `imagePullPolicy: Always` (~73 MB each), so a run is dominated by image
+        # pulls — not by the assertions. The budget has to cover eight of those
+        # while the optional `bridge` job may be building images on the same VM.
+        timeout-minutes: 30
         working-directory: infra/ops
-        run: poetry run prodavan-ops e2e run --suite k8s --timeout 900
+        run: poetry run prodavan-ops e2e run --suite k8s --timeout 1500
 
       - name: Cleanup k8s e2e
         if: always()
@@ -436,6 +440,11 @@ jobs:
     runs-on: [self-hosted, linux, docker]
     timeout-minutes: 25
     continue-on-error: true
+    env:
+      # Hoisted so steps can test it with `if: env.PRODAVAN_CLAW_TOKEN != ''`.
+      # The `secrets` context is not available in step-level `if`, and an
+      # unguarded clone turns a missing secret into a misleading auth failure.
+      PRODAVAN_CLAW_TOKEN: ${{ secrets.PRODAVAN_CLAW_TOKEN }}
     steps:
       - uses: actions/checkout@v4
 
@@ -448,9 +457,13 @@ jobs:
           docker run --rm --network=host alpine sh -c 'wget -qO- http://127.0.0.1:3921/health || echo "no bridge yet (expected)"'
 
       - name: Clone prodavan-claw submodule
+        # Without the PAT this step cannot succeed, and it used to fail with a
+        # bare `fatal: Authentication failed` / exit 128 that reads like a broken
+        # token rather than a missing one. The secret is not configured in this
+        # repository at all, so `suite=all` reported a red bridge job on every
+        # run and taught everyone to ignore it. Skip explicitly instead.
+        if: env.PRODAVAN_CLAW_TOKEN != ''
         env:
-          # PAT with read access to the private ne-tort/prodavan-claw repo
-          # (GITHUB_TOKEN cannot clone cross-repo private repos).
           GH_TOKEN: ${{ secrets.PRODAVAN_CLAW_TOKEN }}
         run: |
           set -euo pipefail
@@ -462,6 +475,12 @@ jobs:
           cd prodavan-claw
           branch="${PRODAVAN_CLAW_BRANCH:-refactor/unified-mcp-surface}"
           git fetch origin "${branch}" && git checkout "${branch}" || true
+
+      - name: Skip bridge suite (no PRODAVAN_CLAW_TOKEN)
+        if: env.PRODAVAN_CLAW_TOKEN == ''
+        run: |
+          echo "::notice::PRODAVAN_CLAW_TOKEN is not set; the bridge suite cannot clone prodavan-claw and is skipped."
+          exit 1
 
       - name: Build agent-runtime image
         working-directory: prodavan-claw

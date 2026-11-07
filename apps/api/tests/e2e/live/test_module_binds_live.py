@@ -43,8 +43,13 @@ def _setup_company_cabinet_module(live_client, api: str, *, stamp: str, label: s
         },
     )
     assert inv.status_code in (200, 201), inv.text
+    # The invitation qualifies the handle with the company slug
+    # (`label1234@live-label-1234.local`); that is the Keycloak username, so it
+    # is what must be used to sign in. The bare handle the test sent returns 401.
     owner_h = auth_header(
-        login_via_api(live_client, api, username=owner_login, password=EMPLOYEE_PASSWORD)
+        login_via_api(
+            live_client, api, username=inv.json()["login"], password=EMPLOYEE_PASSWORD
+        )
     )
 
     cab = live_client.post(
