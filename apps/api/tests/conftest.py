@@ -431,7 +431,13 @@ def _seed_integration_catalog() -> None:
     """Re-insert product modules + platform bootstrap after TRUNCATE (mirrors Alembic seed)."""
     import json
 
-    from prodavan.application.platform.product_module_seeds import PRODUCT_MODULES
+    from prodavan.application.platform.product_module_seeds import (
+        LEGACY_MODULE_ROWS,
+        PRODUCT_MODULES,
+        PRODUCT_MODULE_COMPANY_GRANT_SCOPE,
+    )
+
+    legacy_ids = {module_id for module_id, _ in LEGACY_MODULE_ROWS}
 
     async def _seed() -> None:
         engine = create_async_engine(DATABASE_URL, pool_pre_ping=True)
@@ -440,12 +446,23 @@ def _seed_integration_catalog() -> None:
                 await conn.execute(
                     text(
                         """
-                        INSERT INTO modules (id, name, status)
-                        VALUES (:id, :name, 'active')
-                        ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, status = 'active'
+                        INSERT INTO modules (id, name, status, company_grant_scope)
+                        VALUES (:id, :name, :status, :company_grant_scope)
+                        ON CONFLICT (id) DO UPDATE
+                        SET name = EXCLUDED.name, status = EXCLUDED.status
                         """
                     ),
-                    {"id": module_id, "name": name},
+                    {
+                        "id": module_id,
+                        "name": name,
+                        # Mirrors upsert_product_modules: the modules folded into
+                        # «Управление» are archived shells, «Управление» itself is
+                        # granted to every company.
+                        "status": "archived" if module_id in legacy_ids else "active",
+                        "company_grant_scope": PRODUCT_MODULE_COMPANY_GRANT_SCOPE.get(
+                            module_id, "selected"
+                        ),
+                    },
                 )
                 for slug, body in slugs.items():
                     doc_id = f"mmd_{module_id.removeprefix('mod_')}_{slug}"

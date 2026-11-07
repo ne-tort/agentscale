@@ -133,7 +133,7 @@ def test_expand_prompt_path_ops_skips_empty_files() -> None:
             },
         ],
         rule_id="prompt_paths_files",
-        module_id="mod_prompts",
+        module_id="mod_management",
     )
     assert len(ops) == 1
     assert ops[0].workspace_path == "rules/style.md"
@@ -158,7 +158,7 @@ def test_expand_prompt_path_ops_reads_per_file_priority() -> None:
             },
         ],
         rule_id="prompt_paths_files",
-        module_id="mod_prompts",
+        module_id="mod_management",
     )
     assert {o.priority for o in fragments} == {100, 200}
     stitched = _stitch_prompt_fragment_ops(fragments)
@@ -303,7 +303,7 @@ def test_active_profile_paths_only_expand_matching_profile() -> None:
     ops = _expand_prompt_path_ops(
         rows=filtered,
         rule_id="prompt_paths_files",
-        module_id="mod_prompts",
+        module_id="mod_management",
     )
     assert len(ops) == 1
     assert ops[0].workspace_path == "rules/a.md"
@@ -394,7 +394,7 @@ def test_equipment_prompt_seed_rows_materialize_layout() -> None:
 
 
 def test_prompt_paths_with_profile_placeholder_need_profile() -> None:
-    """mod_prompts: правило с {{active_profile_id}} без активного профиля → []."""
+    """«Управление»: правило prompt_paths с {{active_profile_id}} без профиля → []."""
     import asyncio
     from unittest.mock import AsyncMock
 
@@ -402,7 +402,7 @@ def test_prompt_paths_with_profile_placeholder_need_profile() -> None:
     planner._fetch_rows = AsyncMock(return_value=[])  # type: ignore[method-assign]
     ops = asyncio.run(
         planner._plan_rows_ops(
-            module_id="mod_prompts",
+            module_id="mod_management",
             rule_id="prompt_paths_files",
             source={
                 "type": "rows",

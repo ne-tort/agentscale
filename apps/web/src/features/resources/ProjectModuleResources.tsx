@@ -10,10 +10,18 @@ import { useI18n } from "../../i18n/useT";
 import type { Translate } from "../../i18n/catalogue";
 
 const FIRST_PARTY_MODULES = [
-  { id: "mod_prompts", labelKey: "resources.modulePrompts", detailKey: "resources.modulePromptsDetail" },
-  { id: "mod_files", labelKey: "resources.moduleFiles", detailKey: "resources.moduleFilesDetail" },
-  { id: "mod_mcp", labelKey: "resources.moduleMcp", detailKey: "resources.moduleMcpDetail" },
+  { id: "mod_management", labelKey: "resources.moduleManagement", detailKey: "resources.moduleManagementDetail" },
 ] as const;
+/**
+ * Tables this surface may page through. The merged Management module owns all five:
+ * the prompt profile/path tables, their settings rows, MCP packages and project files.
+ * A table missing here falls back to the service's own single request, so the allowlist
+ * can only narrow the doorway's client-side project filtering, never widen access.
+ */
+const RESOURCE_MODULE_TABLES: Readonly<Record<string, ReadonlySet<string>>> = {
+  mod_management: new Set(["prompt_profiles", "profile_settings", "prompt_paths", "mcp_packages", "files"]),
+};
+const PROMPT_FILES_TABLE = "prompt_paths";
 const PROMPT_FILES_VIEW = "prompt_path_settings";
 const PROMPT_FILES_SLOT = "resource_prompt_files";
 
@@ -81,54 +89,55 @@ function rowAppliesToProject(row: ModuleRow, projectId: string): boolean {
   return ids.length === 0 || ids.includes(projectId);
 }
 
-export function withResourceModuleViews(loaded: { scope: ModuleRuntimeScope; manifest: ModuleManifest }, moduleId: string): { scope: ModuleRuntimeScope; manifest: ModuleManifest } {
-  if (moduleId === "mod_prompts") {
-    const hasFilesJson = loaded.manifest.columns.some((column) => column.table_slug === "prompt_paths" && column.name === "files_json" && column.type === "json");
-    const view = loaded.manifest.views.find((candidate) => candidate.slug === PROMPT_FILES_VIEW && candidate.kind === "detail" && candidate.table_slug === "prompt_paths");
-    const fields = Array.isArray(view?.ui_json.fields) ? view.ui_json.fields : [];
-    const nestedEditor = fields.find((field) => isRecord(field) && field.column === "files_json" && field.widget === "prompt_files_editor");
-    if (!hasFilesJson || !view || !nestedEditor) return loaded;
+/**
+ * Replace the backend's undeclared `prompt_files_editor` widget with the allowlisted
+ * slot that renders the nested editor.
+ *
+ * The decision is made from the manifest alone — the `prompt_paths.files_json` column
+ * and the `prompt_path_settings` detail view that declares the widget — never from the
+ * module id. Any module that ships that table/view pair gets the editor; a module that
+ * does not is returned untouched, so a missing column or view never produces a slot.
+ */
+export function withResourceModuleViews(loaded: { scope: ModuleRuntimeScope; manifest: ModuleManifest }): { scope: ModuleRuntimeScope; manifest: ModuleManifest } {
+  const hasFilesJson = loaded.manifest.columns.some((column) => column.table_slug === PROMPT_FILES_TABLE && column.name === "files_json" && column.type === "json");
+  const view = loaded.manifest.views.find((candidate) => candidate.slug === PROMPT_FILES_VIEW && candidate.kind === "detail" && candidate.table_slug === PROMPT_FILES_TABLE);
+  const fields = Array.isArray(view?.ui_json.fields) ? view.ui_json.fields : [];
+  const nestedEditor = fields.find((field) => isRecord(field) && field.column === "files_json" && field.widget === "prompt_files_editor");
+  if (!hasFilesJson || !view || !nestedEditor) return loaded;
 
-    const reasons = loaded.manifest.invalid_views?.[PROMPT_FILES_VIEW]?.split("; ") ?? [];
-    const nestedEditorOnlyIssue = reasons.length > 0 && reasons.every((item) => {
-      const match = item.match(/^view prompt_path_settings fields\[(\d+)\] uses unsupported widget 'prompt_files_editor'$/);
-      return Boolean(match && Number(match[1]) === fields.indexOf(nestedEditor));
-    });
-    if (reasons.length > 0 && !nestedEditorOnlyIssue) return loaded;
-    const views = loaded.manifest.views.map((candidate) => candidate.slug !== PROMPT_FILES_VIEW ? candidate : {
-      ...candidate,
-      ui_json: {
-        ...candidate.ui_json,
-        fields: fields.filter((field) => !(isRecord(field) && field.column === "files_json" && field.widget === "prompt_files_editor")),
-        slots: [
-          ...(Array.isArray(candidate.ui_json.slots) ? candidate.ui_json.slots.filter((slot) => !isRecord(slot) || slot.name !== PROMPT_FILES_SLOT) : []),
-          { name: PROMPT_FILES_SLOT, placement: "after_content" },
-        ],
-      },
-    });
-    const invalidViews = { ...(loaded.manifest.invalid_views ?? {}) };
-    delete invalidViews[PROMPT_FILES_VIEW];
-    const visibleColumns = loaded.manifest.columns.filter((column) => !(column.table_slug === "prompt_paths" && column.name === "files_json"));
-    const manifest: ModuleManifest = { ...loaded.manifest, columns: visibleColumns, views, invalid_views: invalidViews };
-    return { ...loaded, manifest };
-  }
-
-  return loaded;
+  const reasons = loaded.manifest.invalid_views?.[PROMPT_FILES_VIEW]?.split("; ") ?? [];
+  const nestedEditorOnlyIssue = reasons.length > 0 && reasons.every((item) => {
+    const match = item.match(/^view prompt_path_settings fields\[(\d+)\] uses unsupported widget 'prompt_files_editor'$/);
+    return Boolean(match && Number(match[1]) === fields.indexOf(nestedEditor));
+  });
+  if (reasons.length > 0 && !nestedEditorOnlyIssue) return loaded;
+  const views = loaded.manifest.views.map((candidate) => candidate.slug !== PROMPT_FILES_VIEW ? candidate : {
+    ...candidate,
+    ui_json: {
+      ...candidate.ui_json,
+      fields: fields.filter((field) => !(isRecord(field) && field.column === "files_json" && field.widget === "prompt_files_editor")),
+      slots: [
+        ...(Array.isArray(candidate.ui_json.slots) ? candidate.ui_json.slots.filter((slot) => !isRecord(slot) || slot.name !== PROMPT_FILES_SLOT) : []),
+        { name: PROMPT_FILES_SLOT, placement: "after_content" },
+      ],
+    },
+  });
+  const invalidViews = { ...(loaded.manifest.invalid_views ?? {}) };
+  delete invalidViews[PROMPT_FILES_VIEW];
+  const visibleColumns = loaded.manifest.columns.filter((column) => !(column.table_slug === PROMPT_FILES_TABLE && column.name === "files_json"));
+  const manifest: ModuleManifest = { ...loaded.manifest, columns: visibleColumns, views, invalid_views: invalidViews };
+  return { ...loaded, manifest };
 }
 
-function resourceModuleService(service: ModuleRuntimeService, t: Translate): ModuleRuntimeService {
+/** The doorway's own read path: adapt the manifest, then page the merged tables client-side. */
+export function resourceModuleService(service: ModuleRuntimeService, t: Translate): ModuleRuntimeService {
   return {
     ...service,
     async loadModule(projectId, moduleId, sessionId, options) {
-      return withResourceModuleViews(await service.loadModule(projectId, moduleId, sessionId, options), moduleId);
+      return withResourceModuleViews(await service.loadModule(projectId, moduleId, sessionId, options));
     },
     async listRows(scope: ModuleRuntimeScope, tableSlug: string, query: ModuleListQuery = {}, requestOptions) {
-      const scopeTables: Readonly<Record<string, ReadonlySet<string>>> = {
-        mod_prompts: new Set(["prompt_profiles", "prompt_paths"]),
-        mod_files: new Set(["files"]),
-        mod_mcp: new Set(["mcp_packages"]),
-      };
-      if (!scopeTables[scope.moduleId]?.has(tableSlug)) return service.listRows(scope, tableSlug, query, requestOptions);
+      if (!RESOURCE_MODULE_TABLES[scope.moduleId]?.has(tableSlug)) return service.listRows(scope, tableSlug, query, requestOptions);
       const pageSize = 200;
       const collected: ModuleRow[] = [];
       let total = 0;
@@ -274,6 +283,22 @@ function PromptFilesEditor({ service, scope, row, onRefresh }: { service: Module
   </section>;
 }
 
+/**
+ * The prompt-files slot is keyed by the `prompt_path_settings` detail view over the
+ * `prompt_paths` table, not by a module id: the merged Management module renders it,
+ * and any unrelated table that happens to reuse the slot name is refused here.
+ */
+export function createResourceModuleSlots(service: ModuleRuntimeService): ModuleSlotRegistry {
+  return {
+    resolve(_moduleId, viewSlug, slot) {
+      if (viewSlug !== PROMPT_FILES_VIEW || slot !== PROMPT_FILES_SLOT) return undefined;
+      return ({ view, row, scope, onRefresh }) => view.kind === "detail" && view.table_slug === PROMPT_FILES_TABLE && row
+        ? <PromptFilesEditor service={service} scope={scope} row={row} onRefresh={onRefresh} />
+        : null;
+    },
+  };
+}
+
 function moduleLabel(t: Translate, moduleId: string): string {
   const definition = FIRST_PARTY_MODULES.find((item) => item.id === moduleId);
   return definition ? t(definition.labelKey) : moduleId;
@@ -309,14 +334,7 @@ export function ProjectModuleResources({ projectId, accessToken }: { projectId: 
   const requestedModuleId = searchParams.get("module") ?? "";
   const active = boundModules.find(({ module }) => module.id === requestedModuleId);
 
-  const slots: ModuleSlotRegistry = useMemo(() => ({
-    resolve(moduleId, viewSlug, slot) {
-      if (moduleId === "mod_prompts" && viewSlug === PROMPT_FILES_VIEW && slot === PROMPT_FILES_SLOT) {
-        return ({ scope, row, onRefresh }) => row ? <PromptFilesEditor service={service} scope={scope} row={row} onRefresh={onRefresh} /> : null;
-      }
-      return undefined;
-    },
-  }), [service]);
+  const slots: ModuleSlotRegistry = useMemo(() => createResourceModuleSlots(service), [service]);
 
   const openModule = useCallback((moduleId: string) => {
     const next = new URLSearchParams(searchParams);

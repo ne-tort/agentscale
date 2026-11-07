@@ -11,6 +11,20 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.application.ai_keys.audit_service import AiKeyAuditService
+from prodavan.application.ai_keys.endpoint import (
+    API_KINDS,
+    DEFAULT_ENDPOINT_PROVIDER,
+    DEFAULT_LEGACY_API_KIND,
+    DEFAULT_LEGACY_PROVIDER,
+    EMPTY_ENDPOINT,
+    PROVIDERS,
+    agent_provider_from_entry,
+    api_kind_from_entry,
+    endpoint_fields_for,
+    ensure_endpoint_entry,
+    normalize_base_url,
+    validation_error,
+)
 from prodavan.domain.ai_keys import (
     ApiKind,
     KeyStatus,
@@ -32,8 +46,8 @@ from prodavan.infrastructure.persistence.models.projects import ProjectRow
 from prodavan.infrastructure.secrets.file_store import new_key_id
 from prodavan.infrastructure.secrets.store import SecretStore, get_secret_store
 
-PROVIDERS = frozenset({"cursor", "codex", "claude_code", "xai"})
-API_KINDS = frozenset(k.value for k in ApiKind)
+#: `PROVIDERS` / `API_KINDS` are imported above (and re-exported from this
+#: module for existing callers); the vocabularies live in `ai_keys.endpoint`.
 KEY_EXPIRING_SOON_DAYS = 14
 _SYSTEM_PRINCIPAL = Principal(sub="system:lazy-expire")
 
@@ -270,8 +284,13 @@ class AiKeysService:
         *,
         company_ids: list[str] | None = None,
         last_probe: dict | None = None,
+        endpoint: dict | None = None,
     ) -> dict:
         prefix = row.secret_ref[:24] + "…" if len(row.secret_ref) > 24 else row.secret_ref
+        # Where the key points: resolved from the linked `ai.http_providers`
+        # entry (the storage for an admin-entered endpoint), null when the key
+        # has none. Additive fields — existing consumers keep working.
+        where = endpoint or EMPTY_ENDPOINT
         return {
             "id": row.id,
             "name": row.name,
@@ -280,6 +299,9 @@ class AiKeysService:
             "owner_scope": row.owner_scope,
             "owner_company_id": row.owner_company_id,
             "catalog_entry_id": row.catalog_entry_id,
+            "base_url": where.get("base_url"),
+            "models_path": where.get("models_path"),
+            "auth_scheme": where.get("auth_scheme"),
             "secret_ref_prefix": prefix,
             "has_secret": bool((row.secret_ref or "").strip()),
             "status": row.status,
@@ -304,6 +326,7 @@ class AiKeysService:
                 disabled_ids.append(row.id)
         await self._finalize_lazy_disabled(disabled_ids)
         probes = await self._last_probes_batch([r.id for r in rows])
+        endpoints = await endpoint_fields_for(self._session, [r.catalog_entry_id for r in rows])
         out: list[dict] = []
         for row in rows:
             out.append(
@@ -311,6 +334,7 @@ class AiKeysService:
                     row,
                     company_ids=await self._company_ids(row.id),
                     last_probe=probes.get(row.id),
+                    endpoint=endpoints.get(row.catalog_entry_id or ""),
                 )
             )
         return out
@@ -353,18 +377,75 @@ class AiKeysService:
             await self._finalize_lazy_disabled([key_id])
             row = await self._get_row(key_id)
         probes = await self._last_probes_batch([key_id])
+        endpoints = await endpoint_fields_for(self._session, [row.catalog_entry_id])
         return self._to_public(
             row,
             company_ids=await self._company_ids(key_id),
             last_probe=probes.get(key_id),
+            endpoint=endpoints.get(row.catalog_entry_id or ""),
+        )
+
+    async def _resolve_endpoint(
+        self,
+        *,
+        base_url: str | None,
+        provider: str | None,
+        api_kind: str | None,
+        catalog_entry_id: str | None,
+        models_path: str | None = None,
+        chat_completions_path: str | None = None,
+        auth_scheme: str | None = None,
+    ) -> tuple[str, str, str | None]:
+        """Return ``(provider, api_kind, catalog_entry_id)`` for a create.
+
+        Two mutually exclusive shapes:
+        * endpoint shape — `base_url` given: the endpoint becomes (or reuses) an
+          `ai.http_providers` entry and the key inherits its api_kind/provider,
+          so a reused seeded entry keeps the runtime provider it was seeded with.
+        * legacy shape — `provider`/`api_kind` from the catalog, no `base_url`:
+          unchanged behaviour.
+        """
+        explicit_catalog = (catalog_entry_id or "").strip() or None
+        if base_url is None:
+            # Legacy shape: the body used to default to cursor/cursor_sdk, so a
+            # create that omits them still produces the same key.
+            resolved_provider = (provider or DEFAULT_LEGACY_PROVIDER).strip()
+            resolved_kind = (api_kind or DEFAULT_LEGACY_API_KIND).strip()
+            self._validate_provider_kind(resolved_provider, resolved_kind)
+            return resolved_provider, resolved_kind, explicit_catalog
+
+        # One create must not say where the key points twice: the resolver
+        # would silently prefer the catalog link and drop the endpoint.
+        if explicit_catalog is not None:
+            raise validation_error(
+                "base_url and catalog_entry_id are mutually exclusive: "
+                "the endpoint becomes its own catalog entry"
+            )
+        if provider is not None or api_kind is not None:
+            raise validation_error(
+                "base_url cannot be combined with provider/api_kind: "
+                "the endpoint entry defines both"
+            )
+        entry = await ensure_endpoint_entry(
+            self._session,
+            base_url=normalize_base_url(base_url),
+            models_path=models_path,
+            chat_completions_path=chat_completions_path,
+            auth_scheme=auth_scheme,
+        )
+        payload = entry.payload or {}
+        return (
+            agent_provider_from_entry(payload) or DEFAULT_ENDPOINT_PROVIDER,
+            api_kind_from_entry(payload),
+            entry.id,
         )
 
     async def create_key(
         self,
         *,
         name: str,
-        provider: str,
-        api_kind: str,
+        provider: str | None = None,
+        api_kind: str | None = None,
         secret: str | None = None,
         next_renewal_at: datetime | None = None,
         renewal_price: str | Decimal | None = None,
@@ -374,9 +455,12 @@ class AiKeysService:
         owner_scope: str = "platform",
         owner_company_id: str | None = None,
         catalog_entry_id: str | None = None,
+        base_url: str | None = None,
+        models_path: str | None = None,
+        chat_completions_path: str | None = None,
+        auth_scheme: str | None = None,
         principal: Principal | None = None,
     ) -> dict:
-        self._validate_provider_kind(provider, api_kind)
         scope = (owner_scope or "platform").strip().lower()
         if scope not in {"platform", "company"}:
             raise AppError(
@@ -394,6 +478,17 @@ class AiKeysService:
                     detail="owner_company_id required for company-owned keys",
                 )
             company_ids = []
+        # Resolved after the cheap scope checks: an endpoint create materialises
+        # a catalog entry, so invalid requests must be rejected before that.
+        provider, api_kind, catalog_entry_id = await self._resolve_endpoint(
+            base_url=base_url,
+            provider=provider,
+            api_kind=api_kind,
+            catalog_entry_id=catalog_entry_id,
+            models_path=models_path,
+            chat_completions_path=chat_completions_path,
+            auth_scheme=auth_scheme,
+        )
         key_id = new_key_id()
         has_secret = secret is not None and secret.strip() != ""
         secret_ref = self._secrets.put(key_id, secret) if has_secret else ""
@@ -432,7 +527,12 @@ class AiKeysService:
             },
         )
         self._emit_metrics_created(row, list(company_ids or []))
-        return self._to_public(row, company_ids=list(company_ids or []))
+        endpoints = await endpoint_fields_for(self._session, [row.catalog_entry_id])
+        return self._to_public(
+            row,
+            company_ids=list(company_ids or []),
+            endpoint=endpoints.get(row.catalog_entry_id or ""),
+        )
 
     async def list_keys_for_company(self, company_id: str) -> list[dict]:
         """Company-owned keys ∪ Admin-bound platform keys (bound → writable=false)."""
@@ -461,6 +561,7 @@ class AiKeysService:
                 seen.add(row.id)
                 all_rows.append(row)
         probes = await self._last_probes_batch([r.id for r in all_rows])
+        endpoints = await endpoint_fields_for(self._session, [r.catalog_entry_id for r in all_rows])
         out: list[dict] = []
         for row in all_rows:
             is_owned = row.owner_scope == "company" and row.owner_company_id == company_id
@@ -468,6 +569,7 @@ class AiKeysService:
                 row,
                 company_ids=[company_id] if is_owned else await self._company_ids(row.id),
                 last_probe=probes.get(row.id),
+                endpoint=endpoints.get(row.catalog_entry_id or ""),
             )
             pub.update(
                 company_view_flags(
@@ -503,6 +605,61 @@ class AiKeysService:
     async def patch_key(self, key_id: str, updates: dict[str, Any], *, principal: Principal | None = None) -> dict:
         row = await self._get_row(key_id)
         old_status = row.status
+        updates = dict(updates)
+        # Endpoint re-pointing: a `base_url` on PATCH resolves through the same
+        # helper the create path uses, so two keys on one endpoint stay on one
+        # shared catalog entry. `models_path` / `chat_completions_path` /
+        # `auth_scheme` live on that (shared) entry and only take effect
+        # together with `base_url`; alone they are not per-key settings.
+        endpoint_base_url = updates.pop("base_url", None)
+        endpoint_models_path = updates.pop("models_path", None)
+        endpoint_chat_path = updates.pop("chat_completions_path", None)
+        endpoint_auth_scheme = updates.pop("auth_scheme", None)
+        if endpoint_base_url is not None:
+            if updates.get("provider") is not None or updates.get("api_kind") is not None:
+                raise validation_error(
+                    "base_url cannot be combined with provider/api_kind: "
+                    "the endpoint entry defines both"
+                )
+            if updates.get("catalog_entry_id") is not None:
+                raise validation_error(
+                    "base_url and catalog_entry_id are mutually exclusive: "
+                    "the endpoint becomes its own catalog entry"
+                )
+            # An explicit null would wipe the entry id set just below.
+            updates.pop("catalog_entry_id", None)
+            resolved_provider, resolved_kind, resolved_catalog = await self._resolve_endpoint(
+                base_url=str(endpoint_base_url),
+                provider=None,
+                api_kind=None,
+                catalog_entry_id=None,
+                models_path=endpoint_models_path,
+                chat_completions_path=endpoint_chat_path,
+                auth_scheme=endpoint_auth_scheme,
+            )
+            row.provider = resolved_provider
+            row.api_kind = resolved_kind
+            row.catalog_entry_id = resolved_catalog
+            # Audit/metrics report the fields the admin actually sent; the
+            # endpoint itself is never a secret, but models_path is only ever
+            # written together with base_url (shared entry).
+            updates["base_url"] = True
+            if endpoint_models_path is not None:
+                updates["models_path"] = True
+            if endpoint_chat_path is not None:
+                updates["chat_completions_path"] = True
+            if endpoint_auth_scheme is not None:
+                updates["auth_scheme"] = True
+        elif any(
+            value is not None
+            for value in (endpoint_models_path, endpoint_chat_path, endpoint_auth_scheme)
+        ):
+            # These live on the shared catalog entry, never on the key: without
+            # base_url there is nothing to write them to.
+            raise validation_error(
+                "models_path/chat_completions_path/auth_scheme require base_url: "
+                "they are stored on the shared endpoint entry"
+            )
         if "name" in updates and updates["name"] is not None:
             row.name = str(updates["name"]).strip()
         if "provider" in updates and updates["provider"] is not None:
@@ -552,17 +709,30 @@ class AiKeysService:
             if row.status == KeyStatus.DISABLED and old_status != KeyStatus.DISABLED
             else "ai_key.updated"
         )
+        # A re-pointed key changes provider/api_kind as a side effect of the
+        # endpoint entry; report both so the audit trail and the provider_meta
+        # event describe what actually happened.
+        reported = dict(updates)
+        if endpoint_base_url is not None:
+            reported["provider"] = row.provider
+            reported["api_kind"] = row.api_kind
         await self._emit_audit(
             event_type=event_type,
             key_id=key_id,
             principal=principal,
-            detail={"fields": sorted(updates.keys()), "status": row.status},
+            detail={"fields": sorted(reported.keys()), "status": row.status},
         )
-        self._emit_metrics_updated(row, updates)
+        self._emit_metrics_updated(row, reported)
         cascade: dict[str, Any] = {}
         if row.status == KeyStatus.DISABLED and old_status != KeyStatus.DISABLED:
             cascade = await self.cascade_key_runtime_stop(key_id, principal=principal)
-        out = self._to_public(row, company_ids=await self._company_ids(key_id))
+        await self._session.refresh(row)
+        endpoints = await endpoint_fields_for(self._session, [row.catalog_entry_id])
+        out = self._to_public(
+            row,
+            company_ids=await self._company_ids(key_id),
+            endpoint=endpoints.get(row.catalog_entry_id or ""),
+        )
         if cascade:
             out["runtime_cascade"] = cascade
         return out

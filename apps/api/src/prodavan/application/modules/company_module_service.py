@@ -123,7 +123,12 @@ class CompanyModuleService:
                     ModuleCompanyGrantRow.id.isnot(None),
                     ModuleRow.company_grant_scope == ModuleCompanyGrantScope.ALL,
                     (ModuleRow.owner_scope == OwnerScope.COMPANY) & (ModuleRow.owner_company_id == company_id),
-                )
+                ),
+                # Archived definitions stay in the platform catalog (and keep
+                # their rows) but are no longer offered to a company. That is
+                # how the modules folded into «Управление» disappear from the
+                # company surface while staying recoverable.
+                ModuleRow.status != ModuleStatus.ARCHIVED,
             )
             .order_by(ModuleRow.created_at.desc())
         )

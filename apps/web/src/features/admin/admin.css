@@ -12,15 +12,6 @@
   padding: 36px 32px 80px;
 }
 
-.admin-heading h1 {
-  font-size: 26px;
-  line-height: 1.2;
-  margin: 0;
-}
-
-.admin-heading p {
-  margin: 6px 0 0;
-}
 
 .admin-muted {
   color: var(--text-muted);
@@ -58,22 +49,6 @@
   margin-top: 24px;
 }
 
-.admin-section__header {
-  align-items: flex-start;
-  display: flex;
-  gap: 16px;
-  justify-content: space-between;
-  margin-bottom: 16px;
-}
-
-.admin-section__header h2 {
-  font-size: 18px;
-  margin: 0;
-}
-
-.admin-section__header p {
-  margin: 4px 0 0;
-}
 
 .admin-back {
   color: var(--text-muted);
@@ -149,6 +124,67 @@
   display: flex;
   gap: 14px;
   margin-bottom: 10px;
+}
+
+/* Search and the list's primary action share one line: finding a row and adding
+   one are the two things a person does to a list, so they belong together. */
+.admin-toolbar__count {
+  white-space: nowrap;
+}
+
+.admin-toolbar__action {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+/* A field that lives inside a table cell, so it takes the cell's width. */
+.admin-input--inline {
+  font-size: 13px;
+  padding: 5px 8px;
+  width: auto;
+}
+
+.admin-chips--below {
+  margin-top: 6px;
+}
+
+/* The endpoint as a person recognises it: a host, with the full address in the
+   tooltip. A long API path in a table cell is noise. */
+.admin-endpoint {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+
+/* Everything past the two things a person has: paths, header, timeouts. */
+.admin-advanced {
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+
+.admin-advanced > summary {
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 13px;
+  list-style: none;
+}
+
+.admin-advanced > summary::-webkit-details-marker {
+  display: none;
+}
+
+.admin-advanced > summary::before {
+  content: "▸ ";
+  display: inline-block;
+  transition: transform 120ms ease;
+}
+
+.admin-advanced[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.admin-advanced > .admin-field {
+  margin-top: 12px;
 }
 
 .admin-search {
@@ -539,7 +575,6 @@
     padding: 24px 16px 60px;
   }
 
-  .admin-section__header,
   .admin-company-header {
     flex-direction: column;
   }

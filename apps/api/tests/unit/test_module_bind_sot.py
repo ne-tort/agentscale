@@ -30,21 +30,20 @@ def test_module_bind_kind_enum() -> None:
 
 
 def test_default_bind_helpers() -> None:
-    assert default_project_bind_kind("mod_prompts") == ModuleBindKind.GLOBAL
-    assert default_project_bind_kind("mod_mcp") == ModuleBindKind.GLOBAL
-    assert default_project_bind_kind("mod_files") == ModuleBindKind.GLOBAL
+    # «Управление» replaced the three former management modules and still
+    # defaults to a global project bind (projects share the cabinet SoT).
+    assert default_project_bind_kind("mod_management") == ModuleBindKind.GLOBAL
     assert default_project_bind_kind("mod_equipment") == ModuleBindKind.GLOBAL
     assert default_project_bind_kind("mod_custom") == ModuleBindKind.GLOBAL
-    assert default_cabinet_bind_kind("mod_prompts") == ModuleBindKind.LOCAL
-    assert default_cabinet_bind_kind("mod_files") == ModuleBindKind.LOCAL
+    assert default_cabinet_bind_kind("mod_management") == ModuleBindKind.LOCAL
     assert default_cabinet_bind_kind("mod_equipment") == ModuleBindKind.LOCAL
     assert default_child_may_edit(ModuleBindKind.LOCAL) is True
     assert default_child_may_edit(ModuleBindKind.GLOBAL) is False
     assert default_child_may_edit("local") is True
     assert default_child_may_edit(ModuleBindKind.GLOBAL, "mod_equipment") is True
-    assert default_child_may_edit(ModuleBindKind.GLOBAL, "mod_prompts") is False
+    assert default_child_may_edit(ModuleBindKind.GLOBAL, "mod_management") is False
     assert LOCAL_DEFAULT_PROJECT_MODULES == frozenset()
-    assert GLOBAL_DEFAULT_PROJECT_MODULES == frozenset({"mod_prompts", "mod_mcp", "mod_files"})
+    assert GLOBAL_DEFAULT_PROJECT_MODULES == frozenset({"mod_management"})
 
 
 @pytest.mark.asyncio
@@ -52,7 +51,7 @@ async def test_resolve_sot_follows_global_project_bind() -> None:
     session = MagicMock()
     session.get = AsyncMock(return_value=SimpleNamespace(cabinet_id="cab_1"))
     svc = ModuleInstanceService(session)
-    cab_inst = SimpleNamespace(id="minst_cab", module_id="mod_prompts")
+    cab_inst = SimpleNamespace(id="minst_cab", module_id="mod_management")
     mp = SimpleNamespace(bind_kind=ModuleBindKind.GLOBAL, child_may_edit=False)
     mp_result = MagicMock()
     mp_result.scalar_one_or_none.return_value = mp
@@ -67,7 +66,7 @@ async def test_resolve_sot_follows_global_project_bind() -> None:
     with patch.object(svc, "get_instance", AsyncMock(side_effect=get_inst)):
         session.execute = AsyncMock(return_value=mp_result)
         out = await svc.resolve_sot_instance(
-            module_id="mod_prompts",
+            module_id="mod_management",
             owner_kind=OWNER_PROJECT,
             owner_id="proj_1",
         )
@@ -117,7 +116,7 @@ async def test_resolve_sot_global_cabinet_walks_to_company() -> None:
         return_value=SimpleNamespace(owner_company_id="co_1", company_id="co_1")
     )
     svc = ModuleInstanceService(session)
-    company_inst = SimpleNamespace(id="minst_co", module_id="mod_prompts")
+    company_inst = SimpleNamespace(id="minst_co", module_id="mod_management")
     mc = SimpleNamespace(bind_kind=ModuleBindKind.GLOBAL, child_may_edit=False)
     result = MagicMock()
     result.scalar_one_or_none.return_value = mc
@@ -132,7 +131,7 @@ async def test_resolve_sot_global_cabinet_walks_to_company() -> None:
 
     with patch.object(svc, "get_instance", AsyncMock(side_effect=get_inst)):
         out = await svc.resolve_sot_instance(
-            module_id="mod_prompts",
+            module_id="mod_management",
             owner_kind=OWNER_CABINET,
             owner_id="cab_1",
         )
@@ -157,7 +156,7 @@ async def test_sot_may_edit_matrix() -> None:
     session.execute = AsyncMock(return_value=result)
     with patch.object(svc, "get_instance", AsyncMock(return_value=None)):
         assert not await svc.sot_may_edit(
-            module_id="mod_prompts", owner_kind=OWNER_PROJECT, owner_id="p1"
+            module_id="mod_management", owner_kind=OWNER_PROJECT, owner_id="p1"
         )
 
     # Global unlocked MP → editable shared SoT.
@@ -165,7 +164,7 @@ async def test_sot_may_edit_matrix() -> None:
     result.scalar_one_or_none.return_value = unlocked
     with patch.object(svc, "get_instance", AsyncMock(return_value=None)):
         assert await svc.sot_may_edit(
-            module_id="mod_prompts", owner_kind=OWNER_PROJECT, owner_id="p1"
+            module_id="mod_management", owner_kind=OWNER_PROJECT, owner_id="p1"
         )
 
     # Global locked MC → not editable.
@@ -173,7 +172,7 @@ async def test_sot_may_edit_matrix() -> None:
     result.scalar_one_or_none.return_value = mc_locked
     with patch.object(svc, "get_instance", AsyncMock(return_value=None)):
         assert not await svc.sot_may_edit(
-            module_id="mod_prompts", owner_kind=OWNER_CABINET, owner_id="cab_1"
+            module_id="mod_management", owner_kind=OWNER_CABINET, owner_id="cab_1"
         )
 
 
@@ -190,7 +189,7 @@ async def test_ensure_project_instance_rejects_global_bind() -> None:
         patch.object(svc, "get_instance", AsyncMock(return_value=None)),
         pytest.raises(AppError) as ei,
     ):
-        await svc.ensure_project_instance(project_id="proj_1", module_id="mod_prompts")
+        await svc.ensure_project_instance(project_id="proj_1", module_id="mod_management")
     assert ei.value.status == 422
 
 
@@ -231,10 +230,10 @@ async def test_ensure_cabinet_instance_global_uses_company_sot() -> None:
         patch.object(svc, "get_instance", AsyncMock(return_value=None)),
         patch.object(svc, "ensure_company_instance", AsyncMock(return_value=parent)) as ensure_co,
     ):
-        out = await svc.ensure_cabinet_instance(cabinet_id="cab_1", module_id="mod_prompts")
+        out = await svc.ensure_cabinet_instance(cabinet_id="cab_1", module_id="mod_management")
 
     assert out is parent
-    ensure_co.assert_awaited_once_with(company_id="co_1", module_id="mod_prompts")
+    ensure_co.assert_awaited_once_with(company_id="co_1", module_id="mod_management")
 
 
 @pytest.mark.asyncio
@@ -284,7 +283,7 @@ async def test_sot_for_project_global_locked_forbids_write() -> None:
         pytest.raises(AppError) as ei,
     ):
         bind_cls.return_value.get_project_binding = AsyncMock(return_value=binding)
-        await svc._sot_for_project(project_id="proj_1", module_id="mod_prompts", write=True)
+        await svc._sot_for_project(project_id="proj_1", module_id="mod_management", write=True)
 
     assert ei.value.status == 403
     assert "read-only" in (ei.value.detail or "")
@@ -309,7 +308,7 @@ async def test_sot_for_project_global_unlocked_resolves_parent() -> None:
     ) as bind_cls:
         bind_cls.return_value.get_project_binding = AsyncMock(return_value=binding)
         out = await svc._sot_for_project(
-            project_id="proj_1", module_id="mod_prompts", write=True
+            project_id="proj_1", module_id="mod_management", write=True
         )
 
     assert out is parent

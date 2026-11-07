@@ -123,3 +123,103 @@ describe("admin service", () => {
     await expect(service.listCompanies()).rejects.toThrow(/connection failed/i);
   });
 });
+
+describe("keys are an endpoint and a secret", () => {
+  it("sends the endpoint instead of a provider", async () => {
+    const { calls, service } = fakeApi(() => ({ id: "aik_1" }));
+    await service.createKey({
+      name: "Main",
+      baseUrl: "https://api.example.com/v1",
+      secret: "sk-test",
+      companyIds: ["co_1"],
+    });
+    expect(calls[0]).toMatchObject({ url: "/api/v1/admin/ai-keys", method: "POST" });
+    expect(calls[0].body).toEqual({
+      name: "Main",
+      base_url: "https://api.example.com/v1",
+      secret: "sk-test",
+      company_ids: ["co_1"],
+      // No `provider`: the address identifies the API. Sending one would let the
+      // server fall back to a catalog entry the administrator never chose.
+    });
+  });
+
+  it("sends the advanced fields only when they were filled in", async () => {
+    const { calls, service } = fakeApi(() => ({ id: "aik_1" }));
+    await service.createKey({
+      name: "Gateway",
+      baseUrl: "https://gw.example.com",
+      secret: "sk",
+      companyIds: [],
+      modelsPath: "/v1/models",
+      chatCompletionsPath: "/v1/chat/completions",
+      authScheme: "x-api-key",
+    });
+    expect(calls[0].body).toEqual({
+      name: "Gateway",
+      base_url: "https://gw.example.com",
+      secret: "sk",
+      company_ids: [],
+      models_path: "/v1/models",
+      chat_completions_path: "/v1/chat/completions",
+      auth_scheme: "x-api-key",
+    });
+  });
+
+  it("reads the endpoint back so the list can say where a key points", async () => {
+    const { service } = fakeApi(() => ({
+      items: [
+        {
+          id: "aik_1",
+          name: "Main",
+          status: "active",
+          company_ids: ["co_1"],
+          has_secret: true,
+          base_url: "https://api.example.com/v1",
+          models_path: "/models",
+          auth_scheme: "bearer",
+        },
+        { id: "aik_2", name: "Legacy", provider: "cursor" },
+      ],
+    }));
+    const [keyed, legacy] = await service.listKeys();
+    expect(keyed).toMatchObject({
+      baseUrl: "https://api.example.com/v1",
+      modelsPath: "/models",
+      authScheme: "bearer",
+    });
+    // A key from before endpoints were a field still lists, with no address.
+    expect(legacy.baseUrl).toBeNull();
+  });
+});
+
+describe("a module's company scope", () => {
+  it("is read from the admin row", async () => {
+    const { service } = fakeApi(() => ({
+      items: [
+        { id: "mod_management", name: "Управление", company_grant_scope: "all", company_ids: [] },
+        { id: "mod_equipment", name: "Подбор техники", company_grant_scope: "selected", company_ids: ["co_1"] },
+      ],
+    }));
+    const [all, selected] = await service.listModules();
+    expect(all.allCompanies).toBe(true);
+    expect(selected.allCompanies).toBe(false);
+  });
+
+  it("is written as an ordinary PATCH and read back", async () => {
+    const { calls, service } = fakeApi(() => ({ id: "mod_1", company_grant_scope: "all" }));
+    await expect(service.setModuleScope("mod_1", "all")).resolves.toBe("all");
+    expect(calls[0]).toMatchObject({
+      url: "/api/v1/admin/modules/mod_1",
+      method: "PATCH",
+      body: { company_grant_scope: "all" },
+    });
+  });
+
+  it("believes the server when it answers with a different scope", async () => {
+    // A module the platform refuses to widen must not leave the control showing
+    // the value the administrator picked.
+    const { service } = fakeApi(() => ({ id: "mod_1", company_grant_scope: "selected" }));
+    await expect(service.setModuleScope("mod_1", "all")).resolves.toBe("selected");
+  });
+});

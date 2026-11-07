@@ -20,7 +20,13 @@ class ModuleBindKind(StrEnum):
 LOCAL_DEFAULT_PROJECT_MODULES: frozenset[str] = frozenset()
 
 # Back-compat alias (was an allowlist of global defaults; now unused for defaults).
-GLOBAL_DEFAULT_PROJECT_MODULES = frozenset({"mod_prompts", "mod_mcp", "mod_files"})
+#
+# «Управление» replaced the three former modules (Промпты / MCP / Файлы): a
+# project reaches its prompts, MCP packages and files through one module, and it
+# still reads them from the parent SoT rather than forking a project leaf. The
+# set must therefore name the merged module — keeping the three old ids would
+# leave the current product module out of it.
+GLOBAL_DEFAULT_PROJECT_MODULES = frozenset({"mod_management"})
 
 # Global MP binds that still allow writes into parent SoT (agent fills chat-scoped
 # rows like request_lines / found_offers while sharing catalogs).

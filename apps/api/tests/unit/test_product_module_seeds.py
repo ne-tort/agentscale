@@ -3,7 +3,9 @@
 from prodavan.application.platform.equipment_prompt_content import EQUIPMENT_RULES_FILES
 from prodavan.application.platform.product_module_seeds import (
     EXAMPLE_MODULE_IDS,
+    LEGACY_MODULE_ROWS,
     PRODUCT_MODULES,
+    PRODUCT_MODULE_IDS,
     mod_equipment_meta,
     mod_files_meta,
     mod_mcp_meta,
@@ -14,17 +16,25 @@ from prodavan.application.platform.product_module_upsert import upsert_product_m
 
 def test_upsert_product_modules_helper_is_importable() -> None:
     assert callable(upsert_product_modules)
-    assert len(PRODUCT_MODULES) == 4
+    # «Управление» + «Подбор техники» are the product modules; the three merged
+    # ids are seeded as archived shells (see LEGACY_MODULE_ROWS).
+    assert len(PRODUCT_MODULES) == 5
 
 
 def test_product_modules_replace_examples() -> None:
     ids = {m[0] for m in PRODUCT_MODULES}
     assert ids == {
+        "mod_management",
+        "mod_equipment",
         "mod_prompts",
         "mod_mcp",
         "mod_files",
-        "mod_equipment",
     }
+    # Only two of those rows are product modules: the merged ones are archived
+    # shells kept so a from-base upgrade can create them at earlier revisions.
+    assert PRODUCT_MODULE_IDS == ("mod_management", "mod_equipment")
+    assert {mid for mid, _ in LEGACY_MODULE_ROWS} == {"mod_prompts", "mod_mcp", "mod_files"}
+    assert all(meta == {} for mid, _, meta in PRODUCT_MODULES if mid in {m[0] for m in LEGACY_MODULE_ROWS})
     assert len(EXAMPLE_MODULE_IDS) == 4
 
 
@@ -133,6 +143,7 @@ def test_prompts_meta_has_materialize_and_seed() -> None:
 
 
 def test_management_tabs_have_unique_icons_and_subtitles() -> None:
+    """The three area tabs keep their icons/subtitles inside «Управление»."""
     prompts = mod_prompts_meta()["tabs"][0]
     mcp = mod_mcp_meta()["tabs"][0]
     files = mod_files_meta()["tabs"][0]

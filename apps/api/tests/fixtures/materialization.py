@@ -14,7 +14,7 @@ MATERIALIZATION_SOURCE = SourceProvenance(
     source_generation=7,
     source_path="prompts/AGENTS.md",
     source_revision="cabinet-rev-7",
-    metadata={"module_id": "mod_prompts", "table_slug": "prompt_paths"},
+    metadata={"module_id": "mod_management", "table_slug": "prompt_paths"},
 )
 
 

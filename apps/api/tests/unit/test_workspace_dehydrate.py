@@ -187,7 +187,7 @@ def test_materialized_paths_from_manifest() -> None:
             "prompts/equipment/60-builds.md",
             "packages/prodavan-equipment",
         ],
-        "mod_prompts": [],
+        "mod_management": [],
     }
     assert materialized_paths_from_manifest(manifest) == frozenset(
         {"AGENTS.md", "prompts/equipment/60-builds.md", "packages/prodavan-equipment"}

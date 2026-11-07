@@ -13,7 +13,7 @@ import { ConfirmButton, DialogForm, Field, ListToolbar, Modal, Notice, useCollec
  */
 export function ModulesPage() {
   const service = useAdminService();
-  const { t } = useI18n();
+  const { t, plural } = useI18n();
   const modules = useCollection(() => service.listModules(), [service]);
   const companies = useCollection(() => service.listCompanies(), [service]);
 
@@ -24,6 +24,7 @@ export function ModulesPage() {
   const [notice, setNotice] = useState<string>();
   const [name, setName] = useState("");
   const [granting, setGranting] = useState<string>();
+  const [switching, setSwitching] = useState<string>();
 
   const companiesById = useMemo(
     () => new Map(companies.rows.map((company) => [company.id, company])),
@@ -55,20 +56,6 @@ export function ModulesPage() {
 
   return (
     <section className="admin-section">
-      <div className="admin-section__header">
-        <div>
-          <h2>{t("admin.modulesTitle")}</h2>
-          <p className="admin-muted">{t("admin.modulesHint")}</p>
-        </div>
-        <button
-          className="admin-button admin-button--primary"
-          onClick={() => { setName(""); setError(undefined); setCreating(true); }}
-          type="button"
-        >
-          {t("admin.newModule")}
-        </button>
-      </div>
-
       <Notice success={notice} />
 
       {modules.loading ? (
@@ -82,7 +69,21 @@ export function ModulesPage() {
         </div>
       ) : (
         <>
-          <ListToolbar count={visible.length} onQuery={setQuery} query={query} />
+          <ListToolbar
+            action={
+              <button
+                className="admin-button admin-button--primary"
+                onClick={() => { setName(""); setError(undefined); setCreating(true); }}
+                type="button"
+              >
+                {t("admin.newModule")}
+              </button>
+            }
+            count={visible.length}
+            label={plural("admin.modulesRecord", visible.length)}
+            onQuery={setQuery}
+            query={query}
+          />
           <table className="admin-table">
             <thead>
               <tr>
@@ -97,12 +98,38 @@ export function ModulesPage() {
                 <tr key={module.id}>
                   <td>{module.name}</td>
                   <td>
-                    {module.allCompanies ? (
-                      <span className="admin-chip">{t("admin.moduleCompaniesAll")}</span>
-                    ) : module.companyIds.length === 0 ? (
-                      <span className="admin-muted">{t("admin.moduleNoCompanies")}</span>
-                    ) : (
-                      <span className="admin-chips">
+                    {/* The scope is a setting, not a verdict: any module can be
+                        granted to every company or to a chosen few, and the
+                        choice is changed here. */}
+                    <select
+                      aria-label={t("admin.moduleScopeAria", { name: module.name })}
+                      className="admin-input admin-input--inline"
+                      onChange={(event) => {
+                        const scope = event.target.value as "all" | "selected";
+                        setSwitching(module.id);
+                        void service
+                          .setModuleScope(module.id, scope)
+                          .then(async (updated) => {
+                            await modules.reload();
+                            setNotice(updated
+                              ? t("admin.moduleScopeAll", { name: module.name })
+                              : t("admin.moduleScopeSelected", { name: module.name }));
+                          })
+                          .catch((caught: unknown) => {
+                            setNotice(undefined);
+                            setError(caught instanceof Error ? caught.message : t("common.error"));
+                            void modules.reload();
+                          })
+                          .finally(() => setSwitching(undefined));
+                      }}
+                      disabled={switching === module.id}
+                      value={module.allCompanies ? "all" : "selected"}
+                    >
+                      <option value="all">{t("admin.moduleCompaniesAll")}</option>
+                      <option value="selected">{t("admin.moduleCompaniesSelected")}</option>
+                    </select>
+                    {!module.allCompanies && module.companyIds.length > 0 && (
+                      <span className="admin-chips admin-chips--below">
                         {module.companyIds.map((id) => (
                           <Link className="admin-chip" key={id} to={`/admin/companies/${encodeURIComponent(id)}`}>
                             {companiesById.get(id)?.name ?? id}
@@ -117,6 +144,7 @@ export function ModulesPage() {
                       className="admin-button"
                       disabled={module.allCompanies}
                       onClick={() => setGranting(module.id)}
+                      title={module.allCompanies ? t("admin.moduleGrantDisabledAll") : undefined}
                       type="button"
                     >
                       {t("admin.moduleGrant")}

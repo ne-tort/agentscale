@@ -256,14 +256,22 @@ class MaterializePlanner:
         project_id: str,
         cabinet_id: str | None = None,
     ) -> str | None:
+        """Active prompt profile of the project, read from the module that owns it.
+
+        Prompt profiles and ``prompt_paths`` used to live in their own module
+        (``mod_prompts``); they are now tables of «Управление». The lookup is
+        keyed on the merged module **and** the ``prompt_profiles`` table, so it
+        keeps working whatever else the module declares.
+        """
         from prodavan.application.modules.module_instance_service import (
             OWNER_PROJECT,
             ModuleInstanceService,
         )
+        from prodavan.application.platform.product_module_seeds import MANAGEMENT_MODULE_ID
 
         instances = ModuleInstanceService(self._session)
         sot = await instances.resolve_sot_instance(
-            module_id="mod_prompts",
+            module_id=MANAGEMENT_MODULE_ID,
             owner_kind=OWNER_PROJECT,
             owner_id=project_id,
         )
@@ -271,7 +279,7 @@ class MaterializePlanner:
             from prodavan.application.modules.module_instance_service import OWNER_CABINET
 
             sot = await instances.resolve_sot_instance(
-                module_id="mod_prompts",
+                module_id=MANAGEMENT_MODULE_ID,
                 owner_kind=OWNER_CABINET,
                 owner_id=cabinet_id,
             )
@@ -500,8 +508,9 @@ class MaterializePlanner:
             ]
         if fmt == "prompt_paths":
             # Профиль нужен только правилам с плейсхолдером {{active_profile_id}}
-            # (mod_prompts). Правила других модулей (напр. equipment_prompts)
-            # профилей не знают — их фрагменты мерджатся по workspace_path.
+            # (prompt_paths из «Управления»). Правила других модулей (напр.
+            # equipment_prompts) профилей не знают — их фрагменты мерджатся по
+            # workspace_path.
             needs_profile = "{{active_profile_id}}" in str(source.get("filter") or "")
             if needs_profile and not active_profile_id:
                 return []

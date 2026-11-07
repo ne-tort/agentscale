@@ -7,18 +7,23 @@ import { PickListModal } from "./PickListModal";
 import { ConfirmButton, DialogForm, Field, ListToolbar, Modal, Notice, useCollection } from "./ui";
 
 /**
- * Provider keys — one row per key, showing which companies may use it.
+ * API keys — one row per key, showing where it points and which companies may use it.
  *
- * Creating a key asks for the company up front, because a key nobody can use is
- * a dead row. The provider is chosen from the catalog the platform already has;
- * editing that catalog is not an administrator's job and is not on this screen.
+ * A key is an endpoint plus a secret. There is no provider to choose from: the
+ * administrator knows the address their key belongs to, and picking a provider
+ * from a list we maintain only ever meant "guess which entry we seeded for you".
+ * Two keys on the same endpoint share one endpoint record on the server, so the
+ * address is entered once per provider, not once per key.
+ *
+ * Everything past the address — the path models are listed on, the
+ * authorisation header — sits behind «Дополнительно», because a person adding a
+ * key normally only has the two things the provider gave them.
  */
 export function KeysPage() {
   const service = useAdminService();
-  const { t } = useI18n();
+  const { t, plural } = useI18n();
   const keys = useCollection(() => service.listKeys(), [service]);
   const companies = useCollection(() => service.listCompanies(), [service]);
-  const providers = useCollection(() => service.listProviders(), [service]);
 
   const [query, setQuery] = useState("");
   const [creating, setCreating] = useState(false);
@@ -26,8 +31,12 @@ export function KeysPage() {
   const [error, setError] = useState<string>();
   const [notice, setNotice] = useState<string>();
   const [name, setName] = useState("");
-  const [provider, setProvider] = useState("");
+  const [baseUrl, setBaseUrl] = useState("");
   const [secret, setSecret] = useState("");
+  const [modelsPath, setModelsPath] = useState("");
+  const [chatPath, setChatPath] = useState("");
+  const [authScheme, setAuthScheme] = useState<"bearer" | "x-api-key">("bearer");
+  const [advanced, setAdvanced] = useState(false);
   const [companyIds, setCompanyIds] = useState<string[]>([]);
   const [linking, setLinking] = useState<string>();
 
@@ -38,24 +47,47 @@ export function KeysPage() {
   const visible = useMemo(() => {
     const needle = query.trim().toLowerCase();
     if (!needle) return keys.rows;
-    return keys.rows.filter((key) => key.name.toLowerCase().includes(needle));
+    return keys.rows.filter((key) =>
+      [key.name, key.baseUrl ?? "", key.provider].join(" ").toLowerCase().includes(needle),
+    );
   }, [keys.rows, query]);
 
   function startCreating() {
     setName("");
+    setBaseUrl("");
     setSecret("");
+    setModelsPath("");
+    setChatPath("");
+    setAuthScheme("bearer");
+    setAdvanced(false);
     setCompanyIds([]);
-    setProvider(providers.rows[0]?.id ?? "");
     setError(undefined);
     setCreating(true);
   }
 
   async function submit(event: FormEvent) {
     event.preventDefault();
+    const endpoint = baseUrl.trim();
+    if (!/^https?:\/\//i.test(endpoint)) {
+      setError(t("admin.keyEndpointInvalid"));
+      return;
+    }
     setBusy(true);
     setError(undefined);
     try {
-      await service.createKey({ name: name.trim(), provider, secret, companyIds });
+      await service.createKey({
+        name: name.trim(),
+        baseUrl: endpoint,
+        secret,
+        companyIds,
+        // Paths and the header live on the shared endpoint record, not on the
+        // key. Sending a default would conflict with an endpoint that was
+        // configured differently by whoever added the first key for it — so
+        // these go only when the administrator actually opened and set them.
+        ...(modelsPath.trim() ? { modelsPath: modelsPath.trim() } : {}),
+        ...(chatPath.trim() ? { chatCompletionsPath: chatPath.trim() } : {}),
+        ...(advanced ? { authScheme } : {}),
+      });
       await keys.reload();
       setCreating(false);
       setNotice(t("admin.keyCreated", { name: name.trim() }));
@@ -67,19 +99,14 @@ export function KeysPage() {
   }
 
   const linkingKey = keys.rows.find((key) => key.id === linking);
+  const createButton = (
+    <button className="admin-button admin-button--primary" onClick={startCreating} type="button">
+      {t("admin.newKey")}
+    </button>
+  );
 
   return (
     <section className="admin-section">
-      <div className="admin-section__header">
-        <div>
-          <h2>{t("admin.keysTitle")}</h2>
-          <p className="admin-muted">{t("admin.keysHint")}</p>
-        </div>
-        <button className="admin-button admin-button--primary" onClick={startCreating} type="button">
-          {t("admin.newKey")}
-        </button>
-      </div>
-
       <Notice success={notice} />
 
       {keys.loading ? (
@@ -90,18 +117,22 @@ export function KeysPage() {
         <div className="admin-empty">
           <h3>{t("admin.keysEmpty")}</h3>
           <p className="admin-muted">{t("admin.keysEmptyHint")}</p>
-          <button className="admin-button admin-button--primary" onClick={startCreating} type="button">
-            {t("admin.newKey")}
-          </button>
+          {createButton}
         </div>
       ) : (
         <>
-          <ListToolbar count={visible.length} onQuery={setQuery} query={query} />
+          <ListToolbar
+            action={createButton}
+            count={visible.length}
+            label={plural("admin.keysRecord", visible.length)}
+            onQuery={setQuery}
+            query={query}
+          />
           <table className="admin-table">
             <thead>
               <tr>
                 <th scope="col">{t("admin.keyName")}</th>
-                <th scope="col">{t("admin.keyProvider")}</th>
+                <th scope="col">{t("admin.keyEndpointColumn")}</th>
                 <th scope="col">{t("admin.keyCompanies")}</th>
                 <th scope="col">{t("common.status")}</th>
                 <th scope="col" />
@@ -111,7 +142,13 @@ export function KeysPage() {
               {visible.map((key) => (
                 <tr key={key.id}>
                   <td>{key.name}</td>
-                  <td className="admin-muted">{key.provider || t("admin.keyProviderUnknown")}</td>
+                  <td className="admin-muted">
+                    {key.baseUrl ? (
+                      <span className="admin-endpoint" title={key.baseUrl}>{hostOf(key.baseUrl)}</span>
+                    ) : (
+                      t("admin.keyEndpointUnknown")
+                    )}
+                  </td>
                   <td>
                     {key.companyIds.length === 0 ? (
                       <span className="admin-muted">{t("admin.keyCompaniesEmpty")}</span>
@@ -162,22 +199,17 @@ export function KeysPage() {
                 value={name}
               />
             </Field>
-            <Field label={t("admin.keyProvider")}>
-              <select
+            <Field hint={t("admin.keyEndpointHint")} label={t("admin.keyEndpoint")}>
+              <input
+                autoComplete="off"
                 className="admin-input"
-                onChange={(event) => setProvider(event.target.value)}
+                onChange={(event) => setBaseUrl(event.target.value)}
+                placeholder={t("admin.keyEndpointPlaceholder")}
                 required
-                value={provider}
-              >
-                <option disabled value="">
-                  {t("admin.keyProviderUnknown")}
-                </option>
-                {providers.rows.map((entry) => (
-                  <option key={entry.id} value={entry.id}>
-                    {entry.title}
-                  </option>
-                ))}
-              </select>
+                spellCheck={false}
+                type="url"
+                value={baseUrl}
+              />
             </Field>
             <Field hint={t("admin.keySecretHint")} label={t("admin.keySecret")}>
               <input
@@ -185,10 +217,42 @@ export function KeysPage() {
                 className="admin-input"
                 onChange={(event) => setSecret(event.target.value)}
                 required
+                spellCheck={false}
                 type="password"
                 value={secret}
               />
             </Field>
+            <details className="admin-advanced" onToggle={(event) => setAdvanced(event.currentTarget.open)}>
+              <summary>{t("admin.keyAdvanced")}</summary>
+              <Field label={t("admin.keyModelsPath")}>
+                <input
+                  className="admin-input"
+                  onChange={(event) => setModelsPath(event.target.value)}
+                  placeholder="/models"
+                  spellCheck={false}
+                  value={modelsPath}
+                />
+              </Field>
+              <Field label={t("admin.keyAuthScheme")}>
+                <select
+                  className="admin-input"
+                  onChange={(event) => setAuthScheme(event.target.value === "x-api-key" ? "x-api-key" : "bearer")}
+                  value={authScheme}
+                >
+                  <option value="bearer">{t("admin.keyAuthBearer")}</option>
+                  <option value="x-api-key">{t("admin.keyAuthApiKey")}</option>
+                </select>
+              </Field>
+              <Field label={t("admin.keyChatPath")}>
+                <input
+                  className="admin-input"
+                  onChange={(event) => setChatPath(event.target.value)}
+                  placeholder="/chat/completions"
+                  spellCheck={false}
+                  value={chatPath}
+                />
+              </Field>
+            </details>
             <div className="admin-field">
               <span className="admin-field__label">{t("admin.keyCompanies")}</span>
               <CompanyPicker companies={companies.rows} onChange={setCompanyIds} selected={companyIds} />
@@ -218,6 +282,15 @@ export function KeysPage() {
       )}
     </section>
   );
+}
+
+/** The part of an endpoint a person recognises: `api.openai.com`, not the full path. */
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
 }
 
 function statusLabel(status: string, t: (key: string) => string): string {

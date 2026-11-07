@@ -1178,6 +1178,147 @@ def mod_mcp_meta() -> dict[str, list[Any]]:
     }
 
 
+# --- «Управление»: prompts + MCP + files merged into one module -------------
+#
+# The three areas used to be three independent product modules (mod_prompts,
+# mod_mcp, mod_files). They are now one declarative app: one definition whose
+# meta carries all three areas' tables/views/tabs, one hub view to land on, one
+# instance per owner scope. Slugs of the three areas are disjoint (verified),
+# so the merge is a plain concatenation — nothing is renamed, simplified or
+# dropped, and existing `module_instance_data_rows` keep their table_slug.
+
+MANAGEMENT_MODULE_ID = "mod_management"
+MANAGEMENT_MODULE_NAME = "Управление"
+
+#: Modules that were folded into «Управление». Their catalog rows are kept (a
+#: deployment may still hold grants, bindings and instance data for them) but
+#: they are archived by the merge revision and are no longer product modules.
+LEGACY_MERGED_MODULE_IDS: tuple[str, ...] = ("mod_prompts", "mod_mcp", "mod_files")
+
+#: Slug of the hub view a person lands on when opening «Управление».
+MANAGEMENT_HUB_VIEW_SLUG = "management_hub"
+
+
+def _management_hub_view() -> dict[str, Any]:
+    """Top-level hub: one tile per area folded into «Управление».
+
+    Same shape as ``equipment_hub`` / ``equipment_hub_management`` (``kind:
+    "hub"`` + ``items`` with ``target: {kind: "view", ...}``), so the generic
+    runtime renders it without any module-specific knowledge.
+    """
+    return {
+        "slug": MANAGEMENT_HUB_VIEW_SLUG,
+        "kind": "hub",
+        "ui_json": {
+            "version": 1,
+            "kind": "hub",
+            "items": [
+                {
+                    "title": "Промпты",
+                    "icon": "psychology_outlined",
+                    "target": {"kind": "view", "view": "prompt_profiles_list"},
+                },
+                {
+                    "title": "MCP",
+                    "icon": "hub",
+                    "target": {"kind": "view", "view": "mcp_packages_list"},
+                },
+                {
+                    "title": "Файлы",
+                    "icon": "attach_file",
+                    "target": {"kind": "view", "view": "files_list"},
+                },
+            ],
+        },
+    }
+
+
+def _management_hub_tab() -> dict[str, Any]:
+    """First tab of the module = the page a person lands on (see hub view).
+
+    Order matters more than ``order``: the shell opens the *first enabled tab*,
+    so the hub tab must stay first in the ``tabs`` array.
+    """
+    return {
+        "id": "tab_management",
+        "title": "Обзор",
+        "subtitle": "Промпты, MCP и файлы",
+        "order": 5,
+        "icon": "settings",
+        "view_slug": MANAGEMENT_HUB_VIEW_SLUG,
+        "enabled": True,
+        "default_project_bind": "global",
+        "nav": {"contour": "employee", "placement": "management"},
+    }
+
+
+def mod_management_meta() -> dict[str, list[Any]]:
+    """«Управление» — prompts, MCP packages and workspace files in one module.
+
+    Built from :func:`mod_prompts_meta`, :func:`mod_mcp_meta` and
+    :func:`mod_files_meta` so the three areas cannot drift apart from their
+    historical declarations: every table, column, view, view item, action,
+    materialize rule and seed row of the originals is carried over verbatim.
+
+    What is added on top:
+
+    * ``management_hub`` — the hub view listing the three areas;
+    * ``tab_management`` — the first tab, pointing at that hub (landing page);
+    * the three original tabs, kept as the section tabs under the hub
+      (Промпты / MCP / Файлы), each still pointing at its area's list view;
+    * ``materialize_roots`` — the union of the prompt and MCP workspace roots
+      (formerly written per module by revision 2026082906), so a project sync
+      prunes neither ``rules/``/``prompts/``/``AGENTS.md`` nor ``packages/``;
+    * ``mcp_aliases`` — the chat labels the MCP area used to own.
+    """
+    prompts = mod_prompts_meta()
+    mcp = mod_mcp_meta()
+    files = mod_files_meta()
+    return {
+        "tables": [*prompts["tables"], *mcp["tables"], *files["tables"]],
+        "columns": [*prompts["columns"], *mcp["columns"], *files["columns"]],
+        "views": [
+            _management_hub_view(),
+            *prompts["views"],
+            *mcp["views"],
+            *files["views"],
+        ],
+        "tabs": [
+            _management_hub_tab(),
+            *prompts["tabs"],
+            *mcp["tabs"],
+            *files["tabs"],
+        ],
+        "materialize": [
+            *prompts["materialize"],
+            *files["materialize"],
+            *mcp["materialize"],
+        ],
+        "mcp_aliases": [*mcp.get("mcp_aliases", [])],
+        # Workspace roots any project sync may prune. Union of the prompt area
+        # (rules/, skills/, prompts/, AGENTS.md, CLAUDE.md) and the MCP area
+        # (packages/) — dropping either half would let a sync wipe files the
+        # other area materialized into the same workspace.
+        "materialize_roots": {
+            "workspace_roots": [
+                "rules/",
+                "skills/",
+                "prompts/",
+                "AGENTS.md",
+                "CLAUDE.md",
+                "packages/",
+            ]
+        },
+        "seed_rows": {
+            "items": [
+                *prompts["seed_rows"]["items"],
+                *mcp["seed_rows"]["items"],
+                *files["seed_rows"]["items"],
+            ]
+        },
+    }
+
+
 def mod_equipment_meta() -> dict[str, list[Any]]:
     """Подбор техники — hub on Данные; catalogs + request lines + found offers."""
     return {
@@ -1302,7 +1443,8 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "scope": {"projects": "all", "chats": "all"},
             },
             # Промпты подбора техники (управляемые инструкции; мердж в workspace
-            # через prompt_paths/fragments — совместим с mod_prompts).
+            # через prompt_paths/fragments — совместим с «Управлением», где
+            # живут prompt_paths).
             {
                 "slug": "equipment_prompts",
                 "label": {"ru": "Промпты", "en": "Prompts"},
@@ -8587,11 +8729,52 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
     }
 
 
+#: Catalog rows for the modules folded into «Управление», as ``(id, name)``.
+#:
+#: They are **not** product modules any more — no meta, no grants, no nav — but
+#: their ``modules`` rows have to survive:
+#:
+#: * an existing deployment still holds their grants, bindings and instance
+#:   data; the merge revision copies that into «Управление» and archives them
+#:   (never deletes — rows stay recoverable for the recycle bin / audit);
+#: * a from-base upgrade needs the rows to *exist* at two earlier revisions:
+#:   2026082711 iterates the seeder list to create catalog rows, and 2026082906
+#:   later writes ``materialize_roots`` meta documents for these ids. Without a
+#:   ``modules`` row the foreign key
+#:   ``module_meta_documents.module_id -> modules.id`` fails and
+#:   ``alembic upgrade head`` on an empty database stops at 2026082906.
+#:
+#: So :data:`PRODUCT_MODULES` keeps them as empty, archived *shells* — the two
+#: entries that are real product modules are the first two, and
+#: :data:`PRODUCT_MODULE_IDS` names exactly those.
+LEGACY_MODULE_ROWS: tuple[tuple[str, str], ...] = (
+    ("mod_prompts", "Промпты"),
+    ("mod_mcp", "MCP"),
+    ("mod_files", "Файлы"),
+)
+
+#: Default ``modules.company_grant_scope`` for seeded modules.
+#:
+#: Applied **on insert only** (``ON CONFLICT`` does not touch the column), so a
+#: fresh install grants «Управление» to every company while an administrator can
+#: still narrow the scope through the UI without a later seed upsert undoing it.
+PRODUCT_MODULE_COMPANY_GRANT_SCOPE: dict[str, str] = {
+    MANAGEMENT_MODULE_ID: "all",
+}
+
+#: Product modules only — the ids callers mean by "a product module".
+PRODUCT_MODULE_IDS: tuple[str, ...] = (
+    MANAGEMENT_MODULE_ID,
+    "mod_equipment",
+)
+
+#: Product modules plus the archived shells of the merged modules. This is what
+#: the Alembic seeder iterates; see :data:`LEGACY_MODULE_ROWS` for why the
+#: shells are part of the list.
 PRODUCT_MODULES: list[tuple[str, str, dict[str, Any]]] = [
-    ("mod_prompts", "Промпты", mod_prompts_meta()),
-    ("mod_mcp", "MCP", mod_mcp_meta()),
-    ("mod_files", "Файлы", mod_files_meta()),
+    (MANAGEMENT_MODULE_ID, MANAGEMENT_MODULE_NAME, mod_management_meta()),
     ("mod_equipment", "Подбор техники", mod_equipment_meta()),
+    *[(module_id, name, {}) for module_id, name in LEGACY_MODULE_ROWS],
 ]
 
 EXAMPLE_MODULE_IDS: tuple[str, ...] = (

@@ -226,7 +226,7 @@ async def test_set_profile_writes_sot_instance() -> None:
     ]
     await svc._apply_profile_on_instance(
         project_id="prj_1",
-        module_id="mod_prompts",
+        module_id="mod_management",
         profile_table="prompt_profiles",
         profile_id="p2",
         profiles=profiles,

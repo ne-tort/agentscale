@@ -1,5 +1,7 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from "vitest";
+import { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { afterEach, describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter, Outlet, Route, Routes } from "react-router-dom";
 import { SettingsProvider } from "../../preferences/SettingsProvider";
@@ -70,17 +72,81 @@ function render(ui: React.ReactElement, service: AdminService = emptyService()):
   );
 }
 
+/** A service with one company, so a screen renders its populated state. */
+function serviceWithCompanies(): AdminService {
+  return emptyService({
+    listCompanies: async () => [COMPANY],
+    listKeys: async () => [],
+    listModules: async () => [],
+  });
+}
+
+/**
+ * Mounts a screen and waits for its first fetch to land.
+ *
+ * `renderToStaticMarkup` only produces the initial render, which for these
+ * screens is the loading line — fine for asserting on copy that never changes,
+ * useless for asserting on a table that arrives a tick later. The loading and
+ * empty states are still checked with the static renderer.
+ */
+let mounted: { root: Root; host: HTMLDivElement } | undefined;
+
+afterEach(async () => {
+  if (mounted) await act(async () => mounted?.root.unmount());
+  mounted?.host.remove();
+  mounted = undefined;
+});
+
+async function mount(ui: React.ReactElement, service: AdminService): Promise<string> {
+  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  mounted = { root, host };
+  await act(async () => {
+    root.render(
+      <MemoryRouter>
+        <SettingsProvider>
+          <OutletFrame service={service}>{ui}</OutletFrame>
+        </SettingsProvider>
+      </MemoryRouter>,
+    );
+  });
+  // The collection resolves a promise after mount; one more turn lets it paint.
+  await act(async () => { await new Promise((resolve) => window.setTimeout(resolve, 0)); });
+  return host.innerHTML;
+}
+
 describe("administrator screens", () => {
-  it("leads with companies and states its job in one line", () => {
-    const markup = render(<CompaniesPage />);
-    expect(markup).toContain("Компании");
+  it("shows the company list without a title block above it", async () => {
+    const markup = await mount(<CompaniesPage />, serviceWithCompanies());
+    // The tab bar says "Компании"; the screen below starts with the list.
+    expect(markup).toContain("Acme");
+    expect(markup).not.toContain("admin-section__header");
   });
 
-  it("offers the empty state as an invitation rather than a dead end", () => {
+  it("offers the empty state as an invitation rather than a dead end", async () => {
     // First run has no companies; the screen says what to do next instead of
     // showing an empty table with a search box above it.
-    const markup = render(<CompaniesPage />);
+    const markup = await mount(<CompaniesPage />, emptyService());
+    expect(markup).toContain("Компаний пока нет");
     expect(markup).toContain("Новая компания");
+    expect(markup).not.toContain("admin-toolbar");
+  });
+
+  it("puts the list's create button on the same line as the search", async () => {
+    // "Find a company" and "add a company" are the two things a person does to
+    // this list, so they share the toolbar instead of the action sitting in a
+    // title block above it.
+    const markup = await mount(<CompaniesPage />, serviceWithCompanies());
+    const toolbarStart = markup.indexOf("admin-toolbar");
+    expect(toolbarStart).toBeGreaterThan(-1);
+    const toolbar = markup.slice(toolbarStart, markup.indexOf("</table>"));
+    expect(toolbar).toContain("admin-search");
+    expect(toolbar).toContain("admin-toolbar__action");
+    expect(toolbar).toContain("Новая компания");
+    // The action comes after the search box, on the same row.
+    expect(toolbar.indexOf("admin-search")).toBeLessThan(toolbar.indexOf("admin-toolbar__action"));
   });
 });
 
@@ -91,24 +157,31 @@ describe("admin service contract", () => {
     expect(COMPANY.login).toContain("@");
   });
 
-  it("exposes exactly the four sections an administrator works in", async () => {
+  it("exposes exactly the operations an administrator performs", async () => {
     const service = emptyService();
+    // No `listProviders`: a key is an endpoint plus a secret, so there is no
+    // provider catalog to choose from any more.
     expect(Object.keys(service).sort()).toEqual([
       "createCompany", "createKey", "createModule", "deleteCompany", "deleteKey",
       "deleteModule", "getCompany", "listCompanies", "listDeleted", "listKeys",
-      "listModules", "listProviders", "purgeDeleted", "restoreDeleted",
-      "setCompanyQuota", "setKeyCompanies", "setModuleCompanies",
+      "listModules", "purgeDeleted", "restoreDeleted", "setCompanyQuota",
+      "setKeyCompanies", "setModuleCompanies", "setModuleScope",
     ]);
   });
 });
 
 describe("screens share one vocabulary", () => {
-  it("titles each section with the same word its tab uses", () => {
-    // Keys and modules list what they own; the tab bar is the only place the
-    // word "Администрирование" appears, so a section must name itself.
-    expect(render(<KeysPage />)).toContain("Ключи");
-    expect(render(<ModulesPage />)).toContain("Модули");
-    expect(render(<DeletedPage />)).toContain("Удалённые");
+  it("lets the tab bar name the section instead of repeating it in a heading", async () => {
+    // The heading said "Ключи" directly under a tab that said "Ключи". The tab
+    // bar is the name; the screen below it is the work.
+    for (const [screen, service] of [
+      [<KeysPage />, serviceWithCompanies()],
+      [<ModulesPage />, emptyService()],
+      [<DeletedPage />, emptyService()],
+    ] as const) {
+      const markup = await mount(screen, service);
+      expect(markup).not.toContain("<h2");
+    }
   });
 
   it("renders a company detail without leaking its identifier as text", () => {

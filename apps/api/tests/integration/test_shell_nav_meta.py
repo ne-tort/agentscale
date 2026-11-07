@@ -46,13 +46,20 @@ def test_product_modules_seeded(client: TestClient) -> None:
     modules = client.get("/api/v1/admin/modules", headers=admin_h)
     assert modules.status_code == 200, modules.text
     by_id = {m["id"]: m for m in modules.json().get("items", [])}
-    for mid, label in (
-        ("mod_prompts", "Промпты"),
-        ("mod_mcp", "MCP"),
-        ("mod_files", "Файлы"),
-    ):
-        assert mid in by_id, list(by_id.keys())
-        assert by_id[mid]["name"] == label
-    for legacy in ("mod_example_suppliers", "mod_example_notes"):
-        assert legacy not in by_id
+
+    # One module carries prompts, MCP packages and files.
+    assert "mod_management" in by_id, list(by_id.keys())
+    assert by_id["mod_management"]["name"] == "Управление"
+    assert by_id["mod_management"]["status"] == "active"
+    assert by_id["mod_management"]["company_grant_scope"] == "all"
+    assert "mod_equipment" in by_id
+
+    # The three former modules are archived, never deleted: their rows stay
+    # recoverable, so they are still visible in the platform catalog.
+    for legacy in ("mod_prompts", "mod_mcp", "mod_files"):
+        assert legacy in by_id, list(by_id.keys())
+        assert by_id[legacy]["status"] == "archived"
+
+    for example in ("mod_example_suppliers", "mod_example_notes"):
+        assert example not in by_id
 

@@ -21,7 +21,7 @@ SOURCE = SourceProvenance(
     source_generation=12,
     source_path="modules/prompts/row-1",
     source_revision="rev-12",
-    metadata={"module_id": "mod_prompts", "asset_id": "asset-1"},
+    metadata={"module_id": "mod_management", "asset_id": "asset-1"},
 )
 
 
