@@ -1,7 +1,7 @@
 # Agentscale Migration Architecture
 
 Статус: рабочий архитектурный каркас, не финальный implementation contract.
-Дата: 2026-11-01.
+Дата: 2026-11-01 (обновлено 2026-11-07: declarative-app признан промежуточным этапом; целевая модель — plugin-modules, см. ADR-002 и `architecture/plugin-modules.md`).
 Область: полная миграция UI, модульной модели, equipment-домена и agent control plane.
 
 ## 1. Цель
@@ -28,6 +28,8 @@ tenant -> cabinet -> project -> Pod workspace -> agent session -> run -> events/
 ### 2.1 Frontend
 
 Целевой стек: React + TypeScript + Vite.
+
+**Примечание (2026-11-07):** declarative-app (JSON-описание экранов + generic runtime) — промежуточный этап. Целевая модель — plugin-modules: полноценные приложения, загружаемые динамически (iframe / isolated origin), с доступом к инфраструктуре через capability adapters (ACL + квоты + аудит). Подробно: [`architecture/plugin-modules.md`](architecture/plugin-modules.md), [ADR-002](architecture-migration/ADR-002-plugin-modules.md).
 
 Рекомендуемая структура:
 

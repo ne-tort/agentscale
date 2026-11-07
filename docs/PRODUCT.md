@@ -233,3 +233,66 @@ Meta primitives: hub + collections, `file_ref`, `secret_ref`, `column_map`, mast
 - **Workspace files** — when Pod is `running`, UI **Files** opens live `/workspace` tree (list, text preview, download) via k8s exec; no MinIO fallback when paused.
 - **Sync** — apply module binding changes to existing Pod workspace (`POST /projects/{id}/sync`); module folder prune + hydrate.
 - **Agent reset** — cancel sessions + purge chat history (`POST /projects/{id}/agent/reset`); lives in agent BC, not pod_service.
+
+## Целевая модель: plugin-модули
+
+**Текущая модель** (declarative-app) — промежуточный этап: модуль = JSON-описание экранов + generic runtime. Это позволяет переносить данные из старых модулей и иметь единую систему прав, но не позволяет модулю иметь сложную бизнес-логику, свою БД, или динамически загружать код.
+
+**Целевая модель** — plugin-модули: полноценные приложения, загружаемые динамически (iframe / isolated origin), с доступом к инфраструктуре через **capability adapters** (ACL + квоты + аудит).
+
+### Архитектура
+
+```
+Основное приложение (shell)
+    ├── iframe / isolated origin
+    │       └── Plugin App (отдельный bundle / контейнер)
+    │               ├── Своя БД (опционально, через adapter)
+    │               ├── Свой Redis (опционально, через adapter)
+    │               ├── Свои объекты (MinIO bucket с префиксом)
+    │               └── Свои Pod'ы / инструменты (через gateway)
+    └── Capability Adapters (ACL + quotas + audit)
+            ├── DB Adapter (tenant-aware connection, RLS, quotas)
+            ├── Redis Adapter (key prefix, rate limit)
+            ├── Object Storage Adapter (bucket prefix, signed URLs)
+            └── Pod Gateway (scoped access to project workspace)
+```
+
+### Capability Adapters
+
+Адаптеры — единственная точка доступа плагина к инфраструктуре:
+
+| Адаптер | ACL | Квоты | Аудит |
+|---------|-----|-------|-------|
+| `db` | `module:{id}:db:{table}:read/write` | `max_rows_per_table`, `max_query_time` | `plugin_db_access` |
+| `redis` | `module:{id}:redis:{key_prefix}` | `max_keys`, `max_memory` | `plugin_redis_access` |
+| `objects` | `module:{id}:objects:{bucket_prefix}` | `max_object_size`, `max_objects` | `plugin_object_access` |
+| `pods` | `module:{id}:pods:{project_id}` | `max_pod_cpu`, `max_pod_memory` | `plugin_pod_invoke` |
+| `mcp` | `module:{id}:mcp:{tool}` | `max_tools` | `plugin_mcp_register` |
+
+### Lifecycle
+
+```
+Plugin Definition (registry)
+    → Grant (company/cabinet/project)
+        → Install (развёртывание артефакта, миграция схемы)
+            → Bind (связь с project workspace)
+                → Runtime (iframe + adapters)
+                    → Uninstall (очистка данных, отзыв capabilities)
+```
+
+### Отличия от declarative-app
+
+| Аспект | declarative-app | plugin-app |
+|--------|-----------------|------------|
+| UI | JSON-описание экранов | Полноценный React/Vue/Svelte bundle |
+| Данные | Только `module_instance_data_rows` | Своя БД (через adapter) |
+| Логика | Generic CRUD + materialize | Произвольный код |
+| Изоляция | Нет (shared runtime) | iframe / isolated origin |
+| Доступ к инфраструктуре | Через generic endpoints | Через capability adapters с ACL |
+| Динамическая загрузка | Нет (build-time registry) | Да (реестр артефактов) |
+
+Подробно: [`architecture/plugin-modules.md`](architecture/plugin-modules.md).
+
+### Работа на main (dev)
+
+Миграция plugin-modules ведётся **сразу на dev ветке (main)**, без отдельных feature-веток. Правила: [`workflow/main-branch-workflow.md`](workflow/main-branch-workflow.md).
