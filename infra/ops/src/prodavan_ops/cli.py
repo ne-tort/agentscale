@@ -12,7 +12,7 @@ from prodavan_ops.k8s import (
     rollout_restart,
     wait_argo_app,
 )
-from prodavan_ops.smoke import smoke
+from prodavan_ops.smoke import smoke, smoke_public_https
 from prodavan_ops.validate import validate_all
 
 app = typer.Typer(
@@ -80,8 +80,19 @@ def smoke_cmd(
     addr: str | None = typer.Option(None, "--addr"),
     port: int | None = typer.Option(None, "--port"),
     host: str = typer.Option("localhost", "--host"),
+    public_host: str = typer.Option(
+        "",
+        "--public-host",
+        help=(
+            "Также проверить настоящий публичный путь: https://<host>/api/v1/auth/config. "
+            "Плоский :8088 проверяет оболочку, но не TLS-роутер, на котором /api может "
+            "пропасть (см. rollout в agentscale-api/deployment.yaml)."
+        ),
+    ),
 ) -> None:
     smoke(addr=addr, port=port, host_header=host)
+    if public_host:
+        smoke_public_https(host=public_host)
 
 
 @app.command("dns-check")
