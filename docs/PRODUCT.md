@@ -242,13 +242,13 @@ Meta primitives: hub + collections, `file_ref`, `secret_ref`, `column_map`, mast
 
 | Аспект | Решение |
 |---|---|
-| Данные | Реальные таблицы в схеме `tenant_<company>_module_<module>` внутри уже существующей `agentscale_userdb`; не JSONB-строки |
-| Доступ | Через **существующий** capability gateway (`:8001`, `CapabilityGatewayService`, `PodBridgeClaims`), typed контракты; новый сервис адаптеров и прямой DSN плагину не выдаются |
-| Миграции | Плагин поставляет Liquibase/Flyway/Alembic changelog; платформа исполняет его изолированным Job под доверенной ролью |
-| Изоляция | Отдельная схема + grant без `CREATE` + отдельный origin для iframe без `allow-same-origin` + NetworkPolicy без egress к PostgreSQL. RLS не является границей |
+| Данные | **Прямой DSN к отдельной БД компании** `tenant_<company_id>`: реальные таблицы, полный SQL, JOIN/CTE, индексы, self-managed Liquibase-миграции. Схема `module_<module>` во владении роли плагина. Платформенная `prodavan` недоступна ([ADR-007](architecture-migration/ADR-007-direct-plugin-db.md)) |
+| Доступ к остальной инфраструктуре | Через **существующий** capability gateway (`:8001`, `CapabilityGatewayService`, `PodBridgeClaims`) по typed контрактам: cache, objects, docs, events, jobs, pods, mcp, secrets, network |
+| Миграции | Плагин применяет подписанный changelog **сам** при старте контейнера; безопасность = привилегии PostgreSQL + отдельная БД + `pgaudit`, а не парсер SQL |
+| Изоляция | Отдельная БД + `GRANT CONNECT` только на неё + `NOCREATEDB NOCREATEROLE` + NetworkPolicy без egress к `prodavan` + отдельный origin для iframe без `allow-same-origin`. RLS не является границей |
 | Backend | Контейнер с вебхуками, cron, событиями, фоновыми задачами; внешние адреса `/webhook/{plugin}/{company}/*` и `/pluginpage/{plugin}/{company}/*` |
 | Засыпание | Переиспользуется `SandboxClaim.operatingMode` / `pause|resume` / warm pool от контейнеров агентов; Knative не вводится |
 | Фаерволл | Единый egress-контроллер (`none` / `webhooks-only` / `full`) для плагинов **и** агентов |
-| Переход | Strangler с фича-флагом: dual-read → пилот → перенос по контекстам → cutover → удаление. Не big bang: ~13k строк `mod_equipment`, работа в `main`, бэкапов нет |
+| Переход | Strangler с фича-флагом **только из-за объёма кода** (~13k строк `mod_equipment`). Это dev: данные эфемерны, бэкапы/перенос данных/snapshot/dual-read не нужны |
 
 **Работа на main (dev):** сразу на `main`, без feature-веток, микрокоммиты. Правила: [`workflow/main-branch-workflow.md`](workflow/main-branch-workflow.md). Реестр ADR: [`architecture-migration/README.md`](architecture-migration/README.md).

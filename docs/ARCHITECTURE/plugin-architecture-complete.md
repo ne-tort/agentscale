@@ -35,7 +35,7 @@
 |---|---|---|
 | Единая точка доступа, ACL, квоты, аудит, fail-closed | `CapabilityGatewayService.authorize/invoke`: identity → scope → grant → quota → adapter, `AuditEvent`, `DecisionCode.*` | `apps/api/src/prodavan/application/capability_gateway_service.py:180-255` |
 | Токен, scope, revocation | `PodBridgeClaims` / `mint_pod_bridge_token`: `company_id`, `project_id`, `scopes`, `jti`, `exp`, `gen`, отзыв через `bump_pod_bridge_generation` | `application/pod_identity/bridge.py:76-245` |
-| Structured DB без raw SQL | `TenantUserDbService`: БД `agentscale_userdb`, схема `p_<project>`, `_ALLOWED_TYPES`, `_IDENT_RE`, create/select/insert/drop/purge | `application/tenant_infra/userdb_service.py:1-172`, `infra/k3s/overlays/dev/userdb-init.yaml:42-48` |
+| Structured DB без raw SQL | `TenantUserDbService`: БД `agentscale_userdb`, схема `p_<project>`, `_ALLOWED_TYPES`, create/select/insert/drop/purge. **Для плагинов НЕ используется** — это и есть ограниченная декларативность, от которой уходим; остаётся как as-built для агентов | `application/tenant_infra/userdb_service.py:1-172`, `infra/k3s/overlays/dev/userdb-init.yaml:42-48` |
 | Квоты | `CompanyTenantInfraQuota`, `enforce_ops_rate` (ops/min, 60s window), `quota_exceeded` → 429 | `application/tenant_infra/quota.py:35-116` |
 | Cache / key isolation | `rewrite_cache_key` → `tenant:{company}:proj:{project}:{key}`, denylist `prodavan:`/`celery`/`tenant:`, обязательный TTL | `application/tenant_infra/keys.py:9-56` |
 | Objects | `TenantObjectsService`: один бакет `agentscale`, теги `tenant_infra` + `project:{id}`, API-mediated (presigned намеренно отвергнуты) | `application/tenant_infra/objects_service.py:1-70`, `docs/target/12-layer-docs/tenant-infra-gateway.md:30-32` |
@@ -49,81 +49,145 @@
 
 ---
 
-## 2. Модель данных
+## 2. Модель данных (выбран вариант B: прямой DSN)
 
-### 2.1 Одна БД, схема на компанию и модуль
+> **Решение (2026-11-08):** выбран **прямой доступ плагина к своей БД**. Это более
+> профессионально для задачи «модуль = полноценное приложение» и не потребует
+> переделки. Вариант A (typed gateway, `TenantUserDbService._ALLOWED_TYPES`) — это
+> по сути та же «ограниченная декларативная хрень», от которой уходим: он запрещает
+> произвольный SQL, JOIN, CTE, `EXPLAIN`, собственные индексы и миграции.
+> ADR-003 отменяется в части плагинов — см. §2.6.
+
+### 2.1 Один кластер, БД на компанию
 
 ```
-PostgreSQL (один Deployment, replicas: 1, PVC 5Gi — infra/k3s/overlays/dev/postgres.yaml)
-├── prodavan            — платформенная БД, Alembic, SoT приложения. Плагину НЕ доступна.
-└── agentscale_userdb   — уже создаётся one-shot Job'ом (userdb-init.yaml)
-    └── tenant_<company_id>_module_<module_id>   — схема плагина
-        ├── реальные таблицы плагина (типизированные колонки, индексы, constraints)
-        ├── plugin_migrations / DATABASECHANGELOG  — журнал миграций
-        └── данные: company-wide, кабинет/project-скоуп через колонки cabinet_id/project_id
+PostgreSQL (отдельный инстанс для tenant-данных, НЕ prodavan)
+├── prodavan                 — платформенная БД, Alembic, SoT приложения.
+│                              Плагину недоступна: отдельный хост/порт, отдельные
+│                              credentials, NetworkPolicy запрещает egress.
+└── tenant_<company_id>      — отдельная БД на компанию (создаётся при создании компании)
+    ├── schema module_<module_id>          — схема плагина (БЕЗ версии в имени)
+    │   ├── реальные таблицы плагина: typed columns, индексы, constraints, FK
+    │   ├── DATABASECHANGELOG / plugin_migrations
+    │   └── данные: company-wide + cabinet_id / project_id колонки
+    ├── schema module_<module_id>_...      — другие плагины компании
+    └── search_path = "module_<module_id>"  — зафиксирован в роли плагина
 ```
 
-**Почему не `CREATE DATABASE tenant_<company_id>`:**
+**Почему отдельная БД на компанию, а не общая схема:** при прямом DSN это и есть
+настоящая граница. Роль плагина имеет `CONNECT` только на свою БД; `pg_hba.conf`
+и `GRANT CONNECT` физически не дают ей подключиться к `prodavan` или к
+`tenant_<другая_компания>`. Никакой RLS, GUC или доверия к адаптеру не требуется:
+утечка в чужую БД исключена **конструктивно**, на уровне PostgreSQL, а не политикой.
 
-- `CREATE DATABASE` не имеет `max_size`; `CONNECTION LIMIT` ограничивает **сессии**, а не размер (PostgreSQL 17 `sql-createdatabase`).
-- N БД = N наборов каталогов, N целей миграций, N объектов бэкапа. Автоматических бэкапов в проекте нет вообще (`docs/07-infrastructure/topology.md:208-220`), поэтому «архивация переименованием» из v1 не является бэкапом.
-- PgBouncer в `infra/` отсутствует; «отдельный pool на tenant DB» при `max_connections=100` и 1Gi RAM быстро упирается в потолок.
-- Одна линейная цепочка Alembic (`docs/07-infrastructure/alembic.md:34-72`) остаётся источником истины схемы.
+**Почему один кластер, а не инстанс на компанию:** single-node k3s
+(`ResourceQuota pods: 45`, 26Gi, три OOM-инцидента в `runbook.md:484-554`).
+Один инстанс + N БД даёт ту же логическую изоляцию без умножения control plane.
+Отдельный инстанс — enterprise-tier с выделенной нодой, не v1.
 
-**Отдельный PG-инстанс на компанию** — не v1: single-node k3s с `ResourceQuota pods: 45`, `limits.memory: 26Gi` и тремя OOM-инцидентами в истории (`runbook.md:484-554`). Оставляем как enterprise-tier с выделенной нодой.
+**Что не так с опасениями v2:**
 
-### 2.2 Реальные таблицы вместо JSONB
+| Опасение | Почему снимается |
+|---|---|
+| «N БД = N целей миграций» | Так и надо: плагин мигрирует **свою** схему в **своей** БД, это его ответственность. Платформенная цепочка Alembic относится только к `prodavan` и не трогается |
+| «Нет PgBouncer, max_connections=100» | Ставится PgBouncer в transaction mode **на tenant-кластер**; пул один на кластер, а не N пулов. `CONNECTION LIMIT` на каждой роли ограничивает число сессий плагина |
+| «Нет max_size / бэкапов» | Разработка на dev: данные эфемерны по определению, бэкапы и перенос данных **не нужны**. Размер БД — observability (`pg_database_size()`), не требование |
+| «Нет бэкапов» | Не требуется, см. §8 |
 
-Плагин объявляет структуру структурированным манифестом (как уже делает `TenantUserDbService._ALLOWED_TYPES`):
+### 2.2 Плагин владеет своей схемой
 
-```json
-POST /gateway/plugins/{plugin_id}/schema
-{
-  "tables": [
-    {
-      "name": "equipment_offers",
-      "columns": [
-        {"name": "id", "type": "uuid", "primary_key": true},
-        {"name": "cabinet_id", "type": "uuid", "index": true},
-        {"name": "project_id", "type": "uuid", "index": true},
-        {"name": "price", "type": "numeric(14,2)"},
-        {"name": "currency", "type": "text"}
-      ],
-      "constraints": [{"unique": ["cabinet_id", "part_number"]}]
-    }
-  ]
-}
+Плагин получает DSN **своей компании** и роль, которая:
+
+```sql
+CREATE ROLE tenant_co_123_plugin_mod_equipment
+  LOGIN PASSWORD '...'
+  NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS
+  CONNECTION LIMIT 10;
+
+GRANT CONNECT ON DATABASE tenant_co_123 TO tenant_co_123_plugin_mod_equipment;
+
+-- Схема создаётся платформой при install, владелец — роль плагина.
+CREATE SCHEMA module_mod_equipment
+  AUTHORIZATION tenant_co_123_plugin_mod_equipment;
+
+ALTER ROLE tenant_co_123_plugin_mod_equipment
+  SET search_path = 'module_mod_equipment';
+ALTER ROLE tenant_co_123_plugin_mod_equipment
+  SET statement_timeout = '30s';       -- дефолт сессии, не «защита», а предохранитель
+ALTER ROLE tenant_co_123_plugin_mod_equipment
+  SET lock_timeout = '10s';
 ```
 
-Gateway создаёт реальные таблицы **под своей доверенной ролью**. Плагин получает `USAGE` на схему и `SELECT/INSERT/UPDATE/DELETE` на таблицы — но **не `CREATE`** и не владение.
+Далее плагин **сам** делает `CREATE TABLE`, `ALTER TABLE`, индексы, FK, миграции —
+полноценный SQL, без `_ALLOWED_TYPES` и структурированных манифестов. Это ровно то,
+чего не хватало declarative-app.
 
-Это и есть ответ на «данные должны быть реальными, не эфемерными в jsonb»: настоящие колонки, типы, индексы, constraints, `EXPLAIN`, `JOIN` — всё доступно. Эфемерность исчезает, DSN плагину при этом не выдаётся.
+**Границы при этом жёсткие:**
 
-### 2.3 Два варианта доступа к БД — явный выбор
+- `NOCREATEDB NOCREATEROLE` —不能 создать БД/роль, не может выдать себе права.
+- `CONNECT` только на `tenant_co_123`; `prodavan` и чужие БД недоступны.
+- `search_path` зафиксирован, `CREATE` только на свою схему; чужие схемы компании
+  не видны (нет `USAGE`).
+- `NetworkPolicy`: egress пода плагина → только tenant PostgreSQL + gateway `:8001`
+  + egress-proxy. Платформенный Postgres в принципе не достижим с пода плагина.
+- `pgaudit` на tenant-кластере: все DDL/DML пишутся в append-only лог.
 
-| | **A. Gateway (рекомендуется, v1)** | **B. Прямой DSN (enterprise, позже)** |
-|---|---|---|
-| Реальные таблицы | ✅ | ✅ |
-| Произвольный SQL / JOIN / CTE | typed subset + параметризованные запросы | ✅ полный |
-| DDL | доверенный адаптер по ревьюенному манифесту | плагин, но под `NOCREATEDB NOCREATEROLE` |
-| Граница безопасности | gateway: identity → scope → grant → quota → audit | `GRANT` + отдельная схема + NetworkPolicy + `pgaudit` |
-| Утечка в чужую БД | исключена конструктивно | требует отдельного инстанса / жёсткого лимита компаний |
-| Риск | сужение выразительности запросов | RLS-обход владельцем, подмена GUC, N БД, нет бэкапов |
-| Соответствие ADR-003 | ✅ | ❌ требует явного supersede |
+### 2.3 Роль остальной инфраструктуры
 
-**Рекомендация: A.** Пользовательский запрос на «прямой доступ» удовлетворяется по смыслу (реальные таблицы, миграции, SQL), а не буквенно (DSN). Вариант B оставлен как осознанный trade-off: если он будет выбран, до реализации обязательны отдельный PG-инстанс, `pgaudit`, бэкапы, `FORCE ROW LEVEL SECURITY` + `NOBYPASSRLS` + платформенный owner таблиц, и отдельный ADR, отменяющий ADR-003.
+Прямой DSN выдаётся **только к БД плагина**. Всё остальное — по-прежнему через
+универсальные контракты адаптеров, без знания реализации:
 
-### 2.4 Почему RLS не является границей
+| Ресурс | Как плагин получает |
+|---|---|
+| Свои таблицы | **прямой DSN**, полный SQL |
+| Cache / Redis | `cache` capability, key-rewrite, TTL, квоты |
+| Objects / MinIO | `objects` capability, tenant-теги, без presigned |
+| Docs / Mongo, Events, MCP, Pods, Secrets, Network | typed adapters gateway `:8001` |
+| Платформенная БД `prodavan` | **недоступна вообще** |
 
-В v1 RLS заявлялся как «обязательная защита всех таблиц плагина». Это не работает:
+То есть «БД лучше иметь прямой доступ» удовлетворено буквально, а «к остальной
+инфраструктуре через адаптеры» сохранено.
 
-- `ENABLE ROW LEVEL SECURITY` **не применяется к владельцу таблицы** (PG 17 `ddl-rowsecurity`). Плагин по v1 сам создавал таблицы → становился владельцем → RLS на его же таблицах для него не действовал.
-- Владелец может `ALTER TABLE ... DISABLE ROW LEVEL SECURITY` / `DROP POLICY`.
-- `current_setting('app.tenant_id')` — пользовательский GUC (USERSET), плагин с DSN может пере-set'ить его сам. `REVOKE SET ON PARAMETER` существует в PG 16/17, но осмысленна только для superuser-only параметров; `app.*` всегда settable.
-- `ALTER ROLE ... SET statement_timeout` — это **session default при логине**, а не rate limit; обычный `SET` в сессии его переопределяет.
-- При БД-на-компанию RLS по `tenant_id` защищает от… той же компании, то есть бессмысленна.
+### 2.4 RLS не нужен
 
-**Решение v2:** граница = отдельная схема + `GRANT` без `CREATE` + gateway + NetworkPolicy. RLS **не используется** как межтенантовый барьер. Если он нужен для дополнительной защиты внутри схемы (по `cabinet_id`/`project_id`), то только в связке: `FORCE ROW LEVEL SECURITY` + `WITH CHECK` + таблицы принадлежат платформенной роли + `NOBYPASSRLS` + значение подставляет адаптер в `SET LOCAL` из доверенного JWT.
+При БД-на-компанию RLS по `tenant_id` защищал бы от той же компании — бессмысленно.
+`ENABLE ROW LEVEL SECURITY` без `FORCE` не действует на владельца, а владелец здесь —
+плагин; `app.*` GUC он же и пере-set'ит. Поэтому межтенантовая граница = **отдельная
+БД + роль + `CONNECT` + NetworkPolicy**. RLS не применяется. Для разделения по
+`cabinet_id`/`project_id` внутри БД компании плагин сам строит `WHERE` — это его
+бизнес-логика, а не платформенная политика.
+
+### 2.5 Миграции (Liquibase) при прямом DSN
+
+Плагин применяет changelog **сам, под своей ролью** при старте/установке — это часть
+«полноценного приложения». Платформа не парсит и не ревьюит его SQL:
+
+```
+backend startup
+  → Liquibase update (changelog из подписанного артефакта)
+  → DATABASECHANGELOG в схеме плагина
+  → healthcheck /health после успешного apply
+```
+
+Что остаётся за платформой:
+- подпись артефакта и проверка digest до запуска (§5.2);
+- изоляция роли (`NOCREATEDB`, `search_path`, `CONNECT`);
+- `pgaudit` и наблюдение за DDL как за фактом;
+- egress Job/пода без интернета;
+- `plan`/`rollback` доступны плагину как обычные Liquibase-команды.
+
+Статический валидатор запрещённых statement **убирается**: при `NOCREATEDB` и
+отдельной БД `DROP DATABASE`, `CREATE ROLE`, `COPY ... TO PROGRAM` (требует
+superuser/pg_execute_server_program) и так невозможны. Проверка безопасности
+перенесена туда, где она действительно работает — в привилегии PostgreSQL.
+
+### 2.6 Отмена ADR-003 в части плагинов
+
+ADR-003 («Pod и агент не получают прямых credentials») **продолжает действовать для
+агентов**. Для plugin-контейнеров вводится исключение: прямой DSN к **собственной
+БД компании**, при соблюдении §2.2. Требуется отдельная запись в реестре ADR
+(`ADR-007`) с формулировкой Supersedes-where-applicable; до её принятия реализация
+§2 не начинается.
 
 ---
 
@@ -131,54 +195,61 @@ Gateway создаёт реальные таблицы **под своей до�
 
 ### 3.1 Принцип
 
-Плагин **поставляет** changelog, платформа **исполняет** его. Это снимает главный риск: произвольный DDL из тела HTTP-запроса без ревью, без `alembic check`, при N×M состояниях схемы.
+**Плагин владеет своей схемой и мигрирует её сам** — это прямое следствие выбранного
+варианта B (§2). Платформа не ревьюит SQL плагина и не подменяет его структурированным
+манифестом: безопасность обеспечивается привилегиями PostgreSQL и отдельной БД, а не
+парсером запросов.
 
 ```
-Артефакт плагина
+Артефакт плагина (подписан)
 └── migrations/
     ├── liquibase/changelog.xml      ← рекомендуемый
     ├── alembic/versions/            ← для Python-плагинов
     └── flyway/V1__init.sql          ← альтернатива
 ```
 
-```json
-POST /gateway/plugins/{plugin_id}/migrations/apply
-{
-  "version": "1.2.0",
-  "engine": "liquibase",
-  "changelog_ref": "artifact://plugin-mod_equipment@1.2.0/migrations/liquibase/changelog.xml",
-  "contexts": ["prod"],
-  "labels": ["v1.2"],
-  "checksum": "sha256:..."
-}
+```bash
+# В backend-контейнере плагина при старте (не HTTP-запрос к платформе)
+liquibase \
+  --url="$TENANT_DB_DSN" \
+  --changeLogFile=/migrations/liquibase/changelog.xml \
+  --contexts=prod --labels=v1.2 \
+  update
 ```
 
-### 3.2 Исполнение
+`DATABASECHANGELOG` лежит в схеме плагина. `/health` поднимается только после
+успешного `update`; при ошибке миграции контейнер не становится Ready.
 
-Liquibase запускается **изолированным k8s Job**:
+### 3.2 Что контролирует платформа
 
-- отдельная доверенная роль (владелец схемы), `NOSUPERUSER NOCREATEDB NOCREATEROLE`
-- `readOnlyRootFilesystem: true`, `runAsNonRoot`, `capabilities.drop: [ALL]`, `resources.limits` 500m/512Mi
-- changelog монтируется read-only из артефакта (проверен digest + подпись Ed25519)
-- `LIQUIBASE_ALLOW_EXECUTE_COMMAND=false` (запрет `<executeCommand>`)
-- egress по NetworkPolicy: только PostgreSQL и gateway, **без интернета**
-- результат + checksum пишутся в `DATABASECHANGELOG` и в audit `plugin_migration_applied`
+Контроль перенесён на уровень, где он действительно работает:
 
-**Валидация перед запуском**: статический парсер отклоняет `DROP DATABASE`, `DROP SCHEMA` вне своей, `CREATE ROLE`, `ALTER ROLE ... SUPERUSER`, `GRANT ... ON ALL TABLES IN SCHEMA public`, `COPY ... TO PROGRAM`, `pg_read_file`, `lo_export`, `dblink`/`postgres_fdw`, `SET row_security = off`.
+| Контроль | Где |
+|---|---|
+| Роль не может создать БД/роль, выдать себе права | `NOCREATEDB NOCREATEROLE NOSUPERUSER`, §2.2 |
+| Роль не может выйти из своей БД | `GRANT CONNECT` только на `tenant_<company>` + `pg_hba.conf` |
+| Роль не может писать в чужую схему | `search_path` + отсутствие `USAGE` на другие схемы |
+| Pod не может достучаться до `prodavan` | NetworkPolicy: egress только tenant PG + gateway + egress-proxy |
+| DDL фиксируется | `pgaudit` на tenant-кластере → append-only лог |
+| Артефакт не подменён | digest + Ed25519-подпись до старта контейнера (§5.2) |
+| Shell-команды из changelog | `LIQUIBASE_ALLOW_EXECUTE_COMMAND=false` |
+| Ресурсы | `resources.limits` контейнера плагина, `CONNECTION LIMIT` роли |
+
+Статический парсер SQL **не нужен**: `DROP DATABASE`, `CREATE ROLE`,
+`COPY ... TO PROGRAM`, `pg_read_file` в этой конфигурации невозможны по привилегиям.
+Попытка трактуется как нарушение и видна в `pgaudit`.
 
 ### 3.3 Дополнительные операции
 
-| Операция | Контракт |
+| Операция | Кто и как |
 |---|---|
-| `POST .../migrations/plan` | dry-run: `updateSQL`, возвращает планируемые changesets без применения |
-| `POST .../migrations/rollback` | `rollbackCount` / `rollbackTo` (только Liquibase/Flyway с явным DOWN) |
-| Checksum mismatch | `422` + `plugin_migration_checksum_mismatch`, применение блокируется |
+| `plan` / dry-run | `liquibase updateSQL` внутри контейнера плагина, без применения |
+| `rollback` | `rollbackCount` / `rollbackTo` плагином; требуется явный DOWN |
+| Checksum mismatch | Liquibase отказывает в `update`, контейнер не становится Ready |
+| Повторный запуск | идемпотентно по `DATABASECHANGELOG` |
 
-**Идемпотентность:** повторный `apply` того же `version`+`checksum` → `200` без изменений. Версия плагина в имени схемы **не** используется (иначе при обновлении данные остаются в старой схеме); версия живёт в журнале миграций.
-
-### 3.4 Схема называется `tenant_<company>_module_<module>` без версии
-
-Изменение схемы — это миграция внутри неё, а не новая схема. Старые данные не теряются, `pluginpage` не меняет URL при обновлении плагина.
+Версия плагина в имени схемы **не** используется (иначе при обновлении данные
+останутся в старой схеме); версия живёт в `DATABASECHANGELOG` и в пути статики.
 
 ---
 
@@ -221,10 +292,7 @@ ADR-002-capability-gateway прямо запрещает «generic row/action di
 
 | Адаптер | Контракт | Примечание |
 |---|---|---|
-| `db.schema` | структурированный манифест таблиц/колонок/индексов | DDL только от платформенной роли |
-| `db.query` | `{table, select[], where{}, order, limit}` + параметры | SQL собирается адаптером; схема+таблица проверяются по grant |
-| `db.mutate` | `{table, op: insert\|update\|delete, values{}, where{}}` | `WITH CHECK`-эквивалент на стороне адаптера |
-| `db.migrations` | см. §3 | changelog, не SQL из тела |
+| `db.direct` | прямой DSN к **своей** БД компании: полный SQL, JOIN, CTE, DDL, индексы, миграции | граница — отдельная БД + роль `NOCREATEDB NOCREATEROLE` + `CONNECT` + NetworkPolicy + `pgaudit`. В gateway **не** проходит |
 | `cache` | `get/set/delete/incr/publish` с key-rewrite | `tenant:{company}:proj:{project}:plugin:{module}:*` |
 | `objects` | `put/get/list/delete` через API-mediated | без presigned URL (as-built решение) |
 | `docs` | Mongo namespace `tenant_infra` | `TenantDocsService` |
@@ -242,7 +310,7 @@ ADR-002-capability-gateway прямо запрещает «generic row/action di
 
 | Группа | Идентификатор | Enforcement |
 |---|---|---|
-| capability | `db.schema`, `db.query`, `db.mutate`, `db.migrations`, `cache`, `objects`, `docs`, `events`, `jobs`, `pods`, `mcp`, `secrets`, `network` | `CapabilityGrant.operations` × `resources` × `domains` |
+| capability | `db.direct` (своя БД), `db.migrations`, `cache`, `objects`, `docs`, `events`, `jobs`, `pods`, `mcp`, `secrets`, `network` | `CapabilityGrant` для адаптеров; для `db.direct` граница — привилегии PostgreSQL, а не gateway |
 | quota | `ops_per_minute`, `max_rows`, `max_bytes`, `max_keys`, `max_object_bytes`, `max_egress_bytes` | `CompanyTenantInfraQuota` в gateway; превышение → `429` + `QUOTA_EXCEEDED` |
 | event | `plugin_request`, `plugin_db_query`, `plugin_migration_applied`, `plugin_object_access`, `plugin_egress_request`, `plugin_webhook_received`, `plugin_page_opened`, `plugin_wake_up`, `plugin_task_submitted` | append-only sink, см. §4.5 |
 
@@ -284,9 +352,11 @@ plugin-mod_equipment-1.2.0.tar.gz        (digest sha256, подпись Ed25519)
 **Установка (идемпотентная):**
 1. Реестр артефактов: скачать по digest, проверить подпись.
 2. Frontend → объектное хранилище с tenant-тегами (не отдельный bucket).
-3. Backend → контейнер по образу из манифеста; env получает **только** `GATEWAY_URL`, `PLUGIN_ID`, `BRIDGE_TOKEN` (из k8s Secret). **`TENANT_DB_DSN` не выдаётся.**
-4. Миграции → Job по §3.2.
-5. Grant/bind → запись в `CapabilityGrant` + `PodBridgeClaims`.
+3. Backend → контейнер по образу из манифеста; env/k8s Secret получает `GATEWAY_URL`,
+   `PLUGIN_ID`, короткий bridge lease и **`TENANT_DB_DSN`** (только своей БД компании).
+   Пароль — `secret_ref` с ротацией при reinstall, не plaintext в манифесте.
+4. Старт контейнера: Liquibase `update` по §3 → `/health` Ready.
+5. Grant/bind → запись в `CapabilityGrant` + `PodBridgeClaims` (для адаптеров, не для БД).
 6. Регистрация маршрутов в Plugin Gateway и egress-правил.
 
 ### 5.1 Frontend: отдельный origin, без `allow-same-origin`
@@ -327,13 +397,16 @@ manifest.json          (каноническая форма, без digest/по�
 
 | Операция | Что делает |
 |---|---|
-| `POST /gateway/plugins/{id}/grant` | создаёт `CapabilityGrant`, мнит `PodBridgeClaims`, создаёт схему/роль, регистрирует маршруты и egress |
-| `POST /gateway/plugins/{id}/revoke` | `bump_pod_bridge_generation` → мгновенный отзыв всех токенов, снятие маршрутов, перевод backend в `Suspended` |
-| `POST /gateway/plugins/{id}/uninstall` | `purge_project_tenant_infra` (cache/docs/userdb/events/objects + equipment OS indexes), drop схемы, удаление артефакта. Требует snapshot |
-| `POST /admin/modules/{id}/migrate-to-plugin` | идемпотентный перенос данных: `dry_run` → сверка контрольных сумм → копирование → журнал. Односторонний, поэтому snapshot обязателен **до** запуска |
-| `POST /gateway/plugins/{id}/wake` | см. §7.6; выдаёт **новый короткоживущий** lease, проверяет отзыв перед первым запросом |
+| `POST /gateway/plugins/{id}/grant` | создаёт БД `tenant_<company>` (если нет), схему `module_<id>` с owner = роль плагина, роль, `CapabilityGrant` для адаптеров, маршруты и egress |
+| `POST /gateway/plugins/{id}/revoke` | отзыв bridge lease, снятие маршрутов, `Suspended`; БД/схема сохраняются |
+| `POST /gateway/plugins/{id}/uninstall` | `purge_project_tenant_infra`, `DROP SCHEMA`, дроп роли, удаление артефакта. Данные dev эфемерны — snapshot **не требуется** |
+| `POST /gateway/plugins/{id}/wake` | см. §7.6; новый короткий bridge lease; DSN остаётся тем же |
 
-Долгоживущих креденшелов в env нет: только `GATEWAY_URL`, `PLUGIN_ID`, короткий bridge lease; `secret_ref` вместо plaintext (ADR-003).
+`migrate-to-plugin` **исключён**: перенос данных не нужен, это dev-разработка.
+
+Секреты: `TENANT_DB_DSN` и bridge lease — короткоживущие `secret_ref` с ротацией при
+reinstall/revoke; plaintext в манифесте запрещён. ADR-003 действует для агентов,
+для плагинов отменён в части `db.direct` (§2.6, ADR-007).
 
 ---
 
@@ -341,7 +414,7 @@ manifest.json          (каноническая форма, без digest/по�
 
 ### 6.1 NetworkPolicy
 
-Исправления относительно v1: `namespaceSelector` по `kubernetes.io/metadata.name` (лейбла `name` в `namespace.yaml` нет), **убран** egress на `postgresql:5432` для плагина (комментарий в YAML не является ограничением; as-built явно «Platform Postgres | Never — no DSN»).
+Исправления относительно v1: `namespaceSelector` по `kubernetes.io/metadata.name` (лейбла `name` в `namespace.yaml` нет); egress к **tenant** PostgreSQL разрешён подам плагина (это и есть выбранный прямой DSN), ноPlatform Postgres `prodavan` остаётся недостижим — отдельный Service/хост, отдельные credentials, правило ниже его не включает.
 
 ```yaml
 apiVersion: networking.k8s.io/v1
@@ -379,9 +452,18 @@ spec:
           podSelector:
             matchLabels: {k8s-app: kube-dns}
       ports: [{protocol: UDP, port: 53}]
+    # Tenant PostgreSQL: отдельный Service, НЕ prodavan.
+    - to:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: agentscale-dev}
+          podSelector:
+            matchLabels: {app: tenant-postgres}
+      ports: [{protocol: TCP, port: 5432}]
 ```
 
-Прямой доступ к PostgreSQL разрешён **только** подам gateway и Liquibase Job, не плагину.
+`prodavan` (платформенный Postgres) в эту политику **не входит**: у плагина нет ни
+сетевого пути, ни credentials, ни `CONNECT` к этой БД. Tenant-кластер — отдельный
+Deployment/Service с собственным Secret; роли создаются platform-админом при grant.
 
 ### 6.2 Egress Proxy
 
@@ -463,7 +545,7 @@ spec:
 | Scheduled tasks | `POST /gateway/cron/register` | Celery beat → outbox | `POST /cron/*` |
 | Event handlers | `POST /gateway/events/subscribe` | Kafka/RabbitMQ | `POST /events/*` (DLQ, 3 retry) |
 | Background workers | `POST /gateway/tasks/submit` | k8s Job | `POST /tasks/*` |
-| Миграции | `POST /gateway/migrations/apply` | Liquibase Job | — |
+| Миграции | `manifest.migrations` | старт контейнера плагина, свой DSN | `liquibase update` в entrypoint, не платформенный Job |
 
 Backend — отдельный контейнер (или sidecar), не имеет k8s API, не имеет DSN, общается только с gateway и egress-proxy.
 
@@ -512,21 +594,21 @@ Wake-up триггеры: HTTP-запрос (iframe, webhook, pluginpage), Cron 
 
 ## 8. Путь миграции: цель «под нож», метод — strangler
 
-Разрешаем противоречие v1: **«всё под нож» — это про конечное состояние, а не про способ перехода.** В финале declarative-app (`module_meta_documents`, generic runtime, `module_instance_data_rows`, `ModuleRuntime.tsx`) удалён полностью. Но идём к нему параллельным прогоном, потому что:
+Разрешаем противоречие v1: **«всё под нож» — про конечное состояние, а не про способ перехода.** В финале declarative-app (`module_meta_documents`, generic runtime, `module_instance_data_rows`, `ModuleRuntime.tsx`) удалён полностью. Параллельный прогон нужен **только из-за объёма кода**, а не из-за данных:
 
-- `mod_equipment` — ~13k строк: 18 Python-файлов (9 678 строк) + 16 TS/TSX (3 485 строк), отдельная страница `/equipment`, Celery beat/sweep, MCP-сервер, OpenSearch-индексы (`ADR-005-equipment-bounded-context` требует сохранения provenance и стабильных ID).
-- Работа идёт прямо в `main` с auto-merge и единственным dev-контуром; бэкапов нет (`topology.md:208-220`); DOWN-миграции не поддерживаются. Big bang = неоткатываемый простой и потеря данных.
+- `mod_equipment` — ~13k строк: 18 Python-файлов (9 678 строк) + 16 TS/TSX (3 485 строк), отдельная страница `/equipment`, Celery beat/sweep, MCP-сервер, OpenSearch-индексы.
+- Это **dev-разработка**: данные эфемерны, бэкапы не нужны, перенос данных не нужен, DOWN-миграции платформы не требуются. Любые тестовые данные создаются заново сидом.
 
 **Этапы:**
 
-1. **Слой capability** — расширить `:8001`, `CapabilityGatewayService`, `TenantUserDbService` (новые typed контракты из §4.3), Liquibase-Job, egress-контроллер. Старый путь работает как прежде.
-2. **Пилот** — plugin-версия одного bounded context'a для 1 компании за фича-флагом `plugin_enabled_modules[]`. Dual-read: старый `/equipment` и новый плагин читают одни данные; расхождения фиксируются метрикой парности.
-3. **Перенос frontend** — страница плагина в iframe, backend-логика пока остаётся в API через существующие `/projects/{id}/modules/...`.
-4. **Перенос backend по одному контексту** — офферы → цены → бюджет → документы → тендеры. Каждый шаг за флагом, с dual-write и сверкой.
-5. **Cutover** — переключение флага, N недель наблюдения.
-6. **Удаление** — убрать declarative-app, `mod_management` перевести на plugin (или оставить как единственный простой плагин), старые таблицы архивировать и удалить после сверки.
+1. **Инфраструктура** — tenant PostgreSQL (отдельный Deployment/Service/Secret), роли/БД при grant, PgBouncer в transaction mode, `pgaudit`, egress-контроллер, Ingress с `router.priority: 120`, Plugin Gateway, lifecycle-контроллер. Declarative-app работает как прежде.
+2. **Пилот** — первый плагин с собственными таблицами и Liquibase-миграциями за фича-флагом `plugin_enabled_modules[]`. Данные — только тестовые, созданные сидом плагина.
+3. **Перенос frontend** — страница плагина в iframe; backend-логика пока в API.
+4. **Перенос backend по одному bounded context'у** — офферы → цены → бюджет → документы → тендеры. Каждый шаг за флагом; старый путь можно просто выключить, сравнивать нечего.
+5. **Cutover** — переключение флага.
+6. **Удаление** — убрать declarative-app, `mod_management` перевести на plugin, старые таблицы `module_*` дропаются ревизией Alembic без переноса содержимого.
 
-`POST /admin/modules/{id}/migrate-to-plugin` — идемпотентный, с `dry_run`, сверкой контрольных сумм и журналом; до включения обязателен snapshot (раз бэкапов нет, его надо добавить **до** этапа 2).
+Ни `migrate-to-plugin`, ни snapshot, ни dual-read/dual-write, ни «сверка контрольных сумм», ни «N недель наблюдения» — **не требуются**. Все доводы v2 про потерю данных были про prod-данные, которых на dev нет.
 
 ---
 
@@ -545,16 +627,16 @@ Wake-up триггеры: HTTP-запрос (iframe, webhook, pluginpage), Cron 
 
 | Риск | Митигация |
 |---|---|
-| Произвольный DDL затирает чужие схемы | changelog исполняется доверенной ролью в изолированном Job; статическая валидация запрещённых statement; `NOCREATEDB NOCREATEROLE`; egress Job без интернета |
-| Утечка между компаниями | отдельная схема + grant без `CREATE` + gateway проверяет `company_id` из JWT; RLS не является границей |
+| Произвольный DDL затирает чужие БД | отдельная БД на компанию + `GRANT CONNECT` только на неё + `NOCREATEDB NOCREATEROLE NOSUPERUSER`; `pgaudit` фиксирует DDL; платформенный Postgres в другом Service и недостижим по NetworkPolicy |
+| Утечка между компаниями | исключена конструктивно: роль не имеет `CONNECT` к чужой БД. RLS/GUC не участвуют |
 | Подмена `X-Plugin-*` внешним клиентом | Gateway строит headers allowlist'ом, отбрасывает входящие `X-Plugin-*`/`Cookie`/hop-by-hop; backend дополнительно проверяет JWT |
 | Анонимный доступ к `/pluginpage/*` | обязательная сессия + `employee ∈ company` + grant; `public_pages` — явное исключение с урезанным scope |
 | iframe снимает sandbox | отдельный origin, без `allow-same-origin`, restrictive CSP, `plugin-rpc/1` handshake, проверка `event.origin`; токен не в URL |
-| Исчерпание соединений/памяти PG | одна БД, typed gateway, `CompanyTenantInfraQuota`, без PgBouncer и без N пулов |
+| Исчерпание соединений/памяти PG | один PgBouncer (transaction mode) на tenant-кластер, `CONNECTION LIMIT` на роли, `statement_timeout`/`lock_timeout` как предохранители |
 | DoS через egress | `none`/`webhooks-only`/`full`, динамический allowlist из токена, квота байт, аудит |
 | `/webhook/` уезжает в SPA | `router.priority: 120` + entrypoints + ingressClassName + тест приоритетов |
-| Неоткатываемый cutover | strangler + фича-флаг + dual-read + snapshot до переноса данных |
-| Расхождение политик | один `CapabilityGatewayService`, один `PodBridgeClaims`, один egress-контроллер |
+| Сломанный cutover | strangler + фича-флаг; данные dev эфемерны, откат = выключить флаг |
+| Расхождение политик | один egress-контроллер, один lifecycle-контроллер, один реестр capability |
 
 ---
 
@@ -564,11 +646,11 @@ Wake-up триггеры: HTTP-запрос (iframe, webhook, pluginpage), Cron 
 
 | # | Критерий | Проверка |
 |---|---|---|
-| 1 | Роль плагина не владеет таблицами и не имеет `CREATE` на схему | `\du` / `\dn+` в integration-тесте; попытка `CREATE TABLE` → `42501` |
-| 2 | Changelog с `DROP DATABASE` / `COPY ... TO PROGRAM` / `CREATE ROLE` отклоняется до запуска Job | unit-тест валидатора changelog |
-| 3 | Повторный `migrations/apply` того же `version+checksum` не меняет схему | integration: `DATABASECHANGELOG` без новых строк |
-| 4 | Обновление плагина 1.2.0 → 1.3.0 сохраняет данные | integration: строка, созданная до апдейта, читается после |
-| 5 | Запрос с подменённым `X-Company-ID` не видит чужую схему | e2e Gateway: `403` / пустой результат |
+| 1 | Роль плагина владеет **своей** схемой, но `NOCREATEDB NOCREATEROLE NOSUPERUSER` | `\du`; попытка `CREATE DATABASE` / `CREATE ROLE` → `42501` |
+| 2 | Роль не может подключиться к `prodavan` или чужой `tenant_*` БД | integration: `psql "$prodavan_dsn"` и `tenant_<other>` → `FATAL: permission denied` |
+| 3 | Плагин сам применяет Liquibase changelog; повторный запуск не меняет схему | integration: `DATABASECHANGELOG` без новых строк |
+| 4 | `/health` не становится Ready при ошибке миграции / checksum mismatch | e2e контейнера плагина |
+| 5 | `pgaudit` содержит DDL плагина | integration по логам tenant-кластера |
 | 6 | Анонимный `/pluginpage/{plugin}/{company}/api/*` без сессии → `401` | e2e Gateway |
 | 7 | Webhook без/с неверной `X-Prodavan-Signature` → `401`; повтор `X-Prodavan-Delivery` не дублирует обработку | e2e по `docs/external-api.md` |
 | 8 | Egress на хост вне `allowed_hosts` → `403` + событие аудита | e2e egress-контроллера |
@@ -578,20 +660,21 @@ Wake-up триггеры: HTTP-запрос (iframe, webhook, pluginpage), Cron 
 | 12 | `revoke` мгновенно делает старый токен невалидным | integration `bump_pod_bridge_generation` |
 | 13 | Wake-up после `Suspended` выдаёт новый lease, а не истёкший из Secret | integration lifecycle |
 | 14 | Активный `job_id` блокирует усыпление backend | integration lifecycle |
-| 15 | `migrate-to-plugin` идемпотентен; `dry_run` не пишет данные; контрольные суммы совпадают | integration миграции данных |
-| 16 | Dual-read pilot: расхождение старого и нового пути фиксируется метрикой парности | метрика + алерт |
+| 15 | Uninstall дропает схему/роль, не трогая чужие БД | integration lifecycle |
+| 16 | Фича-флаг `plugin_enabled_modules[]` переключает путь без миграции данных | e2e: старый/новый путь работают независимо |
 
 ---
 
 ## 12. Открытые вопросы
 
-1. **Выразительность `db.query`** — где граница между typed subset и необходимостью произвольного SQL для отчётов `mod_equipment`? Возможен «режим B» (§2.3) для отдельного enterprise-инстанса. **Блокирует реализацию.**
-2. **Хранение артефактов** — реестр с подписью: GHCR + cosign/Ed25519 или отдельный MinIO-префикс?
-3. **Публичные страницы** — какие данные допустимы без сессии; формат anon-scope.
-4. **Cross-module sharing** — пока запрещено; если понадобится, только через явный grant в gateway.
-5. **Бэкапы** — обязательны до этапа 2 (сейчас их нет); pg_dump-job + snapshot-политика. **Блокирует перенос данных.**
-6. **Маркетплейс** — публикация/установка плагинов, отдельный документ.
-7. **Billing** — привязка `quota_ref` к тарифу.
+1. **Хранение артефактов** — реестр с подписью: GHCR + cosign/Ed25519 или отдельный MinIO-префикс?
+2. **Публичные страницы** — какие данные допустимы без сессии; формат anon-scope.
+3. **Cross-module sharing** — пока запрещено; если понадобится, только через явный grant в gateway.
+4. **Маркетплейс** — публикация/установка плагинов, отдельный документ.
+5. **Billing** — привязка `quota_ref` к тарифу.
+6. **ADR-007** — явное supersede ADR-003 в части `db.direct` (обязателен до реализации §2).
+
+Закрытые вопросы: вариант доступа к БД выбран (B, прямой DSN); бэкапы, перенос данных, dual-read, snapshot и «N недель наблюдения» исключены — это dev-разработка, данные эфемерны.
 
 ---
 
@@ -599,8 +682,8 @@ Wake-up триггеры: HTTP-запрос (iframe, webhook, pluginpage), Cron 
 
 | Было в v1 | Почему отвергнуто |
 |---|---|
-| `CREATE DATABASE tenant_<company_id>` | N БД, нет `max_size`, нет бэкапов, PgBouncer отсутствует, одна цепочка Alembic |
-| Прямой `TENANT_DB_DSN` плагину | противоречит ADR-003 (`no direct infra access`); RLS-обход владельцем; подмена GUC |
+| `CREATE DATABASE tenant_<company_id>` | **принято в v3** при прямом DSN: это и есть настоящая граница изоляции. Один кластер + PgBouncer, N БД |
+| Прямой `TENANT_DB_DSN` плагину | **принято в v3**; ADR-003 отменяется в части плагинов (ADR-007). Риски RLS/GUC снимаются тем, что RLS не используется, а граница — `CONNECT` |
 | RLS как граница | `ENABLE` без `FORCE` не действует на owner; owner = плагин; `app.*` GUC пере-set'ится |
 | `CONNECTION LIMIT` как размер БД | это лимит сессий |
 | `statement_timeout` как rate limit | это таймаут statement, переопределяется в сессии |
@@ -611,8 +694,8 @@ Wake-up триггеры: HTTP-запрос (iframe, webhook, pluginpage), Cron 
 | Knative scale-to-zero | нет CRD, нет whitelist в AppProject, нет HPA; pause/resume уже работает |
 | Cold start 100–500 мс | на этом кластере реально секунды/десятки секунд; есть warm pool |
 | `sandbox="allow-scripts allow-same-origin"` | classic sandbox bypass |
-| `companies.tenant_db_connection` | единая точка компрометации всех компаний |
-| egress плагина на `postgresql:5432` | противоречит ADR-003 и as-built «Platform Postgres: Never» |
+| egress плагина на `postgresql:5432` | **принято в v3** для отдельного tenant-Postgres Service; платформенный `prodavan` по-прежнему недостижим |
+| `companies.tenant_db_connection` | единая точка компрометации: учётные данные хранятся в k8s Secret на компанию, а не в общей таблице |
 | wildcard `*.agentscale.dev` сертификат | в кластере self-signed TLSStore, cert-manager нет |
 | `v1→v4 deprecate` при «всё под нож» | разведено: цель = удаление, метод = strangler |
 | Дубли §9.2/§9.6, §9.3/§9.7, два `## 10.` | удалены |
@@ -621,25 +704,28 @@ Wake-up триггеры: HTTP-запрос (iframe, webhook, pluginpage), Cron 
 | Клиентские заголовки после доверенных в proxy | allowlist + отбрасывание входящих `X-Plugin-*`/`Cookie` |
 | Анонимный `pluginpage_proxy` (`pass`) | обязательная сессия + проверка grant + `employee ∈ company` |
 | Статический Envoy-кластер `webhooks.example.com` | кластеры строятся контроллером из подписанного токена |
-| Долгоживущие `TENANT_DB_DSN`/токен в env | короткие lease + `secret_ref` (ADR-003) |
-| Просроченный `exp`, самореференция `artifact_digest` в манифесте | исправлены |
-| Generic Redis `command+args`, версия плагина в имени схемы | typed контракты; версия только в журнале миграций |
+| Долгоживущие `TENANT_DB_DSN`/токен в env | короткие lease + `secret_ref`; DSN ротируется при reinstall/revoke |
+| Generic Redis `command+args`, версия плагина в имени схемы | typed контракты; версия только в `DATABASECHANGELOG` и пути статики |
+| `TenantUserDbService._ALLOWED_TYPES` / структурированный манифест схемы | это та же ограниченная декларативность: плагин в v3 владеет схемой и пишет полноценный SQL |
+| Изолированный Liquibase Job под доверенной ролью + парсер запрещённых SQL | плагин мигрирует сам; безопасность = привилегии PostgreSQL + отдельная БД |
+| `migrate-to-plugin`, dual-read/dual-write, snapshot, бэкапы, «N недель наблюдения» | не нужны: dev-разработка, данные эфемерны, переноса нет |
+| Dual-read метрики парности | не нужны по той же причине; strangler нужен только из-за объёма кода |
 
 ---
 
 ## 14. Порядок реализации
 
-1. ADR-реестр + переименование ADR-006 + статусы Superseded.
-2. Расширение `CapabilityGatewayService` / `CapabilityGrant` новыми capability.
-3. `TenantUserDbService`: схема `tenant_<company>_module_<module>`, структурированный манифест.
-4. Liquibase Job + валидатор changelog + `migrations/plan|apply|rollback`.
-5. Egress-контроллер (динамический allowlist) + единая схема аудита.
-6. Plugin Gateway + Ingress (priority 120) + тест приоритетов.
-7. Lifecycle-контроллер (pause/resume/wake) на базе `SandboxClaim`.
-8. Артефакт/реестр/подпись + установка + grant/bind.
-9. Пилотный плагин за фича-флагом + dual-read метрики.
-10. Snapshot/бэкап до переноса данных → strangler по контекстам → cutover → удаление declarative-app.
+1. ADR-реестр, ADR-006, **ADR-007** (supersede ADR-003 в части `db.direct`).
+2. Tenant PostgreSQL: отдельный Deployment/Service/Secret, PgBouncer (transaction mode), `pgaudit`.
+3. Lifecycle grant/revoke/uninstall: `CREATE DATABASE tenant_<company>`, роль, схема `module_<id>` с owner = плагин, `search_path`, `CONNECT`.
+4. Расширение `CapabilityGatewayService` / `CapabilityGrant` для **не-БД** адаптеров (cache, objects, docs, events, jobs, pods, mcp, secrets, network).
+5. Egress-контроллер (динамический allowlist) + единая схема аудита + CSP/origin для iframe.
+6. Plugin Gateway + Ingress (`router.priority: 120`) + тест приоритетов + webhook-контракт.
+7. Lifecycle-контроллер (pause/resume/wake) на базе `SandboxClaim` + warm pool.
+8. Артефакт/реестр/подпись + установка + Liquibase `update` при старте контейнера.
+9. Пилотный плагин за фича-флагом `plugin_enabled_modules[]` с собственными таблицами и тестовыми данными.
+10. Strangler по контекстам `mod_equipment` → cutover → удаление declarative-app (`module_*` дропаются ревизией без переноса данных).
 
 ---
 
-**Конец документа.** Дизайн, не код. Реализация через субагентов после утверждения §2.3 (вариант A или B) и §11.
+**Конец документа.** Дизайн, не код. Реализация через субагентов на main; микрокоммиты `git add -A && git commit && git push`, без гигиены и без переписывания истории; тесты пишутся, но не запускаются до явного решения. Блокирующее условие — принятие ADR-007.

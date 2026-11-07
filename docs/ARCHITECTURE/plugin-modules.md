@@ -11,12 +11,12 @@
 ## Что важно помнить
 
 1. **Не строим новый слой.** Переиспользуем уже работающие `CapabilityGatewayService`, pod-gateway `:8001`, `PodBridgeClaims`, `TenantUserDbService`, `tenant_infra/*`, `SandboxClaim` pause/resume. Новый сервис адаптеров, новый формат JWT, PgBouncer и Knative — отвергнуты на ревью v1.
-2. **Реальные таблицы без прямого DSN.** Схема `tenant_<company>_module_<module>` в уже существующей `agentscale_userdb`. DDL исполняет доверенная платформенная роль по структурированному манифесту; плагин получает typed `db.query`/`db.mutate`. RLS не является границей безопасности.
-3. **Миграции поставляет плагин, исполняет платформа.** Liquibase/Flyway/Alembic changelog → изолированный k8s Job → валидация запрещённых statement → подпись артефакта → `DATABASECHANGELOG`. Произвольного SQL из тела HTTP-запроса нет.
-4. **Изоляция.** Отдельная схема + grant без `CREATE`, отдельный origin для iframe **без** `allow-same-origin`, NetworkPolicy без egress к PostgreSQL. Единый egress-контроллер (`none`/`webhooks-only`/`full`) для плагинов и агентов.
+2. **Реальные таблицы с прямым DSN.** Отдельная БД `tenant_<company_id>`, схема `module_<module>` во владении роли плагина, полный SQL и self-managed Liquibase/Flyway/Alembic миграции. Платформенная `prodavan` недоступна. Остальная инфраструктура — через typed адаптеры gateway `:8001`. См. [ADR-007](../architecture-migration/ADR-007-direct-plugin-db.md).
+3. **RLS не является границей.** Граница — отдельная БД + `GRANT CONNECT` + `NOCREATEDB NOCREATEROLE` + `search_path` + NetworkPolicy + `pgaudit`.
+4. **Изоляция.** Отдельный origin для iframe **без** `allow-same-origin`, CSP, `plugin-rpc/1` handshake. Единый egress-контроллер (`none`/`webhooks-only`/`full`) для плагинов и агентов.
 5. **Внешние адреса.** `/webhook/{plugin}/{company}/*`, `/pluginpage/{plugin}/{company}/*` на отдельном Ingress с `router.priority: 120`.
 6. **Засыпание.** `SandboxClaim.operatingMode: Suspended` + warm pool — тот же механизм, что у контейнеров агентов.
-7. **Переход.** «Всё под нож» — про конечное состояние, не про метод. Идём strangler'ом с фича-флагом и dual-read: ~13k строк `mod_equipment`, работа в `main`, бэкапов нет.
+7. **Переход.** «Всё под нож» — про конечное состояние. Strangler с фича-флагом нужен только из-за ~13k строк `mod_equipment`. Это dev-разработка: данные эфемерны, бэкапы, перенос данных, snapshot и dual-read **не нужны**.
 
 ## Чего здесь нет
 

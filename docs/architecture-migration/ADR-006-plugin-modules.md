@@ -22,9 +22,9 @@
 ### Ключевые принципы
 
 1. **Переиспользование as-built** — не строить новый сервис адаптеров, не mint'ить новый формат JWT, не создавать БД на компанию. Расширяем `CapabilityGatewayService`, `TenantUserDbService`, `tenant_infra/*`, `:8001`. См. полный дизайн: `docs/ARCHITECTURE/plugin-architecture-complete.md` (v2).
-2. **Реальные таблицы без прямой выдачи DSN** — структурированный манифест схемы, DDL исполняет доверенная платформенная роль; плагин получает typed `db.query`/`db.mutate` через gateway. Прямой DSN возможен только в отдельном enterprise-режиме и требует отдельного ADR, отменяющего ADR-003.
-3. **Миграции как инфраструктура** — плагин поставляет Liquibase/Flyway/Alembic changelog; платформа исполняет его в изолированном Job под доверенной ролью, с валидацией запрещённых statement, подписью артефакта и `DATABASECHANGELOG`. Произвольный SQL из тела HTTP-запроса запрещён (ADR-002).
-4. **Изоляция** — отдельная схема `tenant_<company>_module_<module>`, grant без `CREATE`, отдельный origin для iframe **без** `allow-same-origin`, NetworkPolicy без egress к PostgreSQL. RLS не является границей.
+2. **Реальные таблицы и прямой DSN** — отдельная БД `tenant_<company_id>`, схема `module_<module_id>` во владении роли плагина, полный SQL и self-managed Liquibase/Flyway/Alembic миграции. Плагин **не** получает доступ к платформенной `prodavan`. Подробности и границы — ADR-007.
+3. **Миграции как инфраструктура** — плагин поставляет подписанный Liquibase/Flyway/Alembic changelog и применяет его сам при старте контейнера под своей ролью (`NOCREATEDB NOCREATEROLE`). Безопасность = привилегии PostgreSQL + отдельная БД + `pgaudit`, а не парсер SQL. Произвольный SQL из тела HTTP-запроса к платформе отсутствует (ADR-002).
+4. **Изоляция** — отдельная **БД** `tenant_<company>`, `GRANT CONNECT` только на неё, схема с owner = плагин, NetworkPolicy без egress к `prodavan`, отдельный origin для iframe **без** `allow-same-origin`. RLS не является границей.
 5. **Единый фаерволл** — egress-контроллер с режимами `none`/`webhooks-only`/`full` для плагинов **и** контейнеров агентов.
 6. **Засыпание** — переиспользование `SandboxClaim.operatingMode` / `PodRuntimePort.pause|resume` / warm pool; Knative не вводится (нет CRD, нет whitelist в Argo AppProject).
 7. **Внешние адреса** — path-based `/webhook/{plugin}/{company}/*` и `/pluginpage/{plugin}/{company}/*` на отдельном Ingress с `router.priority: 120`.
@@ -35,7 +35,7 @@ Declarative-app удалён **полностью** («всё под нож»): 
 
 ### Метод перехода
 
-Не big bang. Strangler с фича-флагом на grant/company: слой capability → пилот за флагом → dual-read → перенос frontend → перенос backend по одному bounded context'у (ADR-005) → cutover → удаление. Причины: ~13k строк, работа прямо в `main` с auto-merge, единственный dev-контур, отсутствие бэкапов (`topology.md:208-220`), DOWN-миграции не поддерживаются.
+Strangler с фича-флагом — **только из-за объёма кода** `mod_equipment` (~13k строк), а не из-за данных. Это dev-разработка: данные эфемерны, **бэкапы, перенос данных, snapshot, dual-read/dual-write, `migrate-to-plugin` и длительное наблюдение не требуются**.
 
 ## Последствия
 
@@ -50,24 +50,25 @@ Declarative-app удалён **полностью** («всё под нож»): 
 
 | Риск | Митигация |
 |---|---|
-| Произвольный DDL затирает чужие схемы | changelog → доверенная роль → изолированный Job, статическая валидация, `NOCREATEDB NOCREATEROLE` |
-| Межтенантовая утечка | отдельная схема + grant без `CREATE` + gateway проверяет `company_id` из JWT |
-| Подмена `X-Plugin-*` | Gateway перезаписывает заголовки |
+| Произвольный DDL затирает чужие БД | отдельная БД + `GRANT CONNECT` только на неё + `NOCREATEDB NOCREATEROLE` + NetworkPolicy без `prodavan` + `pgaudit` (ADR-007) |
+| Межтенантовая утечка | исключена конструктивно: роль не имеет `CONNECT` к чужой БД |
+| Подмена `X-Plugin-*` | Gateway строит headers allowlist'ом |
 | iframe снимает sandbox | отдельный origin, CSP, `postMessage` с проверкой origin, без `allow-same-origin` |
-| Неоткатываемый cutover | strangler + dual-read + snapshot до переноса |
+| Сломанный cutover | strangler + фича-флаг; откат = выключить флаг, данные dev пересоздаются сидом |
 | `/webhook/` уезжает в SPA | `router.priority: 120` + тест приоритетов |
 
 ## Альтернативы
 
 1. **Расширить declarative-app** — отклонено: не даёт реальных таблиц и своего runtime.
 2. **WASM plugins** — отложено: требует WASM-компиляции всех зависимостей.
-3. **Отдельный PG-инстанс / БД на компанию с прямым DSN** — отложено в enterprise-tier: нет `max_size`, нет PgBouncer, нет бэкапов, single-node k3s, конфликт с ADR-003.
+3. **Typed gateway без DSN (вариант A)** — отклонено: `_ALLOWED_TYPES` / структурированный манифест запрещает произвольный SQL, JOIN, CTE, индексы и миграции, то есть воспроизводит ту же ограниченную декларативность. Выбран вариант B (ADR-007).
 4. **Knative Serving** — отклонено: нет CRD и whitelist в AppProject; pause/resume уже реализован.
 5. **Wildcard-поддомены `{plugin}.appname.com`** — отклонено: нужен wildcard-сертификат и интеграция с DNS-провайдером; в кластере self-signed TLSStore.
 
 ## Связанные документы
 
-- `docs/ARCHITECTURE/plugin-architecture-complete.md` — **полный дизайн v2 (источник истины)**
+- `docs/ARCHITECTURE/plugin-architecture-complete.md` — **полный дизайн v3 (источник истины)**
+- `docs/architecture-migration/ADR-007-direct-plugin-db.md` — прямой DSN, отмена ADR-003 в части плагинов
 - `docs/ARCHITECTURE/plugin-modules.md` — краткое введение
 - `docs/PRODUCT.md` — раздел «Целевая модель: plugin-модули»
 - `docs/workflow/main-branch-workflow.md` — работа на main
