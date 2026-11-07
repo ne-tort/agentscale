@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter, Outlet, Route, Routes } from "react-router-dom";
 import { SettingsProvider } from "../../preferences/SettingsProvider";
+import { adminTabFor } from "./AdminArea";
 import { CompaniesPage } from "./CompaniesPage";
 import { CompanyDetailPage } from "./CompanyDetailPage";
 import { DeletedPage } from "./DeletedPage";
@@ -284,6 +285,24 @@ describe("dangerous actions say what happened", () => {
     });
     const copy = [...host.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Копировать");
     expect(copy).toBeDefined();
+  });
+});
+
+describe("the tab bar says where you are", () => {
+  it("keeps «Компании» lit on a company's own page", () => {
+    // Its tab points at the bare `/admin`, which a prefix match would let
+    // swallow every other tab. Before the explicit rule, a company page belonged
+    // to no tab and the bar showed nothing selected.
+    expect(adminTabFor("/admin/companies/co_1")).toBe("/admin");
+    expect(adminTabFor("/admin")).toBe("/admin");
+  });
+
+  it("lights the section you are in, not the companies tab", () => {
+    expect(adminTabFor("/admin/keys")).toBe("/admin/keys");
+    expect(adminTabFor("/admin/modules")).toBe("/admin/modules");
+    expect(adminTabFor("/admin/deleted")).toBe("/admin/deleted");
+    // An unknown child of a section stays with that section.
+    expect(adminTabFor("/admin/modules/mod_1")).toBe("/admin/modules");
   });
 });
 
