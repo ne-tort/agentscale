@@ -1,9 +1,19 @@
-# Build context is prodavan/ repo root (see Dockerfile COPY paths).
-**/build/
-**/.dart_tool/
-**/.idea/
-**/*.iml
+# Build context is the repo root (see the Dockerfile COPY paths).
+
+# The web image builds its own dependencies; copying host ones in would shadow
+# the lockfile-resolved tree with whatever the developer happened to have.
 **/node_modules/
+**/dist/
+**/.vite/
+**/playwright-report/
+**/test-results/
+
+# Python/JS tooling caches that occasionally live in the tree.
+**/.venv*/
+**/.mypy_cache/
+**/.pytest_cache/
+**/__pycache__/
+
 .git/
 infra/github-runner/*.tar.gz
 data/

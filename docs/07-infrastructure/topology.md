@@ -14,7 +14,7 @@
 ```mermaid
 flowchart TB
     subgraph Users
-        UI["Браузер (Flutter Web build)"]
+        UI["Браузер (React/TypeScript build)"]
     end
     subgraph Edge["Traefik — web :8088 (dev) / :80 (prod) · websecure :443"]
         WEB["web — dev wildcard"]
@@ -101,9 +101,12 @@ flowchart TB
         → PostgreSQL / Redis / MinIO / MongoDB / OpenSearch / Kafka
 ```
 
-Путь `/` отдаёт `agentscale-web:80` — nginx с собранным Flutter Web; он же проксирует
-`/api` и `/health` на `agentscale-api:8000`, поэтому NodePort `:30090` в prod отдаёт
-всё приложение одним origin.
+Путь `/` отдаёт `agentscale-web:80` — nginx с собранным React/TypeScript приложением
+(`apps/web/Dockerfile`). `/api` и `/health` разделяет ingress на `agentscale-api:8000`,
+поэтому NodePort `:30090` в prod отдаёт всё приложение одним origin. Сам контейнер
+`agentscale-web` отдаёт только статику и намеренно не проксирует API: nginx
+резолвит upstream при старте, и `proxy_pass` на сервис, которого ещё нет, не даёт nginx
+подняться.
 
 ### Agent runtime / Pod проекта
 
@@ -231,7 +234,7 @@ RPO/RTO в цифрах не зафиксированы: пока нет бэк�
 | staging-кластер `staging.prodavan.local` | не существует |
 | бакет `prodavan-prod`, managed PG, S3 cross-region | бакет `agentscale`, Postgres/MinIO — in-cluster на PVC |
 | HPA 2–10 по CPU, «redis 3 (sentinel)» | HPA нет ни одного, всё `replicas: 1` |
-| Flutter Desktop/Mobile как клиенты | `agentscale-web` — сборка Flutter Web (`apps/flutter/Dockerfile`) |
+| Flutter Desktop/Mobile как клиенты | `agentscale-web` — сборка React/TypeScript (`apps/web/Dockerfile`) |
 
 ---
 

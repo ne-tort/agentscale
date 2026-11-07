@@ -196,9 +196,48 @@ def assert_no_compose_or_k3d() -> None:
         raise RuntimeError(f"forbidden legacy deploy paths:\n{listing}")
 
 
+def assert_no_flutter_frontend() -> None:
+    """The frontend is the TypeScript app; nothing may reintroduce the Flutter one.
+
+    The old Flutter web app was removed together with its CI job and image
+    build. The failure mode this guards against is silent: a workflow that still
+    builds `apps/flutter/Dockerfile` produces a green pipeline and a UI nobody
+    meant to ship, which is exactly how the two frontends coexisted long enough
+    for `agentscale.dev` to serve the wrong one. A directory alone is not enough
+    to catch that, so both are checked.
+    """
+    root = repo_root()
+    banned_paths = [root / "apps" / "flutter"]
+    present = [p.relative_to(root) for p in banned_paths if p.exists()]
+
+    offenders: list[str] = []
+    for workflow in sorted((root / ".github" / "workflows").glob("*.yml")):
+        text = workflow.read_text(encoding="utf-8", errors="replace")
+        for line_no, line in enumerate(text.splitlines(), start=1):
+            lowered = line.lower()
+            if "flutter" in lowered and not line.lstrip().startswith("#"):
+                offenders.append(
+                    f"{workflow.relative_to(root)}:{line_no}: {line.strip()[:90]}"
+                )
+    if present or offenders:
+        parts: list[str] = []
+        if present:
+            parts.append("forbidden path(s): " + ", ".join(str(p) for p in present))
+        if offenders:
+            parts.append("flutter references in workflows:\n  " + "\n  ".join(offenders))
+        raise RuntimeError(
+            "the frontend is apps/web (TypeScript); the Flutter app is retired.\n"
+            + "\n".join(parts)
+        )
+
+
 def validate_all() -> None:
     print("==> no .sh under infra/")
     assert_no_shell_scripts()
+    print("ok")
+
+    print("==> frontend is TypeScript only (no apps/flutter, no flutter CI)")
+    assert_no_flutter_frontend()
     print("ok")
 
     print("==> no legacy deploy paths (compose/k3d/deploy/k8s)")

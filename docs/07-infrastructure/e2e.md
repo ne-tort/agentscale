@@ -94,7 +94,7 @@ pytest -m "integration or k8s or live"
 
 | Workflow | Когда | Что гоняет |
 |----------|-------|------------|
-| [`ci-gate.yml`](../../.github/workflows/ci-gate.yml) | каждый PR | пять job'ов: `infra` (`prodavan-ops validate` — kustomize render dev + `overlays/e2e` + argocd, пины образов), `api` (L1 unit + PG-сьюты), `web`, `flutter`, `schemas`; `gate` требует все зелёными |
+| [`ci-gate.yml`](../../.github/workflows/ci-gate.yml) | каждый PR | четыре job'а: `infra` (`prodavan-ops validate` — kustomize render dev + `overlays/e2e` + argocd, пины образов), `api` (L1 unit + PG-сьюты), `web`, `schemas`; `gate` требует все зелёными |
 | [`ci-nightly.yml`](../../.github/workflows/ci-nightly.yml) | cron 02:00 UTC | L2: `pytest tests/integration -m integration` (эфемерный Postgres, порт 55433) |
 | [`ci-e2e.yml`](../../.github/workflows/ci-e2e.yml) | **opt-in** | L2 + L3a + L3b (+ `bridge`, non-blocking) |
 | [`ci-images.yml`](../../.github/workflows/ci-images.yml) | post-merge / dispatch | GHCR `:latest` + SHA |

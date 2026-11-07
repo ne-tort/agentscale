@@ -559,7 +559,7 @@ Keycloak 1.5 + Kafka 2 + searchnet 4 + MongoDB) — запас есть, но н
 
 | Workflow | Роль |
 |----------|------|
-| CI Gate | `prodavan-ops validate` (+ pytest ops) + api/flutter/schemas |
+| CI Gate | `prodavan-ops validate` (+ pytest ops) + api/web/schemas |
 | CI Images | buildx → GHCR |
 | Verify Dev | `rollout` + `wait` + `dns-check` (github.com, auth.x.ai) + `smoke` |
 | Auto-merge | squash после Gate |

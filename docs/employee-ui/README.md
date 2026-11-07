@@ -35,16 +35,17 @@
 
 ## Код
 
+The Flutter implementation this document described has been removed. The
+employee workspace now lives in `apps/web` (React + TypeScript):
+
 ```
-apps/flutter/lib/features/employee/
-  auth/                    → re-export or use features/auth/
-  cabinet_picker_page.dart
-  cabinet_shell.dart
-  cabinet_overview_page.dart
-  cabinet_projects_page.dart
-  cabinet_project_settings_page.dart
-  employee_settings_body.dart
-  cabinet_management_page.dart   # narrow hub
-  cabinet_nav_loader.dart
-  cabinet_module_host.dart
+apps/web/src/routes/pages.tsx        → маршруты: cabinet, projects, project tabs
+apps/web/src/app/workspace-shell.tsx → оболочка рабочего пространства
+apps/web/src/features/cabinet/       → cabinet picker / overview / settings
+apps/web/src/features/projects/      → project list, launch, settings
+apps/web/src/features/chat/          → чат и поток ответов
 ```
+
+Соглашения ниже описывают поведение и остаются в силе; имена компонентов
+Flutter-эпохи (`AppLayout`, `NavigationRail`, `AppEntityCollection`) заменены
+соответствующими React-компонентами в `apps/web/src/shared/ui`.

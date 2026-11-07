@@ -64,11 +64,11 @@ def main() -> None:
     sh("usermod -aG docker runner")
     sh("usermod -aG docker www || true")
 
-    print("==> /cache (shared CI cache: flutter sdk, pub, pip, poetry, tools)")
+    print("==> /cache (shared CI cache: pip, poetry, pnpm store, tools)")
     # pnpm-store: content store for the apps/web workspace (CI Web job). Must be
     # on the SAME filesystem as the runner workspaces (hardlinks), / is fine.
     # node itself lives in /cache/toolcache (RUNNER_TOOL_CACHE, setup-node).
-    for sub in ("pub", "pip", "poetry", "poetry-cli", "poetry-venvs",
+    for sub in ("pip", "poetry", "poetry-cli", "poetry-venvs",
                 "kustomize", "kubectl", "toolcache", "xdg", "pnpm-store"):
         Path(f"/cache/{sub}").mkdir(parents=True, exist_ok=True)
     sh("chown -R runner:runner /cache")

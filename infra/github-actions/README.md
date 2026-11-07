@@ -5,11 +5,11 @@ E2E: [`docs/07-infrastructure/local-cluster-e2e.md`](../../docs/07-infrastructur
 
 | Workflow | Purpose |
 |----------|---------|
-| `ci-gate.yml` | PR gate: `prodavan-ops validate` + api/flutter/schemas |
+| `ci-gate.yml` | PR gate: `prodavan-ops validate` + api/web/schemas |
 | `ci-api.yml` | ruff, pytest |
 | `ci-schemas.yml` | pack + profile schema |
 | `ci-images.yml` | buildx → GHCR `:latest` + SHA |
-| `ci-flutter.yml` | analyze + palette guards |
+| `ci-web.yml` | `tsc --noEmit && vite build` + vitest |
 | `verify-dev.yml` | Argo wait + HTTP smoke (no deploy) |
 | `auto-merge.yml` | squash after Gate |
 

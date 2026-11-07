@@ -14,7 +14,7 @@
 
 > **Dev cluster:** только GitOps — [`runbook.md`](runbook.md).  
 > Нет `docker-compose` кластера, нет k3d, нет `infra/scripts/`.  
-> API/Flutter можно гонять локально без k3s (см. ниже).
+> API/Web можно гонять локально без k3s (см. ниже).
 
 Локальная разработка Prodavan на **Windows + WSL2**.
 
@@ -25,7 +25,7 @@
 ```text
 Windows Host
 ├── Cursor IDE / VS Code
-├── Flutter SDK (Windows) → apps/flutter
+├── Node 22 + pnpm → apps/web (React/TypeScript)
 └── WSL2 Ubuntu
     ├── apps/api (FastAPI) — optional local uvicorn
     ├── k3s (systemd) + Argo CD — единственный путь деплоя
@@ -79,11 +79,13 @@ cd ~/git/prodavan/infra/ops && poetry run prodavan-ops heal
 
 ---
 
-## API / Flutter without cluster
+## API / web without cluster
 
 ```bash
 cd apps/api && pip install -e ".[dev]" && uvicorn prodavan.main:app --reload --port 8000
-cd apps/flutter && flutter pub get && flutter run -d chrome
+
+pnpm install
+pnpm --filter @agentscale/web dev     # :5173, /api проксируется на :8000
 ```
 
 ---
@@ -114,7 +116,7 @@ Runner (outside k3s): [`infra/github-runner/README.md`](../../infra/github-runne
 | Argo OutOfSync | merge to `main`; check Application `prodavan-dev` |
 | ImagePullBackOff (platform or project pod) | `ghcr-pull` в **`prodavan`** и **`prodavan-sandboxes`** — [`SECRETS.md`](../../infra/k3s/overlays/dev/SECRETS.md) |
 | `ErrImagePull` / `lookup ghcr.io: Try again` на `init:hydrate` | Transient DNS в k3s после reboot WSL: `kubectl -n kube-system get pods -l k8s-app=kube-dns`; `prodavan-ops heal`; pod сам recover'ится когда DNS вернётся. Образ `prodavan-api` на hydrate — **by design** (не sandbox image). |
-| Flutter: «metrics-server недоступен» на контейнере | См. [k8s metrics-server](#k8s-metrics-server) ниже |
+| Web: «metrics-server недоступен» на контейнере | См. [k8s metrics-server](#k8s-metrics-server) ниже |
 
 Legacy compose/k3d/bootstrap scripts **removed** — do not restore.
 

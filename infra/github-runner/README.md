@@ -22,7 +22,7 @@
 
 | Workflow | Параллельные job'ы |
 |----------|-------------------|
-| **CI Gate** | infra + api + flutter + schemas = **4** |
+| **CI Gate** | infra + api + web + schemas = **4** |
 | CI Images | build-api + build-web = 2 |
 | Verify Dev | 1 |
 
