@@ -26,7 +26,7 @@ flowchart TB
 | ID | Deliverable | Acceptance |
 |----|-------------|------------|
 | I0-T01 | `apps/api/` FastAPI + Alembic + docker-compose.dev | `alembic upgrade head` на пустой PG |
-| I0-T02 | `apps/flutter/` `flutter create` + clean arch folders | `flutter analyze` clean |
+| I0-T02 | `apps/web/` React + TypeScript + Vite + feature folders | `tsc --noEmit` clean |
 | I0-T03 | `ci-schemas.yml` — validate pack + v1.json | CI green on PR |
 | I0-T04 | OpenAPI codegen hook (optional v0: hand models) | Login + health integration test |
 

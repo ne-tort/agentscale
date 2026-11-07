@@ -11,7 +11,7 @@
 | ID | Gap | Status | Notes |
 |----|-----|--------|-------|
 | B1 | Dockerfile API | done | `apps/api/Dockerfile` (no shell entrypoint; alembic initContainer) |
-| B2 | Dockerfile Flutter web | done | `apps/flutter/Dockerfile` |
+| B2 | Dockerfile web | done | `apps/web/Dockerfile` (React/TypeScript → nginx) |
 | B3 | Каталог `infra/k3s/` manifests | done | base + overlays/dev + platform brokers |
 | B4 | Stub path `infra/k8s` vs docs `infra/k3s` | done | `infra/k8s` и `deploy/k8s` удалены; канон только `infra/k3s` |
 | B5 | CI build/push images | done | `.github/workflows/ci-images.yml` (`:latest` + SHA) |
@@ -23,10 +23,10 @@
 |----|-----|--------|-------|
 | I1 | `/health/live` + `/health/ready` | done | probes для k3s |
 | I2 | CORS для Ingress origin | done | CORS_ORIGINS env |
-| I3 | Flutter refresh token | done | SessionStore + AuthApi.refresh |
+| I3 | Web refresh token | done | SessionStore + client refresh (`apps/web/src/api`) |
 | I4 | OpenAPI stub ≪ runtime | open | не блокер k3s |
 | I5 | Redis/MinIO/Kafka/Celery in k3s | **done** (subset) | platform StatefulSets |
-| I6 | Базовые экраны projects/runs/variants | done | Flutter screens |
+| I6 | Базовые экраны projects/runs/variants | done | Web screens (`apps/web/src/features`) |
 | I7 | docker-compose.stack.yml | **done** (removed) | compose-as-cluster удалён; только k3s+Argo |
 | I8 | Project sandbox Pod/Job isolator | **in_progress** | SA + PVC probe; holes remain |
 | I9 | Redpanda HA | deferred | local single node |
@@ -52,7 +52,7 @@
 | N1 | Terraform modules | done | cloud skeletons (local env removed) |
 | N2 | Argo CD | done | install kustomize + root-app + apps |
 | N3 | ExternalSecrets / SOPS | deferred | Sealed Secrets preferred path for ghcr-pull |
-| N4–N6 | mcp / vault / Flutter inventory | deferred | |
+| N4–N6 | mcp / vault / web inventory | deferred | |
 
 ## Acceptance
 
