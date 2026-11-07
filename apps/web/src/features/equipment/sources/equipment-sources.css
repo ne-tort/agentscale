@@ -44,6 +44,7 @@
 .equipment-source-actions small { flex-basis: 100%; }
 .equipment-source-mapping { display: grid; gap: 10px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .equipment-source-notice { border-left: 3px solid #728a80; font-size: 11px; line-height: 1.5; margin: 0 0 12px; overflow-wrap: anywhere; padding: 8px 10px; }
+.equipment-source-notice__detail { display: block; font-weight: 400; margin-top: 3px; opacity: .85; }
 .equipment-source-notice--error { background: #fff0ef; border-color: #bd493c; color: #812e28; }
 .equipment-source-notice--warning { background: #fff8e9; border-color: #bd8a28; color: #72561b; }
 .equipment-source-notice--success { background: #eff7f1; border-color: #41815f; color: #315d43; }

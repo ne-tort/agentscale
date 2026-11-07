@@ -128,11 +128,23 @@ describe("automation service contract", () => {
     expect(requestBody(calls[9]!)).toEqual({ url: webhook.url, events: webhook.events, project_id: "project/1" });
   });
 
-  it("accepts only JSON objects as payloads", () => {
+  it("accepts only JSON objects as payloads and says so with a code, not a sentence", () => {
     expect(parseJsonObject('{"text":"ok"}')).toEqual({ text: "ok" });
-    expect(() => parseJsonObject("[]")).toThrow("JSON-объектом");
-    expect(() => parseJsonObject("null")).toThrow("JSON-объектом");
-    expect(() => parseJsonObject("not-json")).toThrow("корректным JSON");
+    // The service carries codes; the screen owns the wording. A message written
+    // here would be Russian prose inside an English interface.
+    expect(() => parseJsonObject("[]")).toThrow(expect.objectContaining({ code: "PAYLOAD_NOT_OBJECT" }));
+    expect(() => parseJsonObject("null")).toThrow(expect.objectContaining({ code: "PAYLOAD_NOT_OBJECT" }));
+    expect(() => parseJsonObject("not-json")).toThrow(expect.objectContaining({ code: "PAYLOAD_NOT_JSON" }));
+    expect(() => parseJsonObject("[]")).not.toThrow(/JSON-объектом|должен/);
+  });
+
+  it("keeps its own failures to a code and a field path", () => {
+    const error = new AutomationRequestError("INVALID_RESPONSE", { detail: "run.status" });
+    expect(error.code).toBe("INVALID_RESPONSE");
+    expect(error.detail).toBe("run.status");
+    expect(error.serverMessage).toBeUndefined();
+    // The message is a diagnostic (`CODE: path`), never a translated sentence.
+    expect(error.message).toBe("INVALID_RESPONSE: run.status");
   });
 
   it("preserves backend error and retryability without inventing success", async () => {
@@ -161,7 +173,7 @@ describe("automation service contract", () => {
     const makeService = (body: unknown) => createAutomationService({ fetcher: async () => jsonResponse(body) });
     await expect(makeService({ items: [run], limit: 50, offset: 0 }).listAgentRuns("project/1")).resolves.toEqual([run]);
     await expect(makeService({ items: [run], limit: 50 }).listAgentRuns("project/1")).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
-    await expect(makeService({ items: [{ ...run, project_id: "another-project" }], limit: 50, offset: 0 }).listAgentRuns("project/1")).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
+    await expect(makeService({ items: [{ ...run, project_id: "another-project" }], limit: 50, offset: 0 }).listAgentRuns("project/1")).rejects.toMatchObject({ code: "RESPONSE_OTHER_PROJECT" });
     await expect(makeService({ items: [{ ...run, input_payload: [] }], limit: 50, offset: 0 }).listAgentRuns("project/1")).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
     await expect(makeService({ items: [{ ...run, unexpected: true }], limit: 50, offset: 0 }).listAgentRuns("project/1")).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
     await expect(makeService({ items: [{ ...run, status: "unknown" }], limit: 50, offset: 0 }).listAgentRuns("project/1")).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
@@ -170,7 +182,7 @@ describe("automation service contract", () => {
   it("rejects retry responses that do not confirm the exact requested pending delivery", async () => {
     const wrongId = createAutomationService({ fetcher: async () => jsonResponse({ id: "another-delivery", status: "pending" }) });
     const wrongState = createAutomationService({ fetcher: async () => jsonResponse({ id: "delivery-1", status: "exhausted" }) });
-    await expect(wrongId.retryWebhookDelivery("delivery-1")).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
-    await expect(wrongState.retryWebhookDelivery("delivery-1")).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
+    await expect(wrongId.retryWebhookDelivery("delivery-1")).rejects.toMatchObject({ code: "RETRY_NOT_CONFIRMED" });
+    await expect(wrongState.retryWebhookDelivery("delivery-1")).rejects.toMatchObject({ code: "RETRY_NOT_CONFIRMED" });
   });
 });

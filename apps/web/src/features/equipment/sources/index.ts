@@ -24,6 +24,8 @@ export {
   EquipmentSourcesRequestError,
   EQUIPMENT_CATALOGS_TABLE,
   EQUIPMENT_MODULE_ID,
+  type EquipmentSourcesErrorCode,
+  type EquipmentSourcesRequestErrorOptions,
   type EquipmentSourcesService,
   type EquipmentSourcesServiceOptions,
 } from "./service";

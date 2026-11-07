@@ -41,7 +41,7 @@
 .automation-section-heading { align-items: flex-start; gap: 16px; justify-content: space-between; margin-bottom: 19px; }
 .automation-header-actions { align-items: center; display: flex; flex-wrap: wrap; gap: 8px; }
 .automation-section-heading > div { min-width: 0; }
-.automation-section-heading p:last-child { color: var(--automation-muted); font-size: 13px; line-height: 1.5; margin-bottom: 0; max-width: 720px; }
+.automation-section-heading p:last-child, .automation-section-heading .automation-section-detail { color: var(--automation-muted); font-size: 13px; line-height: 1.5; margin-bottom: 0; max-width: 720px; }
 
 .automation-button { background: #fff; border: 1px solid #bdcbc7; border-radius: 5px; color: #29413c; font-size: 12px; font-weight: 750; min-height: 37px; padding: 8px 12px; white-space: nowrap; }
 .automation-button:hover:not(:disabled) { border-color: var(--automation-primary); color: var(--automation-primary); }
@@ -85,11 +85,18 @@
 .automation-card-title h3, .automation-card-title code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .automation-card-title h3 { margin: 0; }
 .automation-card-title code { color: var(--automation-muted); font-size: 10px; }
+/* The one line a scanner needs: when it fires or where it sends. */
+.automation-when { color: var(--automation-muted); font-size: 12px; line-height: 1.4; margin: 0; overflow-wrap: anywhere; }
 .automation-facts { display: grid; gap: 10px; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 0; }
 .automation-facts > div { border-top: 1px solid #e8efed; display: grid; gap: 5px; min-width: 0; padding-top: 10px; }
 .automation-facts dt { color: var(--automation-muted); font-size: 10px; line-height: 1.3; }
 .automation-facts dd { font-size: 12px; font-weight: 750; margin: 0; overflow-wrap: anywhere; }
 .automation-facts--trigger { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.automation-facts--pair { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+/* Honesty as a badge with the sentence in its tooltip and in the card's details. */
+.automation-caveats { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; }
+.automation-caveat { border: 1px dashed #cbd8d4; border-radius: 999px; color: var(--automation-muted); cursor: help; font-size: 10px; font-weight: 750; line-height: 1; padding: 5px 8px; white-space: nowrap; }
+.automation-caveat-note { color: var(--automation-muted); font-size: 11px; line-height: 1.45; margin: 8px 0 0; }
 .automation-card-actions { align-items: stretch; border-top: 1px solid #e8efed; flex-wrap: wrap; gap: 7px; justify-content: flex-end; margin-top: 15px; padding-top: 13px; }
 .automation-card-actions .automation-button { min-height: 32px; padding: 6px 9px; }
 .automation-review { border-top: 1px solid #e8efed; color: var(--automation-muted); font-size: 12px; margin-top: 13px; padding-top: 12px; }
@@ -139,6 +146,18 @@
 .automation-ingress-grid h3 { margin-top: 12px; }
 .automation-ingress-grid p { color: var(--automation-muted); font-size: 12px; line-height: 1.5; margin-bottom: 0; }
 
+/* Everything a scanner does not need: closed by default, one click away. */
+.automation-advanced { background: var(--automation-panel); border: 1px solid var(--automation-border); border-radius: 10px; }
+.automation-advanced > summary { color: #3d5550; cursor: pointer; font-size: 13px; font-weight: 750; list-style-position: inside; padding: 18px 24px; }
+.automation-advanced[open] > summary { border-bottom: 1px solid var(--automation-border); }
+.automation-advanced-body { display: grid; gap: 26px; padding: 22px 24px 24px; }
+.automation-advanced-block { min-width: 0; }
+.automation-advanced-block + .automation-advanced-block { border-top: 1px solid #e8efed; padding-top: 22px; }
+.automation-limits { display: grid; gap: 12px; margin: 0; }
+.automation-limits > div { border-top: 1px solid #e8efed; display: grid; gap: 4px; padding-top: 10px; }
+.automation-limits dt { color: #334742; font-size: 12px; font-weight: 750; }
+.automation-limits dd { color: var(--automation-muted); font-size: 12px; line-height: 1.5; margin: 0; max-width: 780px; }
+
 @media (max-width: 860px) {
   .automations-page { padding: 22px 0 50px; }
   .automation-card-grid, .automation-ingress-grid { grid-template-columns: 1fr; }
@@ -149,7 +168,7 @@
   .automations-header, .automation-section-heading { align-items: stretch; flex-direction: column; }
   .automations-header .automation-button, .automation-section-heading .automation-button { width: 100%; }
   .automation-panel { padding: 16px; }
-  .automation-form-grid, .automation-facts, .automation-facts--trigger { grid-template-columns: 1fr; }
+  .automation-form-grid, .automation-facts, .automation-facts--trigger, .automation-facts--pair { grid-template-columns: 1fr; }
   .automation-field-wide { grid-column: auto; }
   .automation-form-actions { align-items: stretch; flex-direction: column; }
   .automation-form-actions .automation-button { width: 100%; }

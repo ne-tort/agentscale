@@ -4,11 +4,13 @@ import { useApi, useWorkContext } from "../../app/context";
 import type { Translate } from "../../i18n/catalogue";
 import { useI18n } from "../../i18n/useT";
 import type { Locale } from "../../i18n/core";
+import { formatNumber } from "../../i18n/format";
 import "./equipment.css";
 import {
   calculateProcurement,
   formatEquipmentMoney,
   formatObservedAt,
+  PROCUREMENT_BLOCKER_TEXT_KEYS,
 } from "./calculations";
 import {
   createEquipmentProjectService,
@@ -18,10 +20,11 @@ import {
   type EquipmentProjectService,
   type EquipmentProcurementExport,
   type EquipmentServiceErrorCode,
+  type EquipmentWorkspaceBlocker,
   type EquipmentWorkspaceScope,
   type EquipmentSourceCatalog,
 } from "./live-contract";
-import { EquipmentSourcesPage, type EquipmentCatalogWorkspace, type EquipmentSourcesService } from "./sources";
+import { EquipmentSourcesPage, EquipmentSourcesRequestError, type EquipmentCatalogWorkspace, type EquipmentSourcesService } from "./sources";
 import {
   type EquipmentAuthoritativeOffer,
   type EquipmentCandidateGroup,
@@ -38,14 +41,21 @@ type EquipmentStage = "requests" | "candidates" | "offers" | "procurement" | "ex
 /**
  * Read-only mount: без admin-сервиса источника Source configuration показывает только
  * переданный снимок, поэтому любая запись обязана отказать, а не сделать вид, что ушла на сервер.
+ * Отказ приходит кодом — экран переводит его так же, как остальные отказы сервиса.
  */
+function unmountedSources(): Promise<never> {
+  return Promise.reject(new EquipmentSourcesRequestError("serviceUnavailable", {
+    message: "Equipment source admin service is not mounted in this project route.",
+  }));
+}
+
 const UNMOUNTED_SOURCES_SERVICE: EquipmentSourcesService = {
-  loadWorkspace: () => Promise.reject(new Error("Equipment source admin service is not mounted in this project route.")),
-  createCatalog: () => Promise.reject(new Error("Equipment source admin service is not mounted in this project route.")),
-  patchCatalog: () => Promise.reject(new Error("Equipment source admin service is not mounted in this project route.")),
-  invoke: () => Promise.reject(new Error("Equipment source admin service is not mounted in this project route.")),
-  uploadFile: () => Promise.reject(new Error("Equipment source admin service is not mounted in this project route.")),
-  uploadSecret: () => Promise.reject(new Error("Equipment source admin service is not mounted in this project route.")),
+  loadWorkspace: unmountedSources,
+  createCatalog: unmountedSources,
+  patchCatalog: unmountedSources,
+  invoke: unmountedSources,
+  uploadFile: unmountedSources,
+  uploadSecret: unmountedSources,
 };
 
 export interface EquipmentProcurementPageProps {
@@ -84,20 +94,8 @@ const BLOCKER_GROUP_KEYS: Record<ProcurementBlocker["code"], string> = {
   missing_delivery: "equipment.blockerLabelDelivery",
 };
 
-const BLOCKER_TEXT_KEYS: Record<ProcurementBlocker["code"], string> = {
-  no_selection: "equipment.blockerNoSelection",
-  selected_offer_missing: "equipment.blockerSelectedOfferMissing",
-  selection_mismatch: "equipment.blockerSelectionMismatch",
-  stale_selection: "equipment.blockerStaleSelection",
-  stale_offer: "equipment.blockerStaleOffer",
-  non_authoritative_offer: "equipment.blockerNonAuthoritativeOffer",
-  missing_source: "equipment.blockerMissingSource",
-  missing_observed_at: "equipment.blockerMissingObservedAt",
-  unknown_price: "equipment.blockerUnknownPrice",
-  invalid_price: "equipment.blockerInvalidPrice",
-  missing_currency: "equipment.blockerMissingCurrency",
-  missing_delivery: "equipment.blockerMissingDelivery",
-};
+/** Тот же перевод, что попадает в колонку `warnings` CSV-выгрузки. */
+const BLOCKER_TEXT_KEYS = PROCUREMENT_BLOCKER_TEXT_KEYS;
 
 /** Коды ошибок сервиса переводятся подписями: сообщения сервиса пишутся для логов. */
 const SERVICE_ERROR_KEYS: Record<EquipmentServiceErrorCode, string> = {
@@ -152,8 +150,12 @@ function money(t: Translate, locale: Locale, amount: number | null | undefined, 
   return formatEquipmentMoney(amount, currency, locale);
 }
 
-function timeText(t: Translate, value?: string): string {
-  return value ? formatObservedAt(value) : t("equipment.timeMissing");
+/**
+ * Время в конвенциях выбранного языка. Пустую строку из `formatObservedAt`
+ * заменяет подпись «время не указано», а нечитаемое значение остаётся как есть.
+ */
+function timeText(t: Translate, locale: Locale, value?: string): string {
+  return formatObservedAt(value, locale) || t("equipment.timeMissing");
 }
 
 function matchKindText(t: Translate, kind: MatchKind): string {
@@ -164,7 +166,23 @@ function sourcePriceLabel(t: Translate, locale: Locale, offer: EquipmentAuthorit
   const { amountOriginal, currency } = offer.price;
   if (amountOriginal === null || !Number.isFinite(amountOriginal)) return t("equipment.sourceAmountUnavailable");
   if (!currency) return t("equipment.sourceAmountNoCurrency");
-  return `${amountOriginal.toLocaleString(locale)} ${currency}`;
+  return `${formatNumber(amountOriginal, locale) || String(amountOriginal)} ${currency}`;
+}
+
+/**
+ * Причина устаревания: наши коды переводятся, текст источника показывается как
+ * пришёл — это данные, а не наша фраза.
+ */
+const STALE_REASON_KEYS: Record<string, string> = {
+  catalog_missing: "equipment.staleReasonCatalogMissing",
+  index_failed: "equipment.staleReasonIndexFailed",
+  never_indexed: "equipment.staleReasonNoIndex",
+  reindex_overdue: "equipment.staleReasonReindexOverdue",
+};
+
+function staleReasonText(t: Translate, reason: string): string {
+  const key = STALE_REASON_KEYS[reason];
+  return key ? t(key) : reason;
 }
 
 function freshnessLabel(t: Translate, offer: EquipmentAuthoritativeOffer): string {
@@ -304,7 +322,7 @@ function EquipmentWorkspaceNavigation({
   );
 }
 
-function WorkspaceSnapshotContext({ workspace, scope, blocker }: { workspace: EquipmentWorkspace; scope?: EquipmentWorkspaceScope; blocker?: string }) {
+function WorkspaceSnapshotContext({ workspace, scope, blocker }: { workspace: EquipmentWorkspace; scope?: EquipmentWorkspaceScope; blocker?: EquipmentWorkspaceBlocker }) {
   const { t, locale } = useI18n();
   const calculation = calculateProcurement(workspace);
   const freshness = workspace.offers.reduce((counts, offer) => {
@@ -324,19 +342,19 @@ function WorkspaceSnapshotContext({ workspace, scope, blocker }: { workspace: Eq
         <div><span>{t("equipment.scopeBinding")}</span><strong>{binding}</strong><small>{t("equipment.scopeBindingNote")}</small></div>
         <div><span>{t("equipment.scopeBudget")}</span><strong>{t("equipment.selectedOfTotal", { selected: calculation.totals.selectedLineCount, total: calculation.totals.requestLineCount })} · {calculation.totals.totalRub === null ? t("equipment.scopeBudgetUnresolved") : money(t, locale, calculation.totals.totalRub)}</strong><small>{t("equipment.scopeFreshness", { fresh: freshness.fresh, stale: freshness.stale, unknown: freshness.unknown })}</small></div>
       </section>
-      {blocker && <div className="equipment-boundary-banner" role="status"><strong>{t("equipment.refreshFailedTitle")}</strong><p title={blocker}>{t("equipment.refreshFailedText")}</p></div>}
+      {blocker && <div className="equipment-boundary-banner" role="status"><strong>{t("equipment.refreshFailedTitle")}</strong><p>{t("equipment.refreshFailedText")}</p></div>}
     </>
   );
 }
 
 function SourceConfigurationView({ scope, catalogs }: { scope?: EquipmentWorkspaceScope; catalogs: EquipmentSourceCatalog[] }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   return (
     <section className="equipment-sources-unavailable" aria-label={t("equipment.navSources")}>
       <div className="equipment-section-heading"><div><p className="equipment-eyebrow">{t("equipment.srcEyebrow")}</p><h2>{t("equipment.navSources")}</h2></div><StatusBadge tone="warning">{t("equipment.sourcesReadOnlyBadge")}</StatusBadge></div>
       <p>{t("equipment.sourcesIntro")}</p>
       <section className="equipment-source-snapshot" aria-label={t("equipment.catalogsTitle")}><div className="equipment-source-snapshot-heading"><strong>{t("equipment.catalogsTitle")}</strong><span>{t("equipment.catalogsProjectCount", { count: catalogs.length })}</span></div>
-        {!catalogs.length ? <p>{t("equipment.catalogsEmpty")}</p> : <ul>{catalogs.map((catalog) => <li key={catalog.id}><div><strong>{catalog.name}</strong><small title={catalog.id}>{catalog.kind === "remote" ? t("equipment.catalogKindRemote") : catalog.kind === "local" ? t("equipment.catalogKindLocal") : t("equipment.catalogKindUnknown")} · {catalogStatusText(t, catalog.status)}{catalog.paused ? ` · ${t("equipment.catalogPaused")}` : ""}</small></div><span title={catalog.freshnessReason}>{catalog.freshness === "fresh" ? t("equipment.freshnessFresh") : catalog.freshness === "stale" ? t("equipment.freshnessStale") : t("equipment.freshnessUnknown")}{catalog.lastIndexedAt ? ` · ${t("equipment.catalogIndexedAt", { time: formatObservedAt(catalog.lastIndexedAt) })}` : ` · ${t("equipment.catalogNotIndexed")}`}</span></li>)}</ul>}
+        {!catalogs.length ? <p>{t("equipment.catalogsEmpty")}</p> : <ul>{catalogs.map((catalog) => <li key={catalog.id}><div><strong>{catalog.name || t("equipment.unavailable")}</strong><small title={catalog.id}>{catalog.kind === "remote" ? t("equipment.catalogKindRemote") : catalog.kind === "local" ? t("equipment.catalogKindLocal") : t("equipment.catalogKindUnknown")} · {catalogStatusText(t, catalog.status)}{catalog.paused ? ` · ${t("equipment.catalogPaused")}` : ""}</small></div><span title={catalog.freshnessReason ? staleReasonText(t, catalog.freshnessReason) : undefined}>{catalog.freshness === "fresh" ? t("equipment.freshnessFresh") : catalog.freshness === "stale" ? t("equipment.freshnessStale") : t("equipment.freshnessUnknown")}{catalog.lastIndexedAt ? ` · ${t("equipment.catalogIndexedAt", { time: formatObservedAt(catalog.lastIndexedAt, locale) || catalog.lastIndexedAt })}` : ` · ${t("equipment.catalogNotIndexed")}`}</span></li>)}</ul>}
       </section>
       {scope && <div className="equipment-source-contract-note" role="note"><strong>{t("equipment.catalogEditTitle")}</strong><span>{t("equipment.catalogEditText")} <Link to={`/projects/${encodeURIComponent(scope.projectId)}/modules/mod_equipment/catalogs_settings`}>{t("equipment.catalogEditLink")}</Link></span></div>}
       <div className="equipment-source-contract-note" role="note"><strong>{t("equipment.catalogProvenanceTitle")}</strong><span>{t("equipment.catalogProvenanceText")}</span></div>
@@ -379,7 +397,7 @@ function RequestLineCard({
       </div>
       <div className="equipment-request-card-main">
         <div>
-          <h3>{line.title}</h3>
+          <h3>{line.title || t("equipment.lineUntitled")}</h3>
           <p className="equipment-muted">{line.partNumber ? t("equipment.partNumberValue", { partNumber: line.partNumber }) : t("equipment.partNumberMissing")} · {t("equipment.quantityValue", { quantity: line.quantity })}</p>
           {line.notes && <p className="equipment-card-note">{line.notes}</p>}
         </div>
@@ -391,7 +409,7 @@ function RequestLineCard({
       <div className="equipment-request-card-footer">
         <div className="equipment-selection-summary">
           <span className="equipment-muted">{t("equipment.selectedOfferLabel")}</span>
-          <strong>{selectedOffer ? `${selectedOffer.provenance.supplier} · ${selectedOffer.title}` : t("equipment.noSelectionNote")}</strong>
+          <strong>{selectedOffer ? `${selectedOffer.provenance.supplier} · ${selectedOffer.title || t("equipment.offerUntitled")}` : t("equipment.noSelectionNote")}</strong>
         </div>
         <div className="equipment-inline-actions">
           <button className="equipment-secondary-button" onClick={() => onStage("candidates")} type="button">{t("equipment.reviewCandidates")}</button>
@@ -439,7 +457,7 @@ function CandidateGroupCard({ group, line, offerCount, projectId }: { group: Equ
         <StatusBadge tone={matchTone(group.matchKind)}>{matchKindText(t, group.matchKind)}</StatusBadge>
         <StatusBadge tone="intent">{t("equipment.agentIntentBadge")}</StatusBadge>
       </div>
-      <h3>{line?.title ?? t("equipment.lineUnavailable")}</h3>
+      <h3>{line?.title || t("equipment.lineUnavailable")}</h3>
       <p className="equipment-muted">{t("equipment.groupOffersCount", { count: offerCount })}</p>
       <div className="equipment-candidate-keys">
         {group.partNumber && <span>{t("equipment.partNumberValue", { partNumber: group.partNumber })}</span>}
@@ -507,7 +525,7 @@ function OfferCard({
             <StatusBadge tone={freshnessTone(offer)}>{freshnessLabel(t, offer)}</StatusBadge>
             {offer.provenance.isStale && <StatusBadge tone="danger">{t("equipment.priceHeld")}</StatusBadge>}
           </div>
-          <h3>{offer.title}</h3>
+          <h3>{offer.title || t("equipment.offerUntitled")}</h3>
           <p className="equipment-muted" title={offer.id}>{offer.sku ? t("equipment.skuValue", { sku: offer.sku }) : t("equipment.skuMissing")}</p>
         </div>
         <div className="equipment-offer-price-block">
@@ -518,11 +536,11 @@ function OfferCard({
       <div className="equipment-offer-facts">
         <div><span>{t("equipment.factSupplier")}</span><strong>{offer.provenance.supplier || t("equipment.unavailable")}</strong></div>
         <div><span>{t("equipment.factSource")}</span><strong>{offer.provenance.source || t("equipment.unavailable")}</strong>{offer.provenance.sourceRef && <small>{offer.provenance.sourceRef}</small>}</div>
-        <div><span>{t("equipment.factCatalogIndexed")}</span><strong>{timeText(t, offer.provenance.sourceIndexAt)}</strong><small>{t("equipment.factCatalogIndexedHint")}</small></div>
-        <div><span>{t("equipment.factOfferObserved")}</span><strong>{timeText(t, offer.provenance.observedAt)}</strong></div>
+        <div><span>{t("equipment.factCatalogIndexed")}</span><strong>{timeText(t, locale, offer.provenance.sourceIndexAt)}</strong><small>{t("equipment.factCatalogIndexedHint")}</small></div>
+        <div><span>{t("equipment.factOfferObserved")}</span><strong>{timeText(t, locale, offer.provenance.observedAt)}</strong></div>
         <div><span>{t("equipment.factAvailability")}</span><strong>{availabilityText(t, offer)}</strong></div>
       </div>
-      {offer.provenance.staleReason && <p className="equipment-offer-warning"><strong>{t("equipment.staleReasonLabel")}</strong> {offer.provenance.staleReason}</p>}
+      {offer.provenance.staleReason && <p className="equipment-offer-warning"><strong>{t("equipment.staleReasonLabel")}</strong> {staleReasonText(t, offer.provenance.staleReason)}</p>}
       <div className="equipment-offer-footer">
         <div className="equipment-override-list">
           <span className="equipment-muted">{t("equipment.manualOverrides")}</span>
@@ -557,7 +575,7 @@ function OffersStage({ workspace, busyAction, onRefresh, onSelect, readOnly }: {
         return (
           <section className="equipment-line-review" key={line.id}>
             <div className="equipment-line-review-heading">
-              <div><span className="equipment-line-number" title={line.id}>{t("equipment.lineLabel")}</span><h3>{line.title}</h3><p className="equipment-muted">{t("equipment.quantityAndSelection", { quantity: line.quantity })}</p></div>
+              <div><span className="equipment-line-number" title={line.id}>{t("equipment.lineLabel")}</span><h3>{line.title || t("equipment.lineUntitled")}</h3><p className="equipment-muted">{t("equipment.quantityAndSelection", { quantity: line.quantity })}</p></div>
               {line.selectedOfferId ? <StatusBadge tone="positive">{t("equipment.selectionRecorded")}</StatusBadge> : <StatusBadge tone="warning">{t("equipment.noSelection")}</StatusBadge>}
             </div>
             {offers.length === 0 ? <EmptyState title={t("equipment.offersForLineEmptyTitle")} detail={t("equipment.offersForLineEmptyHint")} /> : <div className="equipment-offer-list">{offers.map((offer) => <OfferCard busy={busyAction === `select-${offer.id}` || busyAction === `clear-${line.id}`} key={offer.id} matchKind={workspace.candidateGroups.find((group) => group.id === offer.groupId)?.matchKind ?? "doubt"} offer={offer} readOnly={readOnly} selected={line.selectedOfferId === offer.id} onSelect={(offerId) => onSelect(line.id, offerId)} />)}</div>}
@@ -617,7 +635,7 @@ function ProcurementStage({ workspace, busy, readOnly, onPatch }: { workspace: E
       {!workspace.projectTotals && <div className="equipment-source-contract-note" role="note"><strong>{t("equipment.projectTotalsMissingTitle")}</strong><span>{t("equipment.projectTotalsMissingText")}</span></div>}
       {workspace.procurementSettings.length > 0 && <div className="equipment-supplier-list">{workspace.procurementSettings.map((setting) => <SupplierBudgetCard busy={busy} key={setting.supplier} onPatch={(patch) => onPatch(setting.supplier, patch)} readOnly={readOnly} setting={setting} />)}</div>}
       <section className="equipment-line-review"><div className="equipment-line-review-heading"><div><h3>{t("equipment.chatBudgetTitle")}</h3><p className="equipment-muted">{t("equipment.chatBudgetNote")}</p></div></div>
-        {workspace.serverBudgetLines?.length ? <ul className="equipment-budget-line-list">{workspace.serverBudgetLines.map((line) => <li key={line.lineId}><strong>{workspace.requestLines.find((request) => request.id === line.lineId)?.title ?? t("equipment.lineLabel")}</strong><span>{line.seller || t("equipment.sellerUnresolved")} · {line.quantity} × {line.priceRub === null ? t("equipment.priceUnresolved") : money(t, locale, line.priceRub)} · {t("equipment.markup", { percent: line.markupPct })}</span></li>)}</ul> : <EmptyState title={t("equipment.budgetEmptyTitle")} detail={t("equipment.budgetEmptyHint")} />}
+        {workspace.serverBudgetLines?.length ? <ul className="equipment-budget-line-list">{workspace.serverBudgetLines.map((line) => <li key={line.lineId}><strong>{workspace.requestLines.find((request) => request.id === line.lineId)?.title || t("equipment.lineLabel")}</strong><span>{line.seller || t("equipment.sellerUnresolved")} · {line.quantity} × {line.priceRub === null ? t("equipment.priceUnresolved") : money(t, locale, line.priceRub)} · {t("equipment.markup", { percent: line.markupPct })}</span></li>)}</ul> : <EmptyState title={t("equipment.budgetEmptyTitle")} detail={t("equipment.budgetEmptyHint")} />}
       </section>
       {calculateProcurement(workspace).blockers.length > 0 && <BlockerList calculation={calculateProcurement(workspace)} />}
     </section>

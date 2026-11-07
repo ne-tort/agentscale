@@ -3,12 +3,20 @@ import { Link, useLocation, useParams, useSearchParams } from "react-router-dom"
 import { useAuth } from "../../app/context";
 import { useI18n } from "../../i18n/useT";
 import type { Translate } from "../../i18n/catalogue";
-import { createIdempotencyKey, createRunsService, RunsRequestError } from "./service";
+import { formatDateTime } from "../../i18n/format";
+import type { Locale } from "../../preferences/settings";
+import { approvalExpiryLabel, createIdempotencyKey, createRunsService, RunsRequestError, type RunsErrorCode } from "./service";
 import type { AgentRunRecord, ApprovalInboxItem, ControlPlaneEvent, RunSession } from "./contracts";
 import "./runs.css";
 
-const dateTime = (value?: string | null) => value && Number.isFinite(Date.parse(value))
-  ? new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(value)) : "—";
+/**
+ * A moment in time, written the way the interface is written.
+ *
+ * `Intl.DateTimeFormat(undefined, …)` follows the *browser*, which is not the
+ * language the reader picked: a Russian screen showed "12 Nov 2026" on an
+ * English machine. `formatDateTime` takes the locale explicitly.
+ */
+const dateTime = (value: string | null | undefined, locale: Locale) => formatDateTime(value, locale) || "—";
 const jsonText = (value: unknown) => JSON.stringify(value ?? {}, null, 2);
 const canCancel = (run: AgentRunRecord) => run.status === "queued" || run.status === "running";
 const isRefreshable = (status: string) => status === "queued" || status === "running" || status === "waiting_approval";
@@ -64,16 +72,53 @@ const ERROR_KEYS: Record<string, string> = {
   AGENT_RUN_READBACK_MISMATCH: "runs.errorReadbackMismatch",
 };
 
+/** Codes that mean "this project cannot be written to right now". */
+const WRITE_BLOCKER_CODES = ["AGENT_RUN_API_DISABLED", "AGENT_RUN_PERSISTENCE_BLOCKED", "AGENT_RUN_PERSISTENCE_NOT_READY"];
+
 /**
- * An error as a sentence. The code stays in the `title` of the element that
- * shows it: support can still read it, the operator never has to.
+ * A failure on this screen: either a key chosen here, or a request that came
+ * back broken.
+ *
+ * Requests carry a code and never a sentence — a sentence written in the service
+ * would stay English inside a Russian screen. The sentence is chosen here, at
+ * render time, in the reader's language; the server's own words are shown under
+ * it as `detail`, because they are data rather than copy.
  */
-function describeError(t: Translate, raw: string): string {
-  const match = /^([A-Z][A-Z0-9_]+):\s*([\s\S]*)$/.exec(raw);
-  if (!match) return raw;
-  const key = ERROR_KEYS[match[1]];
-  if (key) return t(key);
-  return match[2] || raw;
+type ScreenError = { kind: "key"; key: string } | { kind: "request"; error: unknown };
+
+/** `invalidResponse` → `runs.errInvalidResponse`. */
+function errorKeyFor(code: RunsErrorCode): string {
+  return `runs.err${code.charAt(0).toUpperCase()}${code.slice(1)}`;
+}
+
+function errorHeadline(t: Translate, screenError: ScreenError): string {
+  if (screenError.kind === "key") return t(screenError.key);
+  const failure = screenError.error;
+  if (!(failure instanceof RunsRequestError)) return t("runs.errorGeneric");
+  const specificKey = failure.serverCode ? ERROR_KEYS[failure.serverCode] : undefined;
+  return t(specificKey ?? errorKeyFor(failure.code));
+}
+
+/** The server's message, shown next to the sentence rather than as it. */
+function errorDetail(screenError: ScreenError): string | undefined {
+  if (screenError.kind !== "request" || !(screenError.error instanceof RunsRequestError)) return undefined;
+  const detail = screenError.error.detail?.trim();
+  return detail ? detail : undefined;
+}
+
+/**
+ * A raw code for the tooltip: support can still read it, the operator never has
+ * to. No sentence goes there — that would be English on hover.
+ */
+function errorCode(screenError: ScreenError): string | undefined {
+  if (screenError.kind !== "request" || !(screenError.error instanceof RunsRequestError)) return undefined;
+  return screenError.error.serverCode ?? screenError.error.code;
+}
+
+function isWriteBlocked(screenError: ScreenError | undefined): boolean {
+  if (screenError?.kind !== "request" || !(screenError.error instanceof RunsRequestError)) return false;
+  const code = screenError.error.serverCode;
+  return code !== undefined && WRITE_BLOCKER_CODES.includes(code);
 }
 const projectHref = (projectId: string) => `/projects/${encodeURIComponent(projectId)}`;
 const sessionHref = (projectId: string, sessionId: string) => `${projectHref(projectId)}/chat/${encodeURIComponent(sessionId)}`;
@@ -118,11 +163,6 @@ function clearPendingCreate(projectId: string) {
   clearActionKey(projectId, "new", "create");
 }
 
-function formatError(error: unknown): string {
-  if (error instanceof RunsRequestError) return `${error.code}: ${error.message}`;
-  return error instanceof Error ? error.message : String(error);
-}
-
 function eventSummary(event: ControlPlaneEvent, t: Translate): string {
   const payload = event.payload;
   if (typeof payload.reason === "string" && payload.reason) return payload.reason;
@@ -136,7 +176,7 @@ export function RunsCenterPage() {
   const { projectId = "" } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
   const { tokens } = useAuth();
-  const { t, plural } = useI18n();
+  const { t, plural, locale } = useI18n();
   const tokenRef = useRef(tokens?.access_token);
   tokenRef.current = tokens?.access_token;
   const api = useMemo(() => createRunsService({ getAccessToken: () => tokenRef.current }), []);
@@ -146,13 +186,13 @@ export function RunsCenterPage() {
   const [runsCursor, setRunsCursor] = useState<string>();
   const [runsHasMore, setRunsHasMore] = useState(false);
   const [runsLoading, setRunsLoading] = useState(true);
-  const [runsError, setRunsError] = useState<string>();
+  const [runsError, setRunsError] = useState<ScreenError>();
   const selectedRunId = searchParams.get("run") ?? undefined;
   const selectionRef = useRef({ projectId, runId: selectedRunId });
   selectionRef.current = { projectId, runId: selectedRunId };
   const [selectedRun, setSelectedRun] = useState<AgentRunRecord>();
   const [events, setEvents] = useState<ControlPlaneEvent[]>([]);
-  const [pollError, setPollError] = useState<string>();
+  const [pollError, setPollError] = useState<ScreenError>();
   const [pollRestart, setPollRestart] = useState(0);
   const [eventsCursor, setEventsCursor] = useState<string>();
   const [eventsHasMore, setEventsHasMore] = useState(false);
@@ -161,15 +201,15 @@ export function RunsCenterPage() {
   const [approvalCursor, setApprovalCursor] = useState<string>();
   const [approvalsHasMore, setApprovalsHasMore] = useState(false);
   const [approvalsLoading, setApprovalsLoading] = useState(false);
-  const [approvalsError, setApprovalsError] = useState<string>();
+  const [approvalsError, setApprovalsError] = useState<ScreenError>();
   const [sessions, setSessions] = useState<RunSession[]>([]);
   const [sessionsLoading, setSessionsLoading] = useState(false);
-  const [sessionsError, setSessionsError] = useState<string>();
+  const [sessionsError, setSessionsError] = useState<ScreenError>();
   const [createSessionId, setCreateSessionId] = useState("");
   const [inputPayloadText, setInputPayloadText] = useState("{}");
   const [pendingCreate, setPendingCreate] = useState<PendingCreate | undefined>(() => readPendingCreate(projectId));
   const [actionBusy, setActionBusy] = useState<string>();
-  const [error, setError] = useState<string>();
+  const [error, setError] = useState<ScreenError>();
   const [notice, setNotice] = useState<string>();
   const runGeneration = useRef(0);
   const eventGeneration = useRef(0);
@@ -214,7 +254,7 @@ export function RunsCenterPage() {
         setSearchParams((current) => { const next = new URLSearchParams(current); next.set("run", collected[0].id); return next; }, { replace: true });
       }
     } catch (err) {
-      if (generation === runGeneration.current) setRunsError(formatError(err));
+      if (generation === runGeneration.current) setRunsError({ kind: "request", error: err });
     } finally { if (generation === runGeneration.current) setRunsLoading(false); }
   }, [api, projectId, selectedRunId, setSearchParams]);
 
@@ -232,7 +272,7 @@ export function RunsCenterPage() {
       setApprovalCursor(page.nextCursor);
       setApprovalsHasMore(page.hasMore && Boolean(page.nextCursor));
     } catch (err) {
-      if (generation === inboxGeneration.current) setApprovalsError(formatError(err));
+      if (generation === inboxGeneration.current) setApprovalsError({ kind: "request", error: err });
     } finally { if (generation === inboxGeneration.current) setApprovalsLoading(false); }
   }, [api, projectId]);
 
@@ -240,9 +280,9 @@ export function RunsCenterPage() {
     setSessionsLoading(true);
     setSessionsError(undefined);
     try { setSessions(await api.listSessions(projectId)); }
-    catch (err) { setSessionsError(err instanceof Error ? err.message : t("runs.sessionsLoadFailed")); }
+    catch (err) { setSessionsError({ kind: "request", error: err }); }
     finally { setSessionsLoading(false); }
-  }, [api, projectId, t]);
+  }, [api, projectId]);
 
   const loadRunDetail = useCallback(async (runId: string) => {
     const generation = ++eventGeneration.current;
@@ -260,7 +300,7 @@ export function RunsCenterPage() {
       setEventsHasMore(page.hasMore && Boolean(page.nextCursor));
       setSearchParams((current) => { const next = new URLSearchParams(current); next.set("run", runId); next.delete("session"); return next; }, { replace: true });
     } catch (err) {
-      if (generation === eventGeneration.current && selectionRef.current.projectId === projectId && selectionRef.current.runId === runId) setError(formatError(err));
+      if (generation === eventGeneration.current && selectionRef.current.projectId === projectId && selectionRef.current.runId === runId) setError({ kind: "request", error: err });
     } finally {
       if (generation === eventGeneration.current && selectionRef.current.projectId === projectId && selectionRef.current.runId === runId) setEventsLoading(false);
     }
@@ -334,7 +374,7 @@ export function RunsCenterPage() {
           }, requestController.signal),
         ]);
         if (!isCurrent() || requestController.signal.aborted) return;
-        if (latestRun.id !== runId || latestRun.project_id !== projectId) throw new Error("AGENT_RUN_READBACK_MISMATCH: run readback did not match the selected project record.");
+        if (latestRun.id !== runId || latestRun.project_id !== projectId) throw new RunsRequestError(0, "invalidResponse", undefined, "AGENT_RUN_READBACK_MISMATCH");
         setSelectedRun(latestRun);
         setEvents((current) => {
           const merged = new Map(current.map((event) => [event.event_id, event]));
@@ -354,7 +394,7 @@ export function RunsCenterPage() {
         if (isRefreshable(latestRun.status)) schedule();
       } catch (err) {
         if (isCurrent() && !requestController.signal.aborted) {
-          setPollError(formatError(err));
+          setPollError({ kind: "request", error: err });
           schedule();
         }
       } finally {
@@ -405,8 +445,8 @@ export function RunsCenterPage() {
     setNotice(undefined);
     let input: unknown;
     try { input = JSON.parse(inputPayloadText); }
-    catch { setError(t("runs.errorJsonInvalid")); return; }
-    if (input === null || Array.isArray(input) || typeof input !== "object") { setError(t("runs.errorJsonObject")); return; }
+    catch { setError({ kind: "key", key: "runs.errorJsonInvalid" }); return; }
+    if (input === null || Array.isArray(input) || typeof input !== "object") { setError({ kind: "key", key: "runs.errorJsonObject" }); return; }
     const command = pendingCreate ?? newPendingCreate(projectId, { session_id: createSessionId || null, input_payload: input as Record<string, unknown> });
     if (!pendingCreate) setPendingCreate(command);
     setActionBusy("create");
@@ -424,13 +464,13 @@ export function RunsCenterPage() {
         setTab("runs");
         await Promise.all([loadRuns(), loadApprovals()]);
       } else if (result.kind === "blocked") {
-        setError(t("runs.errorCreateBlocked"));
+        setError({ kind: "key", key: "runs.errorCreateBlocked" });
       } else if (result.kind === "conflict") {
-        setError(t("runs.errorCreateConflict"));
+        setError({ kind: "key", key: "runs.errorCreateConflict" });
         clearPendingCreate(projectId);
         setPendingCreate(undefined);
       } else {
-        setError(t("runs.errorCreateUnknown"));
+        setError({ kind: "key", key: "runs.errorCreateUnknown" });
       }
     } finally { if (generation === actionGeneration.current) setActionBusy(undefined); }
   };
@@ -455,10 +495,10 @@ export function RunsCenterPage() {
         await loadRuns();
       } else if (outcome.kind === "conflict") {
         clearActionKey(projectId, selectedRun.id, "cancel");
-        setError(t("runs.errorCancelConflict"));
+        setError({ kind: "key", key: "runs.errorCancelConflict" });
         await loadRunDetail(selectedRun.id);
-      } else if (outcome.kind === "blocked") setError(t("runs.errorCancelBlocked"));
-      else setError(t("runs.errorCancelUnknown"));
+      } else if (outcome.kind === "blocked") setError({ kind: "key", key: "runs.errorCancelBlocked" });
+      else setError({ kind: "key", key: "runs.errorCancelUnknown" });
     } finally { if (generation === actionGeneration.current) setActionBusy(undefined); }
   };
 
@@ -482,10 +522,10 @@ export function RunsCenterPage() {
         await Promise.all([loadApprovals(), loadRuns()]);
       } else if (outcome.kind === "conflict") {
         clearActionKey(projectId, item.approval.id, `decision-${decision}`);
-        setError(t("runs.errorApprovalConflict"));
+        setError({ kind: "key", key: "runs.errorApprovalConflict" });
         await loadApprovals();
-      } else if (outcome.kind === "blocked") setError(t("runs.errorApprovalBlocked"));
-      else setError(t("runs.errorApprovalUnknown"));
+      } else if (outcome.kind === "blocked") setError({ kind: "key", key: "runs.errorApprovalBlocked" });
+      else setError({ kind: "key", key: "runs.errorApprovalUnknown" });
     } finally { if (generation === actionGeneration.current) setActionBusy(undefined); }
   };
 
@@ -500,21 +540,18 @@ export function RunsCenterPage() {
       setEvents((current) => [...current, ...page.items.filter((event) => !current.some((item) => item.event_id === event.event_id))]);
       setEventsCursor(page.nextCursor);
       setEventsHasMore(page.hasMore && Boolean(page.nextCursor));
-    } catch (err) { if (generation === eventGeneration.current) setError(formatError(err)); }
+    } catch (err) { if (generation === eventGeneration.current) setError({ kind: "request", error: err }); }
     finally { if (generation === eventGeneration.current) setEventsLoading(false); }
   };
 
   const loadMoreRuns = async () => { if (runsCursor && runsHasMore && !runsLoading) await loadRuns(runsCursor, true); };
   const loadMoreApprovals = async () => { if (approvalCursor && approvalsHasMore && !approvalsLoading) await loadApprovals(approvalCursor, true); };
   const pendingCommand = Boolean(pendingCreate);
-  const writeBlocker = (() => {
-    if (!runsError) return undefined;
-    const code = runsError.match(/AGENT_RUN_[A-Z_]+/)?.[0];
-    return code ?? (runsError.includes("disabled") ? "AGENT_RUN_API_DISABLED" : undefined);
-  })();
-  const writesBlocked = Boolean(writeBlocker);
+  const writesBlocked = isWriteBlocked(runsError);
 
-  const errorText = error ?? (tab === "runs" ? runsError : tab === "approvals" ? approvalsError : sessionsError);
+  const visibleError = error ?? (tab === "runs" ? runsError : tab === "approvals" ? approvalsError : sessionsError);
+  const visibleErrorDetail = visibleError ? errorDetail(visibleError) : undefined;
+  const pollErrorDetail = pollError ? errorDetail(pollError) : undefined;
 
   return <section className="runs-page">
     <header className="runs-top">
@@ -535,7 +572,11 @@ export function RunsCenterPage() {
       <button type="button" className={tab === "approvals" ? "is-active" : ""} onClick={() => setTab("approvals")}>{t("runs.tabApprovals")} <span>{approvals.length}</span></button>
       <button type="button" className={tab === "sessions" ? "is-active" : ""} onClick={() => setTab("sessions")}>{t("runs.tabSessions")} <span>{sessions.length}</span></button>
     </nav>
-    {errorText && <div className="run-error" role="alert"><strong>{t("runs.requestFailed")}</strong><span title={errorText}>{describeError(t, errorText)}</span></div>}
+    {visibleError && <div className="run-error" role="alert">
+      <strong>{t("runs.requestFailed")}</strong>
+      <span title={errorCode(visibleError)}>{errorHeadline(t, visibleError)}</span>
+      {visibleErrorDetail && <small className="run-error-detail">{visibleErrorDetail}</small>}
+    </div>}
     {notice && <div className="run-notice" role="status">{notice}</div>}
 
     {tab === "runs" && <div className="run-workspace-grid">
@@ -553,7 +594,7 @@ export function RunsCenterPage() {
               <span className="run-session-main">
                 <strong>{run.input_payload?.title ? String(run.input_payload.title) : run.id}</strong>
                 <small>{t("runs.runMeta", { attempt: run.attempt, sequence: run.sequence })}</small>
-                <small className="run-session-time">{dateTime(run.created_at)}</small>
+                <small className="run-session-time">{dateTime(run.created_at, locale)}</small>
               </span>
               <span className={`run-status-pill status-${run.status}`}>{statusLabel(t, run.status)}</span>
             </button>)}</div>}
@@ -594,7 +635,11 @@ export function RunsCenterPage() {
                     <div><span className="run-eyebrow">{t("runs.timelineEyebrow")}</span><h3>{t("runs.timelineTitle")}</h3></div>
                     <span className="run-section-caption">{plural("runs.events", events.length)}</span>
                   </div>
-                  {pollError && <div className="run-error" role="status"><strong>{t("runs.pollDelayed")}</strong><span title={pollError}>{t("runs.pollDelayedHint")} {describeError(t, pollError)}</span></div>}
+                  {pollError && <div className="run-error" role="status">
+                    <strong>{t("runs.pollDelayed")}</strong>
+                    <span title={errorCode(pollError)}>{t("runs.pollDelayedHint")} {errorHeadline(t, pollError)}</span>
+                    {pollErrorDetail && <small className="run-error-detail">{pollErrorDetail}</small>}
+                  </div>}
                   {eventsLoading && events.length === 0
                     ? <p className="run-inline-loading">{t("runs.loadingTimeline")}</p>
                     : events.length === 0
@@ -602,7 +647,7 @@ export function RunsCenterPage() {
                       : <div className="run-timeline">{events.map((event) => <article className="run-timeline-item" key={event.event_id}>
                         <span className="run-timeline-marker">{event.sequence ?? "·"}</span>
                         <div className="run-timeline-content">
-                          <div className="run-timeline-title"><strong title={event.event_type}>{eventLabel(t, event.event_type)}</strong><span>{dateTime(event.occurred_at)}</span></div>
+                          <div className="run-timeline-title"><strong title={event.event_type}>{eventLabel(t, event.event_type)}</strong><span>{dateTime(event.occurred_at, locale)}</span></div>
                           <p>{eventSummary(event, t)}</p>
                           <details><summary>{t("runs.eventPayload")}</summary><pre>{jsonText(event)}</pre></details>
                         </div>
@@ -644,7 +689,7 @@ export function RunsCenterPage() {
             <div className="run-approval-card-head">
               <span className="run-approval-shield">!</span>
               <div><span className="run-eyebrow">{t("runs.pendingApprovalEyebrow", { status: statusLabel(t, item.run_status) })}</span><h3>{item.approval.approval_kind}</h3></div>
-              <span className="run-expiry-tag">{item.approval.expires_at ? t("runs.expiresAt", { date: dateTime(item.approval.expires_at) }) : t("runs.noExpiry")}</span>
+              <span className="run-expiry-tag">{approvalExpiryLabel(t, locale, item.approval.expires_at)}</span>
             </div>
             <div className="run-approval-args"><span>{t("runs.requestedPayload")}</span><pre>{jsonText(item.approval.requested_payload)}</pre></div>
             <div className="run-inbox-source">
@@ -679,7 +724,7 @@ export function RunsCenterPage() {
             : <div className="run-session-list">{sessions.map((session) => <article className="run-session-history-row" key={session.id}>
               <div>
                 <strong>{session.title?.trim() || t("runs.untitledSession")}</strong>
-                <small>{statusLabel(t, session.status)} · {dateTime(session.last_message_at ?? session.created_at)}</small>
+                <small>{statusLabel(t, session.status)} · {dateTime(session.last_message_at ?? session.created_at, locale)}</small>
                 <small>{session.model ?? session.provider ?? t("runs.agentSession")}</small>
               </div>
               <Link to={`/projects/${projectId}/chat/${session.id}`} title={session.id}>{t("runs.openChat")} ↗</Link>

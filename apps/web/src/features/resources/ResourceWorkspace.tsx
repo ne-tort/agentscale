@@ -3,6 +3,7 @@ import "./resources.css";
 import { RESOURCE_CONTRACT_BLOCKERS } from "./blockers";
 import { createBlockedResourceService, ResourceContractBlockedError, type ResourceService } from "./contracts";
 import { useI18n } from "../../i18n/useT";
+import { formatDateTime } from "../../i18n/format";
 import type { Translate } from "../../i18n/catalogue";
 import { ContentOpsPanel } from "./content-ops/ContentOpsPanel";
 import type { ContentOpsService } from "./content-ops/contracts";
@@ -54,12 +55,6 @@ type Notice = {
   tone: "success" | "error" | "info";
   message: string;
 };
-
-function formatDate(value?: string): string {
-  if (!value) return "—";
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(date);
-}
 
 function shortDigest(value?: string): string {
   if (!value) return "—";
@@ -186,11 +181,14 @@ function ProfileCard({
   busy: boolean;
   onSave: (name: string, description: string) => Promise<boolean>;
 }) {
-  const { t, plural } = useI18n();
+  const { t, plural, locale } = useI18n();
   const [name, setName] = useState(profile.name);
   const [description, setDescription] = useState(profile.description);
   const [editing, setEditing] = useState(false);
   const unsaved = name !== profile.name || description !== profile.description;
+  // A timestamp the server sent is shown in the interface's language; one that
+  // cannot be read is shown as it came, and a missing one as a dash.
+  const updatedLabel = formatDateTime(profile.updatedAt, locale) || profile.updatedAt || "—";
 
   useEffect(() => {
     setName(profile.name);
@@ -215,7 +213,7 @@ function ProfileCard({
         {!canUpdate && <p className="resources-form-hint">{t("resources.profileEditLockedHint")}</p>}
       </form> : <>
         <div className="resources-profile-title-row"><div><h2>{profile.name}</h2><p>{profile.description || t("resources.noDescription")}</p></div><button className="resources-button resources-button--quiet" onClick={() => setEditing(true)} disabled={!canUpdate} title={!canUpdate ? t("resources.editProfileBlockedTitle") : undefined}>{t("resources.editProfile")}</button></div>
-        <div className="resources-profile-meta"><span>{t("resources.revision")} <strong>{profile.revision}</strong></span><span>{t("resources.updated")} <strong>{formatDate(profile.updatedAt)}</strong></span><span>{t("resources.scope")} <strong>{plural("resources.projectCount", profile.projectCount)}</strong></span></div>{!canUpdate && <p className="resources-disabled-note">{t("resources.profileEditDisabled")}</p>}
+        <div className="resources-profile-meta"><span>{t("resources.revision")} <strong>{profile.revision}</strong></span><span>{t("resources.updated")} <strong>{updatedLabel}</strong></span><span>{t("resources.scope")} <strong>{plural("resources.projectCount", profile.projectCount)}</strong></span></div>{!canUpdate && <p className="resources-disabled-note">{t("resources.profileEditDisabled")}</p>}
       </>}
     </div>
   </article>;

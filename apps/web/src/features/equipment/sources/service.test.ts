@@ -68,7 +68,7 @@ describe("equipment sources typed adapter API contract", () => {
     expect(init.body).toBeInstanceOf(FormData);
     expect((init.headers as Record<string, string>).Authorization).toBe("Bearer access");
     const invalid = createEquipmentSourcesService({ fetcher: vi.fn(async () => json({ asset_id: "asset-only" })) });
-    await expect(invalid.uploadFile(new File(["x"], "x.csv"))).rejects.toThrow("полный FileRef");
+    await expect(invalid.uploadFile(new File(["x"], "x.csv"))).rejects.toMatchObject({ code: "uploadIncomplete" });
   });
 
   it("sends secrets to the module secrets endpoint and only returns the secret reference", async () => {
@@ -92,18 +92,70 @@ describe("equipment sources typed adapter API contract", () => {
     });
     const service = createEquipmentSourcesService({ fetcher });
     await expect(service.invoke("catalog-1", "probe")).resolves.toMatchObject({ columns: ["Name", "Price"] });
-    await expect(service.invoke("catalog-1", "tables")).rejects.toThrow("отключено в metadata");
+    await expect(service.invoke("catalog-1", "tables")).rejects.toMatchObject({ code: "actionDisabled" });
     expect(calls.filter(([url]) => url.endsWith("/actions/probe_action/invoke")).map(([url, init]) => [url, init?.method, init?.body])).toEqual([
       ["/api/v1/admin/modules/mod_equipment/actions/probe_action/invoke", "POST", JSON.stringify({ row_id: "catalog-1" })],
     ]);
   });
 
-  it("rejects missing module/action contracts and preserves server failures", async () => {
+  it("rejects missing module/action contracts and preserves server failures as codes", async () => {
     const missing = createEquipmentSourcesService({ fetcher: vi.fn(async () => json({ items: [] })) });
-    await expect(missing.loadWorkspace()).rejects.toMatchObject({ status: 404, message: expect.stringContaining("mod_equipment") });
+    await expect(missing.loadWorkspace()).rejects.toMatchObject({ code: "moduleMissing" });
     const failed = createEquipmentSourcesService({ fetcher: vi.fn(async () => json({ detail: "index worker unavailable" }, 503)) });
-    await expect(failed.patchCatalog("catalog-1", { name: "Updated" })).rejects.toMatchObject({ status: 503, message: "index worker unavailable" });
-    await expect(failed.invoke("catalog-1", "index")).rejects.toThrow("index worker unavailable");
+    await expect(failed.patchCatalog("catalog-1", { name: "Updated" })).rejects.toMatchObject({
+      code: "http",
+      status: 503,
+      detail: "index worker unavailable",
+    });
+    await expect(failed.invoke("catalog-1", "index")).rejects.toMatchObject({ code: "http", status: 503 });
     expect(EquipmentSourcesRequestError).toBeDefined();
+  });
+
+  it("names every distinct failure with a code and keeps server detail as data", async () => {
+    const offline = createEquipmentSourcesService({
+      fetcher: vi.fn(async () => { throw new TypeError("Failed to fetch"); }),
+    });
+    await expect(offline.loadWorkspace()).rejects.toMatchObject({ code: "network" });
+
+    const unconfirmed = createEquipmentSourcesService({
+      fetcher: vi.fn(async (input: RequestInfo | URL) => String(input).endsWith("/admin/modules")
+        ? json({ items: [moduleRow] })
+        : json({ id: "another_module" })),
+    });
+    await expect(unconfirmed.loadWorkspace()).rejects.toMatchObject({ code: "moduleUnconfirmed" });
+
+    const badList = createEquipmentSourcesService({ fetcher: vi.fn(async () => json({ unexpected: true })) });
+    await expect(badList.loadWorkspace()).rejects.toMatchObject({ code: "invalidList" });
+
+    const badRow = createEquipmentSourcesService({
+      fetcher: vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input).endsWith("/admin/modules")) return json({ items: [moduleRow] });
+        if (String(input).endsWith("/admin/modules/mod_equipment")) return json(moduleRow);
+        return json({ items: [] });
+      }),
+    });
+    await expect(badRow.patchCatalog("catalog-1", { name: "x" })).rejects.toMatchObject({ code: "invalidRow" });
+
+    const brokenJson = createEquipmentSourcesService({
+      fetcher: vi.fn(async () => new Response("not json", { status: 200, headers: { "Content-Type": "application/json" } })),
+    });
+    await expect(brokenJson.patchCatalog("catalog-1", { name: "x" })).rejects.toMatchObject({ code: "invalidJson" });
+
+    const uploadRejected = createEquipmentSourcesService({ fetcher: vi.fn(async () => json({ detail: "too large" }, 413)) });
+    await expect(uploadRejected.uploadFile(new File(["x"], "x.csv"))).rejects.toMatchObject({ code: "uploadRejected", status: 413 });
+
+    const noSecretRef = createEquipmentSourcesService({ fetcher: vi.fn(async () => json({ ok: true })) });
+    await expect(noSecretRef.uploadSecret("postgresql://u:p@h/db", "DSN")).rejects.toMatchObject({ code: "secretIncomplete" });
+  });
+
+  it("keeps module metadata free of action declarations as an actionUndefined code", async () => {
+    const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).endsWith("/admin/modules")) return json({ items: [moduleRow] });
+      if (String(input).endsWith("/admin/modules/mod_equipment")) return json(moduleRow);
+      if (String(input).endsWith("/meta/documents")) return json({ items: [] });
+      return json({ items: [] });
+    });
+    const service = createEquipmentSourcesService({ fetcher });
+    await expect(service.invoke("catalog-1", "probe")).rejects.toMatchObject({ code: "actionUndefined" });
   });
 });

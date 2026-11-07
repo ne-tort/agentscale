@@ -63,6 +63,11 @@ export interface EquipmentOfferProvenance {
   observedAt?: string;
   freshness: OfferFreshness;
   isStale: boolean;
+  /**
+   * Why it is stale: a code we raise (`catalog_missing`, `index_failed`,
+   * `never_indexed`, `reindex_overdue`) or the source's own note, which is data.
+   * The screen translates the codes and shows a source note as it came.
+   */
   staleReason?: string;
   ingestionRunId?: string;
   snapshotId?: string;

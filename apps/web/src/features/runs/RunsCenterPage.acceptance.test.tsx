@@ -243,7 +243,7 @@ describe("Runs Center backend acceptance contracts", () => {
       ? jsonResponse({ code: "AGENT_RUN_CONFLICT", detail: "sequence changed" }, 409)
       : jsonResponse({ run_id: "run-a", has_more: false, limit: 200, items: [] }, 200, { "X-Has-More": "false" });
     const result = await serviceWith(fetcher).decideApprovalWithReadback("project-a", { item: approval, decision: "deny", idempotencyKey: "command-b" });
-    expect(result).toMatchObject({ kind: "conflict", error: expect.objectContaining({ status: 409, code: "AGENT_RUN_CONFLICT" }) });
+    expect(result).toMatchObject({ kind: "conflict", error: expect.objectContaining({ status: 409, code: "conflict", serverCode: "AGENT_RUN_CONFLICT" }) });
   });
 
   it("returns current persisted run state when cancel sequence conflicts", async () => {
@@ -297,8 +297,8 @@ describe("Runs Center backend acceptance contracts", () => {
     const api = serviceWith(fetcher);
     await expect(api.listRuns("project-empty")).resolves.toMatchObject({ items: [], hasMore: false });
     await expect(api.listApprovalInbox("project-empty")).resolves.toMatchObject({ items: [], hasMore: false });
-    await expect(api.listRuns("project-denied")).rejects.toMatchObject({ status: 404, code: "NOT_FOUND" } satisfies Partial<RunsRequestError>);
-    await expect(api.listApprovalInbox("project-denied")).rejects.toMatchObject({ status: 404, code: "NOT_FOUND" } satisfies Partial<RunsRequestError>);
+    await expect(api.listRuns("project-denied")).rejects.toMatchObject({ status: 404, code: "notFound", serverCode: "NOT_FOUND" } satisfies Partial<RunsRequestError>);
+    await expect(api.listApprovalInbox("project-denied")).rejects.toMatchObject({ status: 404, code: "notFound", serverCode: "NOT_FOUND" } satisfies Partial<RunsRequestError>);
     expect(paths).toEqual([
       "/api/v1/projects/project-empty/agent/runs?limit=50",
       "/api/v1/agent/approvals/inbox?project_id=project-empty&limit=50",
@@ -383,6 +383,63 @@ describe("Runs Center user journey", () => {
     expect(decision?.key).toBeTruthy();
     expect(calls.some((call) => call.path.includes("aggregate_type=approval_request") && call.path.includes("after_sequence=2"))).toBe(true);
     expect(calls.some((call) => call.path === "/api/v1/agent/approvals/inbox?project_id=project-a&limit=50")).toBe(true);
+  });
+
+  it("renders run dates and approval deadlines with Russian month names", async () => {
+    window.localStorage.setItem("agentscale.locale", "ru");
+    const datedRun = run("run-ru", { created_at: "2026-11-15T12:00:00Z", updated_at: "2026-11-15T12:00:00Z" });
+    const datedApproval: ApprovalInboxItem = {
+      ...approval,
+      approval: { ...approval.approval, expires_at: "2031-12-20T09:30:00Z" },
+    };
+    const fetcher: typeof fetch = async (input) => {
+      const url = new URL(String(input), "http://localhost");
+      if (url.pathname === "/api/v1/projects/project-a/agent/runs") return jsonResponse({ items: [datedRun], limit: 50, offset: 0 }, 200, { "X-Has-More": "false" });
+      if (url.pathname === "/api/v1/agent/approvals/inbox") return jsonResponse({ items: [datedApproval], limit: 50 }, 200, { "X-Has-More": "false" });
+      if (url.pathname === "/api/v1/projects/project-a/agent/sessions") return jsonResponse({ items: [] });
+      if (url.pathname === "/api/v1/projects/project-a/agent/runs/run-ru") return jsonResponse(datedRun);
+      if (url.pathname === "/api/v1/projects/project-a/agent/runs/run-ru/events") return jsonResponse({ run_id: "run-ru", items: [], has_more: false, limit: 100 }, 200, { "X-Has-More": "false" });
+      throw new Error(`Unexpected localised-date request: ${url.pathname}${url.search}`);
+    };
+    vi.stubGlobal("fetch", fetcher);
+    await mountRunPage("/projects/project-a/runs?run=run-ru");
+    await waitForPageMicrotasks(() => pageText().includes("run-ru"));
+
+    // A Russian screen shows a Russian month even on an English machine: the date
+    // follows the chosen locale, not `Intl.DateTimeFormat(undefined, …)`.
+    const created = document.querySelector(".run-session-time")?.textContent ?? "";
+    expect(created).toMatch(/нояб/);
+    expect(created).not.toMatch(/Nov/);
+
+    await waitForPageMicrotasks(() => pageText().includes("Подтверждения 1"));
+    await act(async () => { clickPageButton("Подтверждения 1"); });
+    await waitForPageMicrotasks(() => pageText().includes("file.write"));
+    const expiry = document.querySelector(".run-expiry-tag")?.textContent ?? "";
+    expect(expiry).toMatch(/^Действует до .*дек/);
+  });
+
+  it("renders a failed request as a translated sentence and keeps the server's own words as detail", async () => {
+    window.localStorage.setItem("agentscale.locale", "ru");
+    const fetcher: typeof fetch = async (input) => {
+      const url = new URL(String(input), "http://localhost");
+      if (url.pathname === "/api/v1/projects/project-a/agent/runs") {
+        return jsonResponse({ code: "PROJECT_READ_DENIED", detail: "project not visible to this employee" }, 403);
+      }
+      if (url.pathname === "/api/v1/agent/approvals/inbox") return jsonResponse({ items: [], limit: 50 }, 200, { "X-Has-More": "false" });
+      if (url.pathname === "/api/v1/projects/project-a/agent/sessions") return jsonResponse({ items: [] });
+      throw new Error(`Unexpected failed-request read: ${url.pathname}${url.search}`);
+    };
+    vi.stubGlobal("fetch", fetcher);
+    await mountRunPage("/projects/project-a/runs");
+    await waitForPageMicrotasks(() => pageText().includes("Недостаточно прав для этого действия."));
+
+    const banner = document.querySelector(".run-error");
+    // The sentence is the screen's, in the reader's language; the code is in the title.
+    expect(banner?.querySelector("span")?.textContent).toBe("Недостаточно прав для этого действия.");
+    expect(banner?.querySelector("span")?.getAttribute("title")).toBe("PROJECT_READ_DENIED");
+    // The backend's message is data: shown beside the sentence, never as the sentence.
+    expect(banner?.querySelector(".run-error-detail")?.textContent).toBe("project not visible to this employee");
+    expect(banner?.querySelector("strong")?.textContent).toBe("Не удалось загрузить данные");
   });
 
   it("renders an empty project inbox and a retryable tenant/API read error without inventing approvals", async () => {

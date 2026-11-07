@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import type { Cabinet, Id, ProjectLifecycle, ProjectSummary } from "../../../api/types";
+import { useI18n } from "../../../i18n/useT";
+import { formatDate } from "../../../i18n/format";
 import {
   type ProjectOverviewAction,
   type ProjectOverviewService,
@@ -61,12 +63,6 @@ function statusTone(status: ProjectLifecycle): string {
   return projectStatusTone(status);
 }
 
-function formatDate(value?: string | null): string {
-  if (!value) return "";
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? "" : new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium" }).format(date);
-}
-
 function ProjectRow({
   project,
   selected,
@@ -92,9 +88,12 @@ function ProjectRow({
   onRunAction: (action: ProjectRowAction) => void;
   onConfirmCompletion: () => void;
 }) {
+  const { locale } = useI18n();
   const actions = projectActions(project.status, project.observed_state);
   const stateLabel = observedStateLabel(project.observed_state);
   const workspaceLinks = projectWorkspaceLinks(project.id);
+  // The row used to force `ru-RU`, so an English screen still read Russian months.
+  const updatedLabel = formatDate(project.updated_at, locale);
   return <article className={`projects-row${selected ? " projects-row--selected" : ""}`}>
     <button
       type="button"
@@ -112,7 +111,7 @@ function ProjectRow({
       <div className="projects-row-meta">
         <span>{project.id}</span>
         {stateLabel && <span>{stateLabel}</span>}
-        {formatDate(project.updated_at) && <span>Изменён {formatDate(project.updated_at)}</span>}
+        {updatedLabel && <span>Изменён {updatedLabel}</span>}
       </div>
       {project.about && <p className="projects-description">{project.about}</p>}
     </div>

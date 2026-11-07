@@ -344,12 +344,19 @@ class Settings(BaseSettings):
     # a short-lived credential lease into the probe pod, calls /v1/models, then
     # revokes the lease — secret is never persisted and never reused after the probe.
     # Empty base URL = pod-probe disabled (probe falls back to direct http_probe).
+    # There is deliberately no default address: the probe pod is a deployment
+    # object, and its Service name carries the environment's namespace
+    # (`agentscale-probe-pod.agentscale-dev-sandboxes.svc` in dev). A baked-in
+    # default outlived the `prodavan` namespace and pointed at a Service that no
+    # longer exists, so enabling the flag without setting the address looked
+    # configured and failed only at probe time with a DNS error. Enabling the
+    # flag now requires saying where the pod is — see the startup guard.
     pod_probe_enabled: bool = Field(
         default=False,
         validation_alias=AliasChoices("POD_PROBE_ENABLED", "POD_KEY_PROBE_ENABLED"),
     )
     pod_probe_base_url: str = Field(
-        default="http://prodavan-probe-pod.prodavan.svc:3921",
+        default="",
         validation_alias=AliasChoices("POD_PROBE_BASE_URL", "POD_KEY_PROBE_BASE_URL"),
     )
     pod_probe_lease_ttl_sec: int = Field(
@@ -614,6 +621,12 @@ class Settings(BaseSettings):
         chat run against fixtures instead of the real Pod runtime. Fail
         loudly at startup so the misconfiguration is caught before the API
         serves a single request.
+
+        Also refuses a pod-probe switch with no address. The probe pod's Service
+        name contains the environment's namespace, so the address is deployment
+        configuration; a code default silently rotted when the namespace was
+        renamed, and the failure surfaced as a DNS error during a key probe
+        instead of at startup.
         """
         env = (self.app_environment or "dev").strip().lower()
         if env not in {"dev", "staging", "prod"}:
@@ -622,6 +635,12 @@ class Settings(BaseSettings):
             raise RuntimeError(
                 "AGENT_INPROCESS_ADAPTERS_ENABLED is forbidden outside dev "
                 f"(app_environment={env}); stub adapters must not serve prod traffic"
+            )
+        if self.pod_probe_enabled and not self.pod_probe_base_url.strip():
+            raise RuntimeError(
+                "POD_PROBE_ENABLED=true requires POD_PROBE_BASE_URL "
+                "(e.g. http://agentscale-probe-pod.<namespace>.svc:3921); "
+                "the address belongs to the deployment, not to a code default"
             )
         return self
 

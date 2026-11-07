@@ -148,6 +148,7 @@ function ProjectLayout() {
   const { projectId = "" } = useParams();
   const api = useApi();
   const auth = useAuth();
+  const { t } = useI18n();
   const { setProject } = useWorkContext();
   const location = useLocation();
   const [project, setProjectState] = useState<Project>();
@@ -170,19 +171,20 @@ function ProjectLayout() {
     setError(undefined);
     setVerifiedModule(undefined);
     void api.getProject(projectId).then(async (loaded) => {
-      if (loaded.id !== projectId) throw new Error("The project response did not match this URL.");
+      // The thrown message is what the reader sees, so it comes from the unit.
+      if (loaded.id !== projectId) throw new Error(t("workspace.projectMismatch"));
       const loadedCabinet = await api.getCabinet(loaded.cabinet_id);
-      if (loadedCabinet.id !== loaded.cabinet_id) throw new Error("The cabinet response did not match this project.");
+      if (loadedCabinet.id !== loaded.cabinet_id) throw new Error(t("workspace.cabinetMismatch"));
       if (!current) return;
       setProjectState(loaded);
       setLoadedProjectId(loaded.id);
       setCabinet({ id: loadedCabinet.id, name: loadedCabinet.name, ...(typeof loadedCabinet.description === "string" ? { description: loadedCabinet.description } : {}) });
       setProject(loaded);
     }).catch((cause: unknown) => {
-      if (current) setError({ projectId, detail: cause instanceof Error ? cause.message : "Не удалось загрузить проект." });
+      if (current) setError({ projectId, detail: cause instanceof Error ? cause.message : t("workspace.projectLoadFailed") });
     });
     return () => { current = false; };
-  }, [api, projectId, setProject, loadAttempt]);
+  }, [api, projectId, setProject, loadAttempt, t]);
 
   useEffect(() => {
     if (!requestedModuleId || loadedProjectId !== projectId || !project || !cabinet) {
@@ -208,26 +210,43 @@ function ProjectLayout() {
         projectId,
         moduleId: requestedModuleId,
         status: "error",
-        error: cause instanceof Error ? cause.message : "Не удалось проверить доступность модуля.",
+        error: cause instanceof Error ? cause.message : t("workspace.moduleCheckFailed"),
       });
     });
     return () => { current = false; };
-  }, [api, cabinet, loadedProjectId, moduleAttempt, project, projectId, requestedModuleId]);
+  }, [api, cabinet, loadedProjectId, moduleAttempt, project, projectId, requestedModuleId, t]);
 
   const currentProject = loadedProjectId === projectId ? project : undefined;
   if (!currentProject || !cabinet) {
     const currentError = error?.projectId === projectId ? error.detail : undefined;
-    if (!currentError) return <main role="status" className="employee-route-state">Загружаем проект…</main>;
-    return <section className="employee-route-state" role="alert"><h1>Проект недоступен</h1><p>{currentError}</p><button type="button" onClick={() => setLoadAttempt((attempt) => attempt + 1)}>Повторить</button> <Link to="/projects">Вернуться к проектам</Link><button type="button" onClick={auth.signOut}>Sign out</button></section>;
+    if (!currentError) return <main role="status" className="employee-route-state">{t("workspace.loadingProject")}</main>;
+    return <section className="employee-route-state" role="alert">
+      <h1>{t("workspace.projectUnavailable")}</h1>
+      <p>{currentError}</p>
+      <button type="button" onClick={() => setLoadAttempt((attempt) => attempt + 1)}>{t("common.retry")}</button>{" "}
+      <Link to="/projects">{t("workspace.backToProjects")}</Link>
+      <button type="button" onClick={auth.signOut}>{t("workspace.signOut")}</button>
+    </section>;
   }
 
   if (requestedModuleId) {
     const currentModuleState = moduleState?.projectId === projectId && moduleState.moduleId === requestedModuleId ? moduleState : undefined;
     const currentVerifiedModule = verifiedModule?.projectId === projectId && verifiedModule.moduleId === requestedModuleId ? verifiedModule.module : undefined;
     if (!currentVerifiedModule) {
-      if (currentModuleState?.status === "error") return <section className="employee-route-state" role="alert"><h1>Модуль недоступен</h1><p>{currentModuleState.error}</p><button type="button" onClick={() => setModuleAttempt((attempt) => attempt + 1)}>Повторить проверку</button> <Link to={`/projects/${encodeURIComponent(projectId)}`}>К проекту</Link><button type="button" onClick={auth.signOut}>Sign out</button></section>;
-      if (currentModuleState?.status === "missing") return <section className="employee-route-state" role="alert"><h1>Модуль не подключен к проекту</h1><p>Модуль {requestedModuleId} отсутствует в списке модулей, доступных этому проекту.</p><Link to={`/projects/${encodeURIComponent(projectId)}`}>К проекту</Link><button type="button" onClick={auth.signOut}>Sign out</button></section>;
-      return <main role="status" className="employee-route-state">Проверяем доступность модуля…</main>;
+      if (currentModuleState?.status === "error") return <section className="employee-route-state" role="alert">
+        <h1>{t("workspace.moduleUnavailable")}</h1>
+        <p>{currentModuleState.error}</p>
+        <button type="button" onClick={() => setModuleAttempt((attempt) => attempt + 1)}>{t("workspace.retryModuleCheck")}</button>{" "}
+        <Link to={`/projects/${encodeURIComponent(projectId)}`}>{t("workspace.backToProject")}</Link>
+        <button type="button" onClick={auth.signOut}>{t("workspace.signOut")}</button>
+      </section>;
+      if (currentModuleState?.status === "missing") return <section className="employee-route-state" role="alert">
+        <h1>{t("workspace.moduleNotConnected")}</h1>
+        <p>{t("workspace.moduleNotConnectedDetail", { module: requestedModuleId })}</p>
+        <Link to={`/projects/${encodeURIComponent(projectId)}`}>{t("workspace.backToProject")}</Link>
+        <button type="button" onClick={auth.signOut}>{t("workspace.signOut")}</button>
+      </section>;
+      return <main role="status" className="employee-route-state">{t("workspace.checkingModule")}</main>;
     }
   }
 
@@ -239,7 +258,7 @@ function ProjectLayout() {
   return <WorkspaceShell
     account={{
       id: auth.employee?.id,
-      displayName: auth.employee?.display_name ?? auth.employee?.email ?? "Employee",
+      displayName: auth.employee?.display_name ?? auth.employee?.email ?? t("nav.accountEmployee"),
       email: auth.employee?.email,
     }}
     cabinet={cabinet}

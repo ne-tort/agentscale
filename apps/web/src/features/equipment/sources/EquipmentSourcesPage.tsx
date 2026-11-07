@@ -1,5 +1,7 @@
 import { useEffect, useState, type ChangeEvent, type FormEvent } from "react";
 import type { Translate } from "../../../i18n/catalogue";
+import type { Locale } from "../../../i18n/core";
+import { formatDateTime, formatNumber } from "../../../i18n/format";
 import { useI18n } from "../../../i18n/useT";
 import {
   catalogColumnMap,
@@ -15,7 +17,7 @@ import {
   type EquipmentCatalogRow,
   type EquipmentCatalogWorkspace,
 } from "./contracts";
-import type { EquipmentSourcesService } from "./service";
+import { EquipmentSourcesRequestError, type EquipmentSourcesErrorCode, type EquipmentSourcesService } from "./service";
 import "./equipment-sources.css";
 
 export interface EquipmentSourcesPageProps {
@@ -23,7 +25,47 @@ export interface EquipmentSourcesPageProps {
   readonly initialWorkspace?: EquipmentCatalogWorkspace;
 }
 
-type Notice = { readonly kind: "error" | "success" | "info"; readonly message: string };
+type Notice = {
+  readonly kind: "error" | "success" | "info";
+  /** A sentence in the reader's language. */
+  readonly message: string;
+  /** The server's own text, shown as a second line and never as the sentence. */
+  readonly detail?: string;
+};
+
+/** Каждый отказ сервиса — своей фразой; технические подробности идут отдельной строкой. */
+const SOURCE_ERROR_KEYS: Record<EquipmentSourcesErrorCode, string> = {
+  network: "equipment.srcErrNetwork",
+  http: "equipment.srcErrHttp",
+  invalidList: "equipment.srcErrInvalidList",
+  invalidRow: "equipment.srcErrInvalidRow",
+  invalidJson: "equipment.srcErrInvalidJson",
+  moduleMissing: "equipment.srcErrModuleMissing",
+  moduleUnconfirmed: "equipment.srcErrModuleUnconfirmed",
+  actionUndefined: "equipment.srcErrActionUndefined",
+  actionDisabled: "equipment.srcErrActionDisabled",
+  uploadRejected: "equipment.srcErrUploadRejected",
+  uploadIncomplete: "equipment.srcErrUploadIncomplete",
+  secretIncomplete: "equipment.srcErrSecretIncomplete",
+  serviceUnavailable: "equipment.srcErrServiceUnavailable",
+};
+
+/**
+ * Отказ сервиса превращается в две части: переведённую фразу по коду и, если
+ * сервер что-то пояснил, его собственный текст отдельной строкой.
+ */
+function sourceErrorNotice(t: Translate, error: unknown, sensitiveValues: readonly string[] = []): Notice {
+  if (error instanceof EquipmentSourcesRequestError) {
+    const detail = error.detail ? sanitizeCatalogMessage(error.detail, sensitiveValues, t) : "";
+    return {
+      kind: "error",
+      message: t(SOURCE_ERROR_KEYS[error.code] ?? "equipment.actionFailed"),
+      ...(detail ? { detail } : {}),
+    };
+  }
+  const message = sanitizeCatalogMessage(error instanceof Error ? error.message : error, sensitiveValues, t);
+  return { kind: "error", message: message || t("equipment.actionFailed") };
+}
 
 function currentSecrets(draft: CatalogRowBody, dsnInput: string, passwordInput: string): string[] {
   const values = [dsnInput, passwordInput];
@@ -59,10 +101,21 @@ function freshnessLabel(t: Translate, reason: CatalogFreshnessReason): string {
   return t("equipment.freshnessNeverIndexed");
 }
 
-function displayValue(t: Translate, value: unknown): string {
+/**
+ * Значение каталога как его читает человек: числа — в конвенциях языка,
+ * отсутствующее — словом, остальное — как пришло от сервера.
+ */
+function displayValue(t: Translate, locale: Locale, value: unknown): string {
   if (value === null || value === undefined || value === "") return t("equipment.srcValueMissing");
+  if (typeof value === "number") return formatNumber(value, locale) || t("equipment.srcValueMissing");
   if (typeof value === "object") return t("equipment.srcValueConfigured");
   return String(value);
+}
+
+/** Дата каталога в конвенциях языка; нечитаемое значение показывается как есть. */
+function dateValue(t: Translate, locale: Locale, value: unknown): string {
+  const formatted = formatDateTime(typeof value === "string" || typeof value === "number" || value instanceof Date ? value : undefined, locale);
+  return formatted || displayValue(t, locale, value);
 }
 
 function normalizeActionResult(
@@ -95,9 +148,9 @@ function normalizeActionResult(
 }
 
 function CatalogStatus({ row }: { readonly row: EquipmentCatalogRow }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const body = row.body;
-  const freshness = catalogFreshness(body);
+  const freshness = catalogFreshness(body, locale);
   const tone = body.status === "error" || freshness.freshness === "stale" ? "warning" : body.status === "ready" ? "good" : "muted";
   return <div className="equipment-source-status">
     <span className={`equipment-source-pill equipment-source-pill--${tone}`}>{statusLabel(t, body.status)}</span>
@@ -111,10 +164,10 @@ function SourceCard({ row, selected, onSelect }: {
   readonly selected: boolean;
   readonly onSelect: () => void;
 }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   return <button className="equipment-source-row" type="button" aria-current={selected ? "true" : undefined} title={row.row_id} onClick={onSelect}>
-    <span className="equipment-source-row__heading"><strong>{displayValue(t, row.body.name)}</strong></span>
-    <span className="equipment-source-row__meta">{sourceKind(row.body) === "remote" ? t("equipment.catalogKindRemote") : t("equipment.catalogKindLocal")} · {t("equipment.srcRowsLabel")}: {displayValue(t, row.body.row_count)}</span>
+    <span className="equipment-source-row__heading"><strong>{displayValue(t, locale, row.body.name)}</strong></span>
+    <span className="equipment-source-row__meta">{sourceKind(row.body) === "remote" ? t("equipment.catalogKindRemote") : t("equipment.catalogKindLocal")} · {t("equipment.srcRowsLabel")}: {displayValue(t, locale, row.body.row_count)}</span>
     <CatalogStatus row={row} />
   </button>;
 }
@@ -146,7 +199,7 @@ function parseArrayResult(value: unknown, key: string, itemKey: string): string[
 }
 
 export function EquipmentSourcesPage({ service, initialWorkspace }: EquipmentSourcesPageProps) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const [workspace, setWorkspace] = useState<EquipmentCatalogWorkspace | undefined>(initialWorkspace);
   const [selectedId, setSelectedId] = useState(initialWorkspace?.rows[0]?.row_id ?? "");
   const [draft, setDraft] = useState<CatalogRowBody>(() => initialWorkspace?.rows[0]
@@ -202,7 +255,7 @@ export function EquipmentSourcesPage({ service, initialWorkspace }: EquipmentSou
         setIsNew(true);
       }
     } catch (error) {
-      setNotice({ kind: "error", message: sanitizeCatalogMessage(error instanceof Error ? error.message : error) });
+      setNotice(sourceErrorNotice(t, error));
     } finally { setLoading(false); }
   }
 
@@ -230,7 +283,7 @@ export function EquipmentSourcesPage({ service, initialWorkspace }: EquipmentSou
         const current = next.rows.find((row) => row.row_id === selectedId);
         if (current) setDraft({ ...current.body, column_map: catalogColumnMap(current.body) });
       }).catch((error: unknown) => {
-        setNotice({ kind: "error", message: sanitizeCatalogMessage(error instanceof Error ? error.message : error) });
+        setNotice(sourceErrorNotice(t, error));
       });
     }, 3000);
     return () => window.clearInterval(timer);
@@ -314,7 +367,7 @@ export function EquipmentSourcesPage({ service, initialWorkspace }: EquipmentSou
       setPasswordInput("");
       setNotice({ kind: "success", message: t("equipment.srcSaveConfirm") });
     } catch (error) {
-      setNotice({ kind: "error", message: sanitizeCatalogMessage(error instanceof Error ? error.message : error, sensitiveValues) });
+      setNotice(sourceErrorNotice(t, error, sensitiveValues));
     } finally { setBusy(false); }
   }
 
@@ -337,7 +390,7 @@ export function EquipmentSourcesPage({ service, initialWorkspace }: EquipmentSou
       if (operation === "tables") setTableOptions(parseArrayResult(result, "tables", "name"));
       setNotice({ kind: "success", message: `${sanitizeCatalogMessage(outcome.detail)} ${t("equipment.srcActionRechecked")}` });
     } catch (error) {
-      setNotice({ kind: "error", message: sanitizeCatalogMessage(error instanceof Error ? error.message : error, sensitiveValues) });
+      setNotice(sourceErrorNotice(t, error, sensitiveValues));
       try {
         const next = await service.loadWorkspace();
         setWorkspace(next);
@@ -360,7 +413,7 @@ export function EquipmentSourcesPage({ service, initialWorkspace }: EquipmentSou
       <div className="equipment-sources__header-actions"><button aria-label={t("equipment.srcRefresh")} className="equipment-sources__button" disabled={loading} onClick={() => void refresh(selectedId)} title={t("equipment.srcRefreshTitle")} type="button">↻</button><button className="equipment-sources__button equipment-sources__button--primary" type="button" onClick={newCatalog}>+ {t("equipment.srcNew")}</button></div>
     </header>
 
-    {notice && <div className={`equipment-source-notice equipment-source-notice--${notice.kind}`} role={notice.kind === "error" ? "alert" : "status"}>{notice.message}</div>}
+    {notice && <div className={`equipment-source-notice equipment-source-notice--${notice.kind}`} role={notice.kind === "error" ? "alert" : "status"}><span>{notice.message}</span>{notice.detail && <span className="equipment-source-notice__detail">{notice.detail}</span>}</div>}
     {loading && !workspace && <p className="equipment-sources__loading" role="status">{t("equipment.srcLoading")}</p>}
 
     {workspace && <div className="equipment-sources__layout">
@@ -371,7 +424,7 @@ export function EquipmentSourcesPage({ service, initialWorkspace }: EquipmentSou
       </aside>
 
       <section className="equipment-sources__detail" aria-label={t("equipment.srcDetailAria")}>
-        <div className="equipment-sources__section-heading"><div><p className="equipment-sources__eyebrow" title={isNew ? undefined : selected?.row_id}>{isNew ? t("equipment.srcNewSource") : t("equipment.srcCardEyebrow")}</p><h2>{isNew ? t("equipment.srcCatalogParams") : displayValue(t, draft.name)}</h2></div>
+        <div className="equipment-sources__section-heading"><div><p className="equipment-sources__eyebrow" title={isNew ? undefined : selected?.row_id}>{isNew ? t("equipment.srcNewSource") : t("equipment.srcCardEyebrow")}</p><h2>{isNew ? t("equipment.srcCatalogParams") : displayValue(t, locale, draft.name)}</h2></div>
           {!isNew && selected && <CatalogStatus row={selected} />}
         </div>
 
@@ -418,10 +471,10 @@ export function EquipmentSourcesPage({ service, initialWorkspace }: EquipmentSou
 
         {selected && <section className="equipment-sources__section equipment-sources__lifecycle">
           <div className="equipment-sources__section-heading"><h3>{t("equipment.srcLifecycleTitle")}</h3><span>{statusLabel(t, selected.body.status)}</span></div>
-          <dl><div><dt>{t("equipment.srcLastIndex")}</dt><dd>{displayValue(t, selected.body.last_indexed_at)}</dd></div><div><dt>{t("equipment.srcRowsLabel")}</dt><dd>{displayValue(t, selected.body.row_count)}</dd></div><div><dt>{t("equipment.srcProgress")}</dt><dd>{selected.body.status === "indexing" || selected.body.status === "queued" ? `${displayValue(t, selected.body.indexed_count)} / ${displayValue(t, selected.body.total_rows)}` : t("equipment.srcProgressNone")}</dd></div></dl>
-          {selected.body.status === "error" && <p className="equipment-source-notice equipment-source-notice--error">{t("equipment.srcIndexError", { error: sanitizeCatalogMessage(selected.body.error) })}</p>}
+          <dl><div><dt>{t("equipment.srcLastIndex")}</dt><dd>{dateValue(t, locale, selected.body.last_indexed_at)}</dd></div><div><dt>{t("equipment.srcRowsLabel")}</dt><dd>{displayValue(t, locale, selected.body.row_count)}</dd></div><div><dt>{t("equipment.srcProgress")}</dt><dd>{selected.body.status === "indexing" || selected.body.status === "queued" ? `${displayValue(t, locale, selected.body.indexed_count)} / ${displayValue(t, locale, selected.body.total_rows)}` : t("equipment.srcProgressNone")}</dd></div></dl>
+          {selected.body.status === "error" && <p className="equipment-source-notice equipment-source-notice--error">{t("equipment.srcIndexError", { error: sanitizeCatalogMessage(selected.body.error, [], t) })}</p>}
           {(() => {
-            const freshness = catalogFreshness(selected.body);
+            const freshness = catalogFreshness(selected.body, locale);
             if (freshness.freshness !== "stale" && freshness.freshness !== "unknown") return null;
             const label = freshnessLabel(t, freshness.reason);
             return <p className="equipment-source-notice equipment-source-notice--warning">{freshness.lastGoodLabel
@@ -429,7 +482,7 @@ export function EquipmentSourcesPage({ service, initialWorkspace }: EquipmentSou
               : t("equipment.srcStaleNoteNoIndex", { label })}</p>;
           })()}
           {selected.body.remote_auth_failed === true && <p className="equipment-source-notice equipment-source-notice--warning">{t("equipment.srcAuthFailed")}</p>}
-          {Boolean(selected.body.error) && selected.body.status !== "error" && <p className="equipment-source-notice equipment-source-notice--warning">{sanitizeCatalogMessage(selected.body.error)}</p>}
+          {Boolean(selected.body.error) && selected.body.status !== "error" && <p className="equipment-source-notice equipment-source-notice--warning">{sanitizeCatalogMessage(selected.body.error, [], t)}</p>}
         </section>}
       </section>
     </div>}

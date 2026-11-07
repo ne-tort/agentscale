@@ -1,14 +1,9 @@
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent } from "react";
-import { useT } from "../../i18n/useT";
+import { useI18n, useT } from "../../i18n/useT";
+import { formatTime } from "../../i18n/format";
 import type { ChatBlock, ChatProject, ChatAttachment } from "./types";
 import type { ChatWorkspaceController } from "./hooks";
 import "./chat.css";
-
-function formatTime(value?: string): string {
-  if (!value) return "";
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? "" : date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-}
 
 function blockText(value: unknown): string {
   if (typeof value === "string") return value;
@@ -45,7 +40,7 @@ function ChatTree({
   onSelect: (sessionId: string) => void;
   onNew: (projectId: string) => void;
 }) {
-  const t = useT();
+  const { t, locale } = useI18n();
   return <nav className="chat-tree" aria-label={t("chat.treeLabel")}>
     <div className="chat-tree__heading"><span>{t("chat.projects")}</span><span className="chat-tree__count">{projects.length}</span></div>
     {projects.length === 0 && <p className="chat-empty-hint">{t("chat.projectsEmpty")}</p>}
@@ -58,7 +53,7 @@ function ChatTree({
         {project.chats.length === 0 && <span className="chat-tree__muted">{t("chat.noChats")}</span>}
         {project.chats.map((chat) => <button key={chat.session_id} className={`chat-tree__session ${chat.session_id === selectedSessionId ? "is-selected" : ""}`} onClick={() => onSelect(chat.session_id)}>
           <span className="chat-tree__session-title">{chat.pinned && <span aria-label={t("chat.pinned")}>★ </span>}{chat.title || t("chat.untitledChat")}</span>
-          <span className="chat-tree__session-meta">{chat.has_draft ? t("chat.draft") : chat.last_message_at ? formatTime(chat.last_message_at) : t("chat.newChatMark")}</span>
+          <span className="chat-tree__session-meta">{chat.has_draft ? t("chat.draft") : chat.last_message_at ? formatTime(chat.last_message_at, locale) : t("chat.newChatMark")}</span>
         </button>)}
       </div>
     </section>)}
@@ -104,7 +99,7 @@ function ApprovalBlock({ block, busy, blocked, onDecision }: { block: ChatBlock;
 }
 
 function Transcript({ blocks, approvingId, approvalBlocked, hasMore, onLoadOlder, onDecision }: { blocks: ChatBlock[]; approvingId?: string; approvalBlocked: boolean; hasMore: boolean; onLoadOlder: () => void; onDecision: (id: string, decision: "approve" | "deny") => void }) {
-  const t = useT();
+  const { t, locale } = useI18n();
   const endRef = useRef<HTMLDivElement>(null);
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" }); }, [blocks.length, blocks.at(-1)?.text]);
   return <div className="chat-transcript" aria-live="polite">
@@ -112,7 +107,7 @@ function Transcript({ blocks, approvingId, approvalBlocked, hasMore, onLoadOlder
     {blocks.length === 0 && <div className="chat-welcome"><span className="chat-welcome__mark">✦</span><h2>{t("chat.welcomeTitle")}</h2><p>{t("chat.welcomeHint")}</p></div>}
     {blocks.map((block) => {
       if (block.kind === "user") return <article className="chat-message chat-message--user" key={block.id}><div className="chat-message__bubble"><MarkdownText text={block.text ?? ""} />{block.attachments?.length ? <AttachmentList attachments={block.attachments} compact /> : null}</div></article>;
-      if (block.kind === "assistant") return <article className="chat-message chat-message--assistant" key={block.id}><div className="chat-avatar" aria-hidden="true">✦</div><div className="chat-message__content"><MarkdownText text={block.text ?? ""} />{block.raw?.at && <time>{formatTime(block.raw.at)}</time>}</div></article>;
+      if (block.kind === "assistant") return <article className="chat-message chat-message--assistant" key={block.id}><div className="chat-avatar" aria-hidden="true">✦</div><div className="chat-message__content"><MarkdownText text={block.text ?? ""} />{block.raw?.at && <time>{formatTime(block.raw.at, locale)}</time>}</div></article>;
       if (block.kind === "thinking") return <article className="chat-thinking" key={block.id}><span className="chat-thinking__spinner" aria-hidden="true" />{block.text || t("chat.thinking")}</article>;
       if (block.kind === "approval") return <ApprovalBlock key={block.id} block={block} busy={approvingId === block.approvalId} blocked={approvalBlocked} onDecision={onDecision} />;
       if (["tool_call", "tool_result", "tool_progress"].includes(block.kind)) return <ToolBlock key={block.id} block={block} />;

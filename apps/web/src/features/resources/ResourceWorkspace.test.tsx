@@ -19,8 +19,13 @@ const contentOpsService: ContentOpsService = {
   replaceAcl: async () => [],
 };
 
-/** The app's default locale is Russian, so that is what an unconfigured screen shows. */
-function render(ui: ReactElement): string {
+/**
+ * The app's default locale is Russian, so that is what an unconfigured screen shows.
+ * The locale is set explicitly for every render: a rendering test that changes it
+ * would otherwise leak into the next one, which asserts Russian copy.
+ */
+function render(ui: ReactElement, locale: "ru" | "en" = "ru"): string {
+  window.localStorage.setItem("agentscale.locale", locale);
   return renderToStaticMarkup(<SettingsProvider>{ui}</SettingsProvider>);
 }
 
@@ -33,6 +38,17 @@ describe("ResourceWorkspace", () => {
     expect(markup).toContain("Публикация");
     expect(markup).toContain("План 4 · применено 3");
     expect(markup).toContain("Всё подключено");
+  });
+
+  it("renders the profile's updated stamp in the interface's language", () => {
+    // `profile.updatedAt` used to go through `Intl.DateTimeFormat(undefined)`, so the
+    // month came from the browser and not from the language the reader chose.
+    const russian = render(<ResourceWorkspace initialSnapshot={resourceWorkspaceFixture} />, "ru");
+    const english = render(<ResourceWorkspace initialSnapshot={resourceWorkspaceFixture} />, "en");
+
+    expect(russian).toContain("окт");
+    expect(english).toContain("Oct");
+    expect(english).not.toContain("окт");
   });
 
   it("renders blockers and no fabricated data when the service cannot load an authoritative snapshot", () => {
