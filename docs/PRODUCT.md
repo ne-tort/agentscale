@@ -97,7 +97,7 @@ Upstream [openclaw/openclaw](https://github.com/openclaw/openclaw) **не** depe
 **Шаблоны в «Подборе техники»** — таблица templates внутри mod_equipment (хаб-тайл «Шаблоны», «Управление» больше не содержит отдельный модуль), встроенные шаблоны из пользовательского файла (3 листа: Бюджетирование/КП/Спецификация) засеяны строками builtin/*; движок экспорта адаптивен к слотам шаблона и обновляет лист Спецификации кешами формул.| Search Index (OpenSearch) | `application/search_index/`, admin `/admin/search-index`, [ADR](02-architecture/ADR-search-index-opensearch.md) |
 | Tenant Infra Gateway | `application/tenant_infra/` — Cache/Docs/UserDB/Events/Objects + module data/meta/actions via `:8001` + Bridge scopes + company quotas; first-party MCP `prodavan-modules`; [as-built](target/12-layer-docs/tenant-infra-gateway.md) |
 | Agent + chat + files | `application/agent/`, `api/v1/agent.py`, content/assets |
-| Flutter UI (частично) | `apps/flutter/lib/features/` |
+| Web UI | `apps/web/src/` — React + TypeScript, фичи под `src/features/` |
 | **Employee UI канон** | [`employee-ui/README.md`](employee-ui/README.md) |
 | As-built слои | [`target/12-layer-docs/`](target/12-layer-docs/) — **описание кода**, не закон |
 

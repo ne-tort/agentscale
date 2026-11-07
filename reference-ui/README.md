@@ -26,7 +26,7 @@ Add `reference-ui/*/` to `.gitignore` if clones are kept locally.
 
 ## Prodavan implementation
 
-- Flutter: `ProjectWorkspacePage`, `ProjectChatController` (`apps/flutter/lib/features/employee/`).
+- Web: `apps/web/src/features/project-runtime/`, `apps/web/src/features/chat/`.
 - API: `AgentSession` events → `events_to_transcript()`; sidechain via bridge HTTP.
 
 Do not copy upstream auth, routing, or LLM provider stacks — platform keys and policy stay in Prodavan API.
