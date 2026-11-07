@@ -1,7 +1,7 @@
 # Agentscale GitHub Actions runners — Docker Desktop (Windows-controlled)
 #
-# Peak parallel jobs in CI Gate: infra + api + flutter + schemas = 4
-# Persistent /cache volume: Flutter SDK, pub, Poetry, pip (project-dedicated runners).
+# Peak parallel jobs in CI Gate: infra + api + web + schemas = 4
+# Persistent /cache volume: Poetry, pip, pnpm store (project-dedicated runners).
 #
 # IMPORTANT: do NOT use `docker compose --scale` for this image.
 # Each replica needs its own RUNNER_NAME + CONFIGURED_ACTIONS_RUNNER_FILES_DIR volume,
@@ -20,8 +20,6 @@ x-cache-env: &cache-env
   PRODAVAN_CI_CACHE: /cache
   RUNNER_TOOL_CACHE: /cache/toolcache
   AGENT_TOOLSDIRECTORY: /cache/toolcache
-  PUB_CACHE: /cache/pub
-  FLUTTER_SDK: /cache/flutter-sdk
   PIP_CACHE_DIR: /cache/pip
   POETRY_CLI: /cache/poetry-cli
   POETRY_CACHE_DIR: /cache/poetry

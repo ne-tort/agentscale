@@ -118,17 +118,13 @@ jobs:
     name: web
     uses: ./.github/workflows/ci-web.yml
 
-  flutter:
-    name: flutter
-    uses: ./.github/workflows/ci-flutter.yml
-
   schemas:
     name: schemas
     uses: ./.github/workflows/ci-schemas.yml
 
   gate:
     name: gate
-    needs: [infra, api, web, flutter, schemas]
+    needs: [infra, api, web, schemas]
     if: always()
     runs-on: [self-hosted, linux, docker]
     timeout-minutes: 5
@@ -141,7 +137,6 @@ jobs:
               "infra": os.environ["INFRA"],
               "api": os.environ["API"],
               "web": os.environ["WEB"],
-              "flutter": os.environ["FLUTTER"],
               "schemas": os.environ["SCHEMAS"],
           }
           print(checks)
@@ -154,5 +149,4 @@ jobs:
           INFRA: ${{ needs.infra.result }}
           API: ${{ needs.api.result }}
           WEB: ${{ needs.web.result }}
-          FLUTTER: ${{ needs.flutter.result }}
           SCHEMAS: ${{ needs.schemas.result }}

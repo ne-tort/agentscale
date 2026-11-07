@@ -21,17 +21,11 @@ venv/
 dist/
 *.egg-info/
 
-# Flutter / Dart
-.dart_tool/
-.packages
-build/
-.flutter-plugins
-.flutter-plugins-dependencies
-*.iml
-.idea/
-
-# Node (if tooling)
+# Web (TypeScript / Vite). `dist/` is already ignored above for Python builds.
 node_modules/
+.vite/
+playwright-report/
+test-results/
 
 # OS
 .DS_Store

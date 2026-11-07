@@ -8,6 +8,38 @@ import httpx
 _CONNECT_ERRORS = (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout)
 
 
+def _assert_web_shell(base: str, headers: dict[str, str], client: httpx.Client) -> None:
+    """Fail if `/` is not the TypeScript SPA shell.
+
+    `/` returning 200 says almost nothing: the Flutter web image answered 200
+    too, so a deploy that silently served the old frontend would pass. The two
+    bundles are distinguishable in the entry document — Vite emits
+    `<div id="root">` plus a hashed `/assets/*.js`, Flutter emits
+    `flutter_bootstrap.js` and `main.dart.js`.
+    """
+    resp = client.get(f"{base}/", headers=headers)
+    if resp.status_code != 200:
+        raise RuntimeError(f"web shell: / -> HTTP {resp.status_code} at {base}")
+    html = resp.text
+    markers = {
+        "root mount point": 'id="root"',
+        "vite asset bundle": "/assets/",
+    }
+    missing = [name for name, needle in markers.items() if needle not in html]
+    if missing:
+        looks_flutter = "flutter" in html.lower() or "main.dart.js" in html
+        hint = (
+            " — this looks like the Flutter bundle; the web image still serves "
+            "apps/flutter/Dockerfile output"
+            if looks_flutter
+            else ""
+        )
+        raise RuntimeError(
+            f"web shell is not the TypeScript app (missing: {', '.join(missing)}){hint}"
+        )
+    print("web shell -> TypeScript SPA")
+
+
 def smoke(
     *,
     addr: str | None = None,
@@ -48,4 +80,5 @@ def smoke(
                 time.sleep(sleep_sec)
             if not ok:
                 raise RuntimeError(f"smoke failed for {path} at {base}")
+        _assert_web_shell(base, headers, client)
     print(f"smoke OK {base} (Host: {host_header})")

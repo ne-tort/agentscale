@@ -16,7 +16,7 @@ Legacy AI-канон: [`docs/target/`](docs/target/) (кроме as-built) — �
 | Agent + files | [`application/agent/`](apps/api/src/prodavan/application/agent/) | Агент в Pod |
 | ~~Канон BC~~ legacy | [`docs/target/01…15`](docs/target/) | Справка, не блокер |
 
-**Правило:** PRODUCT.md + код > gap map. E2E — backend API, не Flutter.
+**Правило:** PRODUCT.md + код > gap map. E2E — backend API, не браузерный UI.
 
 ## Git / CI / кластер (GitOps)
 

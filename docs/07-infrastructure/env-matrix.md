@@ -138,13 +138,16 @@ MinIO root creds (`agentscale-minio` Secret) — только init Job / ops; AP
 
 ---
 
-## Flutter client (dart-define)
+## Web client (build-time)
 
-| Define | dev | staging | prod |
-|--------|-----|---------|------|
-| `API_BASE` | http://localhost:8000 | https://api.staging.prodavan.local | https://api.prodavan.ru |
-| `ENV` | dev | staging | prod |
-| `ENABLE_AGENT_DEBUG` | true | true | false |
+The web app is built once and served as static files, so it takes no runtime
+configuration: the client calls relative `/api/v1/...` URLs and the ingress
+splits `/api` to `agentscale-api`. There is no `API_BASE` to inject per
+environment — an image built for dev is the image that runs in prod.
+
+| Variable | Where | Purpose |
+|----------|-------|---------|
+| `VITE_API_PROXY` | `vite` dev server only | API address for local `pnpm dev` (default `http://127.0.0.1:8000`); never read by a production build |
 
 ---
 

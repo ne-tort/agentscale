@@ -25,12 +25,10 @@
 
 | Что | Где | Что даёт |
 |-----|-----|----------|
-| Flutter SDK | `/cache/flutter-sdk` (git clone stable, flock `/cache/flutter-sdk.lock`) | SDK не перекачивается |
-| Pub | `/cache/pub` (`PUB_CACHE`) | пакеты не перекачиваются |
 | pip / Poetry | `/cache/pip`, `/cache/poetry*` | python-зависимости |
 | pnpm store | `/cache/pnpm-store` (`--store-dir` в CI Web job) | зависимости `apps/web` не перекачиваются; node 22 — в `/cache/toolcache` (setup-node), pnpm активируется corepack'ом |
 | kubectl / kustomize / setup-python / setup-node | `/cache/kubectl`, `/cache/kustomize`, `/cache/toolcache` (`RUNNER_TOOL_CACHE`) | инструменты и toolcache |
-| **Docker слои + RUN cache mounts** | persistent buildx builder `agentscale-ci` (docker-container, volume `buildx_buildkit_agentscale-ci0_state`) | слои образов и `--mount=type=cache` (pip/pub внутри Dockerfile) живут между сборками; GC — 20 GiB / 7 дней (`/etc/buildkit/buildkitd.toml`, копия — `buildkitd.toml` здесь) |
+| **Docker слои + RUN cache mounts** | persistent buildx builder `agentscale-ci` (docker-container, volume `buildx_buildkit_agentscale-ci0_state`) | слои образов и `--mount=type=cache` (pip внутри Dockerfile) живут между сборками; GC — 20 GiB / 7 дней (`/etc/buildkit/buildkitd.toml`, копия — `buildkitd.toml` здесь) |
 
 Workflows `CI Images` больше не создают per-job buildkitd и не гоняют `type=local`
 кэш через `/tmp` (кэш жил в контейнере раннера и терялся при любом пересоздании).
@@ -63,7 +61,7 @@ Workflows `CI Images` больше не создают per-job buildkitd и не
   journal и вызывает `/usr/local/sbin/ci-disk-alert.sh LEVEL MSG`, если тот
   существует (например, curl в ntfy). Положить свой скрипт — и алерты пойдут
   без правок в репо.
-- **Concurrency в CI**: у `ci-api` / `ci-images` / `ci-flutter` / `ci-schemas`
+- **Concurrency в CI**: у `ci-api` / `ci-images` / `ci-web` / `ci-schemas`
   группы `ci-<name>-${{ github.ref }}` с `cancel-in-progress: true` — новый
   push отменяет предыдущий прогон вместо того, чтобы складывать вторую полную
   сборку/тест на ту же ВМ.

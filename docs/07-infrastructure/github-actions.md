@@ -2,15 +2,14 @@
 
 | Workflow | Триггер | Что делает |
 |----------|---------|------------|
-| [`ci-gate.yml`](../../.github/workflows/ci-gate.yml) | `pull_request` → `main`, dispatch | требует зелёными пять job'ов: `infra`, `api`, `web`, `flutter`, `schemas`; job `gate` агрегирует их результаты |
+| [`ci-gate.yml`](../../.github/workflows/ci-gate.yml) | `pull_request` → `main`, dispatch | требует зелёными четыре job'а: `infra`, `api`, `web`, `schemas`; job `gate` агрегирует их результаты |
 | ├ `infra` | | `prodavan-ops` unit-тесты + `prodavan-ops validate` (kustomize render, пины образов, запрет `.sh`/compose/k3d) |
 | ├ `api` | `workflow_call` → `ci-api.yml` | `test` → `postgres-integration` → `migration-suite` (см. ниже) |
-| ├ `web` | `workflow_call` → `ci-web.yml` | pnpm: `tsc --noEmit && vite build` + vitest (`apps/web`) |
-| ├ `flutter` | `workflow_call` → `ci-flutter.yml` | `pub get`, `analyze`, `test`, плюс запреты на raw `Color(0x…)` вне палитры и entity-модалки в `lib/features` |
+| ├ `web` | `workflow_call` → `ci-web.yml` | pnpm: `tsc --noEmit && vite build` + vitest (`apps/web`) — единственный frontend |
 | └ `schemas` | `workflow_call` → `ci-schemas.yml` | `tools/validate_schemas.py` (cabinet pack + profile schema) |
 | [`ci-nightly.yml`](../../.github/workflows/ci-nightly.yml) | cron 02:00 UTC, dispatch | L2: `alembic upgrade head` + `alembic check` + `pytest tests/integration -m integration` на эфемерном Postgres (порт 55433) |
 | [`ci-e2e.yml`](../../.github/workflows/ci-e2e.yml) | label `e2e` / `[e2e]` в заголовке / dispatch | L2 + L3a k8s Job + L3b live + bridge (opt-in, merge не блокирует) |
-| [`ci-images.yml`](../../.github/workflows/ci-images.yml) | push в `main` (paths api/flutter/packages/schemas/.gitmodules) / dispatch | GHCR `:latest` + SHA: `build-api` → `build-web` → `build-searchnet` (только dispatch с `build_searchnet=true`) / `trigger-verify` (`needs: [build-api, build-web]`) → dispatch Verify Dev |
+| [`ci-images.yml`](../../.github/workflows/ci-images.yml) | push в `main` (paths `apps/api`, `apps/web`, `packages/*`, `pnpm-lock.yaml`, `.gitmodules`) / dispatch | GHCR `:latest` + SHA: `build-api` → `build-web` (`apps/web/Dockerfile`) → `build-searchnet` (только dispatch с `build_searchnet=true`) / `trigger-verify` (`needs: [build-api, build-web]`) → dispatch Verify Dev |
 | [`verify-dev.yml`](../../.github/workflows/verify-dev.yml) | `workflow_run` после **CI Images**, push в `main` c путями `infra/k3s/**`, `infra/argocd/**`, `infra/ops/**` | `rollout` → `wait` → `dns-check` → HTTP smoke |
 | [`auto-merge.yml`](../../.github/workflows/auto-merge.yml) | `workflow_run` после **CI Gate** | squash-merge PR из этого же репо + dispatch CI Images |
 
@@ -30,12 +29,12 @@ Deploy is **Argo CD** from git. Runners: **systemd-сервисы на dev-VM** 
   (`contents/pull-requests/actions: write`).
 - **`timeout-minutes`** — job-потолок вместо шестичасового дефолта: `ci-api test` 60,
   `postgres-integration`/`migration-suite` 45, `ci-gate infra` 15, `ci-gate gate` 5,
-  `ci-web` 20, `ci-schemas` 10, `ci-flutter` 45, `ci-nightly` 45, `ci-images`
+  `ci-web` 20, `ci-schemas` 10, `ci-nightly` 45, `ci-images`
   `build-api` 60 / `build-searchnet` 90, `verify-dev` 60, `auto-merge` 10, `ci-e2e`
-  от 5 до 25 по job'ам. Причина одна: раннеров пять на одну VM, и зависший шаг держал
+  от 5 до 30 по job'ам. Причина одна: раннеров пять на одну VM, и зависший шаг держал
   слот до ручного вмешательства.
 - **`concurrency`** — новая запись вытесняет старую в `ci-gate`, `ci-api`, `ci-web`,
-  `ci-schemas`, `ci-flutter`, `ci-e2e`, `ci-images`; в `ci-nightly`
+  `ci-schemas`, `ci-e2e`, `ci-images`; в `ci-nightly`
   (`cancel-in-progress: false`) и `verify-dev` — наоборот, не отменять идущий прогон.
 
 ## Цепочка job'ов в `ci-api.yml`
