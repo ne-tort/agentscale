@@ -172,6 +172,14 @@ def test_live_containers_lifecycle(live_client, live_api_prefix: str) -> None:
     )
     assert owner_inv.status_code in (200, 201), owner_inv.text
 
+    # Sign in with the login the invitation *returned*, not the handle that was
+    # sent: the API qualifies the handle with the company slug
+    # (`owner1234@livecoord-1234.local`) because the same handle may exist in
+    # several companies, and that qualified name is what Keycloak holds. Using
+    # the bare handle gets 401 INVALID_CREDENTIALS, which looks like a wrong
+    # password rather than a wrong identifier.
+    owner_login = owner_inv.json()["login"]
+
     key = live_client.post(
         f"{api}/admin/ai-keys",
         headers=admin_h,
@@ -214,6 +222,8 @@ def test_live_containers_lifecycle(live_client, live_api_prefix: str) -> None:
         },
     )
     assert inv.status_code in (200, 201), inv.text
+    # Qualified by the company slug — see the owner above.
+    peer_login = inv.json()["login"]
     peer_tok = login_via_api(
         live_client,
         api,

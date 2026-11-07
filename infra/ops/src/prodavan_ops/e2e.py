@@ -169,9 +169,52 @@ def run_e2e(*, suite: str = "k8s", timeout_sec: int = 900) -> None:
     print("prodavan-ops e2e run OK")
 
 
+def _delete_leftover_sandbox_pods(*, fast: bool = False) -> None:
+    """Remove project pods a previous e2e run left in the sandboxes namespace.
+
+    Every test creates a real project pod; when a test fails or times out its
+    pod survives, and nothing deleted them. Nineteen accumulated across a few
+    runs, and because sandbox pods count against the same CPU ceiling as
+    everything else their ``limits`` filled the budget — the next run's first
+    tests then failed at pod creation with an unrelated-looking
+    `project error while waiting for running`, while later tests passed as soon
+    as some of the stale pods happened to be reaped.
+
+    The warm pool and the probe pod belong to the platform, not to a test run,
+    so they are deliberately kept.
+    """
+    selector = (
+        "app.kubernetes.io/component=project-pod,"
+        "prodavan.io/managed-by=pod-service"
+    )
+    proc = kubectl(
+        [
+            "delete",
+            "pods",
+            "-n",
+            E2E_SANDBOXES_NS,
+            "-l",
+            selector,
+            "--ignore-not-found",
+            "--wait=false",
+        ],
+        retries=1,
+        subprocess_timeout=20.0 if fast else 30.0,
+        request_timeout="10s" if fast else "15s",
+    )
+    if proc.returncode != 0:
+        err = (proc.stderr or proc.stdout or "").strip()
+        print(f"skip sandbox pod cleanup: {err.splitlines()[-1] if err else proc.returncode}")
+        return
+    out = (proc.stdout or "").strip()
+    if out and out != "No resources found":
+        print(out)
+
+
 def cleanup_e2e(*, unsync: bool = False) -> None:
     """Delete e2e Job and overlay resources (best-effort, bounded timeouts)."""
     _delete_job(fast=True)
+    _delete_leftover_sandbox_pods(fast=True)
     path = overlay_e2e()
     proc = kubectl(
         ["delete", "-k", str(path), "--ignore-not-found", "--wait=false"],

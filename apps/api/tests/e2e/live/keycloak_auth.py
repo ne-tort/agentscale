@@ -8,8 +8,14 @@ import time
 import httpx
 
 KC_BASE = os.getenv("PRODAVAN_E2E_KC_URL", "http://127.0.0.1:8089").rstrip("/")
-KC_REALM = os.getenv("PRODAVAN_E2E_KC_REALM", "prodavan")
-KC_CLIENT = os.getenv("PRODAVAN_E2E_KC_CLIENT", "prodavan-flutter")
+# The defaults must name what the dev contour actually provisions. `prodavan`
+# and `prodavan-flutter` are the pre-rename names: the realm no longer exists
+# (its discovery URL 404s) and the client list is agentscale-api,
+# agentscale-flutter, agentscale-services. Every token request therefore failed
+# with 401 INVALID_CREDENTIALS, which reads like a bad password rather than a
+# wrong realm.
+KC_REALM = os.getenv("PRODAVAN_E2E_KC_REALM", "agentscale")
+KC_CLIENT = os.getenv("PRODAVAN_E2E_KC_CLIENT", "agentscale-flutter")
 EMPLOYEE_PASSWORD = os.getenv("PRODAVAN_E2E_EMPLOYEE_PASSWORD", "test-employee-pass")
 
 _CONNECT_ERRORS = (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout)
@@ -21,7 +27,7 @@ def _token_url() -> str:
 
 
 def fetch_password_token(*, username: str, password: str) -> str:
-    """ROPC against Keycloak (prodavan-flutter public client)."""
+    """ROPC against Keycloak (agentscale-flutter public client)."""
     with httpx.Client(timeout=_HTTP_TIMEOUT) as client:
         resp = client.post(
             _token_url(),
