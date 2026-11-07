@@ -48,6 +48,24 @@ export interface AdminKey {
   companyIds: string[];
   hasSecret: boolean;
   createdAt: string | null;
+  /**
+   * Where the key points. Resolved on the server from the endpoint record the
+   * key is linked to; `null` for a key created before endpoints were a field.
+   */
+  baseUrl: string | null;
+  modelsPath: string | null;
+  authScheme: string | null;
+}
+
+/** What an administrator types to add a key: an address and a secret. */
+export interface NewKeyInput {
+  name: string;
+  baseUrl: string;
+  secret: string;
+  companyIds: string[];
+  modelsPath?: string;
+  chatCompletionsPath?: string;
+  authScheme?: "bearer" | "x-api-key";
 }
 
 export interface AdminModule {
@@ -60,10 +78,6 @@ export interface AdminModule {
   bindings: number;
 }
 
-export interface AdminProvider {
-  id: string;
-  title: string;
-}
 
 export interface DeletedEntity {
   id: string;
@@ -138,14 +152,18 @@ export interface AdminService {
   setCompanyQuota(id: string, quota: AdminCompany["quota"]): Promise<void>;
 
   listKeys(): Promise<AdminKey[]>;
-  createKey(input: { name: string; provider: string; secret: string; companyIds: string[] }): Promise<void>;
+  createKey(input: NewKeyInput): Promise<void>;
   setKeyCompanies(id: string, companyIds: string[]): Promise<void>;
   deleteKey(id: string): Promise<void>;
-  listProviders(): Promise<AdminProvider[]>;
 
   listModules(): Promise<AdminModule[]>;
   createModule(name: string): Promise<void>;
   setModuleCompanies(id: string, companyIds: string[]): Promise<void>;
+  /**
+   * Grant a module to every company (present and future) or back to a chosen
+   * list. Returns the scope the server settled on.
+   */
+  setModuleScope(id: string, scope: "all" | "selected"): Promise<"all" | "selected">;
   deleteModule(id: string): Promise<void>;
 
   listDeleted(): Promise<DeletedEntity[]>;
@@ -218,6 +236,9 @@ export function createAdminService(options: AdminServiceOptions = {}): AdminServ
       companyIds: strings(row.company_ids),
       hasSecret: row.has_secret === true,
       createdAt: text(row, "created_at") || null,
+      baseUrl: text(row, "base_url") || null,
+      modelsPath: text(row, "models_path") || null,
+      authScheme: text(row, "auth_scheme") || null,
     }));
   }
 
@@ -263,23 +284,23 @@ export function createAdminService(options: AdminServiceOptions = {}): AdminServ
     },
 
     listKeys: keys,
-    async createKey({ name, provider, secret, companyIds }) {
+    async createKey({ name, baseUrl, secret, companyIds, modelsPath, chatCompletionsPath, authScheme }) {
+      // The server turns `base_url` into (or reuses) an endpoint record and links
+      // the key to it. No provider is sent: the address is the identity.
       await request("/admin/ai-keys", "POST", {
         name,
-        provider,
+        base_url: baseUrl,
         secret,
         company_ids: companyIds,
+        ...(modelsPath ? { models_path: modelsPath } : {}),
+        ...(chatCompletionsPath ? { chat_completions_path: chatCompletionsPath } : {}),
+        ...(authScheme ? { auth_scheme: authScheme } : {}),
       });
     },
     async setKeyCompanies(id, companyIds) {
       await request(`${key(id)}/companies`, "PUT", { company_ids: companyIds });
     },
     deleteKey: (id) => request(key(id), "DELETE").then(() => undefined),
-    async listProviders() {
-      return listOf(await request("/admin/catalogs/ai.http_providers/entries"))
-        .map((row) => ({ id: text(row, "id"), title: text(row, "title") || text(row, "id") }))
-        .filter((row) => row.id);
-    },
 
     listModules: modules,
     async createModule(name) {
@@ -287,6 +308,12 @@ export function createAdminService(options: AdminServiceOptions = {}): AdminServ
     },
     async setModuleCompanies(id, companyIds) {
       await request(module(id), "PATCH", { company_ids: companyIds });
+    },
+    async setModuleScope(id, scope) {
+      const updated = await request<unknown>(module(id), "PATCH", { company_grant_scope: scope });
+      const record = isRecord(updated) ? updated : {};
+      const applied = text(record, "company_grant_scope");
+      return applied === "all" || applied === "selected" ? applied : scope;
     },
     deleteModule: (id) => request(module(id), "DELETE").then(() => undefined),
 

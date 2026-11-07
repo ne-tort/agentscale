@@ -27,12 +27,10 @@ export function AdminArea() {
 
   return (
     <main className="admin">
-      {/* No eyebrow, no "contour": the administrator knows what this page is. */}
-      <header className="admin-heading">
-        <h1>{t("admin.title")}</h1>
-        <p className="admin-muted">{t("admin.subtitle")}</p>
-      </header>
-      <nav aria-label={t("admin.title")} className="admin-tabs">
+      {/* No heading, no subtitle. The tabs say where you are and what the page
+          is for; a title above them repeated the same thing in different words
+          and pushed the actual work a hundred pixels down. */}
+      <nav aria-label={t("admin.tabsAria")} className="admin-tabs">
         {tabs.map((tab) => (
           <NavLink
             className={({ isActive }) => (isActive ? "admin-tab admin-tab--active" : "admin-tab")}

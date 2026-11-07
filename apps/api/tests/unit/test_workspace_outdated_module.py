@@ -27,7 +27,7 @@ async def test_mark_workspace_outdated_for_module_marks_bound_projects() -> None
     session.get = AsyncMock(side_effect=_get)
 
     out = await mark_workspace_outdated_for_module(
-        session, module_id="mod_prompts", source="module_meta"
+        session, module_id="mod_management", source="module_meta"
     )
     assert out["marked_outdated"] == 1
     assert out["project_ids"] == ["proj_a"]

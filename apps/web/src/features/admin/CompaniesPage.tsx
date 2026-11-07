@@ -14,7 +14,7 @@ import type { CreatedCompany } from "./service";
  */
 export function CompaniesPage() {
   const service = useAdminService();
-  const { t } = useI18n();
+  const { t, plural } = useI18n();
   const companies = useCollection(() => service.listCompanies(), [service]);
   const [query, setQuery] = useState("");
   const [creating, setCreating] = useState(false);
@@ -60,13 +60,6 @@ export function CompaniesPage() {
 
   return (
     <section className="admin-section">
-      <div className="admin-section__header">
-        <h2>{t("admin.companiesTitle")}</h2>
-        <button className="admin-button admin-button--primary" onClick={startCreating} type="button">
-          {t("admin.newCompany")}
-        </button>
-      </div>
-
       {companies.loading ? (
         <p className="admin-muted" role="status">{t("common.loading")}</p>
       ) : companies.error ? (
@@ -81,7 +74,17 @@ export function CompaniesPage() {
         </div>
       ) : (
         <>
-          <ListToolbar count={visible.length} onQuery={setQuery} query={query} />
+          <ListToolbar
+            action={
+              <button className="admin-button admin-button--primary" onClick={startCreating} type="button">
+                {t("admin.newCompany")}
+              </button>
+            }
+            count={visible.length}
+            label={plural("admin.companiesRecord", visible.length)}
+            onQuery={setQuery}
+            query={query}
+          />
           <table className="admin-table">
             <thead>
               <tr>
@@ -178,7 +181,7 @@ export function CompaniesPage() {
 
 /** A value the administrator has to hand over, with a copy button beside it. */
 function CredentialRow({ label, value }: { label: string; value: string }) {
-  const { t } = useI18n();
+  const { t, plural } = useI18n();
   const [copied, setCopied] = useState(false);
   return (
     <div className="admin-credential">

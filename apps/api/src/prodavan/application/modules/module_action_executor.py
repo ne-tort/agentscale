@@ -1565,9 +1565,9 @@ class ModuleActionExecutor:
         fallback: bytes,
         module_id: str = "mod_equipment",
     ) -> bytes:
-        """Uploadable document templates (mod_templates) with built-in fallback.
+        """Uploadable document templates with built-in fallback.
 
-        Reads the cabinet-contour ``mod_templates`` rows (latest by updated_at,
+        Reads the module's ``templates`` rows (latest by updated_at,
         ``template_type`` match) and loads the stored xlsx. Any miss (module not
         bound, no rows, unreadable file) falls back to the built-in template —
         exports must never hard-fail on template management state.

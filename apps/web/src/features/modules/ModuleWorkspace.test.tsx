@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { SettingsProvider } from "../../preferences/SettingsProvider";
 import { ModuleWorkspace } from "./ModuleWorkspace";
 import type { ModuleRuntimeService } from "./contracts";
-import { equipmentModuleFixture, filesModuleFixture } from "./fixtures";
+import { equipmentModuleFixture, managementModuleFixture } from "./fixtures";
 
 /** Copy comes from the settings provider (Russian by default), so every render is wrapped. */
 function render(element: Parameters<typeof renderToStaticMarkup>[0]): string {
@@ -14,14 +14,14 @@ function render(element: Parameters<typeof renderToStaticMarkup>[0]): string {
 function makeService(): ModuleRuntimeService {
   return {
     listProjectModules: vi.fn(async (_projectId: string, _options?: { signal?: AbortSignal }) => [
-      { id: "mod_files", name: "Файлы", bind_kind: "local" as const, child_may_edit: true },
+      { id: "mod_management", name: "Управление", bind_kind: "local" as const, child_may_edit: true },
       { id: "mod_equipment", name: "Подбор техники", bind_kind: "global" as const, child_may_edit: false },
     ]),
     loadModule: vi.fn(async (_projectId, moduleId) => {
-      const fixture = moduleId === "mod_equipment" ? equipmentModuleFixture : filesModuleFixture;
+      const fixture = moduleId === "mod_equipment" ? equipmentModuleFixture : managementModuleFixture;
       const docs = fixture.documents;
       return {
-        scope: { projectId: "project-host", cabinetId: "cabinet-host", moduleId, moduleName: fixture.module.name, bindKind: moduleId === "mod_files" ? "local" as const : "global" as const, childMayEdit: moduleId === "mod_files", readOnly: moduleId !== "mod_files" },
+        scope: { projectId: "project-host", cabinetId: "cabinet-host", moduleId, moduleName: fixture.module.name, bindKind: fixture.bindKind, childMayEdit: fixture.childMayEdit, readOnly: !fixture.childMayEdit },
         manifest: {
           syntax_version: 1,
           tables: (docs.tables as { body: never[] }).body,

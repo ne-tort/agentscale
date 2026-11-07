@@ -9,7 +9,7 @@ import { AUTH_STORAGE_KEY } from "./auth/lifecycle";
 import { getSafeNextPath } from "./auth/redirect";
 import { RESOURCE_CONTRACT_BLOCKERS } from "../features/resources";
 import { emptyEquipmentWorkspace } from "../features/equipment";
-import { filesModuleFixture, promptModuleFixture } from "../features/modules/fixtures";
+import { managementModuleFixture } from "../features/modules/fixtures";
 import { restoreBlobUrlDescriptors } from "../test-support/blob-url-stubs";
 import { POLL_BUDGET_MS } from "../test-support/poll-budget";
 
@@ -49,75 +49,70 @@ const session = {
   created_at: "2026-10-31T09:00:00Z",
 };
 
-const resourceModuleRecords = [
-  { id: "mod_prompts", module_id: "mod_prompts", name: "Prompts", instance_id: "prompt-instance", bind_kind: "global", child_may_edit: true },
-  { id: "mod_files", module_id: "mod_files", name: "Files", instance_id: "files-instance", bind_kind: "local", child_may_edit: true },
-  { id: "mod_mcp", module_id: "mod_mcp", name: "MCP", instance_id: "mcp-instance", bind_kind: "global", child_may_edit: false },
-];
+/**
+ * The platform ships one first-party «Управление» module. Its bind/rights are what the
+ * project reports, so a scenario that needs a read-only or project-local bind overrides
+ * this before mounting instead of asking for a second module.
+ */
+type ResourceBinding = { bind_kind: "local" | "global"; child_may_edit: boolean };
+const defaultResourceBinding: ResourceBinding = { bind_kind: "global", child_may_edit: true };
+let resourceBinding: ResourceBinding = { ...defaultResourceBinding };
+
+function resourceModuleRecords() {
+  return [{ id: "mod_management", module_id: "mod_management", name: "Управление", instance_id: "management-instance", ...resourceBinding }];
+}
+
+/** The seeded meta, with the undeclared `prompt_files_editor` widget the doorway replaces by a slot. */
+function resourceMetaDocument(slug: "tables" | "columns" | "views" | "tabs" | "actions") {
+  const document = managementModuleFixture.documents[slug];
+  if (slug !== "views") return document;
+  const views = (document as { slug: string; body: Array<{ slug: string; ui_json?: Record<string, unknown> }> }).body.map((view) => view.slug !== "prompt_path_settings" ? view : {
+    ...view,
+    ui_json: {
+      ...view.ui_json,
+      fields: [...(Array.isArray(view.ui_json?.fields) ? view.ui_json.fields : []), { column: "files_json", widget: "prompt_files_editor" }],
+    },
+  });
+  return { slug: "views", body: views };
+}
 
 const initialPromptPathFiles: Record<string, unknown>[] = [{ id: "tone", name: "tone.md", priority: 100, body_md: "Be precise." }];
 let promptPathFiles: Record<string, unknown>[] = initialPromptPathFiles.map((file) => ({ ...file }));
 let resourceFileRow: { row_id: string; body: Record<string, unknown> } | undefined;
 
 function resourceModuleResponse(url: URL, request: CapturedRequest): Response | undefined {
-  if (url.pathname === `/api/v1/projects/${projectId}/runtime-modules` && request.method === "GET") return jsonResponse({ items: resourceModuleRecords });
-  for (const [moduleId, fixture] of [["mod_prompts", promptModuleFixture], ["mod_files", filesModuleFixture]] as const) {
-    for (const slug of ["tables", "columns", "views", "tabs", "actions"] as const) {
-      if (url.pathname === `/api/v1/projects/${projectId}/runtime-modules/${moduleId}/meta/documents/${slug}`) {
-        const document = fixture.documents[slug];
-        if (moduleId === "mod_prompts" && slug === "views") {
-          const views = (document as { slug: string; body: Array<{ slug: string; ui_json?: Record<string, unknown> }> }).body.map((view) => view.slug !== "prompt_path_settings" ? view : {
-            ...view,
-            ui_json: {
-              ...view.ui_json,
-              fields: [...(Array.isArray(view.ui_json?.fields) ? view.ui_json.fields : []), { column: "files_json", widget: "prompt_files_editor" }],
-            },
-          });
-          return jsonResponse({ slug: "views", body: views });
-        }
-        return jsonResponse(document);
-      }
-    }
+  if (url.pathname === `/api/v1/projects/${projectId}/runtime-modules` && request.method === "GET") return jsonResponse({ items: resourceModuleRecords() });
+  for (const slug of ["tables", "columns", "views", "tabs", "actions"] as const) {
+    if (url.pathname === `/api/v1/projects/${projectId}/runtime-modules/mod_management/meta/documents/${slug}`) return jsonResponse(resourceMetaDocument(slug));
   }
-  if (url.pathname === `/api/v1/projects/${projectId}/runtime-modules/mod_mcp/meta/documents/tables`) return jsonResponse({ slug: "tables", body: [{ slug: "mcp_packages", enabled: true, storage_kind: "json_document", scope: { projects: "all", chats: "all" } }] });
-  if (url.pathname === `/api/v1/projects/${projectId}/runtime-modules/mod_mcp/meta/documents/columns`) return jsonResponse({ slug: "columns", body: [
-    { table_slug: "mcp_packages", name: "name", type: "text", required: true }, { table_slug: "mcp_packages", name: "version", type: "text", required: true },
-    { table_slug: "mcp_packages", name: "enabled", type: "bool" }, { table_slug: "mcp_packages", name: "file_ref", type: "file_ref" }, { table_slug: "mcp_packages", name: "project_ids", type: "json" },
-  ] });
-  if (url.pathname === `/api/v1/projects/${projectId}/runtime-modules/mod_mcp/meta/documents/views`) return jsonResponse({ slug: "views", body: [
-    { slug: "mcp_packages_list", table_slug: "mcp_packages", kind: "collection", ui_json: { version: 1, kind: "collection", title: "MCP", columns: [{ field: "name" }, { field: "version" }], row_tap: { kind: "open_form", view: "mcp_packages_form" }, inline_add: { field: "name", title: "Add MCP package" } } },
-    { slug: "mcp_packages_form", table_slug: "mcp_packages", kind: "form", ui_json: { version: 1, kind: "form", title: "MCP package", fields: [{ column: "project_ids", widget: "project_multiselect" }, { column: "name" }, { column: "version" }, { column: "enabled", widget: "switch" }, { column: "file_ref", widget: "file_upload", accept: ".zip" }] } },
-  ] });
-  if (url.pathname === `/api/v1/projects/${projectId}/runtime-modules/mod_mcp/meta/documents/tabs`) return jsonResponse({ slug: "tabs", body: [{ id: "tab_mcp", title: "MCP", view_slug: "mcp_packages_list", enabled: true, nav: { contour: "employee", placement: "management" } }] });
-  if (url.pathname === `/api/v1/projects/${projectId}/runtime-modules/mod_mcp/meta/documents/actions`) return jsonResponse({ slug: "actions", body: [] });
-  if (request.method === "GET" && url.pathname === `/api/v1/projects/${projectId}/runtime-modules/mod_prompts/data/prompt_profiles`) return jsonResponse({ items: [
+  if (request.method === "GET" && url.pathname === `/api/v1/projects/${projectId}/runtime-modules/mod_management/data/prompt_profiles`) return jsonResponse({ items: [
     { row_id: "profile_default", body: { name: "Default", is_default: true, project_ids: [] } },
     { row_id: "profile_research", body: { name: "Research", is_default: false, project_ids: [] } },
     { row_id: "profile_other_project", body: { name: "Private profile", is_default: false, project_ids: ["project-other"] } },
   ] });
-  if (request.method === "GET" && url.pathname === `/api/v1/projects/${projectId}/runtime-modules/mod_prompts/data/prompt_paths`) return jsonResponse({ items: [
+  if (request.method === "GET" && url.pathname === `/api/v1/projects/${projectId}/runtime-modules/mod_management/data/prompt_paths`) return jsonResponse({ items: [
     { row_id: "path_agents", body: { profile_id: "profile_default", name: "AGENTS.md", path: "", files_json: promptPathFiles } },
     { row_id: "path_research", body: { profile_id: "profile_research", name: "Research", path: "prompts/research", files_json: [] } },
     { row_id: "path_private", body: { profile_id: "profile_default", name: "Private path", path: "private", project_ids: ["project-other"], files_json: [] } },
   ] });
-  if (url.pathname === `/api/v1/projects/${projectId}/runtime-modules/mod_prompts/data/prompt_paths/path_private` && request.method === "PATCH") return jsonResponse({ code: "NOT_FOUND", title: "Not Found", detail: "row not found" }, 404);
-  if (request.method === "GET" && url.pathname === `/api/v1/projects/${projectId}/runtime-modules/mod_files/data/files`) return jsonResponse({ items: resourceFileRow ? [{ ...resourceFileRow, module_id: "mod_files", instance_id: "files-instance" }] : [] });
-  if (url.pathname === `/api/v1/projects/${projectId}/runtime-modules/mod_files/data/files` && request.method === "POST") {
+  if (url.pathname === `/api/v1/projects/${projectId}/runtime-modules/mod_management/data/prompt_paths/path_private` && request.method === "PATCH") return jsonResponse({ code: "NOT_FOUND", title: "Not Found", detail: "row not found" }, 404);
+  if (request.method === "GET" && url.pathname === `/api/v1/projects/${projectId}/runtime-modules/mod_management/data/files`) return jsonResponse({ items: resourceFileRow ? [{ ...resourceFileRow, module_id: "mod_management", instance_id: "management-instance" }] : [] });
+  if (url.pathname === `/api/v1/projects/${projectId}/runtime-modules/mod_management/data/files` && request.method === "POST") {
     const body = JSON.parse(request.body ?? "{}").body as Record<string, unknown>;
     resourceFileRow = { row_id: "resource-file-1", body };
-    return jsonResponse({ ...resourceFileRow, module_id: "mod_files", instance_id: "files-instance" });
+    return jsonResponse({ ...resourceFileRow, module_id: "mod_management", instance_id: "management-instance" });
   }
-  if (url.pathname === `/api/v1/projects/${projectId}/runtime-modules/mod_files/data/files/resource-file-1` && request.method === "PATCH") {
+  if (url.pathname === `/api/v1/projects/${projectId}/runtime-modules/mod_management/data/files/resource-file-1` && request.method === "PATCH") {
     const patch = JSON.parse(request.body ?? "{}").body as Record<string, unknown>;
     resourceFileRow = { row_id: "resource-file-1", body: { ...(resourceFileRow?.body ?? {}), ...patch } };
-    return jsonResponse({ ...resourceFileRow, module_id: "mod_files", instance_id: "files-instance" });
+    return jsonResponse({ ...resourceFileRow, module_id: "mod_management", instance_id: "management-instance" });
   }
-  if (url.pathname === `/api/v1/projects/${projectId}/runtime-modules/mod_files/data/files/resource-file-1` && request.method === "DELETE") {
+  if (url.pathname === `/api/v1/projects/${projectId}/runtime-modules/mod_management/data/files/resource-file-1` && request.method === "DELETE") {
     resourceFileRow = undefined;
     return jsonResponse({ deleted: true, row_id: "resource-file-1" });
   }
-  if (request.method === "GET" && url.pathname === `/api/v1/projects/${projectId}/runtime-modules/mod_mcp/data/mcp_packages`) return jsonResponse({ items: [] });
-  if (url.pathname === `/api/v1/cabinets/${cabinetId}/modules/mod_files/bound-projects` || url.pathname === `/api/v1/cabinets/${cabinetId}/modules/mod_mcp/bound-projects`) return jsonResponse({ items: [{ project_id: projectId, name: project.name }] });
+  if (request.method === "GET" && url.pathname === `/api/v1/projects/${projectId}/runtime-modules/mod_management/data/mcp_packages`) return jsonResponse({ items: [] });
+  if (url.pathname === `/api/v1/cabinets/${cabinetId}/modules/mod_management/bound-projects`) return jsonResponse({ items: [{ project_id: projectId, name: project.name }] });
   // Matches CabinetContentUploadService.upload_for_cabinet exactly, including
   // ``version_id`` and ``storage_key``: the module form validates a file_ref by
   // requiring asset_id, version_id, storage_key and filename to be non-empty strings,
@@ -279,6 +274,22 @@ async function click(selector: string, until: () => boolean): Promise<void> {
   await waitFor(until);
 }
 
+/**
+ * Open one area of the merged Management module through its own section navigation.
+ *
+ * The module's first screen is the `management_hub` landing view, so every area is one
+ * click away — matching the label in the button's own span, because the placement line
+ * underneath repeats "Управление" on each of them.
+ */
+async function openModuleSection(title: string, until: () => boolean): Promise<void> {
+  const buttons = () => [...document.querySelectorAll<HTMLButtonElement>(".module-runtime-nav button")];
+  await waitFor(() => buttons().some((button) => button.querySelector("span")?.textContent === title));
+  await act(async () => {
+    buttons().find((button) => button.querySelector("span")?.textContent === title)?.click();
+  });
+  await waitFor(until);
+}
+
 function pageText(): string {
   return document.body.textContent ?? "";
 }
@@ -351,6 +362,7 @@ afterEach(async () => {
   downloadedFile = undefined;
   resourceFileRow = undefined;
   promptPathFiles = initialPromptPathFiles.map((file) => ({ ...file }));
+  resourceBinding = { ...defaultResourceBinding };
   window.localStorage.clear();
   window.sessionStorage.clear();
   vi.unstubAllGlobals();
@@ -937,13 +949,16 @@ describe("employee workspace integration acceptance", () => {
     await waitFor(() => pageText().includes("Модули проекта недоступны"));
     expect(document.querySelector(".project-module-resources__feedback--error")?.textContent).toContain("Модули проекта недоступны");
     await click(".project-module-resources__feedback--error button", () => pageText().includes("К этому проекту пока не подключены модули ресурсов"));
-    expect(document.querySelectorAll(".project-module-resources__card")).toHaveLength(3);
-    expect([...document.querySelectorAll(".project-module-resources__card .project-module-resources__eyebrow")].map((node) => node.textContent)).toEqual(["Не подключён", "Не подключён", "Не подключён"]);
+    // One first-party module is offered now, so an unbound project sees one card.
+    expect(document.querySelectorAll(".project-module-resources__card")).toHaveLength(1);
+    expect([...document.querySelectorAll(".project-module-resources__card .project-module-resources__eyebrow")].map((node) => node.textContent)).toEqual(["Не подключён"]);
+    expect(document.querySelector("[data-resource-module='mod_management']")).toBeTruthy();
     expect(requests.filter((request) => request.path === `/api/v1/projects/${projectId}/runtime-modules`).map((request) => request.method)).toEqual(["GET", "GET"]);
     expect(requests.some((request) => request.path.includes("/runtime-modules/mod_") && request.path.includes("/meta/"))).toBe(false);
   });
 
-  it("opens a read-only project-bound MCP module and preserves its empty state", async () => {
+  it("opens a read-only project-bound Management module and preserves its empty MCP state", async () => {
+    resourceBinding = { bind_kind: "global", child_may_edit: false };
     const { requests } = capture((url, request) => {
       if (url.pathname === "/api/v1/me") return jsonResponse(backendIdentityResponse());
       const overview = overviewPayload(url);
@@ -955,16 +970,16 @@ describe("employee workspace integration acceptance", () => {
     });
     window.localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(tokens));
 
-    await mountApp(`/projects/${projectId}/resources?module=mod_mcp`);
-    await waitFor(() => pageText().includes("Общие данные доступны только для чтения"));
+    await mountApp(`/projects/${projectId}/resources?module=mod_management`);
+    await openModuleSection("MCP", () => pageText().includes("Пока нет записей"));
+    expect(pageText()).toContain("Общие данные доступны только для чтения");
     expect(pageText()).toContain("mcp_packages");
-    expect(pageText()).toContain("Пока нет записей");
     expect(document.querySelector(".module-runtime-inline-add")).toBeNull();
     expect(document.querySelector(".module-runtime-button--primary")).toBeNull();
-    expect(requests.some((request) => request.path === `/api/v1/projects/${projectId}/runtime-modules/mod_mcp/meta/documents/tabs` && request.authorization === "Bearer acceptance-access")).toBe(true);
-    expect(requests.some((request) => request.path.startsWith(`/api/v1/projects/${projectId}/runtime-modules/mod_mcp/data/mcp_packages?`) && request.method === "GET" && request.authorization === "Bearer acceptance-access")).toBe(true);
-    expect(requests.some((request) => request.path === `/api/v1/projects/${projectId}/runtime-modules/mod_mcp/data/mcp_packages` && request.method === "POST")).toBe(false);
-    expect(requests.some((request) => request.path === `/api/v1/projects/${projectId}/modules/mod_mcp/profile` && request.method === "PATCH")).toBe(false);
+    expect(requests.some((request) => request.path === `/api/v1/projects/${projectId}/runtime-modules/mod_management/meta/documents/tabs` && request.authorization === "Bearer acceptance-access")).toBe(true);
+    expect(requests.some((request) => request.path.startsWith(`/api/v1/projects/${projectId}/runtime-modules/mod_management/data/mcp_packages?`) && request.method === "GET" && request.authorization === "Bearer acceptance-access")).toBe(true);
+    expect(requests.some((request) => request.path === `/api/v1/projects/${projectId}/runtime-modules/mod_management/data/mcp_packages` && request.method === "POST")).toBe(false);
+    expect(requests.some((request) => request.path === `/api/v1/projects/${projectId}/modules/mod_management/profile` && request.method === "PATCH")).toBe(false);
   });
 
   it("opens only project-bound first-party modules and preserves fail-closed profile/materialization blockers", async () => {
@@ -980,18 +995,22 @@ describe("employee workspace integration acceptance", () => {
     window.localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(tokens));
 
     await mountApp(`/projects/${projectId}/resources`);
-    await waitFor(() => Boolean(document.querySelector("[data-resource-module='mod_prompts']")));
+    await waitFor(() => Boolean(document.querySelector("[data-resource-module='mod_management']")));
     // The card names its own binding instead of printing the raw bind kind: the reader
     // gets the scope word and the edit rights the backend granted.
-    const promptsCard = document.querySelector<HTMLElement>("[data-resource-module='mod_prompts']");
-    expect(promptsCard?.querySelector(".project-module-resources__binding")?.textContent).toBe("во всех проектах · можно менять");
+    const managementCard = document.querySelector<HTMLElement>("[data-resource-module='mod_management']");
+    expect(managementCard?.querySelector("h3")?.textContent).toBe("Управление");
+    expect(managementCard?.querySelector(".project-module-resources__binding")?.textContent).toBe("во всех проектах · можно менять");
     expect(pageText()).toContain("Подключён к проекту");
     expect(document.querySelector(".resources-blockers")).toBeNull();
 
-    await click("[data-resource-module='mod_prompts'] button", () => Boolean(document.querySelector(".module-runtime-nav")));
-    expect(pageText()).toContain("Промпты");
+    await click("[data-resource-module='mod_management'] button", () => Boolean(document.querySelector(".module-runtime-nav")));
+    // The merged module lands on its hub, which links the three areas it now owns.
+    await waitFor(() => pageText().includes("Промпты"));
+    expect(document.querySelectorAll(".module-runtime-hub-item")).toHaveLength(3);
+    expect([...document.querySelectorAll(".module-runtime-hub-item h3")].map((node) => node.textContent)).toEqual(["Промпты", "MCP", "Файлы"]);
     expect(requests.some((request) => request.path === `/api/v1/projects/${projectId}/runtime-modules` && request.method === "GET" && request.authorization === "Bearer acceptance-access")).toBe(true);
-    expect(requests.some((request) => request.path === `/api/v1/projects/${projectId}/runtime-modules/mod_prompts/meta/documents/views` && request.authorization === "Bearer acceptance-access")).toBe(true);
+    expect(requests.some((request) => request.path === `/api/v1/projects/${projectId}/runtime-modules/mod_management/meta/documents/views` && request.authorization === "Bearer acceptance-access")).toBe(true);
     expect(requests.some((request) => request.path.startsWith("/api/v1/projects/") && request.path.includes("/resource-profile"))).toBe(false);
   });
 
@@ -1004,7 +1023,7 @@ describe("employee workspace integration acceptance", () => {
       const modules = resourceModuleResponse(url, request);
       if (modules) return modules;
       if (url.pathname === "/api/v1/content/assets" && request.method === "GET") return jsonResponse({ items: [] });
-      if (url.pathname === `/api/v1/projects/${projectId}/runtime-modules/mod_prompts/data/prompt_paths/path_agents` && request.method === "PATCH") {
+      if (url.pathname === `/api/v1/projects/${projectId}/runtime-modules/mod_management/data/prompt_paths/path_agents` && request.method === "PATCH") {
         const patch = JSON.parse(request.body ?? "{}").body as { files_json: typeof savedFiles };
         savedFiles.splice(0, savedFiles.length, ...patch.files_json);
         return jsonResponse({ row_id: "path_agents", body: { profile_id: "profile_default", name: "AGENTS.md", path: "", files_json: savedFiles } });
@@ -1013,8 +1032,8 @@ describe("employee workspace integration acceptance", () => {
     });
     window.localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(tokens));
 
-    await mountApp(`/projects/${projectId}/resources?module=mod_prompts`);
-    await waitFor(() => pageText().includes("Профили"));
+    await mountApp(`/projects/${projectId}/resources?module=mod_management`);
+    await openModuleSection("Промпты", () => pageText().includes("Профили"));
     // The fixture rows are server data, so their names stay untranslated: assert the
     // row's own label is absent rather than a locale string that never existed.
     expect(pageText()).not.toContain("Private profile");
@@ -1036,7 +1055,7 @@ describe("employee workspace integration acceptance", () => {
     await setValue(editor!, "Be precise and concise.");
     await click(".project-prompt-files__editor button[type='submit']", () => pageText().includes("Файлы промптов сохранены"));
 
-    const save = requests.find((request) => request.path === `/api/v1/projects/${projectId}/runtime-modules/mod_prompts/data/prompt_paths/path_agents` && request.method === "PATCH");
+    const save = requests.find((request) => request.path === `/api/v1/projects/${projectId}/runtime-modules/mod_management/data/prompt_paths/path_agents` && request.method === "PATCH");
     expect(save).toMatchObject({ authorization: "Bearer acceptance-access", body: JSON.stringify({ body: { files_json: [{ id: "tone", name: "tone.md", priority: 100, body_md: "Be precise and concise." }] } }) });
     expect(savedFiles[0].body_md).toBe("Be precise and concise.");
     expect(requests.some((request) => request.path.includes("/materialization") || request.path.includes("/resource-versions"))).toBe(false);
@@ -1046,7 +1065,7 @@ describe("employee workspace integration acceptance", () => {
     let simulateConcurrentChange = false;
     const { requests } = capture((url, request) => {
       if (url.pathname === "/api/v1/me") return jsonResponse(backendIdentityResponse());
-      if (url.pathname === `/api/v1/projects/${projectId}/runtime-modules/mod_prompts/data/prompt_paths` && request.method === "GET") {
+      if (url.pathname === `/api/v1/projects/${projectId}/runtime-modules/mod_management/data/prompt_paths` && request.method === "GET") {
         if (simulateConcurrentChange) {
           promptPathFiles = [{ ...promptPathFiles[0], body_md: "Concurrent change." }];
           simulateConcurrentChange = false;
@@ -1066,8 +1085,8 @@ describe("employee workspace integration acceptance", () => {
     });
     window.localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(tokens));
 
-    await mountApp(`/projects/${projectId}/resources?module=mod_prompts`);
-    await waitFor(() => pageText().includes("Профили"));
+    await mountApp(`/projects/${projectId}/resources?module=mod_management`);
+    await openModuleSection("Промпты", () => pageText().includes("Профили"));
     const profileRow = [...document.querySelectorAll<HTMLTableRowElement>(".module-runtime-table tbody tr")].find((item) => item.textContent?.includes("Default"));
     if (!profileRow) throw new Error("The Default profile row was not returned.");
     await act(async () => {
@@ -1088,7 +1107,7 @@ describe("employee workspace integration acceptance", () => {
     const staleEditCopy = "Файлы промптов изменились, пока редактор был открыт. Перезагрузите модуль, чтобы не потерять чужие правки.";
     await click(".project-prompt-files__editor button[type='submit']", () => pageText().includes(staleEditCopy));
     expect(document.querySelector(".project-prompt-files__error[role='alert']")?.textContent).toContain(staleEditCopy);
-    expect(requests.some((request) => request.path === `/api/v1/projects/${projectId}/runtime-modules/mod_prompts/data/prompt_paths/path_agents` && request.method === "PATCH")).toBe(false);
+    expect(requests.some((request) => request.path === `/api/v1/projects/${projectId}/runtime-modules/mod_management/data/prompt_paths/path_agents` && request.method === "PATCH")).toBe(false);
     expect(promptPathFiles[0].body_md).toBe("Concurrent change.");
     expect(document.querySelector(".project-prompt-files__reload")).toBeTruthy();
   });
@@ -1143,7 +1162,7 @@ describe("employee workspace integration acceptance", () => {
 
     await mountApp(`/projects/${projectId}/resources`);
     await waitFor(() => Boolean(document.querySelector(".content-ops__form")));
-    expect(document.querySelector(".project-module-resources__card h3")?.textContent).toBe("Промпты");
+    expect(document.querySelector(".project-module-resources__card h3")?.textContent).toBe("Управление");
     expect(document.querySelector(".resources-blockers")).toBeNull();
     
     
@@ -1206,7 +1225,8 @@ describe("employee workspace integration acceptance", () => {
     expect(requests.some((item) => item.path.startsWith("/api/") && !item.path.startsWith("/api/v1/"))).toBe(false);
   });
 
-  it("uses the first-party Files module for scoped upload, row save and Content FileRef download", async () => {
+  it("uses the first-party Management files area for scoped upload, row save and Content FileRef download", async () => {
+    resourceBinding = { bind_kind: "local", child_may_edit: true };
     resourceFileRow = { row_id: "resource-file-1", body: { name: "Guide", target_path: "docs/guide.txt", file_ref: null, project_ids: [] } };
     const { requests } = capture((url, request) => {
       if (url.pathname === "/api/v1/me") return jsonResponse(backendIdentityResponse());
@@ -1227,13 +1247,12 @@ describe("employee workspace integration acceptance", () => {
     const anchorClick = vi.fn(function (this: HTMLAnchorElement) { downloadedFile = { href: this.href, filename: this.download }; });
     Object.defineProperty(HTMLAnchorElement.prototype, "click", { configurable: true, value: anchorClick });
 
-    await mountApp(`/projects/${projectId}/resources?module=mod_files`);
-    await waitFor(() => pageText().includes("Файлы"));
+    await mountApp(`/projects/${projectId}/resources?module=mod_management`);
     // The opened module's descriptor names the data scope in the reader's words: the
-    // Files module is bound locally, so its data belongs to this project only.
+    // Management module is bound locally here, so its data belongs to this project only.
     await waitFor(() => Boolean(document.querySelector(".project-module-resources__active")));
-    expect(document.querySelector(".project-module-resources__active")?.textContent).toContain("Файлы · только здесь");
-    await waitFor(() => Boolean(document.querySelector(".module-runtime-table tbody tr")));
+    expect(document.querySelector(".project-module-resources__active")?.textContent).toContain("Управление · только здесь");
+    await openModuleSection("Файлы", () => Boolean(document.querySelector(".module-runtime-table tbody tr")));
     const fileRow = [...document.querySelectorAll<HTMLTableRowElement>(".module-runtime-table tbody tr")].find((row) => row.textContent?.includes("Guide"));
     expect(fileRow).toBeTruthy();
     await act(async () => { fileRow?.querySelector("button")?.click(); await waitFor(() => Boolean(document.querySelector(".module-runtime-form"))); });
@@ -1249,14 +1268,15 @@ describe("employee workspace integration acceptance", () => {
     await waitFor(() => requests.some((request) => request.path === `/api/v1/cabinets/${cabinetId}/content/upload` && request.method === "POST"));
     expect(requests.find((request) => request.path === `/api/v1/cabinets/${cabinetId}/content/upload`)).toMatchObject({ method: "POST", authorization: "Bearer acceptance-access" });
 
-    await click(".module-runtime-form-actions button[type='submit']", () => requests.some((request) => request.path.endsWith("/runtime-modules/mod_files/data/files/resource-file-1") && request.method === "PATCH"));
+    await click(".module-runtime-form-actions button[type='submit']", () => requests.some((request) => request.path.endsWith("/runtime-modules/mod_management/data/files/resource-file-1") && request.method === "PATCH"));
     expect(resourceFileRow?.body.file_ref).toMatchObject({ asset_id: "uploaded-asset", blob_version_id: "uploaded-version" });
-    expect(requests.some((request) => request.path === `/api/v1/cabinets/${cabinetId}/modules/mod_files/bound-projects` && request.method === "GET")).toBe(true);
+    expect(requests.some((request) => request.path === `/api/v1/cabinets/${cabinetId}/modules/mod_management/bound-projects` && request.method === "GET")).toBe(true);
     // Saving an edit keeps the form open on the confirmed row. The form's own back
     // control only switches that same view to read mode, so the list is reached through
     // the module section navigation, which is what a user actually presses.
     await act(async () => {
-      document.querySelector<HTMLButtonElement>(".module-runtime-nav button")?.click();
+      [...document.querySelectorAll<HTMLButtonElement>(".module-runtime-nav button")]
+        .find((button) => button.querySelector("span")?.textContent === "Файлы")?.click();
     });
     await waitFor(() => [...document.querySelectorAll<HTMLTableRowElement>(".module-runtime-table tbody tr")].some((row) => row.textContent?.includes("Guide")));
     const savedFileRow = [...document.querySelectorAll<HTMLTableRowElement>(".module-runtime-table tbody tr")].find((row) => row.textContent?.includes("Guide"));

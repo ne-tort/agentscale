@@ -20,6 +20,10 @@ from dataclasses import dataclass
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from prodavan.application.ai_keys.endpoint import (
+    LEGACY_CHAT_COMPLETIONS_PATH_DEFAULT,
+    LEGACY_MODELS_PATH_DEFAULT,
+)
 from prodavan.application.catalog.service import CATALOG_AI_HTTP_PROVIDERS
 from prodavan.domain.ai_keys import ApiKind
 from prodavan.domain.ai_keys.http_url import ensure_scheme
@@ -148,8 +152,14 @@ class ProviderResolver:
                     api_kind=str(payload.get("api_kind") or ""),
                     agent_provider=str(payload.get("agent_provider") or ""),
                     auth_scheme=str(payload.get("auth_scheme") or "bearer"),
-                    chat_completions_path=str(payload.get("chat_completions_path") or "/v1/chat/completions"),
-                    models_path=str(payload.get("models_path") or "/v1/models"),
+                    # Same fallbacks as the list response (`endpoint_public`):
+                    # an admin-entered endpoint defaults to /models and
+                    # /chat/completions relative to its base_url.
+                    chat_completions_path=str(
+                        payload.get("chat_completions_path")
+                        or LEGACY_CHAT_COMPLETIONS_PATH_DEFAULT
+                    ),
+                    models_path=str(payload.get("models_path") or LEGACY_MODELS_PATH_DEFAULT),
                     openai_compatible=bool(payload.get("openai_compatible", True)),
                     supports_models_list=bool(payload.get("supports_models_list", True)),
                 )

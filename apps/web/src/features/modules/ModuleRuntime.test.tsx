@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { SettingsProvider } from "../../preferences/SettingsProvider";
 import { ModuleRuntime } from "./ModuleRuntime";
 import type { ModuleManifest, ModuleRuntimeLoadResult, ModuleRuntimeProps, ModuleRuntimeService } from "./contracts";
-import { equipmentModuleFixture, filesModuleFixture, type ModuleSeedFixture } from "./fixtures";
+import { equipmentModuleFixture, managementModuleFixture, type ModuleSeedFixture } from "./fixtures";
 import { createModuleSlotRegistry } from "./slots";
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
@@ -32,7 +32,7 @@ function manifestFor(fixture: ModuleSeedFixture): ModuleManifest {
   };
 }
 
-function serviceFor(fixture = filesModuleFixture): ModuleRuntimeService {
+function serviceFor(fixture = managementModuleFixture): ModuleRuntimeService {
   const rows = new Map<string, unknown>([
     ["files", fixture.page],
     ["prompt_profiles", { items: [{ row_id: "profile_default", body: { name: "Default", is_default: true } }], total: 1, page: 1, page_size: 20 }],
@@ -40,16 +40,16 @@ function serviceFor(fixture = filesModuleFixture): ModuleRuntimeService {
     ["prompt_paths", fixture.profilePage],
   ]);
   return {
-    listProjectModules: vi.fn(async () => [{ id: fixture.module.id, name: fixture.module.name, bind_kind: fixture.module.id === "mod_files" ? "local" as const : "global" as const, child_may_edit: fixture.module.id !== "mod_equipment" }]),
+    listProjectModules: vi.fn(async () => [{ id: fixture.module.id, name: fixture.module.name, bind_kind: fixture.bindKind, child_may_edit: fixture.childMayEdit }]),
     loadModule: vi.fn(async () => ({
       scope: {
         projectId: fixture.project.id,
         cabinetId: fixture.project.cabinet_id,
         moduleId: fixture.module.id,
         moduleName: fixture.module.name,
-        bindKind: fixture.module.id === "mod_files" ? "local" as const : "global" as const,
-        childMayEdit: fixture.module.id !== "mod_equipment",
-        readOnly: fixture.module.id === "mod_equipment",
+        bindKind: fixture.bindKind,
+        childMayEdit: fixture.childMayEdit,
+        readOnly: !fixture.childMayEdit,
         sessionId: fixture.sessionId,
       },
       manifest: manifestFor(fixture),
@@ -67,7 +67,7 @@ function serviceFor(fixture = filesModuleFixture): ModuleRuntimeService {
   };
 }
 
-function initialRuntimeFor(fixture = filesModuleFixture, props: Partial<ModuleRuntimeProps> = {}): ModuleRuntimeLoadResult {
+function initialRuntimeFor(fixture = managementModuleFixture, props: Partial<ModuleRuntimeProps> = {}): ModuleRuntimeLoadResult {
   const sessionId = "sessionId" in props ? props.sessionId : fixture.sessionId;
   return {
     scope: {
@@ -75,16 +75,16 @@ function initialRuntimeFor(fixture = filesModuleFixture, props: Partial<ModuleRu
       cabinetId: fixture.project.cabinet_id,
       moduleId: fixture.module.id,
       moduleName: fixture.module.name,
-      bindKind: fixture.module.id === "mod_files" ? "local" as const : "global" as const,
-      childMayEdit: fixture.module.id !== "mod_equipment",
-      readOnly: fixture.module.id === "mod_equipment",
+      bindKind: fixture.bindKind,
+      childMayEdit: fixture.childMayEdit,
+      readOnly: !fixture.childMayEdit,
       ...(sessionId !== undefined ? { sessionId } : {}),
     },
     manifest: manifestFor(fixture),
   };
 }
 
-function renderStaticRuntime(fixture = filesModuleFixture, props: Partial<ModuleRuntimeProps> = {}) {
+function renderStaticRuntime(fixture = managementModuleFixture, props: Partial<ModuleRuntimeProps> = {}) {
   const service = props.service ?? serviceFor(fixture);
   const initialRuntime = "initialRuntime" in props ? props.initialRuntime : initialRuntimeFor(fixture, props);
   return renderToStaticMarkup(withSettings(<ModuleRuntime projectId={fixture.project.id} moduleId={fixture.module.id} sessionId={fixture.sessionId} service={service} initialRuntime={initialRuntime} {...props} />));
@@ -92,7 +92,7 @@ function renderStaticRuntime(fixture = filesModuleFixture, props: Partial<Module
 
 const mountedRoots: Root[] = [];
 
-async function mountRuntime(fixture = filesModuleFixture, props: Partial<ModuleRuntimeProps> = {}) {
+async function mountRuntime(fixture = managementModuleFixture, props: Partial<ModuleRuntimeProps> = {}) {
   const service = props.service ?? serviceFor(fixture);
   const initialRuntime = "initialRuntime" in props ? props.initialRuntime : initialRuntimeFor(fixture, props);
   const container = document.createElement("div");
@@ -115,12 +115,12 @@ afterEach(async () => {
 describe("ModuleRuntime", () => {
   it("loads module and collection rows in the browser instead of remaining on the SSR loading state", async () => {
     const service = serviceFor();
-    const serverMarkup = renderStaticRuntime(filesModuleFixture, { service });
+    const serverMarkup = renderStaticRuntime(managementModuleFixture, { service, initialViewSlug: "files_list" });
     expect(serverMarkup).toContain("Загружаем данные");
     expect(serverMarkup).not.toContain("guide.pdf");
     expect(service.listRows).not.toHaveBeenCalled();
 
-    const { container } = await mountRuntime(filesModuleFixture, { service, initialRuntime: undefined });
+    const { container } = await mountRuntime(managementModuleFixture, { service, initialRuntime: undefined, initialViewSlug: "files_list" });
     expect(service.loadModule).toHaveBeenCalledOnce();
     expect(service.listRows).toHaveBeenCalled();
     expect(container.textContent).toContain("guide.pdf");
@@ -132,7 +132,7 @@ describe("ModuleRuntime", () => {
     const service = serviceFor();
     let rejectLoad!: (error: Error) => void;
     vi.mocked(service.loadModule).mockImplementationOnce(() => new Promise<Awaited<ReturnType<ModuleRuntimeService["loadModule"]>>>((_resolve, reject) => { rejectLoad = reject; }));
-    const { container } = await mountRuntime(filesModuleFixture, { service, initialRuntime: undefined });
+    const { container } = await mountRuntime(managementModuleFixture, { service, initialRuntime: undefined });
     expect(container.textContent).toContain("Загружаем модуль");
     await act(async () => { rejectLoad(new Error("view privileged_html has unsupported kind")); });
     expect(container.textContent).toContain("view privileged_html has unsupported kind");
@@ -140,7 +140,7 @@ describe("ModuleRuntime", () => {
   });
 
   it("renders a typed collection with current local editability and file refs", async () => {
-    const { container } = await mountRuntime();
+    const { container } = await mountRuntime(managementModuleFixture, { initialViewSlug: "files_list" });
     expect(container.textContent).toContain("Данные проекта");
     expect(container.textContent).toContain("guide.pdf");
     expect(container.textContent).toContain("Путь");
@@ -166,7 +166,7 @@ describe("ModuleRuntime", () => {
   });
 
   it("renders a FileRef row value as a download command", async () => {
-    const { container, service } = await mountRuntime(filesModuleFixture, { initialViewSlug: "files_primary" });
+    const { container, service } = await mountRuntime(managementModuleFixture, { initialViewSlug: "files_primary" });
     const fileButton = [...container.querySelectorAll("button")].find((button) => button.textContent === "guide.pdf");
     expect(fileButton).toBeDefined();
     await act(async () => { fileButton!.click(); });
@@ -174,7 +174,7 @@ describe("ModuleRuntime", () => {
   });
 
   it("routes the primary create command to the form, validates required fields, and confirms the saved row with fresh GET", async () => {
-    const { container, service } = await mountRuntime(filesModuleFixture, { initialViewSlug: "files_primary" });
+    const { container, service } = await mountRuntime(managementModuleFixture, { initialViewSlug: "files_primary" });
     const createButton = [...container.querySelectorAll("button")].find((button) => button.textContent?.includes("Новый файл"));
     expect(createButton).toBeDefined();
     await act(async () => { createButton!.click(); });
@@ -190,13 +190,13 @@ describe("ModuleRuntime", () => {
     nameInput!.value = "created.pdf";
     vi.mocked(service.listRows).mockResolvedValue({ items: [{ row_id: "new", body: { name: "created.pdf", target_path: "", project_ids: [] } }], total: 1, page: 1, page_size: 200 });
     await act(async () => { form!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); });
-    expect(service.createRow).toHaveBeenCalledWith(expect.objectContaining({ projectId: "project-beta", moduleId: "mod_files", sessionId: "session-beta" }), "files", expect.objectContaining({ name: "created.pdf" }));
-    expect(service.listRows).toHaveBeenCalledWith(expect.objectContaining({ projectId: "project-beta", moduleId: "mod_files", sessionId: "session-beta" }), "files", expect.objectContaining({ page: 1, pageSize: 200, chats: "all" }));
+    expect(service.createRow).toHaveBeenCalledWith(expect.objectContaining({ projectId: "project-beta", moduleId: "mod_management", sessionId: "session-beta" }), "files", expect.objectContaining({ name: "created.pdf" }));
+    expect(service.listRows).toHaveBeenCalledWith(expect.objectContaining({ projectId: "project-beta", moduleId: "mod_management", sessionId: "session-beta" }), "files", expect.objectContaining({ page: 1, pageSize: 200, chats: "all" }));
     expect(container.textContent).toContain("Запись создана и подтверждена сервером.");
   });
 
   it("opens an exact collection row in its declared editable form and retains the row body", async () => {
-    const { container, service } = await mountRuntime(filesModuleFixture, { initialViewSlug: "files_primary" });
+    const { container, service } = await mountRuntime(managementModuleFixture, { initialViewSlug: "files_primary" });
     const openButton = [...container.querySelectorAll("button")].find((button) => button.title === "Открыть запись");
     expect(openButton).toBeDefined();
     await act(async () => { openButton!.click(); });
@@ -208,7 +208,7 @@ describe("ModuleRuntime", () => {
   });
 
   it("shows an explicit unknown outcome when create readback is absent, mismatched, or unavailable", async () => {
-    const { container, service } = await mountRuntime(filesModuleFixture, { initialViewSlug: "files_primary" });
+    const { container, service } = await mountRuntime(managementModuleFixture, { initialViewSlug: "files_primary" });
     await act(async () => { [...container.querySelectorAll("button")].find((button) => button.textContent?.includes("Новый файл"))!.click(); });
     const nameInput = container.querySelector<HTMLInputElement>('input[name="name"]')!;
     const form = container.querySelector<HTMLFormElement>("form.module-runtime-form")!;
@@ -231,13 +231,13 @@ describe("ModuleRuntime", () => {
   it("runs a typed row action with the exact backend row id and collected params; cancel does not invoke it", async () => {
     const service = serviceFor();
     vi.mocked(service.invokeAction).mockResolvedValue({ kind: "files.export", ok: true, status: "completed", result: { exported: true } });
-    const base = initialRuntimeFor(filesModuleFixture);
+    const base = initialRuntimeFor(managementModuleFixture);
     const manifest: ModuleManifest = {
       ...base.manifest,
       actions: [{ id: "files_export", kind: "files.export", enabled: true, params: { target: "workbook" } }],
       views: base.manifest.views.map((view) => view.slug === "files_primary" ? { ...view, ui_json: { ...view.ui_json, row_actions: [{ kind: "invoke_action", action: "files_export", label: "Export", params_form: [{ name: "format", label: "Format", type: "enum", required: true, values: ["csv", "xlsx"] }, { name: "include_archived", type: "bool" }, { name: "count", type: "number" }] }] } } : view),
     };
-    const { container } = await mountRuntime(filesModuleFixture, { service, initialRuntime: { ...base, manifest } as never, initialViewSlug: "files_primary" });
+    const { container } = await mountRuntime(managementModuleFixture, { service, initialRuntime: { ...base, manifest } as never, initialViewSlug: "files_primary" });
     const actionButton = [...container.querySelectorAll("button")].find((button) => button.textContent === "Export");
     expect(actionButton).toBeDefined();
     await act(async () => { actionButton!.click(); });
@@ -251,8 +251,8 @@ describe("ModuleRuntime", () => {
     actionForm.querySelector<HTMLInputElement>('input[name="count"]')!.value = "3";
     vi.mocked(service.listRows).mockResolvedValue({ items: [{ row_id: "file_row", body: { name: "guide.pdf" } }], total: 1, page: 1, page_size: 200 });
     await act(async () => { actionForm.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); });
-    expect(service.invokeAction).toHaveBeenCalledWith(expect.objectContaining({ moduleId: "mod_files", projectId: "project-beta", sessionId: "session-beta" }), "files_export", { rowId: "file_row", params: { target: "workbook", format: "xlsx", include_archived: false, count: 3 } });
-    expect(service.listRows).toHaveBeenCalledWith(expect.objectContaining({ projectId: "project-beta", moduleId: "mod_files", sessionId: "session-beta" }), "files", expect.objectContaining({ page: 1, pageSize: 200, chats: "all" }));
+    expect(service.invokeAction).toHaveBeenCalledWith(expect.objectContaining({ moduleId: "mod_management", projectId: "project-beta", sessionId: "session-beta" }), "files_export", { rowId: "file_row", params: { target: "workbook", format: "xlsx", include_archived: false, count: 3 } });
+    expect(service.listRows).toHaveBeenCalledWith(expect.objectContaining({ projectId: "project-beta", moduleId: "mod_management", sessionId: "session-beta" }), "files", expect.objectContaining({ page: 1, pageSize: 200, chats: "all" }));
     expect(container.textContent).toContain("Изменения подтверждены сервером.");
     expect(container.textContent).toContain("Дополнительно");
     expect(container.textContent).toContain('"exported":true');
@@ -260,13 +260,13 @@ describe("ModuleRuntime", () => {
 
   it("does not invoke a row action with missing required parameters and shows backend errors", async () => {
     const service = serviceFor();
-    const base = initialRuntimeFor(filesModuleFixture);
+    const base = initialRuntimeFor(managementModuleFixture);
     const manifest: ModuleManifest = {
       ...base.manifest,
       actions: [{ id: "files_export", kind: "files.export", enabled: true }],
       views: base.manifest.views.map((view) => view.slug === "files_primary" ? { ...view, ui_json: { ...view.ui_json, row_actions: [{ kind: "invoke_action", action: "files_export", label: "Export", params_form: [{ name: "format", type: "text", required: true }] }] } } : view),
     };
-    const { container } = await mountRuntime(filesModuleFixture, { service, initialRuntime: { ...base, manifest } as never, initialViewSlug: "files_primary" });
+    const { container } = await mountRuntime(managementModuleFixture, { service, initialRuntime: { ...base, manifest } as never, initialViewSlug: "files_primary" });
     await act(async () => { [...container.querySelectorAll("button")].find((button) => button.textContent === "Export")!.click(); });
     const form = container.querySelector<HTMLFormElement>("form.module-runtime-action-form")!;
     await act(async () => { form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); });
@@ -292,7 +292,7 @@ describe("ModuleRuntime", () => {
   it("speaks English for the runtime's own words without translating the module's manifest copy", async () => {
     window.localStorage.setItem("agentscale.locale", "en");
     try {
-      const { container } = await mountRuntime(filesModuleFixture, { initialViewSlug: "files_primary" });
+      const { container } = await mountRuntime(managementModuleFixture, { initialViewSlug: "files_primary" });
       const text = container.textContent ?? "";
 
       expect(text).toContain("Search the data");

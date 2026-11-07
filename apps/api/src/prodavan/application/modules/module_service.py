@@ -75,6 +75,7 @@ class ModuleService:
         name: str | None = None,
         company_ids: list[str] | None = None,
         cabinet_ids: list[str] | None = None,
+        company_grant_scope: str | None = None,
     ) -> dict:
         row = await self._get_row(module_id)
         if name is not None:
@@ -82,6 +83,27 @@ class ModuleService:
             if not trimmed:
                 raise AppError(code="VALIDATION_ERROR", title="Validation Error", status=422, detail="name required")
             row.name = trimmed
+        if company_grant_scope is not None:
+            scope = company_grant_scope.strip().lower()
+            if scope not in (
+                ModuleCompanyGrantScope.SELECTED,
+                ModuleCompanyGrantScope.ALL,
+            ):
+                raise AppError(
+                    code="VALIDATION_ERROR",
+                    title="Validation Error",
+                    status=422,
+                    detail="company_grant_scope must be selected or all",
+                )
+            # ``all`` is a read-time switch, not a fan-out: every company (present
+            # and future) sees the module through ``company_grant_scope`` alone
+            # (``CompanyModuleService.list_for_company`` / ``has_company_grant``),
+            # so the explicit grant rows are not consulted while it is set.
+            # They are deliberately left untouched: switching back to
+            # ``selected`` restores exactly the selection the administrator had
+            # made, and the rows also anchor per-company module instances, which
+            # ``all`` resolves through the platform instance instead of a fork.
+            row.company_grant_scope = scope
         if company_ids is not None:
             await self._bindings.replace_company_grants(module_id, company_ids)
         if cabinet_ids is not None:

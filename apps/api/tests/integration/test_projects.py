@@ -1783,7 +1783,7 @@ def _file_ref_from_content_asset(
 
 @requires_postgres
 def test_project_materialize_copy_blob_and_mcp_package(client: TestClient) -> None:
-    """L07: mod_files copy_blob + mod_mcp mcp_package land in workspace on launch."""
+    """L07: «Управление» copy_blob (files) + mcp_package land in workspace on launch."""
     company_id, cabinet_id, owner_tok = _setup_cabinet(client)
     owner_h = {"Authorization": f"Bearer {owner_tok}"}
 
@@ -1797,7 +1797,7 @@ def test_project_materialize_copy_blob_and_mcp_package(client: TestClient) -> No
     file_ref = _file_ref_from_upload(file_up.json())
 
     file_row = client.post(
-        f"/api/v1/cabinets/{cabinet_id}/modules/mod_files/data/files",
+        f"/api/v1/cabinets/{cabinet_id}/modules/mod_management/data/files",
         headers=owner_h,
         json={
             "body": {
@@ -1820,7 +1820,7 @@ def test_project_materialize_copy_blob_and_mcp_package(client: TestClient) -> No
     )
 
     mcp_row = client.post(
-        f"/api/v1/cabinets/{cabinet_id}/modules/mod_mcp/data/mcp_packages",
+        f"/api/v1/cabinets/{cabinet_id}/modules/mod_management/data/mcp_packages",
         headers=owner_h,
         json={
             "body": {
@@ -1859,8 +1859,8 @@ def test_project_materialize_copy_blob_and_mcp_package(client: TestClient) -> No
 
 
 @requires_postgres
-def test_project_materialize_after_mod_files_row_on_running_pod(client: TestClient) -> None:
-    """mod_files row CRUD schedules inline rematerialize — workspace updates without manual POST /materialize."""
+def test_project_materialize_after_management_file_row_on_running_pod(client: TestClient) -> None:
+    """«Управление» file row CRUD schedules inline rematerialize — workspace updates without manual POST /materialize."""
     _, cabinet_id, owner_tok = _setup_cabinet(client)
     owner_h = {"Authorization": f"Bearer {owner_tok}"}
 
@@ -1883,7 +1883,7 @@ def test_project_materialize_after_mod_files_row_on_running_pod(client: TestClie
     assert file_up.status_code == 200, file_up.text
 
     file_row = client.post(
-        f"/api/v1/cabinets/{cabinet_id}/modules/mod_files/data/files",
+        f"/api/v1/cabinets/{cabinet_id}/modules/mod_management/data/files",
         headers=owner_h,
         json={
             "body": {
@@ -1928,16 +1928,16 @@ def test_patch_project_modules_syncs_running_pod(client: TestClient) -> None:
     listed = client.get(f"/api/v1/projects/{project_id}/modules", headers=owner_h)
     assert listed.status_code == 200, listed.text
     all_ids = [m["module_id"] for m in listed.json()["items"]]
-    assert "mod_files" in all_ids
+    assert "mod_management" in all_ids
 
     patched = client.patch(
         f"/api/v1/projects/{project_id}/modules",
         headers=owner_h,
-        json={"module_ids": ["mod_files"]},
+        json={"module_ids": ["mod_management"]},
     )
     assert patched.status_code == 200, patched.text
     body = patched.json()
-    assert body["module_ids"] == ["mod_files"]
+    assert body["module_ids"] == ["mod_management"]
     ws_meta = body.get("workspace_sync") or body.get("rematerialize") or {}
     assert ws_meta.get("mode") == "deferred" or int(ws_meta.get("marked_outdated") or 0) >= 1
 
@@ -1949,7 +1949,7 @@ def test_patch_project_modules_syncs_running_pod(client: TestClient) -> None:
 
 @requires_postgres
 def test_admin_cabinet_module_bind_syncs_running_pod(client: TestClient) -> None:
-    """Admin rebind mod_files enables row CRUD rematerialize on a running project pod."""
+    """Admin rebind «Управление» enables row CRUD rematerialize on a running project pod."""
     _, cabinet_id, owner_tok = _setup_cabinet(client)
     owner_h = {"Authorization": f"Bearer {owner_tok}"}
     admin_h = {"Authorization": f"Bearer {_token(sub='padmin-bind', platform_admin=True)}"}
@@ -1965,8 +1965,8 @@ def test_admin_cabinet_module_bind_syncs_running_pod(client: TestClient) -> None
     cab = client.get(f"/api/v1/admin/cabinets/{cabinet_id}", headers=admin_h)
     assert cab.status_code == 200, cab.text
     all_module_ids = list(cab.json()["module_ids"])
-    assert "mod_files" in all_module_ids
-    without_files = [m for m in all_module_ids if m != "mod_files"]
+    assert "mod_management" in all_module_ids
+    without_files = [m for m in all_module_ids if m != "mod_management"]
 
     stripped = client.patch(
         f"/api/v1/admin/cabinets/{cabinet_id}",
@@ -1974,7 +1974,7 @@ def test_admin_cabinet_module_bind_syncs_running_pod(client: TestClient) -> None
         json={"module_ids": without_files},
     )
     assert stripped.status_code == 200, stripped.text
-    assert "mod_files" not in stripped.json()["module_ids"]
+    assert "mod_management" not in stripped.json()["module_ids"]
 
     created = client.post(
         f"/api/v1/cabinets/{cabinet_id}/projects",
@@ -1998,7 +1998,7 @@ def test_admin_cabinet_module_bind_syncs_running_pod(client: TestClient) -> None
         json={"module_ids": all_module_ids},
     )
     assert rebound.status_code == 200, rebound.text
-    assert "mod_files" in rebound.json()["module_ids"]
+    assert "mod_management" in rebound.json()["module_ids"]
 
     # Re-enable module on the running project (MC rebind does not auto-create MP).
     enabled = client.patch(
@@ -2009,7 +2009,7 @@ def test_admin_cabinet_module_bind_syncs_running_pod(client: TestClient) -> None
     assert enabled.status_code == 200, enabled.text
 
     file_row = client.post(
-        f"/api/v1/cabinets/{cabinet_id}/modules/mod_files/data/files",
+        f"/api/v1/cabinets/{cabinet_id}/modules/mod_management/data/files",
         headers=owner_h,
         json={
             "body": {

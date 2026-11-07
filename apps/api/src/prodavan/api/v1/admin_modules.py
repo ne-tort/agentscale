@@ -32,6 +32,9 @@ class PatchAdminModuleBody(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=200)
     company_ids: list[str] | None = None
     cabinet_ids: list[str] | None = None
+    # «Все компании» / «Выбранные компании» — ordinary setting for any module,
+    # same contract as the cabinet one (see ``admin_cabinets.PatchAdminCabinetBody``).
+    company_grant_scope: str | None = Field(default=None, pattern="^(selected|all)$")
 
 
 class MetaDocumentBody(BaseModel):
@@ -107,6 +110,7 @@ async def patch_module(
         name=body.name,
         company_ids=body.company_ids,
         cabinet_ids=body.cabinet_ids,
+        company_grant_scope=body.company_grant_scope,
     )
 
 

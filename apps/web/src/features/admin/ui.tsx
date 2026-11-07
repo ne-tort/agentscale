@@ -146,19 +146,31 @@ export function ConfirmButton({
   );
 }
 
-/** Search field + row count, the same controls on every list. */
+/**
+ * Search field + row count + the list's own primary action, on one line.
+ *
+ * The action used to sit in a section header above the table, next to a heading
+ * that repeated the tab name. Moving it here puts "find a company" and "add a
+ * company" at the same level — the two things a person does to this list — and
+ * lets the page start with content instead of a title block.
+ */
 export function ListToolbar({
   query,
   onQuery,
   count,
-  children,
+  action,
+  label,
 }: {
   query: string;
   onQuery: (value: string) => void;
   count: number;
-  children?: ReactNode;
+  /** The list's primary action (`Создать …`). */
+  action?: ReactNode;
+  /** Replaces the generic row count, e.g. `plural("admin.companiesRecord", n)`. */
+  label?: string;
 }) {
   const { t, plural } = useI18n();
+  const countLabel = label ?? plural("common.records", count);
   return (
     <div className="admin-toolbar">
       <input
@@ -169,8 +181,8 @@ export function ListToolbar({
         type="search"
         value={query}
       />
-      <span className="admin-muted">{plural("common.records", count)}</span>
-      {children}
+      <span className="admin-muted admin-toolbar__count">{countLabel}</span>
+      {action && <div className="admin-toolbar__action">{action}</div>}
     </div>
   );
 }

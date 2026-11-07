@@ -64,7 +64,7 @@ def test_revision_defaults_are_planned_and_entries_keep_provenance() -> None:
         workspace_path="/workspace/prompts/system.md",
         kind="prompt",
         generation=4,
-        source_capability_id="mod_prompts",
+        source_capability_id="mod_management",
         provenance={"order": 10},
     )
 

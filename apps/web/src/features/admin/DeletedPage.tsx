@@ -42,13 +42,6 @@ export function DeletedPage() {
 
   return (
     <section className="admin-section">
-      <div className="admin-section__header">
-        <div>
-          <h2>{t("admin.deletedTitle")}</h2>
-          <p className="admin-muted">{t("admin.deletedHint")}</p>
-        </div>
-      </div>
-
       <Notice success={notice} />
 
       {deleted.loading ? (
@@ -58,6 +51,7 @@ export function DeletedPage() {
       ) : deleted.rows.length === 0 ? (
         <div className="admin-empty">
           <h3>{t("admin.deletedEmpty")}</h3>
+          <p className="admin-muted">{t("admin.deletedHint")}</p>
         </div>
       ) : (
         <>

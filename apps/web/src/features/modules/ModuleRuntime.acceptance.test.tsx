@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { SettingsProvider } from "../../preferences/SettingsProvider";
 import { ModuleRuntime } from "./ModuleRuntime";
 import type { ModuleManifest, ModuleRuntimeService } from "./contracts";
-import { filesModuleFixture } from "./fixtures";
+import { managementModuleFixture } from "./fixtures";
 
 /** Copy comes from the settings provider (Russian by default), so every render is wrapped. */
 function render(element: Parameters<typeof renderToStaticMarkup>[0]): string {
@@ -12,7 +12,7 @@ function render(element: Parameters<typeof renderToStaticMarkup>[0]): string {
 }
 
 function buildRuntime() {
-  const fixture = filesModuleFixture;
+  const fixture = managementModuleFixture;
   const docs = fixture.documents;
   const manifest: ModuleManifest = {
     syntax_version: 1,

@@ -23,9 +23,9 @@ async def test_module_has_materialize_rules_reads_meta_document() -> None:
         meta_cls.return_value.get_document = AsyncMock(
             return_value={"body": [{"id": "r1", "enabled": True}]}
         )
-        assert await module_has_materialize_rules(session, module_id="mod_files") is True
+        assert await module_has_materialize_rules(session, module_id="mod_management") is True
         meta_cls.return_value.get_document = AsyncMock(return_value={"body": []})
-        assert await module_has_materialize_rules(session, module_id="mod_mcp") is False
+        assert await module_has_materialize_rules(session, module_id="mod_equipment") is False
 
 
 @pytest.mark.asyncio
@@ -35,7 +35,7 @@ async def test_schedule_cabinet_rematerialize_enqueues_projects() -> None:
         mode="scheduled",
         scheduled=2,
         cabinet_id="cab_1",
-        module_id="mod_files",
+        module_id="mod_management",
         source="cabinet_module",
         enqueued=("proj_a", "proj_b"),
     )
@@ -60,7 +60,7 @@ async def test_schedule_cabinet_rematerialize_enqueues_projects() -> None:
         result.all.return_value = [("proj_a",), ("proj_b",)]
         session.execute = AsyncMock(return_value=result)
         out = await schedule_cabinet_rematerialize(
-            session, cabinet_id="cab_1", module_id="mod_files"
+            session, cabinet_id="cab_1", module_id="mod_management"
         )
 
     assert out["scheduled"] == 2
@@ -89,7 +89,7 @@ async def test_schedule_cabinet_rematerialize_marks_outdated_when_auto_off() -> 
         mode="deferred",
         marked_outdated=2,
         cabinet_id="cab_1",
-        module_id="mod_files",
+        module_id="mod_management",
         source="cabinet_module",
     )
     bindings = MagicMock()
@@ -112,7 +112,7 @@ async def test_schedule_cabinet_rematerialize_marks_outdated_when_auto_off() -> 
         ) as defer,
     ):
         out = await schedule_cabinet_rematerialize(
-            session, cabinet_id="cab_1", module_id="mod_files"
+            session, cabinet_id="cab_1", module_id="mod_management"
         )
     assert out["marked_outdated"] == 2
     assert out["mode"] == "deferred"

@@ -2,6 +2,14 @@
 
 Call from Alembic migrations whenever seeds change. Do not silent-overwrite
 from API bootstrap (would clobber manual platform meta edits).
+
+Two rules make the seed safe to re-run on a live installation:
+
+* ``modules.company_grant_scope`` is written on **insert only**. «Управление»
+  is therefore granted to every company on a fresh install while an
+  administrator who later narrows the scope keeps their choice;
+* the modules folded into «Управление» (``LEGACY_MODULE_ROWS``) are seeded as
+  archived, empty shells — see the note on that constant.
 """
 
 from __future__ import annotations
@@ -11,7 +19,13 @@ from typing import Any
 
 import sqlalchemy as sa
 
-from prodavan.application.platform.product_module_seeds import PRODUCT_MODULES
+from prodavan.application.platform.product_module_seeds import (
+    LEGACY_MODULE_ROWS,
+    PRODUCT_MODULES,
+    PRODUCT_MODULE_COMPANY_GRANT_SCOPE,
+)
+
+_LEGACY_MODULE_IDS: frozenset[str] = frozenset(mid for mid, _ in LEGACY_MODULE_ROWS)
 
 
 def upsert_product_modules(conn: sa.Connection) -> int:
@@ -26,6 +40,8 @@ def upsert_product_modules(conn: sa.Connection) -> int:
     # cabinets on stale UX after seed updates.
     if _has_table(conn, "module_instances"):
         for module_id, _, slugs in PRODUCT_MODULES:
+            if not slugs:
+                continue  # archived shells carry no meta
             _refresh_all_instance_meta(conn, module_id=module_id, slugs=slugs)
             _apply_seed_rows_to_instances(conn, module_id=module_id, slugs=slugs)
     return count
@@ -147,15 +163,35 @@ def _upsert_one(
     name: str,
     slugs: dict[str, Any],
 ) -> None:
+    """Insert/refresh one catalog row + its meta documents.
+
+    ``status`` and ``company_grant_scope`` are both supplied by the insert and
+    only ``name``/``status`` are taken from ``EXCLUDED`` on conflict, so:
+
+    * a product module that an admin archived is re-activated by a seed update
+      (product modules are platform-owned, the catalog is the source of truth);
+    * a legacy shell stays archived — it must never come back as a module;
+    * ``company_grant_scope`` keeps whatever an administrator stored, because
+      the column is not part of the ``DO UPDATE`` list.
+    """
+    is_legacy_shell = module_id in _LEGACY_MODULE_IDS
     conn.execute(
         sa.text(
             """
-            INSERT INTO modules (id, name, status)
-            VALUES (:id, :name, 'active')
-            ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, status = 'active'
+            INSERT INTO modules (id, name, status, company_grant_scope)
+            VALUES (:id, :name, :status, :company_grant_scope)
+            ON CONFLICT (id) DO UPDATE
+            SET name = EXCLUDED.name, status = EXCLUDED.status
             """
         ),
-        {"id": module_id, "name": name},
+        {
+            "id": module_id,
+            "name": name,
+            "status": "archived" if is_legacy_shell else "active",
+            "company_grant_scope": PRODUCT_MODULE_COMPANY_GRANT_SCOPE.get(
+                module_id, "selected"
+            ),
+        },
     )
     for slug, body in slugs.items():
         doc_id = f"mmd_{module_id.removeprefix('mod_')}_{slug}"

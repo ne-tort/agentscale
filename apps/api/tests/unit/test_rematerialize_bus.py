@@ -42,7 +42,7 @@ async def test_request_rematerialize_publishes_when_bus_on(monkeypatch: pytest.M
         out = await request_rematerialize_project(
             "proj_1",
             cabinet_id="cab_1",
-            module_id="mod_files",
+            module_id="mod_management",
         )
     assert out["via_bus"] is True
     assert out["enqueued"] is True

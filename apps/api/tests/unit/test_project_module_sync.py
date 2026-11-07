@@ -17,7 +17,7 @@ def _principal() -> Principal:
 def _bindings_mock(*, existing: list[str], after: list[str]) -> MagicMock:
     bindings = MagicMock()
     bindings.list_module_ids_for_cabinet = AsyncMock(
-        return_value=["mod_files", "mod_mcp"]
+        return_value=["mod_management", "mod_equipment"]
     )
     bindings.list_module_ids_for_project = AsyncMock(side_effect=[existing, after])
     bindings.revoke_project = AsyncMock()
@@ -32,7 +32,7 @@ async def test_set_module_ids_marks_workspace_outdated_by_default() -> None:
     row.id = "proj_1"
     row.cabinet_id = "cab_1"
     row.status = "active"
-    bindings = _bindings_mock(existing=["mod_files", "mod_mcp"], after=["mod_files"])
+    bindings = _bindings_mock(existing=["mod_management", "mod_equipment"], after=["mod_management"])
 
     with (
         patch("prodavan.application.pod_service.command.build_pod_runtime", return_value=AsyncMock()),
@@ -60,16 +60,16 @@ async def test_set_module_ids_marks_workspace_outdated_by_default() -> None:
 
         out = await cmd.set_module_ids(
             project_id="proj_1",
-            module_ids=["mod_files"],
+            module_ids=["mod_management"],
             principal=_principal(),
             employee=None,
         )
 
-    assert out["module_ids"] == ["mod_files"]
+    assert out["module_ids"] == ["mod_management"]
     assert out["workspace_sync"]["marked_outdated"] == 1
     assert out["workspace_sync"]["mode"] == "deferred"
     defer.assert_awaited_once()
-    bindings.revoke_project.assert_awaited_once_with("mod_mcp", "proj_1")
+    bindings.revoke_project.assert_awaited_once_with("mod_equipment", "proj_1")
 
 
 @pytest.mark.asyncio
@@ -85,7 +85,7 @@ async def test_set_module_ids_triggers_rematerialize_when_auto_enabled(
     row.id = "proj_1"
     row.cabinet_id = "cab_1"
     row.status = "active"
-    bindings = _bindings_mock(existing=["mod_files", "mod_mcp"], after=["mod_files"])
+    bindings = _bindings_mock(existing=["mod_management", "mod_equipment"], after=["mod_management"])
 
     with (
         patch("prodavan.application.pod_service.command.build_pod_runtime", return_value=AsyncMock()),
@@ -114,11 +114,11 @@ async def test_set_module_ids_triggers_rematerialize_when_auto_enabled(
 
         out = await cmd.set_module_ids(
             project_id="proj_1",
-            module_ids=["mod_files"],
+            module_ids=["mod_management"],
             principal=_principal(),
             employee=None,
         )
 
-    assert out["module_ids"] == ["mod_files"]
+    assert out["module_ids"] == ["mod_management"]
     assert out["workspace_sync"]["scheduled"] == 1
     defer.assert_awaited_once()
