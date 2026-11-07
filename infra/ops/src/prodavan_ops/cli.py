@@ -131,7 +131,7 @@ def heal_cmd(
     skip_smoke: bool = typer.Option(False, "--skip-smoke"),
     skip_dns: bool = typer.Option(False, "--skip-dns"),
 ) -> None:
-    """Post-reboot recovery: delete stuck pods, recycle Traefik, check DNS, smoke :8088."""
+    """Post-reboot recovery: stuck pods, Traefik recycle, Ingress re-apply, DNS, smoke."""
     assert_kubeconfig_docker_ready()
     heal_cluster(
         wait_node_sec=wait_node,

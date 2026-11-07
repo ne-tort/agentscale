@@ -6,6 +6,7 @@ from typing import Iterable
 
 from prodavan_ops.dns_check import DnsCheckError, check_dns
 from prodavan_ops.k8s import kubectl, require_k8s_api, wait_k3s_api_ready
+from prodavan_ops.paths import overlay_dev
 from prodavan_ops.smoke import smoke
 
 _HEAL_NAMESPACES = ("agentscale-dev", "agentscale-dev-sandboxes")
@@ -132,6 +133,47 @@ def recycle_traefik() -> None:
         print(f"traefik recycle skipped: {err.splitlines()[-1] if err else proc.returncode}")
 
 
+def reconcile_ingress_route() -> None:
+    """Force Traefik to rebuild its config for the dev Ingress objects.
+
+    Traefik drops Ingress path routes that pointed at a Service which had no
+    endpoints at the moment it rebuilt its configuration, and does not re-add
+    them afterwards — the object in the API server stays correct while the live
+    router keeps sending `/api` to the web container. Re-applying the Ingress
+    makes the provider recompute it.
+
+    This ran for real: after an API rollout, `https://agentscale.dev` loaded the
+    SPA and `POST /api/v1/auth/login` returned nginx's 405, while `:8088` worked.
+    The annotations were already correct and changing them no longer helped;
+    re-applying the object did.
+
+    The descriptor comes from the repository's own overlay, so what gets applied
+    is what Argo would apply — not a snapshot that could carry cluster drift.
+    """
+    rendered = kubectl(["kustomize", str(overlay_dev())], retries=1)
+    if rendered.returncode != 0:
+        err = (rendered.stderr or rendered.stdout or "").strip()
+        print(f"ingress reconcile skipped: render failed ({err.splitlines()[-1] if err else '?'})")
+        return
+
+    docs = [doc for doc in (rendered.stdout or "").split("\n---") if "kind: Ingress" in doc]
+    if not docs:
+        print("ingress reconcile skipped: overlay renders no Ingress")
+        return
+
+    proc = kubectl(
+        ["apply", "-f", "-"],
+        retries=1,
+        subprocess_timeout=40.0,
+        stdin_text="\n---".join(docs),
+    )
+    if proc.returncode == 0:
+        print(f"ingress re-applied: {(proc.stdout or '').strip()}")
+    else:
+        err = (proc.stderr or proc.stdout or "").strip()
+        print(f"ingress reconcile failed: {err.splitlines()[-1] if err else proc.returncode}")
+
+
 def heal_cluster(
     *,
     wait_node_sec: int = 180,
@@ -150,6 +192,12 @@ def heal_cluster(
     if not skip_traefik:
         recycle_traefik()
         time.sleep(5)
+    # Re-apply the Ingress AFTER anything that recreates the API pod: the router
+    # only breaks while the Service has no endpoints, which is exactly the window
+    # a recycle opens. Doing this unconditionally is cheap (one server-side
+    # apply) and removes a class of "site loads, login 405s" failures nobody
+    # would think to attribute to a rollout.
+    reconcile_ingress_route()
     # DNS ПОСЛЕ подов, но ДО smoke: после рестарта хоста upstream-резолвер может
     # не подняться, и тогда поды живые, HTTP-пробы зелёные, а внешние имена не
     # резолвятся — агент «не может достучаться до провайдера». Ровно это и
