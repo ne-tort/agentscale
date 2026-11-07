@@ -381,9 +381,13 @@ jobs:
             -n agentscale-dev
 
       - name: Run k8s e2e Job (L3a)
-        timeout-minutes: 20
+        # Each test creates a sandbox pod whose three containers pull with
+        # `imagePullPolicy: Always` (~73 MB each), so a run is dominated by image
+        # pulls — not by the assertions. The budget has to cover eight of those
+        # while the optional `bridge` job may be building images on the same VM.
+        timeout-minutes: 30
         working-directory: infra/ops
-        run: poetry run prodavan-ops e2e run --suite k8s --timeout 900
+        run: poetry run prodavan-ops e2e run --suite k8s --timeout 1500
 
       - name: Cleanup k8s e2e
         if: always()
