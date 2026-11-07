@@ -25,7 +25,7 @@ from prodavan.api.v1.admin_modules import PatchAdminModuleBody
 from prodavan.application.modules.company_module_service import CompanyModuleService
 from prodavan.application.modules.module_service import ModuleService
 from prodavan.domain.errors import AppError
-from prodavan.domain.modules import ModuleCompanyGrantScope
+from prodavan.domain.modules import ModuleCompanyGrantScope, ModuleStatus
 from prodavan.infrastructure.persistence.models.cabinets import (
     CabinetCompanyGrantRow,
     CabinetInstanceRow,
@@ -183,6 +183,26 @@ async def test_public_row_exposes_scope_in_list_and_get(db: AsyncSession) -> Non
 
 
 # ---------------------------------------------------------------- guard rails
+
+
+async def test_archived_shells_are_not_listed_as_modules(db: AsyncSession) -> None:
+    """A module folded into «Управление» must not appear as a module.
+
+    Its catalog row survives — revision 2026082906 needs it to exist at its point
+    in the chain — but listing it gave the administrator a scope control for
+    something that renders nowhere, next to the module that replaced it.
+    """
+    live = await _new_module(db)
+    shell = await _new_module(db)
+    shell_id = shell.id
+    shell.status = ModuleStatus.ARCHIVED
+    await db.commit()
+
+    listed = {item["id"] for item in await ModuleService(db).list_all_admin()}
+    assert live.id in listed
+    assert shell_id not in listed
+    # Still reachable by id, for diagnostics.
+    assert (await ModuleService(db).get_admin(module_id=shell_id))["id"] == shell_id
 
 
 async def test_invalid_scope_rejected_by_service(db: AsyncSession) -> None:

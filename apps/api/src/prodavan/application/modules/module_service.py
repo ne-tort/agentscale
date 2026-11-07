@@ -49,7 +49,16 @@ class ModuleService:
         self._bindings = ModuleBindingService(session)
 
     async def list_all_admin(self) -> list[dict]:
-        q = await self._session.execute(select(ModuleRow).order_by(ModuleRow.created_at.desc()))
+        # Archived modules are not modules any more. «Промпты», «MCP» and
+        # «Файлы» were folded into «Управление»; their catalog rows survive only
+        # so a from-base migration chain can reference them, and listing them
+        # offered an administrator a scope control for something that renders
+        # nowhere. `get_admin` still resolves one by id for diagnostics.
+        q = await self._session.execute(
+            select(ModuleRow)
+            .where(ModuleRow.status != ModuleStatus.ARCHIVED)
+            .order_by(ModuleRow.created_at.desc())
+        )
         out: list[dict] = []
         for row in q.scalars().all():
             out.append(await _public_row(self._session, row, bindings=self._bindings))
