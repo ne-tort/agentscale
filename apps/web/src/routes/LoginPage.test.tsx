@@ -11,7 +11,7 @@ import {
   parseTheme,
   resolveTheme,
 } from "../preferences/settings";
-import { STRINGS } from "../preferences/strings";
+import { buildCatalogue } from "../i18n/catalogue";
 import { LoginPage } from "./LoginPage";
 
 let host: HTMLDivElement;
@@ -96,10 +96,11 @@ describe("preferences", () => {
   });
 
   it("keeps both locales complete", () => {
-    expect(Object.keys(STRINGS.ru).sort()).toEqual(Object.keys(STRINGS.en).sort());
-    expect(STRINGS.ru.signIn).toBe("Вход");
-    expect(STRINGS.ru.login).toBe("Логин");
-    expect(STRINGS.ru.password).toBe("Пароль");
+    const catalogue = buildCatalogue();
+    expect(Object.keys(catalogue.ru).sort()).toEqual(Object.keys(catalogue.en).sort());
+    expect(catalogue.ru["login.title"]).toBe("Вход");
+    expect(catalogue.ru["login.login"]).toBe("Логин");
+    expect(catalogue.ru["login.password"]).toBe("Пароль");
   });
 });
 

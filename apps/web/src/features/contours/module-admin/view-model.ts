@@ -27,9 +27,12 @@ export function moduleEvidence(row: ModuleAdminRow, mode: ModuleAdminMode): Modu
     rights = childMayEdit ? "Child may edit (API)" : "Child read only (API)";
   }
   const gaps: string[] = [];
-  if (!source) gaps.push("API contract gap: effective source is not returned.");
-  if (!version) gaps.push("API contract gap: module version is not returned.");
-  if (!rights) gaps.push("API contract gap: effective rights are not returned.");
+  // These surface on a screen a company administrator reads. "API contract gap"
+  // was a note to the frontend team that ended up in front of a customer; what
+  // they need to know is simply that the value is missing.
+  if (!source) gaps.push("Источник не указан.");
+  if (!version) gaps.push("Версия модуля не указана.");
+  if (!rights) gaps.push("Права не указаны.");
   return { source, version, rights, bindKind, childMayEdit, gaps };
 }
 

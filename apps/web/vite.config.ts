@@ -18,6 +18,11 @@ export default defineConfig(({ mode }) => {
         "/api": {
           target: env.VITE_API_PROXY || "http://127.0.0.1:8000",
           changeOrigin: true,
+          // `changeOrigin` rewrites the Host header, so pointing this at the dev
+          // ingress works — but the cluster serves a local CA the host does not
+          // trust. Without `secure: false` every proxied request fails with a
+          // certificate error that looks like the API being down.
+          secure: false,
         },
       },
     },

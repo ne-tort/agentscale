@@ -15,15 +15,16 @@ describe("module admin surfaces", () => {
     expect(employee).toContain("New company module");
   });
 
-  it("renders explicit source/version/rights gaps instead of guessing", () => {
+  it("names what the catalog did not return without exposing developer wording", () => {
     const markup = renderToStaticMarkup(<ModuleEvidencePanel row={{ id: "mod-1", name: "Module" }} mode="admin" />);
-    expect(markup.match(/API contract gap/g)).toHaveLength(6);
-    expect(markup).toContain("Effective source");
-    expect(markup).toContain("Version");
-    expect(markup).toContain("Rights");
+    // Three gaps, each stated once — the panel used to print "API contract gap"
+    // six times, which told the reader nothing they could act on.
+    expect(markup.match(/не указан/g)?.length).toBeGreaterThanOrEqual(3);
+    expect(markup).not.toContain("API contract gap");
+    expect(markup).not.toContain("not returned");
   });
 
-  it("shows effective API evidence and local/global child edit rights", () => {
+  it("shows effective evidence and local/global child edit rights", () => {
     const markup = renderToStaticMarkup(<ModuleEvidencePanel row={{
       id: "mod-1",
       source: "company_local",
@@ -36,6 +37,6 @@ describe("module admin surfaces", () => {
     expect(markup).toContain("v3");
     expect(markup).toContain("Writable (API)");
     expect(markup).toContain("local");
-    expect(markup).toContain("Yes (API)");
+    expect(markup).toContain("Да");
   });
 });

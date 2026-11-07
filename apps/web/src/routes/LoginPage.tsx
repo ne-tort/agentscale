@@ -3,6 +3,7 @@ import { Navigate, useLocation } from "react-router-dom";
 import { useApi, useAuth } from "../app/context";
 import { getSafeNextPath } from "../app/auth/redirect";
 import { useSettings } from "../preferences/SettingsProvider";
+import { useI18n } from "../i18n/useT";
 import type { Locale, ThemeMode } from "../preferences/settings";
 
 /**
@@ -135,7 +136,8 @@ function Choice<T extends string>({
 }
 
 function LoginSettings({ onClose }: { onClose: () => void }) {
-  const { locale, theme, strings, setLocale, setTheme } = useSettings();
+  const { locale, theme, setLocale, setTheme } = useSettings();
+  const { t } = useI18n();
   const panel = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -156,19 +158,19 @@ function LoginSettings({ onClose }: { onClose: () => void }) {
   }, [onClose]);
 
   const locales: readonly { value: Locale; label: string }[] = [
-    { value: "ru", label: strings.languageRu },
-    { value: "en", label: strings.languageEn },
+    { value: "ru", label: t("common.languageRu") },
+    { value: "en", label: t("common.languageEn") },
   ];
   const themes: readonly { value: ThemeMode; label: string }[] = [
-    { value: "system", label: strings.themeSystem },
-    { value: "light", label: strings.themeLight },
-    { value: "dark", label: strings.themeDark },
+    { value: "system", label: t("common.themeSystem") },
+    { value: "light", label: t("common.themeLight") },
+    { value: "dark", label: t("common.themeDark") },
   ];
 
   return (
-    <div aria-label={strings.settings} className="settings-panel" ref={panel} role="dialog">
-      <Choice label={strings.language} onChange={setLocale} options={locales} value={locale} />
-      <Choice label={strings.theme} onChange={setTheme} options={themes} value={theme} />
+    <div aria-label={t("login.openSettings")} className="settings-panel" ref={panel} role="dialog">
+      <Choice label={t("common.language")} onChange={setLocale} options={locales} value={locale} />
+      <Choice label={t("common.theme")} onChange={setTheme} options={themes} value={theme} />
     </div>
   );
 }
@@ -198,7 +200,7 @@ export function LoginPage() {
   const api = useApi();
   const auth = useAuth();
   const location = useLocation();
-  const { strings } = useSettings();
+  const { t } = useI18n();
   const [username, setUsername] = useState(DEFAULT_USERNAME);
   const [password, setPassword] = useState(DEFAULT_PASSWORD);
   const [error, setError] = useState<string>();
@@ -219,7 +221,7 @@ export function LoginPage() {
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : "";
       // The API answers English problem+json; the page speaks the chosen locale.
-      setError(/invalid (user )?credentials/i.test(message) ? strings.invalidCredentials : strings.signInFailed);
+      setError(/invalid (user )?credentials/i.test(message) ? t("login.invalidCredentials") : t("login.failed"));
     } finally {
       setBusy(false);
     }
@@ -231,14 +233,14 @@ export function LoginPage() {
     <main className="login-page">
       <section className="login-card">
         <header className="login-header">
-          <h1 className="login-title">{strings.signIn}</h1>
+          <h1 className="login-title">{t("login.title")}</h1>
           <button
             aria-expanded={settingsOpen}
             aria-haspopup="dialog"
-            aria-label={strings.settings}
+            aria-label={t("login.openSettings")}
             className="icon-button"
             onClick={() => setSettingsOpen((open) => !open)}
-            title={strings.settings}
+            title={t("login.openSettings")}
             type="button"
           >
             <SettingsIcon />
@@ -247,9 +249,9 @@ export function LoginPage() {
         </header>
 
         <form className="login-form" onSubmit={(event) => void submit(event)}>
-          <PrefRow icon={<PersonIcon />} title={strings.login}>
+          <PrefRow icon={<PersonIcon />} title={t("login.login")}>
             <input
-              aria-label={strings.login}
+              aria-label={t("login.login")}
               autoComplete="username"
               autoFocus
               className="pref-input"
@@ -261,7 +263,7 @@ export function LoginPage() {
                   passwordField.current?.focus();
                 }
               }}
-              placeholder={strings.loginHint}
+              placeholder={t("login.loginHint")}
               spellCheck={false}
               type="text"
               value={username}
@@ -270,14 +272,14 @@ export function LoginPage() {
 
           <PrefRow
             icon={<KeyIcon />}
-            title={strings.password}
+            title={t("login.password")}
             trailing={
               <button
-                aria-label={reveal ? strings.hidePassword : strings.showPassword}
+                aria-label={reveal ? t("common.hidePassword") : t("common.showPassword")}
                 className="icon-button"
                 onClick={() => setReveal((value) => !value)}
                 tabIndex={-1}
-                title={reveal ? strings.hidePassword : strings.showPassword}
+                title={reveal ? t("common.hidePassword") : t("common.showPassword")}
                 type="button"
               >
                 <EyeIcon open={!reveal} />
@@ -285,7 +287,7 @@ export function LoginPage() {
             }
           >
             <input
-              aria-label={strings.password}
+              aria-label={t("login.password")}
               autoComplete="current-password"
               className="pref-input"
               disabled={busy}
@@ -299,7 +301,7 @@ export function LoginPage() {
           {error && <p className="error" role="alert">{error}</p>}
 
           <button className="primary login-submit" disabled={busy} type="submit">
-            {busy ? strings.signingIn : strings.signIn}
+            {busy ? t("login.signingIn") : t("login.title")}
           </button>
         </form>
       </section>

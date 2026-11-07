@@ -13,6 +13,9 @@ interface AuthContextValue {
   status: AuthStatus;
   isLoading: boolean;
   isAuthenticated: boolean;
+  /** `platform.admin` — decides which navigation the shell shows. */
+  isPlatformAdmin: boolean;
+  contours: string[];
   error?: Error;
   signIn(tokens: SessionTokens, employee?: Employee, cabinets?: Cabinet[]): void;
   signOut(): void;
@@ -62,7 +65,6 @@ export function AppProviders({ children }: PropsWithChildren) {
     pendingReturnTo.current = undefined;
     navigate(destination, { replace: true });
   }, [authSnapshot.status, location.pathname, location.search, navigate]);
-
   const work = useMemo<WorkContextValue>(() => ({
     project,
     projectId: project?.id,
@@ -77,6 +79,8 @@ export function AppProviders({ children }: PropsWithChildren) {
     status: authSnapshot.status,
     isLoading: authSnapshot.status === "loading",
     isAuthenticated: authSnapshot.status === "authenticated",
+    isPlatformAdmin: authSnapshot.contours.includes("platform_admin"),
+    contours: authSnapshot.contours,
     error: authSnapshot.error,
     signIn: (tokens, employee, cabinets) => {
       pendingReturnTo.current = getSafeNextPath(location.search);

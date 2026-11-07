@@ -20,11 +20,11 @@ describe("module admin evidence", () => {
     });
   });
 
-  it("marks missing source, version and rights as explicit API contract gaps", () => {
+  it("says plainly what the catalog did not return, without developer wording", () => {
     expect(moduleEvidence({ id: "mod-1", name: "Catalog row" }, "admin").gaps).toEqual([
-      "API contract gap: effective source is not returned.",
-      "API contract gap: module version is not returned.",
-      "API contract gap: effective rights are not returned.",
+      "Источник не указан.",
+      "Версия модуля не указана.",
+      "Права не указаны.",
     ]);
   });
 
