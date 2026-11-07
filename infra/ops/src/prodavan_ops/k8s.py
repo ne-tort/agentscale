@@ -156,6 +156,7 @@ def kubectl(
     retry_sleep: float = 1.0,
     subprocess_timeout: float = 30.0,
     request_timeout: str = "15s",
+    stdin_text: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run kubectl with rewritten kubeconfig; retry transient API/ TLS blips."""
     path = resolve_kubeconfig_path()
@@ -171,6 +172,7 @@ def kubectl(
                 text=True,
                 check=False,
                 timeout=subprocess_timeout,
+                input=stdin_text,
             )
         except subprocess.TimeoutExpired as exc:
             err = "kubectl subprocess timed out"
