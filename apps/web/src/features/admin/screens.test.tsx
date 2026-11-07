@@ -184,6 +184,22 @@ describe("screens share one vocabulary", () => {
     }
   });
 
+  it("shows every module's scope as a control, not as a verdict", async () => {
+    // «Все компании» is an ordinary setting any module can have, so every row
+    // carries the same two-option control.
+    const markup = await mount(<ModulesPage />, emptyService({
+      listModules: async () => [
+        { id: "mod_management", name: "Управление", status: "active", companyIds: [], allCompanies: true, bindings: 0 },
+        { id: "mod_equipment", name: "Подбор техники", status: "active", companyIds: ["co_1"], allCompanies: false, bindings: 2 },
+      ],
+      listCompanies: async () => [COMPANY],
+    }));
+    const selects = markup.match(/<select/g)?.length ?? 0;
+    expect(selects).toBe(2);
+    expect(markup).toContain("Все компании");
+    expect(markup).toContain("Выбранные компании");
+  });
+
   it("renders a company detail without leaking its identifier as text", () => {
     // The detail screen reads its service from the outlet and its company from
     // the route, so it is mounted the way the router mounts it.

@@ -145,6 +145,11 @@ export function KeysPage() {
                   <td className="admin-muted">
                     {key.baseUrl ? (
                       <span className="admin-endpoint" title={key.baseUrl}>{hostOf(key.baseUrl)}</span>
+                    ) : key.provider ? (
+                      // A key from before endpoints were a field still has a
+                      // provider we resolved it through; saying "not set" would
+                      // hide where it points when we do know.
+                      <span className="admin-endpoint">{key.provider}</span>
                     ) : (
                       t("admin.keyEndpointUnknown")
                     )}
