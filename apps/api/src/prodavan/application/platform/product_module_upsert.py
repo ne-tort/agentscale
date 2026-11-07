@@ -21,8 +21,8 @@ import sqlalchemy as sa
 
 from prodavan.application.platform.product_module_seeds import (
     LEGACY_MODULE_ROWS,
-    PRODUCT_MODULES,
     PRODUCT_MODULE_COMPANY_GRANT_SCOPE,
+    PRODUCT_MODULES,
 )
 
 _LEGACY_MODULE_IDS: frozenset[str] = frozenset(mid for mid, _ in LEGACY_MODULE_ROWS)
@@ -165,29 +165,47 @@ def _upsert_one(
 ) -> None:
     """Insert/refresh one catalog row + its meta documents.
 
-    ``status`` and ``company_grant_scope`` are both supplied by the insert and
-    only ``name``/``status`` are taken from ``EXCLUDED`` on conflict, so:
+    Two shapes, because the list holds two kinds of row:
 
-    * a product module that an admin archived is re-activated by a seed update
-      (product modules are platform-owned, the catalog is the source of truth);
-    * a legacy shell stays archived — it must never come back as a module;
-    * ``company_grant_scope`` keeps whatever an administrator stored, because
-      the column is not part of the ``DO UPDATE`` list.
+    * **a product module** — ``status`` comes from ``EXCLUDED`` (the catalog is
+      the source of truth, so an archived product module comes back on the next
+      seed update), while ``company_grant_scope`` is written on insert only and
+      otherwise keeps what an administrator stored;
+    * **a legacy shell** (a module folded into «Управление») — always archived
+      and always ``company_grant_scope='selected'``. Both are forced on conflict
+      on purpose: such a row is not a product module, so it must not reappear in
+      the catalog or be auto-granted to every company (revision 2026082714 had
+      set ``'all'`` on exactly these three ids) as a side effect of a seed run.
+      An operator who deliberately revives one can set its scope afterwards.
     """
-    is_legacy_shell = module_id in _LEGACY_MODULE_IDS
+    if module_id in _LEGACY_MODULE_IDS:
+        conn.execute(
+            sa.text(
+                """
+                INSERT INTO modules (id, name, status, company_grant_scope)
+                VALUES (:id, :name, 'archived', 'selected')
+                ON CONFLICT (id) DO UPDATE
+                SET name = EXCLUDED.name,
+                    status = 'archived',
+                    company_grant_scope = 'selected'
+                """
+            ),
+            {"id": module_id, "name": name},
+        )
+        return
+
     conn.execute(
         sa.text(
             """
             INSERT INTO modules (id, name, status, company_grant_scope)
-            VALUES (:id, :name, :status, :company_grant_scope)
+            VALUES (:id, :name, 'active', :company_grant_scope)
             ON CONFLICT (id) DO UPDATE
-            SET name = EXCLUDED.name, status = EXCLUDED.status
+            SET name = EXCLUDED.name, status = 'active'
             """
         ),
         {
             "id": module_id,
             "name": name,
-            "status": "archived" if is_legacy_shell else "active",
             "company_grant_scope": PRODUCT_MODULE_COMPANY_GRANT_SCOPE.get(
                 module_id, "selected"
             ),

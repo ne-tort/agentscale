@@ -20,6 +20,7 @@ from prodavan.application.platform.management_module_merge import (
     Instance,
     MergeState,
     apply_plan,
+    declared_grant_scope,
     plan_merge,
 )
 from prodavan.application.platform.product_module_seeds import (
@@ -334,8 +335,39 @@ def test_apply_plan_copies_before_it_revokes_and_archives_last() -> None:
     assert any(p["row_id"] == "pkg_demo" for p in row_params)
 
 
-def test_upsert_grants_management_to_every_company_by_default() -> None:
-    """`company_grant_scope='all'` on insert only — a stored choice survives."""
+def test_apply_plan_seeds_template_rows_only_after_the_copied_ones() -> None:
+    """Order is data safety, not style.
+
+    Both writes are ``ON CONFLICT DO NOTHING``, so a template row inserted first
+    would shadow the real row with the same id — a renamed ``profile_default``
+    would silently revert to the seed body. The template fill must therefore run
+    after the copy.
+    """
+    conn = _RecordingConn()
+    plan = plan_merge(_state_before_merge())
+    apply_plan(conn, plan)
+
+    copied = [
+        i
+        for i, (sql, params) in enumerate(conn.calls)
+        if sql.startswith("INSERT INTO module_instance_data_rows") and "table_slug" in params
+    ]
+    seeded = [
+        i
+        for i, (sql, _params) in enumerate(conn.calls)
+        if "seed_rows" in sql
+    ]
+    assert copied and seeded
+    assert max(copied) < min(seeded)
+
+
+def test_upsert_hides_the_archived_shells_from_companies() -> None:
+    """An archived shell must not stay granted to every company.
+
+    Revision 2026082714 had set ``company_grant_scope='all'`` on exactly these
+    three ids. Left alone, `CompanyModuleService` would keep showing the
+    archived «Промпты / MCP / Файлы» next to «Управление» for every company.
+    """
     conn = _RecordingConn()
     upsert_product_modules(conn)
     inserts = [
@@ -344,18 +376,80 @@ def test_upsert_grants_management_to_every_company_by_default() -> None:
         if sql.startswith("INSERT INTO modules")
     ]
     by_id = {params["id"]: params for params in inserts}
-    assert by_id[MANAGEMENT_MODULE_ID]["company_grant_scope"] == "all"
-    assert by_id[MANAGEMENT_MODULE_ID]["status"] == "active"
-    # The merged-away modules are seeded as archived shells, not as modules.
     for module_id in LEGACY_MERGED_MODULE_IDS:
-        assert by_id[module_id]["status"] == "archived"
+        # Legacy shells take status + scope as SQL literals, never as params.
+        assert "status" not in by_id[module_id]
+        assert "company_grant_scope" not in by_id[module_id]
+    legacy_sql = [
+        sql
+        for sql, params in conn.calls
+        if sql.startswith("INSERT INTO modules") and params.get("id") in set(LEGACY_MERGED_MODULE_IDS)
+    ]
+    assert all("'selected'" in sql and "status = 'archived'" in sql for sql in legacy_sql)
+
+
+def test_merge_applies_the_scope_the_seed_declares() -> None:
+    """«Управление» must reach every company on both kinds of installation.
+
+    Neither existing path sets it. On a from-base install the row is created by
+    revision 2026082711, which predates the ``company_grant_scope`` column; on an
+    upgraded deployment the upsert's ON CONFLICT branch deliberately leaves the
+    stored scope alone (it must not undo an administrator's choice). That left
+    the merged module on the schema default — hidden from exactly the companies
+    that had all three modules it replaces.
+    """
+    conn = _RecordingConn()
+    plan = plan_merge(_state_before_merge())
+    assert plan.inherit_grant_scope == "all"
+    apply_plan(conn, plan)
+
+    scope_updates = [
+        (sql, params) for sql, params in conn.calls if "company_grant_scope = :scope" in sql
+    ]
+    assert scope_updates, "the merge must set the scope the product seed declares"
+    sql, params = scope_updates[0]
+    assert params == {"scope": "all", "module_id": MANAGEMENT_MODULE_ID}
+    # Guarded on the untouched default: an administrator's choice is never
+    # `selected`-as-default, and a re-run must not undo it.
+    assert "company_grant_scope = 'selected'" in sql
+    # Set before the legacy rows are revoked and archived, so the guard reads the
+    # value nobody has touched yet.
+    scope_at = next(i for i, (text_, _) in enumerate(conn.calls) if "company_grant_scope = :scope" in text_)
+    later = [
+        i
+        for i, (text_, _) in enumerate(conn.calls)
+        if text_.lstrip().startswith(("DELETE", "UPDATE modules SET status"))
+    ]
+    assert later, "the merge must revoke and archive the legacy modules"
+    for index in later:
+        assert scope_at < index
+
+
+def test_merge_without_declared_scope_leaves_it_alone() -> None:
+    """A product module the seed says nothing about keeps whatever it has."""
+    assert declared_grant_scope("mod_equipment") is None
+    assert declared_grant_scope(MANAGEMENT_MODULE_ID) == "all"
+
+
+def test_upsert_grants_management_to_every_company_by_default() -> None:
+    """`company_grant_scope='all'` on insert only — a stored choice survives."""
+    conn = _RecordingConn()
+    upsert_product_modules(conn)
+    product_inserts = [
+        (sql, params)
+        for sql, params in conn.calls
+        if sql.startswith("INSERT INTO modules")
+        and params.get("id") not in set(LEGACY_MERGED_MODULE_IDS)
+    ]
+    by_id = {params["id"]: params for _, params in product_inserts}
+    assert by_id[MANAGEMENT_MODULE_ID]["company_grant_scope"] == "all"
+    assert by_id["mod_equipment"]["company_grant_scope"] == "selected"
 
     # The conflict clause must not touch `company_grant_scope`, otherwise the
     # next seed update would silently undo an administrator's scope change.
-    for sql, _ in conn.calls:
-        if sql.startswith("INSERT INTO modules"):
-            assert "ON CONFLICT (id) DO UPDATE" in sql
-            assert "company_grant_scope" not in sql.split("DO UPDATE", 1)[1]
+    for sql, _ in product_inserts:
+        assert "ON CONFLICT (id) DO UPDATE" in sql
+        assert "company_grant_scope" not in sql.split("DO UPDATE", 1)[1]
 
 
 def test_upsert_writes_no_meta_for_the_archived_shells() -> None:

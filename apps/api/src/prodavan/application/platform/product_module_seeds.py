@@ -8753,11 +8753,15 @@ LEGACY_MODULE_ROWS: tuple[tuple[str, str], ...] = (
     ("mod_files", "Файлы"),
 )
 
-#: Default ``modules.company_grant_scope`` for seeded modules.
+#: Default ``modules.company_grant_scope`` for a *product module* on insert.
 #:
-#: Applied **on insert only** (``ON CONFLICT`` does not touch the column), so a
-#: fresh install grants «Управление» to every company while an administrator can
-#: still narrow the scope through the UI without a later seed upsert undoing it.
+#: Written only in the ``INSERT`` half of the upsert (``ON CONFLICT`` does not
+#: touch the column), so a fresh install grants «Управление» to every company
+#: while an administrator who later narrows the scope keeps that choice through
+#: the next seed update. The archived shells are separate — the upsert forces
+#: ``'selected'`` on them, because revision 2026082714 had granted exactly those
+#: three ids to all companies and they must not keep showing up in a company's
+#: catalog after they were folded into «Управление».
 PRODUCT_MODULE_COMPANY_GRANT_SCOPE: dict[str, str] = {
     MANAGEMENT_MODULE_ID: "all",
 }

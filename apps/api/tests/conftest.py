@@ -433,8 +433,8 @@ def _seed_integration_catalog() -> None:
 
     from prodavan.application.platform.product_module_seeds import (
         LEGACY_MODULE_ROWS,
-        PRODUCT_MODULES,
         PRODUCT_MODULE_COMPANY_GRANT_SCOPE,
+        PRODUCT_MODULES,
     )
 
     legacy_ids = {module_id for module_id, _ in LEGACY_MODULE_ROWS}

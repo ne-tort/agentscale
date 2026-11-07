@@ -4,8 +4,8 @@ from prodavan.application.platform.equipment_prompt_content import EQUIPMENT_RUL
 from prodavan.application.platform.product_module_seeds import (
     EXAMPLE_MODULE_IDS,
     LEGACY_MODULE_ROWS,
-    PRODUCT_MODULES,
     PRODUCT_MODULE_IDS,
+    PRODUCT_MODULES,
     mod_equipment_meta,
     mod_files_meta,
     mod_mcp_meta,
