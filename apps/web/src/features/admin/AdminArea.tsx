@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { NavLink, Outlet, useOutletContext } from "react-router-dom";
+import { NavLink, Outlet, useLocation, useOutletContext } from "react-router-dom";
 import { useAuth } from "../../app/context";
 import { useI18n } from "../../i18n/useT";
 import { createAdminService, type AdminService } from "./service";
@@ -10,14 +10,35 @@ export function useAdminService(): AdminService {
   return useOutletContext<AdminService>();
 }
 
+/** The tab paths, in bar order, and which one a path belongs to. */
+export const ADMIN_TAB_PATHS = ["/admin", "/admin/keys", "/admin/modules", "/admin/deleted"] as const;
+
+/**
+ * Which tab owns a path.
+ *
+ * "Компании" owns the list *and* everything opened from it, but its own path is
+ * the bare `/admin` — a prefix match there would swallow every other tab. So the
+ * company branch is named explicitly. Without this a company's own page belonged
+ * to no tab at all and the bar showed nothing selected.
+ */
+export function adminTabFor(pathname: string): string {
+  if (pathname === "/admin" || pathname.startsWith("/admin/companies")) return "/admin";
+  const match = ADMIN_TAB_PATHS.find(
+    (path) => path !== "/admin" && (pathname === path || pathname.startsWith(`${path}/`)),
+  );
+  return match ?? "/admin";
+}
+
 export function AdminArea() {
   const auth = useAuth();
   const { t } = useI18n();
+  const { pathname } = useLocation();
   const service = useMemo(
     () => createAdminService({ getAccessToken: () => auth.tokens?.access_token }),
     [auth.tokens?.access_token],
   );
 
+  const current = adminTabFor(pathname);
   const tabs = [
     { to: "/admin", end: true, label: t("admin.tabCompanies") },
     { to: "/admin/keys", end: false, label: t("admin.tabKeys") },
@@ -33,7 +54,7 @@ export function AdminArea() {
       <nav aria-label={t("admin.tabsAria")} className="admin-tabs">
         {tabs.map((tab) => (
           <NavLink
-            className={({ isActive }) => (isActive ? "admin-tab admin-tab--active" : "admin-tab")}
+            className={tab.to === current ? "admin-tab admin-tab--active" : "admin-tab"}
             end={tab.end}
             key={tab.to}
             to={tab.to}

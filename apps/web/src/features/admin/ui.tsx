@@ -107,23 +107,57 @@ export function Field({ label, hint, children }: { label: string; hint?: string;
   );
 }
 
-/** A destructive action that asks once, inline, instead of opening a dialog. */
+/**
+ * A destructive action that asks once, inline, instead of opening a dialog.
+ *
+ * The confirmation is the last chance to see the request fail, so a rejection is
+ * shown right here and the row stays in its asking state: every caller used to
+ * write `void service.delete(...).then(...)`, which turned a 403 into a click
+ * that did nothing at all.
+ */
 export function ConfirmButton({
   label,
   confirmLabel,
   onConfirm,
   disabled,
+  disabledReason,
 }: {
   label: string;
   confirmLabel: string;
-  onConfirm: () => void;
+  onConfirm: () => void | Promise<void>;
   disabled?: boolean;
+  /** Shown as the button's tooltip when it is disabled. */
+  disabledReason?: string;
 }) {
   const [asking, setAsking] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string>();
   const { t } = useI18n();
+
+  if (disabled) {
+    return (
+      <button className="admin-button admin-button--danger" disabled title={disabledReason} type="button">
+        {label}
+      </button>
+    );
+  }
+
+  async function confirm() {
+    setBusy(true);
+    setError(undefined);
+    try {
+      await onConfirm();
+      setAsking(false);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : t("common.error"));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   if (!asking) {
     return (
-      <button className="admin-button admin-button--danger" disabled={disabled} onClick={() => setAsking(true)} type="button">
+      <button className="admin-button admin-button--danger" onClick={() => setAsking(true)} type="button">
         {label}
       </button>
     );
@@ -131,17 +165,17 @@ export function ConfirmButton({
   return (
     <span className="admin-confirm">
       <span>{confirmLabel}</span>
-      <button
-        className="admin-button admin-button--danger"
-        disabled={disabled}
-        onClick={() => { setAsking(false); onConfirm(); }}
-        type="button"
-      >
-        {label}
+      <button className="admin-button admin-button--danger" disabled={busy} onClick={() => void confirm()} type="button">
+        {busy ? t("common.saving") : label}
       </button>
-      <button className="admin-button" disabled={disabled} onClick={() => setAsking(false)} type="button">
+      <button className="admin-button" disabled={busy} onClick={() => setAsking(false)} type="button">
         {t("common.cancel")}
       </button>
+      {error && (
+        <span className="admin-confirm__error" role="alert">
+          {error}
+        </span>
+      )}
     </span>
   );
 }

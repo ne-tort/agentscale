@@ -130,33 +130,36 @@ export function ModulesPage() {
                     </select>
                     {!module.allCompanies && module.companyIds.length > 0 && (
                       <span className="admin-chips admin-chips--below">
-                        {module.companyIds.map((id) => (
-                          <Link className="admin-chip" key={id} to={`/admin/companies/${encodeURIComponent(id)}`}>
-                            {companiesById.get(id)?.name ?? id}
-                          </Link>
-                        ))}
+                        {module.companyIds.map((id) => {
+                          const company = companiesById.get(id);
+                          return (
+                            <Link className="admin-chip" key={id} to={`/admin/companies/${encodeURIComponent(id)}`}>
+                              {company?.name ?? t("admin.companyGone")}
+                            </Link>
+                          );
+                        })}
                       </span>
                     )}
                   </td>
                   <td className="admin-muted">{module.bindings}</td>
                   <td className="admin-row-actions">
-                    <button
-                      className="admin-button"
-                      disabled={module.allCompanies}
-                      onClick={() => setGranting(module.id)}
-                      title={module.allCompanies ? t("admin.moduleGrantDisabledAll") : undefined}
-                      type="button"
-                    >
-                      {t("admin.moduleGrant")}
-                    </button>
+                    {/* With «Все компании» there is nobody left to pick, so the
+                        button would be a disabled reminder of a choice already
+                        made above. It is gone, not greyed out. */}
+                    {!module.allCompanies && (
+                      <button className="admin-button" onClick={() => setGranting(module.id)} type="button">
+                        {t("admin.moduleGrant")}
+                      </button>
+                    )}
                     <ConfirmButton
                       confirmLabel={t("admin.moduleDeleteConfirm")}
+                      disabled={module.allCompanies}
+                      disabledReason={t("admin.moduleDeleteAllReason")}
                       label={t("admin.moduleDelete")}
-                      onConfirm={() => {
-                        void service.deleteModule(module.id).then(async () => {
-                          await modules.reload();
-                          setNotice(t("admin.moduleDeleted"));
-                        });
+                      onConfirm={async () => {
+                        await service.deleteModule(module.id);
+                        await modules.reload();
+                        setNotice(t("admin.moduleDeleted"));
                       }}
                     />
                   </td>
@@ -164,6 +167,7 @@ export function ModulesPage() {
               ))}
             </tbody>
           </table>
+          {visible.length === 0 && <p className="admin-muted">{t("common.noMatches")}</p>}
         </>
       )}
 
