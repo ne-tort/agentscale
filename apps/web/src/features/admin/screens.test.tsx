@@ -98,6 +98,11 @@ afterEach(async () => {
 });
 
 async function mount(ui: React.ReactElement, service: AdminService): Promise<string> {
+  return (await mountHost(ui, service)).innerHTML;
+}
+
+/** The mounted element itself, for tests that have to click something. */
+async function mountHost(ui: React.ReactElement, service: AdminService): Promise<HTMLDivElement> {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
   const host = document.createElement("div");
   document.body.append(host);
@@ -114,7 +119,19 @@ async function mount(ui: React.ReactElement, service: AdminService): Promise<str
   });
   // The collection resolves a promise after mount; one more turn lets it paint.
   await act(async () => { await new Promise((resolve) => window.setTimeout(resolve, 0)); });
-  return host.innerHTML;
+  return host;
+}
+
+/** Clicks the element whose visible text is exactly `text`. */
+async function click(host: HTMLElement, text: string): Promise<void> {
+  const target = [...host.querySelectorAll("button")].find(
+    (button) => button.textContent?.trim() === text,
+  );
+  if (!target) throw new Error(`no button «${text}»; got ${[...host.querySelectorAll("button")].map((b) => b.textContent?.trim()).join(" | ")}`);
+  await act(async () => {
+    target.click();
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+  });
 }
 
 describe("administrator screens", () => {
@@ -199,8 +216,79 @@ describe("screens share one vocabulary", () => {
     expect(markup).toContain("Все компании");
     expect(markup).toContain("Выбранные компании");
   });
+});
 
-  it("renders a company detail without leaking its identifier as text", () => {
+describe("dangerous actions say what happened", () => {
+  it("hides «Выдать компаниям» when the module already reaches everyone", async () => {
+    const host = await mountHost(<ModulesPage />, emptyService({
+      listModules: async () => [
+        { id: "mod_management", name: "Управление", status: "active", companyIds: [], allCompanies: true, bindings: 0 },
+        { id: "mod_equipment", name: "Подбор техники", status: "active", companyIds: ["co_1"], allCompanies: false, bindings: 2 },
+      ],
+      listCompanies: async () => [COMPANY],
+    }));
+    // One row has the button, the other has no-one left to pick.
+    const labels = [...host.querySelectorAll("button")].map((b) => b.textContent?.trim());
+    expect(labels.filter((label) => label === "Выдать компаниям")).toHaveLength(1);
+  });
+
+  it("explains why a module that reaches every company cannot be deleted", async () => {
+    const host = await mountHost(<ModulesPage />, emptyService({
+      listModules: async () => [
+        { id: "mod_management", name: "Управление", status: "active", companyIds: [], allCompanies: true, bindings: 0 },
+      ],
+      listCompanies: async () => [COMPANY],
+    }));
+    const remove = [...host.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Удалить модуль");
+    expect(remove?.disabled).toBe(true);
+    expect(remove?.getAttribute("title")).toContain("переключите на выбранные");
+  });
+
+  it("shows a refused deletion instead of clicking into nothing", async () => {
+    // The server answers 403 for a module it refuses to remove. Before, the
+    // rejection was dropped and the row looked unchanged.
+    const host = await mountHost(<ModulesPage />, emptyService({
+      listModules: async () => [
+        { id: "mod_equipment", name: "Подбор техники", status: "active", companyIds: [], allCompanies: false, bindings: 0 },
+      ],
+      listCompanies: async () => [COMPANY],
+      deleteModule: async () => {
+        throw new Error("module still has cabinet bindings");
+      },
+    }));
+    await click(host, "Удалить модуль");
+    await click(host, "Удалить модуль");
+    expect(host.querySelector(".admin-confirm__error")?.textContent).toContain("cabinet bindings");
+  });
+  it("offers a copy button that cannot lie about copying", async () => {
+    // The dev contour is served over plain HTTP on an IP, where the clipboard
+    // API does not exist. Silently doing nothing is the one wrong answer, so a
+    // failed copy falls back to selecting the text and says so. No clipboard in
+    // jsdom, which is exactly the situation being covered.
+    const host = await mountHost(<CompaniesPage />, emptyService({
+      listCompanies: async () => [],
+      createCompany: async () => ({ id: "co_2", name: "Beta", login: "beta", password: "s3cret-pass" }),
+    }));
+    await click(host, "Новая компания");
+    const name = host.querySelector<HTMLInputElement>(".admin-modal input");
+    await act(async () => {
+      if (name) {
+        name.value = "Beta";
+        name.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+    });
+    const form = host.querySelector<HTMLFormElement>(".admin-form");
+    await act(async () => {
+      form?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      await new Promise((resolve) => window.setTimeout(resolve, 0));
+    });
+    const copy = [...host.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Копировать");
+    expect(copy).toBeDefined();
+  });
+});
+
+describe("company detail", () => {
+  it("renders the company by name without leaking its identifier as text", () => {
     // The detail screen reads its service from the outlet and its company from
     // the route, so it is mounted the way the router mounts it.
     const markup = renderToStaticMarkup(

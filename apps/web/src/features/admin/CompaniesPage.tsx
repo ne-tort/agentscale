@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from "react";
+import { useMemo, useRef, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { useI18n } from "../../i18n/useT";
 import { useAdminService } from "./AdminArea";
@@ -179,25 +179,49 @@ export function CompaniesPage() {
   );
 }
 
-/** A value the administrator has to hand over, with a copy button beside it. */
+/**
+ * A value the administrator has to hand over, with a copy button beside it.
+ *
+ * `navigator.clipboard` only exists in a secure context, and the dev contour is
+ * served over plain HTTP on an IP — there the button used to do nothing at all.
+ * The fallback selects the text so the value can be copied by hand, and the
+ * button says which of the two happened.
+ */
 function CredentialRow({ label, value }: { label: string; value: string }) {
-  const { t, plural } = useI18n();
-  const [copied, setCopied] = useState(false);
+  const { t } = useI18n();
+  const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
+  const code = useRef<HTMLElement | null>(null);
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(value);
+      setState("copied");
+    } catch {
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      if (code.current) {
+        const range = document.createRange();
+        range.selectNodeContents(code.current);
+        selection?.addRange(range);
+      }
+      setState("failed");
+    }
+    window.setTimeout(() => setState("idle"), 1500);
+  }
+
   return (
     <div className="admin-credential">
       <span className="admin-credential__label">{label}</span>
-      <code className="admin-credential__value">{value}</code>
+      <code className="admin-credential__value" ref={code}>
+        {value}
+      </code>
       <button
         className="admin-button"
-        onClick={() => {
-          void navigator.clipboard?.writeText(value).then(() => {
-            setCopied(true);
-            window.setTimeout(() => setCopied(false), 1500);
-          });
-        }}
+        onClick={() => void copy()}
+        title={state === "failed" ? t("admin.copyManual") : undefined}
         type="button"
       >
-        {copied ? t("common.copied") : t("common.copy")}
+        {state === "copied" ? t("common.copied") : state === "failed" ? t("admin.copyManual") : t("common.copy")}
       </button>
     </div>
   );

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useI18n } from "../../i18n/useT";
 import { useAdminService } from "./AdminArea";
+import { keyEndpointLabel } from "./keyLabel";
 import { PickListModal } from "./PickListModal";
 import { ConfirmButton, Notice, useCollection } from "./ui";
 import type { AdminCompany } from "./service";
@@ -67,6 +68,8 @@ export function CompanyDetailPage() {
   }
 
   async function deleteCompany() {
+    // Throws on purpose: the confirm prompt is where a 409 ("company still has
+    // cabinets") has to be read, not nowhere.
     await service.deleteCompany(companyId);
     navigate("/admin", { replace: true });
   }
@@ -86,7 +89,7 @@ export function CompanyDetailPage() {
         <ConfirmButton
           confirmLabel={t("admin.companyDeleteConfirm")}
           label={t("admin.companyDelete")}
-          onConfirm={() => void deleteCompany()}
+          onConfirm={deleteCompany}
         />
       </header>
 
@@ -110,7 +113,7 @@ export function CompanyDetailPage() {
               {linkedKeys.map((key) => (
                 <li key={key.id}>
                   <span className="admin-list__name">{key.name}</span>
-                  <span className="admin-list__meta">{key.provider || t("admin.keyProviderUnknown")}</span>
+                  <span className="admin-list__meta">{keyEndpointLabel(key, t)}</span>
                 </li>
               ))}
             </ul>
@@ -149,7 +152,7 @@ export function CompanyDetailPage() {
       {linkingKeys && (
         <PickListModal
           initial={linkedKeys.map((key) => key.id)}
-          items={keys.rows.map((key) => ({ id: key.id, label: key.name, secondary: key.provider }))}
+          items={keys.rows.map((key) => ({ id: key.id, label: key.name, secondary: keyEndpointLabel(key, t) }))}
           onApply={async (next) => {
             // A key's company list is the relationship, so each side that changed
             // is written where it lives: no endpoint accepts "give company X key Y".
@@ -178,7 +181,12 @@ export function CompanyDetailPage() {
       {granting && (
         <PickListModal
           initial={grantedModules.map((module) => module.id)}
-          items={modules.rows.map((module) => ({ id: module.id, label: module.name }))}
+          items={modules.rows.map((module) => ({
+            id: module.id,
+            label: module.name,
+            locked: module.allCompanies,
+            lockedNote: module.allCompanies ? t("admin.moduleCompaniesAll") : undefined,
+          }))}
           onApply={async (next) => {
             const before = new Set(grantedModules.map((module) => module.id));
             const after = new Set(next);
@@ -218,15 +226,26 @@ function QuotaCard({
   const [quota, setQuota] = useState(company.quota);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
+  const [saved, setSaved] = useState(false);
 
   useEffect(() => setQuota(company.quota), [company.quota]);
+
+  /** An empty field is "not typed yet", not zero: `Number("")` is 0 and would
+   *  save a quota nobody asked for. The minimum is the field's own floor. */
+  function number(value: string, fallback: number, minimum: number): number {
+    const parsed = Number(value);
+    if (value.trim() === "" || !Number.isFinite(parsed)) return fallback;
+    return Math.max(minimum, Math.trunc(parsed));
+  }
 
   async function save() {
     setBusy(true);
     setError(undefined);
+    setSaved(false);
     try {
       await service.setCompanyQuota(company.id, quota);
       onSaved();
+      setSaved(true);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : t("common.error"));
     } finally {
@@ -245,7 +264,7 @@ function QuotaCard({
           <input
             className="admin-input"
             min={1}
-            onChange={(event) => setQuota({ ...quota, cabinets: Number(event.target.value) })}
+            onChange={(event) => setQuota({ ...quota, cabinets: number(event.target.value, quota.cabinets, 1) })}
             type="number"
             value={quota.cabinets}
           />
@@ -255,7 +274,9 @@ function QuotaCard({
           <input
             className="admin-input"
             min={0}
-            onChange={(event) => setQuota({ ...quota, packagesPerCabinet: Number(event.target.value) })}
+            onChange={(event) =>
+              setQuota({ ...quota, packagesPerCabinet: number(event.target.value, quota.packagesPerCabinet, 0) })
+            }
             type="number"
             value={quota.packagesPerCabinet}
           />
@@ -265,7 +286,7 @@ function QuotaCard({
           <input
             className="admin-input"
             min={1}
-            onChange={(event) => setQuota({ ...quota, importMb: Number(event.target.value) })}
+            onChange={(event) => setQuota({ ...quota, importMb: number(event.target.value, quota.importMb, 1) })}
             type="number"
             value={quota.importMb}
           />
@@ -274,7 +295,7 @@ function QuotaCard({
           {busy ? t("common.saving") : t("common.save")}
         </button>
       </div>
-      <Notice error={error} />
+      <Notice error={error} success={saved ? t("admin.companyQuotaSaved") : undefined} />
     </article>
   );
 }
