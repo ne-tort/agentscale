@@ -2,7 +2,18 @@ import { useMemo, useState } from "react";
 import { useI18n } from "../../i18n/useT";
 import type { AdminCompany } from "./service";
 
-export type PickItem = { id: string; label: string; secondary?: string };
+export type PickItem = {
+  id: string;
+  label: string;
+  secondary?: string;
+  /**
+   * The relationship is decided elsewhere and this list cannot change it — e.g.
+   * a module already granted to every company. Rendering it as a normal checked
+   * box meant unchecking it wrote nothing and said nothing.
+   */
+  locked?: boolean;
+  lockedNote?: string;
+};
 
 /**
  * Picking things by name.
@@ -62,9 +73,19 @@ export function Picker({
           {visible.map((item) => (
             <li key={item.id}>
               <label className="admin-picker__row">
-                <input checked={chosen.has(item.id)} onChange={() => toggle(item.id)} type="checkbox" />
+                <input
+                  checked={chosen.has(item.id)}
+                  disabled={item.locked}
+                  onChange={() => toggle(item.id)}
+                  type="checkbox"
+                />
                 <span className="admin-picker__name">{item.label}</span>
-                {item.secondary && <span className="admin-picker__login">{item.secondary}</span>}
+                {item.locked && item.lockedNote && (
+                  <span className="admin-picker__login">{item.lockedNote}</span>
+                )}
+                {!item.locked && item.secondary && (
+                  <span className="admin-picker__login">{item.secondary}</span>
+                )}
               </label>
             </li>
           ))}

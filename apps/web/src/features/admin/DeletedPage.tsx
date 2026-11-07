@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { formatDateTime } from "../../i18n/format";
 import { useI18n } from "../../i18n/useT";
 import { useAdminService } from "./AdminArea";
 import { ConfirmButton, ListToolbar, Notice, useCollection } from "./ui";
@@ -17,6 +18,7 @@ export function DeletedPage() {
   const deleted = useCollection(() => service.listDeleted(), [service]);
   const [query, setQuery] = useState("");
   const [notice, setNotice] = useState<string>();
+  const [error, setError] = useState<string>();
 
   const visible = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -33,16 +35,21 @@ export function DeletedPage() {
     return t("admin.entityCompany");
   }
 
-  function formatDate(value: string | null): string {
-    if (!value) return t("common.never");
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return value;
-    return date.toLocaleString(locale, { dateStyle: "medium", timeStyle: "short" });
+  async function restore(row: DeletedEntity) {
+    try {
+      await service.restoreDeleted(row.entity, row.id);
+      await deleted.reload();
+      setError(undefined);
+      setNotice(t("admin.deletedRestored"));
+    } catch (caught) {
+      setNotice(undefined);
+      setError(caught instanceof Error ? caught.message : t("common.error"));
+    }
   }
 
   return (
     <section className="admin-section">
-      <Notice success={notice} />
+      <Notice error={error} success={notice} />
 
       {deleted.loading ? (
         <p className="admin-muted" role="status">{t("common.loading")}</p>
@@ -72,28 +79,19 @@ export function DeletedPage() {
                   <td>{entityLabel(row.entity)}</td>
                   <td>{row.name}</td>
                   <td className="admin-muted">{row.login || t("common.none")}</td>
-                  <td className="admin-muted">{formatDate(row.deletedAt)}</td>
+                  <td className="admin-muted">{formatDateTime(row.deletedAt, locale) || t("common.never")}</td>
                   <td className="admin-row-actions">
-                    <button
-                      className="admin-button"
-                      onClick={() => {
-                        void service.restoreDeleted(row.entity, row.id).then(async () => {
-                          await deleted.reload();
-                          setNotice(t("admin.deletedRestored"));
-                        });
-                      }}
-                      type="button"
-                    >
+                    <button className="admin-button" onClick={() => void restore(row)} type="button">
                       {t("admin.deletedRestore")}
                     </button>
                     <ConfirmButton
                       confirmLabel={t("admin.deletedPurgeConfirm")}
                       label={t("admin.deletedPurge")}
-                      onConfirm={() => {
-                        void service.purgeDeleted(row.entity, row.id).then(async () => {
-                          await deleted.reload();
-                          setNotice(t("admin.deletedPurged"));
-                        });
+                      onConfirm={async () => {
+                        await service.purgeDeleted(row.entity, row.id);
+                        await deleted.reload();
+                        setError(undefined);
+                        setNotice(t("admin.deletedPurged"));
                       }}
                     />
                   </td>
@@ -101,6 +99,7 @@ export function DeletedPage() {
               ))}
             </tbody>
           </table>
+          {visible.length === 0 && <p className="admin-muted">{t("common.noMatches")}</p>}
         </>
       )}
     </section>

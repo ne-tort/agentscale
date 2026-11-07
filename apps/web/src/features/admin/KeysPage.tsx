@@ -2,6 +2,7 @@ import { useMemo, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { useI18n } from "../../i18n/useT";
 import { useAdminService } from "./AdminArea";
+import { hostOf, keyEndpointLabel, keyStatusLabel } from "./keyLabel";
 import { CompanyPicker } from "./picker";
 import { PickListModal } from "./PickListModal";
 import { ConfirmButton, DialogForm, Field, ListToolbar, Modal, Notice, useCollection } from "./ui";
@@ -145,13 +146,8 @@ export function KeysPage() {
                   <td className="admin-muted">
                     {key.baseUrl ? (
                       <span className="admin-endpoint" title={key.baseUrl}>{hostOf(key.baseUrl)}</span>
-                    ) : key.provider ? (
-                      // A key from before endpoints were a field still has a
-                      // provider we resolved it through; saying "not set" would
-                      // hide where it points when we do know.
-                      <span className="admin-endpoint">{key.provider}</span>
                     ) : (
-                      t("admin.keyEndpointUnknown")
+                      <span className="admin-endpoint">{keyEndpointLabel(key, t)}</span>
                     )}
                   </td>
                   <td>
@@ -161,13 +157,13 @@ export function KeysPage() {
                       <span className="admin-chips">
                         {key.companyIds.map((id) => (
                           <Link className="admin-chip" key={id} to={`/admin/companies/${encodeURIComponent(id)}`}>
-                            {companiesById.get(id)?.name ?? id}
+                            {companiesById.get(id)?.name ?? t("admin.companyGone")}
                           </Link>
                         ))}
                       </span>
                     )}
                   </td>
-                  <td className="admin-muted">{statusLabel(key.status, t)}</td>
+                  <td className="admin-muted">{keyStatusLabel(key.status, t)}</td>
                   <td className="admin-row-actions">
                     <button className="admin-button" onClick={() => setLinking(key.id)} type="button">
                       {t("admin.keyCompanies")}
@@ -175,11 +171,10 @@ export function KeysPage() {
                     <ConfirmButton
                       confirmLabel={t("admin.keyDeleteConfirm")}
                       label={t("admin.keyDelete")}
-                      onConfirm={() => {
-                        void service.deleteKey(key.id).then(async () => {
-                          await keys.reload();
-                          setNotice(t("admin.keyDeleted"));
-                        });
+                      onConfirm={async () => {
+                        await service.deleteKey(key.id);
+                        await keys.reload();
+                        setNotice(t("admin.keyDeleted"));
                       }}
                     />
                   </td>
@@ -187,6 +182,7 @@ export function KeysPage() {
               ))}
             </tbody>
           </table>
+          {visible.length === 0 && <p className="admin-muted">{t("common.noMatches")}</p>}
         </>
       )}
 
@@ -287,19 +283,4 @@ export function KeysPage() {
       )}
     </section>
   );
-}
-
-/** The part of an endpoint a person recognises: `api.openai.com`, not the full path. */
-function hostOf(url: string): string {
-  try {
-    return new URL(url).host;
-  } catch {
-    return url;
-  }
-}
-
-function statusLabel(status: string, t: (key: string) => string): string {
-  if (status === "revoked") return t("admin.keyStatusRevoked");
-  if (status === "expired") return t("admin.keyStatusExpired");
-  return t("admin.keyStatusActive");
 }
