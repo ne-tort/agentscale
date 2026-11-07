@@ -5,7 +5,6 @@ import { getSafeNextPath } from "./auth/redirect";
 import type { Project, ProjectRuntimeModule } from "../api/types";
 import { createWorkspaceRouteContract, WorkspaceShell } from "./workspace-shell";
 import {
-  AdminPage,
   CabinetPage,
   CabinetSelectionPage,
   CompanyPage,
@@ -23,11 +22,20 @@ import {
   ProjectResourcesPage,
   RunsPage,
 } from "../routes/pages";
+import {
+  AdminArea,
+  CompaniesPage,
+  CompanyDetailPage,
+  DeletedPage,
+  KeysPage,
+  ModulesPage,
+} from "../features/admin";
+import { useI18n } from "../i18n/useT";
 import { AutomationsPage } from "../features/automations";
 import { DynamicModulePage, DynamicModulesPage } from "../features/dynamic-modules";
 
 const APP_FRAME_STYLES = `
-.employee-app-frame{min-height:100vh;background:#f3f7f5;color:#17232b}
+.employee-app-frame{min-height:100vh;background:var(--bg);color:var(--text)}
 .employee-app-header{align-items:center;background:#102b2c;color:#edf5f2;display:grid;gap:18px;grid-template-columns:auto minmax(0,1fr) auto;min-height:68px;padding:10px 24px}
 .employee-app-brand{color:#fff;font-size:16px;font-weight:800;white-space:nowrap}
 .employee-app-navigation{align-items:center;display:flex;gap:5px;min-width:0;overflow-x:auto;scrollbar-width:thin;white-space:nowrap}
@@ -35,23 +43,24 @@ const APP_FRAME_STYLES = `
 .employee-app-navigation a:hover,.employee-app-navigation a:focus-visible{border-bottom-color:#80c6ae;color:#fff}
 .employee-app-account{align-items:center;display:flex;gap:12px;font-size:12px;white-space:nowrap}
 .employee-app-account button{background:transparent;border:1px solid #6c8a81;border-radius:4px;color:#fff;padding:7px 10px}
-.employee-app-content{min-height:calc(100vh - 68px)}
+.employee-app-content{min-height:calc(100vh - 68px);margin:0 auto;max-width:1160px;padding:36px 32px 80px;width:100%}
+.employee-app-content--wide{max-width:none;padding:0}
 .employee-page-heading{margin:0 0 22px}
 .employee-page-heading h1{font-size:32px;line-height:1.15}
 .employee-page-heading>.muted{margin:9px 0 0}
-.employee-project-links{border-bottom:1px solid #d6e0dc;display:flex;gap:6px;margin:0 0 24px;overflow-x:auto;white-space:nowrap}
-.employee-project-links a{border-bottom:2px solid transparent;color:#405852;font-size:13px;font-weight:650;padding:11px 10px}
-.employee-project-links a:hover,.employee-project-links a:focus-visible{border-bottom-color:#19776c;color:#145d55}
-.employee-route-feedback,.employee-route-state{align-items:flex-start;background:#fff;border-left:3px solid #be7b35;display:grid;gap:8px;margin:20px 0;padding:18px}
-.employee-route-feedback a,.employee-route-state a{color:#126b63;font-weight:700}
+.employee-project-links{border-bottom:1px solid var(--border);display:flex;gap:6px;margin:0 0 24px;overflow-x:auto;white-space:nowrap}
+.employee-project-links a{border-bottom:2px solid transparent;color:var(--text-muted);font-size:13px;font-weight:650;padding:11px 10px}
+.employee-project-links a:hover,.employee-project-links a:focus-visible{border-bottom-color:var(--accent);color:var(--accent)}
+.employee-route-feedback,.employee-route-state{align-items:flex-start;background:var(--surface);border-left:3px solid var(--warning-border);display:grid;gap:8px;margin:20px 0;padding:18px}
+.employee-route-feedback a,.employee-route-state a{color:var(--accent);font-weight:700}
 .employee-cabinet-list{display:grid;max-width:900px}
-.employee-cabinet-list a{align-items:center;border-bottom:1px solid #d7e1dd;display:flex;gap:16px;justify-content:space-between;padding:15px 4px}
-.employee-cabinet-list a span{color:#62736e;font-size:12px}
+.employee-cabinet-list a{align-items:center;border-bottom:1px solid var(--border);display:flex;gap:16px;justify-content:space-between;padding:15px 4px}
+.employee-cabinet-list a span{color:var(--text-muted);font-size:12px}
 .employee-not-found{padding:20px 0}
-.employee-not-found>a{color:#126b63;font-weight:700}
+.employee-not-found>a{color:var(--accent);font-weight:700}
 .employee-auth-state{padding:40px;text-align:center}
 .employee-blocker-note{border-left:3px solid #ad5d4c;color:#724138;margin:18px 0;padding:9px 13px}
-@media(max-width:900px){.employee-app-header{gap:8px 14px;grid-template-columns:auto minmax(0,1fr)}.employee-app-navigation{grid-column:1/-1;grid-row:2}.employee-app-account{grid-column:2;grid-row:1;justify-self:end}.employee-app-content{min-height:calc(100vh - 108px)}}
+@media(max-width:900px){.employee-app-header{gap:8px 14px;grid-template-columns:auto minmax(0,1fr)}.employee-app-navigation{grid-column:1/-1;grid-row:2}.employee-app-account{grid-column:2;grid-row:1;justify-self:end}.employee-app-content{min-height:calc(100vh - 108px);padding:24px 16px 60px}}
 @media(max-width:520px){.employee-app-header{padding:8px 12px}.employee-app-account span{display:none}.employee-app-navigation{gap:0}.employee-app-navigation a{font-size:12px;padding:10px 8px}.employee-project-links a{font-size:12px;padding:10px 8px}}
 `;
 
@@ -71,19 +80,64 @@ function RequireAuth() {
 function AppFrame() {
   const auth = useAuth();
   const location = useLocation();
+  const { t } = useI18n();
   const isProjectWorkspace = matchPath("/projects/:projectId", location.pathname) !== null
     || matchPath("/projects/:projectId/*", location.pathname) !== null;
+  // The bar shows what this account can actually do. A platform administrator
+  // has no company and no cabinets, so those links led to "unavailable" screens;
+  // an employee has no business in the platform catalog.
+  const links = auth.isPlatformAdmin
+    ? [{ to: "/admin", label: t("nav.admin") }]
+    : [
+        { to: "/projects", label: t("nav.projects") },
+        { to: "/cabinets", label: t("nav.cabinets") },
+        { to: "/company", label: t("nav.company") },
+      ];
   return <div className="employee-app-frame">
     <style>{APP_FRAME_STYLES}</style>
     {!isProjectWorkspace && <header className="employee-app-header">
-      <Link to="/projects" className="employee-app-brand">agentscale</Link>
-      <nav className="employee-app-navigation" aria-label="Application navigation">
-        <Link to="/projects">Projects</Link><Link to="/cabinets">Cabinets</Link><Link to="/company">Company</Link><Link to="/company/modules">Module bindings</Link><Link to="/company/content">Content</Link><Link to="/admin/modules">Module catalog</Link><Link to="/dynamic-modules">Dynamic modules</Link><Link to="/admin">Admin</Link>
+      <Link to={auth.isPlatformAdmin ? "/admin" : "/projects"} className="employee-app-brand">agentscale</Link>
+      <nav aria-label={t("nav.menu")} className="employee-app-navigation">
+        {links.map((link) => <Link key={link.to} to={link.to}>{link.label}</Link>)}
       </nav>
-      <div className="employee-app-account"><span>{auth.employee?.display_name ?? "Employee"}</span><button type="button" onClick={auth.signOut}>Sign out</button></div>
+      <div className="employee-app-account">
+        <span>{auth.isPlatformAdmin ? t("nav.accountAdmin") : auth.employee?.display_name ?? t("nav.accountEmployee")}</span>
+        <button type="button" onClick={auth.signOut}>{t("nav.signOut")}</button>
+      </div>
     </header>}
-    <div className="employee-app-content"><Outlet /></div>
+    <div className={`employee-app-content${isWidePage(location.pathname) ? " employee-app-content--wide" : ""}`}>
+      <Outlet />
+    </div>
   </div>;
+}
+
+/**
+ * Screens that own their own measure, and would end up double-padded by the
+ * shell: the administrator's area caps itself, and the notification desk and the
+ * module runtime fill the viewport by design.
+ */
+function isWidePage(pathname: string): boolean {
+  return pathname === "/admin" || pathname.startsWith("/admin/") || pathname.startsWith("/projects/");
+}
+
+/**
+ * Where an account lands.
+ *
+ * A platform administrator has no projects and no company, so the old default
+ * dropped them on an empty employee screen and left them to find their way. The
+ * landing page follows the role.
+ */
+function HomeRedirect() {
+  const auth = useAuth();
+  return <Navigate replace to={auth.isPlatformAdmin ? "/admin" : "/projects"} />;
+}
+
+function ProjectsGate() {
+  const auth = useAuth();
+  // A platform administrator who types /projects is not refused — they are sent
+  // to the only area their account can act in.
+  if (auth.isPlatformAdmin) return <Navigate replace to="/admin" />;
+  return <ProjectsPage />;
 }
 
 function ProjectLayout() {
@@ -217,8 +271,8 @@ export function AppRouter() {
     <Route path="login" element={<LoginPage />} />
     <Route element={<RequireAuth />}>
       <Route element={<AppFrame />}>
-        <Route index element={<Navigate to="/projects" replace />} />
-        <Route path="projects" element={<ProjectsPage />} />
+        <Route index element={<HomeRedirect />} />
+        <Route path="projects" element={<ProjectsGate />} />
         <Route path="projects/:projectId" element={<ProjectLayout />}>
           <Route index element={<ProjectHomeRoute />} />
           <Route path={EMPLOYEE_PROJECT_CHILD_ROUTE_PATHS[0]} element={<ProjectRuntimeRoute />} />
@@ -239,7 +293,14 @@ export function AppRouter() {
         <Route path="cabinets" element={<CabinetSelectionPage />} />
         <Route path="cabinets/:cabinetId" element={<CabinetPage />} />
         <Route path="company/*" element={<CompanyPage />} />
-        <Route path="admin/*" element={<AdminPage />} />
+        {/* The administrator's area: companies first, then what hangs off them. */}
+        <Route element={<AdminArea />} path="admin">
+          <Route index element={<CompaniesPage />} />
+          <Route path="companies/:companyId" element={<CompanyDetailPage />} />
+          <Route path="keys" element={<KeysPage />} />
+          <Route path="modules" element={<ModulesPage />} />
+          <Route path="deleted" element={<DeletedPage />} />
+        </Route>
         {/* Dynamic module registry screens (definitions → versions → install → grants). */}
         <Route path="dynamic-modules" element={<DynamicModulesPage />} />
         <Route path="dynamic-modules/:definitionId" element={<DynamicModulePage />} />

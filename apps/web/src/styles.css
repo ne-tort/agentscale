@@ -17,6 +17,7 @@
   --danger-bg: #fff0ee;
   --danger-border: #e9b7b0;
   --danger-text: #a33c31;
+  --warning-border: #be7b35;
   --shadow-card: 0 14px 40px rgba(16, 32, 39, .09);
 }
 :root[data-theme="dark"] {
@@ -34,6 +35,7 @@
   --danger-bg: #3a1e1b;
   --danger-border: #6d3a33;
   --danger-text: #f0a59b;
+  --warning-border: #b8823f;
   --shadow-card: 0 18px 46px rgba(0, 0, 0, .5);
   color: var(--text);
   background: var(--bg);
@@ -44,6 +46,9 @@ button, input, textarea { font: inherit; }
 button { cursor: pointer; }
 button:disabled { cursor: not-allowed; opacity: .55; }
 a { color: inherit; text-decoration: none; }
+/* Everything below reads from the theme tokens: a literal colour here is a spot
+   that stays light when the page is dark. The topbar keeps its own dark green
+   in both themes, which is why it names two tokens instead of one. */
 .topbar { align-items: center; background: #102027; color: #e8f0ed; display: flex; gap: 24px; height: 64px; padding: 0 32px; }
 .brand { font-size: 19px; font-weight: 760; letter-spacing: .02em; }
 .crumb { color: #9db1ad; font-size: 14px; }
@@ -51,27 +56,27 @@ a { color: inherit; text-decoration: none; }
 .account button { background: transparent; border: 1px solid #59706d; border-radius: 5px; color: #e8f0ed; padding: 7px 11px; }
 .shell-content { margin: 0 auto; max-width: 1160px; padding: 44px 32px 80px; }
 .page-heading { align-items: flex-end; display: flex; justify-content: space-between; gap: 24px; margin-bottom: 28px; }
-.eyebrow { color: #59706d; font-size: 11px; font-weight: 760; letter-spacing: .12em; margin: 0 0 9px; text-transform: uppercase; }
+.eyebrow { color: var(--text-muted); font-size: 11px; font-weight: 760; letter-spacing: .12em; margin: 0 0 9px; text-transform: uppercase; }
 h1 { font-size: clamp(29px, 4vw, 44px); letter-spacing: -.02em; line-height: 1.08; margin: 0; }
-.muted { color: #64736f; line-height: 1.55; }
-.primary { background: #126b63; border: 1px solid #126b63; border-radius: 5px; color: white; font-weight: 700; padding: 10px 15px; }
-.primary-link { color: #126b63; font-weight: 700; }
-.status { background: #e5ece9; border-radius: 4px; color: #4f635e; font-size: 12px; padding: 7px 9px; }
-.empty-state, .chat-surface, .placeholder { background: #fff; border: 1px solid #d9e2df; border-radius: 6px; padding: 28px; }
+.muted { color: var(--text-muted); line-height: 1.55; }
+.primary { background: var(--accent); border: 1px solid var(--accent); border-radius: 5px; color: var(--accent-contrast); font-weight: 700; padding: 10px 15px; }
+.primary-link { color: var(--accent); font-weight: 700; }
+.status { background: var(--surface-muted); border-radius: 4px; color: var(--text-muted); font-size: 12px; padding: 7px 9px; }
+.empty-state, .chat-surface, .placeholder { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 28px; }
 .empty-state { display: grid; gap: 8px; min-height: 180px; place-content: center; text-align: center; }
-.empty-state span { color: #64736f; }
-.empty-state a { color: #126b63; font-weight: 700; margin-top: 10px; }
+.empty-state span { color: var(--text-muted); }
+.empty-state a { color: var(--accent); font-weight: 700; margin-top: 10px; }
 .workspace-grid { display: grid; gap: 16px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .placeholder { min-height: 220px; }
 .placeholder h1 { font-size: 25px; }
 .chat-surface { min-height: 420px; display: flex; flex-direction: column; justify-content: flex-end; }
 .composer { display: flex; gap: 10px; margin-top: 26px; }
-.composer textarea { border: 1px solid #ccd9d5; border-radius: 5px; min-height: 82px; padding: 12px; resize: vertical; width: 100%; }
+.composer textarea { border: 1px solid var(--border-strong); border-radius: 5px; min-height: 82px; padding: 12px; resize: vertical; width: 100%; }
 /* Form chrome shared by the workspace pages. The login card overrides these
    with `.pref-input` (borderless) and `.login-form .error`. */
-label { color: #334742; display: grid; font-size: 13px; font-weight: 700; gap: 7px; }
-input { border: 1px solid #cbd8d4; border-radius: 5px; padding: 11px 12px; }
-.error { background: #fff0ee; border: 1px solid #e9b7b0; border-radius: 4px; color: #a33c31; font-size: 13px; padding: 10px; }
+label { color: var(--text); display: grid; font-size: 13px; font-weight: 700; gap: 7px; }
+input { background: var(--surface); border: 1px solid var(--border-strong); border-radius: 5px; color: var(--text); padding: 11px 12px; }
+.error { background: var(--danger-bg); border: 1px solid var(--danger-border); border-radius: 4px; color: var(--danger-text); font-size: 13px; padding: 10px; }
 
 /* --- Login ---------------------------------------------------------------
    Centred card with a section header ("Вход" + settings), two preference rows

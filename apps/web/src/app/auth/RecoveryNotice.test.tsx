@@ -37,7 +37,7 @@ afterEach(async () => {
 
 describe("RecoveryNotice", () => {
   it("offers a retry after a transient outage without forcing a login redirect", async () => {
-    const { retry } = await mount({ status: "error", tokens: { access_token: "access", refresh_token: "refresh" }, cabinets: [], error: new Error("Network unavailable") });
+    const { retry } = await mount({ status: "error", tokens: { access_token: "access", refresh_token: "refresh" }, cabinets: [], contours: [], error: new Error("Network unavailable") });
 
     expect(document.body.textContent).toContain("Your saved sign-in is still on this device.");
     const retryButton = [...document.querySelectorAll("button")].find((button) => button.textContent === "Retry session");
@@ -48,7 +48,7 @@ describe("RecoveryNotice", () => {
   });
 
   it("names revoked and expired sessions and offers account sign-in", async () => {
-    await mount({ status: "unauthenticated", cabinets: [], endReason: "revoked" });
+    await mount({ status: "unauthenticated", cabinets: [], contours: [], endReason: "revoked" });
     expect(document.body.textContent).toContain("This account is no longer active");
     const switchButton = [...document.querySelectorAll("button")].find((button) => button.textContent === "Sign in / switch account");
     expect(switchButton).toBeTruthy();
@@ -59,7 +59,7 @@ describe("RecoveryNotice", () => {
     root = undefined;
     host?.remove();
     host = undefined;
-    await mount({ status: "unauthenticated", cabinets: [], endReason: "expired" });
+    await mount({ status: "unauthenticated", cabinets: [], contours: [], endReason: "expired" });
     expect(document.body.textContent).toContain("Your session has expired");
   });
 });

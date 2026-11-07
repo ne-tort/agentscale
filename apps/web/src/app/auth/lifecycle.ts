@@ -10,6 +10,12 @@ export interface AuthSnapshot {
   tokens?: SessionTokens;
   employee?: Employee;
   cabinets: Cabinet[];
+  /**
+   * Which contours `/me` says this account belongs to — `platform_admin` is the
+   * one the shell branches on. Empty until the first `/me` answers, so a screen
+   * must treat "unknown" as "not admin" rather than guessing.
+   */
+  contours: string[];
   error?: Error;
   endReason?: AuthEndReason;
 }
@@ -74,12 +80,13 @@ function employeeFromCurrentUser(user: CurrentUserResponse): Employee {
 
 /** Owns persisted credentials and serializes restore/refresh work across provider effects. */
 export class AuthLifecycle {
-  private snapshot: AuthSnapshot = { status: "loading", cabinets: [] };
+  private snapshot: AuthSnapshot = { status: "loading", cabinets: [], contours: [] };
   private readonly listeners = new Set<Listener>();
   private recoveryFlight?: Promise<void>;
   private refreshFlight?: { refreshToken: string; promise: Promise<SessionTokens> };
   private generation = 0;
   private refreshTimer?: ReturnType<typeof setTimeout>;
+  private contours: string[] = [];
 
   constructor(private readonly api: AuthApi, private readonly storage?: AuthStorage | null) {}
 
@@ -120,6 +127,9 @@ export class AuthLifecycle {
     ++this.generation;
     this.cancelScheduledRefresh();
     this.removeTokens();
+    // Contours describe the account that just left; the next one may be a
+    // completely different role.
+    this.contours = [];
     this.publish({ status: "unauthenticated", cabinets: [], endReason: "signed-out" });
     if (!tokens) return;
 
@@ -152,6 +162,7 @@ export class AuthLifecycle {
   private async resolveSession(tokens: SessionTokens, generation: number, fallbackEmployee?: Employee, fallbackCabinets: Cabinet[] = []): Promise<void> {
     try {
       const user = await this.api.me();
+      this.contours = user.contours ?? [];
       if (generation !== this.generation) return;
       if (!user.active) {
         this.removeTokens();
@@ -197,6 +208,7 @@ export class AuthLifecycle {
       this.publish({ status: "loading", tokens: refreshed, employee: fallbackEmployee, cabinets: fallbackCabinets });
       try {
         const user = await this.api.me();
+        this.contours = user.contours ?? [];
         if (generation !== this.generation) return;
         if (!user.active) {
           this.removeTokens();
@@ -257,6 +269,7 @@ export class AuthLifecycle {
       this.publish({ status: "loading", tokens: refreshed, employee, cabinets });
       try {
         const user = await this.api.me();
+        this.contours = user.contours ?? [];
         if (generation !== this.generation) return;
         if (!user.active) {
           this.removeTokens();
@@ -324,8 +337,9 @@ export class AuthLifecycle {
     try { this.storage?.removeItem(AUTH_STORAGE_KEY); } catch { /* continue clearing in-memory state */ }
   }
 
-  private publish(snapshot: AuthSnapshot): void {
-    this.snapshot = snapshot;
-    for (const listener of this.listeners) listener(snapshot);
-  }
-}
+  private publish(snapshot: Omit<AuthSnapshot, "contours">): void {
+    // Contours come from `/me`, not from whatever a caller happens to pass, so
+    // they cannot be set by a screen and cannot leak across a sign-out.
+    this.snapshot = { ...snapshot, contours: this.contours };
+    for (const listener of this.listeners) listener(this.snapshot);
+  }}

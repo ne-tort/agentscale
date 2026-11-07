@@ -13,13 +13,11 @@ import {
   type ResolvedTheme,
   type ThemeMode,
 } from "./settings";
-import { STRINGS, type Strings } from "./strings";
 
 type SettingsValue = {
   locale: Locale;
   theme: ThemeMode;
   resolvedTheme: ResolvedTheme;
-  strings: Strings;
   setLocale: (locale: Locale) => void;
   setTheme: (theme: ThemeMode) => void;
 };
@@ -62,11 +60,17 @@ export function SettingsProvider({ children }: PropsWithChildren) {
     document.documentElement.dataset.theme = resolvedTheme;
   }, [resolvedTheme]);
 
+  // `lang` is what tells a screen reader which language to read, and the browser
+  // which dictionary to use for hyphenation. Setting the theme without it left
+  // a Russian page announcing itself as English.
+  useEffect(() => {
+    document.documentElement.lang = locale;
+  }, [locale]);
+
   const value = useMemo<SettingsValue>(() => ({
     locale,
     theme,
     resolvedTheme,
-    strings: STRINGS[locale],
     setLocale: (next) => {
       setLocaleState(next);
       writePreference(LOCALE_STORAGE_KEY, next);

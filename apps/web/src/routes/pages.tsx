@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useApi, useAuth } from "../app/context";
+import { useI18n } from "../i18n/useT";
 import type { ApiClient, Cabinet, Project } from "../api/types";
 import { ProjectsOverview, createProjectOverviewService } from "../features/projects/overview";
 import { ProjectControlsPanel, createDefaultProjectControlsService } from "../features/projects/controls";
@@ -13,7 +14,7 @@ import { ContentOpsPanel, createContentOpsService } from "../features/resources/
 import { RunsCenterPage } from "../features/runs";
 import { EquipmentProcurementPage } from "../features/equipment";
 import { ModelsPicker, createModelsService } from "../features/models";
-import { CompanyContour, AdminContour, createContourService } from "../features/contours";
+import { CompanyContour, createContourService } from "../features/contours";
 import { ModuleAdminPage, createModuleAdminService } from "../features/contours/module-admin";
 import { ModuleRuntime } from "../features/modules/ModuleRuntime";
 import { createModuleRuntimeService } from "../features/modules/service";
@@ -297,27 +298,26 @@ export function CabinetPage() {
 
 export function CompanyPage() {
   const auth = useAuth();
+  const { t } = useI18n();
   const scope = useCompanyScope();
   const contour = useMemo(() => createContourService({ getAccessToken: () => auth.tokens?.access_token }), [auth.tokens?.access_token]);
   const moduleService = useMemo(() => createModuleAdminService({ getAccessToken: () => auth.tokens?.access_token }), [auth.tokens?.access_token]);
   const contentService = useMemo(() => createContentOpsService({ getAccessToken: () => auth.tokens?.access_token }), [auth.tokens?.access_token]);
-  if (scope.loading) return <RouteFeedback title="Company context" detail="Resolving the authenticated company contour from the current-user API." />;
-  if (!scope.companyId) return <RouteFeedback title="Company contour unavailable" detail="The current-user API returned no company scope for this account." />;
+  if (scope.loading) return <RouteFeedback title={t("nav.company")} detail={t("common.loading")} />;
+  // A platform administrator has no company of their own. That is not a fault in
+  // the account, so the screen offers the thing they were probably after rather
+  // than reporting that a field is missing.
+  if (!scope.companyId) {
+    return <RouteFeedback
+      action={auth.isPlatformAdmin ? <Link to="/admin">{t("nav.admin")}</Link> : undefined}
+      detail={auth.isPlatformAdmin ? t("company.adminHasNoCompany") : t("company.noCompanyScope")}
+      title={t("nav.company")}
+    />;
+  }
   return <Routes>
     <Route index element={<CompanyContour companyId={scope.companyId} service={contour} />} />
     <Route path="modules" element={<ModuleAdminPage mode="company" companyId={scope.companyId} service={moduleService} />} />
     <Route path="content" element={<ContentOpsPanel companyId={scope.companyId} service={contentService} />} />
-    <Route path="*" element={<NotFoundPage />} />
-  </Routes>;
-}
-
-export function AdminPage() {
-  const auth = useAuth();
-  const service = useMemo(() => createContourService({ getAccessToken: () => auth.tokens?.access_token }), [auth.tokens?.access_token]);
-  const moduleService = useMemo(() => createModuleAdminService({ getAccessToken: () => auth.tokens?.access_token }), [auth.tokens?.access_token]);
-  return <Routes>
-    <Route index element={<AdminContour service={service} />} />
-    <Route path="modules" element={<ModuleAdminPage mode="admin" service={moduleService} />} />
     <Route path="*" element={<NotFoundPage />} />
   </Routes>;
 }

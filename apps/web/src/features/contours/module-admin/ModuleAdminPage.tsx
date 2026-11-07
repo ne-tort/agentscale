@@ -12,13 +12,13 @@ export interface ModuleAdminPageProps {
 
 export function ModuleEvidencePanel({ row, mode }: { row: ModuleAdminRow; mode: ModuleAdminMode }) {
   const evidence = moduleEvidence(row, mode);
-  return <section className="module-admin__evidence" aria-label="Effective module evidence">
+  return <section className="module-admin__evidence" aria-label="Параметры модуля">
     <dl>
-      <div><dt>Effective source</dt><dd>{evidence.source ?? "API contract gap"}</dd></div>
-      <div><dt>Version</dt><dd>{evidence.version ?? "API contract gap"}</dd></div>
-      <div><dt>Rights</dt><dd>{evidence.rights ?? "API contract gap"}</dd></div>
-      <div><dt>Bind kind</dt><dd>{evidence.bindKind ?? "Not provided by catalog API"}</dd></div>
-      <div><dt>Child may edit</dt><dd>{evidence.childMayEdit === undefined ? "Not provided by catalog API" : evidence.childMayEdit ? "Yes (API)" : "No (API)"}</dd></div>
+      <div><dt>Источник</dt><dd>{evidence.source ?? "не указан"}</dd></div>
+      <div><dt>Версия</dt><dd>{evidence.version ?? "не указана"}</dd></div>
+      <div><dt>Права</dt><dd>{evidence.rights ?? "не указаны"}</dd></div>
+      <div><dt>Тип привязки</dt><dd>{evidence.bindKind ?? "не указан"}</dd></div>
+      <div><dt>Компания может менять</dt><dd>{evidence.childMayEdit === undefined ? "не указано" : evidence.childMayEdit ? "Да" : "Нет"}</dd></div>
     </dl>
     {evidence.gaps.map((gap) => <p className="module-admin__gap" key={gap}>{gap}</p>)}
   </section>;

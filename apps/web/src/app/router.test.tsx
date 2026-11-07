@@ -3,6 +3,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, matchPath, useLocation } from "react-router-dom";
+import { SettingsProvider } from "../preferences/SettingsProvider";
 import type { ApiClient, Project, ProjectRuntimeModule } from "../api/types";
 import { AppRouter, EMPLOYEE_PROJECT_CHILD_ROUTE_PATHS } from "./router";
 import { POLL_BUDGET_MS } from "../test-support/poll-budget";
@@ -81,7 +82,7 @@ async function mount(initialPath: string): Promise<void> {
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
-  await act(async () => root?.render(<MemoryRouter initialEntries={[initialPath]}><AppRouter /><LocationProbe /></MemoryRouter>));
+  await act(async () => root?.render(<MemoryRouter initialEntries={[initialPath]}><SettingsProvider><AppRouter /><LocationProbe /></SettingsProvider></MemoryRouter>));
 }
 
 async function waitFor(assertion: () => boolean): Promise<void> {
@@ -142,7 +143,7 @@ describe("AppRouter workspace integration", () => {
   it("leaves the company application route under the existing application header", async () => {
     await mount("/company/modules");
     await waitFor(() => host?.querySelector("[data-testid='page-company']") !== null);
-    expect(host?.querySelector(".employee-app-header nav[aria-label='Application navigation']")).not.toBeNull();
+    expect(host?.querySelector(".employee-app-header nav")).not.toBeNull();
     expect(host?.querySelector(".workspace-shell")).toBeNull();
   });
 
