@@ -68,7 +68,7 @@ describe("equipment catalog contracts", () => {
     const now = Date.parse("2026-11-02T12:00:00Z");
     expect(catalogFreshness({ source_kind: "remote", status: "ready", last_indexed_at: "2026-11-02T11:30:00Z", reindex_interval_hours: 1 }, now).freshness).toBe("fresh");
     expect(catalogFreshness({ source_kind: "remote", status: "error", last_indexed_at: "2026-11-01T10:00:00Z" }, now)).toMatchObject({ freshness: "stale", lastGoodLabel: expect.any(String) });
-    expect(catalogFreshness({ source_kind: "remote", status: "ready" }, now)).toMatchObject({ freshness: "unknown", label: "Нет успешной индексации" });
+    expect(catalogFreshness({ source_kind: "remote", status: "ready" }, now)).toMatchObject({ freshness: "unknown", reason: "never-indexed" });
   });
 
   it("accepts only nonempty secret references and sanitizes credentials from API errors", () => {

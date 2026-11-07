@@ -269,6 +269,8 @@ describe("RunsCenterPage route workflow", () => {
     });
     vi.stubGlobal("fetch", fetcher);
     window.localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify({ access_token: "runs-test-token", refresh_token: "refresh-test-token" }));
+    // Copy is translated; pinning English keeps the assertions about behaviour.
+    window.localStorage.setItem("agentscale.locale", "en");
 
     Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
     host = document.createElement("div");
@@ -292,11 +294,11 @@ describe("RunsCenterPage route workflow", () => {
 
     expect(document.querySelector("h1")?.textContent).toBe("Runs & approvals");
     expect(document.querySelectorAll(".run-session-card")).toHaveLength(1);
-    expect(pageText()).toContain("waiting approval");
-    expect(pageText()).toContain("Run run-a · attempt 1 · sequence 4");
-    expect(pageText()).toContain("Linked chat session");
-    expect(pageText()).toContain("Agent Runs API has no cost field or cost endpoint.");
-    expect(pageText()).toContain("Agent Runs API has no run artifact endpoint.");
+    expect(pageText()).toContain("Waiting for approval");
+    expect(pageText()).toContain("Attempt 1 · step 4");
+    expect(pageText()).toContain("Linked chat");
+    expect(pageText()).toContain("Cost is not reported for runs yet.");
+    expect(pageText()).toContain("Result files are not reported for runs yet.");
 
     // Runs, the scoped inbox and session history are all read for the routed project only.
     expect(requests.find((request) => request.path === "/api/v1/me")?.authorization).toBe("Bearer runs-test-token");
@@ -307,13 +309,13 @@ describe("RunsCenterPage route workflow", () => {
 
     await act(async () => { clickPageButton("Approvals 2"); });
     await waitFor(() => approvalCard("file.write") !== undefined && approvalCard("shell.exec") !== undefined);
-    expect(pageText()).toContain("Pending human decisions");
+    expect(pageText()).toContain("Waiting for a decision");
     expect(pageText()).toContain('"path": "deploy.yaml"');
 
     const writeCard = approvalCard("file.write");
     expect(writeCard).toBeDefined();
     await act(async () => { buttonIn(writeCard!, "Approve")?.click(); });
-    await waitFor(() => pageText().includes("Approval confirmed by the durable event timeline."));
+    await waitFor(() => pageText().includes("Approval confirmed."));
 
     const approveCall = requests.find((request) => request.method === "POST" && request.path.endsWith("/approval-write/decision"));
     expect(approveCall).toMatchObject({
@@ -337,7 +339,7 @@ describe("RunsCenterPage route workflow", () => {
     const shellCard = approvalCard("shell.exec");
     expect(shellCard).toBeDefined();
     await act(async () => { buttonIn(shellCard!, "Deny")?.click(); });
-    await waitFor(() => pageText().includes("Denial confirmed by the durable event timeline."));
+    await waitFor(() => pageText().includes("Denial confirmed."));
 
     const denyCall = requests.find((request) => request.method === "POST" && request.path.endsWith("/approval-shell/decision"));
     expect(denyCall).toMatchObject({
@@ -364,7 +366,7 @@ describe("RunsCenterPage route workflow", () => {
     // promoted into Agent Run records and never written through.
     await act(async () => { clickPageButton("Session history 2"); });
     await waitFor(() => pageText().includes("Deployment review") && pageText().includes("Archived activity"));
-    expect(pageText()).toContain("Agent sessions and transcripts are conversation history, not Agent Run records.");
+    expect(pageText()).toContain("Chats are conversations, not run records. They never turn into runs.");
     expect(pageText()).toContain("test-model");
     expect(requests.filter((request) => request.method !== "GET").map(({ path, body }) => ({ path, body }))).toEqual([
       {

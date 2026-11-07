@@ -9,7 +9,6 @@ import { ProjectRuntime, createProjectRuntimeService, type RuntimeTab } from "..
 import { ChatWorkspace, useChatWorkspace } from "../features/chat";
 import { ProjectFilesWorkspace, createWorkspaceService } from "../features/files";
 import { CabinetOverview, createCabinetOverviewService, type CabinetNavigationTarget } from "../features/cabinet";
-import { RESOURCE_CONTRACT_BLOCKERS } from "../features/resources";
 import { ContentOpsPanel, createContentOpsService } from "../features/resources/content-ops";
 import { RunsCenterPage } from "../features/runs";
 import { EquipmentProcurementPage } from "../features/equipment";
@@ -62,15 +61,25 @@ export { LoginPage } from "./LoginPage";
 
 export function ProjectsPage() {
   const auth = useAuth();
+  const { t } = useI18n();
   const [searchParams] = useSearchParams();
   const { tokens } = auth;
   const service = useMemo(() => createProjectOverviewService({ getAccessToken: () => tokens?.access_token }), [tokens?.access_token]);
-  if (!auth.employee) return <RouteFeedback title="Employee identity unavailable" detail="Project selection requires a confirmed employee identity." />;
+  if (!auth.employee) return <RouteFeedback title={t("pages.employeeUnavailable")} detail={t("pages.employeeUnavailableDetail")} />;
   return <ProjectsOverview service={service} employeeId={auth.employee.id} initialCabinetId={searchParams.get("cabinet") ?? undefined} />;
+}
+
+/** A status as a word; the API's own value stays out of the heading. */
+export function projectStatusLabel(status: string | undefined, t: (key: string) => string): string {
+  if (status === "paused") return t("pages.projectStatusPaused");
+  if (status === "completed") return t("pages.projectStatusCompleted");
+  if (status === "archived") return t("pages.projectStatusArchived");
+  return t("pages.projectStatusActive");
 }
 
 export function ProjectOverviewPage({ project, settings = false }: { project: Project; settings?: boolean }) {
   const auth = useAuth();
+  const { t } = useI18n();
   const controls = useMemo(() => createDefaultProjectControlsService(() => auth.tokens?.access_token), [auth.tokens?.access_token]);
   const projectLinks = {
     runtime: `/projects/${encodeURIComponent(project.id)}/runtime`,
@@ -80,13 +89,13 @@ export function ProjectOverviewPage({ project, settings = false }: { project: Pr
   };
   if (settings) return <ProjectControlsPanel projectId={project.id} service={controls} initialProject={project} links={projectLinks} />;
   return <div className="employee-project-overview">
-    <PageHeading eyebrow="Project" title={project.name} detail={`Project ${project.id} · ${project.status}`} />
-    <div className="employee-project-links" aria-label="Project workflows">
-      <Link to={`/projects/${project.id}/runtime`}>Runtime</Link><Link to={`/projects/${project.id}/chat`}>Chat</Link>
-      <Link to={`/projects/${project.id}/files`}>Files</Link><Link to={`/projects/${project.id}/runs`}>Runs and approvals</Link>
-      <Link to={`/projects/${project.id}/resources`}>Resources</Link><Link to={`/projects/${project.id}/equipment`}>Equipment</Link>
-      <Link to={`/projects/${project.id}/automations`}>Automations</Link><Link to={`/projects/${project.id}/models`}>Models</Link>
-      <Link to={`/projects/${project.id}/settings`}>Project settings</Link>
+    <PageHeading eyebrow={t("pages.project")} title={project.name} detail={projectStatusLabel(project.status, t)} />
+    <div className="employee-project-links" aria-label={t("pages.project")}>
+      <Link to={`/projects/${project.id}/runtime`}>{t("workspace.navRuntime")}</Link><Link to={`/projects/${project.id}/chat`}>{t("workspace.navChat")}</Link>
+      <Link to={`/projects/${project.id}/files`}>{t("workspace.navFiles")}</Link><Link to={`/projects/${project.id}/runs`}>{t("workspace.navRuns")}</Link>
+      <Link to={`/projects/${project.id}/resources`}>{t("workspace.navResources")}</Link><Link to={`/projects/${project.id}/equipment`}>{t("workspace.navEquipment")}</Link>
+      <Link to={`/projects/${project.id}/automations`}>{t("workspace.navAutomations")}</Link><Link to={`/projects/${project.id}/models`}>{t("workspace.navModels")}</Link>
+      <Link to={`/projects/${project.id}/settings`}>{t("workspace.navSettings")}</Link>
     </div>
     <ProjectControlsPanel projectId={project.id} service={controls} initialProject={project} links={projectLinks} />
   </div>;
@@ -178,8 +187,9 @@ export function ProjectFilesPage() {
 }
 
 export function RunsPage({ approvalsOnly = false }: { approvalsOnly?: boolean }) {
+  const { t } = useI18n();
   return <section className={approvalsOnly ? "employee-approvals-page" : undefined}>
-    {approvalsOnly && <PageHeading eyebrow="Project" title="Approvals" detail="Pending decisions reported by the session API." />}
+    {approvalsOnly && <PageHeading eyebrow={t("pages.project")} title={t("pages.approvalsTitle")} detail={t("pages.approvalsDetail")} />}
     <RunsCenterPage />
   </section>;
 }
@@ -187,6 +197,7 @@ export function RunsPage({ approvalsOnly = false }: { approvalsOnly?: boolean })
 export function ProjectResourcesPage({ project }: { project: Project }) {
   const api = useApi();
   const auth = useAuth();
+  const { t } = useI18n();
   const contentOpsService = useMemo(() => createContentOpsService({ getAccessToken: () => auth.tokens?.access_token }), [auth.tokens?.access_token]);
   const [verifiedScope, setVerifiedScope] = useState<{ projectId: string; companyId: string }>();
   const [scopeLoading, setScopeLoading] = useState(true);
@@ -200,30 +211,30 @@ export function ProjectResourcesPage({ project }: { project: Project }) {
     setScopeLoading(true);
     void api.getProject(project.id).then((resolvedProject) => {
       if (!current) return;
-      if (resolvedProject.id !== project.id) throw new Error("The Project API returned a different project; company scope could not be verified.");
+      if (resolvedProject.id !== project.id) throw new Error(t("pages.resourcesScopeChanged"));
       const companyId = resolvedProject.company_id?.trim();
-      if (!companyId) throw new Error("The Project API did not return a company_id; content assets were not requested.");
+      if (!companyId) throw new Error(t("pages.resourcesScopeMissingCompany"));
       setVerifiedScope({ projectId: resolvedProject.id, companyId });
     }).catch((cause: unknown) => {
-      if (current) setScopeError(cause instanceof Error ? cause.message : "Project company scope could not be verified.");
+      if (current) setScopeError(cause instanceof Error ? cause.message : t("pages.resourcesScopeUnverified"));
     }).finally(() => {
       if (current) setScopeLoading(false);
     });
     return () => { current = false; };
-  }, [api, project.id, scopeAttempt]);
+  }, [api, project.id, scopeAttempt, t]);
 
   const currentScope = verifiedScope?.projectId === project.id ? verifiedScope : undefined;
+  // The panel's "what the backend does not yet support" aside used to sit here.
+  // It was a note to the engineering team — five paragraphs of contract
+  // vocabulary that a person opening their project's resources cannot act on.
+  // The information lives in the repository, not on this screen.
   return <section>
-    <PageHeading eyebrow="Project resources" title="Resources" detail={`Bound module data and company assets for ${project.name} · project ${project.id}.`} />
+    <PageHeading eyebrow={t("pages.resourcesEyebrow")} title={t("pages.resourcesTitle")} detail={t("pages.resourcesDetail", { name: project.name })} />
     <ProjectModuleResources projectId={project.id} accessToken={auth.tokens?.access_token} />
-    <aside className="resources-blockers" aria-label="Profile and migration resource blockers">
-      <div className="resources-blockers__header"><span className="resources-alert-icon" aria-hidden="true">!</span><div><p className="resources-eyebrow">Not connected</p><h2>Profile and migration blockers</h2></div><span className="resources-blockers__count">{RESOURCE_CONTRACT_BLOCKERS.length}</span></div>
-      <div className="resources-blockers__list">{RESOURCE_CONTRACT_BLOCKERS.map((blocker) => <div className="resources-blocker" key={blocker.code}><div><strong>{blocker.title}</strong><span>{blocker.detail}</span></div><code>{blocker.code} · {blocker.owner}</code></div>)}</div>
-    </aside>
     <section aria-labelledby="project-assets-title">
-      <header className="employee-page-heading"><p className="eyebrow">Company-scoped content</p><h2 id="project-assets-title">Assets</h2><p className="muted">Authenticated company assets from the Content API. Asset scope is verified through the Project API.</p></header>
-      {scopeLoading && <RouteFeedback title="Company context" detail="Verifying this project and its company scope through the Project API." />}
-      {!scopeLoading && scopeError && <div className="employee-route-feedback" role="alert"><strong>Project company scope unavailable</strong><span>{scopeError}</span><button type="button" onClick={() => setScopeAttempt((attempt) => attempt + 1)}>Retry project scope</button></div>}
+      <header className="employee-page-heading"><p className="eyebrow">{t("pages.resourcesAssetsEyebrow")}</p><h2 id="project-assets-title">{t("pages.resourcesAssetsTitle")}</h2><p className="muted">{t("pages.resourcesAssetsDetail")}</p></header>
+      {scopeLoading && <RouteFeedback title={t("pages.resourcesTitle")} detail={t("pages.resourcesScopeCheck")} />}
+      {!scopeLoading && scopeError && <div className="employee-route-feedback" role="alert"><strong>{t("pages.resourcesScopeTitle")}</strong><span>{scopeError}</span><button type="button" onClick={() => setScopeAttempt((attempt) => attempt + 1)}>{t("pages.resourcesScopeRetry")}</button></div>}
       {!scopeLoading && currentScope && <ContentOpsPanel companyId={currentScope.companyId} service={contentOpsService} />}
     </section>
   </section>;
@@ -231,15 +242,17 @@ export function ProjectResourcesPage({ project }: { project: Project }) {
 
 export function ContentOperationsPage({ companyId }: { companyId?: string }) {
   const auth = useAuth();
+  const { t } = useI18n();
   const scope = useCompanyScope(companyId);
   const service = useMemo(() => createContentOpsService({ getAccessToken: () => auth.tokens?.access_token }), [auth.tokens?.access_token]);
-  if (scope.loading) return <RouteFeedback title="Company context" detail="Resolving the authenticated company scope from the current-user API." />;
-  if (!scope.companyId) return <RouteFeedback title="Company context unavailable" detail="The current-user API returned no company scope for content operations." />;
+  if (scope.loading) return <RouteFeedback title={t("pages.contentTitle")} detail={t("common.loading")} />;
+  if (!scope.companyId) return <RouteFeedback title={t("pages.contentTitle")} detail={t("pages.contentUnavailableDetail")} />;
   return <ContentOpsPanel companyId={scope.companyId} service={service} />;
 }
 
 export function EquipmentPage() {
-  return <section><PageHeading eyebrow="Project data" title="Equipment procurement" detail="This surface uses its declared local typed adapter; no live equipment backend is claimed." /><EquipmentProcurementPage /></section>;
+  const { t } = useI18n();
+  return <section><PageHeading eyebrow={t("pages.project")} title={t("pages.equipmentTitle")} detail={t("pages.equipmentDetail")} /><EquipmentProcurementPage /></section>;
 }
 
 export function ProjectModelsPage({ projectId }: { projectId: string }) {
@@ -257,18 +270,38 @@ export function ProjectModelsPage({ projectId }: { projectId: string }) {
 
 export function CabinetSelectionPage() {
   const api = useApi();
+  const { t, plural } = useI18n();
+  const auth = useAuth();
   const [cabinets, setCabinets] = useState<Cabinet[]>();
   const [error, setError] = useState<string>();
   useEffect(() => {
     let active = true;
-    void api.listCabinets().then((items) => { if (active) setCabinets(items); }).catch((cause: unknown) => { if (active) setError(cause instanceof Error ? cause.message : "Не удалось загрузить кабинеты."); });
+    if (!auth.employee) {
+      // Cabinets are an employee surface: the API answers `403 employee
+      // required`. Saying that on screen told the reader nothing, so the page
+      // explains the situation instead of relaying the error.
+      setCabinets([]);
+      setError(undefined);
+      return;
+    }
+    void api.listCabinets().then((items) => { if (active) setCabinets(items); }).catch((cause: unknown) => { if (active) setError(cause instanceof Error ? cause.message : t("pages.cabinetsFailed")); });
     return () => { active = false; };
-  }, [api]);
-  return <section><PageHeading eyebrow="Employee workspace" title="Cabinets" detail="Choose a cabinet to open its projects and module navigation." />
+  }, [api, t, auth.employee]);
+  if (!auth.employee) {
+    return <section>
+      <PageHeading eyebrow={t("pages.cabinetsEyebrow")} title={t("pages.cabinetsTitle")} detail={t("pages.cabinetsDetail")} />
+      <RouteFeedback
+        action={<Link to={auth.isCompany ? "/company" : "/projects"}>{auth.isCompany ? t("nav.company") : t("nav.projects")}</Link>}
+        detail={t("pages.cabinetsNoEmployeeDetail")}
+        title={t("pages.cabinetsNoEmployee")}
+      />
+    </section>;
+  }
+  return <section><PageHeading eyebrow={t("pages.cabinetsEyebrow")} title={t("pages.cabinetsTitle")} detail={t("pages.cabinetsDetail")} />
     {error && <p role="alert" className="error">{error}</p>}
-    {!cabinets && !error && <p role="status">Загрузка кабинетов…</p>}
-    <div className="employee-cabinet-list">{cabinets?.map((cabinet) => <Link key={cabinet.id} to={`/cabinets/${encodeURIComponent(cabinet.id)}`}><strong>{cabinet.name}</strong><span>{cabinet.projects_count ?? "—"} projects</span></Link>)}</div>
-    {cabinets?.length === 0 && <p>Для этого сотрудника нет доступных кабинетов.</p>}
+    {!cabinets && !error && <p role="status">{t("pages.cabinetsLoading")}</p>}
+    <div className="employee-cabinet-list">{cabinets?.map((cabinet) => <Link key={cabinet.id} to={`/cabinets/${encodeURIComponent(cabinet.id)}`}><strong>{cabinet.name}</strong><span>{plural("pages.cabinetProjects", cabinet.projects_count ?? 0)}</span></Link>)}</div>
+    {cabinets?.length === 0 && <p>{t("pages.cabinetsEmpty")}</p>}
   </section>;
 }
 
@@ -276,17 +309,18 @@ export function CabinetPage() {
   const { cabinetId = "" } = useParams();
   const api = useApi();
   const auth = useAuth();
+  const { t } = useI18n();
   const navigate = useNavigate();
   const service = useMemo(() => createCabinetOverviewService({ getAccessToken: () => auth.tokens?.access_token }), [auth.tokens?.access_token]);
   const [cabinet, setCabinet] = useState<Cabinet>();
   const [error, setError] = useState<string>();
   useEffect(() => {
     let active = true;
-    void api.getCabinet(cabinetId).then((item) => { if (active) setCabinet(item); }).catch((cause: unknown) => { if (active) setError(cause instanceof Error ? cause.message : "Cabinet is unavailable."); });
+    void api.getCabinet(cabinetId).then((item) => { if (active) setCabinet(item); }).catch((cause: unknown) => { if (active) setError(cause instanceof Error ? cause.message : t("pages.cabinetUnavailable")); });
     return () => { active = false; };
-  }, [api, cabinetId]);
-  if (error) return <RouteFeedback title="Cabinet unavailable" detail={error} action={<Link to="/cabinets">Cabinet list</Link>} />;
-  if (!cabinet) return <p role="status">Loading cabinet…</p>;
+  }, [api, cabinetId, t]);
+  if (error) return <RouteFeedback title={t("pages.cabinetUnavailable")} detail={error} action={<Link to="/cabinets">{t("pages.cabinetList")}</Link>} />;
+  if (!cabinet) return <p role="status">{t("common.loading")}</p>;
   function go(target: CabinetNavigationTarget) {
     if (target.type === "projects") navigate(`/projects?cabinet=${encodeURIComponent(cabinetId)}`);
     else if (target.type === "project") navigate(`/projects/${encodeURIComponent(target.projectId)}`);
@@ -336,5 +370,11 @@ export function ModuleBindingPage() {
 
 export function NotFoundPage() {
   const location = useLocation();
-  return <section className="employee-not-found"><PageHeading eyebrow="404" title="Page not found" detail={`No workspace route matches ${location.pathname}.`} /><Link to="/projects">Back to projects</Link></section>;
+  const { t } = useI18n();
+  const auth = useAuth();
+  return <section className="employee-not-found">
+    <PageHeading eyebrow="404" title={t("nav.notFoundTitle")} detail={t("nav.notFoundDetail")} />
+    <Link to={auth.isPlatformAdmin ? "/admin" : "/projects"}>{auth.isPlatformAdmin ? t("nav.admin") : t("nav.notFoundBack")}</Link>
+    <code className="employee-not-found__path">{location.pathname}</code>
+  </section>;
 }

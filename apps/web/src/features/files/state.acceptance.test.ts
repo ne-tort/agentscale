@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
+import { createTranslator } from "../../i18n/catalogue";
 import { WorkspaceServiceError, normalizeWorkspacePath, joinWorkspacePath, parentWorkspacePath } from "./contracts";
 import { classifyWorkspaceError, sortWorkspaceEntries, workspaceErrorMessage } from "./state";
+
+// The failure sentences come from the catalogue, so the tests ask for them the way a
+// component does — through a translator for a pinned locale.
+const en = createTranslator("en");
+const ru = createTranslator("ru");
 
 describe("Pod workspace file manager acceptance states", () => {
   it("normalizes only paths inside the project workspace", () => {
@@ -28,13 +34,15 @@ describe("Pod workspace file manager acceptance states", () => {
     expect(classifyWorkspaceError(new WorkspaceServiceError({ code: "WORKSPACE_ALREADY_EXISTS", title: "Conflict", status: 409 }))).toBe("error");
     expect(classifyWorkspaceError(new WorkspaceServiceError({ code: "OFFLINE", title: "Offline", status: 0 }))).toBe("offline");
     expect(classifyWorkspaceError(new WorkspaceServiceError({ code: "UNSUPPORTED_MEDIA", title: "Unsupported", status: 415 }))).toBe("unsupported");
-    expect(workspaceErrorMessage(new WorkspaceServiceError({ code: "POD_NOT_RUNNING", title: "Conflict", status: 409 }))).toContain("Pod is not running");
-    expect(workspaceErrorMessage(new WorkspaceServiceError({ code: "PROJECT_PAUSED", title: "Conflict", status: 409 }))).toContain("paused");
+    expect(workspaceErrorMessage(new WorkspaceServiceError({ code: "POD_NOT_RUNNING", title: "Conflict", status: 409 }), en)).toContain("Pod is not running");
+    expect(workspaceErrorMessage(new WorkspaceServiceError({ code: "PROJECT_PAUSED", title: "Conflict", status: 409 }), en)).toContain("paused");
   });
 
   it("fails closed for mutations while the Pod is unavailable", () => {
     const failure = new WorkspaceServiceError({ code: "POD_NOT_RUNNING", title: "Conflict", status: 409 });
     expect(classifyWorkspaceError(failure)).toBe("pod-unavailable");
-    expect(workspaceErrorMessage(failure)).toBe("The Pod is not running. Start the project Pod to access its files.");
+    expect(workspaceErrorMessage(failure, en)).toBe("The Pod is not running. Start the project Pod to access its files.");
+    // The same failure is worded for a Russian reader rather than leaking the code.
+    expect(workspaceErrorMessage(failure, ru)).toBe("Pod не запущен. Запустите Pod проекта, чтобы открыть файлы.");
   });
 });

@@ -43,7 +43,7 @@ function encode(value: string): string {
 function listItems(value: unknown): ModuleAdminRow[] {
   if (Array.isArray(value)) return value.filter(isRecord) as ModuleAdminRow[];
   if (isRecord(value) && Array.isArray(value.items)) return value.items.filter(isRecord) as ModuleAdminRow[];
-  throw new ModuleAdminRequestError("API returned an invalid list response.");
+  throw new ModuleAdminRequestError("Сервер вернул неожиданный ответ. Обновите страницу.");
 }
 
 export function createModuleAdminService(options: ModuleAdminServiceOptions = {}): ModuleAdminService {
@@ -63,11 +63,11 @@ export function createModuleAdminService(options: ModuleAdminServiceOptions = {}
         },
         ...(body ? { body: JSON.stringify(body) } : {}),
       });
-    } catch (error) {
-      throw new ModuleAdminRequestError(error instanceof Error ? `API connection failed: ${error.message}` : "API connection failed.");
+    } catch {
+      throw new ModuleAdminRequestError("Не удалось связаться с сервером. Проверьте подключение.");
     }
     if (!response.ok) {
-      let message = response.statusText || `Request failed (${response.status})`;
+      let message = response.statusText || `Запрос не выполнен (код ${response.status}).`;
       try {
         const payload: unknown = await response.json();
         if (isRecord(payload)) {
@@ -80,14 +80,14 @@ export function createModuleAdminService(options: ModuleAdminServiceOptions = {}
     }
     if (response.status === 204) return undefined as T;
     try { return await response.json() as T; }
-    catch { throw new ModuleAdminRequestError("API returned an invalid JSON response.", response.status); }
+    catch { throw new ModuleAdminRequestError("Сервер вернул неожиданный ответ. Обновите страницу.", response.status); }
   }
 
   const modulePath = (moduleId: string) => `/admin/modules/${encode(moduleId)}`;
   const companyModulePath = (companyId: string, moduleId: string) => `/companies/${encode(companyId)}/modules/${encode(moduleId)}`;
   const list = (path: string) => request<unknown>(path).then(listItems);
   const companyRequired = (companyId?: string) => {
-    if (!companyId) throw new ModuleAdminRequestError("Company ID is required for this API operation.");
+    if (!companyId) throw new ModuleAdminRequestError("Не выбрана компания — действие невозможно.");
     return companyId;
   };
 

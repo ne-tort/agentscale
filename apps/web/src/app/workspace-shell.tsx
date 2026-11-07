@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from "react";
 import { Link, matchPath, useLocation } from "react-router-dom";
+import { useI18n } from "../i18n/useT";
 import "./workspace-shell.css";
 
 export const WORKSPACE_ROUTE_KEYS = [
@@ -99,79 +100,70 @@ export interface WorkspaceShellProps {
 }
 
 export interface WorkspaceRouteMeta {
-  readonly label: string;
   readonly section: WorkspaceNavSection;
   readonly icon: WorkspaceIconName;
+  /**
+   * Part of the daily path, so it is always on screen. Everything else is a
+   * setting or a diagnostic and lives behind "Ещё": thirteen equal links made the
+   * sidebar read as a list of subsystems rather than a place to work.
+   */
+  readonly primary: boolean;
 }
 
 export const WORKSPACE_ROUTE_META: Readonly<Record<WorkspaceRouteKey, WorkspaceRouteMeta>> = {
-  overview: { label: "Overview", section: "workspace", icon: "grid" },
-  runtime: { label: "Runtime", section: "workspace", icon: "pulse" },
-  chat: { label: "Chat", section: "workspace", icon: "message" },
-  files: { label: "Files", section: "workspace", icon: "file" },
-  runs: { label: "Runs", section: "operations", icon: "clock" },
-  approvals: { label: "Approvals", section: "operations", icon: "check" },
-  resources: { label: "Resources", section: "operations", icon: "layers" },
-  content: { label: "Content", section: "operations", icon: "file" },
-  equipment: { label: "Equipment", section: "operations", icon: "server" },
-  automations: { label: "Automations", section: "operations", icon: "clock" },
-  models: { label: "Models", section: "operations", icon: "grid" },
-  settings: { label: "Settings", section: "manage", icon: "settings" },
-  module: { label: "Module", section: "workspace", icon: "layers" },
+  overview: { section: "workspace", icon: "grid", primary: true },
+  chat: { section: "workspace", icon: "message", primary: true },
+  files: { section: "workspace", icon: "file", primary: true },
+  runs: { section: "operations", icon: "clock", primary: true },
+  approvals: { section: "operations", icon: "check", primary: true },
+  module: { section: "workspace", icon: "layers", primary: true },
+  runtime: { section: "workspace", icon: "pulse", primary: false },
+  resources: { section: "operations", icon: "layers", primary: false },
+  content: { section: "operations", icon: "file", primary: false },
+  equipment: { section: "operations", icon: "server", primary: false },
+  automations: { section: "operations", icon: "clock", primary: false },
+  models: { section: "operations", icon: "grid", primary: false },
+  settings: { section: "manage", icon: "settings", primary: false },
 };
 
 export interface WorkspaceNavItem {
   readonly key: WorkspaceNavRouteKey;
-  readonly label: string;
+  /** Only the module destination carries a name of its own; the rest are translated. */
+  readonly label?: string;
   readonly section: WorkspaceNavSection;
   readonly icon: WorkspaceIconName;
+  readonly primary: boolean;
 }
 
-const WORKSPACE_NAV_ROUTE_KEYS: readonly WorkspaceNavRouteKey[] = [
-  "overview",
-  "runtime",
-  "chat",
-  "files",
-  "runs",
-  "approvals",
-  "resources",
-  "content",
-  "equipment",
-  "automations",
-  "models",
-  "settings",
-  "module",
-];
-
-export const WORKSPACE_NAV_ITEMS: readonly WorkspaceNavItem[] = WORKSPACE_NAV_ROUTE_KEYS.map((key) => ({
+/**
+ * The order of `WORKSPACE_ROUTE_KEYS` is the canonical one; grouping decides
+ * what is visible, not what exists. Keeping one list means a destination cannot
+ * be declared in one place and silently forgotten in another.
+ */
+export const WORKSPACE_NAV_ITEMS: readonly WorkspaceNavItem[] = WORKSPACE_ROUTE_KEYS.map((key) => ({
   key,
-  label: WORKSPACE_ROUTE_META[key].label,
   section: WORKSPACE_ROUTE_META[key].section,
   icon: WORKSPACE_ROUTE_META[key].icon,
+  primary: WORKSPACE_ROUTE_META[key].primary,
 }));
 
+/** i18n key for a destination's name; the module's own name comes from the API. */
+export function workspaceNavLabelKey(key: WorkspaceNavRouteKey): string {
+  return `workspace.nav${key.charAt(0).toUpperCase()}${key.slice(1)}`;
+}
+
 export interface WorkspaceNavGroup {
-  readonly label: string;
-  readonly section: WorkspaceNavSection;
+  readonly id: "primary" | "more";
   readonly items: readonly WorkspaceNavItem[];
 }
 
+/**
+ * Two groups instead of three subsystem-shaped ones: what you came to do, and
+ * everything that configures or inspects it.
+ */
 export const WORKSPACE_NAV_GROUPS: readonly WorkspaceNavGroup[] = [
-  {
-    label: "Workspace",
-    section: "workspace",
-    items: WORKSPACE_NAV_ITEMS.filter((item) => item.section === "workspace"),
-  },
-  {
-    label: "Operations",
-    section: "operations",
-    items: WORKSPACE_NAV_ITEMS.filter((item) => item.section === "operations"),
-  },
-  {
-    label: "Manage",
-    section: "manage",
-    items: WORKSPACE_NAV_ITEMS.filter((item) => item.section === "manage"),
-  },
+  { id: "primary", items: WORKSPACE_NAV_ITEMS.filter((item) => item.primary) },
+  { id: "more", items: WORKSPACE_NAV_ITEMS.filter((item) => !item.primary) },
 ];
 
 export interface WorkspaceRouteContractOptions {
@@ -412,7 +404,7 @@ export function getWorkspaceNavigation(
     const route = getRouteDefinition(contract, item.key);
     return route ? [{
       ...item,
-      label: route.label ?? item.label,
+      ...(route.label ? { label: route.label } : {}),
       href: route.href,
       active: activeRoute === item.key,
     }] : [];
@@ -420,7 +412,10 @@ export function getWorkspaceNavigation(
 }
 
 export interface WorkspaceBreadcrumb {
-  readonly label: string;
+  /** A name that belongs to the data — a cabinet, a project, a module. */
+  readonly label?: string;
+  /** An i18n key for a section name; the component translates it. */
+  readonly labelKey?: string;
   readonly href?: string;
   readonly current: boolean;
 }
@@ -428,13 +423,13 @@ export interface WorkspaceBreadcrumb {
 export function getWorkspaceBreadcrumbs({
   cabinetName,
   projectName,
-  projectId,
   activeRoute,
   routeContract,
 }: {
   readonly cabinetName: string;
   readonly projectName: string;
-  readonly projectId: string;
+  /** Accepted for callers that still pass it; the crumb shows the name only. */
+  readonly projectId?: string;
   readonly activeRoute?: WorkspaceRouteKey;
   readonly routeContract: WorkspaceRouteContract;
 }): readonly WorkspaceBreadcrumb[] {
@@ -442,7 +437,9 @@ export function getWorkspaceBreadcrumbs({
   const breadcrumbs: WorkspaceBreadcrumb[] = [
     { label: cabinetName, current: false },
     {
-      label: `${projectName} · ${projectId}`,
+      // The project name, not `name · co_0cab…`: the identifier meant nothing on
+      // screen and is still available in project settings.
+      label: projectName,
       href: activeRoute === "overview" || !activeRoute ? undefined : contract.overview.href,
       current: activeRoute === "overview" || !activeRoute,
     },
@@ -450,12 +447,13 @@ export function getWorkspaceBreadcrumbs({
 
   if (activeRoute && activeRoute !== "overview") {
     const definition = getRouteDefinition(contract, activeRoute);
-    breadcrumbs.push({
-      label: definition?.scopeId
-        ? `${definition.label ?? WORKSPACE_ROUTE_META[activeRoute].label} · ${definition.scopeId}`
-        : definition?.label ?? WORKSPACE_ROUTE_META[activeRoute].label,
-      current: true,
-    });
+    // A module names itself; every other section is a fixed label, so the crumb
+    // carries the key and the component translates it.
+    breadcrumbs.push(
+      definition?.label
+        ? { label: definition.label, current: true }
+        : { labelKey: workspaceNavLabelKey(activeRoute), current: true },
+    );
   }
 
   return breadcrumbs;
@@ -522,6 +520,7 @@ export function WorkspaceShell({
     () => getWorkspaceNavigation(contract, activeRoute),
     [activeRoute, contract],
   );
+  const { t } = useI18n();
   const breadcrumbs = useMemo(
     () => getWorkspaceBreadcrumbs({
       cabinetName: cabinet.name,
@@ -534,6 +533,7 @@ export function WorkspaceShell({
   );
   const [sidebarCollapsed, setSidebarCollapsed] = useState(initialSidebarCollapsed);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const mobileTriggerRef = useRef<HTMLButtonElement>(null);
   const firstNavLinkRef = useRef<HTMLAnchorElement>(null);
@@ -690,13 +690,13 @@ export function WorkspaceShell({
       data-sidebar-collapsed={sidebarCollapsed ? "true" : "false"}
     >
       <a className="workspace-shell__skip-link" href="#workspace-shell-main">
-        Skip to workspace
+        {t("workspace.skipToContent")}
       </a>
 
-      <aside className="workspace-shell__sidebar" id="workspace-shell-navigation" aria-label="Workspace navigation">
+      <aside className="workspace-shell__sidebar" id="workspace-shell-navigation" aria-label={t("workspace.navigation")}>
         <div className="workspace-shell__sidebar-header">
           <Link
-            aria-label={`${project.name} workspace overview`}
+            aria-label={`${project.name} — ${t("workspace.navOverview")}`}
             className="workspace-shell__brand"
             onClick={() => handleNavigate("overview")}
             to={contract.overview.href}
@@ -704,14 +704,14 @@ export function WorkspaceShell({
             <span aria-hidden="true" className="workspace-shell__brand-mark">A</span>
             <span className="workspace-shell__brand-copy">
               <strong>agentscale</strong>
-              <span>workspace</span>
+              <span>{t("workspace.brandSuffix")}</span>
             </span>
           </Link>
           <button
             aria-controls="workspace-shell-navigation"
             aria-expanded={!sidebarCollapsed}
             aria-keyshortcuts="["
-            aria-label={sidebarCollapsed ? "Expand navigation" : "Collapse navigation"}
+            aria-label={sidebarCollapsed ? t("workspace.expandNavigation") : t("workspace.collapseNavigation")}
             className="workspace-shell__sidebar-toggle"
             onClick={() => setSidebarCollapsed((collapsed) => !collapsed)}
             type="button"
@@ -721,62 +721,81 @@ export function WorkspaceShell({
         </div>
 
         <div className="workspace-shell__context-card">
-          <span className="workspace-shell__context-kicker">Cabinet</span>
+          <span className="workspace-shell__context-kicker">{t("workspace.cabinet")}</span>
           <strong className="workspace-shell__context-name">{cabinet.name}</strong>
           <span className="workspace-shell__context-project">
             <span aria-hidden="true" className="workspace-shell__project-dot" />
             <span>{project.name}</span>
           </span>
-          <code className="workspace-shell__context-project-id">{project.id}</code>
           {cabinet.description && <span className="workspace-shell__context-description">{cabinet.description}</span>}
-          {activeRoute === "module" && contract.module && <span className="workspace-shell__context-module"><span>Module</span><strong>{contract.module.label ?? "Module"}</strong><code>{contract.module.scopeId}</code></span>}
+          {activeRoute === "module" && contract.module && <span className="workspace-shell__context-module"><span>{t("workspace.module")}</span><strong>{contract.module.label ?? t("workspace.module")}</strong></span>}
         </div>
 
-        <nav className="workspace-shell__nav" aria-label="Workspace sections">
-          {WORKSPACE_NAV_GROUPS.map((group) => (
-            <div className="workspace-shell__nav-group" key={group.section}>
-              <p className="workspace-shell__nav-heading">{group.label}</p>
-              {group.items.map((item) => {
-                const route = navigation.find((candidate) => candidate.key === item.key);
-                if (!route) return null;
-                const isActive = activeRoute === item.key;
-                return (
-                  <Link
-                    aria-current={isActive ? "page" : undefined}
-                    aria-label={route.label}
-                    className={joinClassNames(
-                      "workspace-shell__nav-link",
-                      isActive && "workspace-shell__nav-link--active",
-                    )}
-                    data-active={isActive ? "true" : "false"}
-                    key={item.key}
-                    onClick={() => handleNavigate(item.key)}
-                    ref={item.key === "overview" ? firstNavLinkRef : undefined}
-                    title={route.label}
-                    to={route.href}
-                  >
-                    <WorkspaceIcon name={item.icon} />
-                    <span className="workspace-shell__nav-label">{route.label}</span>
-                    {isActive && <span aria-hidden="true" className="workspace-shell__nav-indicator" />}
-                  </Link>
-                );
-              })}
-            </div>
-          ))}
+        <nav className="workspace-shell__nav" aria-label={t("workspace.navigationSections")}>
+          {WORKSPACE_NAV_GROUPS.map((group) => {
+            const links = group.items.flatMap((item) => {
+              const route = navigation.find((candidate) => candidate.key === item.key);
+              return route ? [{ item, route }] : [];
+            });
+            if (links.length === 0) return null;
+            const renderLink = ({ item, route }: (typeof links)[number]) => {
+              const isActive = activeRoute === item.key;
+              const label = route.label ?? t(workspaceNavLabelKey(item.key));
+              return (
+                <Link
+                  aria-current={isActive ? "page" : undefined}
+                  aria-label={label}
+                  className={joinClassNames(
+                    "workspace-shell__nav-link",
+                    isActive && "workspace-shell__nav-link--active",
+                  )}
+                  data-active={isActive ? "true" : "false"}
+                  key={item.key}
+                  onClick={() => handleNavigate(item.key)}
+                  ref={item.key === "overview" ? firstNavLinkRef : undefined}
+                  title={label}
+                  to={route.href}
+                >
+                  <WorkspaceIcon name={item.icon} />
+                  <span className="workspace-shell__nav-label">{label}</span>
+                  {isActive && <span aria-hidden="true" className="workspace-shell__nav-indicator" />}
+                </Link>
+              );
+            };
+            // The primary group is always open. The rest is a disclosure that
+            // opens itself when the current section lives inside it, so arriving
+            // by link never hides the page you are looking at.
+            if (group.id === "primary") {
+              return <div className="workspace-shell__nav-group" key={group.id}>{links.map(renderLink)}</div>;
+            }
+            return (
+              <details
+                className="workspace-shell__nav-group workspace-shell__nav-more"
+                key={group.id}
+                open={moreOpen || links.some(({ item }) => item.key === activeRoute)}
+              >
+                <summary className="workspace-shell__nav-heading" onClick={(event) => { event.preventDefault(); setMoreOpen((open) => !open); }}>
+                  <span>{t("workspace.more")}</span>
+                  <span aria-hidden="true" className="workspace-shell__nav-more-chevron">⌄</span>
+                </summary>
+                {links.map(renderLink)}
+              </details>
+            );
+          })}
         </nav>
 
         <div className="workspace-shell__sidebar-footer">
           <span className="workspace-shell__status-dot" />
           <span className="workspace-shell__status-copy">
-            <strong>Workspace online</strong>
-            <span>All systems operational</span>
+            <strong>{t("workspace.workspaceOnline")}</strong>
+            <span>{t("workspace.workspaceOnlineDetail")}</span>
           </span>
         </div>
       </aside>
 
       {mobileNavOpen && (
         <button
-          aria-label="Close navigation"
+          aria-label={t("workspace.closeNavigation")}
           className="workspace-shell__backdrop"
           onClick={closeMobileNavigation}
           type="button"
@@ -789,7 +808,7 @@ export function WorkspaceShell({
             <button
               aria-controls="workspace-shell-navigation"
               aria-expanded={mobileNavOpen}
-              aria-label={mobileNavOpen ? "Close navigation" : "Open navigation"}
+              aria-label={mobileNavOpen ? t("workspace.closeNavigation") : t("workspace.openNavigation")}
               className="workspace-shell__mobile-trigger"
               onClick={mobileNavOpen ? closeMobileNavigation : openMobileNavigation}
               ref={mobileTriggerRef}
@@ -798,26 +817,28 @@ export function WorkspaceShell({
               <span aria-hidden="true" className="workspace-shell__menu-icon"><span /><span /><span /></span>
             </button>
             <div className="workspace-shell__breadcrumb-wrap">
-              <nav aria-label="Breadcrumb" className="workspace-shell__breadcrumbs">
+              <nav aria-label={t("workspace.breadcrumb")} className="workspace-shell__breadcrumbs">
                 <ol>
-                  {breadcrumbs.map((breadcrumb, index) => (
-                    <li key={`${breadcrumb.label}-${index}`}>
+                  {breadcrumbs.map((breadcrumb, index) => {
+                    const label = breadcrumb.labelKey ? t(breadcrumb.labelKey) : breadcrumb.label ?? "";
+                    return (
+                    <li key={`${label}-${index}`}>
                       {breadcrumb.href && !breadcrumb.current ? (
-                        <Link onClick={() => handleNavigate("overview")} to={breadcrumb.href}>{breadcrumb.label}</Link>
+                        <Link onClick={() => handleNavigate("overview")} to={breadcrumb.href}>{label}</Link>
                       ) : (
-                        <span aria-current={breadcrumb.current ? "page" : undefined}>{breadcrumb.label}</span>
+                        <span aria-current={breadcrumb.current ? "page" : undefined}>{label}</span>
                       )}
                       {index < breadcrumbs.length - 1 && <span aria-hidden="true" className="workspace-shell__breadcrumb-separator">/</span>}
                     </li>
-                  ))}
+                    );
+                  })}
                 </ol>
               </nav>
               <div className="workspace-shell__mobile-context">
                 <span>{cabinet.name}</span>
                 <span aria-hidden="true">/</span>
                 <strong>{project.name}</strong>
-                <code className="workspace-shell__mobile-project-id">{project.id}</code>
-                {activeRoute === "module" && contract.module && <span className="workspace-shell__mobile-module">{contract.module.label ?? "Module"} · {contract.module.scopeId}</span>}
+                {activeRoute === "module" && contract.module && <span className="workspace-shell__mobile-module">{contract.module.label ?? t("workspace.module")}</span>}
               </div>
             </div>
           </div>
@@ -833,7 +854,7 @@ export function WorkspaceShell({
               <button
                 aria-expanded={accountMenuOpen}
                 aria-haspopup="menu"
-                aria-label={`Open account menu for ${account.displayName}`}
+                aria-label={t("workspace.openAccountMenu", { name: account.displayName })}
                 className="workspace-shell__account-trigger"
                 onClick={() => (accountMenuOpen ? closeAccountMenu() : openAccountMenu())}
                 onKeyDown={handleAccountTriggerKeyDown}
@@ -847,13 +868,13 @@ export function WorkspaceShell({
                 )}
                 <span className="workspace-shell__account-copy">
                   <strong>{account.displayName}</strong>
-                  <span>{account.role ?? account.email ?? "Account"}</span>
+                  <span>{account.role ?? account.email ?? t("workspace.account")}</span>
                 </span>
                 <span aria-hidden="true" className="workspace-shell__account-chevron">⌄</span>
               </button>
               {accountMenuOpen && (
                 <div
-                  aria-label="Account actions"
+                  aria-label={t("workspace.accountActions")}
                   className="workspace-shell__account-menu"
                   onKeyDown={handleAccountMenuKeyDown}
                   role="menu"
@@ -870,7 +891,7 @@ export function WorkspaceShell({
                     to={contract.settings.href}
                   >
                     <WorkspaceIcon name="settings" />
-                    Project settings
+                    {t("workspace.projectSettings")}
                   </Link>
                   <button
                     className="workspace-shell__account-menu-item workspace-shell__account-menu-item--danger"
@@ -883,7 +904,7 @@ export function WorkspaceShell({
                     type="button"
                   >
                     <span aria-hidden="true" className="workspace-shell__signout-icon">↪</span>
-                    Sign out
+                    {t("workspace.signOut")}
                   </button>
                 </div>
               )}
@@ -894,21 +915,26 @@ export function WorkspaceShell({
         <main className="workspace-shell__main" id="workspace-shell-main" tabIndex={-1}>
           {!routeIsSupported ? (
             <section className="workspace-shell__route-recovery" role="alert">
-              <p className="workspace-shell__route-eyebrow">{routeResolution.scope === "other-project" ? "Project scope mismatch" : routeResolution.scope === "project-context-mismatch" ? "Project context mismatch" : routeResolution.scope === "other-module" ? "Module scope mismatch" : "Unsupported workspace route"}</p>
-              <h1>{routeResolution.scope === "other-project" ? "This workspace belongs to a different project" : routeResolution.scope === "project-context-mismatch" ? "The selected project does not match this route" : routeResolution.scope === "other-module" ? "This URL requests a different module" : "This route is not available in this workspace"}</h1>
+              <p className="workspace-shell__route-eyebrow">{t("workspace.scopeKicker")}</p>
+              <h1>
+                {routeResolution.scope === "other-project" ? t("workspace.scopeOtherProject")
+                  : routeResolution.scope === "project-context-mismatch" ? t("workspace.scopeProjectMismatch")
+                  : routeResolution.scope === "other-module" ? t("workspace.scopeOtherModule")
+                  : t("workspace.scopeUnsupported")}
+              </h1>
               <p>
                 {routeResolution.scope === "other-project"
-                  ? `This shell is scoped to ${project.name} (${project.id}); the URL requests project ${routeResolution.requestedProjectId ?? "unknown"}. Its content was not loaded.`
+                  ? t("workspace.scopeOtherProjectDetail")
                   : routeResolution.scope === "project-context-mismatch"
-                    ? `The route is scoped to project ${routeResolution.requestedProjectId ?? "unknown"}, but the selected project context is ${routeResolution.contextProjectId ?? "unknown"}. No project content was loaded.`
+                    ? t("workspace.scopeProjectMismatchDetail")
                     : routeResolution.scope === "other-module"
-                    ? `This workspace is scoped to module ${contract.module?.scopeId ?? "unknown"}; the URL requests module ${routeResolution.requestedModuleId ?? "unknown"}. Its content was not loaded.`
-                    : `No confirmed workspace destination matches ${location.pathname}. The URL was kept so you can recover without losing the deep link.`}
+                      ? t("workspace.scopeOtherModuleDetail")
+                      : t("workspace.scopeUnsupportedDetail")}
               </p>
               <div className="workspace-shell__route-actions">
-                {routeResolution.scope === "project-context-mismatch" ? <Link to="/projects">Projects</Link> : (
-                  <Link onClick={() => handleNavigate("overview")} to={contract.overview.href}>Open {project.name}</Link>
-                )}
+                {routeResolution.scope === "project-context-mismatch"
+                  ? <Link to="/projects">{t("workspace.allProjects")}</Link>
+                  : <Link onClick={() => handleNavigate("overview")} to={contract.overview.href}>{t("workspace.openProject", { name: project.name })}</Link>}
               </div>
             </section>
           ) : children}

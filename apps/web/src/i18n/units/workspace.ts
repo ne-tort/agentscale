@@ -1,0 +1,118 @@
+import { defineStrings } from "../core";
+
+/**
+ * The project workspace: its navigation, its header and the recovery screen.
+ *
+ * The navigation is split by what a person does with it, not by which subsystem
+ * implements it. `primary` is the daily path — what the project *is*, what the
+ * agent is doing, its files, its runs, what waits on you. Everything else is a
+ * setting or a diagnostic and belongs under "Ещё".
+ */
+export default defineStrings({
+  ru: {
+    skipToContent: "Перейти к содержимому",
+    navigation: "Навигация проекта",
+    navigationSections: "Разделы проекта",
+    expandNavigation: "Развернуть навигацию",
+    collapseNavigation: "Свернуть навигацию",
+    openNavigation: "Открыть навигацию",
+    closeNavigation: "Закрыть навигацию",
+    cabinet: "Кабинет",
+    project: "Проект",
+    module: "Модуль",
+    brandSuffix: "проект",
+    more: "Ещё",
+    moreHint: "Настройки и инструменты проекта",
+
+    navOverview: "Обзор",
+    navRuntime: "Среда выполнения",
+    navChat: "Чат",
+    navFiles: "Файлы",
+    navRuns: "Запуски",
+    navApprovals: "Согласования",
+    navResources: "Ресурсы",
+    navContent: "Контент",
+    navEquipment: "Оборудование",
+    navAutomations: "Автоматизации",
+    navModels: "Модели",
+    navSettings: "Настройки",
+    navModule: "Модуль",
+
+    workspaceOnline: "Проект доступен",
+    workspaceOnlineDetail: "Все разделы отвечают",
+    workspaceOffline: "Проект недоступен",
+    workspaceOfflineDetail: "Часть разделов не отвечает",
+
+    breadcrumb: "Хлебные крошки",
+    openAccountMenu: "Меню аккаунта: {name}",
+    accountActions: "Действия аккаунта",
+    account: "Аккаунт",
+    projectSettings: "Настройки проекта",
+    signOut: "Выйти",
+
+    scopeOtherProject: "Ссылка ведёт в другой проект",
+    scopeProjectMismatch: "Проект не совпадает с адресом",
+    scopeOtherModule: "Ссылка ведёт в другой модуль",
+    scopeUnsupported: "Такого раздела нет",
+    scopeKicker: "Адрес не подходит",
+    scopeOtherProjectDetail: "Этот адрес открывает проект, который сейчас не выбран. Содержимое не загружено — откройте проект из списка.",
+    scopeProjectMismatchDetail: "Адрес относится к другому проекту, чем выбранный сейчас. Содержимое не загружено.",
+    scopeOtherModuleDetail: "Адрес открывает модуль, которого нет в этом проекте. Содержимое не загружено.",
+    scopeUnsupportedDetail: "Раздела с таким адресом нет. Адрес сохранён, чтобы вы могли вернуться.",
+    openProject: "Открыть {name}",
+    allProjects: "Все проекты",
+  },
+  en: {
+    skipToContent: "Skip to content",
+    navigation: "Project navigation",
+    navigationSections: "Project sections",
+    expandNavigation: "Expand navigation",
+    collapseNavigation: "Collapse navigation",
+    openNavigation: "Open navigation",
+    closeNavigation: "Close navigation",
+    cabinet: "Cabinet",
+    project: "Project",
+    module: "Module",
+    brandSuffix: "workspace",
+    more: "More",
+    moreHint: "Project tools and settings",
+
+    navOverview: "Overview",
+    navRuntime: "Runtime",
+    navChat: "Chat",
+    navFiles: "Files",
+    navRuns: "Runs",
+    navApprovals: "Approvals",
+    navResources: "Resources",
+    navContent: "Content",
+    navEquipment: "Equipment",
+    navAutomations: "Automations",
+    navModels: "Models",
+    navSettings: "Settings",
+    navModule: "Module",
+
+    workspaceOnline: "Project reachable",
+    workspaceOnlineDetail: "Every section responds",
+    workspaceOffline: "Project unreachable",
+    workspaceOfflineDetail: "Some sections do not respond",
+
+    breadcrumb: "Breadcrumb",
+    openAccountMenu: "Account menu for {name}",
+    accountActions: "Account actions",
+    account: "Account",
+    projectSettings: "Project settings",
+    signOut: "Sign out",
+
+    scopeOtherProject: "This link points at another project",
+    scopeProjectMismatch: "The project does not match the address",
+    scopeOtherModule: "This link points at another module",
+    scopeUnsupported: "No such section",
+    scopeKicker: "This address does not fit",
+    scopeOtherProjectDetail: "This address opens a project that is not selected. Its content was not loaded — open the project from the list.",
+    scopeProjectMismatchDetail: "The address belongs to a different project than the selected one. No content was loaded.",
+    scopeOtherModuleDetail: "The address opens a module this project does not have. No content was loaded.",
+    scopeUnsupportedDetail: "No section answers at this address. The address was kept so you can go back.",
+    openProject: "Open {name}",
+    allProjects: "All projects",
+  },
+});

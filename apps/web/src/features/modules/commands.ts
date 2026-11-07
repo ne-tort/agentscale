@@ -1,3 +1,4 @@
+import type { Translate } from "../../i18n/catalogue";
 import type { JsonRecord, ModuleActionResult, ModuleManifest, ModuleRuntimeRouteState, ModuleViewDefinition } from "./contracts";
 
 export interface ModuleActionInputField {
@@ -69,7 +70,7 @@ function parseModuleActionInputFields(value: unknown): { fields?: ModuleActionIn
   return { fields };
 }
 
-export function collectModuleActionParams(fields: readonly ModuleActionInputField[], formData: FormData): { params?: JsonRecord; error?: string } {
+export function collectModuleActionParams(fields: readonly ModuleActionInputField[], formData: FormData, t: Translate): { params?: JsonRecord; error?: string } {
   const params: JsonRecord = {};
   for (const field of fields) {
     const raw = formData.get(field.name);
@@ -79,27 +80,27 @@ export function collectModuleActionParams(fields: readonly ModuleActionInputFiel
     }
     const text = String(raw ?? "").trim();
     if (!text) {
-      if (field.required) return { error: `Заполните обязательный параметр «${field.name}».` };
+      if (field.required) return { error: t("modules.paramRequired", { param: field.name }) };
       continue;
     }
     if (field.type === "number") {
       const number = Number(text);
-      if (!Number.isFinite(number)) return { error: `Параметр «${field.name}» должен быть числом.` };
+      if (!Number.isFinite(number)) return { error: t("modules.paramNumber", { param: field.name }) };
       params[field.name] = number;
     } else if (field.type === "json") {
       try {
         const value: unknown = JSON.parse(text);
-        if (typeof value !== "object" || value === null) return { error: `Параметр «${field.name}» должен быть JSON-объектом или массивом.` };
+        if (typeof value !== "object" || value === null) return { error: t("modules.paramJson", { param: field.name }) };
         params[field.name] = value;
       } catch {
-        return { error: `Параметр «${field.name}» должен содержать корректный JSON.` };
+        return { error: t("modules.paramJson", { param: field.name }) };
       }
     } else if (field.type === "enum") {
-      if (!field.values?.includes(text)) return { error: `Параметр «${field.name}» имеет недопустимое значение.` };
+      if (!field.values?.includes(text)) return { error: t("modules.paramEnum", { param: field.name }) };
       params[field.name] = text;
     } else if (field.type === "datetime") {
       const value = new Date(text);
-      if (Number.isNaN(value.getTime())) return { error: `Параметр «${field.name}» должен быть датой и временем.` };
+      if (Number.isNaN(value.getTime())) return { error: t("modules.paramDate", { param: field.name }) };
       params[field.name] = value.toISOString();
     } else {
       params[field.name] = text;
@@ -108,40 +109,40 @@ export function collectModuleActionParams(fields: readonly ModuleActionInputFiel
   return { params };
 }
 
-export function parseModuleColumnValue(column: { readonly name: string; readonly type: string; readonly enum?: { readonly values?: readonly string[] } }, raw: string): { readonly value?: unknown; readonly skip?: boolean; readonly error?: string } {
+export function parseModuleColumnValue(column: { readonly name: string; readonly type: string; readonly enum?: { readonly values?: readonly string[] } }, raw: string, t: Translate): { readonly value?: unknown; readonly skip?: boolean; readonly error?: string } {
   if (column.type === "text") return { value: raw };
   const text = raw.trim();
   if (!text) return { skip: true };
   if (column.type === "number") {
     const value = Number(text);
-    return Number.isFinite(value) ? { value } : { error: `Поле «${column.name}» должно быть числом.` };
+    return Number.isFinite(value) ? { value } : { error: t("modules.fieldNumber", { field: column.name }) };
   }
   if (column.type === "datetime") {
     const value = new Date(text);
-    return Number.isNaN(value.getTime()) ? { error: `Поле «${column.name}» должно содержать дату и время.` } : { value: value.toISOString() };
+    return Number.isNaN(value.getTime()) ? { error: t("modules.fieldDate", { field: column.name }) } : { value: value.toISOString() };
   }
   if (column.type === "json" || column.type === "file_ref") {
     try {
       const value: unknown = JSON.parse(text);
-      if (typeof value !== "object" || value === null) return { error: `Поле «${column.name}» должно быть JSON-объектом или массивом.` };
+      if (typeof value !== "object" || value === null) return { error: t("modules.fieldJson", { field: column.name }) };
       return { value };
     } catch {
-      return { error: `Поле «${column.name}» должно содержать корректный JSON.` };
+      return { error: t("modules.fieldJson", { field: column.name }) };
     }
   }
-  if (column.type === "enum") return column.enum?.values && !column.enum.values.includes(text) ? { error: `Поле «${column.name}» имеет недопустимое значение.` } : { value: text };
+  if (column.type === "enum") return column.enum?.values && !column.enum.values.includes(text) ? { error: t("modules.fieldEnum", { field: column.name }) } : { value: text };
   if (column.type === "ref") return { value: text };
-  return { error: `Поле «${column.name}» использует неподдерживаемый ввод.` };
+  return { error: t("modules.fieldType", { field: column.name }) };
 }
 
-export function validateModuleRowBody(body: JsonRecord, columns: readonly { readonly name: string; readonly type: string; readonly required?: boolean; readonly enum?: { readonly values?: readonly string[] } }[]): string | undefined {
+export function validateModuleRowBody(body: JsonRecord, columns: readonly { readonly name: string; readonly type: string; readonly required?: boolean; readonly enum?: { readonly values?: readonly string[] } }[], t: Translate): string | undefined {
   const known = new Set(columns.map((column) => column.name));
   const unknown = Object.keys(body).find((key) => !known.has(key));
-  if (unknown) return `Поле «${unknown}» не объявлено в схеме таблицы.`;
+  if (unknown) return t("modules.fieldUndeclared", { field: unknown });
   for (const column of columns) {
     const value = body[column.name];
     const missing = value === undefined || value === null || (typeof value === "string" && value.trim() === "");
-    if (column.required && missing) return `Заполните обязательное поле «${column.name}».`;
+    if (column.required && missing) return t("modules.fieldRequired", { field: column.name });
     if (missing) continue;
     const valid = column.type === "text" ? typeof value === "string"
       : column.type === "number" ? typeof value === "number" && Number.isFinite(value)
@@ -153,7 +154,7 @@ export function validateModuleRowBody(body: JsonRecord, columns: readonly { read
                   : column.type === "file_ref" ? isRecord(value) && ["asset_id", "version_id", "storage_key", "filename"].every((key) => typeof value[key] === "string" && Boolean(value[key]))
                     : column.type === "secret_ref" ? isRecord(value) && typeof value.secret_ref === "string" && Boolean(value.secret_ref) && !["secret", "password", "value", "token"].some((key) => typeof value[key] === "string" && value[key])
                       : false;
-    if (!valid) return `Поле «${column.name}» имеет некорректный тип или значение (${column.type}).`;
+    if (!valid) return t("modules.fieldType", { field: column.name });
   }
   return undefined;
 }
@@ -191,22 +192,22 @@ export function sameModuleRowBody(expected: JsonRecord, actual: JsonRecord): boo
  */
 export type ModuleWriteReadbackOutcome = "confirmed" | "missing" | "unavailable" | "mismatch";
 
-const CREATE_WRITE_NOTICES: Record<ModuleWriteReadbackOutcome, string> = {
-  confirmed: "Запись создана и подтверждена повторным чтением backend.",
-  missing: "Неизвестно, создана ли запись: POST завершился, но свежий GET не подтвердил созданные данные. Проверьте список перед повторной отправкой.",
-  unavailable: "Неизвестно, создана ли запись: POST завершился, но свежий GET недоступен. Проверьте список перед повторной отправкой.",
-  mismatch: "Неизвестный результат создания: backend вернул строку с несовпадающими данными. Проверьте список и не повторяйте операцию автоматически.",
+const CREATE_WRITE_NOTICE_KEYS: Record<ModuleWriteReadbackOutcome, string> = {
+  confirmed: "modules.writeCreateConfirmed",
+  missing: "modules.writeCreateMissing",
+  unavailable: "modules.writeCreateUnavailable",
+  mismatch: "modules.writeCreateMismatch",
 };
 
-const UPDATE_WRITE_NOTICES: Record<ModuleWriteReadbackOutcome, string> = {
-  confirmed: "Изменения сохранены и подтверждены повторным чтением backend.",
-  missing: "Неизвестный результат сохранения: свежий GET не подтвердил актуальные данные строки. Проверьте список перед повторной отправкой.",
-  unavailable: "Неизвестно, сохранены ли изменения: PATCH завершился, но свежий GET недоступен. Проверьте список перед повторной отправкой.",
-  mismatch: "Неизвестный результат сохранения: backend вернул строку с несовпадающими данными. Проверьте список и не повторяйте операцию автоматически.",
+const UPDATE_WRITE_NOTICE_KEYS: Record<ModuleWriteReadbackOutcome, string> = {
+  confirmed: "modules.writeUpdateConfirmed",
+  missing: "modules.writeUpdateMissing",
+  unavailable: "modules.writeUpdateUnavailable",
+  mismatch: "modules.writeUpdateMismatch",
 };
 
-export function moduleWriteNotice(kind: "create" | "update", outcome: ModuleWriteReadbackOutcome): string {
-  return (kind === "create" ? CREATE_WRITE_NOTICES : UPDATE_WRITE_NOTICES)[outcome];
+export function moduleWriteNotice(kind: "create" | "update", outcome: ModuleWriteReadbackOutcome, t: Translate): string {
+  return t((kind === "create" ? CREATE_WRITE_NOTICE_KEYS : UPDATE_WRITE_NOTICE_KEYS)[outcome]);
 }
 
 export function moduleRowActionMatches(action: ModuleCollectionRowAction, body: JsonRecord): boolean {
@@ -237,11 +238,11 @@ export function resolvePrimaryCreateRoute(
   };
 }
 
-export function normalizeProjectSelection(mode: string | null, ids: readonly string[]): { readonly project_ids?: readonly string[]; readonly error?: string } {
+export function normalizeProjectSelection(mode: string | null, ids: readonly string[], t: Translate): { readonly project_ids?: readonly string[]; readonly error?: string } {
   if (mode === "all") return { project_ids: [] };
-  if (mode !== "selected") return { error: "Choose all projects or explicitly select projects." };
+  if (mode !== "selected") return { error: t("modules.projectsRequired") };
   const selected = [...new Set(ids.filter((id) => id.trim().length > 0))];
-  return selected.length ? { project_ids: selected } : { error: "Select at least one project or choose all projects." };
+  return selected.length ? { project_ids: selected } : { error: t("modules.projectsRequired") };
 }
 
 export function validateModuleActionResult(value: unknown, expectedKind: string): ModuleActionResult {
@@ -276,8 +277,7 @@ export function validateModuleActionResult(value: unknown, expectedKind: string)
   return value as ModuleActionResult;
 }
 
-export function actionResultNotice(result: ModuleActionResult): string {
+export function actionResultNotice(result: ModuleActionResult, t: Translate): string {
   if (typeof result.message === "string" && result.message) return result.message;
-  if (typeof result.status === "string") return `Действие завершено: ${result.status}.`;
-  return "Действие завершено.";
+  return t("modules.actionDone");
 }

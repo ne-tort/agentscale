@@ -2,10 +2,11 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter, Route, Routes, useNavigate } from "react-router-dom";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createRunsService, RunsRequestError } from "./service";
 import { RUN_DETAIL_POLL_INTERVAL_MS, RunsCenterPage } from "./RunsCenterPage";
 import type { AgentRunRecord, ApprovalInboxItem, ControlPlaneEvent } from "./contracts";
+import { SettingsProvider } from "../../preferences/SettingsProvider";
 import { POLL_BUDGET_MS } from "../../test-support/poll-budget";
 
 vi.mock("../../app/context", () => ({ useAuth: () => ({ tokens: { access_token: "journey-token" } }) }));
@@ -81,6 +82,12 @@ let pageRoot: Root | undefined;
 let pageHost: HTMLDivElement | undefined;
 let hiddenDescriptor: PropertyDescriptor | undefined;
 
+// The page reads its copy through `useT`; English keeps these assertions about
+// polling and write readback rather than about translation.
+beforeEach(() => {
+  window.localStorage.setItem("agentscale.locale", "en");
+});
+
 afterEach(async () => {
   if (pageRoot) await act(async () => pageRoot?.unmount());
   pageRoot = undefined;
@@ -91,6 +98,7 @@ afterEach(async () => {
   hiddenDescriptor = undefined;
   vi.useRealTimers();
   window.sessionStorage.clear();
+  window.localStorage.clear();
   vi.unstubAllGlobals();
 });
 
@@ -104,6 +112,11 @@ async function waitForPage(assertion: () => boolean): Promise<void> {
 
 function pageText(): string { return document.body.textContent ?? ""; }
 
+/** The selected run's heading; the run id itself lives in its tooltip. */
+function detailTitle(): string {
+  return document.querySelector(".run-detail-panel h2")?.textContent ?? "";
+}
+
 async function flushPendingFetches(): Promise<void> {
   await act(async () => { await Promise.resolve(); await Promise.resolve(); });
 }
@@ -113,7 +126,7 @@ async function mountRunPage(entry: string, projectRoute = "/projects/:projectId/
   pageHost = document.createElement("div");
   document.body.appendChild(pageHost);
   pageRoot = createRoot(pageHost);
-  await act(async () => { pageRoot?.render(runPageRouter(entry, projectRoute, extraRoutes)); });
+  await act(async () => { pageRoot?.render(<SettingsProvider>{runPageRouter(entry, projectRoute, extraRoutes)}</SettingsProvider>); });
 }
 
 async function waitForPageMicrotasks(assertion: () => boolean): Promise<void> {
@@ -296,6 +309,25 @@ describe("Runs Center backend acceptance contracts", () => {
 });
 
 describe("Runs Center user journey", () => {
+  it("renders the page in Russian for a Russian reader", async () => {
+    window.localStorage.setItem("agentscale.locale", "ru");
+    const fetcher: typeof fetch = async (input) => {
+      const url = new URL(String(input), "http://localhost");
+      if (url.pathname === "/api/v1/projects/project-a/agent/runs") return jsonResponse({ items: [], limit: 50, offset: 0 }, 200, { "X-Has-More": "false" });
+      if (url.pathname === "/api/v1/agent/approvals/inbox") return jsonResponse({ items: [], limit: 50 }, 200, { "X-Has-More": "false" });
+      if (url.pathname === "/api/v1/projects/project-a/agent/sessions") return jsonResponse({ items: [] });
+      throw new Error(`Unexpected Russian-copy request: ${url.pathname}${url.search}`);
+    };
+    vi.stubGlobal("fetch", fetcher);
+    await mountRunPage("/projects/project-a/runs");
+    await waitForPageMicrotasks(() => pageText().includes("Запусков пока нет"));
+    expect(document.querySelector("h1")?.textContent).toBe("Запуски и подтверждения");
+    expect(pageText()).toContain("Подтверждения");
+    expect(pageText()).toContain("История чатов");
+    expect(pageText()).toContain("Выберите запуск");
+    expect(pageText()).toContain("Создать запуск");
+  });
+
   it("loads durable run detail, event history and project inbox, then verifies an approval decision", async () => {
     const realRun = run("run-a", { sequence: 4, status: "waiting_approval", session_id: "session-a" });
     const inboxItem: ApprovalInboxItem = { ...approval, run_status: "waiting_approval" };
@@ -331,18 +363,18 @@ describe("Runs Center user journey", () => {
     document.body.appendChild(pageHost);
     pageRoot = createRoot(pageHost);
     await act(async () => {
-      pageRoot?.render(<MemoryRouter initialEntries={["/projects/project-a/runs"]}><Routes><Route path="/projects/:projectId/runs" element={<RunsCenterPage />} /></Routes></MemoryRouter>);
+      pageRoot?.render(<SettingsProvider><MemoryRouter initialEntries={["/projects/project-a/runs"]}><Routes><Route path="/projects/:projectId/runs" element={<RunsCenterPage />} /></Routes></MemoryRouter></SettingsProvider>);
     });
     await waitForPage(() => pageText().includes("agent_run.waiting_approval") && pageText().includes("run-a"));
-    expect(pageText()).toContain("Not supported");
-    expect(pageText()).toContain("Agent Runs API has no cost field or cost endpoint.");
-    expect(pageText()).toContain("Agent Runs API has no run artifact endpoint.");
+    expect(pageText()).toContain("No data");
+    expect(pageText()).toContain("Cost is not reported for runs yet.");
+    expect(pageText()).toContain("Result files are not reported for runs yet.");
     expect(calls.some((call) => call.path === "/api/v1/projects/project-a/agent/runs/run-a/events?limit=100")).toBe(true);
 
     await act(async () => { clickPageButton("Approvals 1"); });
     await waitForPage(() => pageText().includes("file.write"));
     await act(async () => { clickPageButton("Approve"); });
-    await waitForPage(() => pageText().includes("confirmed by the durable event timeline"));
+    await waitForPage(() => pageText().includes("Approval confirmed."));
     const decision = calls.find((call) => call.method === "POST");
     expect(decision).toMatchObject({
       path: "/api/v1/projects/project-a/agent/approvals/approval-a/decision",
@@ -372,17 +404,17 @@ describe("Runs Center user journey", () => {
     document.body.appendChild(pageHost);
     pageRoot = createRoot(pageHost);
     await act(async () => {
-      pageRoot?.render(<MemoryRouter initialEntries={["/projects/project-a/runs"]}><Routes><Route path="/projects/:projectId/runs" element={<RunsCenterPage />} /></Routes></MemoryRouter>);
+      pageRoot?.render(<SettingsProvider><MemoryRouter initialEntries={["/projects/project-a/runs"]}><Routes><Route path="/projects/:projectId/runs" element={<RunsCenterPage />} /></Routes></MemoryRouter></SettingsProvider>);
     });
     await waitForPage(() => calls.some((path) => path.startsWith("/api/v1/agent/approvals/inbox")));
     await act(async () => { clickPageButton("Approvals 0"); });
-    await waitForPage(() => pageText().includes("AGENT_RUN_API_DISABLED"));
+    await waitForPage(() => pageText().includes("Runs are not available in this environment yet."));
     expect(pageText()).toContain("Retry approval inbox");
     expect(calls).toContain("/api/v1/agent/approvals/inbox?project_id=project-a&limit=50");
     unavailable = false;
     await act(async () => { clickPageButton("Retry approval inbox"); });
     await waitForPage(() => pageText().includes("No pending approvals"));
-    expect(pageText()).toContain("The backend returned no pending approvals visible in this project.");
+    expect(pageText()).toContain("Nothing is waiting for your decision right now.");
   });
 
   it("finds a deep-linked run on a later cursor page without faking client pagination", async () => {
@@ -405,9 +437,9 @@ describe("Runs Center user journey", () => {
     document.body.appendChild(pageHost);
     pageRoot = createRoot(pageHost);
     await act(async () => {
-      pageRoot?.render(<MemoryRouter initialEntries={["/projects/project-a/runs?run=deep-linked"]}><Routes><Route path="/projects/:projectId/runs" element={<RunsCenterPage />} /></Routes></MemoryRouter>);
+      pageRoot?.render(<SettingsProvider><MemoryRouter initialEntries={["/projects/project-a/runs?run=deep-linked"]}><Routes><Route path="/projects/:projectId/runs" element={<RunsCenterPage />} /></Routes></MemoryRouter></SettingsProvider>);
     });
-    await waitForPage(() => pageText().includes("Run deep-linked"));
+    await waitForPage(() => detailTitle().includes("deep-linked"));
     expect(calls).toContain("/api/v1/projects/project-a/agent/runs?limit=50&cursor=page-2");
     expect(calls).toContain("/api/v1/projects/project-a/agent/runs/deep-linked");
   });
@@ -439,12 +471,12 @@ describe("Runs Center user journey", () => {
     };
     vi.stubGlobal("fetch", fetcher);
     await mountRunPage("/projects/project-a/runs?run=run-live");
-    await waitForPageMicrotasks(() => pageText().includes("Run run-live"));
+    await waitForPageMicrotasks(() => detailTitle().includes("run-live"));
     const readsBeforeTick = calls.filter((path) => path.endsWith("/run-live") || path.includes("/run-live/events")).length;
     currentRun = run("run-live", { sequence: 4, status: "succeeded", output_payload: { result: "complete" } });
     await act(async () => { await vi.advanceTimersByTimeAsync(RUN_DETAIL_POLL_INTERVAL_MS); });
     await waitForPageMicrotasks(() => pageText().includes("agent_run.succeeded"));
-    expect(pageText()).toContain("succeeded");
+    expect(pageText()).toContain("Finished");
     expect(pageText()).toContain("complete");
     expect(calls.filter((path) => path.endsWith("/run-live") || path.includes("/run-live/events")).length).toBeGreaterThan(readsBeforeTick);
     const readsAtTerminal = calls.filter((path) => path.endsWith("/run-live") || path.includes("/run-live/events")).length;
@@ -470,18 +502,18 @@ describe("Runs Center user journey", () => {
     };
     vi.stubGlobal("fetch", fetcher);
     await mountRunPage("/projects/project-a/runs?run=run-retry");
-    await waitForPageMicrotasks(() => pageText().includes("Run run-retry"));
+    await waitForPageMicrotasks(() => detailTitle().includes("run-retry"));
     failNextPoll = true;
     await act(async () => { await vi.advanceTimersByTimeAsync(RUN_DETAIL_POLL_INTERVAL_MS); });
-    await waitForPageMicrotasks(() => pageText().includes("Live refresh delayed"));
-    expect(pageText()).toContain("running");
+    await waitForPageMicrotasks(() => pageText().includes("Live updates are delayed"));
+    expect(pageText()).toContain("Running");
     const failedReadCount = calls.filter((path) => path.endsWith("/run-retry")).length;
     await act(async () => { await vi.advanceTimersByTimeAsync(RUN_DETAIL_POLL_INTERVAL_MS - 1); });
     expect(calls.filter((path) => path.endsWith("/run-retry")).length).toBe(failedReadCount);
     failNextPoll = false;
     await act(async () => { await vi.advanceTimersByTimeAsync(1); });
-    await waitForPageMicrotasks(() => !pageText().includes("Live refresh delayed"));
-    expect(pageText()).toContain("Run run-retry");
+    await waitForPageMicrotasks(() => !pageText().includes("Live updates are delayed"));
+    expect(detailTitle()).toContain("run-retry");
   });
 
   it("ignores a late old-run read after deep-link selection changes", async () => {
@@ -509,16 +541,17 @@ describe("Runs Center user journey", () => {
     };
     vi.stubGlobal("fetch", fetcher);
     await mountRunPage("/projects/project-a/runs?run=run-old", "/projects/:projectId/runs", true);
-    await waitForPageMicrotasks(() => pageText().includes("Run run-old"));
+    await waitForPageMicrotasks(() => detailTitle().includes("run-old"));
     await act(async () => { await vi.advanceTimersByTimeAsync(RUN_DETAIL_POLL_INTERVAL_MS); });
     expect(releaseOldPoll).toBeDefined();
     await act(async () => { clickPageButton("Select another run"); });
-    await waitForPageMicrotasks(() => pageText().includes("Run run-new"));
+    await waitForPageMicrotasks(() => detailTitle().includes("run-new"));
     expect(pollSignal?.aborted).toBe(true);
     await act(async () => { releaseOldPoll?.(jsonResponse(run("run-old", { status: "failed", failure_message: "late" }))); });
     await flushPendingFetches();
-    expect(pageText()).toContain("Run run-new");
-    expect(pageText()).not.toContain("late");
+    expect(detailTitle()).toContain("run-new");
+    // The late failure belonged to run-old; nothing about it may reach the pane.
+    expect(document.querySelector(".run-capability-notice")).toBeNull();
   });
 
   it("pauses live reads while the document is hidden and resumes for the selected run", async () => {
@@ -538,7 +571,7 @@ describe("Runs Center user journey", () => {
     hiddenDescriptor = Object.getOwnPropertyDescriptor(document, "hidden");
     Object.defineProperty(document, "hidden", { configurable: true, value: false });
     await mountRunPage("/projects/project-a/runs?run=run-visible");
-    await waitForPageMicrotasks(() => pageText().includes("Run run-visible"));
+    await waitForPageMicrotasks(() => detailTitle().includes("run-visible"));
     const initialReads = calls.filter((path) => path.includes("/run-visible")).length;
     Object.defineProperty(document, "hidden", { configurable: true, value: true });
     await act(async () => { document.dispatchEvent(new Event("visibilitychange")); });
@@ -553,7 +586,7 @@ describe("Runs Center user journey", () => {
     // visibility recovery is broken.
     await act(async () => { await vi.advanceTimersByTimeAsync(0); });
     await waitForPageMicrotasks(() => calls.filter((path) => path.includes("/run-visible")).length > initialReads);
-    expect(pageText()).toContain("Run run-visible");
+    expect(detailTitle()).toContain("run-visible");
   });
 
   it("stops polling when project or run selection changes, linked chat opens, and the page unmounts", async () => {
@@ -581,35 +614,36 @@ describe("Runs Center user journey", () => {
     };
     vi.stubGlobal("fetch", fetcher);
     await mountRunPage("/projects/project-a/runs?run=run-a", "/projects/:projectId/runs", true);
-    await waitForPageMicrotasks(() => pageText().includes("Run run-a"));
+    await waitForPageMicrotasks(() => detailTitle().includes("run-a"));
     const oldRunReads = () => calls.filter((path) => path.includes("/agent/runs/run-a")).length;
     const firstCount = oldRunReads();
     await act(async () => { clickPageButton("Switch project"); });
-    await waitForPageMicrotasks(() => pageText().includes("Run run-b"));
+    await waitForPageMicrotasks(() => detailTitle().includes("run-b"));
     await act(async () => { await vi.advanceTimersByTimeAsync(RUN_DETAIL_POLL_INTERVAL_MS * 2); });
     expect(oldRunReads()).toBe(firstCount);
 
     await act(async () => { clickPageButton("Return to project"); });
-    await waitForPageMicrotasks(() => pageText().includes("Run run-a"));
+    await waitForPageMicrotasks(() => detailTitle().includes("run-a"));
     await act(async () => { await vi.advanceTimersByTimeAsync(RUN_DETAIL_POLL_INTERVAL_MS); });
     await waitForPageMicrotasks(() => oldRunReads() > firstCount);
     const secondCount = oldRunReads();
     await act(async () => { clickPageButton("Select another run"); });
-    await waitForPageMicrotasks(() => pageText().includes("Run run-new"));
+    await waitForPageMicrotasks(() => detailTitle().includes("run-new"));
     await act(async () => { await vi.advanceTimersByTimeAsync(RUN_DETAIL_POLL_INTERVAL_MS * 2); });
     expect(oldRunReads()).toBe(secondCount);
 
     await act(async () => { clickPageButton("Return to project"); });
-    await waitForPageMicrotasks(() => pageText().includes("Run run-a"));
+    await waitForPageMicrotasks(() => detailTitle().includes("run-a"));
     const thirdCount = oldRunReads();
-    const chatLink = [...document.querySelectorAll<HTMLAnchorElement>("a")].find((link) => link.textContent?.includes("session-linked"));
+    const chatLink = document.querySelector<HTMLAnchorElement>(".run-detail-link a") ?? undefined;
     expect(chatLink).toBeDefined();
+    expect(chatLink?.getAttribute("title")).toBe("session-linked");
     await act(async () => { chatLink?.click(); });
     await waitForPageMicrotasks(() => pageText().includes("Project chat route"));
     await act(async () => { await vi.advanceTimersByTimeAsync(RUN_DETAIL_POLL_INTERVAL_MS * 2); });
     expect(oldRunReads()).toBe(thirdCount);
     await act(async () => { clickPageButton("Return to runs"); });
-    await waitForPageMicrotasks(() => pageText().includes("Run run-a"));
+    await waitForPageMicrotasks(() => detailTitle().includes("run-a"));
     await act(async () => { clickPageButton("Deselect run"); });
     await waitForPageMicrotasks(() => pageText().includes("Select a run"));
     const fourthCount = oldRunReads();
@@ -617,7 +651,7 @@ describe("Runs Center user journey", () => {
     expect(oldRunReads()).toBe(fourthCount);
 
     await act(async () => { clickPageButton("Return to project"); });
-    await waitForPageMicrotasks(() => pageText().includes("Run run-a"));
+    await waitForPageMicrotasks(() => detailTitle().includes("run-a"));
     const readsBeforeUnmount = oldRunReads();
     await act(async () => pageRoot?.unmount());
     pageRoot = undefined;

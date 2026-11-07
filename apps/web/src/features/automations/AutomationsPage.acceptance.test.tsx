@@ -3,6 +3,7 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { SettingsProvider } from "../../preferences/SettingsProvider";
 import { AutomationsView } from "./AutomationsPage";
 import { AutomationRequestError } from "./service";
 import type { AutomationService, Schedule, WebhookDelivery, WebhookSubscription } from "./types";
@@ -38,7 +39,7 @@ async function mount(serviceOverride: AutomationService): Promise<HTMLDivElement
   document.body.appendChild(host);
   root = createRoot(host);
   await act(async () => {
-    root?.render(createElement(AutomationsView, { projectId: "project-1", service: serviceOverride }));
+    root?.render(createElement(SettingsProvider, null, createElement(AutomationsView, { projectId: "project-1", service: serviceOverride })));
   });
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
   return host;
@@ -76,27 +77,31 @@ afterEach(async () => {
 
 describe("project automations acceptance surface", () => {
   it("renders loading surfaces, accessible forms, and explicit capability blockers", () => {
-    const html = renderToStaticMarkup(createElement(AutomationsView, { projectId: "project-1", service }));
+    const html = renderToStaticMarkup(createElement(SettingsProvider, null, createElement(AutomationsView, { projectId: "project-1", service })));
 
     expect(html).toContain("Автоматизации");
     expect(html).toContain("Загружаем расписания");
-    expect(html).toContain("Загружаем project triggers");
-    expect(html).toContain("Загружаем webhook-подписки");
+    expect(html).toContain("Загружаем события");
+    expect(html).toContain("Загружаем вебхуки");
     expect(html).toContain('aria-labelledby="schedules-heading"');
     expect(html).toContain('aria-labelledby="triggers-heading"');
     expect(html).toContain('aria-labelledby="webhooks-heading"');
-    expect(html).toContain("Agent Run history");
-    expect(html).toContain("Delivery log");
-    expect(html).toContain("не принимает trigger id");
-    expect(html).toContain("точная причинная связь trigger → run API не возвращает");
-    expect(html).toContain("Ingress — это отдельный поток");
+    expect(html).toContain("Запуски агента");
+    expect(html).toContain("История доставок");
+    expect(html).toContain("Отредактировать, удалить или повторить отдельное событие нельзя");
+    expect(html).toContain("связать запуск с конкретным событием нельзя");
+    expect(html).toContain("Входящие события — отдельный поток");
     // The one-time-secret controls belong to the post-create state only; a freshly
     // mounted, still-loading screen has no secret to copy and must not offer one.
     // That flow is pinned by "never renders the one-time webhook secret and offers
     // a copy action", which creates the subscription first.
-    expect(html).not.toContain("Скопировать одноразовый секрет");
+    expect(html).not.toContain("Скопировать секрет");
     expect(html).not.toContain("run succeeded");
     expect(html).not.toContain("delivery succeeded");
+    // The internal vocabulary stays out of the copy a person reads.
+    expect(html).not.toContain("trigger id");
+    expect(html).not.toContain("payload");
+    expect(html).not.toContain("endpoint");
   });
 
   it("creates, updates, and deletes a schedule with GET readback", async () => {
@@ -117,7 +122,7 @@ describe("project automations acceptance surface", () => {
       deleteSchedule: async (_projectId, id) => { schedules.splice(schedules.findIndex((item) => item.id === id), 1); },
     });
     const container = await mount(liveService);
-    await act(async () => button("＋ Новое расписание").click());
+    await act(async () => button("Новое расписание").click());
     const createForm = container.querySelector<HTMLFormElement>('form[aria-label="Новое расписание"]');
     const name = createForm?.querySelector<HTMLInputElement>("input");
     if (!createForm || !name) throw new Error("Schedule creation form missing");
@@ -125,10 +130,10 @@ describe("project automations acceptance surface", () => {
     await act(async () => createForm.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
     await flush();
     expect(container.textContent).toContain("Morning digest");
-    expect(container.textContent).toContain("подтверждено GET списком");
+    expect(container.textContent).toContain("Расписание «Morning digest» создано");
 
     await act(async () => button("Изменить").click());
-    const editForm = container.querySelector<HTMLFormElement>('form[aria-label="Редактировать расписание Morning digest"]');
+    const editForm = container.querySelector<HTMLFormElement>('form[aria-label="Редактирование расписания «Morning digest»"]');
     const editName = editForm?.querySelector<HTMLInputElement>("input");
     if (!editForm || !editName) throw new Error("Schedule edit form missing");
     await setInput(editName, "Updated digest");
@@ -143,8 +148,8 @@ describe("project automations acceptance surface", () => {
     // the name" would also forbid honest feedback. The claim under test is that the
     // schedule row itself is gone and the backend list no longer has it.
     expect(schedules).toHaveLength(0);
-    expect(container.querySelector('[aria-label="Расписание Updated digest"]')).toBeNull();
-    expect(container.textContent).toContain("подтверждено backend");
+    expect(container.querySelector('[aria-label="Расписание «Updated digest»"]')).toBeNull();
+    expect(container.textContent).toContain("Расписание «Updated digest» удалено");
   });
 
   it("creates a project trigger and confirms queue membership without claiming an agent run", async () => {
@@ -162,8 +167,9 @@ describe("project automations acceptance surface", () => {
     if (!form) throw new Error("Project trigger form missing");
     await act(async () => form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
     await flush();
-    expect(container.textContent).toContain("Trigger trigger-1 подтверждён в backend со статусом «queued»");
-    expect(container.textContent).toContain("не выполнения агента");
+    expect(container.textContent).toContain("Событие «Сообщение агенту» в очереди");
+    expect(container.textContent).toContain("Состояние: «В очереди»");
+    expect(container.textContent).toContain("а не выполнения");
     expect(container.textContent).not.toContain("результат Agent Run trigger-1");
     expect(triggers).toHaveLength(1);
   });
@@ -185,8 +191,8 @@ describe("project automations acceptance surface", () => {
     expect(container.textContent).toContain("История попыток");
     await act(async () => button("Повторить доставку").click());
     await flush();
-    expect(container.textContent).toContain("Ручной retry доставки");
-    expect(container.textContent).toContain("pending");
+    expect(container.textContent).toContain("Повторная доставка запущена");
+    expect(container.textContent).toContain("В очереди");
     expect(container.textContent).toContain("manual_retry");
     expect(container.textContent).not.toContain("Повторить доставку");
   });
@@ -202,14 +208,14 @@ describe("project automations acceptance surface", () => {
     const liveService = createService({ listWebhooks: async () => [ownSubscription], listWebhookDeliveries: async () => deliveries });
     const container = await mount(liveService);
 
-    expect(container.textContent).toContain("Company-wide список последних записей delivery");
-    expect(container.textContent).toContain("Получено от API: 200 из максимум 200 строк");
-    expect(container.textContent).toContain("199 строк не связаны с этим project-filtered списком");
+    expect(container.textContent).toContain("Последние доставки по всей компании");
+    expect(container.textContent).toContain("Получено от сервиса: 200 из максимум 200 строк");
+    expect(container.textContent).toContain("199 с ним не связаны");
     // The caveat is the second sentence of one paragraph, so it is lowercase in the
     // DOM. Asserting the capitalised form only pinned a copy-paste artefact.
-    expect(container.textContent).toContain("точный размер оставшейся истории API не сообщает");
+    expect(container.textContent).toContain("Сервис отдаёт только недавние записи");
     expect(container.textContent).toContain("delivery-company-0");
-    expect(container.textContent).toContain("Retry недоступен");
+    expect(container.textContent).toContain("Повторить нельзя");
 
     await act(async () => button("Совпадения с подписками проекта (1)").click());
     expect(container.textContent).toContain("delivery-project");
@@ -225,10 +231,12 @@ describe("project automations acceptance surface", () => {
     });
     const container = await mount(liveService);
     expect(container.textContent).toContain("project subscriptions unavailable");
-    expect(container.textContent).toContain("Получено от API: 1 из максимум 200 строк");
-    expect(container.textContent).toContain("company-only-delivery");
-    expect(container.textContent).toContain("vendor_state");
-    expect(container.textContent).toContain("Project attribution по subscription_id неполная");
+    expect(container.textContent).toContain("Получено от сервиса: 1 из максимум 200 строк");
+    expect(container.textContent).toContain("https://company.test");
+    // An unfamiliar state is described, not printed as the raw enum value.
+    expect(container.textContent).toContain("Состояние не сообщено");
+    expect(container.textContent).not.toContain("vendor_state");
+    expect(container.textContent).toContain("Список подписок проекта пока не загружен");
     expect(container.textContent).not.toContain("Повторить доставку");
   });
 
@@ -248,7 +256,7 @@ describe("project automations acceptance surface", () => {
     await act(async () => button("Повторить доставку").click());
     await flush();
     expect(retryPosts).toBe(0);
-    expect(container.textContent).toContain("exact delivery как exhausted");
+    expect(container.textContent).toContain("исчерпана и относится к подписке проекта");
   });
 
   it("does not POST retry when the fresh project-filtered subscription list no longer contains the row subscription", async () => {
@@ -266,7 +274,7 @@ describe("project automations acceptance surface", () => {
     await act(async () => button("Повторить доставку").click());
     await flush();
     expect(retryPosts).toBe(0);
-    expect(container.textContent).toContain("exact delivery как exhausted и принадлежащую subscription текущего проекта");
+    expect(container.textContent).toContain("исчерпана и относится к подписке проекта");
   });
 
   it("requires a newly appended manual_retry marker in GET readback", async () => {
@@ -282,8 +290,8 @@ describe("project automations acceptance surface", () => {
     await act(async () => button("Повторить доставку").click());
     await flush();
     expect(retryPosts).toBe(1);
-    expect(container.textContent).toContain("GET истории не подтвердил ручную попытку");
-    expect(container.textContent).not.toContain("Ручной retry доставки delivery-readback подтверждён");
+    expect(container.textContent).toContain("История доставок не подтвердила повторную попытку");
+    expect(container.textContent).not.toContain("Повторная доставка запущена");
   });
 
   it("never renders the one-time webhook secret and offers a copy action", async () => {
@@ -305,7 +313,7 @@ describe("project automations acceptance surface", () => {
     await flush();
     expect(container.textContent).toContain("Секрет доступен только сейчас");
     expect(container.innerHTML).not.toContain(secret);
-    await act(async () => button("Скопировать одноразовый секрет").click());
+    await act(async () => button("Скопировать секрет").click());
     await flush();
     expect(clipboardWrite).toHaveBeenCalledWith(secret);
     expect(container.innerHTML).not.toContain(secret);
@@ -346,11 +354,11 @@ describe("project automations acceptance surface", () => {
     await act(async () => form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
     await flush();
     expect(container.textContent).toContain("https://hooks.example.test/automation");
-    expect(container.textContent).toContain("подтверждена backend");
+    expect(container.textContent).toContain("Подписка для https://hooks.example.test/automation создана");
 
-    await act(async () => button("Отключить webhook https://hooks.example.test/automation").click());
+    await act(async () => button("Отключить вебхук https://hooks.example.test/automation").click());
     await flush();
-    expect(container.textContent).toContain("выключен");
+    expect(container.textContent).toContain("Вебхук выключен");
 
     vi.spyOn(window, "confirm").mockReturnValue(true);
     await act(async () => button("Удалить").click());
@@ -364,7 +372,7 @@ describe("project automations acceptance surface", () => {
       dispatchNextTrigger: async () => { throw new Error("dispatch unavailable"); },
     });
     const container = await mount(liveService);
-    await act(async () => button("Обработать следующий").click());
+    await act(async () => button("Обработать следующее").click());
     await flush();
     expect(container.textContent).toContain("dispatch unavailable");
     expect(container.textContent).not.toContain("dispatched=true");
@@ -382,7 +390,7 @@ describe("project automations acceptance surface", () => {
     await act(async () => button("Повторить доставку").click());
     await flush();
     expect(container.textContent).toContain("delivery not found or not exhausted");
-    expect(container.textContent).not.toContain("Ручной retry доставки");
+    expect(container.textContent).not.toContain("Повторная доставка запущена");
     expect(container.textContent).toContain("exhausted");
   });
 

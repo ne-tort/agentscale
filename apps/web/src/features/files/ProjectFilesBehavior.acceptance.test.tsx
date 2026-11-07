@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
 import { ProjectFilesWorkspace } from "./ProjectFilesWorkspace";
 import type { WorkspaceEntry, WorkspaceListing, WorkspaceService, WorkspaceTextPreview } from "./contracts";
+import { SettingsProvider } from "../../preferences/SettingsProvider";
 import { POLL_BUDGET_MS } from "../../test-support/poll-budget";
 import { restoreBlobUrlDescriptors } from "../../test-support/blob-url-stubs";
 
@@ -57,15 +58,20 @@ let anchorClickDescriptor: PropertyDescriptor | undefined;
 let createObjectUrlDescriptor: PropertyDescriptor | undefined;
 let revokeObjectUrlDescriptor: PropertyDescriptor | undefined;
 
-async function mount(service: WorkspaceService, url: string) {
+async function mount(service: WorkspaceService, url: string, locale = "en") {
+  // The workspace reads its copy through the i18n catalogue, so the tests pin a
+  // locale and the assertions below stay about file behaviour, not translation.
+  window.localStorage.setItem("agentscale.locale", locale);
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
   await act(async () => root?.render(
-    <MemoryRouter initialEntries={[url]}>
-      <Routes><Route path="/projects/:projectId/files/*" element={<ProjectRoute service={service} />} /></Routes>
-      <LocationProbe />
-    </MemoryRouter>,
+    <SettingsProvider>
+      <MemoryRouter initialEntries={[url]}>
+        <Routes><Route path="/projects/:projectId/files/*" element={<ProjectRoute service={service} />} /></Routes>
+        <LocationProbe />
+      </MemoryRouter>
+    </SettingsProvider>,
   ));
   return host;
 }
@@ -108,6 +114,7 @@ afterEach(async () => {
   createObjectUrlDescriptor = undefined;
   revokeObjectUrlDescriptor = undefined;
   document.body.replaceChildren();
+  window.localStorage.clear();
   vi.restoreAllMocks();
 });
 
@@ -187,7 +194,9 @@ describe("Project Pod files URL and recovery behavior", () => {
     expect(oldSignal?.aborted).toBe(true);
     await act(async () => { resolveOld({ path: "", entries: [file("project-1/stale.txt")] }); });
     expect(container.textContent).not.toContain("stale.txt");
-    expect(container.querySelector(".files-panel-heading")?.textContent).toContain("project-2");
+    // The panel shows the Pod, not the project id: the id is a tooltip, so the switch
+    // is proved through the tooltip rather than through visible text.
+    expect(container.querySelector(".files-sidebar .files-panel-heading span")?.getAttribute("title")).toBe("project-2");
   });
 
   it("uploads exact bytes, confirms the upload by readback, and downloads via the service", async () => {
@@ -266,7 +275,7 @@ describe("Project Pod files URL and recovery behavior", () => {
     const back = [...container.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "Browser back");
 
     await act(async () => back?.click());
-    await waitFor(() => container.textContent?.includes("Discard unsaved changes?") ?? false);
+    await waitFor(() => container.textContent?.includes("Leave without saving?") ?? false);
     expect(container.querySelector("[data-testid='location']")?.textContent).toBe("/projects/project-1/files?selected=notes.txt");
     const cancel = [...container.querySelectorAll<HTMLButtonElement>(".files-modal button")].find((button) => button.textContent === "Cancel");
     await act(async () => cancel?.click());
@@ -277,7 +286,7 @@ describe("Project Pod files URL and recovery behavior", () => {
     // the guard the way a user would — navigate to another project in-app.
     const switchProject = [...container.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "Switch project");
     await act(async () => switchProject?.click());
-    await waitFor(() => container.textContent?.includes("Discard unsaved changes?") ?? false);
+    await waitFor(() => container.textContent?.includes("Leave without saving?") ?? false);
     expect(container.querySelector("[data-testid='location']")?.textContent).toBe("/projects/project-1/files?selected=notes.txt");
     const discard = [...container.querySelectorAll<HTMLButtonElement>(".files-modal button")].find((button) => button.textContent === "Discard changes");
     await act(async () => discard?.click());
@@ -371,7 +380,7 @@ describe("Project Pod files URL and recovery behavior", () => {
     const input = container.querySelector<HTMLInputElement>("#files-create-folder-name");
     await setValue(input!, "not-visible");
     await act(async () => input?.closest("form")?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
-    await waitFor(() => container.textContent?.includes("Workspace mutation was not confirmed") ?? false);
+    await waitFor(() => container.textContent?.includes("did not confirm the change") ?? false);
     expect(container.textContent).not.toContain("Created not-visible");
   });
 });

@@ -1,10 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
+import { createTranslator } from "../../i18n/catalogue";
 import {
   createProjectRuntimeService,
   ProjectRuntimeRequestError,
 } from "./service";
 import { phaseOf, readableError } from "./ProjectRuntime";
 import type { ProjectRuntimeSnapshot } from "./types";
+
+const t = createTranslator("ru");
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -258,7 +261,7 @@ describe("project runtime view model", () => {
 
   it("formats typed request errors without hiding the trace id", () => {
     const error = new ProjectRuntimeRequestError("image pull denied", { code: "POD_LAUNCH_FAILED", trace_id: "trace-7", status: 502 });
-    expect(readableError(error)).toContain("image pull denied");
-    expect(readableError(error)).toContain("trace-7");
+    expect(readableError(t, error)).toContain("image pull denied");
+    expect(readableError(t, error)).toContain("trace-7");
   });
 });

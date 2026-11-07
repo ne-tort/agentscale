@@ -1,8 +1,15 @@
+// @vitest-environment jsdom
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
+import { SettingsProvider } from "../../preferences/SettingsProvider";
 import { ModuleWorkspace } from "./ModuleWorkspace";
 import type { ModuleRuntimeService } from "./contracts";
 import { equipmentModuleFixture, filesModuleFixture } from "./fixtures";
+
+/** Copy comes from the settings provider (Russian by default), so every render is wrapped. */
+function render(element: Parameters<typeof renderToStaticMarkup>[0]): string {
+  return renderToStaticMarkup(<SettingsProvider>{element}</SettingsProvider>);
+}
 
 function makeService(): ModuleRuntimeService {
   return {
@@ -40,7 +47,7 @@ function makeService(): ModuleRuntimeService {
 
 describe("ModuleWorkspace navigation", () => {
   it("has an explicit loading boundary during server rendering", () => {
-    const markup = renderToStaticMarkup(<ModuleWorkspace projectId="project-host" service={makeService()} />);
+    const markup = render(<ModuleWorkspace projectId="project-host" service={makeService()} />);
     expect(markup).toContain("Загружаем модули проекта");
   });
 });

@@ -15,6 +15,8 @@ interface AuthContextValue {
   isAuthenticated: boolean;
   /** `platform.admin` — decides which navigation the shell shows. */
   isPlatformAdmin: boolean;
+  /** A company account signs in as the company itself, not as an employee. */
+  isCompany: boolean;
   contours: string[];
   error?: Error;
   signIn(tokens: SessionTokens, employee?: Employee, cabinets?: Cabinet[]): void;
@@ -80,6 +82,7 @@ export function AppProviders({ children }: PropsWithChildren) {
     isLoading: authSnapshot.status === "loading",
     isAuthenticated: authSnapshot.status === "authenticated",
     isPlatformAdmin: authSnapshot.contours.includes("platform_admin"),
+    isCompany: authSnapshot.contours.includes("company"),
     contours: authSnapshot.contours,
     error: authSnapshot.error,
     signIn: (tokens, employee, cabinets) => {

@@ -13,24 +13,24 @@ describe("module admin evidence", () => {
     }, "company")).toEqual({
       source: "platform_assigned",
       version: "2.4.1",
-      rights: "Read only (API)",
+      rights: "readOnly",
       bindKind: "global",
       childMayEdit: false,
       gaps: [],
     });
   });
 
-  it("says plainly what the catalog did not return, without developer wording", () => {
+  it("names the missing values as keys instead of carrying developer sentences", () => {
     expect(moduleEvidence({ id: "mod-1", name: "Catalog row" }, "admin").gaps).toEqual([
-      "Источник не указан.",
-      "Версия модуля не указана.",
-      "Права не указаны.",
+      "source",
+      "version",
+      "rights",
     ]);
   });
 
   it("shows admin project rights only when the binding response supplies them", () => {
     expect(moduleEvidence({ id: "mod-1", child_may_edit: false }, "admin")).toMatchObject({
-      rights: "Child read only (API)",
+      rights: "childReadOnly",
       childMayEdit: false,
     });
   });

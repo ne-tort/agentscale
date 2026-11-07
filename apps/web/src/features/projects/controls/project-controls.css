@@ -92,6 +92,12 @@
 .project-controls__links small { color: #7a8982; font-size: 9px; line-height: 1.35; }
 .project-controls__links > a > span:last-child { color: #809087; font-size: 13px; }
 .project-controls__loading { align-items: center; color: var(--control-muted); display: flex; justify-content: center; min-height: 200px; }
+.project-controls__advanced { border-bottom: 1px solid var(--control-line); }
+.project-controls__advanced-summary { color: #5a786c; cursor: pointer; font-size: 11px; font-weight: 760; letter-spacing: .04em; padding: 13px 0; text-transform: uppercase; }
+.project-controls__advanced-summary:hover { color: var(--control-green); }
+.project-controls__advanced-body { display: grid; gap: 16px; padding: 4px 0 21px; }
+.project-controls__advanced-body > .project-controls__section { border-bottom: 0; padding-bottom: 0; }
+.project-controls__advanced-body > .project-controls__summary { border-top: 1px solid var(--control-line); padding-top: 13px; }
 
 @media (max-width: 760px) {
   .project-controls__summary { grid-template-columns: 1fr; }

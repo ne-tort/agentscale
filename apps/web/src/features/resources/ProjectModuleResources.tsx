@@ -2,14 +2,17 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react
 import { Link, useSearchParams } from "react-router-dom";
 import { ModuleRuntime } from "../modules/ModuleRuntime";
 import { createModuleRuntimeService } from "../modules/service";
+import { bindingLabel, editRightsLabel } from "../modules/binding";
 import type { JsonRecord, ModuleListQuery, ModuleManifest, ModulePage, ModuleRecord, ModuleRow, ModuleRuntimeScope, ModuleRuntimeService, ModuleSlotRegistry } from "../modules/contracts";
 import "./project-module-resources.css";
 import "./resources.css";
+import { useI18n } from "../../i18n/useT";
+import type { Translate } from "../../i18n/catalogue";
 
 const FIRST_PARTY_MODULES = [
-  { id: "mod_prompts", label: "Prompts", detail: "Project-bound agent instructions and prompt files." },
-  { id: "mod_files", label: "Files", detail: "Project-bound files uploaded as canonical content FileRefs." },
-  { id: "mod_mcp", label: "MCP", detail: "Project-bound MCP packages and integrations." },
+  { id: "mod_prompts", labelKey: "resources.modulePrompts", detailKey: "resources.modulePromptsDetail" },
+  { id: "mod_files", labelKey: "resources.moduleFiles", detailKey: "resources.moduleFilesDetail" },
+  { id: "mod_mcp", labelKey: "resources.moduleMcp", detailKey: "resources.moduleMcpDetail" },
 ] as const;
 const PROMPT_FILES_VIEW = "prompt_path_settings";
 const PROMPT_FILES_SLOT = "resource_prompt_files";
@@ -21,10 +24,10 @@ function isRecord(value: unknown): value is JsonRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function readPromptFiles(value: unknown): PromptFilesRead {
+function readPromptFiles(value: unknown, t: Translate): PromptFilesRead {
   if (value === undefined || value === null) return { files: [] };
-  if (!Array.isArray(value)) return { files: [], error: "The prompt row returned a non-list files_json value. Editing is disabled to preserve it." };
-  if (value.some((item) => !isRecord(item))) return { files: [], error: "The prompt row contains an unsupported files_json entry. Editing is disabled to preserve it." };
+  if (!Array.isArray(value)) return { files: [], error: t("resources.promptFilesBadList") };
+  if (value.some((item) => !isRecord(item))) return { files: [], error: t("resources.promptFilesBadEntry") };
   return { files: value as PromptFileEntry[] };
 }
 
@@ -48,8 +51,8 @@ function promptBody(file: PromptFileEntry): string {
   return String(file.body ?? file.body_md ?? file.content ?? "");
 }
 
-function safeError(error: unknown): string {
-  return error instanceof Error ? error.message : "The module operation failed.";
+function safeError(error: unknown, t: Translate): string {
+  return error instanceof Error ? error.message : t("resources.moduleOpFailed");
 }
 
 function sameJson(left: unknown, right: unknown): boolean {
@@ -61,14 +64,14 @@ function sameJson(left: unknown, right: unknown): boolean {
   return JSON.stringify(canonical(left)) === JSON.stringify(canonical(right));
 }
 
-async function findPromptPath(service: ModuleRuntimeService, scope: ModuleRuntimeScope, rowId: string): Promise<ModuleRow | undefined> {
+async function findPromptPath(service: ModuleRuntimeService, scope: ModuleRuntimeScope, rowId: string, t: Translate): Promise<ModuleRow | undefined> {
   for (let page = 1; page <= 5; page += 1) {
     const result = await service.listRows(scope, "prompt_paths", { page, pageSize: 200 });
     const row = result.items.find((item) => item.row_id === rowId);
     if (row) return row;
     if (page * result.page_size >= result.total || result.items.length === 0) return undefined;
   }
-  throw new Error("The prompt_paths list exceeds the 1,000-row stale-check limit.");
+  throw new Error(t("resources.moduleListLimitStale"));
 }
 
 function rowAppliesToProject(row: ModuleRow, projectId: string): boolean {
@@ -113,7 +116,7 @@ export function withResourceModuleViews(loaded: { scope: ModuleRuntimeScope; man
   return loaded;
 }
 
-function resourceModuleService(service: ModuleRuntimeService): ModuleRuntimeService {
+function resourceModuleService(service: ModuleRuntimeService, t: Translate): ModuleRuntimeService {
   return {
     ...service,
     async loadModule(projectId, moduleId, sessionId, options) {
@@ -135,7 +138,7 @@ function resourceModuleService(service: ModuleRuntimeService): ModuleRuntimeServ
         total = result.total;
         if (collected.length >= total || result.items.length === 0) break;
       }
-      if (collected.length < total) throw new Error(`The ${scope.moduleId}/${tableSlug} list exceeds the 1,000-row project filtering limit supported by the unpaginated project module route.`);
+      if (collected.length < total) throw new Error(t("resources.moduleListLimit"));
       const visible = collected.filter((row) => rowAppliesToProject(row, scope.projectId)
         && Object.entries(query.filters ?? {}).every(([field, expected]) => row.body[field] === expected));
       const search = (query.search ?? "").trim().toLocaleLowerCase();
@@ -148,7 +151,8 @@ function resourceModuleService(service: ModuleRuntimeService): ModuleRuntimeServ
 }
 
 function PromptFilesEditor({ service, scope, row, onRefresh }: { service: ModuleRuntimeService; scope: ModuleRuntimeScope; row: ModuleRow; onRefresh: () => void }) {
-  const initial = readPromptFiles(row.body.files_json);
+  const { t } = useI18n();
+  const initial = readPromptFiles(row.body.files_json, t);
   const [files, setFiles] = useState(initial.files);
   const [baselineFiles, setBaselineFiles] = useState(initial.files);
   const [selectedKey, setSelectedKey] = useState(() => initial.files.length ? promptFileKey(initial.files[0], 0) : undefined);
@@ -165,7 +169,7 @@ function PromptFilesEditor({ service, scope, row, onRefresh }: { service: Module
   const ordered = files.map((file, index) => ({ file, index })).sort((left, right) => promptPriority(left.file) - promptPriority(right.file) || left.index - right.index);
 
   useEffect(() => {
-    const loaded = readPromptFiles(row.body.files_json);
+    const loaded = readPromptFiles(row.body.files_json, t);
     setFiles(loaded.files);
     setBaselineFiles(loaded.files);
     setSelectedKey(loaded.files.length ? promptFileKey(loaded.files[0], 0) : undefined);
@@ -187,24 +191,24 @@ function PromptFilesEditor({ service, scope, row, onRefresh }: { service: Module
     if (readOnly || error) return;
     setBusy(true); setError(undefined); setNotice(undefined);
     try {
-      const current = await findPromptPath(service, scope, row.row_id);
-      if (!current) throw new Error("This prompt path is no longer available. Refresh the module before editing again.");
-      const currentFiles = readPromptFiles(current.body.files_json);
+      const current = await findPromptPath(service, scope, row.row_id, t);
+      if (!current) throw new Error(t("resources.promptFilesGone"));
+      const currentFiles = readPromptFiles(current.body.files_json, t);
       if (currentFiles.error || !sameJson(currentFiles.files, baselineFiles)) {
-        throw new Error("Prompt files changed since this editor opened. Refresh the module before saving; the backend does not provide an atomic version guard.");
+        throw new Error(t("resources.promptFilesChanged"));
       }
       const saved = await service.patchRow(scope, "prompt_paths", row.row_id, { files_json: nextFiles });
-      const returned = readPromptFiles(saved.body.files_json);
-      if (returned.error) throw new Error("The API did not confirm a valid files_json value. Refresh the module before editing again.");
+      const returned = readPromptFiles(saved.body.files_json, t);
+      if (returned.error) throw new Error(t("resources.promptFilesNotConfirmed"));
       setFiles(returned.files);
       setBaselineFiles(returned.files);
       setSelectedKey(nextSelectedKey && returned.files.some((file, index) => promptFileKey(file, index) === nextSelectedKey)
         ? nextSelectedKey
         : returned.files.length ? promptFileKey(returned.files[0], 0) : undefined);
-      setNotice("Prompt files saved by the project module API.");
+      setNotice(t("resources.promptFilesSaved"));
       onRefresh();
     } catch (cause) {
-      setError(safeError(cause));
+      setError(safeError(cause, t));
     } finally {
       setBusy(false);
     }
@@ -227,7 +231,7 @@ function PromptFilesEditor({ service, scope, row, onRefresh }: { service: Module
     if (!selected || selectedIndex < 0 || !name.trim()) return;
     const numericPriority = Number(priority);
     if (!Number.isSafeInteger(numericPriority) || numericPriority < 0) {
-      setError("Priority must be a non-negative whole number.");
+      setError(t("resources.promptFilesPriorityInvalid"));
       return;
     }
     const updated = { ...selected, name: name.trim(), priority: numericPriority, [promptBodyField(selected)]: body };
@@ -236,47 +240,49 @@ function PromptFilesEditor({ service, scope, row, onRefresh }: { service: Module
   }
 
   async function deletePrompt(file: PromptFileEntry, index: number) {
-    if (readOnly || busy || error || !window.confirm(`Remove prompt file '${String(file.name ?? "")}' from this path?`)) return;
+    if (readOnly || busy || error || !window.confirm(t("resources.promptFilesConfirmRemove", { name: String(file.name ?? t("resources.promptFilesUnnamed")) }))) return;
     const next = files.filter((_entry, candidateIndex) => candidateIndex !== index);
     await persist(next, next.length ? promptFileKey(next[0], 0) : undefined);
   }
 
-  return <section className="project-prompt-files" aria-label="Nested prompt files" aria-busy={busy}>
-    <header><div><p>Prompt files</p><h3>{String(row.body.name ?? row.row_id)}</h3><span>{String(row.body.path ?? "") || "Project workspace root"}</span></div><span>{readOnly ? "Read only" : "Bound module row"}</span></header>
-    {readOnly && <p className="project-prompt-files__readonly" role="status">This module is globally bound without child edit rights. Prompt files are read-only in this project.</p>}
+  return <section className="project-prompt-files" aria-label={t("resources.promptFilesTitle")} aria-busy={busy}>
+    <header><div><p>{t("resources.promptFilesTitle")}</p><h3>{String(row.body.name ?? t("resources.promptFilesUnnamed"))}</h3><span>{String(row.body.path ?? "") || t("resources.promptFilesRoot")}</span></div><span>{readOnly ? t("resources.promptFilesReadOnly") : t("resources.promptFilesBound")}</span></header>
+    {readOnly && <p className="project-prompt-files__readonly" role="status">{t("resources.promptFilesReadOnlyNote")}</p>}
     {error && <p className="project-prompt-files__error" role="alert">{error}</p>}
-    {error && !readOnly && <button type="button" className="project-prompt-files__reload" onClick={onRefresh}>Reload module data before retrying</button>}
+    {error && !readOnly && <button type="button" className="project-prompt-files__reload" onClick={onRefresh}>{t("resources.promptFilesReload")}</button>}
     <form className="project-prompt-files__add" onSubmit={(event) => void addPrompt(event)}>
-      <label htmlFor={`prompt-add-${row.row_id}`}>Add prompt file</label>
+      <label htmlFor={`prompt-add-${row.row_id}`}>{t("resources.promptFilesAdd")}</label>
       <input id={`prompt-add-${row.row_id}`} value={newName} onChange={(event) => setNewName(event.target.value)} placeholder="Instructions.md" disabled={readOnly || busy || Boolean(error)} required />
-      <button type="submit" disabled={readOnly || busy || Boolean(error) || !newName.trim()}>Add</button>
+      <button type="submit" disabled={readOnly || busy || Boolean(error) || !newName.trim()}>{t("resources.promptFilesAddButton")}</button>
     </form>
     <div className="project-prompt-files__layout">
-      <nav aria-label="Prompt files in this path">
+      <nav aria-label={t("resources.promptFilesNavLabel")}>
         {ordered.map(({ file, index }) => <div className="project-prompt-files__item" key={promptFileKey(file, index)}>
-          <button type="button" aria-pressed={selectedKey === promptFileKey(file, index)} onClick={() => setSelectedKey(promptFileKey(file, index))}><strong>{String(file.name ?? "Unnamed prompt")}</strong><small>Priority {promptPriority(file)}</small></button>
-          <button type="button" aria-label={`Remove ${String(file.name ?? "prompt file")}`} disabled={readOnly || busy || Boolean(error)} onClick={() => void deletePrompt(file, index)}>Remove</button>
+          <button type="button" aria-pressed={selectedKey === promptFileKey(file, index)} onClick={() => setSelectedKey(promptFileKey(file, index))}><strong>{String(file.name ?? t("resources.promptFilesUnnamed"))}</strong><small>{t("resources.promptFilesPriority", { value: promptPriority(file) })}</small></button>
+          <button type="button" aria-label={t("resources.promptFilesRemoveAria", { name: String(file.name ?? t("resources.promptFilesTitle")) })} disabled={readOnly || busy || Boolean(error)} onClick={() => void deletePrompt(file, index)}>{t("resources.promptFilesRemove")}</button>
         </div>)}
-        {files.length === 0 && !error && <p className="project-prompt-files__empty">No prompt files in this path.</p>}
+        {files.length === 0 && !error && <p className="project-prompt-files__empty">{t("resources.promptFilesEmpty")}</p>}
       </nav>
       {selected && <form className="project-prompt-files__editor" onSubmit={(event) => void savePrompt(event)}>
-        <label>Name<input value={name} onChange={(event) => setName(event.target.value)} disabled={readOnly || busy || Boolean(error)} required /></label>
-        <label>Priority<input type="number" min="0" step="1" value={priority} onChange={(event) => setPriority(event.target.value)} disabled={readOnly || busy || Boolean(error)} required /></label>
-        <label>Markdown<textarea value={body} onChange={(event) => setBody(event.target.value)} rows={14} disabled={readOnly || busy || Boolean(error)} /></label>
-        <button type="submit" disabled={readOnly || busy || Boolean(error) || !name.trim()}>{busy ? "Saving…" : "Save prompt file"}</button>
+        <label>{t("resources.promptFilesName")}<input value={name} onChange={(event) => setName(event.target.value)} disabled={readOnly || busy || Boolean(error)} required /></label>
+        <label>{t("resources.promptFilesPriorityLabel")}<input type="number" min="0" step="1" value={priority} onChange={(event) => setPriority(event.target.value)} disabled={readOnly || busy || Boolean(error)} required /></label>
+        <label>{t("resources.promptFilesMarkdown")}<textarea value={body} onChange={(event) => setBody(event.target.value)} rows={14} disabled={readOnly || busy || Boolean(error)} /></label>
+        <button type="submit" disabled={readOnly || busy || Boolean(error) || !name.trim()}>{busy ? t("common.saving") : t("resources.promptFilesSave")}</button>
       </form>}
     </div>
     {notice && <p className="project-prompt-files__notice" role="status">{notice}</p>}
   </section>;
 }
 
-function moduleLabel(moduleId: string): string {
-  return FIRST_PARTY_MODULES.find((item) => item.id === moduleId)?.label ?? moduleId;
+function moduleLabel(t: Translate, moduleId: string): string {
+  const definition = FIRST_PARTY_MODULES.find((item) => item.id === moduleId);
+  return definition ? t(definition.labelKey) : moduleId;
 }
 
 export function ProjectModuleResources({ projectId, accessToken }: { projectId: string; accessToken?: string }) {
+  const { t } = useI18n();
   const baseService = useMemo(() => createModuleRuntimeService({ getAccessToken: () => accessToken }), [accessToken]);
-  const service = useMemo(() => resourceModuleService(baseService), [baseService]);
+  const service = useMemo(() => resourceModuleService(baseService, t), [baseService, t]);
   const [searchParams, setSearchParams] = useSearchParams();
   const [modules, setModules] = useState<readonly ModuleRecord[]>();
   const [loading, setLoading] = useState(true);
@@ -289,7 +295,7 @@ export function ProjectModuleResources({ projectId, accessToken }: { projectId: 
     void service.listProjectModules(projectId, { signal: controller.signal }).then((result) => {
       if (!controller.signal.aborted) setModules(result);
     }).catch((cause: unknown) => {
-      if (!controller.signal.aborted) setError(safeError(cause));
+      if (!controller.signal.aborted) setError(safeError(cause, t));
     }).finally(() => {
       if (!controller.signal.aborted) setLoading(false);
     });
@@ -325,23 +331,23 @@ export function ProjectModuleResources({ projectId, accessToken }: { projectId: 
   }
 
   return <section className="project-module-resources" aria-labelledby="project-module-resources-title">
-    <header className="project-module-resources__heading"><div><p className="project-module-resources__eyebrow">First-party modules</p><h2 id="project-module-resources-title">Prompts, files and MCP</h2><p>Only project-bound module data is shown. Project scope: <code>{projectId}</code>. Declared project filters are applied to the owner-scoped module rows.</p></div>{active && <button type="button" onClick={closeModule}>All resource modules</button>}</header>
-    {loading && <p className="project-module-resources__feedback" role="status">Checking first-party module bindings for this project…</p>}
-    {!loading && error && <div className="project-module-resources__feedback project-module-resources__feedback--error" role="alert"><strong>Project module bindings unavailable</strong><span>{error}</span><button type="button" onClick={() => setAttempt((value) => value + 1)}>Retry</button></div>}
+    <header className="project-module-resources__heading" title={projectId}><div><p className="project-module-resources__eyebrow">{t("resources.modulesEyebrow")}</p><h2 id="project-module-resources-title">{t("resources.modulesTitle")}</h2><p>{t("resources.modulesDetail")}</p></div>{active && <button type="button" onClick={closeModule}>{t("resources.modulesAll")}</button>}</header>
+    {loading && <p className="project-module-resources__feedback" role="status">{t("resources.modulesChecking")}</p>}
+    {!loading && error && <div className="project-module-resources__feedback project-module-resources__feedback--error" role="alert"><strong>{t("resources.modulesUnavailable")}</strong><span>{error}</span><button type="button" onClick={() => setAttempt((value) => value + 1)}>{t("common.retry")}</button></div>}
     {!loading && !error && !active && <>
-      {boundModules.length === 0 && <p className="project-module-resources__feedback">No first-party resource modules are bound to this project yet. A module administrator can review the company module bindings.</p>}
+      {boundModules.length === 0 && <p className="project-module-resources__feedback">{t("resources.modulesEmpty")}</p>}
       <div className="project-module-resources__grid">
         {FIRST_PARTY_MODULES.map((definition) => {
           const module = modules?.find((candidate) => candidate.id === definition.id);
           return <article key={definition.id} className="project-module-resources__card" data-resource-module={definition.id}>
-            <div><p className="project-module-resources__eyebrow">{module ? "Bound to project" : "Not bound"}</p><h3>{definition.label}</h3><p>{definition.detail}</p></div>
-            {module ? <><span className="project-module-resources__binding">{module.bind_kind === "global" ? "Global" : "Local"} bind · {module.child_may_edit ? "project edits allowed" : "read only"}</span><button type="button" onClick={() => openModule(module.id)}>Open {definition.label}</button></> : <Link to="/company/modules">Open module bindings</Link>}
+            <div><p className="project-module-resources__eyebrow">{module ? t("resources.moduleBound") : t("resources.moduleNotBound")}</p><h3>{t(definition.labelKey)}</h3><p>{t(definition.detailKey)}</p></div>
+            {module ? <><span className="project-module-resources__binding">{t("resources.moduleBinding", { mode: bindingLabel(t, module.bind_kind, true), rights: editRightsLabel(t, module.child_may_edit) })}</span><button type="button" onClick={() => openModule(module.id)}>{t("resources.moduleOpen", { name: t(definition.labelKey) })}</button></> : <Link to="/company/modules">{t("resources.moduleOpenBindings")}</Link>}
           </article>;
         })}
       </div>
     </>}
     {!loading && !error && active && <div className="project-module-resources__runtime">
-      <div className="project-module-resources__active"><span>{moduleLabel(active.module.id)} · {active.module.bind_kind} bind</span><span>Project {projectId}{active.module.child_may_edit ? " · child edits allowed" : " · read only"}</span></div>
+      <div className="project-module-resources__active"><span>{t("resources.moduleActive", { name: moduleLabel(t, active.module.id), mode: bindingLabel(t, active.module.bind_kind, true) })}</span><span title={projectId}>{active.module.child_may_edit ? t("resources.moduleProjectEditable") : t("resources.moduleProjectReadOnly")}</span></div>
       <ModuleRuntime key={`${projectId}:${active.module.id}`} projectId={projectId} moduleId={active.module.id} service={service} slots={slots} showNavigation onBack={closeModule} />
     </div>}
   </section>;

@@ -99,6 +99,10 @@
 .project-runtime-facts dt { color: var(--runtime-muted); font-size: 11px; }
 .project-runtime-facts dd { font-size: 13px; font-weight: 750; margin: 0; overflow-wrap: anywhere; }
 
+/* Technical identifiers sit behind a closed disclosure so the page leads with the project, not with the cluster. */
+.project-runtime-advanced > summary { color: var(--runtime-muted); cursor: pointer; font-size: 12px; font-weight: 750; }
+.project-runtime-advanced > h2 { font-size: 14px; margin: 14px 0 10px; }
+
 .project-runtime-notice { align-items: center; display: flex; font-size: 13px; gap: 12px; justify-content: space-between; padding: 12px 15px; }
 .project-runtime-notice--success { background: #eefaf5; border-color: #b8ddcf; color: #246b4c; }
 .project-runtime-notice--error { background: #fff1ef; border-color: #efc4be; color: var(--runtime-danger); }

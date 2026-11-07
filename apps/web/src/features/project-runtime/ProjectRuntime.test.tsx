@@ -2,6 +2,7 @@
 import { act, type ComponentProps } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { SettingsProvider } from "../../preferences/SettingsProvider";
 import { ProjectRuntime } from "./ProjectRuntime";
 import type { ProjectRuntimeService, ProjectRuntimeSnapshot } from "./types";
 import { POLL_BUDGET_MS } from "../../test-support/poll-budget";
@@ -55,7 +56,7 @@ async function mount(props: Partial<ComponentProps<typeof ProjectRuntime>> = {})
   document.body.append(host);
   root = createRoot(host);
   await act(async () => {
-    root?.render(<ProjectRuntime projectId={projectId} onNavigate={vi.fn()} onModelChange={vi.fn()} {...props} />);
+    root?.render(<SettingsProvider><ProjectRuntime projectId={projectId} onNavigate={vi.fn()} onModelChange={vi.fn()} {...props} /></SettingsProvider>);
   });
   return { container: host, service: props.service };
 }
@@ -93,12 +94,12 @@ describe("ProjectRuntime component workflow", () => {
     const service = serviceFor({ load });
     const { container } = await mount({ service });
 
-    expect(container.textContent).toContain("Загружаем project runtime");
+    expect(container.textContent).toContain("Загружаем проект");
     expect(load).toHaveBeenCalledWith(projectId);
 
     await act(async () => { resolveLoad(snapshot()); });
     expect(container.textContent).toContain("Runtime Lab");
-    expect(container.textContent).not.toContain("Загружаем project runtime");
+    expect(container.textContent).not.toContain("Загружаем проект");
   });
 
   it("shows the project read error and recovers through retry", async () => {
@@ -106,7 +107,7 @@ describe("ProjectRuntime component workflow", () => {
     const { container } = await mount({ service: serviceFor({ load }) });
     await waitFor(() => container.textContent?.includes("project missing") ?? false);
 
-    expect(container.textContent).toContain("Project runtime недоступен");
+    expect(container.textContent).toContain("Проект недоступен");
     const retry = [...container.querySelectorAll("button")].find((button) => button.textContent === "Повторить");
     expect(retry).toBeDefined();
     await act(async () => { retry?.click(); });
@@ -122,7 +123,8 @@ describe("ProjectRuntime component workflow", () => {
 
     expect(load).toHaveBeenCalledWith(projectId);
     expect(container.textContent).not.toContain("Wrong project");
-    expect(container.textContent).toContain(`Project / ${projectId}`);
+    expect(container.textContent).toContain("Route project");
+    expect(container.textContent).not.toContain(projectId);
   });
 
   it("refreshes the readback from the backend", async () => {
@@ -146,14 +148,14 @@ describe("ProjectRuntime component workflow", () => {
     });
     const load = vi.fn(async () => running);
     const { container } = await mount({ service: serviceFor({ load }), initialSnapshot: preparing });
-    expect(container.textContent).toContain("Provisioning");
+    expect(container.textContent).toContain("Выделяем ресурсы");
 
     const refresh = [...container.querySelectorAll("button")].find((button) => button.textContent === "Обновить");
     await act(async () => { refresh?.click(); });
 
     expect(load).toHaveBeenCalledWith(projectId);
     expect(container.textContent).toContain("Работает");
-    expect(container.textContent).toContain("Readiness подтверждён");
+    expect(container.textContent).toContain("Принимает работу");
   });
 
   it("keeps the last readback visible on refresh error and clears it after recovery", async () => {
@@ -205,9 +207,9 @@ describe("ProjectRuntime component workflow", () => {
 
     await act(async () => { choose(provider, "codex"); });
     await act(async () => { choose(key, "key-codex"); });
-    const save = [...container.querySelectorAll("button")].find((button) => button.textContent === "Сохранить настройки");
+    const save = [...container.querySelectorAll("button")].find((button) => button.textContent === "Сохранить");
     await act(async () => { save?.click(); });
-    await waitFor(() => container.textContent?.includes("Provider и AI key сохранены и подтверждены backend") ?? false);
+    await waitFor(() => container.textContent?.includes("Провайдер и ключ сохранены") ?? false);
     expect(patchProject).toHaveBeenCalledWith(projectId, expect.objectContaining({ agent_provider: "codex", resolved_ai_key_id: "key-codex" }));
     expect(load).toHaveBeenCalledWith(projectId);
     const launch = [...container.querySelectorAll("button")].find((button) => button.textContent === "Запустить проект");
@@ -216,14 +218,14 @@ describe("ProjectRuntime component workflow", () => {
     await act(async () => { launch?.click(); });
     expect(runAction).not.toHaveBeenCalled();
     await act(async () => { launch?.click(); });
-    await waitFor(() => container.textContent?.includes("Pod ещё готовится") ?? false);
+    await waitFor(() => container.textContent?.includes("Проект ещё готовится") ?? false);
 
-    expect(confirm).toHaveBeenCalledWith("Запустить runtime проекта? Backend подготовит workspace и provision контейнера.");
+    expect(confirm).toHaveBeenCalledWith("Запустить проект? Мы подготовим рабочую папку и среду выполнения.");
     expect(runAction).toHaveBeenCalledWith(projectId, "launch");
     expect(load).toHaveBeenCalledWith(projectId);
-    expect(container.textContent).toContain("Pod ещё готовится");
+    expect(container.textContent).toContain("Проект ещё готовится");
     expect(container.textContent).not.toContain("Запустить завершено");
-    expect(container.textContent).toContain("Live model недоступна до запуска Pod");
+    expect(container.textContent).toContain("Модели появятся после запуска проекта");
   });
 
   it("keeps launch disabled until provider and active key are explicitly saved", async () => {
@@ -237,7 +239,7 @@ describe("ProjectRuntime component workflow", () => {
     const { container } = await mount({ service: serviceFor(), initialSnapshot: draft, initialTab: "settings" });
     const launch = [...container.querySelectorAll("button")].find((button) => button.textContent === "Запустить проект");
 
-    expect(container.textContent).toContain("черновик создаётся в Projects через реальный POST");
+    expect(container.textContent).toContain("Проект-черновик создаётся в разделе «Проекты»");
     expect(container.querySelector('a[href="/projects"]')).not.toBeNull();
     expect(launch?.disabled).toBe(true);
   });
@@ -252,7 +254,7 @@ describe("ProjectRuntime component workflow", () => {
     const onModelChange = vi.fn();
     const { container } = await mount({ service: serviceFor(), initialSnapshot: initial, initialTab: "settings", onModelChange });
     const [, , model] = [...container.querySelectorAll<HTMLSelectElement>("select")];
-    const apply = [...container.querySelectorAll("button")].find((button) => button.textContent === "Новый чат с выбранной моделью");
+    const apply = [...container.querySelectorAll("button")].find((button) => button.textContent === "Новый чат с этой моделью");
 
     expect(model?.value).toBe("");
     expect(apply?.disabled).toBe(true);
@@ -261,7 +263,7 @@ describe("ProjectRuntime component workflow", () => {
     await act(async () => { apply?.click(); });
 
     expect(onModelChange).toHaveBeenCalledWith(projectId, "gpt-5");
-    expect(container.textContent).toContain("Создание agent session с моделью gpt-5 передано chat surface");
+    expect(container.textContent).toContain("Создаём чат с моделью «gpt-5»");
   });
 
   it("does not offer launch for an already active project", async () => {
@@ -269,6 +271,21 @@ describe("ProjectRuntime component workflow", () => {
     const launch = [...container.querySelectorAll("button")].find((button) => button.textContent === "Запустить");
 
     expect(launch?.disabled).toBe(true);
+  });
+
+  it("speaks English end to end when the reader chose English", async () => {
+    window.localStorage.setItem("agentscale.locale", "en");
+    try {
+      const { container } = await mount({ service: serviceFor(), initialSnapshot: snapshot() });
+      const text = container.textContent ?? "";
+
+      expect(text).toContain("Running");
+      expect(text).toContain("How the project is doing");
+      expect(text).toContain("Advanced");
+      expect(text).not.toMatch(/[А-Яа-я]/);
+    } finally {
+      window.localStorage.removeItem("agentscale.locale");
+    }
   });
 
   it("navigates runtime tabs, browses folders, previews a file, and downloads it", async () => {
@@ -285,10 +302,10 @@ describe("ProjectRuntime component workflow", () => {
     const { container } = await mount({ service, initialSnapshot: initial, onNavigate });
     // The mkdir limitation is stated by the Files panel, so it can only be asserted once the
     // files tab is rendered — the overview tab legitimately does not carry that sentence.
-    const filesTab = [...container.querySelectorAll<HTMLButtonElement>("nav button")].find((button) => button.textContent?.startsWith("Files"));
+    const filesTab = [...container.querySelectorAll<HTMLButtonElement>("nav button")].find((button) => button.textContent?.startsWith("Файлы"));
     await act(async () => { filesTab?.click(); });
 
-    expect(container.textContent).toContain("Создание папок недоступно");
+    expect(container.textContent).toContain("Создавать папки пока нельзя");
     expect(onNavigate).toHaveBeenCalledWith("files", projectId);
     const folder = [...container.querySelectorAll<HTMLButtonElement>(".project-runtime-file-row button")].find((button) => button.textContent?.includes("src"));
     await act(async () => { folder?.click(); });
@@ -333,10 +350,10 @@ describe("ProjectRuntime component workflow", () => {
     const listWorkspace = vi.fn(async (_id: string, path = "") => ({ path, entries: [{ name: "listed.txt", path: "listed.txt", kind: "file" }] }));
     const { container } = await mount({ service: serviceFor({ load, listWorkspace }), initialSnapshot: paused, initialTab: "files" });
 
-    expect(container.textContent).toContain("Live workspace недоступен");
+    expect(container.textContent).toContain("Файлы доступны, когда проект запущен");
     expect(container.textContent).not.toContain("stale.txt");
     expect(listWorkspace).not.toHaveBeenCalled();
-    const refresh = [...container.querySelectorAll("button")].find((button) => button.textContent === "Обновить статус Pod");
+    const refresh = [...container.querySelectorAll("button")].find((button) => button.textContent === "Проверить состояние");
     await act(async () => { refresh?.click(); });
 
     expect(load).toHaveBeenCalledWith(projectId);
@@ -348,7 +365,7 @@ describe("ProjectRuntime component workflow", () => {
     const listWorkspace = vi.fn().mockRejectedValueOnce(new Error("workspace service unavailable"));
     const { container } = await mount({ service: serviceFor({ listWorkspace }), initialSnapshot: snapshot({ files: null }), initialTab: "files" });
     await waitFor(() => container.textContent?.includes("workspace service unavailable") ?? false);
-    expect(container.textContent).toContain("Live workspace пока не доступен");
+    expect(container.textContent).toContain("Рабочая папка ещё готовится");
     listWorkspace.mockResolvedValue({ path: "", entries: [{ name: "README.md", path: "README.md", kind: "file" }] });
     const retry = container.querySelector<HTMLButtonElement>(".project-runtime-files-layout .project-runtime-section-heading button");
     await act(async () => { retry?.click(); });

@@ -1,33 +1,35 @@
+// @vitest-environment jsdom
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import { SettingsProvider } from "../../preferences/SettingsProvider";
 import { ConfirmAction, DataTable } from "./ui";
 import type { ContourRow } from "./service";
 
 const row = { id: "company-1", name: "Acme", status: "active" } satisfies ContourRow;
 
 function tableMarkup(rows: ContourRow[], loading = false, error?: string) {
-  return renderToStaticMarkup(<DataTable rows={rows} columns={[{ key: "name", label: "Name" }, { key: "status", label: "Status" }]} loading={loading} error={error} onRetry={() => undefined} query="" onQuery={() => undefined} />);
+  return renderToStaticMarkup(<SettingsProvider><DataTable rows={rows} columns={[{ key: "name", label: "Name" }, { key: "status", label: "Status" }]} loading={loading} error={error} onRetry={() => undefined} query="" onQuery={() => undefined} /></SettingsProvider>);
 }
 
 describe("contour table acceptance surface", () => {
   it("exposes loading, error and empty states", () => {
-    expect(tableMarkup([], true)).toContain("Loading…");
+    expect(tableMarkup([], true)).toContain("Загрузка…");
     expect(tableMarkup([], false, "network down")).toContain("network down");
-    expect(tableMarkup([])).toContain("No records found.");
+    expect(tableMarkup([])).toContain("Записей нет");
   });
 
   it("renders search and pagination controls for real rows", () => {
     const rows = Array.from({ length: 11 }, (_, index) => ({ ...row, id: `company-${index}`, name: `Acme ${index}` }));
     const markup = tableMarkup(rows);
     expect(markup).toContain('type="search"');
-    expect(markup).toContain("Page 1 of 2");
-    expect(markup).toContain("Previous");
-    expect(markup).toContain("Next");
+    expect(markup).toContain("Страница 1 из 2");
+    expect(markup).toContain("Назад");
+    expect(markup).toContain("Вперёд");
   });
 
   it("does not expose a destructive confirmation until the action is requested", () => {
-    const markup = renderToStaticMarkup(<ConfirmAction label="Delete company" onConfirm={() => undefined} />);
-    expect(markup).toContain("Delete company");
-    expect(markup).not.toContain("Confirm");
+    const markup = renderToStaticMarkup(<SettingsProvider><ConfirmAction label="Удалить компанию" onConfirm={() => undefined} /></SettingsProvider>);
+    expect(markup).toContain("Удалить компанию");
+    expect(markup).not.toContain("Подтвердить");
   });
 });

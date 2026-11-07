@@ -1,3 +1,4 @@
+import type { Translate } from "../../i18n/catalogue";
 import { WorkspaceServiceError, type WorkspaceFailureKind } from "./contracts";
 
 export type FilesAvailability = "loading" | "ready" | "empty" | "error" | "offline" | "paused" | "pod-unavailable";
@@ -13,16 +14,24 @@ export function classifyWorkspaceError(error: unknown): WorkspaceFailureKind {
   return "error";
 }
 
-export function workspaceErrorMessage(error: unknown): string {
+/**
+ * The sentence a user reads for a failed workspace call.
+ *
+ * Takes the translator rather than importing copy: the same failure is rendered
+ * on the screen the user is looking at, so it has to follow the active language.
+ * A server-supplied `detail` is passed through as-is — it is the server's own
+ * wording, not ours to rewrite.
+ */
+export function workspaceErrorMessage(error: unknown, t: Translate): string {
   if (error instanceof WorkspaceServiceError) {
-    if (error.code === "POD_NOT_RUNNING") return "The Pod is not running. Start the project Pod to access its files.";
-    if (error.code === "PROJECT_PAUSED") return "This project is paused. Resume the project to access its files.";
-    if (error.code === "OFFLINE") return "The workspace service is offline. Check your connection and try again.";
-    if (error.code === "UNSUPPORTED_MEDIA") return "This file is binary and cannot be previewed as text.";
+    if (error.code === "POD_NOT_RUNNING") return t("files.errorPodNotRunning");
+    if (error.code === "PROJECT_PAUSED") return t("files.errorProjectPaused");
+    if (error.code === "OFFLINE") return t("files.errorOffline");
+    if (error.code === "UNSUPPORTED_MEDIA") return t("files.errorBinaryPreview");
     if (error.detail) return error.detail;
   }
   if (error instanceof Error && error.message) return error.message;
-  return "The workspace request failed. Try again.";
+  return t("files.errorGeneric");
 }
 
 export function sortWorkspaceEntries<T extends { kind: "file" | "dir"; name: string }>(entries: readonly T[]): T[] {

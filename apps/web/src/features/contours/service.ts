@@ -86,7 +86,7 @@ function encode(value: string): string { return encodeURIComponent(value); }
 function items<T extends ContourRow>(value: unknown): T[] {
   if (Array.isArray(value)) return value as T[];
   if (isRecord(value) && Array.isArray(value.items)) return value.items as T[];
-  throw new ContourRequestError("API returned an invalid list response.");
+  throw new ContourRequestError("Сервер вернул неожиданный список. Обновите страницу.");
 }
 
 export function createContourService(options: ContourServiceOptions = {}): ContourService {
@@ -106,11 +106,11 @@ export function createContourService(options: ContourServiceOptions = {}): Conto
         },
         ...(body ? { body: JSON.stringify(body) } : {}),
       });
-    } catch (error) {
-      throw new ContourRequestError(error instanceof Error ? `API connection failed: ${error.message}` : "API connection failed.");
+    } catch {
+      throw new ContourRequestError("Не удалось связаться с сервером. Проверьте подключение.");
     }
     if (!response.ok) {
-      let message = response.statusText || `Request failed (${response.status})`;
+      let message = response.statusText || `Запрос не выполнен (код ${response.status}).`;
       let code: string | undefined;
       try {
         const payload: unknown = await response.json();
@@ -125,7 +125,7 @@ export function createContourService(options: ContourServiceOptions = {}): Conto
     }
     if (response.status === 204) return undefined as T;
     try { return await response.json() as T; }
-    catch { throw new ContourRequestError("API returned an invalid JSON response.", response.status); }
+    catch { throw new ContourRequestError("Сервер вернул неожиданный ответ. Обновите страницу.", response.status); }
   }
   const company = (id: string) => `/companies/${encode(id)}`;
   const adminCompany = (id: string) => `/admin/companies/${encode(id)}`;
@@ -141,19 +141,19 @@ export function createContourService(options: ContourServiceOptions = {}): Conto
     ]);
     const activeRow = active.find((row) => row.id === employeeId);
     const deletedRow = deleted.find((row) => row.id === employeeId);
-    if (activeRow && deletedRow) throw new ContourRequestError("Employee appears in both company employee lists.");
+    if (activeRow && deletedRow) throw new ContourRequestError("Сотрудник найден сразу в двух списках компании.");
     const row = deletedRow ?? activeRow;
-    if (!row) throw new ContourRequestError("Employee is not linked to this company.");
+    if (!row) throw new ContourRequestError("Этот сотрудник не относится к компании.");
     if (row.status !== "active" && row.status !== "disabled" && row.status !== "invited") {
-      throw new ContourRequestError("Employee status is invalid in the company employee list.");
+      throw new ContourRequestError("В списке сотрудников компании недопустимый статус.");
     }
     // The live include_deleted=true list contains only tombstones; the active list omits deleted_at.
     const deletedAt = row.deleted_at;
     if (deletedAt !== undefined && deletedAt !== null && (typeof deletedAt !== "string" || deletedAt.trim().length === 0)) {
-      throw new ContourRequestError("Employee deletion timestamp is invalid in the company employee list.");
+      throw new ContourRequestError("В списке сотрудников компании недопустимая дата удаления.");
     }
     const isDeleted = typeof deletedAt === "string" && deletedAt.trim().length > 0;
-    if (isDeleted !== Boolean(deletedRow)) throw new ContourRequestError("Employee deletion state is inconsistent in the company employee list.");
+    if (isDeleted !== Boolean(deletedRow)) throw new ContourRequestError("В списке сотрудников компании не совпадает состояние удаления.");
     return { row: { ...row, deleted_at: isDeleted ? deletedAt : null }, deleted: isDeleted };
   }
 
@@ -168,13 +168,13 @@ export function createContourService(options: ContourServiceOptions = {}): Conto
       ? typeof deletedAt === "string" && deletedAt.trim().length > 0
       : deletedAt === null;
     if (snapshot.row.status !== expected.status || snapshot.deleted !== expected.deleted || !deletionStateMatches) {
-      throw new ContourRequestError("Employee change could not be verified from the company employee list.");
+      throw new ContourRequestError("Не удалось подтвердить изменение по списку сотрудников компании.");
     }
     return snapshot.row;
   }
 
   function assertMutationEmployee(response: ContourRow, employeeId: string): void {
-    if (response.id !== employeeId) throw new ContourRequestError("Employee mutation returned a mismatched employee ID.");
+    if (response.id !== employeeId) throw new ContourRequestError("Сервер вернул другого сотрудника.");
   }
 
   async function mutateEmployeeLifecycle(
@@ -192,13 +192,13 @@ export function createContourService(options: ContourServiceOptions = {}): Conto
           ? { status: "disabled", deleted: true }
           : { status: "disabled", deleted: false };
     if (action === "restore" && !current.deleted) {
-      throw new ContourRequestError("Employee is not deleted in this company.");
+      throw new ContourRequestError("Этот сотрудник не удалён.");
     }
     if (current.row.status === expected.status && current.deleted === expected.deleted) return current.row;
     if (action !== "restore" && current.deleted) {
-      throw new ContourRequestError("Deleted employees cannot use this action.");
+      throw new ContourRequestError("Сотрудник удалён — действие недоступно.");
     }
-    if (isCurrent && !isCurrent()) throw new ContourRequestError("Company scope changed before the employee action could run.");
+    if (isCurrent && !isCurrent()) throw new ContourRequestError("Контекст компании изменился до выполнения действия.");
     const path = `/employees/${encode(employeeId)}`;
     const response = await request<ContourRow>(
       action === "delete" ? path : `${path}/${action}`,
@@ -215,8 +215,8 @@ export function createContourService(options: ContourServiceOptions = {}): Conto
     isCurrent?: () => boolean,
   ): Promise<ContourRow> {
     const current = await companyEmployeeSnapshot(companyId, employeeId);
-    if (current.deleted) throw new ContourRequestError("Deleted employees cannot be edited.");
-    if (isCurrent && !isCurrent()) throw new ContourRequestError("Company scope changed before the employee update could run.");
+    if (current.deleted) throw new ContourRequestError("Удалённого сотрудника нельзя изменить.");
+    if (isCurrent && !isCurrent()) throw new ContourRequestError("Контекст компании изменился до сохранения изменений.");
     const response = await action();
     assertMutationEmployee(response, employeeId);
     return verifyEmployeeState(companyId, employeeId, { status: String(current.row.status ?? ""), deleted: false });
@@ -230,10 +230,10 @@ export function createContourService(options: ContourServiceOptions = {}): Conto
   return {
     listEmployees,
     createEmployee: async (id, body, isCurrent) => {
-      if (isCurrent && !isCurrent()) throw new ContourRequestError("Company scope changed before the employee could be created.");
+      if (isCurrent && !isCurrent()) throw new ContourRequestError("Контекст компании изменился до создания сотрудника.");
       const created = await request<ContourRow>(`${company(id)}/employees`, "POST", { ...body });
-      if (!created.id) throw new ContourRequestError("Employee creation returned no employee ID.");
-      if (created.status !== "invited") throw new ContourRequestError("Created employee has an unexpected status.");
+      if (!created.id) throw new ContourRequestError("Сервер не вернул идентификатор сотрудника.");
+      if (created.status !== "invited") throw new ContourRequestError("У созданного сотрудника неожиданный статус.");
       return verifyEmployeeState(id, created.id, { status: "invited", deleted: false });
     },
     updateEmployeeEmail: (id, employeeId, contact_email, isCurrent) => updateEmployee(id, employeeId, () => request(`${company(id)}/employees/${encode(employeeId)}/contact-email`, "PATCH", { contact_email }), isCurrent),
@@ -281,9 +281,9 @@ export function createContourService(options: ContourServiceOptions = {}): Conto
     deleteProvider: (id) => request(`${providers}/${encode(id)}`, "DELETE"),
     listCompanyMetrics: async () => {
       const result = await request<unknown>("/admin/metrics/companies");
-      if (!isRecord(result) || !Array.isArray(result.items)) throw new ContourRequestError("API returned an invalid metrics response.");
+      if (!isRecord(result) || !Array.isArray(result.items)) throw new ContourRequestError("Сервер вернул неожиданный ответ по метрикам.");
       return result.items.map((row, index) => {
-        if (!isRecord(row)) throw new ContourRequestError("API returned an invalid metric row.");
+        if (!isRecord(row)) throw new ContourRequestError("Сервер вернул неожиданную строку метрики.");
         return { ...row, id: String(row.company_id ?? row.id ?? `metric-${index}`) };
       });
     },
@@ -294,7 +294,7 @@ export function createContourService(options: ContourServiceOptions = {}): Conto
     rebuildMetrics: () => request("/admin/metrics/rebuild", "POST"),
     listRecycleBin: async () => {
       const result = await request<unknown>("/admin/recycle");
-      if (!isRecord(result)) throw new ContourRequestError("API returned an invalid recycle response.");
+      if (!isRecord(result)) throw new ContourRequestError("Сервер вернул неожиданный ответ по корзине.");
       const rows: ContourRow[] = [];
       for (const entity of ["companies", "employees", "cabinets", "projects"]) {
         if (Array.isArray(result[entity])) rows.push(...(result[entity] as ContourInput[]).map((row) => ({ ...row, id: String(row.id ?? ""), entity })));

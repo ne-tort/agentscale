@@ -273,6 +273,40 @@
   gap: 4px;
 }
 
+/* "Ещё" — a disclosure, not a third group of equal links. The summary sits
+   where a group heading used to be, so the sidebar keeps one rhythm. */
+.workspace-shell__nav-more {
+  margin-top: 10px;
+}
+
+.workspace-shell__nav-more > summary {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  list-style: none;
+  user-select: none;
+}
+
+.workspace-shell__nav-more > summary::-webkit-details-marker {
+  display: none;
+}
+
+.workspace-shell__nav-more > summary:focus-visible {
+  border-radius: 6px;
+  outline: 2px solid #80c6ae;
+  outline-offset: 2px;
+}
+
+.workspace-shell__nav-more-chevron {
+  font-size: 11px;
+  transition: transform 120ms ease;
+}
+
+.workspace-shell__nav-more[open] .workspace-shell__nav-more-chevron {
+  transform: rotate(180deg);
+}
+
 .workspace-shell__nav-heading {
   padding: 0 12px 7px;
 }

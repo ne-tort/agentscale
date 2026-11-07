@@ -3,7 +3,6 @@ import { resourceWorkspaceFixture } from "./fixtures";
 import {
   canPlanMaterialization,
   canSyncMaterialization,
-  formatGeneration,
   latestVersionNumber,
   selectVisibleResources,
   summarizeDiff,
@@ -62,9 +61,7 @@ describe("resource workspace view model", () => {
     expect(canSyncMaterialization(enabled, { ...resourceWorkspaceFixture.materialization!, status: "ready" })).toBe(true);
   });
 
-  it("keeps generation and diff counts inspectable", () => {
-    expect(formatGeneration(4, 3)).toBe("g4 desired · g3 applied");
-    expect(formatGeneration(4)).toBe("g4 desired · unapplied");
+  it("keeps diff counts inspectable", () => {
     expect(summarizeDiff({
       resourceId: "resource-prompt",
       fromVersion: 1,

@@ -1,8 +1,15 @@
+// @vitest-environment jsdom
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
+import { SettingsProvider } from "../../preferences/SettingsProvider";
 import { ModuleRuntime } from "./ModuleRuntime";
 import type { ModuleManifest, ModuleRuntimeService } from "./contracts";
 import { filesModuleFixture } from "./fixtures";
+
+/** Copy comes from the settings provider (Russian by default), so every render is wrapped. */
+function render(element: Parameters<typeof renderToStaticMarkup>[0]): string {
+  return renderToStaticMarkup(<SettingsProvider>{element}</SettingsProvider>);
+}
 
 function buildRuntime() {
   const fixture = filesModuleFixture;
@@ -36,14 +43,14 @@ function buildRuntime() {
 describe("ModuleRuntime collection acceptance", () => {
   it("exposes the primary create command in the initial collection render", () => {
     const { fixture, service, initialRuntime } = buildRuntime();
-    const markup = renderToStaticMarkup(<ModuleRuntime projectId={fixture.project.id} moduleId={fixture.module.id} service={service} initialRuntime={initialRuntime} initialViewSlug="files_primary" />);
+    const markup = render(<ModuleRuntime projectId={fixture.project.id} moduleId={fixture.module.id} service={service} initialRuntime={initialRuntime} initialViewSlug="files_primary" />);
     expect(markup).toContain("Новый файл");
   });
 
   it("shows undeclared and malformed row actions as errors instead of dropping them", () => {
     const { fixture, service, initialRuntime } = buildRuntime();
     const mutated = { ...initialRuntime, manifest: { ...initialRuntime.manifest, views: initialRuntime.manifest.views.map((view) => view.slug === "files_primary" ? { ...view, ui_json: { ...view.ui_json, row_actions: [{ action: "missing_action" }, { kind: "unknown" }] } } : view) } };
-    const markup = renderToStaticMarkup(<ModuleRuntime projectId={fixture.project.id} moduleId={fixture.module.id} service={service} initialRuntime={mutated} initialViewSlug="files_primary" />);
+    const markup = render(<ModuleRuntime projectId={fixture.project.id} moduleId={fixture.module.id} service={service} initialRuntime={mutated} initialViewSlug="files_primary" />);
     expect(markup).toContain("missing_action");
     expect(markup).toContain("row action must invoke a declared action");
   });

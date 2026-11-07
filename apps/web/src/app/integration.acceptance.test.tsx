@@ -419,7 +419,7 @@ describe("employee workspace integration acceptance", () => {
     await click(".login-submit", () => pageText().includes("Inspect notes.md"));
     await waitFor(() => pageText().includes("Inspect notes.md"));
 
-    expect(pageText()).toContain("Chats");
+    expect(pageText()).toContain("Чаты");
     expect(pageText()).toContain("Inspect notes.md");
     expect(pageText()).toContain("ada@example.test");
     expect(JSON.parse(window.localStorage.getItem(AUTH_STORAGE_KEY) ?? "null")).toEqual(tokens);
@@ -536,27 +536,27 @@ describe("employee workspace integration acceptance", () => {
     expect(requests.some((request) => request.path === `/api/v1/cabinets/${cabinetId}/me/selection`)).toBe(true);
     await click(`a[href='/projects/${projectId}']`, () => Boolean(document.querySelector(".project-runtime-header")));
     expect(document.querySelector(".project-runtime-header")?.textContent).toContain("Signal Lab");
-    expect(pageText()).toContain("Наблюдаемое состояние");
+    expect(pageText()).toContain("Запуск проекта, его файлы и настройки агента.");
     expect(requests.find((request) => request.path === `/api/v1/projects/${projectId}`)).toMatchObject({ method: "GET", authorization: "Bearer acceptance-access" });
     expect(requests.find((request) => request.path === `/api/v1/projects/${projectId}/container`)).toMatchObject({ method: "GET", authorization: "Bearer acceptance-access" });
     expect(requests.find((request) => request.path === `/api/v1/projects/${projectId}/container/metrics?window=1h`)).toMatchObject({ method: "GET", authorization: "Bearer acceptance-access" });
 
     await click(`a[href='/projects/${projectId}/files']`, () => Boolean(document.querySelector(".files-entry-main")));
-    expect(pageText()).toContain("Live files from the project Pod");
+    expect(pageText()).toContain("Файлы из Pod проекта, в реальном времени");
     expect(requests.find((request) => request.path === `/api/v1/projects/${projectId}/container/workspace/entries?path=`)).toMatchObject({ method: "GET", authorization: "Bearer acceptance-access" });
     const fileEntry = [...document.querySelectorAll<HTMLButtonElement>(".files-entry-main")].find((button) => button.textContent?.includes("notes.md"));
     expect(fileEntry).toBeTruthy();
     await act(async () => {
       fileEntry?.click();
     });
-    await waitFor(() => document.querySelector<HTMLTextAreaElement>("textarea[aria-label='Editing notes.md']")?.value === "workspace content");
+    await waitFor(() => document.querySelector<HTMLTextAreaElement>("textarea[aria-label='Редактирование файла notes.md']")?.value === "workspace content");
     expect(requests.find((request) => request.path === `/api/v1/projects/${projectId}/container/workspace/preview?path=notes.md`)).toMatchObject({ method: "GET", authorization: "Bearer acceptance-access" });
 
-    await click(`a[href='/projects/${projectId}/runs']`, () => pageText().includes("Runs & approvals"));
+    await click(`a[href='/projects/${projectId}/runs']`, () => pageText().includes("Запуски и подтверждения"));
     // The centre opens on the Runs tab; the approval inbox is its own tab.
     await act(async () => {
       const approvalsTab = [...document.querySelectorAll<HTMLButtonElement>(".run-tabs button")]
-        .find((button) => button.textContent?.trim().startsWith("Approvals"));
+        .find((button) => button.textContent?.trim().startsWith("Подтверждения"));
       if (!approvalsTab) throw new Error("Missing Approvals tab");
       approvalsTab.click();
     });
@@ -566,13 +566,13 @@ describe("employee workspace integration acceptance", () => {
     const approval = [...document.querySelectorAll<HTMLElement>(".run-approval-card")]
       .find((card) => card.querySelector("h3")?.textContent === "write_file");
     expect(approval).toBeTruthy();
-    const approveButton = [...approval!.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent?.trim() === "Approve");
+    const approveButton = [...approval!.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent?.trim() === "Подтвердить");
     expect(approveButton).toBeTruthy();
     await act(async () => {
       approveButton?.click();
     });
     // Confirmation must come from the run's own event timeline, not the POST response.
-    await waitFor(() => pageText().includes("confirmed by the durable event timeline"));
+    await waitFor(() => pageText().includes("Подтверждение сохранено"));
     expect(document.querySelector(".run-approval-card")).toBeNull();
     const decision = requests.find((request) => request.path === `/api/v1/projects/${projectId}/agent/approvals/${approvalId}/decision`);
     expect(decision).toMatchObject({ method: "POST", authorization: "Bearer acceptance-access" });
@@ -590,7 +590,7 @@ describe("employee workspace integration acceptance", () => {
     // Session history is a separate tab over a separate resource.
     await act(async () => {
       const sessionsTab = [...document.querySelectorAll<HTMLButtonElement>(".run-tabs button")]
-        .find((button) => button.textContent?.trim().startsWith("Session history"));
+        .find((button) => button.textContent?.trim().startsWith("История чатов"));
       if (!sessionsTab) throw new Error("Missing Session history tab");
       sessionsTab.click();
     });
@@ -730,27 +730,27 @@ describe("employee workspace integration acceptance", () => {
       overviewLink?.click();
     });
     await waitFor(() => Boolean(document.querySelector(`.workspace-shell[data-project-id='${projectId}']`))
-      && pageText().includes("Наблюдаемое состояние"));
+      && pageText().includes("Запуск проекта, его файлы и настройки агента."));
     expect(requests.find((request) => request.path === `/api/v1/projects/${projectId}`)).toMatchObject({ method: "GET", authorization: "Bearer acceptance-access" });
     expect(requests.find((request) => request.path === `/api/v1/projects/${projectId}/container`)).toMatchObject({ method: "GET", authorization: "Bearer acceptance-access" });
     expect(requests.some((request) => request.path === `/api/v1/projects/${projectId}/container/workspace/entries?path=`)).toBe(true);
 
-    await click("a[aria-label='Settings']", () => Boolean(document.querySelector(".project-controls__header")));
+    await click("a[aria-label='Настройки']", () => Boolean(document.querySelector(".project-controls__header")));
     expect(document.querySelector(".project-controls__header h1")?.textContent).toBe("Signal Lab");
     expect(requests.some((request) => request.path === `/api/v1/projects/${projectId}` && request.method === "GET" && request.authorization === "Bearer acceptance-access")).toBe(true);
 
     const rootListingCountBeforeError = requests.filter((request) => request.path === `/api/v1/projects/${projectId}/container/workspace/entries?path=` && request.method === "GET").length;
     failNextProjectRootListing = true;
-    await click("a[aria-label='Files']", () => Boolean(document.querySelector(".files-availability-error")));
+    await click("a[aria-label='Файлы']", () => Boolean(document.querySelector(".files-availability-error")));
     expect(pageText()).toContain("Workspace listing temporarily unavailable.");
     expect(requests.filter((request) => request.path === `/api/v1/projects/${projectId}/container/workspace/entries?path=` && request.method === "GET")).toHaveLength(rootListingCountBeforeError + 1);
     await click(".files-availability button", () => Boolean(document.querySelector(".files-entry-main")));
-    expect(pageText()).toContain("Live files from the project Pod");
+    expect(pageText()).toContain("Файлы из Pod проекта, в реальном времени");
     expect(requests.filter((request) => request.path === `/api/v1/projects/${projectId}/container/workspace/entries?path=` && request.method === "GET")).toHaveLength(rootListingCountBeforeError + 2);
 
-    await click("button[aria-label='Create a folder']", () => Boolean(document.querySelector("#files-create-folder-name")));
+    await click("button[aria-label='Создать папку']", () => Boolean(document.querySelector("#files-create-folder-name")));
     await setValue(document.querySelector<HTMLInputElement>("#files-create-folder-name")!, "docs");
-    await click(".files-modal-form button[type='submit']", () => pageText().includes("Created docs"));
+    await click(".files-modal-form button[type='submit']", () => pageText().includes("Создано: docs"));
     const mkdirRequest = requests.find((request) => request.path === `/api/v1/projects/${projectId}/container/workspace/mkdir` && request.method === "POST");
     expect(mkdirRequest).toMatchObject({
       method: "POST",
@@ -769,20 +769,20 @@ describe("employee workspace integration acceptance", () => {
     });
     await waitFor(() => document.querySelector<HTMLInputElement>("#files-path-input")?.value === "docs"
       && Boolean(document.querySelector("[data-testid='acceptance-location']")?.textContent?.includes("path=docs")));
-    const uploadInput = document.querySelector<HTMLInputElement>("input[aria-label='Upload files']");
+    const uploadInput = document.querySelector<HTMLInputElement>("input[aria-label='Загрузить файлы']");
     expect(uploadInput).toBeTruthy();
     await act(async () => {
       Object.defineProperty(uploadInput, "files", { configurable: true, value: [new File(["acceptance artifact"], "brief.txt", { type: "text/plain" })] });
       uploadInput?.dispatchEvent(new Event("change", { bubbles: true }));
     });
-    await waitFor(() => pageText().includes("Uploaded 1 file"));
+    await waitFor(() => pageText().includes("Загружен 1 файл"));
     const uploadRequest = requests.find((request) => request.path === `/api/v1/projects/${projectId}/container/workspace/content?path=docs%2Fbrief.txt` && request.method === "PUT");
     expect(uploadRequest).toMatchObject({ method: "PUT", contentType: "application/octet-stream", authorization: "Bearer acceptance-access" });
     expect(await uploadRequest?.binaryBody?.text()).toBe("acceptance artifact");
     const fileDownload = requests.find((request) => request.path === `/api/v1/projects/${projectId}/container/workspace/content?path=docs%2Fbrief.txt` && request.method === "GET");
     expect(fileDownload).toMatchObject({ method: "GET", authorization: "Bearer acceptance-access" });
     expect(filesystems.get(projectId)?.files.get("docs/brief.txt")).toBe("acceptance artifact");
-    expect(pageText()).toContain("Uploaded 1 file");
+    expect(pageText()).toContain("Загружен 1 файл");
     expect([...document.querySelectorAll<HTMLButtonElement>(".files-entry-main")].some((button) => button.textContent?.includes("brief.txt"))).toBe(true);
     expect(requests.filter((request) => request.path === `/api/v1/projects/${projectId}/container/workspace/entries?path=docs` && request.method === "GET")).toHaveLength(3);
 
@@ -790,7 +790,7 @@ describe("employee workspace integration acceptance", () => {
     await act(async () => {
       briefEntry?.click();
     });
-    await waitFor(() => document.querySelector<HTMLTextAreaElement>("textarea[aria-label='Editing brief.txt']")?.value === "acceptance artifact");
+    await waitFor(() => document.querySelector<HTMLTextAreaElement>("textarea[aria-label='Редактирование файла brief.txt']")?.value === "acceptance artifact");
     const deepLink = document.querySelector<HTMLOutputElement>("[data-testid='acceptance-location']")?.textContent;
     expect(deepLink).toBe(`/projects/${projectId}/files?path=docs&selected=docs%2Fbrief.txt`);
     expect(requests.find((request) => request.path === `/api/v1/projects/${projectId}/container/workspace/preview?path=docs%2Fbrief.txt`)).toMatchObject({ method: "GET", authorization: "Bearer acceptance-access" });
@@ -801,7 +801,7 @@ describe("employee workspace integration acceptance", () => {
     host = undefined;
     await mountApp(deepLink!, { navigationProbe: true, initialEntries: ["/projects", deepLink!] });
     await act(async () => {
-      await waitFor(() => document.querySelector<HTMLTextAreaElement>("textarea[aria-label='Editing brief.txt']")?.value === "acceptance artifact");
+      await waitFor(() => document.querySelector<HTMLTextAreaElement>("textarea[aria-label='Редактирование файла brief.txt']")?.value === "acceptance artifact");
     });
     expect(document.querySelector(".files-entry-row.is-selected")?.textContent).toContain("brief.txt");
     expect(document.querySelector(".workspace-shell")?.getAttribute("data-project-id")).toBe(projectId);
@@ -826,12 +826,12 @@ describe("employee workspace integration acceptance", () => {
       secondOverviewLink?.click();
     });
     await waitFor(() => Boolean(document.querySelector(`.workspace-shell[data-project-id='${secondProjectId}']`))
-      && pageText().includes("Наблюдаемое состояние"));
+      && pageText().includes("Запуск проекта, его файлы и настройки агента."));
     const secondProjectRequest = requests.find((request) => request.path === `/api/v1/projects/${secondProjectId}`);
     expect(secondProjectRequest).toMatchObject({ method: "GET", authorization: "Bearer acceptance-access" });
     const beforeSecondFiles = requests.length;
     await click(`a[href='/projects/${secondProjectId}/files']`, () => Boolean(document.querySelector(".files-workspace"))
-      && pageText().includes("This folder is empty"));
+      && pageText().includes("Папка пуста"));
     expect(requests.slice(beforeSecondFiles).filter((request) => request.path.includes("/container/workspace/entries"))
       .every((request) => request.path.startsWith(`/api/v1/projects/${secondProjectId}/`))).toBe(true);
     expect(requests.filter((request) => request.path.includes("/container/workspace/mkdir")).map((request) => request.path)).toEqual([
@@ -895,7 +895,7 @@ describe("employee workspace integration acceptance", () => {
     });
     // The overview reports the confirmed readback, not an action-log line: it names the
     // action and the status the backend now reports.
-    await waitFor(() => pageText().includes("«Запустить» подтверждено backend. Статус проекта: «Активен»."));
+    await waitFor(() => pageText().includes("«Запустить» выполнено. Статус проекта: «Активен»."));
 
     expect(requests.find((request) => request.path === `/api/v1/projects/${projectId}/launch` && request.method === "POST")?.authorization).toBe("Bearer acceptance-access");
     expect(requests.filter((request) => request.path === `/api/v1/cabinets/${cabinetId}/projects`).length).toBeGreaterThanOrEqual(2);
@@ -934,11 +934,11 @@ describe("employee workspace integration acceptance", () => {
     window.localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(tokens));
 
     await mountApp(`/projects/${projectId}/resources`);
-    await waitFor(() => pageText().includes("Project module bindings unavailable"));
-    expect(document.querySelector(".project-module-resources__feedback--error")?.textContent).toContain("temporarily unavailable");
-    await click(".project-module-resources__feedback--error button", () => pageText().includes("No first-party resource modules are bound to this project yet."));
+    await waitFor(() => pageText().includes("Модули проекта недоступны"));
+    expect(document.querySelector(".project-module-resources__feedback--error")?.textContent).toContain("Модули проекта недоступны");
+    await click(".project-module-resources__feedback--error button", () => pageText().includes("К этому проекту пока не подключены модули ресурсов"));
     expect(document.querySelectorAll(".project-module-resources__card")).toHaveLength(3);
-    expect([...document.querySelectorAll(".project-module-resources__card .project-module-resources__eyebrow")].map((node) => node.textContent)).toEqual(["Not bound", "Not bound", "Not bound"]);
+    expect([...document.querySelectorAll(".project-module-resources__card .project-module-resources__eyebrow")].map((node) => node.textContent)).toEqual(["Не подключён", "Не подключён", "Не подключён"]);
     expect(requests.filter((request) => request.path === `/api/v1/projects/${projectId}/runtime-modules`).map((request) => request.method)).toEqual(["GET", "GET"]);
     expect(requests.some((request) => request.path.includes("/runtime-modules/mod_") && request.path.includes("/meta/"))).toBe(false);
   });
@@ -958,7 +958,7 @@ describe("employee workspace integration acceptance", () => {
     await mountApp(`/projects/${projectId}/resources?module=mod_mcp`);
     await waitFor(() => pageText().includes("Общие данные доступны только для чтения"));
     expect(pageText()).toContain("mcp_packages");
-    expect(pageText()).toContain("Нет записей");
+    expect(pageText()).toContain("Пока нет записей");
     expect(document.querySelector(".module-runtime-inline-add")).toBeNull();
     expect(document.querySelector(".module-runtime-button--primary")).toBeNull();
     expect(requests.some((request) => request.path === `/api/v1/projects/${projectId}/runtime-modules/mod_mcp/meta/documents/tabs` && request.authorization === "Bearer acceptance-access")).toBe(true);
@@ -981,11 +981,12 @@ describe("employee workspace integration acceptance", () => {
 
     await mountApp(`/projects/${projectId}/resources`);
     await waitFor(() => Boolean(document.querySelector("[data-resource-module='mod_prompts']")));
-    expect(pageText()).toContain(`Project scope: ${projectId}`);
-    expect(pageText()).toContain("Bound to project");
-    expect(pageText()).toContain("Profile and migration blockers");
-    expect(pageText()).toContain("Canonical resource web facade is not confirmed");
-    expect(pageText()).toContain("Materialization apply is unavailable");
+    // The card names its own binding instead of printing the raw bind kind: the reader
+    // gets the scope word and the edit rights the backend granted.
+    const promptsCard = document.querySelector<HTMLElement>("[data-resource-module='mod_prompts']");
+    expect(promptsCard?.querySelector(".project-module-resources__binding")?.textContent).toBe("во всех проектах · можно менять");
+    expect(pageText()).toContain("Подключён к проекту");
+    expect(document.querySelector(".resources-blockers")).toBeNull();
 
     await click("[data-resource-module='mod_prompts'] button", () => Boolean(document.querySelector(".module-runtime-nav")));
     expect(pageText()).toContain("Промпты");
@@ -1013,7 +1014,9 @@ describe("employee workspace integration acceptance", () => {
     window.localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(tokens));
 
     await mountApp(`/projects/${projectId}/resources?module=mod_prompts`);
-    await waitFor(() => pageText().includes("Profiles"));
+    await waitFor(() => pageText().includes("Профили"));
+    // The fixture rows are server data, so their names stay untranslated: assert the
+    // row's own label is absent rather than a locale string that never existed.
     expect(pageText()).not.toContain("Private profile");
     const profileRow = [...document.querySelectorAll<HTMLTableRowElement>(".module-runtime-table tbody tr")].find((row) => row.textContent?.includes("Default"));
     expect(profileRow).toBeTruthy();
@@ -1031,7 +1034,7 @@ describe("employee workspace integration acceptance", () => {
     const editor = document.querySelector<HTMLTextAreaElement>(".project-prompt-files__editor textarea");
     expect(editor?.value).toBe("Be precise.");
     await setValue(editor!, "Be precise and concise.");
-    await click(".project-prompt-files__editor button[type='submit']", () => pageText().includes("Prompt files saved by the project module API."));
+    await click(".project-prompt-files__editor button[type='submit']", () => pageText().includes("Файлы промптов сохранены"));
 
     const save = requests.find((request) => request.path === `/api/v1/projects/${projectId}/runtime-modules/mod_prompts/data/prompt_paths/path_agents` && request.method === "PATCH");
     expect(save).toMatchObject({ authorization: "Bearer acceptance-access", body: JSON.stringify({ body: { files_json: [{ id: "tone", name: "tone.md", priority: 100, body_md: "Be precise and concise." }] } }) });
@@ -1064,7 +1067,7 @@ describe("employee workspace integration acceptance", () => {
     window.localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(tokens));
 
     await mountApp(`/projects/${projectId}/resources?module=mod_prompts`);
-    await waitFor(() => pageText().includes("Profiles"));
+    await waitFor(() => pageText().includes("Профили"));
     const profileRow = [...document.querySelectorAll<HTMLTableRowElement>(".module-runtime-table tbody tr")].find((item) => item.textContent?.includes("Default"));
     if (!profileRow) throw new Error("The Default profile row was not returned.");
     await act(async () => {
@@ -1079,8 +1082,12 @@ describe("employee workspace integration acceptance", () => {
     await waitFor(() => Boolean(document.querySelector(".project-prompt-files__editor textarea")));
     await setValue(document.querySelector<HTMLTextAreaElement>(".project-prompt-files__editor textarea")!, "My local edit.");
     simulateConcurrentChange = true;
-    await click(".project-prompt-files__editor button[type='submit']", () => pageText().includes("Prompt files changed since this editor opened."));
-    expect(pageText()).toContain("the backend does not provide an atomic version guard");
+    // The editor re-reads the owner-scoped row before saving and refuses a stale
+    // baseline. The refusal is the whole point: the copy names the concurrent change
+    // and tells the reader to reload instead of saving over someone else's edits.
+    const staleEditCopy = "Файлы промптов изменились, пока редактор был открыт. Перезагрузите модуль, чтобы не потерять чужие правки.";
+    await click(".project-prompt-files__editor button[type='submit']", () => pageText().includes(staleEditCopy));
+    expect(document.querySelector(".project-prompt-files__error[role='alert']")?.textContent).toContain(staleEditCopy);
     expect(requests.some((request) => request.path === `/api/v1/projects/${projectId}/runtime-modules/mod_prompts/data/prompt_paths/path_agents` && request.method === "PATCH")).toBe(false);
     expect(promptPathFiles[0].body_md).toBe("Concurrent change.");
     expect(document.querySelector(".project-prompt-files__reload")).toBeTruthy();
@@ -1136,10 +1143,10 @@ describe("employee workspace integration acceptance", () => {
 
     await mountApp(`/projects/${projectId}/resources`);
     await waitFor(() => Boolean(document.querySelector(".content-ops__form")));
-    expect(document.querySelector(".project-module-resources__card h3")?.textContent).toBe("Prompts");
-    expect(pageText()).toContain("Profile and migration blockers");
-    expect(pageText()).toContain("Canonical resource web facade is not confirmed");
-    expect(pageText()).toContain("Materialization apply is unavailable");
+    expect(document.querySelector(".project-module-resources__card h3")?.textContent).toBe("Промпты");
+    expect(document.querySelector(".resources-blockers")).toBeNull();
+    
+    
     expect(projectLookups).toBe(2);
 
     const listRequests = requests.filter((item) => item.path === "/api/v1/content/assets?company_id=company-verified&limit=200");
@@ -1155,7 +1162,7 @@ describe("employee workspace integration acceptance", () => {
       Object.defineProperty(fileInput, "files", { configurable: true, value: [file] });
       fileInput?.dispatchEvent(new Event("change", { bubbles: true }));
     });
-    await click(".content-ops__form button[type='submit']", () => pageText().includes("Uploaded v1."));
+    await click(".content-ops__form button[type='submit']", () => pageText().includes("Загружена версия v1"));
 
     const createRequest = requests.find((item) => item.path === "/api/v1/content/assets" && item.method === "POST");
     expect(createRequest).toMatchObject({
@@ -1179,11 +1186,14 @@ describe("employee workspace integration acceptance", () => {
     const anchorClick = vi.fn(function (this: HTMLAnchorElement) { downloadedFile = { href: this.href, filename: this.download }; });
     Object.defineProperty(HTMLAnchorElement.prototype, "click", { configurable: true, value: anchorClick });
     await act(async () => {
-      const downloadButton = [...document.querySelectorAll<HTMLButtonElement>(".content-ops__section button")].find((button) => button.textContent?.includes("Download selected version"));
+      // The download control is the asset-and-version section's own button; its label is
+      // the Resources unit's "Скачать версию", not the raw operation name.
+      const downloadButton = [...document.querySelectorAll<HTMLButtonElement>(".content-ops__section[aria-labelledby='content-asset-title'] button")]
+        .find((button) => button.textContent?.includes("Скачать версию"));
       expect(downloadButton).toBeTruthy();
       downloadButton?.click();
     });
-    await waitFor(() => pageText().includes("Downloaded v1."));
+    await waitFor(() => pageText().includes("Скачана версия v1"));
     const downloadRequest = requests.find((item) => item.path.startsWith(`/api/v1/content/assets/${uploadedAsset.id}/download?`));
     expect(downloadRequest).toMatchObject({ method: "GET", authorization: "Bearer acceptance-access" });
     const downloadUrl = new URL(downloadRequest?.path ?? "", window.location.origin);
@@ -1218,8 +1228,11 @@ describe("employee workspace integration acceptance", () => {
     Object.defineProperty(HTMLAnchorElement.prototype, "click", { configurable: true, value: anchorClick });
 
     await mountApp(`/projects/${projectId}/resources?module=mod_files`);
-    await waitFor(() => pageText().includes("Files"));
-    expect(pageText()).toContain("Local bind");
+    await waitFor(() => pageText().includes("Файлы"));
+    // The opened module's descriptor names the data scope in the reader's words: the
+    // Files module is bound locally, so its data belongs to this project only.
+    await waitFor(() => Boolean(document.querySelector(".project-module-resources__active")));
+    expect(document.querySelector(".project-module-resources__active")?.textContent).toContain("Файлы · только здесь");
     await waitFor(() => Boolean(document.querySelector(".module-runtime-table tbody tr")));
     const fileRow = [...document.querySelectorAll<HTMLTableRowElement>(".module-runtime-table tbody tr")].find((row) => row.textContent?.includes("Guide"));
     expect(fileRow).toBeTruthy();
@@ -1306,9 +1319,9 @@ describe("employee workspace integration acceptance", () => {
     window.localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(tokens));
 
     await mountApp(`/projects/${projectId}/resources`);
-    await waitFor(() => pageText().includes("The Project API did not return a company_id"));
+    await waitFor(() => pageText().includes("У проекта не указана компания"));
 
-    expect(document.querySelector("[role='alert']")?.textContent).toContain("Project company scope unavailable");
+    expect(document.querySelector("[role='alert']")?.textContent).toContain("Компания проекта недоступна");
     expect(projectLookups).toBe(2);
     expect(requests.filter((item) => item.path.startsWith("/api/v1/content/assets"))).toEqual([]);
   });
@@ -1326,12 +1339,12 @@ describe("employee workspace integration acceptance", () => {
 
     await mountApp(`/projects/${projectId}/chat/${sessionId}`);
     await act(async () => {
-      await waitFor(() => pageText().includes("Writing changes the project workspace."));
+      await waitFor(() => pageText().includes("Нужно подтверждение"));
     });
 
-    expect(pageText()).toContain("Chats");
+    expect(pageText()).toContain("Чаты");
     expect(pageText()).toContain("Inspect notes.md");
-    expect(pageText()).toContain("Approval required for write_file");
+    expect(pageText()).toContain("Нужно подтверждение: write_file");
     expect(requests.some((request) => request.path === `/api/v1/projects/${projectId}`)).toBe(true);
     expect(requests.some((request) => request.path === `/api/v1/cabinets/${cabinetId}`)).toBe(true);
     expect(requests.some((request) => request.path.startsWith(`/api/v1/projects/${projectId}/chat/transcript?session_id=${sessionId}`)
@@ -1355,12 +1368,12 @@ describe("employee workspace integration acceptance", () => {
     await mountApp(`/projects/${projectId}/files`);
     await waitFor(() => pageText().includes("Загружаем проект…"));
     expect(pageText()).toContain("Загружаем проект…");
-    expect(pageText()).not.toContain("Live files from the project Pod");
+    expect(pageText()).not.toContain("Файлы из Pod проекта, в реальном времени");
 
     await act(async () => {
       releaseProject(jsonResponse(project));
     });
-    await waitFor(() => pageText().includes("This folder is empty"));
+    await waitFor(() => pageText().includes("Папка пуста"));
     expect(requests.find((request) => request.path === `/api/v1/projects/${projectId}`)).toMatchObject({ method: "GET", authorization: "Bearer acceptance-access" });
     expect(requests.find((request) => request.path === `/api/v1/projects/${projectId}/container/workspace/entries?path=`)).toMatchObject({ method: "GET", authorization: "Bearer acceptance-access" });
   });
@@ -1379,18 +1392,24 @@ describe("employee workspace integration acceptance", () => {
     window.localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(tokens));
 
     await mountApp(`/projects/${projectId}/files`);
-    await waitFor(() => pageText().includes("Loading workspace…"));
-    expect(pageText()).toContain("Loading workspace…");
+    // The Files unit's own loading sentence, not an English literal.
+    await waitFor(() => pageText().includes("Загружаем рабочую папку…"));
+    expect(pageText()).toContain("Загружаем рабочую папку…");
 
     await act(async () => {
       releaseEntries(jsonResponse({ code: "POD_NOT_RUNNING", title: "Conflict", detail: "pod is not running" }, 409));
     });
     // The panel reports the availability itself; the copy lives in the Files feature,
-    // not in this test, so assert the contract sentence it actually renders.
-    await waitFor(() => pageText().includes("This project Pod is not running or ready."));
+    // not in this test, so assert the contract sentences it actually renders: the
+    // pod-unavailable variant, its detail, and the retry control meant for it.
+    await waitFor(() => pageText().includes("Pod проекта не запущен. Запустите его, чтобы открыть файлы."));
 
-    expect(document.querySelector(".files-availability[role='status']")).toBeTruthy();
-    expect(document.querySelector(".files-availability")?.textContent).toContain("Retry");
+    const availability = document.querySelector(".files-availability[role='status']");
+    expect(availability).toBeTruthy();
+    expect(availability?.classList.contains("files-availability-pod-unavailable")).toBe(true);
+    expect(availability?.textContent).toContain("Pod не запущен");
+    expect(availability?.textContent).toContain("Pod проекта не запущен. Запустите его, чтобы открыть файлы.");
+    expect(availability?.textContent).toContain("Повторить");
     expect(requests.find((request) => request.path === `/api/v1/projects/${projectId}/container/workspace/entries?path=`)).toMatchObject({ method: "GET", authorization: "Bearer acceptance-access" });
     expect(requests.some((request) => request.path.startsWith("/api/") && !request.path.startsWith("/api/v1/"))).toBe(false);
   });
@@ -1409,22 +1428,22 @@ describe("employee workspace integration acceptance", () => {
     window.localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(tokens));
 
     await mountApp(`/projects/${projectId}/runs`);
-    await waitFor(() => pageText().includes("Runs & approvals"));
+    await waitFor(() => pageText().includes("Запуски и подтверждения"));
     // Session history is its own tab; the pending request is only surfaceable there.
     await act(async () => {
       const sessionsTab = [...document.querySelectorAll<HTMLButtonElement>(".run-tabs button")]
-        .find((button) => button.textContent?.trim().startsWith("Session history"));
+        .find((button) => button.textContent?.trim().startsWith("История чатов"));
       if (!sessionsTab) throw new Error("Missing Session history tab");
       sessionsTab.click();
     });
-    await waitFor(() => pageText().includes("Loading session history…"));
-    expect(pageText()).toContain("Loading session history…");
+    await waitFor(() => pageText().includes("Загружаем историю чатов…"));
+    expect(pageText()).toContain("Загружаем историю чатов…");
 
     await act(async () => {
-      releaseSessions(jsonResponse({ code: "SERVICE_UNAVAILABLE", title: "Service Unavailable", detail: "Session history is temporarily unavailable." }, 503));
+      releaseSessions(jsonResponse({ code: "SERVICE_UNAVAILABLE", title: "Service Unavailable", detail: "История чатов временно недоступна" }, 503));
     });
-    await waitFor(() => pageText().includes("Session history is temporarily unavailable."));
-    expect(document.querySelector(".run-error[role='alert']")?.textContent).toContain("Session history is temporarily unavailable.");
+    await waitFor(() => pageText().includes("История чатов временно недоступна"));
+    expect(document.querySelector(".run-error[role='alert']")?.textContent).toContain("История чатов временно недоступна");
     expect(requests.some((request) => request.path === `/api/v1/projects/${projectId}/agent/sessions` && request.authorization === "Bearer acceptance-access")).toBe(true);
     expect(requests.some((request) => request.path.startsWith("/api/") && !request.path.startsWith("/api/v1/"))).toBe(false);
   });

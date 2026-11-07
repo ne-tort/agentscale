@@ -3,6 +3,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
+import { SettingsProvider } from "../../../preferences/SettingsProvider";
 import { ModuleAdminPage } from "./ModuleAdminPage";
 import { createModuleAdminService } from "./service";
 import { POLL_BUDGET_MS } from "../../../test-support/poll-budget";
@@ -106,7 +107,7 @@ async function mount(mode: "admin" | "company", api = makeApi()) {
   document.body.append(host);
   root = createRoot(host);
   const service = createModuleAdminService({ fetcher: api.fetcher });
-  await act(async () => root?.render(<MemoryRouter><ModuleAdminPage mode={mode} companyId={mode === "company" ? companyId : undefined} service={service} /></MemoryRouter>));
+  await act(async () => root?.render(<MemoryRouter><SettingsProvider><ModuleAdminPage mode={mode} companyId={mode === "company" ? companyId : undefined} service={service} /></SettingsProvider></MemoryRouter>));
   return { container: host, api };
 }
 
@@ -144,18 +145,18 @@ afterEach(async () => {
 describe("module binding owner workflow", () => {
   it("lists available modules and filters the catalog by search", async () => {
     const { container, api } = await mount("company");
-    await waitFor(() => container.querySelector("[aria-label='Binding hierarchy']") !== null);
+    await waitFor(() => container.querySelector("[aria-label='Структура привязки']") !== null);
     expect(api.requests.some((request) => request.path === `/api/v1/companies/${companyId}/modules` && request.method === "GET")).toBe(true);
-    expect(container.querySelector("[aria-label='Binding hierarchy']")?.textContent).toContain("Platform module");
-    expect(container.textContent).toContain("no company-accessible global catalog for ungranted modules");
+    expect(container.querySelector("[aria-label='Структура привязки']")?.textContent).toContain("Модуль платформы");
+    expect(container.textContent).toContain("Доступы компаниям выдаёт администратор платформы");
     // The sentence sits in the middle of a paragraph, so it is lowercase in the DOM;
     // the capitalised form only ever matched a copy of the copy, not the markup.
-    expect(container.textContent).toContain("platform grants are managed by platform administrators");
-    expect([...container.querySelectorAll("h3")].some((heading) => heading.textContent === "Company grants")).toBe(false);
+    expect(container.textContent).toContain("доступы компаниям выдаёт администратор платформы");
+    expect([...container.querySelectorAll("h3")].some((heading) => heading.textContent === "Доступ у компаний")).toBe(false);
     const search = container.querySelector<HTMLInputElement>("#module-search");
     expect(search).toBeTruthy();
     await setInput(search!, "no-such-module");
-    expect(container.textContent).toContain("No modules match this search.");
+    expect(container.textContent).toContain("Модули не найдены.");
     expect(container.querySelector(".module-admin__module-option")).toBeNull();
   });
 
@@ -163,7 +164,7 @@ describe("module binding owner workflow", () => {
     const api = makeApi();
     api.setCatalogEmpty(true);
     const { container } = await mount("company", api);
-    await waitFor(() => container.textContent?.includes("No modules are currently available to this company.") ?? false);
+    await waitFor(() => container.textContent?.includes("Этой компании пока не выдан ни один модуль.") ?? false);
     expect(container.querySelector(".module-admin__details")).toBeNull();
   });
 
@@ -174,10 +175,10 @@ describe("module binding owner workflow", () => {
       .find((label) => label.textContent?.includes("Example company"));
     expect(companyLabel).toBeTruthy();
     await act(async () => companyLabel!.querySelector("input")?.click());
-    await clickButton(container, "Review grant changes");
-    expect(container.querySelector("[role=alertdialog]")?.textContent).toContain("bind 1, revoke 0");
-    await clickButton(container, "Confirm");
-    await waitFor(() => container.textContent?.includes("Company grants updated and verified.") ?? false);
+    await clickButton(container, "Проверить изменения доступа");
+    expect(container.querySelector("[role=alertdialog]")?.textContent).toContain("подключить 1, отозвать 0");
+    await clickButton(container, "Подтвердить");
+    await waitFor(() => container.textContent?.includes("Доступ у компаний обновлён и проверен.") ?? false);
     expect(api.requests.some((request) => request.path === `/api/v1/admin/modules/${moduleId}` && request.method === "PATCH" && JSON.stringify(request.body) === JSON.stringify({ company_ids: [companyId] }))).toBe(true);
     expect(api.requests.filter((request) => request.path === `/api/v1/admin/modules/${moduleId}` && request.method === "GET").length).toBeGreaterThanOrEqual(2);
   });
@@ -191,11 +192,11 @@ describe("module binding owner workflow", () => {
       .find((label) => label.textContent?.includes("Example company"));
     expect(companyLabel?.querySelector<HTMLInputElement>("input")?.checked).toBe(true);
     await act(async () => companyLabel?.querySelector("input")?.click());
-    await clickButton(container, "Review grant changes");
-    expect(container.querySelector("[role=alertdialog]")?.textContent).toContain("bind 0, revoke 1");
-    expect(container.querySelector("[role=alertdialog]")?.textContent).toContain("removes this company's cabinet bindings and dependent project bindings");
-    await clickButton(container, "Confirm");
-    await waitFor(() => container.textContent?.includes("Company grants updated and verified.") ?? false);
+    await clickButton(container, "Проверить изменения доступа");
+    expect(container.querySelector("[role=alertdialog]")?.textContent).toContain("подключить 0, отозвать 1");
+    expect(container.querySelector("[role=alertdialog]")?.textContent).toContain("пропадут подключения в её кабинетах");
+    await clickButton(container, "Подтвердить");
+    await waitFor(() => container.textContent?.includes("Доступ у компаний обновлён и проверен.") ?? false);
     const updatedLabel = [...container.querySelectorAll<HTMLLabelElement>(".module-admin__checks label")]
       .find((label) => label.textContent?.includes("Example company"));
     expect(updatedLabel?.querySelector<HTMLInputElement>("input")?.checked).toBe(false);
@@ -208,11 +209,11 @@ describe("module binding owner workflow", () => {
       .find((label) => label.textContent?.includes("Example cabinet"));
     expect(cabinetLabel?.querySelector<HTMLInputElement>("input")?.checked).toBe(true);
     await act(async () => cabinetLabel?.querySelector("input")?.click());
-    await clickButton(container, "Review cabinet changes");
-    expect(container.querySelector("[role=alertdialog]")?.textContent).toContain("revoke 1");
-    expect(container.querySelector("[role=alertdialog]")?.textContent).toContain("uninstalls the module and revokes its project bindings");
-    await clickButton(container, "Confirm");
-    await waitFor(() => container.textContent?.includes("Cabinet bindings updated and verified.") ?? false);
+    await clickButton(container, "Проверить изменения кабинетов");
+    expect(container.querySelector("[role=alertdialog]")?.textContent).toContain("отключить 1");
+    expect(container.querySelector("[role=alertdialog]")?.textContent).toContain("модуль удаляется из него");
+    await clickButton(container, "Подтвердить");
+    await waitFor(() => container.textContent?.includes("Подключения в кабинетах обновлены и проверены.") ?? false);
     expect(api.requests.some((request) => request.path === `/api/v1/companies/${companyId}/modules/${moduleId}` && request.method === "PATCH" && JSON.stringify(request.body) === JSON.stringify({ cabinet_ids: [] }))).toBe(true);
     expect(api.requests.filter((request) => request.path === `/api/v1/companies/${companyId}/modules/${moduleId}/cabinets`).length).toBeGreaterThanOrEqual(2);
     const updatedCabinetLabel = [...container.querySelectorAll<HTMLLabelElement>(".module-admin__checks label")]
@@ -227,10 +228,10 @@ describe("module binding owner workflow", () => {
     await waitFor(() => mounted.container.querySelector("[role=alert]") !== null);
     expect(mounted.container.querySelector("[role=alert]")?.textContent).toContain("platform administrator required");
     expect(mounted.container.querySelector(".module-admin__details")).toBeNull();
-    expect([...mounted.container.querySelectorAll("button")].some((button) => button.textContent?.includes("Review grant"))).toBe(false);
+    expect([...mounted.container.querySelectorAll("button")].some((button) => button.textContent?.includes("Проверить изменения"))).toBe(false);
     expect(mounted.container.querySelector<HTMLButtonElement>(".module-admin__create button")?.disabled).toBe(true);
     api.setUnauthorized(false);
-    await clickButton(mounted.container, "Retry");
+    await clickButton(mounted.container, "Повторить");
     await waitFor(() => mounted.container.querySelector(".module-admin__details h2")?.textContent === "Example module");
     expect(api.requests.filter((request) => request.path === "/api/v1/admin/modules" && request.method === "GET").length).toBeGreaterThanOrEqual(2);
   });
@@ -243,33 +244,34 @@ describe("module binding owner workflow", () => {
     const companyLabel = [...container.querySelectorAll<HTMLLabelElement>(".module-admin__checks label")]
       .find((label) => label.textContent?.includes("Example company"));
     await act(async () => companyLabel?.querySelector("input")?.click());
-    await clickButton(container, "Review grant changes");
-    await clickButton(container, "Confirm");
+    await clickButton(container, "Проверить изменения доступа");
+    await clickButton(container, "Подтвердить");
     await waitFor(() => container.querySelector("[role=alert]")?.textContent?.includes("grant update unavailable") ?? false);
     expect(container.querySelector("[role=alertdialog]")).toBeTruthy();
-    expect([...container.querySelectorAll("button")].some((button) => button.textContent === "Retry")).toBe(true);
-    expect(container.textContent).not.toContain("Company grants updated and verified.");
+    expect([...container.querySelectorAll("button")].some((button) => button.textContent === "Повторить")).toBe(true);
+    expect(container.textContent).not.toContain("Доступ у компаний обновлён и проверен.");
     api.setMutationFailure(false);
-    await clickButton(container, "Retry");
+    await clickButton(container, "Повторить");
     await waitFor(() => container.querySelector(".module-admin__details h2")?.textContent === "Example module" && container.querySelector("[role=alert]") === null);
     expect(container.querySelector("[role=alertdialog]")).toBeTruthy();
-    await clickButton(container, "Confirm");
-    await waitFor(() => container.textContent?.includes("Company grants updated and verified.") ?? false);
+    await clickButton(container, "Подтвердить");
+    await waitFor(() => container.textContent?.includes("Доступ у компаний обновлён и проверен.") ?? false);
   });
 
   it("links existing project bindings to project management and labels missing version/status actions", async () => {
     const { container } = await mount("admin");
     await waitFor(() => container.querySelector(".module-admin__details h2")?.textContent === "Example module");
     expect(container.querySelector(`a[href='/projects/${projectId}/settings']`)?.textContent).toBe("Example project");
-    expect(container.querySelector("[aria-label='Binding hierarchy']")?.textContent).toContain("Enable/disable and version actions are unavailable");
-    expect(container.textContent).toContain("API contract gap");
-    expect(container.textContent).toContain("Create or remove project bindings from project management.");
+    expect(container.querySelector("[aria-label='Структура привязки']")?.textContent).toContain("Включить, отключить или сменить версию модуля из этого экрана нельзя");
+    expect(container.textContent).not.toContain("API contract gap");
+    expect(container.textContent).toContain("не указан");
+    expect(container.textContent).toContain("Подключение модуля к проектам настраивается в самом проекте.");
     // Scope the check to the project-bindings section: a catalog row is itself a
-    // button whose description reads "<n> cabinet binds", so matching "/bind/"
+    // button whose description reads "<n> кабинетов", so matching "/bind/"
     // across the whole document flagged descriptive copy, not a mutation control.
     const projectSection = [...container.querySelectorAll(".module-admin__section")]
-      .find((section) => section.querySelector("h3")?.textContent === "Project bindings");
+      .find((section) => section.querySelector("h3")?.textContent === "Проекты");
     expect(projectSection).toBeDefined();
-    expect([...projectSection!.querySelectorAll("button")].some((button) => /bind|revoke|manage/i.test(button.textContent ?? ""))).toBe(false);
+    expect([...projectSection!.querySelectorAll("button")].some((button) => /bind|revoke|manage|подключ|отозвать|управ/i.test(button.textContent ?? ""))).toBe(false);
   });
 });

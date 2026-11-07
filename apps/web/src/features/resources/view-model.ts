@@ -3,23 +3,12 @@ import type { MaterializationPlan, ResourceDiff, ResourceKind, ResourceRecord, R
 
 export type ResourceKindFilter = ResourceKind | "all";
 
-export function resourceKindLabel(kind: ResourceKind): string {
-  return kind === "prompt" ? "Prompt" : kind === "file" ? "File" : "MCP server";
-}
-
+/**
+ * Icons only: the words for a kind, a status or a generation are copy, so they
+ * live in `i18n/units/resources.ts` and are asked for by key at the call site.
+ */
 export function resourceKindGlyph(kind: ResourceKind): string {
   return kind === "prompt" ? "Aa" : kind === "file" ? "⌁" : "↗";
-}
-
-const LIFECYCLE_LABELS: Readonly<Record<ResourceRecord["lifecycle"], string>> = {
-  draft: "Draft",
-  active: "Active",
-  archived: "Archived",
-  quarantined: "Quarantined",
-};
-
-export function resourceLifecycleLabel(status: ResourceRecord["lifecycle"]): string {
-  return LIFECYCLE_LABELS[status];
 }
 
 /** `active` serves traffic, `draft` is being edited, the other two are non-serving. */
@@ -30,15 +19,6 @@ export function resourceLifecycleTone(status: ResourceRecord["lifecycle"]): "pos
     case "quarantined": return "danger";
     case "archived": return "neutral";
   }
-}
-
-const PLAN_STATUS_LABELS: Readonly<Record<MaterializationPlan["status"], string>> = {
-  ready: "Plan ready",
-  blocked: "Blocked",
-};
-
-export function materializationStatusLabel(status: MaterializationPlan["status"]): string {
-  return PLAN_STATUS_LABELS[status];
 }
 
 export function materializationStatusTone(status: MaterializationPlan["status"]): "positive" | "warning" | "danger" | "neutral" {
@@ -81,9 +61,4 @@ export function canPlanMaterialization(capabilities: ResourceServiceCapabilities
 
 export function canSyncMaterialization(capabilities: ResourceServiceCapabilities, plan?: MaterializationPlan): boolean {
   return capabilities.syncMaterialization && Boolean(plan) && plan?.status === "ready";
-}
-
-export function formatGeneration(desired?: number, applied?: number): string {
-  if (desired === undefined) return "—";
-  return applied === undefined ? `g${desired} desired · unapplied` : `g${desired} desired · g${applied} applied`;
 }
