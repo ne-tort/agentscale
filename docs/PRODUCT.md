@@ -236,65 +236,19 @@ Meta primitives: hub + collections, `file_ref`, `secret_ref`, `column_map`, mast
 
 ## Целевая модель: plugin-модули
 
-**Текущая модель** (declarative-app) — промежуточный этап: модуль = JSON-описание экранов + generic runtime. Это позволяет переносить данные из старых модулей и иметь единую систему прав, но не позволяет модулю иметь сложную бизнес-логику, свою БД, или динамически загружать код.
+**Конечное состояние:** declarative-app удалён полностью — `module_meta_documents`, generic runtime, `module_instance_data_rows`, `ModuleRuntime.tsx`. Модуль — это **полноценное приложение** (frontend + backend) с реальными таблицами, собственными миграциями и динамической загрузкой кода.
 
-**Целевая модель** — plugin-модули: полноценные приложения, загружаемые динамически (iframe / isolated origin), с доступом к инфраструктуре через **capability adapters** (ACL + квоты + аудит).
+**Ключевые решения** (источник истины — [`ARCHITECTURE/plugin-architecture-complete.md`](ARCHITECTURE/plugin-architecture-complete.md), [ADR-006](architecture-migration/ADR-006-plugin-modules.md)):
 
-### Архитектура
+| Аспект | Решение |
+|---|---|
+| Данные | Реальные таблицы в схеме `tenant_<company>_module_<module>` внутри уже существующей `agentscale_userdb`; не JSONB-строки |
+| Доступ | Через **существующий** capability gateway (`:8001`, `CapabilityGatewayService`, `PodBridgeClaims`), typed контракты; новый сервис адаптеров и прямой DSN плагину не выдаются |
+| Миграции | Плагин поставляет Liquibase/Flyway/Alembic changelog; платформа исполняет его изолированным Job под доверенной ролью |
+| Изоляция | Отдельная схема + grant без `CREATE` + отдельный origin для iframe без `allow-same-origin` + NetworkPolicy без egress к PostgreSQL. RLS не является границей |
+| Backend | Контейнер с вебхуками, cron, событиями, фоновыми задачами; внешние адреса `/webhook/{plugin}/{company}/*` и `/pluginpage/{plugin}/{company}/*` |
+| Засыпание | Переиспользуется `SandboxClaim.operatingMode` / `pause|resume` / warm pool от контейнеров агентов; Knative не вводится |
+| Фаерволл | Единый egress-контроллер (`none` / `webhooks-only` / `full`) для плагинов **и** агентов |
+| Переход | Strangler с фича-флагом: dual-read → пилот → перенос по контекстам → cutover → удаление. Не big bang: ~13k строк `mod_equipment`, работа в `main`, бэкапов нет |
 
-```
-Основное приложение (shell)
-    ├── iframe / isolated origin
-    │       └── Plugin App (отдельный bundle / контейнер)
-    │               ├── Своя БД (опционально, через adapter)
-    │               ├── Свой Redis (опционально, через adapter)
-    │               ├── Свои объекты (MinIO bucket с префиксом)
-    │               └── Свои Pod'ы / инструменты (через gateway)
-    └── Capability Adapters (ACL + quotas + audit)
-            ├── DB Adapter (tenant-aware connection, RLS, quotas)
-            ├── Redis Adapter (key prefix, rate limit)
-            ├── Object Storage Adapter (bucket prefix, signed URLs)
-            └── Pod Gateway (scoped access to project workspace)
-```
-
-### Capability Adapters
-
-Адаптеры — единственная точка доступа плагина к инфраструктуре:
-
-| Адаптер | ACL | Квоты | Аудит |
-|---------|-----|-------|-------|
-| `db` | `module:{id}:db:{table}:read/write` | `max_rows_per_table`, `max_query_time` | `plugin_db_access` |
-| `redis` | `module:{id}:redis:{key_prefix}` | `max_keys`, `max_memory` | `plugin_redis_access` |
-| `objects` | `module:{id}:objects:{bucket_prefix}` | `max_object_size`, `max_objects` | `plugin_object_access` |
-| `pods` | `module:{id}:pods:{project_id}` | `max_pod_cpu`, `max_pod_memory` | `plugin_pod_invoke` |
-| `mcp` | `module:{id}:mcp:{tool}` | `max_tools` | `plugin_mcp_register` |
-
-### Lifecycle
-
-```
-Plugin Definition (registry)
-    → Grant (company/cabinet/project)
-        → Install (развёртывание артефакта, миграция схемы)
-            → Bind (связь с project workspace)
-                → Runtime (iframe + adapters)
-                    → Uninstall (очистка данных, отзыв capabilities)
-```
-
-### Отличия от declarative-app
-
-| Аспект | declarative-app | plugin-app |
-|--------|-----------------|------------|
-| UI | JSON-описание экранов | Полноценный React/Vue/Svelte bundle |
-| Данные | Только `module_instance_data_rows` | Своя БД (через adapter) |
-| Логика | Generic CRUD + materialize | Произвольный код |
-| Изоляция | Нет (shared runtime) | iframe / isolated origin |
-| Доступ к инфраструктуре | Через generic endpoints | Через capability adapters с ACL |
-| Динамическая загрузка | Нет (build-time registry) | Да (реестр артефактов) |
-
-Подробно: [`architecture/plugin-modules.md`](architecture/plugin-modules.md).
-
-**Работа на main (dev):** миграция ведётся сразу на `main`, без feature-веток. Правила: [`workflow/main-branch-workflow.md`](workflow/main-branch-workflow.md).
-
-### Работа на main (dev)
-
-Миграция plugin-modules ведётся **сразу на dev ветке (main)**, без отдельных feature-веток. Правила: [`workflow/main-branch-workflow.md`](workflow/main-branch-workflow.md).
+**Работа на main (dev):** сразу на `main`, без feature-веток, микрокоммиты. Правила: [`workflow/main-branch-workflow.md`](workflow/main-branch-workflow.md). Реестр ADR: [`architecture-migration/README.md`](architecture-migration/README.md).

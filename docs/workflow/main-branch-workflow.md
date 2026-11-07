@@ -100,5 +100,7 @@ gh pr view 123 --json statusCheckRollup
 ## Связанные документы
 
 - `docs/PRODUCT.md` — раздел "Целевая модель: plugin-модули"
-- `docs/architecture/plugin-modules.md` — детальное описание архитектуры
-- `docs/architecture-migration/ADR-002-plugin-modules.md` — решение о переходе
+- `docs/ARCHITECTURE/plugin-architecture-complete.md` — полный дизайн (источник истины)
+- `docs/ARCHITECTURE/plugin-modules.md` — краткое введение
+- `docs/architecture-migration/ADR-006-plugin-modules.md` — решение о переходе
+- `docs/architecture-migration/README.md` — реестр ADR

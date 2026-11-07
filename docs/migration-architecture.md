@@ -1,7 +1,7 @@
 # Agentscale Migration Architecture
 
 Статус: рабочий архитектурный каркас, не финальный implementation contract.
-Дата: 2026-11-01 (обновлено 2026-11-07: declarative-app признан промежуточным этапом; целевая модель — plugin-modules, см. ADR-002 и `architecture/plugin-modules.md`).
+Дата: 2026-11-01 (обновлено 2026-11-08: declarative-app — промежуточный этап, удаляется в конечном состоянии; целевая модель — plugin-modules, см. ADR-006 и `ARCHITECTURE/plugin-architecture-complete.md`).
 Область: полная миграция UI, модульной модели, equipment-домена и agent control plane.
 
 ## 1. Цель
@@ -29,7 +29,7 @@ tenant -> cabinet -> project -> Pod workspace -> agent session -> run -> events/
 
 Целевой стек: React + TypeScript + Vite.
 
-**Примечание (2026-11-07):** declarative-app (JSON-описание экранов + generic runtime) — промежуточный этап. Целевая модель — plugin-modules: полноценные приложения, загружаемые динамически (iframe / isolated origin), с доступом к инфраструктуре через capability adapters (ACL + квоты + аудит). Подробно: [`architecture/plugin-modules.md`](architecture/plugin-modules.md), [ADR-002](architecture-migration/ADR-002-plugin-modules.md).
+**Примечание (2026-11-08):** declarative-app (JSON-описание экранов + generic runtime) — промежуточный этап и в конечном состоянии удаляется полностью. Целевая модель — plugin-modules: полноценные приложения (frontend + backend), реальные таблицы, динамическая загрузка, доступ к инфраструктуре через **существующий** capability gateway (`:8001`, `CapabilityGatewayService`), а не через новый сервис адаптеров. Путь перехода — strangler с фича-флагом. Подробно: [`ARCHITECTURE/plugin-architecture-complete.md`](ARCHITECTURE/plugin-architecture-complete.md), [ADR-006](architecture-migration/ADR-006-plugin-modules.md).
 
 Рекомендуемая структура:
 
