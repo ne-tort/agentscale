@@ -248,9 +248,18 @@ async def test_webhook_with_wrong_signature_is_401() -> None:
 
 @pytest.mark.asyncio
 async def test_webhook_missing_event_or_delivery_is_401() -> None:
-    h = build_harness()
+    """Отсутствие ``X-Prodavan-Event`` или ``X-Prodavan-Delivery`` → 401.
+
+    На КАЖДУЮ итерацию — свежий harness: ``AsyncClient`` нельзя открыть
+    повторно после выхода из ``async with`` (``Cannot reopen a client
+    instance``). Переиспользование одного ``h.client`` в цикле было ошибкой
+    самого теста, а не шлюза; инвариант fail-closed проверяется для обоих
+    заголовков на независимом приложении.
+    """
+
     body = b"{}"
     for missing in (HEADER_EVENT, HEADER_DELIVERY):
+        h = build_harness()
         headers = _webhook_headers(body)
         headers.pop(missing)
         async with h.client as client:
@@ -261,6 +270,8 @@ async def test_webhook_missing_event_or_delivery_is_401() -> None:
             )
         assert response.status_code == 401
         assert response.json()["code"] == GatewayErrorCode.WEBHOOK_HEADERS_MISSING.value
+        # Отказ не дошёл до backend.
+        assert h.backend_http.requests == []
 
 
 @pytest.mark.asyncio

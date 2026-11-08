@@ -21,6 +21,7 @@ from prodavan.application.plugins.identity import (
     PluginTokenError,
     PluginTokenErrorCode,
     build_payload,
+    hs256_entry,
     mint_plugin_claims,
     peek_plugin_token,
     verify_plugin_token,

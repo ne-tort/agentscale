@@ -305,7 +305,7 @@ def test_wrong_typ_is_not_a_plugin_capability_token(platform: Platform) -> None:
 
 
 # ===========================================================================
-# 4. Grant.capabilities УЖЕ, чем requestedCapabilities -> INCOMPATIBLE / QUARANTINED
+# 4. Grant.capabilities УЖЕ, чем manifest.capabilities -> INCOMPATIBLE / QUARANTINED
 #    Стык: artifacts↔CapabilityGrant (критерий №18, §5.1 compatibility gate)
 # ===========================================================================
 
@@ -352,10 +352,15 @@ def test_full_grant_publishes_then_admin_grant_is_allowed(
 
     registry = platform.artifact_registry()
     full = _GrantCapabilities(
-        capabilities=tuple(valid_manifest["requestedCapabilities"])
+        capabilities=tuple(valid_manifest["capabilities"])
     )
     outcome = _verifier_of(registry).verify(
-        oci_ref, valid_manifest, grant=full, scan_verified=True
+        oci_ref,
+        valid_manifest,
+        grant=full,
+        scan_verified=True,
+        # Вариант A: CSP подтверждается static-origin, а не полем манифеста.
+        csp_verified=True,
     )
     assert outcome.evidence.verified is True
     published = registry.publish(oci_ref, valid_manifest, outcome.evidence, grant=full)

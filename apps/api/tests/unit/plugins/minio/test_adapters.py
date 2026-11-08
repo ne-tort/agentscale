@@ -363,7 +363,12 @@ async def test_presign_rejects_traversal_at_adapter_level(bad_key: str) -> None:
     доверяет входу (ports.py). URL не подписывается вообще.
     """
     client = FakeS3Client()
-    presigner = adapters.MinioPresigner(config=make_config(), client=client)
+    # Адаптер знает СВОЙ доверенный префикс (как при сборке через фабрику):
+    # без него «любой module-*» выглядел бы «своим» и чужой плагин подписался бы.
+    presigner = adapters.MinioPresigner(
+        config=make_config(), client=client,
+        expected_prefix=iam.module_prefix(PLUGIN_A),
+    )
     with pytest.raises(err.ObjectAccessDenied):
         await presigner.presign_put(
             bucket=BUCKET, key=bad_key, ttl_seconds=900
@@ -762,8 +767,12 @@ def test_factory_wires_all_ports_and_no_bytes_in_signature() -> None:
     assert store._presigner is not None
     assert store._sts is not None
     assert store._audit is not None
-    # Ни один публичный метод адаптеров не аннотирован bytes.
+    # Ни один публичный метод адаптеров не аннотирован ТИПОМ bytes.
+    # Проверяем именно разрешённые аннотации, а не подстроку в сигнатуре:
+    # имя параметра ``quota_bytes: int`` — это число-квота (ports.py), а НЕ
+    # payload; поиск ``"bytes" in str(signature)`` давал ложное срабатывание.
     import inspect
+    import typing
     for cls in (
         adapters.MinioBucketAdmin, adapters.MinioSts,
         adapters.MinioPresigner, adapters.MinioAuditAdapter,
@@ -771,8 +780,16 @@ def test_factory_wires_all_ports_and_no_bytes_in_signature() -> None:
         for name, method in inspect.getmembers(cls, inspect.iscoroutinefunction):
             if name.startswith("_"):
                 continue
-            hints = str(inspect.signature(method))
-            assert "bytes" not in hints, f"{cls.__name__}.{name}: {hints}"
+            hints = typing.get_type_hints(method)
+            for param, annotation in hints.items():
+                assert annotation is not bytes, (
+                    f"{cls.__name__}.{name}: параметр {param!r} типа bytes"
+                )
+                # ``bytes`` не должен встречаться и внутри составных аннотаций
+                # (list[bytes], dict[str, bytes] и т.п.).
+                assert bytes not in typing.get_args(annotation), (
+                    f"{cls.__name__}.{name}: {param!r}={annotation!r} содержит bytes"
+                )
 
 
 def test_factory_rejects_foreign_config_type() -> None:

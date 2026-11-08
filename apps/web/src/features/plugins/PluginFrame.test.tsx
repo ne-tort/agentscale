@@ -114,8 +114,12 @@ describe("PluginFrame: sandbox / атрибуты / состояния", () => {
 
   it("referrerpolicy, credentialless, no-referrer и aria-атрибуты на месте", () => {
     const markup = frameMarkup();
-    expect(markup).toContain('referrerpolicy="no-referrer"');
-    expect(markup).toContain("credentialless");
+    // `renderToStaticMarkup` (React 19) выводит имя пропа как `referrerPolicy=`,
+    // а DOM-атрибут в HTML регистронезависим; клиентский рендер приводит его к
+    // `referrerpolicy=`. Проверяем ИМЯ и ЗНАЧЕНИЕ без учёта регистра, чтобы
+    // тест описывал HTML-контракт, а не регистр сериализации конкретного React.
+    expect(markup.toLowerCase()).toContain('referrerpolicy="no-referrer"');
+    expect(markup.toLowerCase()).toContain('credentialless=""');
     expect(markup).toContain('aria-busy="true"');
     expect(markup).toContain('aria-label=');
     expect(markup).toContain('role="status"');

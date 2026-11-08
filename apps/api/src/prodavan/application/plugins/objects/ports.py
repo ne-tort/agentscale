@@ -20,7 +20,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal, Protocol, runtime_checkable
 
-from prodavan.application.plugins.objects.errors import PluginObjectError
+from prodavan.application.plugins.objects.errors import InvalidTtl, PluginObjectError
 
 # Диапазон TTL presigned/STS. Минимум 60 с (иначе URL бесполезен / гонка часов),
 # максимум 3600 с (short-lived, §5.4). Проверяется и в портах-адаптерах, и в
@@ -30,15 +30,6 @@ MAX_TTL_SECONDS = 3600
 DEFAULT_TTL_SECONDS = 900
 
 ObjectMethod = Literal["get", "put"]
-
-
-class InvalidTtl(PluginObjectError):
-    """TTL вне ``[60, 3600]``: не молча клампим, а отказываем (fail-closed)."""
-
-    CODE = "INVALID_TTL"
-    STATUS = 400
-    TITLE = "Invalid TTL"
-    MESSAGE = "TTL временных credentials / presigned URL вне диапазона 60..3600 с"
 
 
 def validate_ttl(ttl_seconds: int) -> int:

@@ -101,7 +101,15 @@ def _string(
     code: PluginTokenErrorCode,
     required: bool = True,
     missing_code: PluginTokenErrorCode | None = None,
+    empty_code: PluginTokenErrorCode | None = None,
 ) -> str:
+    """Прочитать строковый атрибут grant/instance с точными кодами отказов.
+
+    ``missing_code`` — для ОТСУТСТВУЮЩЕГО ключа (MISSING_CLAIM по контракту),
+    ``empty_code`` — для присутствующего, но пустого значения. Разделение
+    важно для ``artifact_digest``: пустой/битый digest — это MALFORMED, а не
+    «claim отсутствует»; отсутствие ключа — MISSING_CLAIM.
+    """
     value = _attr(source, name)
     if value is None:
         if required:
@@ -113,7 +121,7 @@ def _string(
     text = str(value).strip()
     if not text and required:
         raise PluginTokenError(
-            code=missing_code or code,
+            code=empty_code or missing_code or code,
             detail=f"plugin grant has empty {name}",
         )
     if text:
@@ -189,6 +197,7 @@ def build_payload(
         "artifact_digest",
         code=PluginTokenErrorCode.MALFORMED,
         missing_code=PluginTokenErrorCode.MISSING_CLAIM,
+        empty_code=PluginTokenErrorCode.MALFORMED,
     )
     quota_ref = _string(grant, "quota_ref", code=PluginTokenErrorCode.MISSING_CLAIM)
     scopes = _scopes(grant)

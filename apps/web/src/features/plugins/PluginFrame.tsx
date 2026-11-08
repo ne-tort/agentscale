@@ -77,8 +77,14 @@ type PluginIdentityAttributes = {
   "data-plugin-version"?: string;
 };
 
-/** `credentialless` не описан в @types/react@19; это boolean HTML-атрибут iframe. */
-type CredentiallessAttribute = { credentialless?: string };
+/**
+ * `credentialless` не описан в @types/react@19; это boolean HTML-атрибут iframe.
+ * Значение обязано быть `true`: React 19 считает ПУСТУЮ СТРОКУ у boolean-атрибута
+ * ложью (`Received an empty string for a boolean attribute... treat as false`)
+ * и вообще не выводит атрибут в DOM. Для изоляции плагина потеря атрибута
+ * означает, что фрейм сможет использовать учётные данные оболочки.
+ */
+type CredentiallessAttribute = { credentialless?: boolean };
 
 export interface PluginFrameProps extends Pick<IframeHTMLAttributes<HTMLIFrameElement>, "height" | "width" | "loading"> {
   readonly pluginId: string;
@@ -207,7 +213,8 @@ export function PluginFrame(props: PluginFrameProps) {
     "data-plugin-id": pluginId,
     "data-plugin-version": version,
   };
-  const credentialless: CredentiallessAttribute = { credentialless: "" };
+  // `true`, не `""`: React 19 отбрасывает boolean-атрибут с пустой строкой.
+  const credentialless: CredentiallessAttribute = { credentialless: true };
 
   const ariaLabel = props.title ?? t("plugins.open");
 

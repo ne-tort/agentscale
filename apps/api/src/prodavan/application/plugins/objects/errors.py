@@ -59,6 +59,23 @@ class InvalidObjectMethod(InvalidObjectKey):
     MESSAGE = "Метод presigned URL должен быть get или put"
 
 
+class InvalidTtl(PluginObjectError):
+    """TTL вне ``[60, 3600]``: не молча клампим, а отказываем (fail-closed).
+
+    Каноническое определение — ЗДЕСЬ, вместе со всеми ошибками capability.
+    ``ports.py`` импортирует его отсюда и реэкспортирует в своём ``__all__``:
+    существующие импорты ``from ...objects.ports import InvalidTtl`` (тесты
+    ``test_ports.py`` / ``test_service.py``, сервис) продолжают работать, и
+    одновременно доступен путь ``errors.InvalidTtl`` (как у всех остальных
+    ошибок). Циклического импорта нет: ``errors.py`` НЕ импортирует ``ports``.
+    """
+
+    CODE = "INVALID_TTL"
+    STATUS = 400
+    TITLE = "Invalid TTL"
+    MESSAGE = "TTL временных credentials / presigned URL вне диапазона 60..3600 с"
+
+
 class BucketUnavailable(PluginObjectError):
     """``BucketAdminPort`` / ``PresignPort`` недоступен или вернул мусор."""
 
@@ -91,6 +108,7 @@ __all__ = [
     "ObjectAccessDenied",
     "InvalidObjectKey",
     "InvalidObjectMethod",
+    "InvalidTtl",
     "BucketUnavailable",
     "StsUnavailable",
     "AuditUnavailable",

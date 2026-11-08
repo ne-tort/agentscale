@@ -90,6 +90,7 @@ def build_plugin_object_store(
     quota_bytes: int = DEFAULT_QUOTA_BYTES,
     clock: Any = time,
     allow_noop_audit: bool = False,
+    expected_prefix: str | None = None,
 ) -> PluginObjectStore:
     """Собрать ``PluginObjectStore`` задачи 06 из MinIO-адаптеров.
 
@@ -119,6 +120,11 @@ def build_plugin_object_store(
     allow_noop_audit:
         ТОЛЬКО для тестов/локальной отладки: подставляет in-memory sink.
         В проде оставлять ``False`` (fail-closed).
+    expected_prefix:
+        Канонический ``module-<plugin>/``, который адаптеру разрешено
+        подписывать (например ``module-hello_plugin/``). Задаётся вызывающим,
+        который знает пару (company, plugin). ``None`` = прямая проверка
+        структуры ключа без привязки к конкретному плагину.
 
     Returns
     -------
@@ -147,7 +153,14 @@ def build_plugin_object_store(
         owns_bucket=True,
         clock=clock,
     )
-    presigner = MinioPresigner(config=config, client=presign_client)
+    presigner = MinioPresigner(
+        config=config, client=presign_client,
+        # Явный «свой» префикс: ``PresignPort`` не знает plugin_id, а компания
+        # может иметь несколько плагинов. Без привязки адаптер счёл бы ЛЮБОЙ
+        # ``module-*`` своим и подписал бы чужой ``module-other/secret``.
+        # Вызывающий задаёт «свой» префикс по паре (company, plugin).
+        expected_prefix=expected_prefix,
+    )
     sts = MinioSts(
         config=config,
         sts_client=sts_client,

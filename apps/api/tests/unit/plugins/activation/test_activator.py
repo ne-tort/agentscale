@@ -458,7 +458,13 @@ async def test_max_concurrent_wakes_limits_parallel_wakeups() -> None:
     """Одновременно будится не более N плагинов; лишние получают конфликт."""
     scale = GateScale()
     h = Harness(
-        policy=_policy(max_concurrent_wakes=1, ready_timeout_seconds=0.2),
+        # interval должен быть <= timeout: иначе IdlePolicy обоснованно
+        # отвергает конфигурацию (ни одной пробы Ready до таймаута).
+        policy=_policy(
+            max_concurrent_wakes=1,
+            ready_timeout_seconds=0.2,
+            ready_poll_interval_seconds=0.1,
+        ),
         scale=scale,
         readiness=FakeReadiness(ready=True),
     )

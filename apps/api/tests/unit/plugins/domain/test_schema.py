@@ -72,6 +72,25 @@ def _read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
+def _resolve_ref(contract: dict[str, Any], node: dict[str, Any]) -> dict[str, Any]:
+    """Разрешить локальный ``$ref`` внутри protocol.json (JSON Schema 2020-12).
+
+    Контракт выносит общие ограничения (protocol / artifactDigest / pluginId)
+    в ``$defs`` и ссылается на них из каждого сообщения. Тест сверяет именно
+    **ограничения**, а не способ их записи, поэтому ref разворачивается здесь.
+    Проверка не ослабляется: отсутствующий или нелокальный ref упадёт сразу.
+    """
+    ref = node.get("$ref")
+    if ref is None:
+        return node
+    assert isinstance(ref, str) and ref.startswith("#/$defs/"), f"unexpected $ref: {ref!r}"
+    name = ref.removeprefix("#/$defs/")
+    assert name in contract["$defs"], f"unresolved $ref: {ref!r}"
+    resolved = contract["$defs"][name]
+    assert isinstance(resolved, dict)
+    return resolved
+
+
 # ───────────────────────── schema.json ─────────────────────────
 
 def test_schema_uses_draft_2020_12_and_closed_root() -> None:
@@ -195,9 +214,9 @@ def test_protocol_requires_plugin_id_version_and_digest() -> None:
     for def_name in ("pluginReady", "pluginRpcRequest", "pluginRpcResponse", "pluginError"):
         definition = protocol["$defs"][def_name]
         assert base_fields <= set(definition["required"]), def_name
-        assert definition["properties"]["protocol"]["const"] == PROTOCOL_VERSION
-        assert definition["properties"]["artifact_digest"]["pattern"] == ARTIFACT_DIGEST_PATTERN.pattern
-        assert definition["properties"]["plugin_id"]["pattern"] == PLUGIN_ID_PATTERN.pattern
+        assert _resolve_ref(protocol, definition["properties"]["protocol"])["const"] == PROTOCOL_VERSION
+        assert _resolve_ref(protocol, definition["properties"]["artifact_digest"])["pattern"] == ARTIFACT_DIGEST_PATTERN.pattern
+        assert _resolve_ref(protocol, definition["properties"]["plugin_id"])["pattern"] == PLUGIN_ID_PATTERN.pattern
 
 
 def test_protocol_requires_event_origin_check() -> None:

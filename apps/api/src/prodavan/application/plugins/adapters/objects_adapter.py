@@ -73,8 +73,18 @@ class ObjectStoreAdapter:
         self._buckets = require_wired("object_store.buckets", buckets)
         if not isinstance(store, PluginObjectStore):
             raise TypeError("ObjectStoreAdapter: ожидался PluginObjectStore")
-        if not isinstance(buckets, BucketAdminPort):
-            raise TypeError("ObjectStoreAdapter: ожидался BucketAdminPort")
+        # НЕ ``isinstance(buckets, BucketAdminPort)``: ``runtime_checkable``
+        # Protocol проверяет только НАЛИЧИЕ атрибутов и отвергает корректный
+        # кейс, когда адаптер намеренно не реализовал ``delete_prefix`` /
+        # ``list_prefix`` (атрибут есть, но равен ``None``). Такой адаптер
+        # должен ДОЙТИ до ``drop_prefix`` / ``drop_bucket_if_empty`` и получить
+        # там явный fail-closed отказ, а не упасть в конструкторе. Здесь
+        # проверяем минимальный обязательный контракт, полноту — в методах.
+        for method in ("ensure_bucket", "delete_bucket"):
+            if not callable(getattr(buckets, method, None)):
+                raise TypeError(
+                    f"ObjectStoreAdapter: BucketAdminPort.{method} не реализован"
+                )
 
     @property
     def store(self) -> PluginObjectStore:

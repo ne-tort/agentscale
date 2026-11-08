@@ -57,7 +57,7 @@ from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import Any, Final, Protocol, runtime_checkable
 
-from prodavan.application.plugins.gateway.headers import HEADER_CAPABILITY_TOKEN
+from prodavan.application.plugins.gateway.headers import HEADER_CAPABILITY_TOKEN, TRUSTED_HEADERS
 from prodavan.application.plugins.gateway.ports import (
     ANON_SCOPES,
     BackendRequest,
@@ -163,14 +163,18 @@ def with_trusted_bearer(
     * если ``capability_token`` пуст (anon/public_pages/static-origin),
       ``Authorization`` НЕ выставляется вовсе — урезанный anon-scope не
       получает capability-токена (§7.2, §12 вопрос 1);
-    * ``X-Plugin-Capability-Token`` **сохраняется**: оба заголовка должны
-      присутствовать в исходящем запросе к backend'у плагина.
+    * ``X-Plugin-Capability-Token`` и остальные доверенные ``X-Plugin-*``
+      (``X-Plugin-ID``/``X-Company-ID``/``X-Project-ID``) **сохраняются**:
+      их выставил сам шлюз из claims/grant; capability-токен при этом
+      перезаписывается свежим значением. Оба заголовка (токен и Authorization)
+      должны присутствовать в исходящем запросе к backend'у плагина;
 
     Возвращается НОВЫЙ dict: исходные заголовки не мутируются, поэтому
     вызывающий не может случайно «протащить» клиентское значение обратно.
     """
     out: dict[str, str] = {}
     trusted_lower = HEADER_CAPABILITY_TOKEN.lower()
+    trusted_names_lower = {name.lower() for name in TRUSTED_HEADERS}
     for name, value in headers.items():
         if not isinstance(name, str) or not isinstance(value, str) or not value:
             continue
@@ -179,19 +183,26 @@ def with_trusted_bearer(
             continue
         # Defense-in-depth: даже при прямом вызове адаптера (минуя
         # build_forward_headers) клиентские X-Plugin-* не проходят downstream.
-        # Исключение — сам capability-токен, он будет выставлен заново ниже.
-        if lowered.startswith("x-plugin-") and lowered != trusted_lower:
+        # ИСКЛЮЧЕНИЕ — четыре ДОВЕРЕННЫХ заголовка из headers.py (X-Plugin-ID,
+        # X-Company-ID, X-Project-ID, X-Plugin-Capability-Token): их выставил
+        # сам шлюз из GatewayClaims/GatewayGrant, и отбрасывать их нельзя,
+        # иначе backend плагина не получит plugin_id/даже capability-токен.
+        # Клиентские значения этих имён уже удалены sanitize_incoming.
+        if lowered.startswith("x-plugin-") and lowered not in trusted_names_lower:
             continue
         out[name] = value
 
     # Перестраховка от регистроразличимых дублей: убираем ЛЮБОЕ написание
     # ``Authorization`` и ``X-Plugin-Capability-Token`` (в т.ч. клиентское
     # ``x-plugin-capability-token``), чтобы downstream получил ровно по одному
-    # каноническому заголовку, а не два значения с разным регистром.
+    # каноническому заголовку, а не два значения с разным регистром. Остальные
+    # доверенные заголовки (X-Plugin-ID и т.д.) уже каноничны: их выставил
+    # build_trusted_headers, дубли с другим регистром удалены ещё там.
     for key in [
         k
         for k in out
         if k.lower() in {HEADER_AUTHORIZATION.lower(), trusted_lower}
+        or (k.lower() in trusted_names_lower and k not in TRUSTED_HEADERS)
     ]:
         out.pop(key, None)
 

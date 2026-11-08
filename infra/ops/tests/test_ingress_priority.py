@@ -110,6 +110,11 @@ def test_rendered_dev_overlay_has_no_priority_tie() -> None:
         ["kubectl", "kustomize", str(DEV_OVERLAY)],
         capture_output=True,
         text=True,
+        # kustomize выводит комментарии/аннотации манифестов как есть; в них
+        # есть кириллица. Без явной кодировки Windows использует cp1251 и
+        # subprocess падает с UnicodeDecodeError в reader-потоке.
+        encoding="utf-8",
+        errors="replace",
         timeout=180,
     )
     assert rendered.returncode == 0, rendered.stderr

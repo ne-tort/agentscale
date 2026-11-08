@@ -117,7 +117,11 @@ def test_principal_is_frozen_dataclass_without_pydantic() -> None:
         principal.subject = "other"  # type: ignore[misc]
     # Домен не импортирует Pydantic/FastAPI/Starlette: в docstring эти слова
     # встречаются в отрицании («не зависит от Pydantic»), поэтому смотрим
-    # только на строки импортов.
+    # только на строки импортов. Читаем ports.py — модуль, где ОПРЕДЕЛЁН
+    # Principal (ранее здесь использовалась неопределённая переменная source).
+    from prodavan.application.plugins.platform_admin import ports as ports_module
+
+    source = Path(ports_module.__file__).read_text(encoding="utf-8")
     imports = [
         line for line in source.splitlines()
         if line.startswith(("import ", "from ")) and "prodavan.application.plugins.platform_admin" not in line

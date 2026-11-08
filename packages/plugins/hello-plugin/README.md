@@ -58,9 +58,10 @@ docker build -f backend/Dockerfile -t ghcr.io/ne-tort/plugins/hello_plugin@sha25
   в `packages/schemas/plugin-manifest/v1/schema.json`).
 - `imagePullPolicy: IfNotPresent` задаётся в k8s Deployment (§7.4), **не в Dockerfile**.
 
-## 2. Получение DSN при grant (задачи 05 / 12, §2, §5.1, §5.5)
+## 2. Получение DSN при grant (задача 05 / 12, §2, §5.1, §5.5)
 
-`POST /gateway/plugins/hello_plugin/grant` (задача 12) через lifecycle задачи 05:
+`POST /gateway/plugins/hello_plugin/grant` (задача 12) через lifecycle задачи 05
+(создание tenant-БД, роли, Secret и Deployment `replicas: 0`) — контур задачи 05:
 
 1. `CREATE DATABASE tenant_<company_id>` (одна БД на компанию, отдельный
    tenant-кластер, **не** `prodavan`).

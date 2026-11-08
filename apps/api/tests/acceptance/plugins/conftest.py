@@ -1735,17 +1735,24 @@ def valid_claims(platform: "Platform") -> Any:
 
 @pytest.fixture
 def valid_manifest() -> dict[str, Any]:
-    """Подписанный plugin-manifest v1 (совместим с artifacts/conftest)."""
+    """Подписанный plugin-manifest v1 (совместим с artifacts/conftest).
+
+    Вариант A выравнивания gate (docs/migration/plugin-manifest-gate-alignment.md):
+    в подписанном JSON РАЗРЕШЕНЫ ровно 11 полей whitelist. `capabilities` —
+    каноническое поле; `requestedCapabilities` и `frontend.csp` ЗАПРЕЩЕНЫ
+    (`validate_manifest` их отвергнет). `scan_verified` / `csp_verified`
+    приходят ИЗВНЕ из CI и static-origin, а не из манифеста.
+    """
 
     return {
         "plugin_id": TEST_PLUGIN,
         "version": TEST_VERSION,
         "protocol": "plugin-rpc/1",
         "min_platform_version": "4.0.0",
-        "requestedCapabilities": ["cache", "objects", "events", "network"],
+        "capabilities": ["cache", "objects", "events", "network"],
         "frontend": {
             "entry": "index.html",
-            "csp": "default-src 'none'; script-src 'self'",
+            "base_path": "/",
         },
         "backend": {"port": 8080, "health": "/health"},
         "migrations": {

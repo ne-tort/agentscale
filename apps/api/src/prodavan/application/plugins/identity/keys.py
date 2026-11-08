@@ -16,7 +16,9 @@ EdDSA реализованы через ``jwt.encode``/``jwt.decode``; само�
 
 from __future__ import annotations
 
+import base64
 import hashlib
+import json
 import re
 from dataclasses import dataclass
 from typing import Any, Final, Mapping
@@ -162,13 +164,27 @@ class KeyRing:
         строго из записи ключа, поэтому «algorithm confusion» (HS256 вместо
         EdDSA и наоборот) исключён.
         """
+        # Читаем ТОЛЬКО header-сегмент: компактный JWT парсится по ``.``,
+        # крипто-сегмент здесь намеренно не трогаем. Нельзя использовать
+        # ``jwt.get_unverified_header(token)`` — он валидирует base64url всех
+        # трёх сегментов, и битовая правка подписи (испорченный padding)
+        # упала бы DecodeError → MALFORMED ДО проверки подписи. Подпись в
+        # любом случае проверяется ниже через ``jwt.decode``: и валидный
+        # сегмент с неверной подписью, и испорченный сегмент дают
+        # InvalidSignatureError/DecodeError → INVALID_SIGNATURE.
         try:
-            header = jwt.get_unverified_header(token)
-        except (jwt.PyJWTError, TypeError, ValueError) as exc:
+            header_segment = token.split(".")[0]
+            header = json.loads(base64.urlsafe_b64decode(header_segment + "=" * (-len(header_segment) % 4)))
+        except (AttributeError, IndexError, TypeError, ValueError, json.JSONDecodeError) as exc:
             raise PluginTokenError(
                 code=PluginTokenErrorCode.MALFORMED,
                 detail="cannot parse plugin token header",
             ) from exc
+        if not isinstance(header, dict):
+            raise PluginTokenError(
+                code=PluginTokenErrorCode.MALFORMED,
+                detail="plugin token header is not an object",
+            )
 
         kid = str(header.get("kid") or "").strip()
         if not kid:

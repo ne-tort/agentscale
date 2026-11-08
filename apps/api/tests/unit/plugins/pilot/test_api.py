@@ -23,13 +23,22 @@ from .conftest import (
 
 
 class Record:
-    """Имитация asyncpg.Record: поддерживает dict(row)."""
+    """Имитация asyncpg.Record: поддерживает dict(row).
+
+    Реальная ``asyncpg.Record`` реализует ``keys()`` и ``Mapping``; ``dict(row)``
+    строит пары (ключ, значение). Итерация по ключам (как в dict) приводила бы к
+    ``ValueError: dictionary update sequence element #1 has length 10`` — это
+    баг фейка, а не ``app.list_greetings``.
+    """
 
     def __init__(self, **values: Any) -> None:
         self._values = values
 
     def __getitem__(self, key: str) -> Any:
         return self._values[key]
+
+    def keys(self):
+        return self._values.keys()
 
     def __iter__(self):
         return iter(self._values)
@@ -63,8 +72,23 @@ class FakeConnection:
         self.sink.append((query, params))
         return "OK"
 
-    def transaction(self) -> FakeConnection:
-        return self
+    def transaction(self) -> FakeTransactionCtx:
+        # asyncpg: ``async with conn.transaction():`` — асинхронный контекстный
+        # менеджер, а не сам connection. Возврат ``self`` давал TypeError.
+        return FakeTransactionCtx(self)
+
+
+class FakeTransactionCtx:
+    """``async with conn.transaction():`` из реального asyncpg."""
+
+    def __init__(self, conn: FakeConnection) -> None:
+        self.conn = conn
+
+    async def __aenter__(self) -> FakeConnection:
+        return self.conn
+
+    async def __aexit__(self, *args: Any) -> bool:
+        return False
 
 
 class FakeAcquireCtx:

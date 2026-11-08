@@ -165,24 +165,56 @@ def _normalize_prefix(prefix: str) -> str:
     return candidate
 
 
-def _normalize_key(key: str) -> str:
+def _normalize_key(key: str, *, expected_prefix: str | None = None) -> str:
     """Перепроверка ключа НА УРОВНЕ АДАПТЕРА (сервис уже нормализовал его).
 
     Возвращает канонический ``module-<plugin>/...``. Отвергает:
       * ``../`` / ``..\\`` / сегмент ``..`` (обход пути);
       * абсолютный путь, ``//``, ``s3://``, ``://``, ``\\``;
-      * ``tenant-*`` (чужой бакет в ключе), чужой ``module-*``;
+      * ``tenant-*`` (чужой бакет), ``module-*`` в ХВОСТЕ (чужой плагин);
       * NUL, ``*``/``?`` (wildcard), пустой хвост;
       * ключ БЕЗ префикса ``module-<plugin>/`` (адаптер не «достраивает» его
-        сам: сервис обязан был это сделать, расхождение = отказ, а не угадывание).
+        сам: сервис обязан был это сделать, расхождение = отказ, а не угадывание);
+      * при заданном ``expected_prefix`` — ключ ЛЮБОГО другого ``module-<plugin>/``
+        («начинается с какого-нибудь module-*» само по себе недостаточно).
 
     Это дублирует ``service._normalize_key`` намеренно: граница IAM + адаптер,
-    а не «доверие одному слою» ( ports.py: «порт НЕ доверяет входу»).
+    а не «доверие одному слою» (ports.py: «порт НЕ доверяет входу»).
+
+    ``expected_prefix`` — канонический ``module-<plugin>/`` доверенного
+    вызывающего (сервис задачи 06 / фабрика). Если он задан, адаптер обязан
+    сверить, что ключ лежит ИМЕННО в этом префиксе: проверка «начинается с
+    любого ``module-*``» недостаточна, иначе ``module-other/secret`` (чужой
+    плагин той же компании) был бы подписан. Без ``expected_prefix`` (прямой
+    вызов адаптера) действует структурная проверка: префикс каноничен, хвост
+    не адресует другой ``module-*``; привязка к конкретному плагину тогда
+    обеспечивается вызывающим (``service._normalize_key``).
     """
     if not isinstance(key, str) or not key or "\x00" in key:
         raise err.InvalidObjectKey("пустой/некорректный ключ объекта")
 
     candidate = key.strip().replace("\\", "/")
+    if expected_prefix is not None:
+        # Жёсткая привязка к СВОЕМУ плагину ДО любой другой нормализации:
+        # «начинается с любого module-*» НЕ означает «начинается с моего».
+        # Ключ ``module-other/secret`` (чужой плагин той же компании) обязан
+        # быть отклонён здесь, а не подписан (v4 §5.4, fail-closed).
+        try:
+            canonical_expected = _normalize_prefix(expected_prefix)
+        except err.ObjectAccessDenied as exc:
+            raise err.ObjectAccessDenied(
+                "ожидаемый префикс плагина некорректен — подпись запрещена"
+            ) from exc
+        if not candidate.startswith(canonical_expected):
+            raise err.ObjectAccessDenied(
+                f"ключ {key!r} вне префикса {canonical_expected!r}: "
+                "подпись чужого module-* запрещена"
+            )
+        tail_expected = candidate[len(canonical_expected) :]
+        if not tail_expected or tail_expected.startswith("/"):
+            raise err.ObjectAccessDenied(
+                f"ключ {key!r} не указывает объект внутри {canonical_expected!r}"
+            )
     if candidate.startswith("/") or "//" in candidate or "://" in candidate:
         raise err.ObjectAccessDenied(
             f"ключ {key!r} использует абсолютный путь/схему"
@@ -953,6 +985,12 @@ class MinioPresigner:
 
     config: Any = None
     client: Any = None
+    #: Доверенный ``module-<plugin>/``, в котором адаптеру разрешено подписывать
+    #: ключи. ``PresignPort`` не передаёт ``plugin_id`` (контракт задачи 06),
+    #: поэтому «свой» префикс задаётся ЯВНО интегратором, который знает пару
+    #: (company, plugin). ``None`` = адаптер вызван напрямую (юнит-тесты):
+    #: проверяется только структура ключа, без привязки к конкретному плагину.
+    expected_prefix: str | None = None
 
     def __post_init__(self) -> None:
         if self.client is None and self.config is None:
@@ -986,7 +1024,7 @@ class MinioPresigner:
         # (as-built minio_store делает только max(60, ...) без верхней границы).
         ttl = ports.validate_ttl(ttl_seconds)
         safe_bucket = _validate_bucket(bucket)
-        safe_key = _normalize_key(key)
+        safe_key = _normalize_key(key, expected_prefix=self.expected_prefix)
         # Дополнительная страховка: ключ не должен адресовать ДРУГОЙ бакет,
         # даже если тот тоже начинается с tenant-.
         if safe_key.lower().startswith("tenant-"):

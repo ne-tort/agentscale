@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 
 import jwt
@@ -51,8 +52,17 @@ def test_peek_plugin_token_never_raises_on_broken_token(broken) -> None:
 
 
 def test_peek_plugin_token_returns_none_for_non_mapping_payload() -> None:
-    # JWT с payload-массивом: decode вернёт list → None, а не исключение.
-    token = jwt.encode(["not", "a", "mapping"], TEST_SECRET, algorithm="HS256")
+    # PyJWT >= 2.x jwt.encode() принимает ТОЛЬКО dict и сам бросает TypeError
+    # на list, поэтому компактный JWT с payload-массивом собираем вручную:
+    # проверяем именно поведение peek на не-mapping payload, а не encode().
+    def b64(raw: bytes) -> str:
+        return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
+
+    header = b64(json.dumps({"alg": "HS256", "typ": "JWT"}).encode("utf-8"))
+    payload = b64(json.dumps(["not", "a", "mapping"]).encode("utf-8"))
+    token = f"{header}.{payload}.{b64(b'f' * 32)}"
+    # Подпись заведомо невалидна — peek всё равно не должен её проверять,
+    # но и не имеет права вернуть list как «payload плагина».
     assert peek_plugin_token(token) is None
 
 

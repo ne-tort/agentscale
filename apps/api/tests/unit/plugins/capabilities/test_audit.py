@@ -112,15 +112,30 @@ def test_redact_handles_nested_and_varied_key_names() -> None:
 
 
 def test_redact_replaces_secret_like_strings_even_under_safe_keys() -> None:
-    """Даже под «безопасным» ключом Bearer/JWT/DSN заменяется digest'ом."""
-    result = redact(
-        {
-            "reason": "postgres://user:pass@tenant-db:5432/prodavan",
-            "note": "Bearer " + "x" * 120,
-        }
-    )
-    assert result["reason"].startswith("sha256:")
-    assert result["note"].startswith("sha256:")
+    """Даже под «безопасным» ключом Bearer/JWT/DSN заменяется digest'ом.
+
+    По контракту redaction (docs/08-migration/audit-append-shape-decision.md:13-19,
+    §4.5) исходное значение НЕ сохраняется под своим ключом: удаляется само поле
+    и вместо него пишутся ``<key>_digest`` + маркер ``<key>_redacted``. Иначе
+    «безопасный» ключ стал бы каналом утечки и противоречил бы правилу для
+    запрещённых ключей (``password``/``sql``/``token``), проверяемому соседними
+    тестами. Поэтому проверяем именно ЗАМЕНУ, а не дайджест под старым именем.
+    """
+
+    raw = {
+        "reason": "postgres://user:pass@tenant-db:5432/prodavan",
+        "note": "Bearer " + "x" * 120,
+    }
+    result = redact(raw)
+
+    for key in raw:
+        # Сырого значения под исходным ключом нет вообще.
+        assert key not in result, key
+        assert result[f"{key}_digest"].startswith("sha256:")
+        assert result[f"{key}_redacted"] is True
+    serialized = json.dumps(result, ensure_ascii=False)
+    for leaked in ("postgres://user:pass@tenant-db:5432/prodavan", "Bearer " + "x" * 120):
+        assert leaked not in serialized
 
 
 def test_canonical_digest_is_stable_and_sha256() -> None:

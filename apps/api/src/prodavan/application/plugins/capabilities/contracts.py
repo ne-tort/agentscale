@@ -202,7 +202,11 @@ class CacheGetResponse(TypedResponse):
     value_digest: str = field(default_factory=empty_digest)
 
     def __post_init__(self) -> None:
-        super().__post_init__()
+        # НЕ zero-arg ``super()``: при ``slots=True`` dataclass ПЕРЕСОЗДАЁТ класс,
+        # а ``__class__``-cell в замыкании метода продолжает указывать на старый
+        # класс → ``TypeError: super(type, obj): obj is not an instance ...``.
+        # Явный вызов базового метода устойчив к пересозданию класса.
+        TypedResponse.__post_init__(self)
         _require_digest(self.value_digest, "value_digest")
 
 
@@ -229,7 +233,7 @@ class CacheSetResponse(TypedResponse):
     stored_bytes: int = 0
 
     def __post_init__(self) -> None:
-        super().__post_init__()
+        TypedResponse.__post_init__(self)
         _require_non_negative(self.stored_bytes, "stored_bytes")
 
 
@@ -285,7 +289,7 @@ class CachePublishResponse(TypedResponse):
     subscribers: int = 0
 
     def __post_init__(self) -> None:
-        super().__post_init__()
+        TypedResponse.__post_init__(self)
         _require_non_negative(self.subscribers, "subscribers")
 
 
@@ -405,7 +409,7 @@ class ObjectsListResponse(TypedResponse):
     total_bytes: int = 0
 
     def __post_init__(self) -> None:
-        super().__post_init__()
+        TypedResponse.__post_init__(self)
         if not isinstance(self.objects, tuple) or any(not isinstance(item, ObjectRef) for item in self.objects):
             raise TypedContractError("objects must be a tuple of ObjectRef")
         _require_non_negative(self.total_bytes, "total_bytes")
@@ -511,7 +515,7 @@ class DocsQueryResponse(TypedResponse):
     matched: int = 0
 
     def __post_init__(self) -> None:
-        super().__post_init__()
+        TypedResponse.__post_init__(self)
         if not isinstance(self.documents, tuple) or any(not isinstance(item, DocumentRef) for item in self.documents):
             raise TypedContractError("documents must be a tuple of DocumentRef")
         _require_non_negative(self.matched, "matched")
@@ -542,7 +546,7 @@ class EventsPublishResponse(TypedResponse):
     partition: int = 0
 
     def __post_init__(self) -> None:
-        super().__post_init__()
+        TypedResponse.__post_init__(self)
         _require_text(self.event_id, "event_id")
         _require_non_negative(self.partition, "partition")
 
@@ -582,7 +586,7 @@ class EventsSubscribeResponse(TypedResponse):
     manual_commit: bool = True
 
     def __post_init__(self) -> None:
-        super().__post_init__()
+        TypedResponse.__post_init__(self)
         _require_text(self.subscription_id, "subscription_id")
 
 
@@ -634,7 +638,7 @@ class JobsSubmitResponse(TypedResponse):
     lease: JobLease | None = None
 
     def __post_init__(self) -> None:
-        super().__post_init__()
+        TypedResponse.__post_init__(self)
         _require_text(self.job_id, "job_id")
         _require_text(self.run_id, "run_id")
         if not isinstance(self.state, JobState):
@@ -661,7 +665,7 @@ class JobsGetResponse(TypedResponse):
     lease: JobLease | None = None
 
     def __post_init__(self) -> None:
-        super().__post_init__()
+        TypedResponse.__post_init__(self)
         _require_text(self.job_id, "job_id")
         _require_text(self.run_id, "run_id")
         if not isinstance(self.state, JobState):
@@ -688,7 +692,7 @@ class JobsCancelResponse(TypedResponse):
     state: JobState = JobState.CANCELLED
 
     def __post_init__(self) -> None:
-        super().__post_init__()
+        TypedResponse.__post_init__(self)
         _require_text(self.job_id, "job_id")
         if not isinstance(self.state, JobState):
             raise TypedContractError("state must be a JobState")
@@ -731,7 +735,7 @@ class PodsInvokeResponse(TypedResponse):
     result_digest: str = field(default_factory=empty_digest)
 
     def __post_init__(self) -> None:
-        super().__post_init__()
+        TypedResponse.__post_init__(self)
         _require_text(self.pod_id, "pod_id")
         if not isinstance(self.action, PodActionName):
             raise TypedContractError("action must be a PodActionName")
@@ -790,7 +794,7 @@ class McpRegisterResponse(TypedResponse):
     registered: int = 0
 
     def __post_init__(self) -> None:
-        super().__post_init__()
+        TypedResponse.__post_init__(self)
         _require_text(self.server_id, "server_id")
         _require_non_negative(self.registered, "registered")
 
@@ -822,7 +826,7 @@ class SecretsReadResponse(TypedResponse):
     value_digest: str = field(default_factory=empty_digest)
 
     def __post_init__(self) -> None:
-        super().__post_init__()
+        TypedResponse.__post_init__(self)
         _require_text(self.secret_ref, "secret_ref")
         _require_text(self.version, "version")
         _require_digest(self.value_digest, "value_digest")
@@ -879,7 +883,7 @@ class NetworkEgressResponse(TypedResponse):
     bytes_received: int = 0
 
     def __post_init__(self) -> None:
-        super().__post_init__()
+        TypedResponse.__post_init__(self)
         if not isinstance(self.status_code, int) or not (100 <= self.status_code <= 599):
             raise TypedContractError("status_code must be a valid HTTP status")
         _require_digest(self.response_digest, "response_digest")

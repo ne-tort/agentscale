@@ -132,8 +132,12 @@ class GrantRevocation:
         key = (grant_id or "").strip()
         if not key or self._port is None:
             return False
-        moment = _utc_datetime(now)
         try:
+            # Валидация ``now`` тоже внутри fail-closed блока: naive datetime
+            # (и любая иная ошибка приведения к aware UTC) — это ОТКАЗ, а не
+            # исключение наружу. Иначе ``is_active`` вместо ``False`` бросал бы
+            # PluginTokenError, и ``check``/``is_revoked`` не закрывали доступ.
+            moment = _utc_datetime(now)
             return bool(self._port.is_active(key, now=moment))
         except Exception:
             # Хранилище недоступно ≠ «grant активен». Закрываем доступ.

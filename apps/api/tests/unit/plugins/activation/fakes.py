@@ -46,21 +46,28 @@ class FakeClock:
 
 
 class FakeScale:
-    """Имитация PATCH deployments/scale с полным журналом вызовов."""
+    """Имитация PATCH deployments/scale с полным журналом вызовов.
+
+    replicas хранится **по instance_id**: каждый плагин — отдельный Deployment
+    (ScalePort.current_replicas(plugin_instance_id)), поэтому параллельный wake
+    двух разных инстансов не должен видеть чужой PATCH 0→1. Общий счётчик здесь
+    был бы не просто неточностью фейка, а подменой контракта порта.
+    """
 
     def __init__(self, *, replicas: int = 0) -> None:
-        self.replicas = replicas
+        self.replicas: dict[str, int] = {}
+        self._default_replicas = replicas
         self.calls: list[int] = []
         self.fail_on: int | None = None
 
     async def current_replicas(self, plugin_instance_id: str) -> int:
-        return self.replicas
+        return self.replicas.get(plugin_instance_id, self._default_replicas)
 
     async def scale_to(self, plugin_instance_id: str, replicas: int) -> None:
         self.calls.append(replicas)
         if self.fail_on is not None and replicas == self.fail_on:
             raise RuntimeError("k8s patch failed")
-        self.replicas = replicas
+        self.replicas[plugin_instance_id] = replicas
 
     def scale_ups(self) -> int:
         return self.calls.count(1)

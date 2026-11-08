@@ -388,9 +388,21 @@ export function createPluginChannel(
         handshakeResolve = resolve;
         handshakeReject = reject;
         handshakeTimer = setTimeout(() => {
+          // Таймер уже сработал: снимаем ссылку и не будим канал, если его
+          // успели закрыть (dispose гасит таймер, но гонку исключаем явно).
+          handshakeTimer = undefined;
+          if (disposed) return;
           fail(new PluginFrameError("timeout", "plugin_handshake_timeout"));
         }, handshakeTimeoutMs);
       });
+      // Отказ handshake ВСЕГДА наблюдается самим каналом (`fail()` зовёт
+      // `onError`), но внешний потребитель может навесить обработчик ПОЗЖЕ —
+      // например, после прогона fake-таймеров в тесте. Без внутреннего
+      // обработчика Node/Vitest регистрируют unhandledRejection до того, как
+      // `await handshake` / `.rejects` доберутся до промиса. no-op catch не
+      // поглощает ошибку: отвергнутый `handshakePromise` остаётся отвергнутым
+      // и внешние обработчики получают тот же `PluginFrameError`.
+      void handshakePromise.catch(() => undefined);
       // `host.ready` инициирует плагин; capability token здесь отсутствует.
       // `instanceId`/`nonce` — одноразовая привязка к этому iframe (контракт §4.2).
       send({

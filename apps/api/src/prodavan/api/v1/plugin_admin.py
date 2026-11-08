@@ -223,7 +223,9 @@ class UninstallResponse(BaseModel):
     token_revoked: bool
     completed_steps: tuple[str, ...]
     #: §5.5 / §8: данные dev эфемерны — snapshot и перенос данных не требуются.
-    snapshot_taken: bool
+    #: Дефолт ``False`` — часть контракта: ответ не может «забыть» сообщить,
+    #: что snapshot не делался, и не может неявно утверждать обратное.
+    snapshot_taken: bool = False
 
 
 class WakeResponse(BaseModel):
@@ -270,7 +272,8 @@ class EnabledModulesResponse(BaseModel):
     changed: bool
     replayed: bool
     #: §11 критерий 16: переключается только путь, данные не переносятся.
-    data_migration_performed: bool
+    #: Дефолт ``False`` фиксирует инвариант на уровне контракта ответа.
+    data_migration_performed: bool = False
 
 
 # --------------------------------------------------------------------------- deps

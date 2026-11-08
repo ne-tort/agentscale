@@ -80,12 +80,22 @@ async def test_grant_on_quarantined_artifact_is_rejected(
 
 
 async def test_grant_on_missing_artifact_is_rejected(harness: Harness, grant_args: dict) -> None:
-    """Отсутствие записи в реестре равносильно «не опубликовано», а не «разрешить»."""
+    """Отсутствие записи в реестре равносильно «не опубликовано», а не «разрешить».
 
+    Фикстура ``grant_args`` тянет за собой ``published`` (в реестре уже есть
+    PUBLISHED-артефакт), поэтому явно очищаем реестр: иначе тест проверял бы
+    успешную установку, а не отказ на отсутствующем артефакте.
+    """
+
+    harness.artifact_registry.records.clear()
     with pytest.raises(PluginAdminError) as caught:
         await harness.service().grant(**grant_args)
     assert caught.value.code == PluginAdminErrorCode.ARTIFACT_NOT_PUBLISHED.value
     assert harness.grant_store.grants == {}
+    # Fail-closed: ни одной позитивной мутации инфраструктуры.
+    assert harness.tenant_db.databases == set()
+    assert harness.activation.deployments == {}
+    assert harness.mint.issued == []
 
 
 async def test_grant_on_published_succeeds(harness: Harness, grant_args: dict) -> None:
