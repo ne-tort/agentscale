@@ -21,7 +21,7 @@ strangler, 6 таблиц состояния платформы (ревизия 
 | Web | `pnpm exec vitest run` | **785 passed**, 0 errors |
 | Web | `pnpm exec tsc --noEmit` | 0 ошибок |
 | Web | `pnpm run build` | success |
-| infra/ops | `pytest infra/ops/tests -q` | **103 passed**, 0 failed |
+| infra/ops | `pytest infra/ops/tests -q` | **104 passed**, 0 failed |
 | kustomize | `kubectl kustomize overlays/dev` + `overlays/dev/plugins` | оба собираются |
 | YAML | все `.github/workflows/*.yml` + `infra/**/*.yaml` | парсятся |
 | Alembic | чистый `postgres:17-alpine`, `upgrade head` + `check` | `2026110321 → 2026110801`, 6 таблиц, drift отсутствует |
@@ -50,6 +50,11 @@ strangler, 6 таблиц состояния платформы (ревизия 
    `plugin-platform` оставался `Missing` (Ingress нет в live → поздняя волна не
    применяется → Ingress не создаётся). Переведён в `wave 1` одной волной со
    всеми ресурсами оверлея. Приоритет 120 задаётся аннотацией Traefik, не волной.
+   **Дополнительный корень (найден позже):** в `plugin-platform.yaml` стоял
+   `ignoreDifferences /data` для `egress-proxy-config`, хотя контроллер
+   синхронизации НЕ задеплоен как Pod. Арго поэтому вообще не применял правку
+   конфига из Git. Запись убрана; регрессионный тест
+   `test_argo_applies_egress_configmap_data` это пинит.
 3. `plugin-topics-init` — `rpk topic list` печатает таблицу, проверка через
    `awk` по первому столбцу вместо `grep -qx`.
 4. `plugin-gateway` — ленивый `RedisManager` (lifespan ещё не стартовал в

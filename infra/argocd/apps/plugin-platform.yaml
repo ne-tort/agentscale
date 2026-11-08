@@ -158,19 +158,21 @@ spec:
     # Контроллер-правимые данные (замечание задачи 14). selfHeal иначе сотрёт
     # то, что admin API пишет ВНЕ Git при grant/revoke:
     #   * tenant_hba.conf — пары (role, tenant_<company>) + pg_reload_conf();
-    #   * pgbouncer userlist.txt — SCRAM-секреты ролей + RELOAD;
-    #   * egress-proxy ConfigMap — Envoy-кластеры из CapabilityGrant (задача 08).
-    # Откат к пустому allowlist НЕ открывает доступ (fail-closed), но ломает
-    # выданный grant. Игнорируем /data точечно, не весь объект.
+    #   * pgbouncer userlist.txt — SCRAM-секреты ролей + RELOAD.
+    #
+    # ВАЖНО: `egress-proxy-config` ЗДЕСЬ НЕ ИГНОРИРУЕМ. Контроллер синхронизации
+    # (infrastructure/plugins/controllers/**) пока НЕ задеплоен как Pod — в
+    # kustomize-рендере оверлея нет ни одного controller-ресурса. ignoreDifferences
+    # на /data поэтому не защищал «данные контроллера», а НАОБОРОТ запрещал Argo
+    # применить эталонный конфиг из Git: live ConfigMap оставался с admin
+    # 127.0.0.1:9901, и readiness-проба падала даже после правки манифеста.
+    # Когда контроллер будет реально задеплоен, добавить его ConfigMap сюда
+    # ОТДЕЛЬНОЙ записью и сразу подключить EnvoyReloadPort (иначе patch /data
+    # не вступит в силу).
     # -------------------------------------------------------------------------
     - group: ""
       kind: ConfigMap
       name: tenant-postgres-config
-      jsonPointers:
-        - /data
-    - group: ""
-      kind: ConfigMap
-      name: egress-proxy-config
       jsonPointers:
         - /data
     - group: ""

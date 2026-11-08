@@ -221,3 +221,33 @@ def test_plugins_ingress_is_present_in_local_kustomize_render() -> None:
     assert _admin_socket(yaml.safe_load(cm["data"]["envoy.yaml"]))["address"] == (
         ADMIN_BIND_ADDRESS
     )
+
+
+def test_argo_applies_egress_configmap_data() -> None:
+    """`ignoreDifferences /data` на egress-proxy-config ЗАПРЕЩЁН.
+
+    Контроллер синхронизации (infrastructure/plugins/controllers/**) пока НЕ
+    задеплоен как Pod: в kustomize-рендере оверлея нет controller-ресурса.
+    Игнорирование /data не защищало «данные контроллера», а наоборот не давало
+    Argo применить эталонный envoy.yaml из Git — live ConfigMap вечно оставался
+    с admin 127.0.0.1:9901 и readiness падала, сколько ни правь манифест.
+    Когда контроллер реально появится, добавить его ConfigMap ОТДЕЛЬНОЙ
+    записью вместе с EnvoyReloadPort.
+    """
+    app = yaml.safe_load(PLUGIN_PLATFORM.read_text(encoding="utf-8"))
+    ignored = app["spec"].get("ignoreDifferences") or []
+    offenders = [
+        item
+        for item in ignored
+        if item.get("kind") == "ConfigMap"
+        and item.get("name") == "egress-proxy-config"
+        and "/data" in (item.get("jsonPointers") or [])
+    ]
+    assert not offenders, (
+        "egress-proxy-config не должен быть в ignoreDifferences /data: "
+        "иначе Argo никогда не применит admin 0.0.0.0 из Git"
+    )
+    # Остальные controller-правимые объекты по-прежнему защищены.
+    protected = {(i.get("kind"), i.get("name")) for i in ignored}
+    assert ("ConfigMap", "tenant-postgres-config") in protected
+    assert ("Secret", "pgbouncer-credentials") in protected
