@@ -557,6 +557,37 @@ def _admin_ports(
     return _wrap("admin_ports", build, **kwargs)
 
 
+def _gateway_sessions() -> Any | None:
+    """Реальный ``SessionPort``: JWKS-валидатор + SQL-каталог сотрудников.
+
+    ``SessionAdapter`` и ``SqlEmployeeDirectory`` уже реализованы в
+    ``infrastructure/plugins/adapters/gateway_adapters.py``: Bearer/JWTF
+    проверяется существующим ``get_jwt_validator()``, а ``employee ∈ company``
+    читается из ``EmployeeRow``/``MembershipRow`` через process session
+    factory. НЕ in-memory: источник истины — та же БД, что у остального API.
+
+    Если фабрика сессий недоступна (частичный контур/тесты), возвращаем
+    ``None`` -> вызывающий оставит fail-closed ``_UnwiredPort`` с именем в
+    ``plugin_unwired_ports``. Не «тихий allow».
+    """
+    try:
+        from prodavan.infrastructure.persistence.database import get_session_factory
+        from prodavan.infrastructure.plugins.adapters.gateway_adapters import (
+            SessionAdapter,
+            SqlEmployeeDirectory,
+        )
+
+        return SessionAdapter(directory=SqlEmployeeDirectory(get_session_factory()))
+    except Exception as exc:  # noqa: BLE001 — конфигурация/импорт ≠ падение startup
+        logger.warning(
+            "plugin gateway session port is not configured (%s: %s); "
+            "session auth stays fail-closed",
+            type(exc).__name__,
+            str(exc)[:120],
+        )
+        return None
+
+
 def _gateway_runtime(
     runtime: Any, repos: Any, redis: Any, ov: dict[str, Any], unwired: list[str],
     services: Mapping[str, Any] | None = None,
@@ -624,8 +655,13 @@ def _gateway_runtime(
             or _wrap("gateway_runtime", InMemoryInstanceResolver),
             readiness=runtime.readiness,
         )
+    sessions = ov.get("gateway_sessions")
+    if sessions is None:
+        sessions = _gateway_sessions()
+    if sessions is None:
+        sessions = need("gateway_sessions")
     kwargs: dict[str, Any] = {
-        "sessions": need("gateway_sessions"),
+        "sessions": sessions,
         "grants": need("gateway_grants"),
         "secrets": need("gateway_secrets"),
         "rate_limit": ov.get("gateway_rate_limit_port") or RedisRateLimitAdapter(redis),
