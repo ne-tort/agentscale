@@ -635,6 +635,10 @@ def install_plugin_platform(
 
     composer = _Composer(app)
     unwired: list[str] = []
+    # ОДНИ и те же реальные сервисы зон использует и admin (шаг c), и gateway
+    # (шаг d), и platform (шаг e): иначе capability-запросы, отзыв и wake
+    # смотрели бы в разные объекты зон.
+    zone_services: dict[str, Any] = {}
     try:
         # --- i) guard ДО attach (решение по transport/guard.py) -------------
         _register_guard_once(app, composer)
@@ -671,7 +675,7 @@ def install_plugin_platform(
 
         # --- c) PluginAdminPorts (10 полей) + PluginAdminService ------------
         admin_ports = ov.get("admin_ports") or _wrap(
-            "admin_ports", _admin_ports, runtime, repos, config, ov, unwired
+            "admin_ports", _admin_ports, runtime, repos, config, ov, unwired, zone_services
         )
         admin_service = ov.get("admin_service")
         if admin_service is None:
@@ -683,7 +687,8 @@ def install_plugin_platform(
 
         # --- d) PluginGatewayRuntime ----------------------------------------
         gateway_runtime = ov.get("gateway_runtime") or _wrap(
-            "gateway_runtime", _gateway_runtime, runtime, repos, redis, ov, unwired
+            "gateway_runtime", _gateway_runtime, runtime, repos, redis, ov, unwired,
+            zone_services,
         )
         if gateway_runtime is None:
             raise PluginCompositionError("gateway_runtime", "build_gateway_runtime вернул None")
