@@ -8,13 +8,15 @@
    это не ослабляет fail-closed (`clusters: []` + `direct_response 403`).
 
 2. Ingress `plugins-gateway` отсутствует в кластере, Argo `plugin-platform`
-   показывает OutOfSync. Манифест КОРРЕКТЕН: локальный `kubectl kustomize`
-   (БЕЗ кластера) рендерит Ingress с `router.priority: "120"`, `traefik`,
-   websecure, TLS без secretName (default TLSStore), kind Ingress разрешён
-   whitelist'ом 00-project.yaml, дубля имени нет. Ошибки в манифесте НЕТ —
-   требуется refresh/sync Argo Application (императив запрещён, тест его НЕ
-   делает). Вероятный блокиратор: unhealthy `Deployment/egress-proxy` в wave 1
-   держит sync до wave 25, где лежит Ingress.
+   показывает OutOfSync/Missing. Манифест КОРРЕКТЕН: локальный
+   `kubectl kustomize` (БЕЗ кластера) рендерит Ingress с
+   `router.priority: "120"`, `traefik`, websecure, TLS без secretName
+   (default TLSStore), kind Ingress разрешён whitelist'ом 00-project.yaml,
+   дубля имени нет. Корень: Ingress был в wave 25, а App оставался Missing
+   (Ingress нет в live) — более поздняя волна не применялась до здоровья
+   предыдущих, получался замкнутый круг. Решение: wave 1, одной волной со
+   всеми ресурсами plugin-platform; приоритет 120 задан аннотацией Traefik,
+   а не волной.
 
 Тесты читают YAML/рендер и НЕ обращаются к кластеру, kubectl apply, argocd.
 """
@@ -169,7 +171,7 @@ def test_plugins_ingress_manifest_is_valid() -> None:
     ann = doc["metadata"]["annotations"]
     assert ann["traefik.ingress.kubernetes.io/router.priority"] == EXPECTED_PRIORITY
     assert ann["traefik.ingress.kubernetes.io/router.entrypoints"] == "websecure"
-    assert ann["argocd.argoproj.io/sync-wave"] == "25"
+    assert ann["argocd.argoproj.io/sync-wave"] == "1"
     assert doc["spec"]["ingressClassName"] == "traefik"
     # TLS без secretName → self-signed default TLSStore (cert-manager в кластере нет).
     assert all("secretName" not in entry for entry in doc["spec"]["tls"])

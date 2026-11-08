@@ -199,19 +199,25 @@ def test_plugins_gateway_tls_hosts_include_agentscale_dev() -> None:
     )
 
 
-def test_plugins_gateway_sync_wave_is_25() -> None:
+def test_plugins_gateway_sync_wave_matches_plugin_platform() -> None:
     doc = _load(PLUGINS_INGRESS)
     wave = doc["metadata"].get("annotations", {}).get(
         "argocd.argoproj.io/sync-wave"
     )
-    assert wave == "25", (
-        "Ingress плагинов применяется в той же волне, что api/web Ingress'ы; "
-        "иначе порядок роутеров на :443 не гарантирован"
+    # wave 1, как и остальные ресурсы оверлея plugin-platform. Раньше здесь
+    # было 25: Argo считал Application «Missing» (Ingress отсутствует в live),
+    # а более поздняя волна не применялась до здоровья предыдущих — Ingress
+    # не создавался вообще. Порядок роутеров на :443 задаётся НЕ волной, а
+    # аннотацией Traefik router.priority (120 > 110 > 100 > 50), проверенной
+    # отдельным тестом выше; api/web Ingress'ы живут в ДРУГОМ Argo App.
+    assert wave == "1", (
+        "Ingress плагинов должен синхронизироваться одной волной с остальными "
+        "ресурсами plugin-platform, иначе App остаётся Missing и wave 25 "
+        "никогда не применяется"
     )
-    for path in (API_INGRESS, WEB_INGRESS):
-        assert _load(path)["metadata"]["annotations"].get(
-            "argocd.argoproj.io/sync-wave"
-        ) == "25"
+    assert doc["metadata"]["annotations"][
+        "traefik.ingress.kubernetes.io/router.priority"
+    ] == "120"
 
 
 # ---------------------------------------------------------------------------

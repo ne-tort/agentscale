@@ -35,9 +35,14 @@ metadata:
     app.kubernetes.io/part-of: agentscale
     app.kubernetes.io/component: plugin-ingress
   annotations:
-    # Порядок ресурсов ВНУТРИ Argo Application `plugin-platform` (не путать с
-    # sync-wave: "1" на самом Application в app-of-apps).
-    argocd.argoproj.io/sync-wave: "25"
+    # Порядок ресурсов ВНУТРИ Argo Application `plugin-platform`.
+    # wave 1 (НЕ 25): wave 25 создавал замкнутый круг — Argo считал App
+    # «Missing» (Ingress отсутствует в live), а более поздняя волна не
+    # применялась до здоровья предыдущих, поэтому Ingress НЕ создавался
+    # вообще и /webhook/* оставался без маршрута. Все ресурсы плагинового
+    # оверлея синхронизируются одной волной; приоритет 120 задан аннотацией
+    # Traefik на самом Ingress и от sync-wave НЕ зависит (инцидент #331).
+    argocd.argoproj.io/sync-wave: "1"
     # ПРИОРИТЕТ — АННОТАЦИЯ НА INGRESS, НЕ НА PATH (см. шапку).
     traefik.ingress.kubernetes.io/router.entrypoints: websecure
     traefik.ingress.kubernetes.io/router.tls: "true"
