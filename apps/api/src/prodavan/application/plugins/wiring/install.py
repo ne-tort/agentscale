@@ -588,6 +588,65 @@ def _gateway_sessions() -> Any | None:
         return None
 
 
+def _gateway_grants(repos: Any) -> Any | None:
+    """Реальный ``GrantPort`` поверх SQL-репозитория ``CapabilityGrant``.
+
+    ``GrantAdapter`` (infrastructure/plugins/adapters/gateway_adapters.py)
+    ждёт ``GrantStorePort.active_grant(plugin_id, company_id) -> GrantRecord``,
+    а SQL-репозиторий A10 даёт ``get(company_id, plugin_id) ->
+    CapabilityGrantRecord``. Тонкий мост маппит поля, включая egress-политику
+    ИЗ БД (критерий №22: не из краткоживущего JWT). Источник истины один —
+    ``repos.grant_store``; НЕ in-memory дубль.
+    """
+    try:
+        from prodavan.infrastructure.plugins.adapters.gateway_adapters import (
+            GrantAdapter,
+            GrantRecord,
+        )
+
+        store = getattr(repos, "grant_store", None)
+        if store is None or not callable(getattr(store, "get", None)):
+            return None
+
+        class _SqlGrantStore:
+            def __init__(self, sql_store: Any) -> None:
+                self._store = sql_store
+
+            async def active_grant(
+                self, *, plugin_id: str, company_id: str
+            ) -> Any | None:
+                record = await self._store.get(
+                    company_id=company_id, plugin_id=plugin_id
+                )
+                if record is None:
+                    return None
+                policy = record.egress_policy
+                return GrantRecord(
+                    grant_id=record.grant_id,
+                    plugin_id=record.plugin_id,
+                    company_id=record.company_id,
+                    active=bool(getattr(record, "is_active", True)),
+                    operations=frozenset(record.capabilities),
+                    egress_mode=str(getattr(policy, "mode", "none")),
+                    egress_allowed_hosts=tuple(getattr(policy, "allowed_hosts", ()) or ()),
+                    egress_allowed_paths=tuple(getattr(policy, "allowed_paths", ()) or ()),
+                    egress_approved_for_full=bool(
+                        getattr(policy, "approved_for_full", False)
+                    ),
+                    artifact_digest=record.artifact_digest,
+                )
+
+        return GrantAdapter(_SqlGrantStore(store))
+    except Exception as exc:  # noqa: BLE001 — конфигурация/импорт ≠ падение startup
+        logger.warning(
+            "plugin gateway grant port is not configured (%s: %s); "
+            "grant lookups stay fail-closed",
+            type(exc).__name__,
+            str(exc)[:120],
+        )
+        return None
+
+
 def _gateway_runtime(
     runtime: Any, repos: Any, redis: Any, ov: dict[str, Any], unwired: list[str],
     services: Mapping[str, Any] | None = None,
@@ -660,9 +719,14 @@ def _gateway_runtime(
         sessions = _gateway_sessions()
     if sessions is None:
         sessions = need("gateway_sessions")
+    grants = ov.get("gateway_grants")
+    if grants is None:
+        grants = _gateway_grants(repos)
+    if grants is None:
+        grants = need("gateway_grants")
     kwargs: dict[str, Any] = {
         "sessions": sessions,
-        "grants": need("gateway_grants"),
+        "grants": grants,
         "secrets": need("gateway_secrets"),
         "rate_limit": ov.get("gateway_rate_limit_port") or RedisRateLimitAdapter(redis),
         "audit": audit,

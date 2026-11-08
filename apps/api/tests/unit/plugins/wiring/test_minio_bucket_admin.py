@@ -50,6 +50,59 @@ def test_gateway_sessions_is_real_sql_directory_with_db(monkeypatch: Any) -> Non
     assert sessions._cookie_sessions is None  # opaque cookie = fail-closed
 
 
+def test_gateway_grants_uses_sql_store_not_in_memory(monkeypatch: Any) -> None:
+    """GrantPort читает CapabilityGrant из SQL, а не из in-memory дубля."""
+    import asyncio
+    from dataclasses import dataclass, field
+    from types import SimpleNamespace
+
+    from prodavan.application.plugins.admin.contracts import GrantStatus
+    from prodavan.infrastructure.plugins.adapters.gateway_adapters import GrantAdapter
+
+    @dataclass
+    class _Policy:
+        mode: str = "webhooks-only"
+        allowed_hosts: tuple[str, ...] = ("hooks.slack.com",)
+        allowed_paths: tuple[str, ...] = ("/services/",)
+        approved_for_full: bool = False
+
+    @dataclass
+    class _Record:
+        grant_id: str = "grant_1"
+        company_id: str = "co_1"
+        plugin_id: str = "p_1"
+        artifact_digest: str = "sha256:" + "a" * 64
+        capabilities: tuple[str, ...] = ("cache",)
+        egress_policy: Any = field(default_factory=_Policy)
+        status: Any = GrantStatus.ACTIVE
+
+        @property
+        def is_active(self) -> bool:
+            return self.status is GrantStatus.ACTIVE
+
+    class _Store:
+        async def get(self, *, company_id: str, plugin_id: str) -> Any:
+            return _Record()
+
+    grants = install._gateway_grants(SimpleNamespace(grant_store=_Store()))
+    assert isinstance(grants, GrantAdapter)
+
+    record = asyncio.run(grants.active_grant(plugin_id="p_1", company_id="co_1"))
+    assert record is not None
+    assert record.grant_id == "grant_1"
+    assert record.active is True
+    assert "cache" in record.operations
+    # GrantAdapter отдаёт урезанную проекцию GatewayGrant: capability_token
+    # намеренно ПУСТ (свежий токен приходит из WakeLease при wake-up).
+    assert record.capability_token == ""
+    # Egress-политика осталась в SQL-записи GrantRecord, а не в JWT.
+    raw = asyncio.run(_Store().get(company_id="co_1", plugin_id="p_1"))
+    assert raw.egress_policy.allowed_hosts == ("hooks.slack.com",)
+
+    # Нет SQL-репозитория -> None -> честный _UnwiredPort, не падение startup.
+    assert install._gateway_grants(SimpleNamespace()) is None
+
+
 def test_minio_bucket_admin_is_real_with_valid_env(monkeypatch: Any) -> None:
     """В кластерной конфигурации порт привязан к реальному адаптеру."""
     for key, value in _MINIO_ENV.items():
