@@ -33,6 +33,7 @@ import {
 import { useI18n } from "../i18n/useT";
 import { AutomationsPage } from "../features/automations";
 import { DynamicModulePage, DynamicModulesPage } from "../features/dynamic-modules";
+import { PLUGIN_ROUTE_ELEMENTS } from "./plugin-routes";
 
 const APP_FRAME_STYLES = `
 .employee-app-frame{min-height:100vh;background:var(--bg);color:var(--text)}
@@ -327,6 +328,10 @@ export function AppRouter() {
         {/* Dynamic module registry screens (definitions → versions → install → grants). */}
         <Route path="dynamic-modules" element={<DynamicModulesPage />} />
         <Route path="dynamic-modules/:definitionId" element={<DynamicModulePage />} />
+        {/* Plugin-платформа (v4 §5.3): страница плагина — фрагмент с <Route>,
+            НЕ компонент-обёртка: react-router 7 принимает только <Route>/<Fragment>.
+            ДО SPA-fallback, иначе /plugins/... уедет в NotFound. */}
+        {PLUGIN_ROUTE_ELEMENTS}
         <Route path="*" element={<NotFoundPage />} />
       </Route>
     </Route>

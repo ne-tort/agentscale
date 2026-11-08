@@ -12,13 +12,20 @@
   ``created_at`` (есть ``issued_at``), есть ``expires_at`` и обязательный
   ``created_by``. НЕТ отдельной колонки ``grant_id``.
 * ``plugin_artifacts`` — ``oci_digest`` вместо ``digest``, ``app_version_projection``
-  (NOT NULL + CHECK ``manifest <> app_version_projection``), ``quarantine_reason``,
-  ``cosign_verified``. НЕТ ``is_current``/``manifest_fingerprint``/``image_ref``.
-* ``plugin_audit_events`` — append-only, НЕТ ``event_id``/``event_type``/``details``;
-  зато есть ``request_id``/``subject_id``/``capability``/``operation``/``resource``/
-  ``decision``/``code``/``sql_digest``/``payload_digest`` (часть NOT NULL).
+  (NOT NULL + CHECK ``manifest <> app_version_projection``), ``image_ref``,
+  ``quarantine_reason``, ``cosign_verified``, ``lifecycle_version`` (CAS) и
+  ``is_current`` (partial unique ``UNIQUE(plugin_id) WHERE is_current = true``).
+  НЕТ ``manifest_fingerprint`` — вычисляем из manifest.
+* ``plugin_audit_events`` — append-only (ORM-listener на UPDATE/DELETE), НЕТ
+  ``event_id``/``event_type``/``details``; зато есть ``request_id``/``subject_id``/
+  ``capability``/``operation``/``resource``/``decision``/``code``/``sql_digest``/
+  ``payload_digest`` (часть NOT NULL).
 * ``plugin_event_deliveries`` — Unique(``subscription_id``, ``source_event_id``),
-  NOT NULL ``topic``/``partition``/``offset``. НЕТ ``kind``/``details``/``event_id``.
+  NOT NULL ``topic``/``partition``/``offset``; аддитивно ``event_id``/
+  ``dlq_topic``/``error_kind``/``payload_digest``. НЕТ ``kind``/``details``.
+* ``plugin_feature_flags`` (6-я таблица) — ``company_id`` PK, ``enabled_modules``
+  JSONB (CHECK ``jsonb_typeof = 'array'``), ``updated_at``. Единственный владелец
+  фича-флага strangler'а.
 
 Родитель добавляет импорт моделей в ``models/__init__.py`` сам (граница
 владения). Импорт моделей здесь ЛЕНИВЫЙ (внутри методов), чтобы пакет не падал
@@ -98,8 +105,18 @@ def has_columns(row: type, names: Sequence[str]) -> bool:
 
 
 def column_names(row: type) -> frozenset[str]:
+    """Имена колонок ORM-модели.
+
+    Для тестовых заглушек без ``__table__`` возвращаем ПУСТОЕ множество —
+    это fail-closed: репозиторий не будет писать «неизвестные» колонки.
+    """
     table = getattr(row, "__table__", None)
-    return frozenset(table.columns.keys()) if table is not None else frozenset()
+    if table is None:
+        return frozenset()
+    columns = getattr(table, "columns", None)
+    if columns is None:
+        return frozenset()
+    return frozenset(columns.keys())
 
 
 def aware_utc(value: Any) -> Any:
@@ -263,8 +280,9 @@ DELIVERY_EXTRA_COLUMNS: tuple[str, ...] = (
 #: ``PluginFeatureFlagRow`` (6-я таблица): company_id PK + enabled_modules JSONB.
 FLAG_COLUMNS: tuple[str, ...] = ("company_id", "enabled_modules")
 
-#: Зарезервированная служебная строка фича-флага (fallback, если 6-й таблицы
-#: ещё нет в конкретной сессии). ВСЕ запросы грантов исключают её.
+#: Зарезервированный id: защита от случайной служебной строки в таблице
+#: грантов (на случай, если кто-то создаст её вручную). ВСЕ запросы грантов
+#: исключают его. Реальный флаг лежит в 6-й таблице ``PluginFeatureFlagRow``.
 FLAG_SENTINEL_ID = "plugin_feature_flags_singleton"
 FLAG_SENTINEL_PLUGIN_ID = "pluginfeatureflags"
 

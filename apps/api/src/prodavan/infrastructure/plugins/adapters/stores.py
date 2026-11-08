@@ -23,8 +23,8 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Awaitable, Callable, Mapping
-from dataclasses import dataclass, field
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
 from prodavan.application.plugins.events.contracts import (
@@ -41,11 +41,15 @@ CLUSTER_BACKEND_NOTE = (
 
 __all__ = [
     "CLUSTER_BACKEND_NOTE",
+    "EventInstanceResolver",
     "InMemoryAudit",
+    "InMemoryEventPorts",
     "InMemoryIdempotencyStore",
     "InMemoryPublishedEventStore",
     "InMemorySubscriptionStore",
     "InMemoryWakeHook",
+    "InstanceActivatorLike",
+    "InstanceMappingError",
     "event_instance_resolver",
     "in_memory_event_ports",
 ]

@@ -2,9 +2,11 @@
 
 Публичный контракт пакета — :func:`build_plugin_repositories` и
 :class:`PluginRepositories`. Модули НЕ импортируют ORM-модели A10 на уровне
-пакета: модели/ревизия создаются параллельной задачей и разрешаются лениво
-(см. ``_schema.py``). Родитель самостоятельно добавляет импорт моделей в
-``infrastructure/persistence/models/__init__.py``.
+пакета: все 6 моделей (``models/plugin_platform.py``, ревизия
+``2026110801_plugin_platform.py``) разрешаются ЛЕНИВО внутри методов через
+:func:`_schema.load_row`, а физические имена колонок сведены в
+:data:`_schema.A10_COLUMN_MAP`. Родитель самостоятельно добавляет импорт
+моделей в ``infrastructure/persistence/models/__init__.py``.
 
 Соответствие портам:
 

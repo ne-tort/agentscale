@@ -170,16 +170,30 @@ def with_trusted_bearer(
     вызывающий не может случайно «протащить» клиентское значение обратно.
     """
     out: dict[str, str] = {}
+    trusted_lower = HEADER_CAPABILITY_TOKEN.lower()
     for name, value in headers.items():
         if not isinstance(name, str) or not isinstance(value, str) or not value:
             continue
-        if name.lower() in _UNTRUSTED_REQUEST_HEADERS:
+        lowered = name.lower()
+        if lowered in _UNTRUSTED_REQUEST_HEADERS:
+            continue
+        # Defense-in-depth: даже при прямом вызове адаптера (минуя
+        # build_forward_headers) клиентские X-Plugin-* не проходят downstream.
+        # Исключение — сам capability-токен, он будет выставлен заново ниже.
+        if lowered.startswith("x-plugin-") and lowered != trusted_lower:
             continue
         out[name] = value
 
-    # Перестраховка от регистроразличимых дублей: ``authorization`` уже
-    # отброшен выше, но явно убираем и каноническое имя.
-    out.pop(HEADER_AUTHORIZATION, None)
+    # Перестраховка от регистроразличимых дублей: убираем ЛЮБОЕ написание
+    # ``Authorization`` и ``X-Plugin-Capability-Token`` (в т.ч. клиентское
+    # ``x-plugin-capability-token``), чтобы downstream получил ровно по одному
+    # каноническому заголовку, а не два значения с разным регистром.
+    for key in [
+        k
+        for k in out
+        if k.lower() in {HEADER_AUTHORIZATION.lower(), trusted_lower}
+    ]:
+        out.pop(key, None)
 
     token = (capability_token or "").strip()
     if token:
@@ -190,11 +204,8 @@ def with_trusted_bearer(
         out[HEADER_CAPABILITY_TOKEN] = token
         out[HEADER_AUTHORIZATION] = f"{BEARER_PREFIX}{token}"
     else:
-        # Нет capability-токена → нет ни одного из двух заголовков.
-        # Клиентский X-Plugin-Capability-Token уже отброшен в headers.py,
-        # но на случай прямого вызова адаптера убираем и его.
-        for key in [k for k in out if k.lower() == HEADER_CAPABILITY_TOKEN.lower()]:
-            out.pop(key, None)
+        # Нет capability-токена → ни одного из двух заголовков (они уже
+        # удалены циклом выше). Явная перестраховка для будущих правок.
         out.pop(HEADER_AUTHORIZATION, None)
     return out
 
@@ -795,7 +806,6 @@ return current
 #: Namespace анонимных/публичных запросов: гарантирует ОТДЕЛЬНЫЙ bucket даже
 #: если вызывающий забыл добавить subject (§7.2 «отдельный rate limit»).
 ANON_BUCKET_PREFIX: Final[str] = "plugin-gateway:rl:anon"
-_AUTHENTICATED_BUCKET_PREFIX: Final[str] = "plugin-gateway:rl:auth"
 
 
 class RedisRateLimitAdapter:

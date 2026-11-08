@@ -73,10 +73,15 @@ def map_unexpected_error(exc: Exception, *, operation: str, reason: str) -> Plug
 
     В ``detail`` НЕ подставляем ``str(exc)``: там теоретически может оказаться
     DSN, SQL с параметрами или токен. Только тип исключения (безопасная строка).
+    Для неизвестной операции используем нейтральный ``UNINSTALL_PARTIAL`` —
+    это тоже отказ, а не «успех», так что fail-closed не нарушается.
     """
 
+    code = _TENANT_DB_ADMIN_CODES.get(
+        operation, PluginAdminErrorCode.UNINSTALL_PARTIAL
+    )
     return PluginAdminError(
-        code=_TENANT_DB_ADMIN_CODES.get(operation, PluginAdminErrorCode.UNINSTALL_PARTIAL),
+        code=code,
         detail=f"{reason}: {type(exc).__name__}",
         status=503,
         extra={"adapter_operation": operation},

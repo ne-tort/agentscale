@@ -85,6 +85,8 @@ _FORBIDDEN_VALUE_MARKERS: tuple[str, ...] = (
     "bearer ",
     "eyj",  # начало JWT
     "password=",
+    "payload",
+    "cookie",
 )
 
 

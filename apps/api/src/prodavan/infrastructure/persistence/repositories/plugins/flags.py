@@ -5,11 +5,13 @@
     ``PluginFeatureFlagRow`` (``plugin_feature_flags``)
     ``company_id`` PK + ``enabled_modules`` JSONB NOT NULL default ``[]`` + ``updated_at``
 
-Ни ``CapabilityGrantRow.feature_flags`` (убирается из A10), ни служебная строка
+Ни ``capabilities``/``egress_policy``/``quota`` гранта, ни служебная строка
 в таблице доставки НЕ являются источником истины. Если класс 6-й таблицы ещё
-не зарегистрирован в конкретной сессии (A10 дописывается параллельно),
-репозиторий бросает ЯВНУЮ :class:`PluginRepositorySchemaError` при любой
-авторитетной операции — fail-closed, а не «тихо пустой список».
+не зарегистрирован в конкретной сессии, репозиторий бросает ЯВНУЮ
+:class:`PluginRepositorySchemaError` при любой авторитетной операции —
+fail-closed, а не «тихо пустой список». A10 и ревизия ``2026110801`` уже
+содержат ``PluginFeatureFlagRow`` (``company_id`` PK + ``enabled_modules``
+JSONB + ``updated_at``).
 
 Стык sync/async
 ---------------
@@ -298,6 +300,10 @@ class DbFeatureFlagStore:
             raise
         except (SQLAlchemyError, ValueError) as exc:
             raise PluginRepositoryUnavailable(f"set enabled_modules failed: {exc}") from exc
+        except Exception as exc:  # noqa: BLE001 — позитивная мутация = явный deny
+            raise PluginRepositoryUnavailable(
+                f"set enabled_modules failed: {type(exc).__name__}"
+            ) from exc
 
     async def enabled_async(self, company_id: str, plugin_id: str) -> bool:
         text(company_id, field="company_id")

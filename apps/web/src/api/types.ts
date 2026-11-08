@@ -207,4 +207,23 @@ export interface ApiClient {
   finalizeContentAssetVersion(assetId: Id, versionId: Id): Promise<JsonObject>; downloadContentAsset(assetId: Id, options?: { blob_version_id?: Id; proxy?: boolean }): Promise<DownloadedFile>;
   getProjectChatErrorPolicy(projectId: Id): Promise<ChatErrorPolicy>; setProjectChatErrorPolicy(projectId: Id, patch: Partial<ChatErrorPolicy>): Promise<ChatErrorPolicy>;
   /** Compatibility alias used by the existing project overview feature. */ lifecycle(projectId: Id, action: "launch" | "pause" | "resume" | "complete" | "reload"): Promise<void>;
+  /** Plugin-платформа (дизайн v4): установленные плагины компании + фича-флаг. */
+  listAdminPlugins(companyId: Id): Promise<AdminPluginsResponse>;
+}
+
+/** Ответ `GET /api/v1/admin/plugins/?company_id=...` (plugin_admin.py). */
+export interface AdminPluginsResponse {
+  items: AdminPluginRow[];
+  enabled_modules: string[];
+}
+
+export interface AdminPluginRow {
+  company_id: string;
+  plugin_id: string;
+  plugin_instance_id: string;
+  manifest_version: string;
+  artifact_digest: string;
+  grant_status: string;
+  status?: string;
+  [key: string]: unknown;
 }

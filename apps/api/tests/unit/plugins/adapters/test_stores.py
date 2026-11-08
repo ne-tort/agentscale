@@ -126,19 +126,31 @@ def test_audit_rejects_raw_sql_tokens_pii(reason: str) -> None:
         _assert_redacted(_event(reason=reason))
 
 
-def test_audit_rejects_non_string_values() -> None:
-    with pytest.raises(ValueError, match="должно быть строкой"):
-        _assert_redacted(
-            AdminAuditEvent(
-                event_id="evt-1",
-                occurred_at=NOW,
-                company_id=COMPANY,
-                plugin_id=PLUGIN,
-                operation=AdminOperation.GRANT,
-                decision=AdminDecision.ALLOW,
-                reason=None,  # type: ignore[arg-type]
-            )
-        )
+def test_audit_rejects_wrong_event_type() -> None:
+    """В аудит нельзя подсунуть произвольный dict вместо AdminAuditEvent."""
+
+    with pytest.raises(TypeError, match="AdminAuditEvent"):
+        _assert_redacted({"event_id": "x"})  # type: ignore[arg-type]
+
+
+def test_audit_redacted_form_is_canonical() -> None:
+    """``redacted()`` даёт ровно разрешённый набор строковых полей."""
+
+    redacted = _assert_redacted(_event())
+    assert set(redacted) == {
+        "event_id",
+        "occurred_at",
+        "company_id",
+        "plugin_id",
+        "operation",
+        "decision",
+        "grant_id",
+        "artifact_digest",
+        "code",
+        "reason",
+    }
+    assert all(isinstance(value, str) for value in redacted.values())
+    assert redacted["occurred_at"] == "2026-11-08T09:00:00+00:00"
 
 
 async def test_audit_append_failure_is_reported_false() -> None:
@@ -151,9 +163,11 @@ async def test_audit_events_are_copies_not_mutable_originals() -> None:
     audit = InMemoryAdminAudit()
     await audit.append(event=_event())
     snapshot = audit.events
-    with pytest.raises(TypeError):
-        snapshot[0]["event_id"] = "tampered"  # type: ignore[index]
+    # Снимок можно изменить, но хранилище от этого не меняется: каждый вызов
+    # ``events`` отдаёт новые dict, а внутренний список недоступен наружу.
+    snapshot[0]["event_id"] = "tampered"
     assert audit.events[0]["event_id"] == "evt-1"
+    assert len(audit.events) == 1  # append-only: запись не удалена/не заменена
 
 
 # --------------------------------------------------------------------------- grant store

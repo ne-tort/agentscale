@@ -195,6 +195,7 @@ class PluginArtifactRegistry:
         actor: str = "system",
         grant: object | None = None,
         scan_verified: bool | None = None,
+        csp_verified: bool | None = None,
     ) -> RegistryResult:
         """Опубликовать артефакт ТОЛЬКО после успешного verify.
 
@@ -204,6 +205,9 @@ class PluginArtifactRegistry:
         ``QUARANTINED`` + ``QuarantineEvidence``, запись НЕ публикуется.
 
         Повтор того же digest с другим manifest → ``ARTIFACT_DIGEST_CONFLICT``.
+        ``scan_verified`` / ``csp_verified`` — внешние подтверждения (вариант A),
+        по умолчанию берутся из снимка в evidence; ``None`` = «использовать
+        снимок», а ЯВНЫЙ ``False`` = принудительный отказ (fail-closed).
         """
         if not isinstance(actor, str) or not actor.strip():
             raise ArtifactError(ArtifactErrorCode.QUARANTINED, "publish требует actor")
@@ -216,8 +220,12 @@ class PluginArtifactRegistry:
             # publish(ref, manifest, evidence) без доп. аргументов был полным).
             effective_grant = grant if grant is not None else _GrantSnapshot(verified.granted_capabilities)
             effective_scan = verified.scan_verified if scan_verified is None else scan_verified
+            effective_csp = verified.csp_verified if csp_verified is None else csp_verified
             verdict = self._verifier.recheck_compatibility(
-                manifest, grant=effective_grant, scan_verified=effective_scan
+                manifest,
+                grant=effective_grant,
+                scan_verified=effective_scan,
+                csp_verified=effective_csp,
             )
             if not verdict.ok:
                 return self._quarantine(
@@ -231,6 +239,13 @@ class PluginArtifactRegistry:
                     ref=ref,
                     code=ArtifactErrorCode.INCOMPATIBLE,
                     reason="evidence не подтверждает сканирование образа",
+                    actor=actor,
+                )
+            if verified.csp_verified is not True:
+                return self._quarantine(
+                    ref=ref,
+                    code=ArtifactErrorCode.INCOMPATIBLE,
+                    reason="evidence не подтверждает CSP-заголовок static-origin",
                     actor=actor,
                 )
             plugin_id = self._require_plugin_id(manifest)
@@ -544,7 +559,11 @@ class PluginArtifactRegistry:
         """
         now = record.published_at or record.created_at
         safe_app_id = _normalize_app_id(record.plugin_id)
-        raw_caps = record.manifest.get("requestedCapabilities", ())
+        # Вариант A: capability берём из поля ``capabilities`` закрытого
+        # whitelist подписанного manifest (задача 01), а не из запрещённого
+        # схемой ``requestedCapabilities``. Legacy-обёртка AppVersion хранит
+        # их под своим историческим ключом (контракт доменного типа).
+        raw_caps = record.manifest.get("capabilities", ())
         capabilities = tuple(str(item) for item in raw_caps) if isinstance(raw_caps, (list, tuple)) else ()
         legacy_manifest: dict[str, Any] = {
             "protocol": "1.0",

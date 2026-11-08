@@ -8,6 +8,8 @@ digest, фиксированные часы, in-memory cosign/validator/grant �
 from __future__ import annotations
 
 from datetime import UTC, datetime
+import json
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -96,21 +98,56 @@ class FakeGrant:
 
 
 def valid_manifest(**overrides: Any) -> dict[str, Any]:
-    """Подписанный plugin-manifest v4, проходящий все проверки."""
+    """Подписанный plugin-manifest v1, проходящий ``validate_manifest`` задачи 01.
+
+    Вариант A (аудит F11, блокер №5): РОВНО 11 полей закрытого whitelist из
+    ``MANIFEST_ALLOWED_FIELDS``. НЕТ запрещённых схемой ``requestedCapabilities``
+    и ``frontend.csp``: запрошенные capability живут в поле ``capabilities``,
+    а подтверждения сканирования/CSP приходят ОТДЕЛЬНЫМИ аргументами gate
+    (``scan_verified`` / ``csp_verified``) из CI и static-origin.
+    """
     manifest: dict[str, Any] = {
         "plugin_id": "mod_equipment",
         "version": "1.2.0",
         "protocol": "plugin-rpc/1",
-        "min_platform_version": "4.0.0",
-        "requestedCapabilities": ["cache", "objects", "docs"],
-        "frontend": {"entry": "index.html", "csp": "default-src 'none'; script-src 'self'"},
+        "frontend": {"entry": "index.html", "base_path": "/"},
         "backend": {"port": 8080, "health": "/health"},
+        "capabilities": ["cache", "objects", "docs"],
         "migrations": {"engine": "liquibase", "path": "migrations/liquibase/changelog.xml"},
+        "egress_ref": "grant:mod_equipment",
         "public_pages": [],
         "webhooks": ["/webhook/external-system"],
+        "min_platform_version": "4.0.0",
     }
     manifest.update(overrides)
     return manifest
+
+
+def pilot_manifest() -> dict[str, Any]:
+    """Реальный manifest пилота ``packages/plugins/hello-plugin/manifest.json``.
+
+    Читается КАК ДАННЫЕ (без импорта приложения): это тот самый dict, который
+    проходит ``validate_manifest`` и ДОЛЖЕН давать ``CompatibilityVerdict(ok=True)``
+    при обоих verified-флагах. Используется в интеграционном тесте gate.
+    """
+    # conftest.py -> artifacts(0), plugins(1), unit(2), tests(3), api(4),
+    # apps(5), root(6)
+    root = Path(__file__).resolve().parents[6]
+    path = root / "packages" / "plugins" / "hello-plugin" / "manifest.json"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assert isinstance(payload, dict), "манифест пилота обязан быть объектом"
+    return payload
+
+
+def real_validator() -> object:
+    """Настоящий ``validate_manifest`` задачи 01 (ленивый импорт).
+
+    Проверяет, что фикстура/манифест пилота действительно проходят закрытый
+    whitelist, а не только «принимающий» валидатор-заглушку.
+    """
+    from prodavan.domain.plugins.validation import validate_manifest
+
+    return validate_manifest
 
 
 def ref(digest: str = DIGEST_A) -> OciArtifactRef:
@@ -210,6 +247,8 @@ __all__ = [
     "frontend_layer",
     "full_grant",
     "migrations_layer",
+    "pilot_manifest",
+    "real_validator",
     "ref",
     "valid_manifest",
 ]

@@ -4,14 +4,16 @@
 * каждый адаптер транслирует вызов корректно;
 * async-обёртка revocation возвращает bool = ПОДТВЕРЖДЕНИЕ записи;
 * ``reason`` не теряется, но и не попадает в токен;
-* mint заполняет ``jti``/``issued_at``/``expires_at`` из проверенного payload;
+* mint заполняет ``jti``/``expires_at`` из проверенного payload (``issued_at``
+  восстанавливается как ``expires_at - ttl_seconds`` — отдельного поля в
+  ``IssuedPluginClaims`` задачи 12 нет);
 * коллизия имён ``MintPort``/``RevocationPort`` разрешена алиасами;
 * fail-closed: пустой grant_id, unbound port, битый токен.
 """
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -160,6 +162,10 @@ async def test_mint_adapter_translates_request_and_fills_jti_exp() -> None:
     assert issued.jti and issued.token
     assert issued.expires_at.tzinfo is not None
     assert issued.expires_at > datetime.now(UTC)
+    # Момент выпуска восстанавливается из проверенного exp и TTL (в контракте
+    # задачи 12 отдельного issued_at нет).
+    issued_at = issued.expires_at - timedelta(seconds=issued.ttl_seconds)
+    assert issued_at <= datetime.now(UTC) + timedelta(seconds=1)
 
     # Тот же токен проверяется настоящим verify_plugin_token: подпись, iss/aud,
     # typ, exp, jti, sub, artifact_digest — всё из проверенного payload.
@@ -172,9 +178,10 @@ async def test_mint_adapter_translates_request_and_fills_jti_exp() -> None:
     assert claims.company_id == COMPANY
     assert claims.artifact_digest == DIGEST
     assert claims.scopes == ("db.direct", "cache", "objects")
-    # §4.2: в коротком токене НЕТ egress/квот.
-    assert "egress" not in claims.__dict__
-    assert "quotas" not in claims.__dict__
+    # §4.2: в коротком токене НЕТ egress/квот (dataclass slots — проверяем
+    # по ``__slots__``, т.к. ``__dict__`` у slots-класса отсутствует).
+    assert "egress" not in type(claims).__slots__
+    assert "quotas" not in type(claims).__slots__
 
 
 async def test_mint_adapter_rejects_empty_secret() -> None:

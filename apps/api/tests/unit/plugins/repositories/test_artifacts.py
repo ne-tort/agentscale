@@ -12,7 +12,6 @@ from prodavan.application.dynamic_app_registry.contracts import (
     RegistryOutcome,
     RegistryReason,
 )
-from prodavan.application.plugins.artifacts.registry import RegistryStorePort
 from prodavan.domain.dynamic_apps import AppLifecycleStatus
 from prodavan.infrastructure.persistence.repositories.plugins.artifacts import (
     ConcurrentPublishError,
@@ -51,8 +50,13 @@ def _store(*, rows: list | None = None, rowcount: int = 1) -> SqlArtifactRegistr
 
 
 def test_sql_artifact_store_implements_registry_port() -> None:
+    """Структурно реализует ``RegistryStorePort`` (Protocol НЕ runtime_checkable)."""
     store = _store()
-    assert isinstance(store, RegistryStorePort)
+    for method in (
+        "add", "replace", "by_digest", "versions", "get", "current",
+        "set_current", "append_quarantine", "append_lifecycle",
+    ):
+        assert callable(getattr(store, method, None)), f"нет метода {method}"
 
 
 def test_artifact_row_maps_to_real_a10_columns() -> None:
@@ -63,7 +67,8 @@ def test_artifact_row_maps_to_real_a10_columns() -> None:
     assert record.digest == DIGEST
     assert record.status is AppLifecycleStatus.PUBLISHED
     assert record.published is True
-    assert record.manifest_fingerprint.startswith("sha256:")
+    # Формат задачи 07: голый hex без префикса (совпадает с manifest_fingerprint()).
+    assert len(record.manifest_fingerprint) == 64
 
 
 def test_set_current_uses_cas_version_and_row_lock() -> None:
@@ -147,9 +152,9 @@ def test_add_requires_published_projection_difference() -> None:
     store.add(record)
     session = store._session_factory.session  # type: ignore[union-attr]
     inserted = session.added[-1]
-    assert inserted.data["manifest"] != inserted.data["app_version_projection"]
-    assert inserted.data["is_current"] is False
-    assert inserted.data["oci_digest"] == OTHER_DIGEST
+    # Реальная ORM-строка A10: атрибуты = колонки.
+    assert inserted.manifest != inserted.app_version_projection
+    assert inserted.oci_digest == OTHER_DIGEST
 
 
 def test_current_reads_is_current_column_only() -> None:

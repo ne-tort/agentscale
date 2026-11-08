@@ -19,7 +19,7 @@
 
 **КОЛЛИЗИЯ ИМЁН.** ``MintPort`` в ``admin/ports.py`` и ``activation/ports.py``
 — РАЗНЫЕ протоколы, ``ActivationPort`` в ``admin/ports.py`` и
-``gateway/ports.py`` — тоже разные. Все импорты aqui выполняются с алиасами:
+``gateway/ports.py`` — тоже разные. Все импорты здесь выполнены с алиасами:
 ``AdminMintPort``, ``ActivatorMintPort``, ``AdminActivationPort``,
 ``GatewayActivationPort``. См. test ``test_mint_port_alias_collision.py``.
 

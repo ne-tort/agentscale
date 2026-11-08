@@ -94,6 +94,20 @@ from prodavan.infrastructure.persistence.models.modules import (
 )
 from prodavan.infrastructure.persistence.models.platform import PlatformBootstrapRow
 from prodavan.infrastructure.persistence.models.platform_events import PlatformEventRow
+# Plugin-платформа (дизайн v4, ревизия 2026110801): 6 таблиц СОСТОЯНИЯ
+# платформы. Без этого импорта Base.metadata их не увидит и `alembic check`
+# на деплое упадёт по drift. Данные самих плагинов лежат НЕ здесь, а в
+# tenant_<company> (прямой DSN, ADR-007).
+from prodavan.infrastructure.persistence.models.plugin_platform import (
+    AUDIT_FORBIDDEN_RAW_COLUMNS,
+    CapabilityGrantRow,
+    PluginArtifactRow,
+    PluginAuditEventRow,
+    PluginEventDeliveryRow,
+    PluginFeatureFlagRow,
+    PluginInstanceRow,
+    build_app_version_projection,
+)
 from prodavan.infrastructure.persistence.models.external_api import (
     ApiAppKeyRow,
     WebhookDeliveryRow,
@@ -178,6 +192,7 @@ from prodavan.infrastructure.persistence.models.runtime_revisions import (
 )
 
 __all__ = [
+    "AUDIT_FORBIDDEN_RAW_COLUMNS",
     "AgentControlPlaneAggregateRow",
     "AgentControlPlaneCommandRow",
     "AgentControlPlaneEnqueueIntentRow",
@@ -274,6 +289,13 @@ __all__ = [
     "ModuleRow",
     "PlatformBootstrapRow",
     "PlatformEventRow",
+    "CapabilityGrantRow",
+    "PluginArtifactRow",
+    "PluginAuditEventRow",
+    "PluginEventDeliveryRow",
+    "PluginFeatureFlagRow",
+    "PluginInstanceRow",
+    "build_app_version_projection",
     "ProjectAttachmentRow",
     "ProjectRow",
     "ProjectScheduleRow",

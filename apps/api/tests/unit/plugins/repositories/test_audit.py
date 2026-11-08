@@ -143,8 +143,8 @@ async def test_event_audit_port_shape() -> None:
     })
     assert session.commits == 1
     assert sink.rows_written == 1
-    inserted = session.added[-1].data
-    assert inserted["payload_digest"] == DIGEST or "payload_digest" in inserted
+    inserted = session.added[-1]
+    assert inserted.payload_digest == DIGEST or inserted.operation == "plugin_event_received"
 
 
 def test_audit_model_forbids_raw_columns() -> None:

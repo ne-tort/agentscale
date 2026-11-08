@@ -103,17 +103,20 @@ def build_plugin_repositories(
         )
 
     # Различаем готовую сессию и фабрику. ``async_sessionmaker`` — callable.
-    if isinstance(session, AsyncSession):
-        session_factory = None
-        bound_session = session
-    elif isinstance(session, async_sessionmaker):
-        session_factory = session
-        bound_session = None
-    elif callable(session):
-        # Дак-тайпинг для тестовых фабрик/обёрток, не являющихся
-        # ``async_sessionmaker`` (например lambda, возвращающая async-CM).
+    if isinstance(session, async_sessionmaker) or (
+        callable(session) and not hasattr(session, "execute")
+    ):
+        # Фабрика: ``async_sessionmaker`` или тестовая lambda/Callable,
+        # возвращающая async-CM. У неё НЕТ методов сессии.
         session_factory = session  # type: ignore[assignment]
         bound_session = None
+    elif isinstance(session, AsyncSession) or all(
+        hasattr(session, name) for name in ("execute", "add", "commit")
+    ):
+        # Готовая сессия: реальный AsyncSession или структурный дабл
+        # (тесты/обёртки). Транзакцией владеет вызывающий — не коммитим её.
+        session_factory = None
+        bound_session = session
     else:
         raise ValueError(
             "build_plugin_repositories: session должен быть AsyncSession, "

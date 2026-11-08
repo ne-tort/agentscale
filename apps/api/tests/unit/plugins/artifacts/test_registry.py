@@ -28,13 +28,14 @@ from .conftest import (
 )
 
 
-def _verified(verifier, manifest=None, digest: str = DIGEST_A):
-    """Успешная проверка → evidence для publish."""
+def _verified(verifier, manifest=None, digest: str = DIGEST_A, **kwargs):
+    """Успешная проверка → evidence для publish (вариант A: оба внешних флага)."""
+    flags = {"grant": full_grant(), "scan_verified": True, "csp_verified": True}
+    flags.update(kwargs)
     return verifier.verify(
         ref(digest),
         manifest or valid_manifest(),
-        grant=full_grant(),
-        scan_verified=True,
+        **flags,
     )
 
 

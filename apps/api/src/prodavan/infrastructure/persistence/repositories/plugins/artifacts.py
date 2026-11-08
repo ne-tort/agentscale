@@ -136,14 +136,20 @@ def _status_to_db(status: AppLifecycleStatus) -> str:
 
 
 def _fingerprint(manifest: Any) -> str:
-    """Детерминированный fingerprint (совпадает с задачей 07 по смыслу)."""
+    """Детерминированный fingerprint задачи 07 (голый hex, БЕЗ ``sha256:``).
+
+    ``registry.PluginArtifactRegistry.publish`` сравнивает
+    ``by_digest.manifest_fingerprint`` с ``manifest_fingerprint(manifest)``;
+    формат ДОЛЖЕН совпадать, иначе повторная публикация того же digest
+    ложно даст ``ARTIFACT_DIGEST_CONFLICT``.
+    """
     from prodavan.application.plugins.artifacts.verification import manifest_fingerprint
 
     try:
         return manifest_fingerprint(manifest)
     except Exception:  # noqa: BLE001 — fallback без external-зависимости
         encoded = json.dumps(manifest, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
-        return "sha256:" + hashlib.sha256(encoded).hexdigest()
+        return hashlib.sha256(encoded).hexdigest()
 
 
 class SqlArtifactRegistryStore:
@@ -402,6 +408,10 @@ class SqlArtifactRegistryStore:
             raise
         except SQLAlchemyError as exc:
             raise PluginRepositoryUnavailable(f"add artifact failed: {exc}") from exc
+        except Exception as exc:  # noqa: BLE001 — позитивная мутация = явный deny
+            raise PluginRepositoryUnavailable(
+                f"add artifact failed: {type(exc).__name__}"
+            ) from exc
 
     async def replace_async(self, record: PluginArtifactRecord) -> None:
         """Обновить запись (quarantine/rollback/promote) по (plugin_id, version)."""

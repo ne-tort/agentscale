@@ -13,6 +13,16 @@ Pipeline (ровно в этом порядке, каждый шаг — обя�
 (типы переиспользуются из ``dynamic_app_registry.contracts``), НЕ публикация.
 Ни один «позитивный» результат не строится из непроверенных данных.
 
+Выравнивание gate с задачей 01 (аудит F11, блокер №5, вариант A):
+подписанный manifest проходит ``validate_manifest`` со ЗАКРЫТЫМ whitelist
+(ровно 11 полей, ``additionalProperties: false``), поэтому gate НЕ читает из
+него запрещённые ``requestedCapabilities`` / ``frontend.csp``. Запрошенные
+capability берутся из ``manifest["capabilities"]``, сканирование и CSP —
+отдельные fail-closed аргументы извне (``scan_verified`` от CI-сканера,
+``csp_verified`` от static-origin/OCI-политики), а не поля подписанного JSON.
+Иначе один и тот же dict не может пройти оба gate и КАЖДЫЙ артефакт уходит
+в QUARANTINED. Детали: ``docs/migration/plugin-manifest-gate-alignment.md``.
+
 Дополнительно verifier выдаёт ``VerificationEvidence`` — привязанный к
 конкретным ``ref`` + manifest результат. ``PluginArtifactRegistry.publish``
 принимает только такой evidence и проверяет печать verifier'а: подделать
@@ -103,8 +113,10 @@ class VerificationEvidence:
     quarantine: QuarantineEvidence | None
     seal: object
     # Снимок входов compatibility gate: позволяет publish() перепроверить
-    # решение, не доверяя «голому» флагу успеха.
+    # решение, не доверяя «голому» флагу успеха. Оба флага приходят ИЗВНЕ
+    # подписанного manifest (CI-сканер / static-origin), а не из его полей.
     scan_verified: bool = False
+    csp_verified: bool = False
     granted_capabilities: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
@@ -249,12 +261,26 @@ def _grant_capabilities(grant: object) -> frozenset[str]:
 class CompatibilityGate:
     """Проверки совместимости ДО PUBLISHED (§5.1).
 
+    Вариант A (аудит F11, блокер №5): подписанный manifest уже прошёл
+    ``validate_manifest`` задачи 01 с ЗАКРЫТЫМ whitelist (11 полей,
+    ``additionalProperties: false``). Поэтому gate НЕ требует и НЕ читает
+    запрещённые схемой поля ``requestedCapabilities`` / ``frontend.csp``:
+    иначе один и тот же dict не может пройти оба gate и КАЖДЫЙ артефакт
+    уходит в QUARANTINED.
+
     - semver (``version`` и ``min_platform_version``);
     - ``protocol == plugin-rpc/1``;
-    - ``requestedCapabilities ⊆ CapabilityGrant.capabilities``;
+    - ``capabilities ⊆ CapabilityGrant.capabilities`` — берётся поле
+      ``capabilities`` из whitelist задачи 01, а не ``requestedCapabilities``;
     - ``min_platform_version <= PLATFORM_VERSION``;
-    - образ просканирован (``scan_verified``);
-    - CSP для frontend присутствует.
+    - образ просканирован — отдельный аргумент ``scan_verified`` от CI-сканера
+      (НЕ поле манифеста);
+    - структура ``frontend`` (ровно ``entry`` + ``base_path``, CSP внутри
+      подписанного JSON запрещён) и отдельный аргумент ``csp_verified`` —
+      подтверждение CSP-заголовка от static-origin / OCI-аннотации
+      (задачи 13/14), а не поле манифеста.
+
+    Оба verified-флага fail-closed: отсутствие (default ``False``) = отказ.
     """
 
     def __init__(self, *, platform_version: str = PLATFORM_VERSION) -> None:
@@ -268,8 +294,14 @@ class CompatibilityGate:
         *,
         grant: object | None = None,
         scan_verified: bool = False,
+        csp_verified: bool = False,
     ) -> CompatibilityVerdict:
-        """Проверить манифест. Любая неудача → ``INCOMPATIBLE``."""
+        """Проверить манифест. Любая неудача → ``INCOMPATIBLE``.
+
+        ``scan_verified`` / ``csp_verified`` передаются вызывающей стороной из
+        CI (сканер образа) и static-origin (CSP-заголовок), НЕ из подписанного
+        manifest. Fail-closed: любой флаг не ``True`` → отказ.
+        """
         if not isinstance(manifest, Mapping):
             return self._deny("манифест обязан быть объектом", code=ArtifactErrorCode.INCOMPATIBLE)
 
@@ -303,35 +335,59 @@ class CompatibilityGate:
         except ValueError:
             return self._deny("не удалось сравнить semver версии", code=ArtifactErrorCode.INCOMPATIBLE)
 
-        requested = manifest.get("requestedCapabilities")
+        # Запрошенные capability — из ЗАКРЫТОГО whitelist-поля ``capabilities``
+        # (задача 01 / schema.json). ``requestedCapabilities`` схемой запрещён
+        # и живёт только в OCI-аннотациях CI: gate его не читает и не требует.
+        requested = manifest.get("capabilities")
         if not isinstance(requested, (list, tuple)) or not requested or not all(
             isinstance(item, str) and item.strip() for item in requested
         ):
             return self._deny(
-                "requestedCapabilities обязан быть непустым массивом строк",
+                "capabilities обязан быть непустым массивом строк",
                 code=ArtifactErrorCode.INCOMPATIBLE,
             )
         granted = _grant_capabilities(grant)
         unknown = frozenset(str(item) for item in requested) - granted
         if unknown:
             return self._deny(
-                "requestedCapabilities шире CapabilityGrant.capabilities: "
-                + ", ".join(sorted(unknown)),
+                "capabilities шире CapabilityGrant.capabilities: " + ", ".join(sorted(unknown)),
                 code=ArtifactErrorCode.INCOMPATIBLE,
             )
 
-        # Образ просканирован: явный флаг сканера (не поле из непроверенного manifest).
+        # Образ просканирован: явный флаг CI-сканера (не поле непроверенного manifest).
         if not isinstance(scan_verified, bool) or scan_verified is not True:
             return self._deny(
-                "образ не подтверждён как просканированный",
+                "образ не подтверждён как просканированный (scan_verified)",
                 code=ArtifactErrorCode.INCOMPATIBLE,
             )
 
+        # Структура frontend по схеме задачи 01: закрытый объект ровно с
+        # ``entry`` + ``base_path``. Поле ``frontend.csp`` НЕ требуется и не
+        # читается: CSP — ответственность хоста static-origin (задачи 13/14).
         frontend = manifest.get("frontend")
-        csp = frontend.get("csp") if isinstance(frontend, Mapping) else None
-        if not isinstance(csp, str) or not csp.strip():
+        if not isinstance(frontend, Mapping):
             return self._deny(
-                "CSP для frontend отсутствует (§5.2)",
+                "frontend обязан быть объектом с entry и base_path",
+                code=ArtifactErrorCode.INCOMPATIBLE,
+            )
+        if set(frontend) != {"entry", "base_path"}:
+            return self._deny(
+                "frontend обязан содержать ровно entry и base_path; csp — не поле манифеста",
+                code=ArtifactErrorCode.INCOMPATIBLE,
+            )
+        if not all(
+            isinstance(frontend[key], str) and frontend[key].strip() for key in ("entry", "base_path")
+        ):
+            return self._deny(
+                "frontend.entry и frontend.base_path обязаны быть непустыми строками",
+                code=ArtifactErrorCode.INCOMPATIBLE,
+            )
+
+        # CSP подтверждён извне (static-origin / OCI-аннотация): fail-closed,
+        # отсутствие флага или любое значение кроме True = отказ.
+        if not isinstance(csp_verified, bool) or csp_verified is not True:
+            return self._deny(
+                "CSP-заголовок static-origin не подтверждён (csp_verified)",
                 code=ArtifactErrorCode.INCOMPATIBLE,
             )
 
@@ -383,12 +439,17 @@ class ArtifactVerifier:
         *,
         grant: object | None = None,
         scan_verified: bool = False,
+        csp_verified: bool = False,
     ) -> VerificationOutcome:
         """Проверить артефакт и вернуть решение + привязанное свидетельство.
 
         ``result`` — доменный ``RegistryResult`` (APPLIED / QUARANTINED).
         ``evidence`` — выдаётся ВСЕГДА, но публикацию разрешает только
         ``VerificationEvidence.verified is True`` (outcome == APPLIED).
+
+        ``scan_verified`` / ``csp_verified`` — внешние подтверждения CI-сканера
+        и static-origin (вариант A), НЕ поля подписанного manifest. Оба
+        fail-closed: по умолчанию ``False`` → CompatibilityVerdict(ok=False).
         """
         if not isinstance(ref, OciArtifactRef):
             return self._failure(
@@ -470,9 +531,13 @@ class ArtifactVerifier:
                 reason=f"validate_manifest отклонил манифест: {type(exc).__name__}",
             )
 
-        # 4. compatibility gate.
+        # 4. compatibility gate: capability из manifest["capabilities"], а
+        # scan/csp — отдельные внешние флаги (вариант A, не поля manifest).
         verdict = self._compatibility.check(
-            manifest, grant=grant, scan_verified=scan_verified
+            manifest,
+            grant=grant,
+            scan_verified=scan_verified,
+            csp_verified=csp_verified,
         )
         if not verdict.ok:
             return self._failure(
@@ -498,6 +563,7 @@ class ArtifactVerifier:
             quarantine=None,
             seal=self._seal,
             scan_verified=scan_verified,
+            csp_verified=csp_verified,
             granted_capabilities=tuple(sorted(_grant_capabilities(grant))),
         )
         return VerificationOutcome(
@@ -555,10 +621,14 @@ class ArtifactVerifier:
         *,
         grant: object | None = None,
         scan_verified: bool = False,
+        csp_verified: bool = False,
     ) -> CompatibilityVerdict:
         """Публичный повторный прогон gate (используется реестром при publish)."""
         return self._compatibility.check(
-            manifest, grant=grant, scan_verified=scan_verified
+            manifest,
+            grant=grant,
+            scan_verified=scan_verified,
+            csp_verified=csp_verified,
         )
 
     def _run_validator(self, data: dict[str, Any]) -> None:

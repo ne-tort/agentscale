@@ -185,14 +185,20 @@ async def test_dlq_publish_stores_only_digest_and_ids() -> None:
     session = FakeSession()
     store = DbDlqStore(session_factory=FakeSessionFactory(session))
     await store.publish(record)
-    inserted = session.added[-1].data
-    assert inserted["payload_digest"] == DIGEST
-    assert inserted["error_kind"] == "ConnectionError"
-    assert inserted["event_id"] == "evt_01"
-    assert inserted["dlq_topic"] == "agentscale.plugin.events.dlq"
+    inserted = session.added[-1]
+    # Реальная ORM-строка A10: атрибуты = колонки.
+    assert inserted.payload_digest == DIGEST
+    assert inserted.error_kind == "ConnectionError"
+    assert inserted.event_id == "evt_01"
+    assert inserted.dlq_topic == "agentscale.plugin.events.dlq"
     # Ни одного поля с сырым телом/токеном/SQL.
+    from prodavan.infrastructure.persistence.models.plugin_platform import (
+        PluginEventDeliveryRow,
+    )
+
     assert not any(
-        forbidden in inserted
-        for forbidden in ("payload", "body", "sql", "params", "token", "secret")
+        forbidden in name
+        for name in PluginEventDeliveryRow.__table__.columns.keys()
+        for forbidden in ("raw_payload", "request_body", "raw_sql", "bind_params", "access_token")
     )
     assert session.commits == 1

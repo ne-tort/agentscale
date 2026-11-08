@@ -77,10 +77,12 @@ from .kafka_adapters import (
 from .stores import (
     CLUSTER_BACKEND_NOTE,
     InMemoryAudit,
+    InMemoryEventPorts,
     InMemoryIdempotencyStore,
     InMemoryPublishedEventStore,
     InMemorySubscriptionStore,
     InMemoryWakeHook,
+    InstanceMappingError,
     event_instance_resolver,
     in_memory_event_ports,
 )
@@ -124,10 +126,12 @@ __all__ = [
     # in-memory stores (dev/тесты; кластер → БД/Redis, задача A10)
     "CLUSTER_BACKEND_NOTE",
     "InMemoryAudit",
+    "InMemoryEventPorts",
     "InMemoryIdempotencyStore",
     "InMemoryPublishedEventStore",
     "InMemorySubscriptionStore",
     "InMemoryWakeHook",
+    "InstanceMappingError",
     "event_instance_resolver",
     "in_memory_event_ports",
 ]

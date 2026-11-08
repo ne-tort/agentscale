@@ -325,6 +325,15 @@ class FakeKafkaConsumer:
         self.stopped = True
 
 
+@dataclass(frozen=True, slots=True)
+class FakeNewTopic:
+    """Двойник ``aiokafka.admin.NewTopic``."""
+
+    name: str
+    num_partitions: int = 1
+    replication_factor: int = 1
+
+
 class FakeKafkaAdmin:
     def __init__(self, *, fail_create: bool = False) -> None:
         self.existing: set[str] = set()
@@ -346,8 +355,28 @@ class FakeKafkaAdmin:
             self.created.append((topic.name, topic.num_partitions, topic.replication_factor))
             self.existing.add(topic.name)
 
+    # Тот же объект можно передать и КАК TopicAdminPort (ensure_topic задачи 10),
+    # и КАК aiokafka-admin клиент для KafkaTopicAdminAdapter.
+    async def topic_exists(self, topic: str) -> bool:
+        return topic in self.existing
+
+    async def create_topic(
+        self, topic: str, *, num_partitions: int, replication_factor: int
+    ) -> None:
+        if self.fail_create:
+            raise RuntimeError("admin unavailable")
+        self.created.append((topic, num_partitions, replication_factor))
+        self.existing.add(topic)
+
     async def close(self) -> None:
         self.closed = True
+
+
+@dataclass
+class FakeAdminModule:
+    """Подмена модуля ``aiokafka.admin`` для тестов без aiokafka."""
+
+    NewTopic: Any = FakeNewTopic
 
 
 # ---------------------------------------------------------------------------
@@ -410,7 +439,9 @@ __all__ = [
     "WEBHOOK_SECRET_OLD",
     "BackendResponse",
     "FakeActivator",
+    "FakeAdminModule",
     "FakeConsumerRecord",
+    "FakeNewTopic",
     "FakeCookieSessions",
     "FakeDirectory",
     "FakeHttpxClient",

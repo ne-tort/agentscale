@@ -621,6 +621,11 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
     uploadCompanyModuleSecret: (companyId, moduleId, body) => request<JsonObject>(`/companies/${encodePath(companyId)}/modules/${encodePath(moduleId)}/secrets/upload`, { method: "POST", body: JSON.stringify(body) }),
 
     listAdminModules: () => request<{ items: AdminModule[] }>("/admin/modules"),
+    // Plugin-платформа (дизайн v4):PluginInfoPort читает установленные плагины
+    // компании, чтобы решить, рендерить iframe или показать «не подключён».
+    // Токен идёт в заголовке (request добавляет Authorization), в query — только
+    // company_id; capability-токен плагина в URL не попадает никогда (§5.2).
+    listAdminPlugins: (companyId) => request<AdminPluginsResponse>(`/admin/plugins/?company_id=${encodeURIComponent(companyId)}`),
     createAdminModule: (name) => request<AdminModule>("/admin/modules", { method: "POST", body: JSON.stringify({ name }) }),
     getAdminModule: (moduleId) => request<AdminModule>(`/admin/modules/${encodePath(moduleId)}`),
     patchAdminModule: (moduleId, patch) => request<AdminModule>(`/admin/modules/${encodePath(moduleId)}`, { method: "PATCH", body: JSON.stringify(patch) }),

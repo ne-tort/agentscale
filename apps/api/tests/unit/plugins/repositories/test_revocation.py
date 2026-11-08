@@ -10,13 +10,13 @@ from datetime import timedelta
 import pytest
 
 from prodavan.application.plugins.admin.contracts import GrantStatus
-from prodavan.application.plugins.capabilities.ports import GrantRevocationPort
 from prodavan.application.plugins.identity.revocation import RevocationPort
 from prodavan.infrastructure.persistence.repositories.plugins.grants import (
     SqlCapabilityGrantRepository,
 )
 from prodavan.infrastructure.persistence.repositories.plugins.revocation import (
     DbGrantRevocation,
+    _CacheEntry,
 )
 
 from .conftest import NOW, FakeSession, grant_record, grant_row
@@ -28,10 +28,19 @@ def _repo(*, rows: list | None = None) -> SqlCapabilityGrantRepository:
 
 
 def test_db_revocation_satisfies_both_port_protocols() -> None:
-    """Структурно совместим с портами задач 02 и 03."""
+    """Структурно совместим с портами задач 02 и 03.
+
+    ``GrantRevocationPort`` НЕ помечен ``@runtime_checkable``, поэтому
+    ``isinstance`` с ним недопустим — проверяем сигнатуру метода напрямую.
+    """
+    import inspect
+
     rev = DbGrantRevocation(_repo(), ttl_seconds=30, clock=lambda: NOW)
     assert isinstance(rev, RevocationPort)
-    assert isinstance(rev, GrantRevocationPort)
+    signature = inspect.signature(rev.is_active)
+    assert "grant_id" in signature.parameters
+    assert "now" in signature.parameters
+    assert callable(rev.is_active)
 
 
 @pytest.mark.asyncio
@@ -76,7 +85,7 @@ def test_cache_is_invalidated_immediately_on_revoke_not_after_ttl() -> None:
     rev = DbGrantRevocation(repo, ttl_seconds=3600, clock=lambda: NOW)
     # Вручную прогреваем запись «активен» (имитация async-refresh).
     repo._snapshot["pcg_01"] = grant_record(grant_id="pcg_01")
-    rev._cache["pcg_01"] = type(rev)._CacheEntry(
+    rev._cache["pcg_01"] = _CacheEntry(
         active=True, expires_at=NOW + timedelta(seconds=3600)
     )
     assert rev.is_active("pcg_01", now=NOW) is True
@@ -98,7 +107,7 @@ def test_expired_ttl_entry_is_fail_closed() -> None:
     """Протухшая запись кэша = отказ + пометка на async-refresh."""
     repo = _repo()
     rev = DbGrantRevocation(repo, ttl_seconds=1, clock=lambda: NOW)
-    rev._cache["pcg_01"] = type(rev)._CacheEntry(
+    rev._cache["pcg_01"] = _CacheEntry(
         active=True, expires_at=NOW - timedelta(seconds=1)
     )
     assert rev.is_active("pcg_01", now=NOW) is False

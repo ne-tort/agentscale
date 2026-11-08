@@ -5,8 +5,17 @@ export default defineConfig(({ mode }) => {
   // `process` is not typed here and the app has no @types/node; `loadEnv` reads
   // the same environment without pulling Node types into a browser build.
   const env = loadEnv(mode, ".", "");
+  // Static-origin для iframe плагинов (v4 §5.2/§5.3): ОТДЕЛЬНЫЙ origin, не
+  // совпадающий с оболочкой. В dev это то же имя хоста, что и shell, но другой
+  // поддомен; при переходе на wildcard subdomain (§5.3) подставить точный
+  // https-origin из конфигурации контура. Пустое/невалидное значение не
+  // пробрасываем в клиент — PluginInfoPort и usePluginFrame fail-closed.
+  const pluginStaticOrigin = env.VITE_PLUGIN_STATIC_ORIGIN || "https://plugin-origin.agentscale.dev";
   return {
     plugins: [react()],
+    define: {
+      "import.meta.env.VITE_PLUGIN_STATIC_ORIGIN": JSON.stringify(pluginStaticOrigin),
+    },
     server: {
       port: 5173,
       // The client calls relative `/api/v1/...` URLs so the same bundle works

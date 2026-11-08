@@ -11,13 +11,14 @@ resources:
   - agentscale-api/service.yaml
   - agentscale-web/deployment.yaml
   - agentscale-web/service.yaml
-  # Plugin-платформа (дизайн v4): всегда-running инфраструктура — отдельный
-  # tenant-PostgreSQL (НЕ prodavan), PgBouncer, Plugin Gateway, egress-proxy и
-  # NetworkPolicy. Живёт здесь, в основном agentscale-dev Application.
-  # Динамические Deployment'ы плагинов и plugins-gateway Ingress НЕ здесь: они
-  # ведутся отдельным Argo Application plugin-platform.yaml (overlays/dev/plugins)
-  # с ignoreDifferences на /spec/replicas. Двойного владения нет.
-  - plugins
+  # Plugin-платформа НЕ подключается здесь.
+  #
+  # Владелец ОДИН: Argo Application `plugin-platform` (infra/argocd/apps/
+  # plugin-platform.yaml) рендерит overlays/dev/plugins → ../../../base/plugins.
+  # Раньше `- plugins` был и здесь, и там: `agentscale-dev` (prune+selfHeal)
+  # и `plugin-platform` рендерили одни и те же Deployment/Service/NP двумя
+  # Application и перетирали друг друга. Убираем дубль, оставляя приложение
+  # с ignoreDifferences на /spec/replicas и controller-managed /data.
   # agentscale-sandbox/rbac.yaml removed (Wave 4): legacy SA + batch/Jobs Role — dead path.
   # Only the agentscale-api ServiceAccount remains (see agentscale-sandbox/rbac-api.yaml).
   - agentscale-sandbox/rbac-api.yaml

@@ -62,11 +62,12 @@ from prodavan.application.plugins.tenantdb.service import (
     TenantDsn,
 )
 
-from .errors import map_tenant_db_error, map_unexpected_error, require_wired
 from prodavan.application.plugins.tenantdb.errors import (
     NOT_FOUND as TENANT_DB_NOT_FOUND,
-    TenantDbError,
 )
+from prodavan.application.plugins.tenantdb.errors import TenantDbError
+
+from .errors import map_tenant_db_error, map_unexpected_error, require_wired
 
 #: Служебный префикс ссылки на БД компании (НЕ plaintext DSN, не пароль).
 #: Реальный DSN живёт в SecretPort; здесь только стабильный идентификатор.
@@ -107,8 +108,8 @@ class TenantDbAdapter:
         """
 
         db_name = self._db_name(company_id=company_id)
-        created = not await self._database_exists(db_name=db_name)
         try:
+            created = not await self._database_exists(db_name=db_name)
             returned = await self._service.ensure_company_database(company_id)
         except TenantDbError as exc:
             raise map_tenant_db_error(
@@ -116,6 +117,10 @@ class TenantDbAdapter:
                 operation="ensure_company_database",
                 reason="не удалось обеспечить БД компании",
             ) from None
+        except PluginAdminError:
+            # Наш же отказ (например, AdminConnectionPort не подключён) не
+            # перехватываем как «непредвиденное исключение адаптера».
+            raise
         except Exception as exc:  # noqa: BLE001 - драйвер/порт мог упасть как угодно
             raise map_unexpected_error(
                 exc,
@@ -153,10 +158,13 @@ class TenantDbAdapter:
     ) -> PluginSchema:
         """Создать роль + схему плагина, вернуть типизированный ``PluginSchema``.
 
-        ``dsn_ref`` из authorize-контекста admin-сервиса перепроверяется: он
-        обязан совпадать со ссылкой, которую вернёт ``grant_plugin``. Это
-        исключает ситуацию «схема создана в БД одной компании, а DSN указывает
-        на другую». При расхождении — отказ до возврата результата.
+        ``dsn_ref`` приходит от admin-сервиса как служебная ссылка НА БД
+        КОМПАНИИ (ещё до создания роли плагина, см.
+        ``ensure_company_database``), поэтому сравнивать его напрямую с
+        ``TenantDsn.secret_ref`` (ссылка на DSN роли плагина) нельзя — это две
+        разные ссылки. Адаптер проверяет, что входящий ``dsn_ref`` указывает
+        ровно на нашего ``company_id``, а итоговую ``PluginSchema.dsn_ref``
+        берёт из проверенного ``TenantDsn.secret_ref``.
         """
 
         db_name, role_name, schema_name, search_path = self._names(
@@ -198,14 +206,19 @@ class TenantDbAdapter:
                 status=503,
                 extra={"adapter_operation": "ensure_plugin_schema"},
             )
-        if (dsn_ref or "").strip() and dsn.secret_ref != (dsn_ref or "").strip():
-            # Не подменяем DSN «на всякий случай»: это был бы доступ к чужой БД.
-            raise PluginAdminError(
-                code="GRANT_EXISTS",
-                detail="dsn_ref не совпадает с secret_ref выданного DSN",
-                status=503,
-                extra={"adapter_operation": "ensure_plugin_schema"},
-            )
+        incoming = (dsn_ref or "").strip()
+        if incoming:
+            # Ожидаемая служебная ссылка на БД ЭТОЙ компании (формируется
+            # ensure_company_database). Чужая компания в dsn_ref = отказ:
+            # иначе схема одной компании ушла бы с DSN другой.
+            expected_db_ref = f"{_DB_SECRET_REF_PREFIX}/{company_id}/TENANT_DB_DSN"
+            if incoming != expected_db_ref:
+                raise PluginAdminError(
+                    code="GRANT_EXISTS",
+                    detail="dsn_ref указывает не на БД этой компании",
+                    status=503,
+                    extra={"adapter_operation": "ensure_plugin_schema"},
+                )
 
         return PluginSchema(
             company_id=company_id,

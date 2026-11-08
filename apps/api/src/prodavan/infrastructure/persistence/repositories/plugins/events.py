@@ -207,19 +207,14 @@ class DbSubscriptionStore(DbEventStoreBase):
     async def put(self, subscription: Subscription, *, active: bool = True) -> None:
         """Зарегистрировать/обновить подписку (не часть порта, для интеграции).
 
-        ``event_types`` / ``consumer_group`` / ``plugin_id`` в A10 НЕ хранятся
-        отдельными колонками, поэтому кладём их в ``source_event_id``? НЕТ:
-        ``source_event_id`` — часть уникального ключа. Используем ``status``
-        для активности, а типизированные метаданные кодируем в ``error_kind``
-        ( String(128) ) как компактный JSON-список? НЕТ: это было бы raw-данные.
-        Решение: храним ТОЛЬКО ``consumer_group`` в ``dlq_topic`` (String(255),
-        аддитивная колонка), а ``event_types`` — в ``payload_digest``? Тоже нет.
-
-        Честный подход: A10 не предусмотрела таблицу подписок, поэтому
-        ``DbSubscriptionStore`` хранит ровно факт активности подписки, а
-        полный объект ``Subscription`` (event_types/consumer_group) отдаётся
-        вызывающему из его собственного конфига. В БД пишем канонические id и
-        НЕ выдумываем сырые payload. См. риск в отчёте родителю.
+        A10 не выделяет отдельную таблицу подписок, поэтому факт подписки
+        хранится служебной строкой ``PluginEventDeliveryRow``:
+        ``source_event_id = "__subscription__"``, ``status`` = active/revoked,
+        ``consumer_group`` → аддитивная колонка ``dlq_topic``, ``event_types``
+        → ``error_kind`` (короткий список канонических имён через запятую).
+        Это ТОЛЬКО технические идентификаторы, не raw payload/токены/SQL
+        (критерий 11). Риск: ``error_kind`` ограничен 128 символами — длинный
+        список типов будет усечён; см. отчёт родителю.
         """
         if not isinstance(subscription, Subscription):
             raise PluginRepositoryError("put ожидает Subscription")
@@ -359,6 +354,10 @@ class DbIdempotencyStore(DbEventStoreBase):
             raise
         except SQLAlchemyError as exc:
             raise PluginRepositoryUnavailable(f"idempotency remember failed: {exc}") from exc
+        except Exception as exc:  # noqa: BLE001 — любая ошибка записи = deny, не «тихо ОК»
+            raise PluginRepositoryUnavailable(
+                f"idempotency remember failed: {type(exc).__name__}"
+            ) from exc
 
     async def remember_pg(self, key: IdempotencyKey) -> None:
         """Явный PostgreSQL ``ON CONFLICT DO NOTHING`` (конструктор SQLAlchemy)."""
@@ -429,6 +428,10 @@ class DbPublishedEventStore(DbEventStoreBase):
             raise
         except SQLAlchemyError as exc:
             raise PluginRepositoryUnavailable(f"published event remember failed: {exc}") from exc
+        except Exception as exc:  # noqa: BLE001
+            raise PluginRepositoryUnavailable(
+                f"published event remember failed: {type(exc).__name__}"
+            ) from exc
 
 
 class DbDlqStore(DbEventStoreBase):
@@ -463,6 +466,10 @@ class DbDlqStore(DbEventStoreBase):
             raise
         except SQLAlchemyError as exc:
             raise PluginRepositoryUnavailable(f"DLQ publish failed: {exc}") from exc
+        except Exception as exc:  # noqa: BLE001 — DLQ не записан = offset НЕ коммитим
+            raise PluginRepositoryUnavailable(
+                f"DLQ publish failed: {type(exc).__name__}"
+            ) from exc
 
     async def count(self, subscription_id: str | None = None) -> int:
         """Диагностика для тестов; ошибка БД → 0 (не источник решения)."""

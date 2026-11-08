@@ -68,6 +68,7 @@ from .fakes import (
 )
 from .test_activation_adapter import _activator
 
+
 class _FakeCosign:
     def verify(self, image_ref: str, identity: str, issuer: str) -> Any:
         from prodavan.application.plugins.artifacts.verification import (
@@ -229,6 +230,13 @@ def test_build_rejects_wrong_deployment_admin_type() -> None:
 def test_build_rejects_wrong_platform_type() -> None:
     deps = _deps()
     deps["platform"] = object()
+    with pytest.raises(TypeError, match="PlatformAdminPort"):
+        build_plugin_admin_ports(**deps)
+
+
+def test_build_rejects_platform_without_method() -> None:
+    deps = _deps()
+    deps["platform"] = "not-a-port"
     with pytest.raises(TypeError, match="PlatformAdminPort"):
         build_plugin_admin_ports(**deps)
 

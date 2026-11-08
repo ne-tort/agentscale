@@ -13,7 +13,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 DIGEST = "sha256:" + "a" * 64
@@ -273,14 +273,14 @@ def make_activator_wake_result(*, token: str = "fresh.jwt.token") -> Any:
 
     from prodavan.application.plugins.activation.state import WakeResult
 
-    now = datetime(2026, 11, 8, 9, 0, tzinfo=UTC)
+    now = datetime.now(UTC)
     return WakeResult(
         plugin_instance_id=INSTANCE,
         token=token,
         jti="jti-wake-1",
         claims={"sub": f"plugin:{PLUGIN}:{COMPANY}:{INSTANCE}"},
         issued_at=now,
-        expires_at=now.replace(second=now.second + 300),
+        expires_at=now + timedelta(seconds=300),
         ready_at=now,
         waited_seconds=0.012,
         previous_replicas=0,

@@ -86,7 +86,7 @@ async def test_service_grant_rejects_tag_as_digest() -> None:
     deps = _deps()
     service = build_plugin_admin_service(**deps)
 
-    with pytest.raises((PluginAdminError, ValueError)):
+    with pytest.raises((PluginAdminError, ValueError)) as exc:
         await service.grant(
             company_id=COMPANY,
             plugin_id=PLUGIN,
@@ -94,6 +94,9 @@ async def test_service_grant_rejects_tag_as_digest() -> None:
             artifact_digest="ghcr.io/plugins/mod_equipment:latest",
             capabilities=CapabilitySet(capabilities=("cache",)),
         )
+    # Отказ, а не «успех по тегу»: либо валидация admin-сервиса, либо
+    # ARTIFACT_NOT_PUBLISHED из адаптера реестра.
+    assert isinstance(exc.value, (PluginAdminError, ValueError))
 
 
 # --------------------------------------------------------------------------- revoke

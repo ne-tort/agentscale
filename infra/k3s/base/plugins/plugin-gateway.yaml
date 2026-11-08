@@ -51,11 +51,28 @@ rules:
     resources: ["deployments/scale"]
     verbs: ["get", "patch", "update"]
   # Чтение для hold-until-Ready: ожидание Ready без pods/exec и без secrets.
-  # Ни `deployments` (на запись), ни `pods`, ни `secrets`, ни `configmaps` здесь
-  # НЕТ. Fail-closed: всё не перечисленное запрещено по умолчанию.
   - apiGroups: ["apps"]
     resources: ["deployments"]
     verbs: ["get", "list", "watch"]
+  # Межпроцессный CAS состояния activator'а (задача runtime-адаптеров):
+  # `ConfigMapStateStore` сравнивает resourceVersion, чтобы две реплики Gateway
+  # не сделали два PATCH 0→1. Имя фиксировано — сужаем через resourceNames.
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["plugin-activation-state"]
+    verbs: ["get", "create", "update", "patch"]
+  # Controller-managed данные (задача controllers): pg_hba / userlist / Envoy.
+  # Имена фиксированы; patch только /data, чтение для идемпотентного sync.
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["tenant-postgres-config", "egress-proxy-config"]
+    verbs: ["get", "patch", "update"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["pgbouncer-credentials"]
+    verbs: ["get", "patch", "update"]
+  # Всё остальное (pods, secrets прочих имён, deployments на запись,
+  # prodavan) ЗАПРЕЩЕНО по умолчанию — fail-closed.
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -137,6 +154,44 @@ data:
   PLUGIN_OCI_REGISTRY: "ghcr.io/ne-tort/plugins"
   PLUGIN_ARTIFACT_PIN_MODE: "digest"
   PLUGIN_COSIGN_ISSUER: "https://token.actions.githubusercontent.com"
+---
+# Secret для always-running Plugin Gateway.
+#
+# Pod НЕ стартует без этого объекта (envFrom secretRef без optional) — это и
+# есть fail-closed: платформа включена, но без ключа подписи PluginClaims и без
+# static-origin для iframe она обязана отказать, а не работать «на честном
+# слове» (§4.2, guards в config/settings.py и wiring/config.py).
+#
+# DEV-ЗНАЧЕНИЯ ниже — только для dev-контура, как в base/platform/minio.yaml.
+# Для shared/прод-контура ЗАМЕНИТЬ на SealedSecret (kind уже в whitelist
+# 00-project.yaml) и не коммитить реальные ключи в Git.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: plugin-gateway-secrets
+  labels:
+    app: plugin-gateway
+    app.kubernetes.io/name: plugin-gateway
+    app.kubernetes.io/part-of: agentscale
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+type: Opaque
+stringData:
+  # Подпись короткоживущих PluginClaims. Ротация — PLUGIN_CLAIMS_PREVIOUS_SECRETS
+  # (от старого к новому), НЕ общий с агентским pod_identity_bridge_secret.
+  PLUGIN_CLAIMS_SECRET: "dev-plugin-claims-secret-change-me"
+  # Отдельный static-origin для iframe: НЕ совпадает с shellOrigin.
+  # В dev это тот же хост, что и shell, но отдельное имя; при переходе на
+  # wildcard subdomain (§5.3) заменить на точный https-origin плагинов.
+  PLUGIN_STATIC_ORIGIN: "https://plugin-origin.agentscale.dev"
+  # keyless cosign: ожидаемый certificate identity GitHub Actions.
+  # Пусто = wiring/config.py откажет в сборке (все артефакты ушли бы в
+  # карантин молча). Dev-значение ниже совпадает с workflow, который
+  # подписывает артефакты; для прод-контура заменить на реальный identity.
+  PLUGIN_COSIGN_IDENTITY: "https://github.com/ne-tort/agentscale/.github/workflows/plugin-artifacts.yml@refs/heads/main"
+  # Админский DSN tenant-кластера (создание БД/ролей). НЕ платформенный
+  # prodavan: отдельный Service tenant-postgres / пул pgbouncer.
+  PLUGIN_TENANT_DB_ADMIN_URL: "postgresql://plugin_platform_admin:dev-admin-change-me@tenant-postgres:5432/postgres"
 ---
 apiVersion: apps/v1
 kind: Deployment

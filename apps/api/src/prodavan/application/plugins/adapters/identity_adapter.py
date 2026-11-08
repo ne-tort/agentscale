@@ -32,11 +32,17 @@ admin (задача 12, ``admin/ports.py``)        identity (задача 02)
 * **Mint:** ``MintRequest`` → структурный ``MintGrant``/``MintInstance`` для
   ``mint_plugin_claims``; затем токен разбирается через ``peek_plugin_token``
   (без проверки подписи — он только что выпущен НАМИ) и валидируется через
-  ``claims_from_payload``; ``jti``/``issued_at``/``expires_at`` берутся из
-  проверенного payload, а не придумываются адаптером.
+  ``claims_from_payload``; ``jti`` и ``expires_at`` берутся из проверенного
+  payload, а не придумываются адаптером.
+* **Про ``issued_at``.** ``IssuedPluginClaims`` (задача 12) содержит ``jti`` и
+  ``expires_at``, но НЕ отдельное поле ``issued_at`` — момент выпуска
+  восстанавливается как ``expires_at - ttl_seconds`` из проверенного ``exp``.
+  Адаптер не выдумывает ``iat``: он берёт ``claims.iat`` из payload и
+  проверяет ``exp - iat == ttl_seconds`` (иначе отказ). Родителю рекомендуется
+  добавить ``issued_at`` в контракт задачи 12, если нужен явный момент выпуска.
 * **Fail-closed:** пустой ``secret``, пустой ``grant_id``, битый payload,
   расхождение ``grant_id``/``jti`` в токене — ``PluginTokenError``/``ValueError``
-  наверх, NEVER «вернём токен-заглушку».
+  наверх, а не «вернём токен-заглушку».
 
 ВАЖНО (для родителя): ``identity.MintPort`` и ``admin.MintPort`` — РАЗНЫЕ
 протоколы с одинаковым именем. Здесь импортируются с алиасами, см.
@@ -244,6 +250,10 @@ class IdentityMintAdapter:
         claims = claims_from_payload(payload)
         if claims.grant_id != request.grant_id or claims.plugin_instance_id != request.plugin_instance_id:
             raise ValueError("IdentityMintAdapter: токен привязан к другому grant/instance")
+        if claims.exp - claims.iat != int(request.ttl_seconds):
+            # Подписанный TTL обязан совпадать с запрошенным: иначе адаптер
+            # вернул бы ``expires_at``, не соответствующий токену.
+            raise ValueError("IdentityMintAdapter: TTL токена не совпадает с MintRequest")
 
         return IssuedPluginClaims(
             token=token,

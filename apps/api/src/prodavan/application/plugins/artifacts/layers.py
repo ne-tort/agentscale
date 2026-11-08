@@ -8,6 +8,9 @@
 
 Аннотации несут ``plugin_id``, ``manifest_version``, ``protocol``,
 ``requestedCapabilities``, ``min_platform_version`` и ``artifact_digest``.
+Важно: ``requestedCapabilities`` — это ИМЯ OCI-АННОТАЦИИ (ключ контракта CI),
+а НЕ поле подписанного plugin-manifest. Источник значений — закрытое
+whitelist-поле ``capabilities`` из задачи 01 (вариант A, аудит F11).
 
 ВАЖНО (§5.1 «без самореференции», §13.1): ``artifact_digest`` — это digest
 САМОГО OCI-манифеста, поэтому он НЕ может входить в подписываемый манифест
@@ -85,9 +88,14 @@ def build_oci_manifest(
     - ``ref`` — строго ``OciArtifactRef`` с валидным digest;
     - в ``plugin_manifest`` отсутствует ``artifact_digest`` (самореференция);
     - ``protocol == plugin-rpc/1``;
+    - capability из ``manifest["capabilities"]`` (закрытый whitelist задачи 01);
     - ровно 3 слоя с ожидаемыми mediaType и путями;
     - изображение просканировано (``scanned: true``) — §5.1 compatibility gate;
-    - CSP для frontend присутствует (``csp``) — §5.2 / §5.1.
+    - CSP для frontend-слоя задан (``csp``) — подтверждение static-origin.
+
+    CSP здесь хранится в АННОТАЦИИ OCI-СЛОЯ (внешний источник для
+    ``csp_verified``), а НЕ в подписанном ``plugin_manifest``: схема задачи 01
+    запрещает ``frontend.csp`` (вариант A, аудит F11).
     """
     if not isinstance(ref, OciArtifactRef):
         raise ArtifactError(
@@ -116,13 +124,16 @@ def build_oci_manifest(
             f"protocol должен быть {PLUGIN_PROTOCOL!r}, получено {protocol!r}",
         )
 
-    requested = manifest.get("requestedCapabilities")
+    # Вариант A: capability из ЗАКРЫТОГО whitelist-поля ``capabilities``
+    # подписанного manifest. Запрещённое схемой ``requestedCapabilities`` —
+    # только имя OCI-аннотации ниже (контракт CI), не поле входа.
+    requested = manifest.get("capabilities")
     if not isinstance(requested, (list, tuple)) or not requested or not all(
         isinstance(item, str) and item.strip() for item in requested
     ):
         raise ArtifactError(
             ArtifactErrorCode.INCOMPATIBLE,
-            "requestedCapabilities обязан быть непустым массивом строк",
+            "capabilities обязан быть непустым массивом строк",
         )
     min_platform_version = _require_str(manifest.get("min_platform_version"), "min_platform_version")
 

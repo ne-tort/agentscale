@@ -14,6 +14,10 @@ import pytest
 
 from prodavan.application.plugins.admin.errors import PluginAdminError
 from prodavan.application.plugins.adapters.tenantdb_adapter import TenantDbAdapter
+from prodavan.application.plugins.tenantdb.errors import (
+    NOT_FOUND,
+    TenantDbError,
+)
 from prodavan.application.plugins.tenantdb.naming import (
     plugin_role_name,
     plugin_schema_name,
@@ -23,10 +27,6 @@ from prodavan.application.plugins.tenantdb.naming import (
 from prodavan.application.plugins.tenantdb.service import (
     TenantDatabaseService,
     TenantDsn,
-)
-from prodavan.application.plugins.tenantdb.errors import (
-    NOT_FOUND,
-    TenantDbError,
 )
 
 from .fakes import (
@@ -91,7 +91,6 @@ async def test_ensure_company_database_rejects_foreign_company() -> None:
     with pytest.raises(TenantDbError):
         tenant_db_name("co_a; DROP DATABASE prodavan")
 
-
 # --------------------------------------------------------------------------- ensure схемы
 
 
@@ -116,18 +115,32 @@ async def test_ensure_plugin_schema_maps_tenant_dsn_and_validates_scope() -> Non
     assert schema.created is True
 
 
-async def test_ensure_plugin_schema_rejects_mismatched_dsn_ref() -> None:
-    """DSN-ссылка на другую установку = отказ, а не тихая подмена."""
+async def test_ensure_plugin_schema_rejects_foreign_company_dsn_ref() -> None:
+    """``dsn_ref`` на другую компанию = отказ, а не тихая подмена."""
 
     service, _admin = _service()
     adapter = TenantDbAdapter(service)
 
-    with pytest.raises(PluginAdminError, match="dsn_ref"):
+    with pytest.raises(PluginAdminError, match="не на БД этой компании"):
         await adapter.ensure_plugin_schema(
             company_id=COMPANY,
             plugin_id=PLUGIN,
-            dsn_ref="secret_ref://other-company/TENANT_DB_DSN",
+            dsn_ref="secret://plugins/tenantdb/co_other/TENANT_DB_DSN",
         )
+
+
+async def test_ensure_plugin_schema_accepts_own_company_dsn_ref() -> None:
+    """Служебная ссылка ensure_company_database проходит проверку области."""
+
+    service, _admin = _service()
+    adapter = TenantDbAdapter(service)
+    database = await adapter.ensure_company_database(company_id=COMPANY)
+
+    schema = await adapter.ensure_plugin_schema(
+        company_id=COMPANY, plugin_id=PLUGIN, dsn_ref=database.dsn_ref
+    )
+    assert schema.dsn_ref.startswith("secret_ref://")  # DSN роли плагина
+    assert schema.dsn_ref != database.dsn_ref  # это ДВЕ разные ссылки
 
 
 async def test_ensure_plugin_schema_calls_grant_plugin_positionally() -> None:
@@ -182,7 +195,6 @@ async def test_drop_plugin_schema_does_not_touch_other_company() -> None:
     await adapter.drop_plugin_schema(company_id=COMPANY, plugin_id=PLUGIN)
     assert plugin_role_name(COMPANY, PLUGIN) != plugin_role_name(COMPANY_OTHER, PLUGIN)
 
-
 # --------------------------------------------------------------------------- ошибки
 
 
@@ -193,7 +205,6 @@ async def test_tenant_db_error_is_mapped_to_plugin_admin_error() -> None:
     with pytest.raises(PluginAdminError) as exc:
         await adapter.ensure_company_database(company_id=COMPANY)
     assert exc.value.extra["adapter_operation"] == "ensure_company_database"
-    # Ни DSN, ни пароля, ни raw SQL в detail.
     assert "postgresql://" not in (exc.value.detail or "")
     assert "password" not in (exc.value.detail or "").lower()
 

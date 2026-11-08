@@ -238,7 +238,7 @@ async def test_gateway_wake_returns_wake_lease_from_activator_token() -> None:
 
     assert lease.plugin_id == PLUGIN
     assert lease.company_id == COMPANY
-    assert lease.capability_token == make_activator_wake_result().token
+    assert lease.capability_token == _fake_of(activator).wake_result.token
     assert lease.ready is True
     assert lease.expires_at > 0
     assert _fake_of(activator).wake_calls == [INSTANCE]

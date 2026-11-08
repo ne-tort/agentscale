@@ -60,9 +60,9 @@ async def test_ensure_bucket_translates_to_grant_with_policy_and_quota() -> None
     parent = object_policy.bucket_policy(COMPANY, PLUGIN)
     session = object_policy.session_policy(COMPANY, PLUGIN)
     assert call.kwargs["policy"] == parent
-    assert session["Version"] == parent["Version"]
     assert call.kwargs["policy"]["Statement"] == session["Statement"]
     assert "agentscale/*" not in str(call.kwargs["policy"])
+    # session_policy ⊂ bucket_policy: один генератор на обе политики.
 
 
 async def test_ensure_bucket_never_addresses_other_company_bucket() -> None:

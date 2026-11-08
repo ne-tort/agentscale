@@ -47,7 +47,6 @@ from prodavan.application.plugins.admin.contracts import (
 )
 
 from ._schema import (
-    ACTIVE_GRANT_STATUS,
     FLAG_SENTINEL_ID,
     FLAG_SENTINEL_PLUGIN_ID,
     GRANT_COLUMNS,
@@ -518,6 +517,10 @@ class SqlCapabilityGrantRepository:
             ) from exc
         except (SQLAlchemyError, PluginRepositoryError) as exc:
             raise PluginRepositoryUnavailable(f"create grant failed: {exc}") from exc
+        except Exception as exc:  # noqa: BLE001 — позитивная мутация = явный deny
+            raise PluginRepositoryUnavailable(
+                f"create grant failed: {type(exc).__name__}"
+            ) from exc
 
     async def deactivate(self, *, grant_id: str) -> CapabilityGrantRecord:
         """Деактивация (мгновенный отзыв, кр. №12); строка остаётся (audit)."""

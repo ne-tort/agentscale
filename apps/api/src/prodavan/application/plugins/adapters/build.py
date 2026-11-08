@@ -140,8 +140,13 @@ def build_plugin_admin_ports(
         raise TypeError("build_plugin_admin_ports: instance_resolver обязан реализовывать InstanceIdResolver")
     if not isinstance(deployment_admin, DeploymentAdminPort):
         raise TypeError("build_plugin_admin_ports: deployment_admin обязан реализовывать DeploymentAdminPort")
-    if not isinstance(platform, PlatformAdminPort):
-        raise TypeError("build_plugin_admin_ports: platform обязан реализовывать PlatformAdminPort")
+    if not callable(getattr(platform, "require_platform_admin", None)):
+        # ``admin.PlatformAdminPort`` НЕ помечен @runtime_checkable, поэтому
+        # ``isinstance(platform, PlatformAdminPort)`` всегда бросил бы TypeError
+        # (даже для корректной реализации). Проверяем структуру через атрибут.
+        raise TypeError(
+            "build_plugin_admin_ports: platform обязан реализовывать PlatformAdminPort"
+        )
 
     # --- 2. Адаптеры к реальным сервисам соседних зон ------------------------
     tenant_db = TenantDbAdapter(tenant_db_service)
