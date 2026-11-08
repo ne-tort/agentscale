@@ -139,8 +139,14 @@ spec:
               #    мог «успешно» ничего не сделать (гонка/очередь админ-операций),
               #    а auto_create_topics_enabled=false не спасёт при первом produce
               #    (topics.py:234-250 — та же логика повторной проверки).
+              #
+              #    `rpk topic list` печатает ТАБЛИЦУ (`NAME PARTITIONS REPLICAS`),
+              #    а не просто имена: `grep -qx "$t"` всегда промахивался бы и
+              #    Job уходил в CrashLoopBackOff даже при созданных топиках.
+              #    Берём первый столбец через awk и сравниваем точную строку.
+              topics=$(rpk topic list -X brokers=$BROKERS | awk 'NR > 1 { print $1 }')
               for t in agentscale.plugin.events agentscale.plugin.events.dlq; do
-                rpk topic list -X brokers=$BROKERS | grep -qx "$t" || {
+                printf '%s\n' "$topics" | grep -Fxq "$t" || {
                   echo "FAIL: топик $t отсутствует после create; публикация событий плагинов запрещена" >&2
                   exit 1
                 }
@@ -149,7 +155,7 @@ spec:
               # 6) Явная фиксация: ровно 2 топика, DLQ-суффикс ОДИН раз.
               #    Список имён задан литералами, а не вычислением из переменной с
               #    уже добавленным `.dlq`: исключаем `.dlq.dlq` (topics.py:110-120).
-              matched=$(rpk topic list -X brokers=$BROKERS | grep -c '^agentscale\.plugin\.events\(\.dlq\)\?$' || true)
+              matched=$(printf '%s\n' "$topics" | grep -Ec '^agentscale\.plugin\.events(\.dlq)?$' || true)
               if [ "$matched" -ne 2 ]; then
                 echo "FAIL: ожидалось ровно 2 топика плагинов, найдено $matched" >&2
                 exit 1

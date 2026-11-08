@@ -36,7 +36,12 @@ FROM ${PG_BASE_IMAGE}
 # откатил/обновил сборку 16.0 — сборка образа ПАДАЕТ, а не молча ставит
 # другую версию аудита. Точная строка версии попадает в SBOM/provenance.
 # -----------------------------------------------------------------------------
-ARG PGAUDIT_VERSION=16.0
+# ТОЧНАЯ версия пакета из PGDG (не плавающий тег). 2026-11-08: база
+# postgres:16.15 уже содержит репозиторий PGDG для trixie, где доступен
+# `postgresql-16-pgaudit | 16.1-2.pgdg13+1`; версии `16.0-*` там нет
+# (первый прогон CI честно упал с FATAL). Bump осознанный: пин остаётся
+# жёстким, при смене ревизии PGDG сборка снова упадёт и потребует решения.
+ARG PGAUDIT_VERSION=16.1
 ARG PGDG_KEY_URL=https://www.postgresql.org/media/keys/ACCC4CF8.asc
 ARG PGDG_REPO_URL=https://apt.postgresql.org/pub/repos/apt
 ARG PGDG_SUITE=bookworm-pgdg

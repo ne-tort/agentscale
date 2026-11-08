@@ -61,11 +61,12 @@ on:
   push:
     branches: [main]
     paths:
-      # «Когда появятся»: каталог plugins ещё не создан, но триггер уже готов.
+      # Публикуем ТОЛЬКО при изменении самого плагина. НЕ добавляем сюда ни
+      # сам workflow, ни скрипты: при push правки CI каталог packages/plugins
+      # не меняется, «однозначно определить plugin_id» невозможно и job
+      # честно падает, делая весь CI Gate красным без публикации артефакта.
+      # Изменения инструментов проверяются через workflow_dispatch.
       - "packages/plugins/**"
-      - ".github/workflows/plugin-artifacts.yml"
-      - ".github/scripts/plugin_manifest_builder.py"
-      - ".github/scripts/plugin_verify.py"
 
 permissions:
   contents: read

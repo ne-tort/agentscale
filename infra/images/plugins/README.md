@@ -20,7 +20,7 @@ tenant-контура плагинов (дизайн v4, §2.1 / §6.1 / §6.3 /
 
 | Образ (каталог) | База (ЗАПИНЕНА ПО DIGEST) | Что добавляем | Куда пушим | Теги |
 |---|---|---|---|---|
-| [`postgres-pgaudit/`](postgres-pgaudit/Dockerfile) | `postgres:16.15@sha256:f9a7b9eb…657` | `postgresql-16-pgaudit` **16.0** из PGDG (bookworm-pgdg), `01-bootstrap.sql`, эталоны `pg_hba.conf.template` / `pg_ident.conf` / `tenant_hba.conf`, `HEALTHCHECK` | `ghcr.io/ne-tort/plugin-base-postgres` | `:sha12`, `:latest` |
+| [`postgres-pgaudit/`](postgres-pgaudit/Dockerfile) | `postgres:16.15@sha256:f9a7b9eb…657` | `postgresql-16-pgaudit` **16.1** из PGDG (trixie-pgdg), `01-bootstrap.sql`, эталоны `pg_hba.conf.template` / `pg_ident.conf` / `tenant_hba.conf`, `HEALTHCHECK` | `ghcr.io/ne-tort/plugin-base-postgres` | `:sha12`, `:latest` |
 | [`pgbouncer/`](pgbouncer/Dockerfile) | `pgbouncer/pgbouncer:1.24.1@sha256:3d6fbf93…2ba` | `pgbouncer.ini` (transaction, scram-sha-256), пустой `auth_file` = deny all, `HEALTHCHECK` | `ghcr.io/ne-tort/plugin-base-pgbouncer` | `:sha12`, `:latest` |
 | [`egress-proxy/`](egress-proxy/Dockerfile) | `envoyproxy/envoy:v1.31.10@sha256:caa5b411…865` | Стартовый `envoy.yaml` = `direct_response 403` + `clusters: []` (deny all), `HEALTHCHECK` | `ghcr.io/ne-tort/plugin-base-envoy` | `:sha12`, `:latest` |
 
@@ -35,7 +35,7 @@ tenant-контура плагинов (дизайн v4, §2.1 / §6.1 / §6.3 /
 | Компонент | Версия | Почему |
 |---|---|---|
 | PostgreSQL | `16.15` | Та же версия, что и платформенный инстанс (`infra/k3s/base/plugins/tenant-postgres.yaml`, `overlays/dev/postgres.yaml`). Не `16-alpine`: у alpine другой dpkg и пути PGDG-пакета. |
-| pgaudit | `16.0-N.pgdg120+M` | Релиз для ветки PG16. `ARG PGAUDIT_VERSION=16.0`, а `apt-get install` принимает **ТОЧНУЮ** строку из `apt-cache madison`; если PGDG отдал другую версию — сборка **ПАДАЕТ** (fail-closed), а не ставит «что нашлось». Точная строка попадает в SBOM. |
+| pgaudit | `16.1-2.pgdg13+1` | Релиз для ветки PG16. `ARG PGAUDIT_VERSION=16.1`, а `apt-get install` принимает **ТОЧНУЮ** строку из `apt-cache madison`; если PGDG отдал другую версию — сборка **ПАДАЕТ** (fail-closed), а не ставит «что нашлось». Точная строка попадает в SBOM. |
 | PgBouncer | `1.24.1` | Официальный Docker Official Image (не форк), версия зафиксирована в `pgbouncer.yaml`. Сборка с поддержкой SCRAM (libpq) обязательна для `auth_type=scram-sha-256`. |
 | Envoy | `1.31.10` | В ТЗ был `v1.31-latest` — **плавающий тег, запрещён**. Взята актуальная стабильная ветки v1.31: [upstream `VERSION.txt`](https://raw.githubusercontent.com/envoyproxy/envoy/release/v1.31/VERSION.txt) → `1.31.10`; тег и digest подтверждены Docker Hub API (last_pushed 2025-07-18, amd64+arm64). Задача 14 пока пинует `v1.31.2` (2024-09-19) — родитель перепинит после первой сборки. |
 
@@ -193,9 +193,9 @@ Workflow `.github/workflows/plugin-base-images.yml`:
    «поставим из Debian main», где `postgresql-16-pgaudit` может отсутствовать).
    Митигация — заранее зазеркалировать `.deb` + ключ в ghcr/внутренний
    артефакторий и переключить `ARG PGDG_REPO_URL`; **не** ослаблять пин версии.
-2. **Точная строка версии `postgresql-16-pgaudit`.** `16.0-N.pgdg120+M`
+2. **Точная строка версии `postgresql-16-pgaudit`.** `16.1-2.pgdg13+1`
    зависит от ревизии сборки PGDG для bookworm. Пин по `ARG
-   PGAUDIT_VERSION=16.0` намеренно жёсткий: при обновлении ревизии в PGDG
+   PGAUDIT_VERSION=16.1` намеренно жёсткий: при обновлении ревизии в PGDG
    сборка упадёт и потребует **осознанного** bump. Не заменять на
    `apt-get install postgresql-16-pgaudit` без версии.
 3. **База `postgres:16.15` уже содержит репозиторий PGDG.** Dockerfile
