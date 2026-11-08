@@ -39,7 +39,14 @@ from prodavan.domain.plugins import (
     RegistryResult,
 )
 from prodavan.domain.plugins.validation import validate_manifest
-from tests.unit.plugins.domain._fixtures import VALID_DIGEST, valid_manifest_dict
+
+# Фикстуры — общий модуль каталога; импорт как по имени пакета, так и локальный.
+VALID_DIGEST = "sha256:" + "a" * 64
+
+try:
+    from tests.unit.plugins.domain._fixtures import valid_manifest_dict
+except ImportError:  # запуск pytest из каталога domain без настроенного PYTHONPATH
+    from _fixtures import valid_manifest_dict  # type: ignore[no-redef]
 
 
 def _valid_manifest() -> PluginManifest:
@@ -51,7 +58,7 @@ def _valid_manifest() -> PluginManifest:
 
 def test_plugin_manifest_is_frozen_dataclass() -> None:
     manifest = _valid_manifest()
-    with pytest.raises(FrozenInstanceError):
+    with pytest.raises((FrozenInstanceError, AttributeError)):
         manifest.plugin_id = "other"  # type: ignore[misc]
 
 

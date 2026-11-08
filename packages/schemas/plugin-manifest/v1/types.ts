@@ -33,14 +33,25 @@ export type Capability =
 
 export type MigrationEngine = "liquibase" | "flyway" | "alembic";
 
+/** Режим egress-политики (§6.3 v4), хранится в grant в БД, а не в токене. */
+export type EgressMode = "none" | "webhooks-only" | "full";
+
+/** Статус экземпляра плагина (доменный, не статус Kubernetes Pod). */
+export type PluginInstanceStatus =
+  | "installed"
+  | "active"
+  | "suspended"
+  | "revoked"
+  | "quarantined";
+
+/** Исход регистрации версии в реестре (AppVersion/RegistryOutcome). */
+export type RegistryOutcome = "applied" | "conflict" | "quarantined" | "missing";
+
 /**
  * Ссылка на долгоживущий CapabilityGrant в БД, а не встроенный allowlist.
  * Истечение короткого JWT не должно пересобирать сетевые правила (§6.1 v4).
  */
 export type EgressRef = string;
-
-/** Режим egress-политики, хранится в CapabilityGrant, а не в токене. */
-export type EgressMode = "none" | "webhooks-only" | "full";
 
 export interface FrontendEntrypoint {
   /** Относительный путь к точке входа в версионированной статике. */
@@ -83,17 +94,6 @@ export interface PluginManifest {
   webhooks: string[];
   min_platform_version: SemVer;
 }
-
-/** Статус экземпляра плагина (доменный, не статус Kubernetes Pod). */
-export type PluginInstanceStatus =
-  | "installed"
-  | "active"
-  | "suspended"
-  | "revoked"
-  | "quarantined";
-
-/** Исход регистрации версии в реестре (AppVersion/RegistryOutcome). */
-export type RegistryOutcome = "applied" | "conflict" | "quarantined" | "missing";
 
 /** Код решения gateway (свой enum, по идее application/capability_gateway_service.py). */
 export type DecisionCode =

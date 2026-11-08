@@ -92,22 +92,22 @@ def test_session_policy_is_subset_of_parent() -> None:
     session = session_policy("co_123", "mod_equipment")
     assert session["Version"] == parent["Version"]
 
-    canon = lambda statements: {  # noqa: E731 - каноническая форма для сравнения
-        json.dumps(s, sort_keys=True, separators=(",", ":")) for s in statements
-    }
+    def canon(statements: list[dict]) -> set[str]:
+        return {json.dumps(s, sort_keys=True, separators=(",", ":")) for s in statements}
+
     assert canon(session["Statement"]) <= canon(parent["Statement"])
     assert set(_all_actions(session)) == set(OBJECT_ACTIONS)
     assert _all_resources(session) == _all_resources(parent)
 
 
 def test_session_policy_is_scoped_to_its_own_pair_only() -> None:
-    """Политика пары (co_A, mod_X) не даёт доступ к (co_B, mod_Y)."""
-    policy = session_policy("co_A", "mod_X")
+    """Политика пары (co_a, mod_x) не даёт доступ к (co_b, mod_y)."""
+    policy = session_policy("co_a", "mod_x")
     serialized = json.dumps(policy)
-    assert "tenant-co_A" in serialized
-    assert "module-mod_X" in serialized
-    assert "tenant-co_B" not in serialized
-    assert "module-mod_Y" not in serialized
+    assert "tenant-co_a" in serialized
+    assert "module-mod_x" in serialized
+    assert "tenant-co_b" not in serialized
+    assert "module-mod_y" not in serialized
 
 
 def test_policies_use_no_policy_variables() -> None:
@@ -132,7 +132,7 @@ def test_bucket_and_prefix_are_deterministic_and_validated() -> None:
     assert module_prefix("mod_equipment") == "module-mod_equipment/"
     # Имя бакета/префикса строится из провалидированного идентификатора:
     # обход пути, '*' и ARN-инъекции невозможны (fail-closed).
-    for bad in ("", "../other", "co/*", "co/../../x", "a:b", "co name", "co\n"):
+    for bad in ("", "../other", "co/*", "co/../../x", "a:b", "co name", "co\n", "CO_123"):
         with pytest.raises(InvalidObjectKey):
             bucket_name(bad)
         with pytest.raises(InvalidObjectKey):
@@ -141,6 +141,13 @@ def test_bucket_and_prefix_are_deterministic_and_validated() -> None:
             bucket_policy(bad, "mod_equipment")
         with pytest.raises(InvalidObjectKey):
             bucket_policy("co_123", bad)
+
+
+def test_uppercase_company_id_is_rejected_not_silently_lowercased() -> None:
+    """«Привести к lower» объединило бы две компании в одном бакете."""
+    with pytest.raises(InvalidObjectKey):
+        bucket_name("CO_123")
+    assert bucket_name("co_123") == "tenant-co_123"
 
 
 def test_policy_json_is_serializable_for_assume_role() -> None:

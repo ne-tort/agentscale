@@ -178,7 +178,12 @@ data:
       END IF;
     END
     $$;
-    ALTER ROLE plugin_platform_admin PASSWORD :'admin_password';
+    -- Пароль роли задаём через \gexec: утилитная команда ALTER ROLE не
+    -- подставляет psql-переменную :'admin_password' внутри SQL-выражения,
+    -- а dollar-quoting здесь создал бы строку с двоеточием. quote_literal
+    -- экранирует кавычки, \gexec исполняет собранный текст как команду.
+    SELECT format('ALTER ROLE plugin_platform_admin PASSWORD %L',
+                  :'admin_password') \gexec
     -- Оставляем только CREATEDB/CREATEROLE, без SUPERUSER/REPLICATION/BYPASSRLS.
     -- Явное повторение атрибутов защищает от «дрейфа» роли между синками.
     ALTER ROLE plugin_platform_admin
@@ -241,7 +246,7 @@ data:
         WHERE datallowconn AND datname <> 'template0'
       LOOP
         -- Сначала ЯВНО подтверждаем право владельца (на случай нестандартного
-        -- ACL):CONNECT у owner есть всегда, но fail-closed лучше проверить.
+        -- ACL): CONNECT у owner есть всегда, но fail-closed лучше проверить.
         EXECUTE format('GRANT CONNECT, TEMPORARY ON DATABASE %I TO %I',
                        db.datname, current_user);
         EXECUTE format('REVOKE CONNECT, TEMPORARY ON DATABASE %I FROM PUBLIC', db.datname);

@@ -95,7 +95,7 @@ def is_plugin_surface_path(path: str) -> bool:
     # Query/fragment в path быть не должно; их наличие = попытка обхода.
     if "?" in raw or "#" in raw:
         return False
-    # Нормализуем только для проверки, но сравниваем по исходной строке:
+    # Сравниваем по исходной строке, без нормализации:
     # ``/capabilities/v1/../agent/events`` не должен превратиться в «разрешено».
     if ".." in raw or "//" in raw or "\\" in raw:
         return False

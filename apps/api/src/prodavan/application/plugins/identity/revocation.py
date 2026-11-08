@@ -9,9 +9,11 @@
 для будущей БД/Redis-реализации (задача F2/F11). Fail-closed: если порт не
 передан или проверка упала — доступ закрыт, а не «продолжить».
 
-Контракт порта согласован с задачей 03 (``PluginCapabilityService``): основной
-метод — ``is_active(grant_id, *, now) -> bool``. ``is_revoked`` сохранён как
-обратный алиас для обратной совместимости с проверками F1.
+Контракт порта согласован с задачей 03
+(``application/plugins/capabilities/ports.py::GrantRevocationPort``): основной
+метод — ``is_active(grant_id, *, now: datetime) -> bool``, в порт передаётся
+aware UTC ``datetime``. ``is_revoked`` сохранён как обратный алиас для
+проверок F1.
 """
 
 from __future__ import annotations
@@ -33,12 +35,12 @@ class RevocationPort(Protocol):
     любая неопределённость/ошибка = ``False`` (fail-closed).
 
     ``is_revoked(grant_id)`` — обратный алиас (используется ``GrantRevocation``
-    и тестами F1). ``revoke`` деактивирует grant.
+    и тестами F1). ``revoke`` деактивирует grant. Оба метода объявлены здесь, но
+    задача 03 требует от реализации только ``is_active``; адаптер/обёртка
+    может не иметь ``revoke`` — см. ``GrantRevocation.bind``.
     """
 
     def is_active(self, grant_id: str, *, now: int | float | datetime) -> bool: ...
-
-    def is_revoked(self, grant_id: str) -> bool: ...
 
     def revoke(self, grant_id: str) -> None: ...
 
@@ -121,12 +123,15 @@ class GrantRevocation:
         """Fail-closed ``is_active`` поверх порта (контракт задачи 03).
 
         Порт отсутствует → ``False``; исключение порта → ``False``; пустой
-        ``grant_id`` → ``False``. ``now`` по умолчанию = текущее UTC-время.
+        ``grant_id`` → ``False``. В порт всегда передаётся **aware UTC
+        ``datetime``** — ровно так, как объявлено в
+        ``capabilities/ports.py::GrantRevocationPort`` (``now: datetime``);
+        это важно, чтобы БД-реализация могла сравнивать с ``expires_at``.
         """
         key = (grant_id or "").strip()
         if not key or self._port is None:
             return False
-        moment = _epoch_seconds(now)
+        moment = _utc_datetime(now)
         try:
             return bool(self._port.is_active(key, now=moment))
         except Exception:
@@ -167,17 +172,19 @@ class GrantRevocation:
         return claims
 
 
-def _epoch_seconds(now: int | float | datetime | None) -> float:
-    """Привести ``now`` к Unix epoch seconds (UTC) для БД-реализации порта."""
-    import time
+def _utc_datetime(now: int | float | datetime | None) -> datetime:
+    """Привести ``now`` к aware UTC ``datetime`` для порта задачи 03.
 
+    Naive ``datetime`` считается неоднозначным → ``PluginTokenError``, который
+    ``is_active`` перехватывает и трактует как fail-closed ``False``.
+    """
     if now is None:
-        return time.time()
+        return datetime.now(UTC)
     if isinstance(now, datetime):
         if now.tzinfo is None:
             raise PluginTokenError(
                 code=PluginTokenErrorCode.MALFORMED,
                 detail="revocation now datetime must be timezone-aware",
             )
-        return now.astimezone(UTC).timestamp()
-    return float(now)
+        return now.astimezone(UTC)
+    return datetime.fromtimestamp(float(now), tz=UTC)

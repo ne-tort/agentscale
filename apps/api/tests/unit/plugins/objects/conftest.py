@@ -142,11 +142,11 @@ def build_store(
     *,
     sts: FakeSts | None = None,
     buckets: FakeBuckets | None = None,
-    presigner: FakePresigner | None = None,
+    presigner: Any = None,
     audit: FakeAudit | None = None,
     clock: FakeClock | None = None,
     quota_bytes: int = 1024,
-) -> tuple[PluginObjectStore, FakeBuckets, FakeSts, FakePresigner, FakeAudit, FakeClock]:
+) -> tuple[PluginObjectStore, FakeBuckets, FakeSts, Any, FakeAudit, FakeClock]:
     clock = clock or FakeClock()
     buckets = buckets or FakeBuckets()
     sts = sts or FakeSts(clock=clock)

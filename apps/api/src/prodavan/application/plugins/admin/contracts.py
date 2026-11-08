@@ -9,7 +9,7 @@ fail-closed — неполный/неизвестный/противоречив
   * §4.2 — короткий ``PluginClaims`` несёт только ``grant_id`` и TTL; egress-политика
     и квоты живут в долгоживущем ``CapabilityGrant`` в БД, а не в токене;
   * §4.4 — единый реестр capability / quota / event;
-  * §5.5 / §13.3 — grant / revoke / uninstall / wake, ``migrate-to-plugin`` исключён;
+  * §5.5 / §13.3 — grant / revoke / uninstall / wake, перенос данных исключён;
   * §8 (этап 2) — strangler через фича-флаг ``plugin_enabled_modules[]``;
   * §11 (критерии 12, 15, 16) — отзыв по ``grant_id``, изоляция компаний, отсутствие
     переноса данных при переключении пути.

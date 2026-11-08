@@ -6,8 +6,6 @@ ARTIFACT_DIGEST_CONFLICT, rollback на неподписанный digest → RO
 
 from __future__ import annotations
 
-import pytest
-
 from prodavan.application.dynamic_app_registry.contracts import (
     QuarantineEvidence,
     RegistryOutcome,
@@ -24,7 +22,6 @@ from .conftest import (
     DIGEST_A,
     DIGEST_B,
     DIGEST_UNSIGNED,
-    InMemoryRegistryStore,
     full_grant,
     ref,
     valid_manifest,

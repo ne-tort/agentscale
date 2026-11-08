@@ -1,0 +1,184 @@
+# ШАБЛОН Deployment плагина (v4 §5.1, §7.4, §14 п.9; acceptance №13).
+#
+# ЭТО ШАБЛОН, НЕ БОЕВОЙ МАНИФЕСТ. Реальные манифесты ГЕНЕРИРУЮТСЯ
+# контроллером/platform API при grant (задача 12: `POST /gateway/plugins/{id}/grant`):
+# имя, `image` по проверенному OCI digest, `plugin_instance_id`, DSN своей БД
+# компании и лейблы подставляются из `CapabilityGrant` + реестра артефактов.
+# Не подключать этот файл в kustomization как рабочий Deployment (у него
+# `replicas: 0` и плейсхолдеры вместо значений).
+#
+# `spec.replicas` находится под `ignoreDifferences` в Argo Application
+# `plugin-platform.yaml` (ЗАДАЧА 15):
+#   ignoreDifferences:
+#     - group: apps
+#       kind: Deployment
+#       jsonPointers: [/spec/replicas]
+#       jqPathExpressions: [.spec.replicas]
+#   syncOptions: RespectIgnoreDifferences=true
+# Без этого `automated.selfHeal: true` каждые несколько секунд возвращал бы
+# live-состояние к 0 из Git и 0→1 wake-up никогда бы не отработал.
+#
+# Активация (§7.4): Plugin Gateway (activator) патчит `deployments/scale` 0→1,
+# УДЕРЖИВАЕТ соединение до Ready, выдаёт новый короткий PluginClaims и только
+# потом проксирует. Idle TTL снова ставит 0. Никаких KEDA/Knative/HPA/CRD.
+#
+# Все kinds из whitelist `infra/argocd/apps/00-project.yaml:37-88`:
+# ServiceAccount / Deployment / Service / Secret.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: plugin-runtime
+  namespace: agentscale-dev
+  labels:
+    app: plugin
+    app.kubernetes.io/name: plugin-runtime
+    app.kubernetes.io/part-of: agentscale
+    app.kubernetes.io/component: plugin-runtime
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+# Backend плагина НЕ имеет k8s API (§7.3): ни tạo подов, ни чтения секретов.
+# Токен SA не монтируем — это fail-closed против выхода в кластер.
+automountServiceAccountToken: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  # Имя генерируется при grant: plugin-<plugin_id>-<plugin_instance_id>.
+  name: plugin-template
+  namespace: agentscale-dev
+  labels:
+    app: plugin
+    app.kubernetes.io/name: plugin-template
+    app.kubernetes.io/part-of: agentscale
+    app.kubernetes.io/component: plugin-backend
+    # Обязательные лейблы плагина (задача): идентификаторы для NP, аудита,
+    # квот per-(company, plugin_instance, artifact_digest) и activator'а.
+    plugin_id: "REPLACE_AT_GRANT"
+    plugin_instance_id: "REPLACE_AT_GRANT"
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+    # digest подписанного OCI-артефакта (cosign verify ДО деплоя, §5.1).
+    agentscale.io/artifact-digest: "sha256:REPLACE_AT_GRANT"
+spec:
+  # 0 = «спит». Меняет ТОЛЬКО activator через deployments/scale (§7.4).
+  replicas: 0
+  strategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      app: plugin
+      plugin_id: "REPLACE_AT_GRANT"
+      plugin_instance_id: "REPLACE_AT_GRANT"
+  template:
+    metadata:
+      labels:
+        # `app: plugin` — цель podSelector у `plugin-egress` NetworkPolicy.
+        app: plugin
+        plugin_id: "REPLACE_AT_GRANT"
+        plugin_instance_id: "REPLACE_AT_GRANT"
+        app.kubernetes.io/part-of: agentscale
+        app.kubernetes.io/component: plugin-backend
+    spec:
+      serviceAccountName: plugin-runtime
+      automountServiceAccountToken: false
+      # Образ плагина приватный в ghcr — pull через контурный ghcr-pull.
+      imagePullSecrets:
+        - name: ghcr-pull
+      containers:
+        - name: plugin-backend
+          # PIN ПО DIGEST, НЕ :latest (§5.1, §13, критерий №18).
+          # `image` и `agentscale.io/artifact-digest` подставляет контроллер
+          # при grant после cosign verify; неподписанный/несовпавший digest →
+          # QUARANTINED и деплой НЕ создаётся.
+          image: ghcr.io/ne-tort/plugins/REPLACE_PLUGIN_ID@sha256:REPLACE_AT_GRANT
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          # Старт контейнера: Liquibase `update` по changelog из артефакта →
+          # /health становится Ready ТОЛЬКО после успешного apply (§2.5, §5.1).
+          # При ошибке миграции / checksum mismatch readiness НЕ наступает
+          # (acceptance №4) — Gateway держит запрос до таймаута и отдаёт ошибку.
+          env:
+            - name: GATEWAY_URL
+              valueFrom:
+                secretKeyRef:
+                  name: plugin-instance-secrets
+                  key: GATEWAY_URL
+            - name: PLUGIN_ID
+              valueFrom:
+                secretKeyRef:
+                  name: plugin-instance-secrets
+                  key: PLUGIN_ID
+            - name: TENANT_DB_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: plugin-instance-secrets
+                  key: TENANT_DB_DSN
+          # Секрет `plugin-instance-secrets` создаётся платформой при grant:
+          # короткоживущий `secret_ref` (GATEWAY_URL, PLUGIN_ID, TENANT_DB_DSN
+          # ТОЛЬКО своей БД компании, короткий PluginClaims lease). Ротация —
+          # при reinstall/revoke (§5.5). plaintext в манифесте ЗАПРЕЩЁН.
+          # Сам Secret здесь НЕ описан намеренно: он создаётся динамически,
+          # а не лежит в Git (§5.1, §5.5).
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 5
+            failureThreshold: 12
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 5
+            # Холодный старт: pull образа + Liquibase update — десятки секунд.
+            failureThreshold: 60
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 20
+          resources:
+            # ЯВНЫЕ requests/limits ОБЯЗАТЕЛЬНЫ: LimitRange
+            # (guards/app-budget.yaml) max 4Gi / 2 CPU, а BestEffort под ядро
+            # убивает первым при OOM (3 инцидента). Квота 45 подов / 12Gi
+            # requests — это и есть лимит на число одновременно проснувшихся
+            # плагинов; лимит одновременных wake-up в Gateway = 2 (§7.4).
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          lifecycle:
+            preStop:
+              exec:
+                command:
+                  - /bin/sh
+                  - -c
+                  - sleep 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: plugin-template
+  namespace: agentscale-dev
+  labels:
+    app: plugin
+    plugin_id: "REPLACE_AT_GRANT"
+    plugin_instance_id: "REPLACE_AT_GRANT"
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  # Gateway проксирует на этот Service, удерживая запрос до Ready.
+  selector:
+    app: plugin
+    plugin_id: "REPLACE_AT_GRANT"
+    plugin_instance_id: "REPLACE_AT_GRANT"
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

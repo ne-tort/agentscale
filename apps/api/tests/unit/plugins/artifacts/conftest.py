@@ -42,11 +42,14 @@ class FakeCosign(CosignPort):
         self,
         *,
         verified: bool = True,
-        signed_digest: str = DIGEST_A,
+        signed_digest: str | None = None,
         sbom: bool = True,
         provenance: bool = True,
         raises: Exception | None = None,
     ) -> None:
+        # По умолчанию cosign «подтверждает» ровно тот digest, который ему
+        # передали в image_ref (как реальный cosign verify). Явно заданный
+        # signed_digest нужен только для теста расхождения digest.
         self.verified = verified
         self.signed_digest = signed_digest
         self.sbom = sbom
@@ -58,9 +61,12 @@ class FakeCosign(CosignPort):
         self.calls.append((image_ref, identity, issuer))
         if self.raises is not None:
             raise self.raises
+        digest = self.signed_digest
+        if digest is None and "@" in image_ref:
+            digest = image_ref.split("@", 1)[1]
         return VerificationResult(
             verified=self.verified,
-            signed_digest=self.signed_digest,
+            signed_digest=digest,
             identity=identity,
             issuer=issuer,
             sbom_verified=self.sbom,

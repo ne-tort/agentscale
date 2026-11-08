@@ -13,8 +13,11 @@ from prodavan.domain.plugins.validation import PROTOCOL_RELATIVE_PATH, SCHEMA_RE
 
 
 def repo_root() -> Path:
-    """Корень репозитория по расположению этого файла: tests/unit/plugins/domain/."""
-    return Path(__file__).resolve().parents[5]
+    """Корень репозитория: общий предок apps/api и packages/schemas.
+
+    _fixtures.py -> domain(0), plugins(1), unit(2), tests(3), api(4), apps(5), root(6)
+    """
+    return Path(__file__).resolve().parents[6]
 
 
 def schema_path() -> Path:

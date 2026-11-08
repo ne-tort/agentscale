@@ -3,8 +3,10 @@
 Публичный API:
 
 * ``types``      — ``PluginClaims``, константы контура, ``PluginTokenError``;
-* ``keys``       — ``KeyRing`` / ``KeyEntry``, ``kid``/JWKS/ротация, HS256+EdDSA;
-* ``mint``       — ``mint_plugin_claims`` / ``verify_plugin_token`` / ``peek``;
+* ``keys``       — ``KeyRing`` / ``KeyEntry``, ``peek_plugin_token``, ``kid``/
+  JWKS/ротация, HS256+EdDSA;
+* ``mint``       — ``mint_plugin_claims`` / ``verify_plugin_token`` /
+  ``build_payload`` / ``claims_from_payload``;
 * ``revocation`` — ``GrantRevocation`` / ``RevocationPort`` (``is_active``/
   ``is_revoked``) / ``InMemoryRevocation``;
 * ``allowlist``  — ``PluginSurfaceAllowlist`` / ``assert_plugin_surface``.

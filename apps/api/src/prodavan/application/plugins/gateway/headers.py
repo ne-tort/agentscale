@@ -62,6 +62,10 @@ _STRIPPED_EXACT: frozenset[str] = frozenset(
         "x-company-id",
         "x-project-id",
         "x-plugin-capability-token",
+        # HMAC-подпись — артефакт аутентификации САМОГО шлюза (§7.5). Её
+        # проверяет GatewayAuth; downstream её получить не должен, иначе
+        # backend решит, что «тоже проверил подпись» и ослабит проверку JWT.
+        "x-prodavan-signature",
     }
 )
 

@@ -209,7 +209,8 @@ class PluginArtifactRegistry:
             raise ArtifactError(ArtifactErrorCode.QUARANTINED, "publish требует actor")
 
         try:
-            bound = self._coerce_evidence(evidence)            verified = self._verifier.validate_evidence(bound, ref=ref, manifest=manifest)
+            bound = self._coerce_evidence(evidence)
+            verified = self._verifier.validate_evidence(bound, ref=ref, manifest=manifest)
             # Повторная проверка совместимости: evidence не подменяет gate.
             # По умолчанию используем снимок входов из evidence (чтобы вызов
             # publish(ref, manifest, evidence) без доп. аргументов был полным).
@@ -346,6 +347,9 @@ class PluginArtifactRegistry:
             return self._rollback_invalid(plugin_id, target_digest, "целевая версия не найдена")
         if not target.published or target.outcome is RegistryOutcome.QUARANTINED:
             return self._rollback_invalid(plugin_id, target_digest, "целевая версия не опубликована")
+        # Fail-closed: откат на неподписанный digest запрещён (критерий 18).
+        # Подпись подтверждается вызывающей стороной (cosign verify по digest),
+        # но отсутствие подтверждения никогда не трактуется как «успех».
         if not isinstance(cosign_verified, bool) or cosign_verified is not True:
             return self._rollback_invalid(
                 plugin_id, target_digest, "откат на неподписанный digest запрещён"

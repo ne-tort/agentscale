@@ -48,7 +48,10 @@ OBJECT_ACTIONS: tuple[str, ...] = (
 _BUCKET_ACTIONS: tuple[str, ...] = ("s3:ListBucket",)
 _PREFIX_CONDITION_KEY = "s3:prefix"
 
-_IDENTIFIER_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,62}$", re.IGNORECASE)
+# Только lowercase: имя S3-бакета обязано быть в нижнем регистре. Намеренно
+# НЕ приводим ``company_id`` к lower(): ``co_A`` и ``co_a`` слились бы в один
+# бакет — это утечка между компаниями. Некорректный идентификатор = отказ.
+_IDENTIFIER_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,62}$")
 
 
 def _validate_identifier(value: str, *, kind: str) -> str:
@@ -56,7 +59,8 @@ def _validate_identifier(value: str, *, kind: str) -> str:
 
     Fail-closed: без ``[a-z0-9_-]`` невозможно образование ``../``, ``//``,
     ``*``, ``?``, ``arn:``-инъекций, разделителей пути и подстановки другого
-    ресурса. Пустое значение и не-строка тоже отказ, а не «подставим дефолт».
+    ресурса. Пустое значение, не-строка и верхний регистр — тоже отказ, а не
+    «подставим дефолт» / «приведём к нижнему регистру».
     """
     if not isinstance(value, str) or not value:
         raise InvalidObjectKey(f"пустой или нестроковый {kind}")

@@ -1,0 +1,229 @@
+# Egress-proxy (Envoy) — регулируемый исходящий трафик плагинов (v4 §6.3, §6.4, §14 п.6).
+#
+# КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ v1/v3: конфиг НЕ статический. Никакого захардкоженного
+# `webhooks.example.com` и никаких кластеров из краткоживущего PluginClaims.
+# Envoy-кластеры/маршруты ГЕНЕРИРУЮТСЯ ЗАДАЧЕЙ 08 из `CapabilityGrant` в БД
+# (`allowed_hosts` × `allowed_paths`, режимы none / webhooks-only / full).
+# Token несёт только `grant_id`; иначе истечение JWT пересобирало бы сетевые
+# правила посреди запроса (§6.1, §6.3, критерий №22).
+#
+# Стартовое состояние = FAIL-CLOSED: ни одного upstream-кластера, единственный
+# маршрут — `direct_response: 403`. Пока задача 08 не записала правила из grant,
+# любой egress плагина отклоняется с `plugin_egress_request` в аудите. Под не
+# «тихо» не работает, а явно отвечает отказом.
+#
+# Аудит: единая схема для плагинов и агентов — host, path, method, status,
+# bytes, decision, tenant, subject (`plugin_egress_request` /
+# `agent_egress_request`). Проверка redirect и TLS на каждом хопе, DNS-резолв
+# через этот прокси (защита от обхода по IP), квота байт для режима `full`.
+#
+# Плагин НЕ имеет прямого выхода в интернет: `plugin-egress` NP разрешает ему
+# ТОЛЬКО `egress-proxy:8080` (см. networkpolicy-plugin.yaml). 0.0.0.0/0 :80/:443
+# в политике плагинов отсутствует намеренно.
+#
+# Только kinds из whitelist `infra/argocd/apps/00-project.yaml:37-88`:
+# ConfigMap / Deployment / Service. Никаких CRD (KEDA/Knative/cert-manager/SPIRE).
+# Поле namespace намерено НЕ задано — подставляет NamespaceTransformer оверлея.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: egress-proxy-config
+  labels:
+    app: egress-proxy
+    app.kubernetes.io/name: egress-proxy
+    app.kubernetes.io/part-of: agentscale
+    app.kubernetes.io/component: plugin-egress-proxy
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+data:
+  # Конфигурация Envoy. Задача 08 обновляет ключ `envoy.yaml` при каждом
+  # изменении `CapabilityGrant` (grant/revoke), добавляя/удаляя кластеры и
+  # маршруты; контроллер ОБЯЗАН вызвать hot-restart/reload Envoy, иначе новая
+  # политика не вступит в силу.
+  #
+  # ВНИМАНИЕ ДЛЯ ЗАДАЧИ 15: этот ConfigMap правится контроллером ВНЕ Git,
+  # поэтому `/data` нужно добавить в `ignoreDifferences` Argo Application
+  # `plugin-platform`. При `selfHeal: true` без этой записи Argo при первом же
+  # синке вернёт конфиг к пустому fail-closed состоянию и сотрёт все выданные
+  # разрешения (доступ не откроется, но grant'ы перестанут работать).
+  #
+  # Монтирование каталогом БЕЗ subPath (см. Deployment), чтобы обновление
+  # ConfigMap проецировалось kubelet'ом.
+  envoy.yaml: |
+    # Стартовый ЗАКРЫТЫЙ конфиг. Ни одного upstream-кластера, кроме заглушки.
+    # Задача 08 генерирует из CapabilityGrant:
+    #   static_resources.clusters[]  — по allowed_hosts[] с TLS + DNS-резолвом;
+    #   static_resources.listeners[].filter_chains[].filters[].route_config
+    #       .virtual_hosts[].routes[] — по allowed_paths[] с RBAC и аудитом;
+    #   при отсутствии совпадения → direct_response 403 + событие аудита.
+    #
+    # НЕ добавлять сюда `webhooks.example.com`: это ровно та ошибка v1/v3,
+    # которую исправляет §6.3. Никаких хостов из JWT.
+    admin:
+      address:
+        socket_address:
+          address: 127.0.0.1
+          port_value: 9901
+      # Admin-консоль НЕ вынесена отдельным Service: доступна только внутри пода.
+    static_resources:
+      listeners:
+        - name: egress_listener
+          address:
+            socket_address:
+              address: 0.0.0.0
+              port_value: 8080
+          filter_chains:
+            - filters:
+                - name: envoy.filters.network.http_connection_manager
+                  typed_config:
+                    "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                    stat_prefix: plugin_egress
+                    # Прокси в режиме forward: плагин шлёт абсолютный URI,
+                    # Envoy сопоставляет host/path с разрешёнными из grant.
+                    http_filters:
+                      - name: envoy.filters.http.router
+                        typed_config:
+                          "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+                    route_config:
+                      name: egress_routes
+                      virtual_hosts:
+                        - name: default_deny
+                          domains: ["*"]
+                          routes:
+                            # FAIL-CLOSED: правил из grant ещё нет — 403.
+                            # Задача 08 ЗАМЕЩАЕТ этот маршрут сгенерированными
+                            # (host × path) и добавляет аудит/квоту байт.
+                            - match:
+                                prefix: "/"
+                              direct_response:
+                                status: 403
+                                body:
+                                  inline_string: "egress denied: no CapabilityGrant rule\n"
+                    access_log:
+                      - name: envoy.access_loggers.stdout
+                        typed_config:
+                          "@type": type.googleapis.com/envoy.extensions.access_loggers.stream.v3.StdoutAccessLog
+                          # Единая схема аудита (§6.3): host, path, method,
+                          # status, bytes, decision, tenant, subject.
+                          log_format:
+                            json_format:
+                              event: "plugin_egress_request"
+                              host: "%REQ(:AUTHORITY)%"
+                              path: "%REQ(:PATH)%"
+                              method: "%REQ(:METHOD)%"
+                              status: "%RESPONSE_CODE%"
+                              bytes: "%BYTES_SENT%"
+                              decision: "%RESPONSE_CODE%"
+                              tenant: "%REQ(X-Company-ID)%"
+                              subject: "%REQ(X-Plugin-ID)%"
+      # НАМЕРЕННО ПУСТО: ни одного внешнего кластера до первого grant.
+      clusters: []
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: egress-proxy
+  labels:
+    app: egress-proxy
+    app.kubernetes.io/name: egress-proxy
+    app.kubernetes.io/part-of: agentscale
+    app.kubernetes.io/component: plugin-egress-proxy
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  # 1 реплика: HPA/KEDA запрещены whitelist'ом (§7.4, ADR-008).
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      app: egress-proxy
+  template:
+    metadata:
+      labels:
+        app: egress-proxy
+        app.kubernetes.io/name: egress-proxy
+        app.kubernetes.io/part-of: agentscale
+        app.kubernetes.io/component: plugin-egress-proxy
+    spec:
+      terminationGracePeriodSeconds: 30
+      # Зеркало ghcr: Docker Hub на холодной ноде отдаёт 429 TOOMANYREQUESTS.
+      # Сборка/пин образа Envoy — задача 16.
+      imagePullSecrets:
+        - name: ghcr-pull
+      containers:
+        - name: envoy
+          image: ghcr.io/ne-tort/envoy:v1.31.2
+          imagePullPolicy: IfNotPresent
+          command:
+            - envoy
+            - -c
+            - /etc/envoy/envoy.yaml
+            - --log-level
+            - warn
+          ports:
+            - name: proxy
+              containerPort: 8080
+          volumeMounts:
+            # КАТАЛОГ БЕЗ subPath: задача 08 обновляет ConfigMap → kubelet
+            # проецирует новый envoy.yaml; вызов reload остаётся за задачей 08.
+            - name: config
+              mountPath: /etc/envoy
+              readOnly: true
+          lifecycle:
+            preStop:
+              exec:
+                command:
+                  - /bin/sh
+                  - -c
+                  - sleep 5
+          startupProbe:
+            tcpSocket:
+              port: proxy
+            periodSeconds: 3
+            failureThreshold: 30
+          readinessProbe:
+            # Envoy admin /ready отвечает только когда конфиг загружен.
+            httpGet:
+              path: /ready
+              port: 9901
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: proxy
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            # ЯВНЫЕ requests/limits: LimitRange max 4Gi / 2 CPU, квота
+            # 12Gi requests / 45 подов, 3 OOM-инцидента (guards/app-budget.yaml).
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+      volumes:
+        - name: config
+          configMap:
+            name: egress-proxy-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: egress-proxy
+  labels:
+    app: egress-proxy
+    app.kubernetes.io/name: egress-proxy
+    app.kubernetes.io/part-of: agentscale
+    app.kubernetes.io/component: plugin-egress-proxy
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  # Единственная цель egress-правила `plugin-egress` NP (§6.2, §6.3).
+  selector:
+    app: egress-proxy
+  ports:
+    - name: proxy
+      port: 8080
+      targetPort: proxy

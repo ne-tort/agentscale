@@ -37,6 +37,7 @@ import secrets
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal, Mapping, Protocol, runtime_checkable
+from urllib.parse import quote
 
 from prodavan.application.plugins.tenantdb import sql
 from prodavan.application.plugins.tenantdb.errors import (
@@ -361,8 +362,6 @@ class TenantDatabaseService:
         но явное кодирование защищает от будущей смены генератора).
         DSN НЕ возвращается наружу: сразу уходит в ``SecretPort``.
         """
-        from urllib.parse import quote
-
         user = quote(role, safe="")
         pwd = quote(password, safe="")
         return (
@@ -371,9 +370,7 @@ class TenantDatabaseService:
         )
 
     def _secret_key(self, *, company_id: str, plugin_id: str) -> str:
-        """Ключ в SecretPort. Строится из ПРОВАЛЕННЫХ id (вызывается после ``_names``)."""
-        from urllib.parse import quote
-
+        """Ключ в SecretPort. Строится из ПРОВЕРЕННЫХ id (вызывается после ``_names``)."""
         return f"{_SECRET_KEY_PREFIX}/{quote(company_id, safe='')}/{quote(plugin_id, safe='')}/TENANT_DB_DSN"
     # endregion
 

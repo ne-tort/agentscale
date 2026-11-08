@@ -135,14 +135,20 @@ jobs:
           IN_PLATFORM_VERSION: ${{ inputs.platform_version }}
           IN_GRANTED: ${{ inputs.granted_capabilities }}
           IN_MIN_PLATFORM: ${{ inputs.min_platform_version }}
-          EVENT_BEFORE: ${{ github.event.before }}
-          EVENT_SHA: ${{ github.sha }}
           EVENT_NAME: ${{ github.event_name }}
+          EVENT_PATH: ${{ github.event_path }}
           OWNER: ${{ github.repository_owner }}
         run: |
           set -euo pipefail
+          # ВЕСЬ stdout Python идёт в GITHUB_OUTPUT. Ошибки пишем ЯВНО в
+          # stderr и выходим с ненулевым кодом — они не должны попадать в
+          # файл outputs (иначе job может «тихо» продолжиться).
           python3 - <<'PY' >> "$GITHUB_OUTPUT"
-          import json, os, re
+          import json, os, re, sys
+
+          def fail(message: str) -> None:
+              print(f"::error::{message}", file=sys.stderr, flush=True)
+              sys.exit(1)
 
           event = os.environ["EVENT_NAME"]
           plugin_id = os.environ.get("IN_PLUGIN_ID", "").strip()
@@ -153,39 +159,40 @@ jobs:
           for name, value in (("plugin_id", plugin_id), ("version", version),
                              ("manifest_path", manifest_path)):
               if ":latest" in value or value.endswith("/latest"):
-                  raise SystemExit(f"::error::{name}: ':latest' запрещён для плагинов")
+                  fail(f"{name}: ':latest' запрещён для плагинов")
 
           if event == "push" and not plugin_id:
-              # Пытаемся однозначно вывести плагин из изменённых manifest.json.
-              import subprocess
-              before = os.environ.get("EVENT_BEFORE", "")
-              sha = os.environ["EVENT_SHA"]
-              args = ["git", "diff", "--name-only", (before or "HEAD~1"), sha,
-                      "--", "packages/plugins"]
-              changed = subprocess.run(args, check=False, capture_output=True, text=True).stdout
+              # Pure-python: читаем GITHUB_EVENT_PATH, а не вызываем `git diff`.
+              # Это работает и при shallow-checkout на self-hosted раннере.
+              event_path = os.environ.get("EVENT_PATH", "")
+              changed = []
+              if event_path and os.path.isfile(event_path):
+                  with open(event_path, "r", encoding="utf-8") as handle:
+                      payload = json.load(handle)
+                  for commit in payload.get("commits", []):
+                      for key in ("added", "modified", "removed"):
+                          changed.extend(commit.get(key, []))
               candidates = sorted({
-                  p.split("/")[2] for p in changed.splitlines()
+                  p.split("/")[2] for p in changed
                   if p.startswith("packages/plugins/") and len(p.split("/")) > 3
               })
               if len(candidates) == 1:
                   plugin_id = candidates[0]
               else:
-                  raise SystemExit(
-                      "::error::push без inputs: не удалось однозначно определить plugin_id "
+                  fail(
+                      "push без inputs: не удалось однозначно определить plugin_id "
                       f"(кандидаты: {candidates}); используйте workflow_dispatch"
                   )
 
           if not plugin_id:
-              raise SystemExit("::error::plugin_id не задан — публикация запрещена (fail-closed)")
+              fail("plugin_id не задан — публикация запрещена (fail-closed)")
           if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,62}", plugin_id):
-              raise SystemExit(f"::error::некорректный plugin_id: {plugin_id!r}")
+              fail(f"некорректный plugin_id: {plugin_id!r}")
 
           if not manifest_path:
               manifest_path = f"packages/plugins/{plugin_id}/manifest.json"
           if not os.path.isfile(manifest_path):
-              raise SystemExit(
-                  f"::error::исходный манифест не найден: {manifest_path!r} (fail-closed)"
-              )
+              fail(f"исходный манифест не найден: {manifest_path!r} (fail-closed)")
 
           with open(manifest_path, "r", encoding="utf-8") as handle:
               src = json.load(handle)
@@ -197,21 +204,21 @@ jobs:
                               r"(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
                               r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$")
           if not semver.fullmatch(version):
-              raise SystemExit(f"::error::version не semver: {version!r} (fail-closed)")
+              fail(f"version не semver: {version!r} (fail-closed)")
 
           caps = src.get("capabilities", src.get("requestedCapabilities", []))
           if isinstance(caps, str):
               caps = [part.strip() for part in caps.split(",") if part.strip()]
           if not isinstance(caps, list):
-              raise SystemExit("::error::capabilities должны быть списком (fail-closed)")
+              fail("capabilities должны быть списком (fail-closed)")
 
           min_platform = (
               os.environ.get("IN_MIN_PLATFORM", "").strip()
               or str(src.get("min_platform_version", "")).strip()
           )
           if not min_platform:
-              raise SystemExit(
-                  "::error::min_platform_version отсутствует в манифесте и не передан "
+              fail(
+                  "min_platform_version отсутствует в манифесте и не передан "
                   "через input (fail-closed)"
               )
 

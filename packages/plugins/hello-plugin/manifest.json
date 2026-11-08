@@ -1,0 +1,34 @@
+{
+  "plugin_id": "hello_plugin",
+  "version": "0.1.0",
+  "protocol": "plugin-rpc/1",
+  "frontend": {
+    "entry": "index.html",
+    "base_path": "/"
+  },
+  "backend": {
+    "port": 8080,
+    "health": "/health"
+  },
+  "capabilities": [
+    "cache",
+    "objects",
+    "docs",
+    "events",
+    "jobs",
+    "pods",
+    "mcp",
+    "secrets",
+    "network"
+  ],
+  "migrations": {
+    "engine": "liquibase",
+    "path": "migrations/changelog.xml"
+  },
+  "egress_ref": "grant:hello_plugin",
+  "public_pages": [],
+  "webhooks": [
+    "/webhook/ping"
+  ],
+  "min_platform_version": "4.0.0"
+}

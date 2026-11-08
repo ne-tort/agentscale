@@ -1,0 +1,249 @@
+# PgBouncer — ОДИН пул на весь tenant-кластер (дизайн v4, §2.1, §14 п.2, §10).
+#
+# НЕ N пулов на компанию: single-node k3s, ResourceQuota pods: 45,
+# requests.memory: 12Gi, три OOM-инцидента (guards/app-budget.yaml). Один
+# PgBouncer в transaction mode + `CONNECTION LIMIT` на каждой роли плагина даёт
+# ту же защиту от исчерпания соединений без умножения подов/control plane.
+#
+# Плагины подключаются к `pgbouncer:6432`, а НЕ напрямую к `tenant-postgres:5432`.
+# Прямой :5432 нужен только платформенной админской роли для CREATE DATABASE /
+# CREATE ROLE / CREATE SCHEMA при grant (§5.5). В pg_hba tenant-кластера для
+# PgBouncer есть явная пара (role, db) — см. tenant-postgres.yaml.
+#
+# Только kinds из whitelist `infra/argocd/apps/00-project.yaml:37-88`:
+# Secret / ConfigMap / Deployment / Service. Никаких CRD/HPA.
+# Поле namespace намерено НЕ задано — подставляет NamespaceTransformer оверлея.
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: pgbouncer-credentials
+  labels:
+    app: pgbouncer
+    app.kubernetes.io/name: pgbouncer
+    app.kubernetes.io/part-of: agentscale
+    app.kubernetes.io/component: tenant-db-pool
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+type: Opaque
+stringData:
+  # `userlist.txt` — файл аутентификации PgBouncer. Формат строки:
+  #   "<имя роли>" "<SCRAM-секрет или plaintext-пароль>"
+  #
+  # ВАЖНО (задача 05): при grant контроллер ДОБАВЛЯЕТ сюда пару для каждой
+  # новой роли плагина, при revoke — УДАЛЯЕТ её и ставит роль NOLOGIN.
+  # plaintext здесь допустим только в dev; в общем контуре хранится
+  # SCRAM-секрет (`SCRAM-SHA-256$<iterations>:<salt>$<stored>:<server>`),
+  # который PgBouncer умеет передавать в scram-sha-256 без знания пароля.
+  #
+  # `pgbouncer_admin` — ТОЛЬКО для консольной команды RELOAD, которую задача 05
+  # обязана вызывать после правки Secret (PgBouncer читает userlist при старте
+  # и по RELOAD, но НЕ по SIGHUP). Это НЕ роль tenant-БД и НЕ роль плагина.
+  #
+  # Пустой список ролей плагинов = ни один плагин не пройдёт аутентификацию
+  # (fail-closed). Консоль без пароля из userlist недоступна.
+  #
+  # ВНИМАНИЕ ДЛЯ ЗАДАЧИ 15: этот Secret правится контроллером вне Git →
+  # `/stringData` (или `/data`) нужно добавить в `ignoreDifferences` Argo
+  # Application `plugin-platform`, иначе selfHeal сотрёт пары при первом синке.
+  userlist.txt: |
+    "pgbouncer_admin" "pgbouncer-admin-change-me"
+    # Роли плагинов генерирует задача 05 при grant. Пример (НЕ применять):
+    # "tenant_co_123_plugin_mod_equipment" "SCRAM-SHA-256$4096:...$...:..."
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pgbouncer-config
+  labels:
+    app: pgbouncer
+    app.kubernetes.io/name: pgbouncer
+    app.kubernetes.io/part-of: agentscale
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+data:
+  # ОДНА секция [databases], ОДИН пул, wildcard `*` → любая tenant_* БД
+  # маршрутизируется на один и тот же backend-кластер. Это и есть «один пул на
+  # tenant-кластер, не N пулов»: N компаний = N БД, но НЕ N записей и НЕ N подов.
+  #
+  # `auth_query` / `auth_user` НАМЕРЕННО ОТСУТСТВУЮТ: они заставляли бы
+  # PgBouncer читать pg_shadow на backend (нужна суперпользовательская роль)
+  # и размывали бы границу. Fail-closed: известны ТОЛЬКО роли из userlist.txt,
+  # всё остальное получает отказ на этапе аутентификации.
+  pgbouncer.ini: |
+    [databases]
+    * = host=tenant-postgres port=5432
+
+    [pgbouncer]
+    listen_addr = 0.0.0.0
+    listen_port = 6432
+    unix_socket_dir = /tmp
+
+    ; Аутентификация: ТОЛЬКО scram-sha-256, НЕ trust/md5/plain.
+    ; Путь совпадает с точкой монтирования Secret (каталог /etc/pgbouncer/auth).
+    auth_type = scram-sha-256
+    auth_file = /etc/pgbouncer/auth/userlist.txt
+
+    ; ТРАНЗАКЦИОННЫЙ режим (§2.1): серверное соединение возвращается в пул
+    ; после каждой транзакции, а не удерживается сессией плагина. Это позволяет
+    ; одному пулу обслужить N плагинов при max_connections=100 у tenant-postgres.
+    pool_mode = transaction
+
+    ; Лимиты соединений. max_client_conn — суммарный поток клиентов (плагины);
+    ; default_pool_size — серверных соединений на пару (db, user). Произведение
+    ; pool_size × число ролей должно оставаться ниже max_db_connections=80.
+    max_client_conn = 200
+    default_pool_size = 20
+    min_pool_size = 0
+    reserve_pool_size = 5
+    reserve_pool_timeout = 3
+    max_db_connections = 80
+    max_user_connections = 40
+
+    ; DISCARD ALL (= RESET ALL + ...) возвращает search_path к значению из
+    ; ALTER ROLE ... SET search_path (§2.2), а НЕ к дефолту "$user", public.
+    ; Плагин не может «залипнуть» на чужой схеме через переиспользование
+    ; серверного соединения в transaction mode.
+    server_reset_query = DISCARD ALL
+    server_reset_query_always = 1
+    server_check_query = SELECT 1
+    server_check_delay = 30
+    server_lifetime = 3600
+    server_idle_timeout = 600
+    server_connect_timeout = 15
+    server_login_retry = 2
+    query_wait_timeout = 30
+    client_idle_timeout = 300
+    client_login_timeout = 30
+    ; Плагин не может пере-set'ить search_path в startup-пакете (§2.2).
+    ignore_startup_parameters = extra_float_digits,search_path
+
+    ; Консоль (RELOAD / SHOW POOLS) доступна только пользователю из userlist
+    ; с паролем; отдельного Service для неё НЕТ. Задача 05 вызывает RELOAD
+    ; после каждого изменения Secret.
+    admin_users = pgbouncer_admin
+    stats_users = pgbouncer_admin
+    log_connections = 0
+    log_disconnections = 0
+    log_pooler_errors = 1
+    verbose = 0
+    pidfile = /tmp/pgbouncer.pid
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pgbouncer
+  labels:
+    app: pgbouncer
+    app.kubernetes.io/name: pgbouncer
+    app.kubernetes.io/part-of: agentscale
+    app.kubernetes.io/component: tenant-db-pool
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  # ОДНА реплика = ОДИН пул. HPA/KEDA запрещены whitelist'ом (§7.4, ADR-008).
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      app: pgbouncer
+  template:
+    metadata:
+      labels:
+        app: pgbouncer
+        app.kubernetes.io/name: pgbouncer
+        app.kubernetes.io/part-of: agentscale
+        app.kubernetes.io/component: tenant-db-pool
+    spec:
+      terminationGracePeriodSeconds: 30
+      # Зеркало ghcr: Docker Hub на холодной ноде отдаёт 429 TOOMANYREQUESTS.
+      # Образ ДОЛЖЕН быть собран с поддержкой SCRAM (libpq) — задача 16.
+      imagePullSecrets:
+        - name: ghcr-pull
+      containers:
+        - name: pgbouncer
+          image: ghcr.io/ne-tort/pgbouncer:1.24.1
+          imagePullPolicy: IfNotPresent
+          command:
+            - pgbouncer
+            - /etc/pgbouncer/config/pgbouncer.ini
+          ports:
+            - name: pgb
+              containerPort: 6432
+          volumeMounts:
+            # Статический конфиг: subPath допустим, он не меняется контроллером.
+            - name: config
+              mountPath: /etc/pgbouncer/config/pgbouncer.ini
+              subPath: pgbouncer.ini
+              readOnly: true
+            # КАТАЛОГ БЕЗ subPath: задача 05 обновляет Secret → kubelet
+            # проецирует новый userlist.txt → RELOAD (перезапуск не нужен).
+            - name: auth
+              mountPath: /etc/pgbouncer/auth
+              readOnly: true
+          lifecycle:
+            preStop:
+              # Дать kubelet снять endpoint из Service ДО SIGTERM: иначе
+              # in-flight запросы плагинов получат connection-reset.
+              # PgBouncer сам корректно завершает клиентов по SIGTERM.
+              exec:
+                command:
+                  - /bin/sh
+                  - -c
+                  - sleep 5
+          startupProbe:
+            tcpSocket:
+              port: pgb
+            periodSeconds: 3
+            failureThreshold: 30
+          readinessProbe:
+            tcpSocket:
+              port: pgb
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: pgb
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            # ЯВНЫЕ requests/limits: LimitRange max 4Gi / 2 CPU; пул лёгкий,
+            # но BestEffort уходит первым при OOM (guards/app-budget.yaml).
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+      volumes:
+        - name: config
+          configMap:
+            name: pgbouncer-config
+            items:
+              - key: pgbouncer.ini
+                path: pgbouncer.ini
+        - name: auth
+          secret:
+            secretName: pgbouncer-credentials
+            items:
+              - key: userlist.txt
+                path: userlist.txt
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pgbouncer
+  labels:
+    app: pgbouncer
+    app.kubernetes.io/name: pgbouncer
+    app.kubernetes.io/part-of: agentscale
+    app.kubernetes.io/component: tenant-db-pool
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  selector:
+    app: pgbouncer
+  ports:
+    - name: pgb
+      port: 6432
+      targetPort: pgb

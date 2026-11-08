@@ -1,0 +1,31 @@
+# Сборка base-манифестов плагиновой платформы (задача 14).
+#
+# НОВЫЙ файл в каталоге задачи 14 (`infra/k3s/base/plugins/**`). Это НЕ
+# `infra/k3s/base/kustomization.yaml` и НЕ `infra/k3s/overlays/dev/kustomization.yaml`
+# — те два файла ведёт родитель и здесь они не трогаются.
+#
+# Зачем он нужен: `infra/k3s/overlays/dev/plugins/kustomization.yaml` подключает
+# этот каталог строкой `- ../../../base/plugins`. Kustomize при указании
+# КАТАЛОГА требует внутри него `kustomization.yaml` (иначе «unable to find one
+# of 'kustomization.yaml' ...» и весь рендер Argo `plugin-platform` падает).
+# Именно Argo Application `plugin-platform.yaml` рендерит `overlays/dev/plugins`.
+#
+# Что НЕ включено намеренно:
+#   * `networkpolicy-agent.yaml` — СПРАВОЧНЫЙ эталон для генератора задачи 08,
+#     НЕ применяется к плагинам (`agentscale.io/manifest-role: reference-only`).
+#     Включение создало бы третью боевую NP c `podSelector: {app: agent}`.
+#   * `README.md` — не манифест.
+#   * Шаблон Deployment лежит в `overlays/dev/plugins/plugin-deployment-template.yaml`
+#     и НЕ подключён родителем (у него `replicas: 0` и плейсхолдеры; реальные
+#     манифесты генерирует контроллер при grant).
+#
+# `metadata.namespace` в нижележащих файлах НЕ задан: namespace подставляет
+# `namespace: agentscale-dev` из overlays/dev/plugins/kustomization.yaml.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - tenant-postgres.yaml
+  - pgbouncer.yaml
+  - plugin-gateway.yaml
+  - networkpolicy-plugin.yaml
+  - egress-proxy.yaml

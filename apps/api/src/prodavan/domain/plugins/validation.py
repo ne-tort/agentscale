@@ -92,7 +92,7 @@ class PluginValidationError(ValueError):
 
 def _repo_root() -> Path:
     """Корень репозитория по расположению этого модуля (без обращения к git)."""
-    # .../apps/api/src/prodavan/domain/plugins/validation.py -> repo root
+    # validation.py -> plugins(0), domain(1), prodavan(2), src(3), api(4), apps(5), root(6)
     return Path(__file__).resolve().parents[6]
 
 
@@ -260,9 +260,9 @@ def validate_manifest(data: dict) -> PluginManifest:
     capability allowlist → вложенные объекты → сборка доменного типа.
     Любая ошибка — :class:`PluginValidationError` с ``code``.
 
-    Нормализация ``plugin_id``: ``str.strip().lower()`` (после проверки pattern;
-    значение уже должно быть в нижнем регистре, поэтому повторная проверка
-    гарантирует отсутствие «тихого» изменения идентификатора).
+    Нормализация ``plugin_id``: ``str.strip().lower()`` применяется только к
+    уже прошедшему pattern значению; любое расхождение (пробелы/регистр) —
+    отказ, а не тихое изменение идентификатора.
     """
     if not isinstance(data, Mapping):
         _fail(ManifestValidationErrorCode.NOT_AN_OBJECT, "manifest must be an object")
@@ -290,8 +290,9 @@ def validate_manifest(data: dict) -> PluginManifest:
     if unknown:
         _fail(ManifestValidationErrorCode.UNKNOWN_FIELD, f"unknown fields: {', '.join(unknown)}")
 
-    # 3. Проверка по JSON Schema (jsonschema при наличии), затем ручная проверка.
-    # Ручная проверка обязательна в обоих случаях: она даёт стабильные коды ошибок.
+    # 3. Ручная проверка обязательна всегда: она даёт стабильные коды ошибок.
+    # Затем, при наличии jsonschema, — дополнительный контроль по живой схеме.
+    _validate_manual(payload)
     try:
         import jsonschema  # noqa: F401  # type: ignore[import-not-found]
     except ImportError:
@@ -300,9 +301,8 @@ def validate_manifest(data: dict) -> PluginManifest:
         jsonschema_available = True
     if jsonschema_available:
         _validate_with_jsonschema(payload)
-    _validate_manual(payload)
 
-    # 4. Нормализация plugin_id и сборка доменного типа (повторная валидация в __post_init__).
+    # 4. Нормализация plugin_id: не молча «исправляем», а отказываем при расхождении.
     raw_plugin_id = payload["plugin_id"]
     if not isinstance(raw_plugin_id, str) or not raw_plugin_id.strip():
         _fail(ManifestValidationErrorCode.PLUGIN_ID_EMPTY, "plugin_id must not be empty")
@@ -344,6 +344,11 @@ def validate_manifest(data: dict) -> PluginManifest:
 
 def _validate_manual(payload: Mapping[str, Any]) -> None:
     """Эквивалент schema.json без внешних зависимостей, с теми же кодами ошибок."""
+    raw_plugin_id = payload["plugin_id"]
+    if not isinstance(raw_plugin_id, str) or not raw_plugin_id.strip():
+        _fail(ManifestValidationErrorCode.PLUGIN_ID_EMPTY, "plugin_id must not be empty")
+    if not PLUGIN_ID_PATTERN.fullmatch(raw_plugin_id):
+        _fail(ManifestValidationErrorCode.PLUGIN_ID_INVALID, "plugin_id must match ^[a-z][a-z0-9_]*$")
     if not isinstance(payload["version"], str) or not SEMVER_PATTERN.fullmatch(payload["version"]):
         _fail(ManifestValidationErrorCode.VERSION_INVALID, "version must be a semantic version")
     if payload["protocol"] != PROTOCOL_VERSION:

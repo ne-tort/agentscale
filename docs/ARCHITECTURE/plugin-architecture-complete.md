@@ -112,9 +112,17 @@ GRANT CONNECT ON DATABASE tenant_<company> TO tenant_<company>_plugin_<module>;
 ```
 
 Плюс `pg_hba.conf` tenant-кластера явно разрешает только пару
-`(role, tenant_<company>)` через `map`/include-файл, `scram-sha-256`.
+`(role, tenant_<company>)` полями DATABASE/USER с `scram-sha-256`, включает
+`tenant_hba.conf` через `include` и завершается `reject all`. **Важно:** опция
+`map=` в pg_hba **несовместима** со `scram-sha-256` (допустима только для
+ident/peer/gssapi/sspi/ldap/radius/cert), поэтому `pg_ident.conf` остаётся
+пустой заглушкой, а пары задаются не через pg_ident, а полями DATABASE/USER.
+Bootstrap дополнительно снимает PUBLIC-привилегии с `template1`, чтобы новые
+`tenant_*` наследовали закрытый ACL.
 Мгновенный отзыв доступа при `revoke` — `ALTER ROLE ... NOLOGIN`, не зависящий от
 PUBLIC и Redis. `pgaudit` фиксирует DDL, но **не является** границей.
+Платформенный инстанс (`agentscale-postgres`, БД `agentscale`/`agentscale_userdb`)
+получает тот же `REVOKE ... FROM PUBLIC`.
 
 **Почему один кластер, а не инстанс на компанию:** single-node k3s
 (`ResourceQuota pods: 45`, 26Gi, три OOM-инцидента в `runbook.md:484-554`).
@@ -604,13 +612,26 @@ spec:
             matchLabels: {app: tenant-postgres}
       ports: [{protocol: TCP, port: 5432}]
     # Scoped object storage (§5.4); агентским Pod'ам :9000 закрыт.
+    # as-built лейблы: НЕ app: minio / app: kafka.
     - to:
         - namespaceSelector:
             matchLabels: {kubernetes.io/metadata.name: agentscale-dev}
           podSelector:
-            matchLabels: {app: minio}
+            matchLabels: {app.kubernetes.io/name: agentscale-minio}
       ports: [{protocol: TCP, port: 9000}]
+    # Redpanda/Kafka для plugin events (§7.3).
+    - to:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: agentscale-dev}
+          podSelector:
+            matchLabels: {app.kubernetes.io/name: agentscale-kafka}
+      ports: [{protocol: TCP, port: 9092}]
 ```
+
+Лейблы `app.kubernetes.io/name: agentscale-minio` / `agentscale-kafka` взяты из
+`infra/k3s/base/platform/{minio,kafka}.yaml`; выдуманные `app: minio` / `app: kafka`
+не совпали бы ни с одним подом. `app: agentscale-postgres` (платформенный
+`prodavan`) в egress **не входит**.
 
 `prodavan` (платформенный Postgres) в эту политику **не входит**: у плагина нет ни
 сетевого пути, ни credentials, ни `CONNECT` к этой БД. Tenant-кластер — отдельный

@@ -12,7 +12,6 @@ from prodavan.application.plugins.identity import (
     KeyRing,
     PluginClaims,
     PluginSurfaceAllowlist,
-    hs256_entry,
     keyring_from_secret,
     mint_plugin_claims,
     verify_plugin_token,
@@ -91,8 +90,3 @@ def claims(
 @pytest.fixture
 def allowlist() -> PluginSurfaceAllowlist:
     return PluginSurfaceAllowlist()
-
-
-@pytest.fixture
-def hs_key(secret: str):
-    return hs256_entry(secret, kid="hs256-test-kid")

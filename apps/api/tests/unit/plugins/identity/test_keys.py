@@ -56,6 +56,18 @@ def test_peek_plugin_token_returns_none_for_non_mapping_payload() -> None:
     assert peek_plugin_token(token) is None
 
 
+def test_peek_plugin_token_ignores_expiry_for_middleware_routing() -> None:
+    """peek не проверяет exp: разветвление middleware работает и на истёкшем."""
+    expired = jwt.encode(
+        {"typ": "plugin_capability", "exp": 1},
+        TEST_SECRET,
+        algorithm="HS256",
+    )
+    payload = peek_plugin_token(expired)
+    assert payload is not None
+    assert payload["typ"] == "plugin_capability"
+
+
 def test_generate_kid_is_prefixed_and_unique() -> None:
     kid = generate_kid("HS256")
     assert kid.startswith("hs256-")

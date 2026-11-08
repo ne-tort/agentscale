@@ -277,15 +277,20 @@ def test_small_leeway_does_not_resurrect_expired_token(
     instance: FakeInstance,
     secret: str,
     keyring: KeyRing,
-    now: int,
 ) -> None:
+    # ``now`` берём из самого payload, чтобы тест не зависел от секунды запуска.
     token = mint_plugin_claims(grant=grant, instance=instance, secret=secret)
-    # Внутри leeway (exp + 3) — ещё валиден.
-    claims = verify_plugin_token(token, keyring=keyring, now=now + 303)
-    assert claims.exp == now + 300
-    # За границей leeway (exp + 6) — уже нет.
+    payload = peek_plugin_token(token)
+    assert payload is not None
+    issued_at = int(payload["iat"])
+    expires_at = int(payload["exp"])
+
+    # Внутри leeway (exp + 3) — ещё валиден, ровно на границе (exp + 5) — уже нет.
+    claims = verify_plugin_token(token, keyring=keyring, now=expires_at + 3)
+    assert claims.iat == issued_at
+    assert claims.exp == expires_at
     with pytest.raises(PluginTokenError) as ei:
-        verify_plugin_token(token, keyring=keyring, now=now + 306)
+        verify_plugin_token(token, keyring=keyring, now=expires_at + 5)
     assert ei.value.code == PluginTokenErrorCode.EXPIRED
 
 

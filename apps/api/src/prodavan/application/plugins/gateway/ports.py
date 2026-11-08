@@ -181,10 +181,17 @@ class DeliveryStatus(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class DeliveryVerdict:
-    """Результат атомарной проверки ``X-Prodavan-Delivery``."""
+    """Результат атомарной проверки ``X-Prodavan-Delivery``.
+
+    ``previous_token`` — HMAC-токен ПЕРВОЙ доставки. Повтор с тем же
+    delivery-id возвращает ``200`` без повторной обработки **только если**
+    предъявленный токен совпадает с сохранённым: иначе это подделка/
+    повтор с чужим replay-токеном → ``401`` (защита от replay, §7.5).
+    """
 
     status: DeliveryStatus
     first_seen_at: float | None = None
+    previous_token: str | None = None
 
     @property
     def is_duplicate(self) -> bool:
@@ -203,8 +210,16 @@ class RateLimitPort(Protocol):
         """``True`` = запрос разрешён, ``False`` = лимит исчерпан (429)."""
         ...
 
-    async def claim_delivery(self, *, key: str, ttl_seconds: int) -> DeliveryVerdict:
-        """Атомарно зарегистрировать delivery-id. Повтор → ``DUPLICATE``."""
+    async def claim_delivery(
+        self, *, key: str, ttl_seconds: int, token: str | None = None
+    ) -> DeliveryVerdict:
+        """Атомарно зарегистрировать delivery-id + отпечаток первой доставки.
+
+        ``token`` — детерминированный digest связки (delivery, event, body),
+        который сохраняется при ПЕРВОМ вызове. Повтор возвращает
+        ``DUPLICATE`` с ``previous_token``; шлюз отказывает, если новый
+        ``token`` не совпал (защита от replay, §7.5).
+        """
         ...
 
 

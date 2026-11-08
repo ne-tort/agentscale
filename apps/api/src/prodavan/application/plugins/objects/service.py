@@ -559,6 +559,16 @@ class PluginObjectStore:
             ) from exc
 
         if not isinstance(url, str) or not url:
+            await self._emit(
+                company_id=company_id,
+                plugin_id=plugin_id,
+                operation="presign",
+                decision="deny",
+                code=err.BucketUnavailable.CODE,
+                key_digest=_digest(safe_key),
+                reason="PresignPort вернул пустой URL",
+                ttl_seconds=ttl,
+            )
             raise err.BucketUnavailable("PresignPort вернул пустой URL")
 
         await self._emit(
@@ -636,7 +646,11 @@ class PluginObjectStore:
         return out
 
     async def usage(self, company_id: str) -> int:
-        """Фактическое потребление бакета компании (фасад квот, не payload)."""
+        """Фактическое потребление СВОЕГО бакета (фасад квот, не payload).
+
+        Строго свой ``tenant-<company>``: ``company_id`` валидируется генератором
+        ``bucket_name`` до обращения к адаптеру, чужой бакет в вызов не попадает.
+        """
         bucket = iam.bucket_name(company_id)
         try:
             return int(await self._buckets.get_usage(bucket))
@@ -646,6 +660,38 @@ class PluginObjectStore:
             raise err.BucketUnavailable(
                 f"get_usage({bucket!r}) недоступен: {type(exc).__name__}"
             ) from exc
+
+    async def set_quota(self, company_id: str, plugin_id: str, quota_bytes: int) -> None:
+        """Жёсткая квота СВОЕГО бакета (§5.4), фасад ``TenantObjectsService``.
+
+        Квота — не observability-счётчик в БД, а предел на стороне MinIO.
+        Отрицательный/нулевой предел запрещён: это был бы «безлимит», а не
+        fail-closed. ``plugin_id`` нужен только для канонического события
+        аудита и валидируется тем же генератором, что и префикс.
+        """
+        bucket = iam.bucket_name(company_id)
+        iam.module_prefix(plugin_id)
+        try:
+            limit = int(quota_bytes)
+        except (TypeError, ValueError) as exc:
+            raise err.BucketUnavailable("некорректное значение квоты") from exc
+        if limit <= 0:
+            raise err.BucketUnavailable("квота бакета должна быть положительной")
+        try:
+            await self._buckets.set_quota(bucket, limit)
+        except err.PluginObjectError:
+            raise
+        except Exception as exc:
+            raise err.BucketUnavailable(
+                f"set_quota({bucket!r}) недоступен: {type(exc).__name__}"
+            ) from exc
+        await self._emit(
+            company_id=company_id,
+            plugin_id=plugin_id,
+            operation="set_quota",
+            decision="allow",
+            strict=True,
+        )
 
 
 def _is_subset(child: list[dict], parent: list[dict]) -> bool:

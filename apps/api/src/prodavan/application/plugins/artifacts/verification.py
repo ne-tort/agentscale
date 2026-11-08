@@ -242,6 +242,7 @@ def _grant_capabilities(grant: object) -> frozenset[str]:
     if raw is None or isinstance(raw, (str, bytes)):
         return frozenset()
     if not isinstance(raw, Collection):
+        return frozenset()
     return frozenset(str(item) for item in raw if isinstance(item, str) and item.strip())
 
 

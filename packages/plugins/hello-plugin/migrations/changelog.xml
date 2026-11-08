@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    Self-managed Liquibase changelog пилотного плагина hello_plugin.
+
+    Контракт §2/§3 v4: плагин сам владеет своей схемой и применяет changelog под
+    своей ролью в БД tenant_<company_id>. Платформа не ревьюит SQL; граница —
+    привилегии PostgreSQL (NOCREATEDB/NOCREATEROLE, CONNECT только на свою БД,
+    search_path), а не парсер запросов.
+
+    Важно:
+      * реальные типизированные таблицы, НЕ jsonb / module_instance_data_rows;
+      * версия плагина НЕ входит ни в имя схемы, ни в имя таблиц/индексов —
+        иначе при обновлении данные останутся в старой схеме (§3.3);
+      * у каждого changeset есть явный DOWN для rollbackCount/rollbackTo (§3.3);
+      * logicalFilePath зафиксирован, чтобы checksum не зависел от пути монтирования
+        (checksum mismatch => контейнер не становится Ready, §11 критерий 4).
+-->
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+                        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.24.xsd"
+    logicalFilePath="migrations/changelog.xml">
+
+    <!-- 0001: приветствия компании. company_id обязателен, cabinet_id/project_id —
+         необязательная детализация внутри БД компании (RLS не нужен, §2.4). -->
+    <changeSet id="0001" author="agentscale-pilot">
+        <createTable tableName="greetings">
+            <column name="id" type="UUID">
+                <constraints primaryKey="true" nullable="false" primaryKeyName="pk_greetings"/>
+            </column>
+            <column name="company_id" type="TEXT">
+                <constraints nullable="false"/>
+            </column>
+            <column name="cabinet_id" type="TEXT"/>
+            <column name="project_id" type="TEXT"/>
+            <column name="message" type="TEXT">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_at" type="TIMESTAMPTZ" defaultValueComputed="now()">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <!-- Индекс под типовой фильтр «все приветствия компании в разрезе проекта». -->
+        <createIndex tableName="greetings" indexName="idx_greetings_company_project">
+            <column name="company_id"/>
+            <column name="project_id"/>
+        </createIndex>
+
+        <rollback>
+            <dropIndex tableName="greetings" indexName="idx_greetings_company_project"/>
+            <dropTable tableName="greetings"/>
+        </rollback>
+    </changeSet>
+
+    <!-- 0002: счётчик. Отдельная таблица, а не jsonb-строка: плагин — полноценное
+         приложение и сам решает, какие агрегаты ему хранить (§0 цель 1). -->
+    <changeSet id="0002" author="agentscale-pilot">
+        <createTable tableName="greeting_stats">
+            <column name="id" type="UUID">
+                <constraints primaryKey="true" nullable="false" primaryKeyName="pk_greeting_stats"/>
+            </column>
+            <column name="greetings_count" type="INT" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <rollback>
+            <dropTable tableName="greeting_stats"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

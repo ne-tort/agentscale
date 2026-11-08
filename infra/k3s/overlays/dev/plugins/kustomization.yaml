@@ -1,0 +1,16 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Argo Application plugin-platform.yaml рендерит ИМЕННО этот каталог.
+# Без явного включения base-манифесты останутся файлами на диске и не попадут
+# в кластер (замечание задачи 14).
+resources:
+  - ../../../base/plugins
+  - ingress-plugins.yaml
+
+# В base-манифестах metadata.namespace намеренно не задан (паттерн
+# guards/app-budget.yaml): пространство имён подставляется трансформером.
+namespace: agentscale-dev
+
+# Динамические Deployment'ы плагинов создаёт admin API при grant, а НЕ Git.
+# Они живут под ignoreDifferences /spec/replicas в plugin-platform.yaml.

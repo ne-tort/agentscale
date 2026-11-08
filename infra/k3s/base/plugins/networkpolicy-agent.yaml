@@ -1,0 +1,102 @@
+# ЭТАЛОННАЯ NetworkPolicy для контейнеров АГЕНТОВ — СПРАВОЧНЫЙ манифест (v4 §6.1).
+#
+# ВНИМАНИЕ: этот файл НЕ применяется к плагинам и НЕ должен подключаться в
+# kustomization как «боевая» политика плагинов. Это ОБРАЗЕЦ для генератора
+# задачи 08 (две NP из одного CRD-генератора, общая схема аудита, разные наборы
+# портов). Боевая политика агентов уже существует:
+#   infra/k3s/base/agentscale-sandboxes-ks/networkpolicy.yaml
+#   (`agentscale-sandboxes-egress`, `podSelector: {}`, TCP 3921/8001, DNS, 80/443)
+# и по решению v4 §6.1 НЕ меняется. Здесь зафиксирован ЦЕЛЕВОЙ минимальный
+# профиль агента, чтобы генератор не «перетащил» в него плагиновые порты.
+#
+# КЛЮЧЕВОЕ ОТЛИЧИЕ от `networkpolicy-plugin.yaml`:
+#   * БЕЗ :5432 (tenant-postgres / pgbouncer) — агент не имеет прямой БД;
+#   * БЕЗ :9000 (MinIO) — объекты агента идут через capability adapter;
+#   * БЕЗ :9092 (Kafka/Redpanda) — события агента не читаются напрямую;
+#   * БЕЗ egress-proxy :8080 — у агента свой egress-контроллер (§6.3);
+#   * ЕСТЬ DNS UDP/TCP 53 + 80/443 (AI-провайдеры, web search) + :8001
+#     (pod-gateway, ТОЛЬКО агентская surface).
+#
+# `namespaceSelector` по `kubernetes.io/metadata.name` (лейбла `name` в
+# overlays/dev/namespace.yaml НЕТ). Имя `agentscale-dev` — dev-контур; prod
+# заменяется на `agentscale` / `agentscale-sandboxes`.
+#
+# kind NetworkPolicy разрешён whitelist'ом `infra/argocd/apps/00-project.yaml:81-84`.
+# Никаких CRD (KEDA/Knative/cert-manager/SPIRE).
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: agent-egress-reference
+  labels:
+    app.kubernetes.io/name: agent-egress-reference
+    app.kubernetes.io/part-of: agentscale
+    app.kubernetes.io/component: agent-network-policy-reference
+  annotations:
+    # СПРАВОЧНЫЙ файл: НЕ применяется. Явная пометка, чтобы генератор задачи 08
+    # не включил его в боевой рендер как третью политику.
+    agentscale.io/manifest-role: "reference-only"
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  # Агенты, НЕ плагины (`app: plugin` из plugin-deployment-template.yaml).
+  podSelector:
+    matchLabels:
+      app: agent
+  # Fail-closed: оба направления. Отсутствие правила = ЗАПРЕТ.
+  policyTypes: [Ingress, Egress]
+  ingress:
+    # Входящий трафик агента — от агентского pod-gateway / router (§6.1).
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: agent-sandbox-system
+      ports:
+        - protocol: TCP
+          port: 3921
+  egress:
+    # 1) pod-gateway :8001 — ЕДИНСТВЕННАЯ платформенная surface агента
+    #    (Bridge JWT `typ=pod_bridge`, require_project, allowlist projects/*).
+    #    Плагинам :8001 ЗАКРЫТ (критерий №17), агентам — открыт только он.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: agentscale-dev
+          podSelector:
+            matchLabels:
+              app: agentscale-api
+      ports:
+        - protocol: TCP
+          port: 8001
+    # 2) DNS (UDP 53 + TCP 53 для ответов >512 байт).
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # 3) Публичный интернет: AI-провайдеры и web search. Исключаем pod/service
+    #    CIDR, чтобы :80/:443 не стали лазейкой к in-cluster сервисам.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.42.0.0/16 # pods
+              - 10.43.0.0/16 # services
+      ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 80
+    # ЯВНО ОТСУТСТВУЮТ (и потому запрещены):
+    #   * TCP 5432 tenant-postgres / 6432 pgbouncer — нет прямого DSN у агента;
+    #   * TCP 9000 MinIO — объекты через typed capability adapter;
+    #   * TCP 9092 Kafka/Redpanda — события через gateway;
+    #   * TCP 8080 plugin-gateway / egress-proxy — чужой trust-контур;
+    #   * 5432/5433 «внешнего Postgres» из as-built sandboxes NP: в целевом
+    #     профиле агента прямой SQL отсутствует (ADR-003 действует для агентов).

@@ -154,3 +154,27 @@ spec:
       kind: Deployment
       jsonPointers:
         - /status
+    # -------------------------------------------------------------------------
+    # Контроллер-правимые данные (замечание задачи 14). selfHeal иначе сотрёт
+    # то, что admin API пишет ВНЕ Git при grant/revoke:
+    #   * tenant_hba.conf — пары (role, tenant_<company>) + pg_reload_conf();
+    #   * pgbouncer userlist.txt — SCRAM-секреты ролей + RELOAD;
+    #   * egress-proxy ConfigMap — Envoy-кластеры из CapabilityGrant (задача 08).
+    # Откат к пустому allowlist НЕ открывает доступ (fail-closed), но ломает
+    # выданный grant. Игнорируем /data точечно, не весь объект.
+    # -------------------------------------------------------------------------
+    - group: ""
+      kind: ConfigMap
+      name: tenant-postgres-config
+      jsonPointers:
+        - /data
+    - group: ""
+      kind: ConfigMap
+      name: egress-proxy-config
+      jsonPointers:
+        - /data
+    - group: ""
+      kind: Secret
+      name: pgbouncer-credentials
+      jsonPointers:
+        - /data

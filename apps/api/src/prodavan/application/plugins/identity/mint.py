@@ -94,15 +94,28 @@ def _attr(source: Any, name: str, *, default: Any = None) -> Any:
     return getattr(source, name, default)
 
 
-def _string(source: Any, name: str, *, code: PluginTokenErrorCode, required: bool = True) -> str:
+def _string(
+    source: Any,
+    name: str,
+    *,
+    code: PluginTokenErrorCode,
+    required: bool = True,
+    missing_code: PluginTokenErrorCode | None = None,
+) -> str:
     value = _attr(source, name)
     if value is None:
         if required:
-            raise PluginTokenError(code=code, detail=f"plugin grant missing {name}")
+            raise PluginTokenError(
+                code=missing_code or code,
+                detail=f"plugin grant missing {name}",
+            )
         return ""
     text = str(value).strip()
     if not text and required:
-        raise PluginTokenError(code=code, detail=f"plugin grant has empty {name}")
+        raise PluginTokenError(
+            code=missing_code or code,
+            detail=f"plugin grant has empty {name}",
+        )
     if text:
         # ``quota_ref`` — ссылка, а не идентификатор: в v4 это ``co_123/plan_pro``.
         pattern = _SAFE_REF_RE if name == "quota_ref" else _SAFE_ID_RE
@@ -168,9 +181,15 @@ def build_payload(
     plugin_id = _string(grant, "plugin_id", code=PluginTokenErrorCode.MISSING_CLAIM)
     company_id = _string(grant, "company_id", code=PluginTokenErrorCode.MISSING_CLAIM)
     manifest_version = _string(grant, "manifest_version", code=PluginTokenErrorCode.MISSING_CLAIM)
-    # Пустой/битый digest — это MALFORMED, а не «claim отсутствует»: формат
-    # ``sha256:<64 lowercase hex>`` проверяется отдельно ниже.
-    artifact_digest = _string(grant, "artifact_digest", code=PluginTokenErrorCode.MALFORMED)
+    # Пустой/битый digest — это MALFORMED, а не «claim отсутствует»; формат
+    # ``sha256:<64 lowercase hex>`` проверяется отдельно ниже. При полностью
+    # отсутствующем ключе — MISSING_CLAIM.
+    artifact_digest = _string(
+        grant,
+        "artifact_digest",
+        code=PluginTokenErrorCode.MALFORMED,
+        missing_code=PluginTokenErrorCode.MISSING_CLAIM,
+    )
     quota_ref = _string(grant, "quota_ref", code=PluginTokenErrorCode.MISSING_CLAIM)
     scopes = _scopes(grant)
 

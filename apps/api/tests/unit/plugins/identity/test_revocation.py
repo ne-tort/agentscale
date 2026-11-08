@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import inspect
 from datetime import UTC, datetime
 
 import pytest
@@ -44,14 +45,40 @@ def test_in_memory_revocation_implements_port_structurally() -> None:
 
 
 def test_grant_revocation_exposes_is_active_contract() -> None:
+    from prodavan.application.plugins.capabilities.ports import GrantRevocationPort
+
     rev = GrantRevocation(InMemoryRevocation())
     assert isinstance(rev.port, RevocationPort)
+    # Структурное соответствие протоколу задачи 03 (без адаптера): протокол не
+    # объявлен runtime_checkable, поэтому проверяем наличие метода с нужной
+    # сигнатурой, а не isinstance().
+    assert callable(getattr(rev, "is_active", None))
+    assert "now" in inspect.signature(GrantRevocationPort.is_active).parameters
     assert rev.is_active("grant_01") is True
     assert rev.is_active("grant_01", now=1_700_000_100) is True
     assert rev.is_active("grant_01", now=datetime.now(UTC)) is True
 
 
-def test_is_active_accepts_naive_datetime_as_fail_closed() -> None:
+def test_grant_revocation_passes_aware_utc_datetime_to_port() -> None:
+    """Контракт задачи 03: ``GrantRevocationPort.is_active(..., now: datetime)``."""
+
+    class RecordingPort:
+        def __init__(self) -> None:
+            self.seen: list[datetime] = []
+
+        def is_active(self, grant_id: str, *, now) -> bool:
+            self.seen.append(now)
+            return True
+
+    port = RecordingPort()
+    rev = GrantRevocation(port)  # type: ignore[arg-type]
+    assert rev.is_active("grant_01", now=1_700_000_100) is True
+    assert isinstance(port.seen[0], datetime)
+    assert port.seen[0].tzinfo is not None
+    assert port.seen[0] == datetime.fromtimestamp(1_700_000_100, tz=UTC)
+
+
+def test_naive_datetime_is_fail_closed() -> None:
     rev = GrantRevocation(InMemoryRevocation())
     # Naive datetime = неоднозначное время → fail-closed (False), а не «активен».
     assert rev.is_active("grant_01", now=datetime(2026, 1, 1)) is False
@@ -185,14 +212,12 @@ def test_plain_object_with_is_active_satisfies_port() -> None:
 
     class DbBackedPort:
         def __init__(self) -> None:
-            self.seen_now: list[float] = []
+            self.seen_now: list[datetime] = []
 
-        def is_active(self, grant_id: str, *, now) -> bool:
-            self.seen_now.append(float(now))
+        def is_active(self, grant_id: str, *, now: datetime) -> bool:
+            assert isinstance(now, datetime) and now.tzinfo is not None
+            self.seen_now.append(now)
             return grant_id == "grant_01"
-
-        def is_revoked(self, grant_id: str) -> bool:
-            return not self.is_active(grant_id, now=0)
 
         def revoke(self, grant_id: str) -> None:
             return None
@@ -200,6 +225,7 @@ def test_plain_object_with_is_active_satisfies_port() -> None:
     db = DbBackedPort()
     assert isinstance(db, RevocationPort)
     rev = GrantRevocation(db)
+    expected = datetime.fromtimestamp(1_700_000_100, tz=UTC)
     assert rev.is_active("grant_01", now=1_700_000_100) is True
-    assert db.seen_now == [1_700_000_100.0]
+    assert db.seen_now == [expected]
     assert rev.is_active("grant_02") is False

@@ -21,6 +21,7 @@ from prodavan.domain.errors import AppError
 class ActivationErrorCode(StrEnum):
     """Реестр кодов activator'а. Расширять только вместе с планом миграции."""
 
+    ALLOWED = "allowed"
     WAKE_TIMEOUT = "PLUGIN_WAKE_TIMEOUT"
     SCALE_UNAVAILABLE = "PLUGIN_SCALE_UNAVAILABLE"
     ACTIVATION_CONFLICT = "PLUGIN_ACTIVATION_CONFLICT"

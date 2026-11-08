@@ -1,0 +1,244 @@
+# Plugin Gateway — ВСЕГДА running, отдельный trust-контур плагинов (v4 §1, §7.2, §7.4).
+#
+# НЕ расширение pod-gateway `:8001`: у агентов Bridge JWT (`typ=pod_bridge`,
+# `sub=pod:{id}`, require_project) и allowlist `projects/{id}/...`. Плагин
+# company-scoped; смешение дало бы ему доступ к `/agent/*` и
+# `/internal/pods/{id}/workspace-archive` (§1). Поэтому свой Deployment, свой
+# Service, свои PluginClaims (`iss=agentscale-plugins`, `aud=capability-gateway`).
+#
+# Gateway же является activator'ом (§7.4, §14 п.9): патчит `deployments/scale`
+# 0→1, УДЕРЖИВАЕТ запрос до Ready, затем проксирует; по idle-TTL снова ставит 0.
+# Отсюда RBAC: Role с правом ТОЛЬКО `deployments/scale` (+ read-only get/list
+# для ожидания Ready) и НИЧЕГО более. Никаких CRD, KEDA/Knative/HPA/SPIRE.
+#
+# `replicas: 2` — всегда running (§7.2); на single-node k3s это +1 под против
+# квоты 45 подов / 12Gi requests. Если бюджет не позволит — опустить до 1.
+# Все kinds из whitelist `infra/argocd/apps/00-project.yaml:37-88`:
+# ConfigMap / ServiceAccount / Role / RoleBinding / Deployment / Service.
+# Поле namespace намерено НЕ задано — подставляет NamespaceTransformer оверлея.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: plugin-gateway
+  labels:
+    app: plugin-gateway
+    app.kubernetes.io/name: plugin-gateway
+    app.kubernetes.io/part-of: agentscale
+    app.kubernetes.io/component: plugin-gateway
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+# Токен НУЖЕН: activator ходит в k8s API за deployments/scale и readiness.
+automountServiceAccountToken: true
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: plugin-gateway-activator
+  labels:
+    app: plugin-gateway
+    app.kubernetes.io/name: plugin-gateway
+    app.kubernetes.io/part-of: agentscale
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+rules:
+  # MINIMUM для activator'а (§7.4): МЕНЯТЬ можно ТОЛЬКО scale-подресурс.
+  # `resourceNames` намеренно отсутствует: имена Deployment'ов плагинов
+  # создаются динамически при grant (§5.1) и заранее не перечислимы.
+  # PATCH `deployments` (не scale) НЕ выдан — Gateway не может подменить образ,
+  # env или DSN плагина, только число реплик.
+  - apiGroups: ["apps"]
+    resources: ["deployments/scale"]
+    verbs: ["get", "patch", "update"]
+  # Чтение для hold-until-Ready: ожидание Ready без pods/exec и без secrets.
+  # Ни `deployments` (на запись), ни `pods`, ни `secrets`, ни `configmaps` здесь
+  # НЕТ. Fail-closed: всё не перечисленное запрещено по умолчанию.
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: plugin-gateway-activator
+  labels:
+    app: plugin-gateway
+    app.kubernetes.io/name: plugin-gateway
+    app.kubernetes.io/part-of: agentscale
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: plugin-gateway-activator
+subjects:
+  - kind: ServiceAccount
+    name: plugin-gateway
+    # Namespace НЕ задаём сознательно (паттерн rbac-sandboxes.yaml:46-47):
+    # RoleBinding и SA живут в ОДНОМ namespace плагинов, поэтому subject
+    # резолвится в него же. Явное имя сломало бы перенос в другой контур.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: plugin-gateway-config
+  labels:
+    app: plugin-gateway
+    app.kubernetes.io/name: plugin-gateway
+    app.kubernetes.io/part-of: agentscale
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+data:
+  # Конфиг БЕЗ секретов: PLUGIN_CLAIMS_SECRET / PLUGIN_TENANT_DB_ADMIN_URL /
+  # PLUGIN_COSIGN_IDENTITY приносит Secret (НЕ ConfigMap), как и в
+  # base/agentscale-api/configmap.yaml:109-110. Отсутствие секрета = отказ
+  # старта (fail-closed), а не «dev-фолбэк» (§4.2, ADR-008).
+  PLUGIN_PLATFORM_ENABLED: "true"
+  PLUGIN_CLAIMS_TTL_SECONDS: "300"
+  PLUGIN_CLAIMS_ISSUER: "agentscale-plugins"
+  PLUGIN_CLAIMS_AUDIENCE: "capability-gateway"
+  PLUGIN_TOKEN_TYP: "plugin_capability"
+  # `/capabilities/v1/*` — ЕДИНСТВЕННАЯ capability-surface плагинов (§4.1).
+  # Агентский `:8001` здесь НЕ указан и недостижим по NP.
+  PLUGIN_CAPABILITIES_PATH_PREFIX: "/capabilities/v1"
+  # Пути внешней маршрутизации (§7.1); приоритет Ingress — 120.
+  PLUGIN_WEBHOOK_PATH_PREFIX: "/webhook"
+  PLUGIN_PAGE_PATH_PREFIX: "/pluginpage"
+
+  # Tenant DB: плагин получает DSN ТОЛЬКО своей БД компании. Прямой :5432
+  # используется только админской ролью при grant; пул — pgbouncer:6432.
+  PLUGIN_TENANT_DB_HOST: "pgbouncer"
+  PLUGIN_TENANT_DB_PORT: "6432"
+  PLUGIN_TENANT_DB_ADMIN_HOST: "tenant-postgres"
+  PLUGIN_TENANT_DB_ADMIN_PORT: "5432"
+
+  # Egress: правила из `CapabilityGrant` в БД, НЕ из краткоживущего JWT (§6.1,
+  # §6.3, критерий №22). Никакого статического `webhooks.example.com`.
+  PLUGIN_EGRESS_MODE: "none"
+  PLUGIN_EGRESS_APPROVED: "false"
+  PLUGIN_EGRESS_PROXY_URL: "http://egress-proxy:8080"
+
+  # Activator (§7.4): 0→1 через deployments/scale, удержание до Ready.
+  # Реестр активных job_id блокирует усыпление посреди фоновой задачи (§7.3).
+  PLUGIN_IDLE_TTL_SECONDS: "300"
+  PLUGIN_READY_TIMEOUT_SECONDS: "120"
+  PLUGIN_MAX_CONCURRENT_WAKES: "2"
+  PLUGIN_ACTIVATOR_TARGET_LABEL: "app=plugin"
+
+  # Webhook-контракт (§7.5): HMAC + идемпотентность, без изобретения нового.
+  PLUGIN_WEBHOOK_SIGNATURE_HEADER: "X-Prodavan-Signature"
+  PLUGIN_WEBHOOK_DELIVERY_HEADER: "X-Prodavan-Delivery"
+
+  # Перезаписываемые доверенные заголовки (§6.4): входящие X-Plugin-*,
+  # Cookie, X-Forwarded-* и hop-by-hop ОТБРАСЫВАЮТСЯ, а не пропускаются.
+  PLUGIN_TRUSTED_HEADERS_ALLOWLIST: "X-Plugin-ID,X-Company-ID,X-Project-ID,X-Plugin-Capability-Token"
+
+  # Артефакты: деплой ТОЛЬКО по проверенному OCI digest (§5.1, §13).
+  PLUGIN_OCI_REGISTRY: "ghcr.io/ne-tort/plugins"
+  PLUGIN_ARTIFACT_PIN_MODE: "digest"
+  PLUGIN_COSIGN_ISSUER: "https://token.actions.githubusercontent.com"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: plugin-gateway
+  labels:
+    app: plugin-gateway
+    app.kubernetes.io/name: plugin-gateway
+    app.kubernetes.io/part-of: agentscale
+    app.kubernetes.io/component: plugin-gateway
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  # ВСЕГДА running (§7.2). Не 0: Gateway — тот, кто будит остальных.
+  # 1–2 реплики по задаче; 2 даёт переживание rolling update без простоя.
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: plugin-gateway
+  template:
+    metadata:
+      labels:
+        app: plugin-gateway
+        app.kubernetes.io/name: plugin-gateway
+        app.kubernetes.io/part-of: agentscale
+        app.kubernetes.io/component: plugin-gateway
+    spec:
+      serviceAccountName: plugin-gateway
+      automountServiceAccountToken: true
+      imagePullSecrets:
+        - name: ghcr-pull
+      containers:
+        - name: gateway
+          # Образ того же API-приложения, но отдельный entrypoint плагинового
+          # контура (задача 11). Pin по digest в CI — задача 16; здесь тег
+          # `:latest` НЕ используется для плагиновых артефактов (§5.1).
+          image: ghcr.io/ne-tort/agentscale-api:latest
+          imagePullPolicy: IfNotPresent
+          command:
+            - uvicorn
+            - prodavan.main_plugin_gateway:app
+            - --host
+            - 0.0.0.0
+            - --port
+            - "8080"
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: plugin-gateway-config
+            # Секреты ОБЯЗАТЕЛЬНЫ (optional НЕ поставлен): без них pod не
+            # стартует — это и есть fail-closed, а не тихий dev-фолбэк.
+            - secretRef:
+                name: plugin-gateway-secrets
+          startupProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: http
+            periodSeconds: 10
+            failureThreshold: 12
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 20
+          resources:
+            # ЯВНЫЕ resources: LimitRange max 4Gi / 2 CPU, квота 12Gi/45 подов.
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: plugin-gateway
+  labels:
+    app: plugin-gateway
+    app.kubernetes.io/name: plugin-gateway
+    app.kubernetes.io/part-of: agentscale
+    app.kubernetes.io/component: plugin-gateway
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  selector:
+    app: plugin-gateway
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

@@ -1,0 +1,155 @@
+# NetworkPolicy `plugin-egress` — фаерволл подов плагинов (дизайн v4, §6.1, §6.2, §14 п.6).
+#
+# ОДНА из ДВУХ политик из одного генератора (задача 08): вторая, эталонная для
+# агентов, — `networkpolicy-agent.yaml` в этом же каталоге. Общая схема правил
+# и единая схема egress-аудита, но наборы портов РАЗНЫЕ: у плагинов есть
+# :5432 и :9000, у агентов — нет (§6.1).
+#
+# `namespaceSelector` ТОЛЬКО по `kubernetes.io/metadata.name`: лейблы `name`
+# в `overlays/dev/namespace.yaml` НЕТ (§6.2). Имя `agentscale-dev` — dev-контур
+# (политика сред: работаем только с dev). При переносе в prod заменить на
+# `agentscale` / `agentscale-sandboxes` (оба есть в destinations 00-project.yaml).
+#
+# ЯВНО НЕ ВКЛЮЧАЕМ `prodavan`: платформенный Postgres (`app: agentscale-postgres`,
+# БД `agentscale` / `agentscale_userdb`) в правила egress НЕ входит. У плагина
+# нет ни сетевого пути, ни credentials, ни CONNECT к этой БД (§2.1, §2.2, §6.2).
+# Дополнительно bootstrap-Job tenant-postgres.yaml снимает PUBLIC CONNECT и на
+# самом платформенном инстансе.
+#
+# kind NetworkPolicy разрешён whitelist'ом `infra/argocd/apps/00-project.yaml:81-84`.
+# Никаких CRD (KEDA/Knative/cert-manager/SPIRE).
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: plugin-egress
+  labels:
+    app: plugin
+    app.kubernetes.io/name: plugin-egress
+    app.kubernetes.io/part-of: agentscale
+    app.kubernetes.io/component: plugin-network-policy
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+    # Справочная пометка для генератора задачи 08: реальные egress-правила
+    # (`allowed_hosts` / `allowed_paths`) берутся из `CapabilityGrant` в БД,
+    # а НЕ из краткоживущего PluginClaims (§6.1, §6.3, критерий №22).
+    # Token несёт только `grant_id`.
+spec:
+  # ТОЛЬКО поды плагинов (`app: plugin` из plugin-deployment-template.yaml).
+  # НЕ `podSelector: {}`: иначе политика накроет и агентов, и сам Gateway.
+  podSelector:
+    matchLabels:
+      app: plugin
+  # Fail-closed: Ingress + Egress. Отсутствие правила = ЗАПРЕТ, не разрешение.
+  policyTypes: [Ingress, Egress]
+  ingress:
+    # Входящий трафик ТОЛЬКО от Plugin Gateway на :8080 (§6.2, §7.2).
+    # Webhook'ы и pluginpage приходят через Ingress → Gateway → плагин.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: agentscale-dev
+          podSelector:
+            matchLabels:
+              app: plugin-gateway
+      ports:
+        - protocol: TCP
+          port: 8080
+  egress:
+    # 1) Plugin Gateway /capabilities/v1/* (§6.1, §7.2). НЕ pod-gateway :8001:
+    #    агентская surface плагину недоступна (критерий №17).
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: agentscale-dev
+          podSelector:
+            matchLabels:
+              app: plugin-gateway
+      ports:
+        - protocol: TCP
+          port: 8080
+    # 2) Egress-proxy (Envoy, §6.3). Прямой выход в интернет ЗАКРЫТ: только
+    #    через прокси с allowlist'ом из CapabilityGrant и аудитом.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: agentscale-dev
+          podSelector:
+            matchLabels:
+              app: egress-proxy
+      ports:
+        - protocol: TCP
+          port: 8080
+    # 3) kube-dns. UDP 53 обязателен; TCP 53 добавлен для ответов >512 байт
+    #    (паттерн base/agentscale-sandboxes-ks/networkpolicy.yaml:39-47).
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # 4) Tenant PostgreSQL :5432 — ОТДЕЛЬНЫЙ Service, НЕ prodavan (§2.1, §6.2).
+    #    podSelector `app: tenant-postgres` точечно открывает только tenant-кластер.
+    #    Плагины в норме ходят через pgbouncer:6432 (см. правило 4a); прямой
+    #    :5432 разрешён здесь для совместимости с §6.2 дизайна и для проверки
+    #    границ, но pg_hba пускает только пару (role, tenant_<company>).
+    #    ВАЖНО: `app: agentscale-postgres` (prodavan) НИГДЕ не указан.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: agentscale-dev
+          podSelector:
+            matchLabels:
+              app: tenant-postgres
+      ports:
+        - protocol: TCP
+          port: 5432
+    # 4a) PgBouncer — один transaction-mode пул на tenant-кластер (§2.1, §14 п.2).
+    #     Именно сюда указывает TENANT_DB_DSN плагина.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: agentscale-dev
+          podSelector:
+            matchLabels:
+              app: pgbouncer
+      ports:
+        - protocol: TCP
+          port: 6432
+    # 5) MinIO :9000 — scoped object access (§5.4). Агентским Pod'ам :9000
+    #    ЗАКРЫТ; плагинам разрешён ТОЛЬКО здесь, в plugin-политике.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: agentscale-dev
+          podSelector:
+            matchLabels:
+              # as-built label в base/platform/minio.yaml:38,50,69,72.
+              app.kubernetes.io/name: agentscale-minio
+      ports:
+        - protocol: TCP
+          port: 9000
+    # 6) Kafka/Redpanda :9092 — события плагинов (§7.3), топик
+    #    `agentscale.plugin.events`, ручной commit / earliest / DLQ.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: agentscale-dev
+          podSelector:
+            matchLabels:
+              # as-built label в base/platform/kafka.yaml:21,35,55,59.
+              app.kubernetes.io/name: agentscale-kafka
+      ports:
+        - protocol: TCP
+          port: 9092
+    # ЯВНО ЗАПРЕЩЕНО (правил НЕТ, поэтому запрещено по policyTypes: Egress):
+    #   * `app: agentscale-postgres` / БД `prodavan` (:5432);
+    #   * pod-gateway :8001 (`/agent/*`, `/internal/pods/*`) — критерий №17;
+    #   * прямой 0.0.0.0/0 :80/:443 в обход egress-proxy (§6.3);
+    #   * любой иной порт/хост, не перечисленный выше (fail-closed).

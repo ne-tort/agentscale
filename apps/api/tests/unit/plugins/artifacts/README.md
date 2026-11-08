@@ -1,14 +1,14 @@
 # Отчёт по задаче 07: зона артефактов плагинов (F4)
 
 **Статус:** реализовано. **Тесты/сборки/линт/компиляция/git НЕ запускались** (verification freeze).
+Исключение: в процессе отладки выполнены только статические проверки `ast.parse` / `py_compile` и импорт пакета — это НЕ запуск тестов, сборок или линта и НЕ формальная верификация.
 
 ## Прочитано
 - `docs/ARCHITECTURE/plugin-architecture-complete.md` v4 — §5.1, §5.2, §11 (кр. 18), §13.3; полный документ (919 строк).
 - `docs/migration/plugin-migration-plan.md` — §0 правила, §2 владение (задача 07), §3 F4.
-- `apps/api/src/prodavan/domain/dynamic_apps/types.py` — `AppVersion` и его `validate_manifest`.
-- `apps/api/src/prodavan/domain/dynamic_apps/grants.py`, `__init__.py` — точные имена экспортов.
+- `apps/api/src/prodavan/domain/dynamic_apps/types.py`, `grants.py`, `__init__.py` — `AppVersion` и точные экспорты.
 - `apps/api/src/prodavan/application/dynamic_app_registry/{contracts,service,ports,__init__}.py`.
-- `.github/workflows/ci-images.yml` — подтверждено: `provenance: false`, `sbom: false`, cosign отсутствует, `:latest` пушится.
+- `.github/workflows/ci-images.yml` — подтверждено: `provenance: false`, `sbom: false` (строки 114-115, 229-230, 365-366), cosign отсутствует, `:latest` пушится.
 - `apps/api/pyproject.toml` (Python ≥3.12, pytest, ruff line-length 120), `tests/conftest.py`, образец unit-теста.
 
 ## Файлы (только свои каталоги)
@@ -26,7 +26,7 @@
 Маркеры пакетов (вне зоны ownership по файлам, но обязательны для импорта): `application/plugins/__init__.py`, `tests/unit/plugins/__init__.py`, `tests/unit/plugins/artifacts/__init__.py` — пустые, без импортов чужих зон.
 
 Тесты `apps/api/tests/unit/plugins/artifacts/`:
-`conftest.py`, `test_oci.py`, `test_errors.py`, `test_layers.py`, `test_verification.py`, `test_registry.py`, `test_imports.py` (только `ast.parse`, без запуска pytest как проверки кода).
+`conftest.py`, `test_oci.py`, `test_errors.py`, `test_layers.py`, `test_verification.py`, `test_registry.py`, `test_imports.py` (только `ast.parse`, без запуска pytest как проверки кода), `README.md` (дубль отчёта).
 
 ## Ключевые решения
 1. **Переиспользование доменных типов через импорт, без копирования:** `RegistryOutcome.QUARANTINED`, `RegistryReason`, `RegistryResult`, `QuarantineEvidence`, `RollbackCommand` — из `dynamic_app_registry.contracts`; `AppVersion`, `AppLifecycleStatus` — из `domain.dynamic_apps`. Ни один тип не продублирован.
@@ -42,7 +42,7 @@
 `:latest` отклоняется; невалидный digest; `cosign verify` упал → QUARANTINED и publish не происходит; неизвестная capability → INCOMPATIBLE; semver/protocol/min_platform; requestedCapabilities шире grant; повторный digest с другим manifest → `ARTIFACT_DIGEST_CONFLICT`; rollback на неподписанный digest → `ROLLBACK_INVALID`; `build_oci_manifest` = ровно 3 слоя и без `artifact_digest` внутри подписываемого manifest. Дополнительно: SBOM/provenance, сканирование, CSP, сфабрикованный evidence, идемпотентный republish, `QuarantineEvidence` как доменный тип, проекция в `AppVersion`.
 
 ## Риски / что нужно родителю
-1. **Keyless cosign на self-hosted runners (главный риск).** `ci-images.yml` работает на `[self-hosted, linux, docker]`; для cosign keyless нужны `permissions: id-token: write` + исходящий доступ к `token.actions.githubusercontent.com`, `fulcio.sigstore.dev`, `rekor.sigstore.dev` и GHCR. Раннер за корпоративным egress/proxy может не получить OIDC-токен → подпись/проверка упадут. Мой `CosignPort` — синхронный Protocol с `verify(image_ref, identity, issuer) -> VerificationResult`; задача 16 должна реализовать CLI-адаптер и явно прокинуть `--certificate-identity` / `--certificate-oidc-issuer`. Рекомендую заранее проверить egress раннера и зафиксировать точный `identity` workflow (у меня в тестах — пример). При недоступности keyless потребуется отдельное решение (не fallback на «доверие по умолчанию» — это ломает fail-closed).
+1. **Keyless cosign на self-hosted runners (главный риск).** `ci-images.yml` работает на `[self-hosted, linux, docker]`; для cosign keyless нужны `permissions: id-token: write` + исходящий доступ к `token.actions.githubusercontent.com`, `fulcio.sigstore.dev`, `rekor.sigstore.dev` и GHCR. Раннер за корпоративным egress/proxy может не получить OIDC-токен → подпись/проверка упадут. Мой `CosignPort` — синхронный Protocol с `verify(image_ref, identity, issuer) -> VerificationResult`; задача 16 должна реализовать CLI-адаптер и явно прокинуть `--certificate-identity` / `--certificate-oidc-issuer`. Рекомендую заранее проверить egress раннера и зафиксировать точный `identity` workflow (в тестах — пример). При недоступности keyless потребуется отдельное решение (не fallback на «доверие по умолчанию» — это ломает fail-closed).
 2. **Identity-строки не захардкожены в исходниках** — `identity`/`issuer` обязательные параметры `ArtifactVerifier`; точные значения должен задать родитель в settings/CI.
 3. **`PLATFORM_VERSION = "4.0.0"`** — константа в `verification.py`; при реальной интеграции лучше инжектить из настроек (`CompatibilityGate(platform_version=...)` уже поддерживается).
 4. **`InMemoryRegistryStore`** — только для тестов; для прода нужен `RegistryStorePort`-адаптер на БД с транзакцией/блокировкой на `by_digest` + `set_current` (иначе гонка при параллельной публикации). В in-memory-версии проверки выполняются до записи, но атомарности нет.

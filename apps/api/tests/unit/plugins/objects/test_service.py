@@ -431,6 +431,9 @@ async def test_grant_and_uninstall_of_one_company_never_name_other_bucket() -> N
     assert "tenant-co_other" not in str(buckets.deleted_prefixes)
     for event in audit.events:
         assert event["bucket"] == "tenant-co_123"
+    # Квоту тоже нельзя «выставить» чужому бакету.
+    await store.set_quota(COMPANY, PLUGIN, 4096)
+    assert all(b == "tenant-co_123" for b, _ in buckets.quotas)
 
 
 @pytest.mark.asyncio
@@ -482,6 +485,7 @@ async def test_audit_event_has_no_bytes_payload_or_secrets() -> None:
     await store.issue_credentials(COMPANY, PLUGIN)
     await store.presign(COMPANY, PLUGIN, "reports/q1.xlsx", "get")
     await store.list(COMPANY, PLUGIN)
+    await store.set_quota(COMPANY, PLUGIN, 8192)
     await store.uninstall(COMPANY, PLUGIN)
 
     assert audit.events, "аудит обязан писать события"
@@ -540,9 +544,7 @@ async def test_presigner_unavailable_fails_closed() -> None:
 
 @pytest.mark.asyncio
 async def test_presigner_error_fails_closed() -> None:
-    store, _, _, _, audit, _ = build_store(
-        presigner=_ErrorPresigner()
-    )
+    store, _, _, _, audit, _ = build_store(presigner=_ErrorPresigner())
     with pytest.raises(BucketUnavailable):
         await store.presign(COMPANY, PLUGIN, "a.txt", "get")
     assert audit.for_op("presign")[-1]["decision"] == "deny"
@@ -557,10 +559,38 @@ class _ErrorPresigner:
 
 
 @pytest.mark.asyncio
+async def test_presigner_empty_url_fails_closed() -> None:
+    from tests.unit.plugins.objects.conftest import FakePresigner  # type: ignore[import-not-found]
+
+    store, _, _, _, audit, _ = build_store(presigner=FakePresigner(empty_url=True))
+    with pytest.raises(BucketUnavailable):
+        await store.presign(COMPANY, PLUGIN, "a.txt", "get")
+    assert audit.for_op("presign")[-1]["decision"] == "deny"
+
+
+@pytest.mark.asyncio
 async def test_usage_returns_bucket_bytes_only() -> None:
     buckets = FakeBuckets(usage={"tenant-co_123": 4096})
     store, _, _, _, _, _ = build_store(buckets=buckets)
     assert await store.usage(COMPANY) == 4096
+
+
+@pytest.mark.asyncio
+async def test_set_quota_targets_only_own_bucket() -> None:
+    store, buckets, _, _, audit, _ = build_store()
+    await store.set_quota(COMPANY, PLUGIN, 8192)
+    assert buckets.quotas == [("tenant-co_123", 8192)]
+    assert "tenant-co_other" not in str(buckets.quotas)
+    assert audit.for_op("set_quota")[-1]["decision"] == "allow"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("quota", [0, -1])
+async def test_set_quota_rejects_non_positive_limit(quota: int) -> None:
+    store, buckets, _, _, _, _ = build_store()
+    with pytest.raises(BucketUnavailable):
+        await store.set_quota(COMPANY, PLUGIN, quota)
+    assert buckets.quotas == []
 
 
 @pytest.mark.asyncio
