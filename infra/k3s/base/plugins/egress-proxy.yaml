@@ -152,6 +152,12 @@ spec:
         app.kubernetes.io/name: egress-proxy
         app.kubernetes.io/part-of: agentscale
         app.kubernetes.io/component: plugin-egress-proxy
+      annotations:
+        # ConfigMap `egress-proxy-config` монтируется каталогом, но смена его
+        # /data сама по себе НЕ перекатывает Deployment (pod template не менялся).
+        # Явная ревизия гарантирует перезапуск Envoy после правки admin-адреса
+        # (127.0.0.1 -> 0.0.0.0), иначе readiness :9901 останется сломанной.
+        agentscale.io/egress-config-revision: "2"
     spec:
       terminationGracePeriodSeconds: 30
       # Зеркало ghcr: Docker Hub на холодной ноде отдаёт 429 TOOMANYREQUESTS.

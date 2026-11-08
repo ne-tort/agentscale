@@ -79,7 +79,10 @@ def test_configmap_envoy_admin_binds_0_0_0_0() -> None:
     )
     assert socket["port_value"] == ADMIN_PORT
     _assert_fail_closed(config)
-    assert "webhooks.example.com" not in raw
+    # Статический хост из ошибки v1/v3 не должен появиться в ДАННЫХ конфига.
+    # В комментариях манифеста он упомянут как запрет — это нормально, поэтому
+    # проверяем распарсенный конфиг, а не сырой текст ключа.
+    assert "webhooks.example.com" not in str(config)
 
 
 def test_deployment_readiness_probe_matches_admin_port() -> None:
