@@ -17,7 +17,7 @@ strangler, 6 таблиц состояния платформы (ревизия 
 
 | Контур | Команда | Результат |
 |---|---|---|
-| API | `pytest tests/acceptance tests/unit -q` | **4198 passed**, 0 failed |
+| API | `pytest tests/acceptance tests/unit -q` | **4199 passed**, 0 failed |
 | Web | `pnpm exec vitest run` | **785 passed**, 0 errors |
 | Web | `pnpm exec tsc --noEmit` | 0 ошибок |
 | Web | `pnpm run build` | success |
@@ -27,7 +27,7 @@ strangler, 6 таблиц состояния платформы (ревизия 
 | Alembic | чистый `postgres:17-alpine`, `upgrade head` + `check` | `2026110321 → 2026110801`, 6 таблиц, drift отсутствует |
 | Импорты | `prodavan.main`, `main_plugin_gateway`, все зоны plugins | ok |
 | Композиция | `create_app()` обоих приложений на реальном Postgres с `PLUGIN_PLATFORM_ENABLED=true` | **18/18 `STATE_KEYS`**, `PluginPlatform`, `PluginGatewayRuntime`, `PluginAdminPorts`, `PluginCapabilityService` привязаны; 10 `_UnwiredPort` зафиксированы как долг F11 |
-| HTTP smoke | TestClient по обоим apps | `/health/live` `/health/ready` → 200; `/capabilities/v1/health`, `/webhook/*`, `/api/v1/admin/plugins/` → 401/400/503 (ожидаемые fail-closed), **ни одного 500** |
+| HTTP smoke | TestClient по обоим apps | `/health/live` `/health/ready` → 200; `/capabilities/v1/health`, `/api/v1/admin/plugins/` → 401/400 (ожидаемые fail-closed); `/webhook/*` → **502 `problem+json`** при недоступном Redis; **ни одного 500** |
 
 ## Dev-кластер (последнее подтверждённое состояние до потери VM)
 
@@ -62,6 +62,20 @@ strangler, 6 таблиц состояния платформы (ревизия 
 4. `plugin-gateway` — ленивый `RedisManager` (lifespan ещё не стартовал в
    `create_app`), `PLUGIN_RUNTIME_NAMESPACE`, `_admin_ports(services_out)`,
    fail-closed `DeploymentAdminPort`, `imagePullPolicy: Always` + ревизия 5.
+5. `ignoreDifferences /data` для `egress-proxy-config` — удалён (контроллер
+   не задеплоен, Argo поэтому не применял правку конфига из Git).
+6. `/webhook/*` 500 → 502: `RedisRateLimitAdapter` бросал `RuntimeError`,
+   не ловившийся роутером. `LazyRedisManager` стал прозрачным прокси
+   (`__getattr__` + property `client`/`enabled`), а `_enforce_rate_limit`
+   оборачивает любой отказ порта в `GatewayError(UPSTREAM_ERROR)`.
+
+## Дополнительная проверка композиции (пока VM недоступна)
+
+`create_app()` **обоих** приложений собран на реальном `postgres:17`
+(`alembic upgrade head`) с `PLUGIN_PLATFORM_ENABLED=true`: все 18 `STATE_KEYS`
+присутствуют, `PluginPlatform` / `PluginGatewayRuntime` / `PluginAdminPorts` /
+`PluginCapabilityService` привязаны. Это снимает риск повторного падения
+пода на старте — предыдущие 4 инцидента в кластере были именно на этом пути.
 
 ## Внешний блокер (НЕ код)
 
