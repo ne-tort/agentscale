@@ -40,7 +40,7 @@ class RevocationPort(Protocol):
     может не иметь ``revoke`` — см. ``GrantRevocation.bind``.
     """
 
-    def is_active(self, grant_id: str, *, now: int | float | datetime) -> bool: ...
+    def is_active(self, grant_id: str, *, now: datetime) -> bool: ...
 
     def revoke(self, grant_id: str) -> None: ...
 
@@ -63,10 +63,11 @@ class InMemoryRevocation:
     def _normalize(grant_id: str) -> str:
         return (grant_id or "").strip()
 
-    def is_active(self, grant_id: str, *, now: int | float | datetime | None = None) -> bool:
+    def is_active(self, grant_id: str, *, now: datetime | None = None) -> bool:
         # ``now`` здесь не используется, но сохранён в сигнатуре ради
-        # структурного соответствия Protocol задачи 03 (БД-реализация
-        # проверяет ``expires_at``).
+        # структурного соответствия ``GrantRevocationPort`` задачи 03 (БД-
+        # реализация проверяет ``expires_at``). Допускаем ``None`` для вызовов
+        # из тестов/``is_revoked``.
         key = self._normalize(grant_id)
         if not key:
             # Пустой grant_id не может быть активным — fail-closed.

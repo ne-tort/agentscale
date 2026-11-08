@@ -99,8 +99,8 @@ class FakeTopicAdmin:
     """Администратор топиков: создаёт по запросу и помнит, что создано."""
 
     existing: set[str] = field(default_factory=set)
-    created: list[tuple[str, int, int]] = []
-    exists_calls: list[str] = []
+    created: list[tuple[str, int, int]] = field(default_factory=list)
+    exists_calls: list[str] = field(default_factory=list)
     fail_on_create: bool = False
 
     async def topic_exists(self, topic: str) -> bool:
@@ -118,7 +118,7 @@ class FakeTopicAdmin:
 
 @dataclass
 class FakeProducer:
-    sent: list[dict[str, Any]] = []
+    sent: list[dict[str, Any]] = field(default_factory=list)
     flushes: int = 0
     fail: bool = False
 
@@ -170,7 +170,7 @@ class FakeConsumer:
 
 @dataclass
 class FakeDlq:
-    records: list[Any] = []
+    records: list[Any] = field(default_factory=list)
     fail: bool = False
 
     async def publish(self, record: Any) -> None:

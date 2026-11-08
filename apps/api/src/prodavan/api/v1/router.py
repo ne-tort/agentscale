@@ -37,6 +37,8 @@ from prodavan.api.v1 import (
     health,
     identity,
     pod_modules,
+    plugin_admin,
+    plugin_gateway,
     projects,
     resources,
     stub,
@@ -85,4 +87,11 @@ router.include_router(agent_runs.router)
 router.include_router(b2b.router)
 router.include_router(external.router)
 router.include_router(internal_pods.router)
+
+# Plugin-платформа (дизайн v4). plugin_gateway и plugin_admin монтируются здесь,
+# в общем /api/v1. Роутер /capabilities/v1/* НЕ монтируется с этим префиксом:
+# у него отдельный surface и allowlist middleware (задача 04), любой внешний
+# префикс дал бы 403 на всех эндпоинтах — его подключает Plugin Gateway.
+router.include_router(plugin_gateway.router)
+router.include_router(plugin_admin.router)
 router.include_router(resources.router)

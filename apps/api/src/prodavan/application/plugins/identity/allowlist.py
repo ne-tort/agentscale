@@ -12,7 +12,8 @@
 * ``/agent/*`` (и ``/api/v1/agent/*``),
 * ``/internal/pods/*`` (в т.ч. ``workspace-archive``),
 * ``/projects/{id}/modules/*`` (в т.ч. ``.../data/t``),
-* ровно как и ``_POD_SURFACE_RE`` из ``core/middleware.py:36-38`` целиком.
+* все остальные ветки ``_POD_SURFACE_RE`` из ``core/middleware.py:36-38``
+  (``projects/{id}/infra``, ``documents``, ``web-search``, ``web-fetch``).
 
 Иначе повторяется ошибка v2/v3: смешение trust даёт плагину доступ к
 ``/agent/*`` и ``/internal/pods/{pod_id}/workspace-archive``.

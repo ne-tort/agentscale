@@ -2,9 +2,10 @@
 
 As-built Redpanda (``infra/k3s/base/platform/kafka.yaml``) работает с
 ``auto_create_topics_enabled=false``: init-Job создаёт фиксированный список
-платформенных топиков, а всё остальное обязано быть создано ЯВНО. Поэтому публикация событий плагинов без вызова :func:`ensure_topic` — это отказ, а не
-«Redpanda сам создаст»: ``PluginEventDispatcher`` вызывает ``ensure_topic``
-для основного топика и для DLQ до первой отправки (fail-closed).
+платформенных топиков, а всё остальное обязано быть создано ЯВНО.
+Поэтому публикация событий плагинов без вызова :func:`ensure_topic` — это
+отказ, а не «Redpanda сам создаст»: ``PluginEventDispatcher`` вызывает
+``ensure_topic`` для основного топика и для DLQ до первой отправки (fail-closed).
 
 Почему отдельный dispatch, а не as-built ``KafkaManager``: в
 ``core/infra/kafka_manager.py`` консьюмер проекта поднят с

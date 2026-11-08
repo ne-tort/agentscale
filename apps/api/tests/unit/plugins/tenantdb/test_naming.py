@@ -78,13 +78,14 @@ INJECTION_PAYLOADS = [
     "co@123",
     "co$123",
     "CO_123;SELECT 1",
-    "tenant_prodavan",  # попытка выйти на платформенную БД
-    "prodavan",
     "';--",
     "co_123/*x*/",
     "со_123",  # кириллица
     "co_123\x00",
 ]
+# ``tenant_prodavan`` / ``prodavan`` — валидные [a-z0-9_] id, НЕ инъекции:
+# имя БД ``tenant_prodavan`` физически отличается от платформенной ``prodavan``.
+VALID_BUT_SUSPICIOUS_IDS = ["tenant_prodavan", "prodavan", "co__123", "_co_123"]
 
 
 @pytest.mark.parametrize("payload", INJECTION_PAYLOADS)
@@ -133,6 +134,21 @@ def test_no_silent_sanitization() -> None:
     # Если бы была тихая нормализация, результат равнялся бы имени валидного id.
     with pytest.raises(TenantDbError):
         normalize_identifier("co_123; DROP DATABASE prodavan")
+
+
+@pytest.mark.parametrize("company", VALID_BUT_SUSPICIOUS_IDS)
+def test_suspicious_but_valid_id_never_targets_platform_db(company: str) -> None:
+    """Даже ``prodavan`` как company_id даёт ``tenant_prodavan``, НЕ ``prodavan``.
+
+    Префикс ``tenant_`` — часть конструктивной границы §2.1: плагин
+    физически не может получить DSN к платформенной БД через подбор id.
+    """
+    name = tenant_db_name(company)
+    assert name.startswith("tenant_")
+    assert name != "prodavan"
+    # Имя схемы тоже всегда с префиксом module_, без «голых» имён.
+    assert plugin_schema_name("prodavan") == "module_prodavan"
+    assert plugin_schema_name("prodavan").startswith("module_")
 # endregion
 
 

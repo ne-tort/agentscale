@@ -7,7 +7,14 @@ import {
   toPluginFrameError,
   type PluginErrorCode,
 } from "./errors";
-import { createPluginChannel, OPAQUE_ORIGIN, PLUGIN_RPC_PROTOCOL, type PluginChannel } from "./rpc";
+import { createPluginChannel, OPAQUE_ORIGIN, type PluginChannel } from "./rpc";
+
+/** Фабрика каналов: родительский хук может владеть lifecycle вместо компонента. */
+export type PluginChannelFactory = (
+  frame: HTMLIFrameElement,
+  expectedOrigin: string,
+  options: Parameters<typeof createPluginChannel>[2],
+) => PluginChannel;
 
 /**
  * `sandbox` плагина: `allow-scripts allow-forms`, БЕЗ `allow-same-origin`.
@@ -17,7 +24,7 @@ import { createPluginChannel, OPAQUE_ORIGIN, PLUGIN_RPC_PROTOCOL, type PluginCha
  */
 export const PLUGIN_SANDBOX = "allow-scripts allow-forms";
 
-/** Capability token НИКОГДА не должен попадать в URL (v4 §5.2, §10, §13.1). */
+/** Регистр плагинов приходит из конфигурации; capability token в URL запрещён. */
 const FORBIDDEN_QUERY_KEYS = [
   "token", "access_token", "refresh_token", "id_token", "auth", "authorization",
   "bearer", "api_key", "apikey", "secret", "capability_token", "plugin_claims",
@@ -37,36 +44,35 @@ export class UnsafePluginSrcError extends PluginFrameError {
   }
 }
 
+/** Токен в query — утечка через Referer, историю и access-логи (v4 §5.2/§10). */
+function containsTokenQuery(raw: string): boolean {
+  const lower = raw.toLowerCase();
+  if (SENSITIVE_QUERY_PATTERN.test(lower)) return true;
+  return FORBIDDEN_QUERY_KEYS.some((key) => lower.includes(`${key}=`));
+}
+
 /**
- * Проверяет `src` ДО того, как он окажется в DOM.
- *
- * Fail-closed: любой query или `#fragment` запрещены целиком. Токен в URL —
- * утечка через Referer, историю браузера и access-логи; фрагмент не отправляется
- * на сервер, но остаётся в истории и виден скриптам плагина. Отдельно
- * запрещены известные имена параметров и userinfo в URL.
+ * Проверяет `src` ДО того, как он окажется в DOM. Fail-closed:
+ * query и `#fragment` запрещены целиком, отдельно — известные имена параметров,
+ * userinfo и закодированные разделители ( `%3F` / `%23` / `%26` ).
  */
-export function assertSafeSrc(src: string): void {
+export function assertSafeSrc(src: string, base?: string): void {
   let parsed: URL;
-  try { parsed = new URL(src, window.location?.href ?? "https://shell.invalid"); }
+  const baseHref = base ?? (typeof window === "undefined" ? "https://shell.invalid" : window.location.href);
+  try { parsed = new URL(src, baseHref); }
   catch { throw new UnsafePluginSrcError("malformed"); }
 
   if (parsed.protocol !== "https:" && parsed.protocol !== "http:") throw new UnsafePluginSrcError("insecure");
   if (parsed.username || parsed.password) throw new UnsafePluginSrcError("credentials");
   if (parsed.hash) throw new UnsafePluginSrcError("fragment");
   if (parsed.search) throw new UnsafePluginSrcError("query");
-
-  // Повторная проверка по «сырому» тексту: URL-парсер нормализует часть форм,
-  // но нам важно отсечь и закодированные варианты (#token=, %3Ftoken=).
+  if (containsTokenQuery(src)) throw new UnsafePluginSrcError("query");
   const raw = src.toLowerCase();
-  if (SENSITIVE_QUERY_PATTERN.test(raw)) throw new UnsafePluginSrcError("query");
-  for (const key of FORBIDDEN_QUERY_KEYS) {
-    if (raw.includes(`${key}=`)) throw new UnsafePluginSrcError("query");
-  }
   if (raw.includes("#")) throw new UnsafePluginSrcError("fragment");
   if (raw.includes("%23") || raw.includes("%3f") || raw.includes("%26")) throw new UnsafePluginSrcError("query");
 }
 
-/** Origin для `event.origin`. Песочница без `allow-same-origin` даёт opaque origin. */
+/** Песочница без `allow-same-origin` всегда даёт opaque `event.origin` (v4 §5.3). */
 export function expectedPluginOrigin(_src: string): string {
   return OPAQUE_ORIGIN;
 }
@@ -77,6 +83,9 @@ type PluginIdentityAttributes = {
   "data-plugin-version"?: string;
 };
 
+/** `credentialless` не описан в @types/react@19; это валидный HTML-атрибут iframe. */
+type CredentiallessAttribute = { credentialless?: boolean };
+
 export type PluginFrameProps = {
   readonly pluginId: string;
   readonly companyId: string;
@@ -86,6 +95,8 @@ export type PluginFrameProps = {
   readonly publicPage?: boolean;
   readonly expectedOrigin?: string;
   readonly timeoutMs?: number;
+  /** Если задана, lifecycle канала ведёт родительский `usePluginFrame`. */
+  readonly channelFactory?: PluginChannelFactory;
   readonly onReady?: () => void;
   readonly onError?: (error: PluginFrameError) => void;
   readonly title?: string;
@@ -98,6 +109,10 @@ type FramePhase = "loading" | "ready" | "error" | "notConnected";
  * Хост iframe плагина. Владеет каналом `plugin-rpc/1` и показывает состояние
  * загрузки/ошибки/«не подключён». Никакого capability token: ни в `src`, ни в
  * postMessage, ни в состоянии компонента.
+ *
+ * iframe монтируется один раз и остаётся в DOM: канал привязан к его
+ * `contentWindow`. `src` задаётся императивно только после `assertSafeSrc`,
+ * поэтому опасный URL никогда не становится адресом фрейма.
  */
 export function PluginFrame(props: PluginFrameProps) {
   const { t } = useI18n();
@@ -112,7 +127,7 @@ export function PluginFrame(props: PluginFrameProps) {
   onReadyRef.current = props.onReady;
   onErrorRef.current = props.onError;
 
-  const { pluginId, companyId, version, src, publicPage = false, timeoutMs } = props;
+  const { pluginId, version, src, publicPage = false, timeoutMs, expectedOrigin } = props;
 
   useEffect(() => {
     setPhase("loading");
@@ -120,25 +135,29 @@ export function PluginFrame(props: PluginFrameProps) {
     channelRef.current?.dispose();
     channelRef.current = null;
 
+    const frame = frameRef.current;
+    if (!frame) return undefined;
+
+    // Пока интеграция не подтвердила grant, канал не создаётся: пустой `src`
+    // означает «данных нет» (fail-closed), а не «грузим что попало».
+    if (!src) return undefined;
+
     let srcError: PluginFrameError | undefined;
     try { assertSafeSrc(src); }
     catch (error) { srcError = toPluginFrameError(error, "unsafeSrc"); }
-    if (!companyId) srcError = new PluginFrameError("notConnected", "plugin_company_missing");
-
     if (srcError) {
+      frame.removeAttribute("src");
       setErrorCode(srcError.code);
       setPhase(srcError.code === "notConnected" ? "notConnected" : "error");
       try { onErrorRef.current?.(srcError); } catch { /* Внешний обработчик не влияет на отказ. */ }
       return undefined;
     }
 
-    const frame = frameRef.current;
-    if (!frame) return undefined;
-
-    const expectedOrigin = props.expectedOrigin ?? expectedPluginOrigin(src);
+    frame.setAttribute("src", src);
+    const targetOrigin = expectedOrigin ?? expectedPluginOrigin(src);
     let channel: PluginChannel;
     try {
-      channel = createPluginChannel(frame, expectedOrigin, {
+      const channelOptions = {
         pluginId,
         version,
         timeoutMs,
@@ -146,14 +165,19 @@ export function PluginFrame(props: PluginFrameProps) {
           setPhase("ready");
           try { onReadyRef.current?.(); } catch { /* ignore */ }
         },
-        onError: (error) => {
-          setErrorCode(error.code);
+        onError: (cause: PluginFrameError) => {
+          setErrorCode(cause.code);
           setPhase("error");
-          try { onErrorRef.current?.(error); } catch { /* ignore */ }
+          try { onErrorRef.current?.(cause); } catch { /* ignore */ }
         },
-      });
+      };
+      // Без фабрики компонент сам владеет каналом и своим cleanup.
+      channel = props.channelFactory
+        ? props.channelFactory(frame, targetOrigin, channelOptions)
+        : createPluginChannel(frame, targetOrigin, channelOptions);
     } catch (error) {
       const frameError = toPluginFrameError(error);
+      frame.removeAttribute("src");
       setErrorCode(frameError.code);
       setPhase("error");
       try { onErrorRef.current?.(frameError); } catch { /* ignore */ }
@@ -171,9 +195,7 @@ export function PluginFrame(props: PluginFrameProps) {
       channel.dispose();
       if (channelRef.current === channel) channelRef.current = null;
     };
-    // `attempt` — публичный retry; `props.expectedOrigin` участвует явно.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pluginId, companyId, version, src, timeoutMs, props.expectedOrigin, attempt]);
+  }, [pluginId, version, src, timeoutMs, expectedOrigin, props.channelFactory, attempt]);
 
   const retry = useCallback(() => setAttempt((value) => value + 1), []);
 
@@ -181,13 +203,14 @@ export function PluginFrame(props: PluginFrameProps) {
     "data-plugin-id": pluginId,
     "data-plugin-version": version,
   };
+  const credentialless: CredentiallessAttribute = { credentialless: true };
 
   const ariaLabel = props.title ?? t("plugins.open");
-  const safe = phase !== "error" && phase !== "notConnected";
 
   return <section
     className={props.className ?? "plugin-frame"}
     data-plugin-phase={phase}
+    data-plugin-company={props.companyId}
     data-plugin-public={publicPage ? "true" : "false"}
     aria-busy={phase === "loading"}
   >
@@ -200,22 +223,22 @@ export function PluginFrame(props: PluginFrameProps) {
       <button type="button" onClick={retry}>{t("plugins.retry")}</button>
     </div>}
 
-    {/* unsafe src / notConnected: iframe не монтируется вообще (fail-closed). */}
-    {safe && <iframe
+    <iframe
       ref={frameRef}
-      src={src}
       sandbox={PLUGIN_SANDBOX}
       referrerPolicy="no-referrer"
-      {...{ credentialless: true }}
+      {...credentialless}
       allow=""
       title={ariaLabel}
       aria-label={ariaLabel}
       aria-busy={phase === "loading"}
+      aria-hidden={phase === "error" || phase === "notConnected" ? true : undefined}
+      hidden={phase === "error" || phase === "notConnected" ? true : undefined}
       loading={props.loading}
       height={props.height}
       width={props.width}
       {...identity}
-    />}
+    />
 
     {phase === "ready" && <button type="button" className="plugin-frame__close" onClick={() => {
       channelRef.current?.dispose();

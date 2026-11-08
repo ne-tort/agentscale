@@ -1,7 +1,8 @@
 /**
  * Типы манифеста плагина и протокола plugin-rpc/1 (F0).
  *
- * Чистые типы: без импортов из apps/web и без рантайм-зависимостей.
+ * Чистые типы: без импортов из apps/web и без рантайм-зависимостей (кроме
+ * константы версии протокола).
  * Источник истины — docs/ARCHITECTURE/plugin-architecture-complete.md (v4).
  * Зеркало контрактов: packages/schemas/plugin-manifest/v1/{schema,protocol}.json
  * и apps/api/src/prodavan/domain/plugins/types.py.

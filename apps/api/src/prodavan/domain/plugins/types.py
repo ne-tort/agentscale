@@ -459,7 +459,7 @@ class PluginClaims:
 
 @dataclass(frozen=True, slots=True)
 class RegistryResult:
-    """Результатcompatibility gate / публикации версии (§5.1 v4)."""
+    """Результат compatibility gate / публикации версии (§5.1 v4)."""
 
     outcome: RegistryOutcome
     artifact_digest: ArtifactDigest

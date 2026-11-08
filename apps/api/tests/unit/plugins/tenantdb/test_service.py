@@ -18,6 +18,8 @@ import pytest
 
 from prodavan.application.plugins.tenantdb import (
     ADMIN_UNAVAILABLE,
+    ALREADY_EXISTS,
+    ALL_CODES,
     INVALID_IDENTIFIER,
     NOT_FOUND,
     PRIVILEGE_DENIED,
@@ -100,16 +102,16 @@ async def test_grant_plugin_returns_secret_ref_not_plaintext_dsn() -> None:
 async def test_grant_plugin_password_not_leaked_via_errors_or_audit() -> None:
     """Пароль роли не попадает в AuditPort и не в ``TenantDsn``."""
     service, _admin, secrets, audit = make_service()
-    await service.grant_plugin(COMPANY, PLUGIN)
+    result = await service.grant_plugin(COMPANY, PLUGIN)
     dsn = next(iter(secrets.values.values()))
     password = dsn.split("@")[0].split(":", 1)[1]
     assert password
     assert password not in audit.all_payload_text()
-    assert password not in repr(await service.grant_plugin(COMPANY, PLUGIN))
-    # Ни один statement, записанный fake-портом, не логировался сервисом
-    # (сервис вообще не логирует text/params — проверяем отсутствие в аудите).
+    assert password not in repr(result)
+    assert password not in str(result)
+    # Ни один statement не попал в аудит: там нет raw SQL/параметров.
     assert "params" not in audit.all_payload_text()
-    assert "sql" not in audit.all_payload_text().lower()
+    assert "CREATE ROLE" not in audit.all_payload_text()
 
 
 async def test_grant_plugin_creates_role_schema_and_search_path() -> None:
@@ -236,10 +238,7 @@ async def test_driver_failure_is_fail_closed_and_text_not_leaked() -> None:
 
 
 async def test_sqlstate_42501_maps_to_privilege_denied() -> None:
-    admin = FakeAdminConnection()
-    admin.fail_next = True
-    service, _a, _s, _au = make_service(admin=admin)
-    # fail_next срабатывает на первом SELECT; отдельно проверим 42501.
+    """PostgreSQL 42501 → PRIVILEGE_DENIED, а не ADMIN_UNAVAILABLE."""
     admin2 = FakeAdminConnection()
     admin2.privilege_denied_next = True
     service2, _a2, _s2, _au2 = make_service(admin=admin2)

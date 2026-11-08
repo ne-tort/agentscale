@@ -52,6 +52,7 @@ from prodavan.application.plugins.capabilities.contracts import (
     ObjectsListResponse,
     ObjectsScopedCredentialsRequest,
     ObjectsScopedCredentialsResponse,
+    OPERATION_TO_CAPABILITY,
     PodsInvokeRequest,
     PodsInvokeResponse,
     SecretsReadRequest,
@@ -218,7 +219,11 @@ CAPABILITY_PORT: Final[dict[str, type]] = {
     CapabilityName.NETWORK.value: NetworkPort,
 }
 
-#: Имя capability -> имя метода адаптера (типизированный dispatch без generic).
+#: Имя capability -> ГОЛЫЕ имена методов адаптера (внутренний контракт).
+#: Публичный реестр операций — ТОЧЕЧНЫЙ ``OPERATION_TO_CAPABILITY`` (§4.4):
+#: ``cache.get``, ``network.egress`` и т.д. Задача 04 шлёт точечную форму,
+#: ``PluginCapabilityService._prepare`` нормализует её в голую часть перед
+#: передачей сюда. Оба формата допустимы в ``dispatch`` ради совместимости.
 CAPABILITY_OPERATIONS: Final[dict[str, frozenset[str]]] = {
     CapabilityName.CACHE.value: frozenset({"get", "set", "delete", "incr", "publish"}),
     CapabilityName.OBJECTS.value: frozenset({"scoped_credentials", "list", "delete"}),
@@ -229,6 +234,12 @@ CAPABILITY_OPERATIONS: Final[dict[str, frozenset[str]]] = {
     CapabilityName.MCP.value: frozenset({"register"}),
     CapabilityName.SECRETS.value: frozenset({"read"}),
     CapabilityName.NETWORK.value: frozenset({"egress"}),
+}
+
+#: Точечная форма для проверок (строится из публичного реестра §4.4).
+CAPABILITY_DOTTED_OPERATIONS: Final[dict[str, frozenset[str]]] = {
+    name: frozenset(f"{name}.{op}" for op in ops)
+    for name, ops in CAPABILITY_OPERATIONS.items()
 }
 
 
@@ -281,13 +292,25 @@ class AdapterRegistry:
 def dispatch(adapter: object, capability: str, operation: str, request: object) -> TypedResponse:
     """Единственная точка typed dispatch: capability + operation + Request.
 
-    Это НЕ ``{"command": ..., "args": ...}``: ``operation`` берётся из
-    закрытого множества ``CAPABILITY_OPERATIONS``, а ``request`` — один из
-    датаклассов ``contracts.py``. Произвольная строка операции отклоняется.
+    КАНОНИЧЕСКИЙ ФОРМАТ ОПЕРАЦИИ — ТОЧЕЧНЫЙ (``cache.get``, реестр
+    ``contracts.OPERATION_TO_CAPABILITY`` из §4.4); задача 04 передаёт именно
+    его. Внутри адаптера метод называется голой частью (``get``), поэтому
+    ``dispatch`` отсекает префикс capability через ``split(".", 1)[-1]``.
+    Голая форма (``get``) тоже принимается для обратной совместимости.
+
+    Это НЕ ``{"command": ..., "args": ...}``: операция проверяется по
+    закрытому множеству, а ``request`` — один из датаклассов contracts.py.
     """
-    if operation not in CAPABILITY_OPERATIONS.get(capability, frozenset()):
+    dotted = operation if "." in operation else f"{capability}.{operation}"
+    allowed = CAPABILITY_OPERATIONS.get(capability, frozenset()) | CAPABILITY_DOTTED_OPERATIONS.get(capability, frozenset())
+    if (
+        dotted not in OPERATION_TO_CAPABILITY
+        or OPERATION_TO_CAPABILITY[dotted] != capability
+        or operation not in allowed
+    ):
         raise UnknownCapabilityError(f"{capability}/{operation}")
-    method = getattr(adapter, operation, None)
+    method_name = dotted.split(".", 1)[-1]
+    method = getattr(adapter, method_name, None)
     if not callable(method):
         raise AdapterMissingError(capability)
     response = method(request)
@@ -300,6 +323,7 @@ def dispatch(adapter: object, capability: str, operation: str, request: object) 
 __all__ = [
     "AdapterMissingError",
     "AdapterRegistry",
+    "CAPABILITY_DOTTED_OPERATIONS",
     "CAPABILITY_OPERATIONS",
     "CAPABILITY_PORT",
     "CachePort",

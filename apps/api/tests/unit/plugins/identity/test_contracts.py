@@ -6,7 +6,29 @@
 from __future__ import annotations
 
 from prodavan.application.plugins.capabilities.ports import PluginClaims as CapabilityPluginClaimsPort
-from prodavan.application.plugins.identity import PluginClaims
+from prodavan.application.plugins.identity import (
+    PLUGIN_TOKEN_ERROR_CODES,
+    PluginClaims,
+    PluginTokenErrorCode,
+)
+
+
+def test_plugin_token_error_codes_match_required_set() -> None:
+    """Все коды из ТЗ на месте; константа и StrEnum не расходятся."""
+    required = {
+        "INVALID_SIGNATURE",
+        "WRONG_AUDIENCE",
+        "WRONG_TYP",
+        "EXPIRED",
+        "MALFORMED",
+        "MISSING_CLAIM",
+        "UNKNOWN_KID",
+    }
+    assert required <= PLUGIN_TOKEN_ERROR_CODES
+    assert {code.value for code in PluginTokenErrorCode} == PLUGIN_TOKEN_ERROR_CODES
+
+
+def test_plugin_claims_satisfies_capability_protocol() -> None:
 
 
 def test_plugin_claims_satisfies_capability_protocol() -> None:

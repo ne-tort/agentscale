@@ -186,6 +186,30 @@ class PluginAdminService:
             reason=reason,
         )
 
+    async def _decision_audit(
+        self,
+        *,
+        operation: AdminOperation,
+        company_id: str,
+        plugin_id: str,
+        grant_id: str | None = None,
+    ) -> None:
+        """Зафиксировать **решение** до первой мутации (§4.5).
+
+        Если append-only sink недоступен, позитивная мутация не начинается вовсе: это
+        устраняет состояние «инфраструктура изменена, а следа нет» и делает отказ
+        настоящим fail-closed, а не post-factum исключением.
+        """
+
+        await self._audit(
+            operation=operation,
+            company_id=company_id,
+            plugin_id=plugin_id,
+            decision=AdminDecision.ALLOW,
+            grant_id=grant_id,
+            reason="decision recorded before mutation",
+        )
+
     # ------------------------------------------------------------------ grant
 
     async def grant(
@@ -254,6 +278,12 @@ class PluginAdminService:
 
             # Повтор с тем же смыслом: новый короткий токен, но без пересоздания
             # БД/схемы/bucket/grant/маршрутов.
+            await self._decision_audit(
+                operation=AdminOperation.GRANT,
+                company_id=company_id,
+                plugin_id=plugin_id,
+                grant_id=existing.grant_id,
+            )
             claims = await self._mint(existing=existing)
             routes = await self._ports.routes.register(
                 company_id=company_id, plugin_id=plugin_id, grant_id=existing.grant_id

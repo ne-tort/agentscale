@@ -10,7 +10,7 @@
   после успеха; ошибка → до 3 ретраев → DLQ → коммит. Никакого ``kick``-режима
   и ``auto_commit``: as-built ``KafkaManager`` теряет события при простое
   консьюмера (``kafka_manager.py:695-696``, §13.3);
-* ``wake_hook`` — колбэк, будующий backend плагина ДО доставки (задача 09);
+* ``wake_hook`` — колбэк, который будит backend плагина ДО доставки (задача 09);
 * идемпотентность консьюмера по ``(subscription_id, source_event_id)``, а НЕ
   по URL/hash тела;
 * аудит ``plugin_event_received`` / ``plugin_event_dlq`` без raw payload.

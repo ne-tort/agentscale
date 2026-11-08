@@ -371,7 +371,20 @@ def test_rotation_keeps_old_kid_verifiable(
 
 @pytest.mark.parametrize(
     "missing",
-    ["sub", "company_id", "plugin_id", "plugin_instance_id", "manifest_version", "grant_id", "jti", "iat", "exp", "scopes", "quota_ref"],
+    [
+        "sub",
+        "company_id",
+        "plugin_id",
+        "plugin_instance_id",
+        "manifest_version",
+        "grant_id",
+        "jti",
+        "iat",
+        "exp",
+        "scopes",
+        "quota_ref",
+        "artifact_digest",
+    ],
 )
 def test_missing_required_claim_is_rejected(
     missing: str,

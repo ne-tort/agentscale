@@ -72,7 +72,8 @@ from prodavan.application.plugins.capabilities.contracts import (
     TypedContractError,
     TypedResponse,
     empty_digest,
-)from prodavan.application.plugins.capabilities.ports import (
+)
+from prodavan.application.plugins.capabilities.ports import (
     CAPABILITY_OPERATIONS,
     AdapterMissingError,
     AdapterRegistry,
@@ -501,7 +502,7 @@ class PluginCapabilityService:
         success = invocation_event(
             envelope=invocation.envelope,
             capability=invocation.capability,
-            operation=invocation.operation,
+            operation=f"{invocation.capability}.{invocation.operation}",
             resource=core_request.resource,
             decision=AuditDecision.SUCCESS,
             code=DecisionCode.ALLOWED,
@@ -589,8 +590,20 @@ class PluginCapabilityService:
             raise TypedContractError("now must be timezone-aware")
         if not isinstance(capability, str) or capability not in PLUGIN_CAPABILITIES:
             raise UnknownCapabilityError(str(capability))
-        if OPERATION_TO_CAPABILITY.get(operation) != capability:
-            raise TypedContractError(f"operation {operation!r} does not belong to {capability!r}")
+        # КАНОНИЧЕСКИЙ ФОРМАТ НА ВХОДЕ — ТОЧЕЧНЫЙ (``cache.get``, §4.4,
+        # contracts.OPERATION_TO_CAPABILITY); задача 04 передаёт именно его.
+        # ВНУТРИ слоя используем голую часть (``get``) — это имя метода
+        # адаптера в CAPABILITY_OPERATIONS / _CoreScope / dispatch. Выбран
+        # вариант с нормализацией (не переименование публичного реестра):
+        # один формат снаружи, один внутри, без расхождений.
+        bare_operation = operation.split(".", 1)[-1]
+        if OPERATION_TO_CAPABILITY.get(f"{capability}.{bare_operation}") != capability:
+            # Отклоняем и ``cache.get`` для чужого capability, и ``get`` без
+            # префикса, если он не описан в публичном реестре.
+            if OPERATION_TO_CAPABILITY.get(operation) != capability:
+                raise TypedContractError(
+                    f"operation {operation!r} does not belong to {capability!r}"
+                )
         if capability not in CAPABILITY_BRIDGE:
             raise UnknownCapabilityError(capability)
 
@@ -622,7 +635,7 @@ class PluginCapabilityService:
         return _Invocation(
             claims=claims,
             capability=capability,
-            operation=operation,
+            operation=bare_operation,
             request=typed_request,
             envelope=envelope,
             now=now,
@@ -742,7 +755,7 @@ class PluginCapabilityService:
             artifact_digest=invocation.envelope.artifact_digest,
             grant_id=invocation.claims.grant_id,
             capability=invocation.capability,
-            operation=invocation.operation,
+            operation=f"{invocation.capability}.{invocation.operation}",
             resource=self._resource(invocation),
             decision=CapabilityDecision.DENY,
             code=code,
@@ -767,7 +780,7 @@ class PluginCapabilityService:
         event = invocation_event(
             envelope=invocation.envelope,
             capability=invocation.capability,
-            operation=invocation.operation,
+            operation=f"{invocation.capability}.{invocation.operation}",
             resource=self._resource(invocation),
             decision=AuditDecision.ERROR,
             code=DecisionCode.ADAPTER_MISSING,

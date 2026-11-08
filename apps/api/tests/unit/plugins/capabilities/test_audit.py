@@ -84,8 +84,6 @@ def test_redact_removes_password_token_sql_and_body_values() -> None:
     assert result["capability"] == "cache"
 
     # Нигде в сериализованной проекции нет исходных значений.
-    import json
-
     serialized = json.dumps(result, ensure_ascii=False)
     for leaked in ("hunter2", "eyJhbGciOi", "SELECT * FROM users", "plaintext", "a@b.c"):
         assert leaked not in serialized
@@ -108,8 +106,6 @@ def test_redact_handles_nested_and_varied_key_names() -> None:
     assert "Authorization" not in result
     assert "payload" not in result
     assert result["sql_digest"] == DIGEST
-    import json
-
     serialized = json.dumps(result)
     for leaked in ("DROP TABLE equipment", "user@example.com", "Bearer abc", '"p"', '"k"'):
         assert leaked not in serialized
@@ -173,8 +169,6 @@ def test_plugin_audit_event_has_full_plugin_identity() -> None:
 
 def test_event_rejects_long_freeform_reason() -> None:
     """reason — канонический код, а не произвольный текст с данными."""
-    import pytest
-
     with pytest.raises(ValueError):
         PluginAuditEvent(
             request_id="req-1", company_id="co_123", subject_id="sub-1",
@@ -222,8 +216,6 @@ def test_success_audit_is_a_separate_event_from_authorization() -> None:
 
 def test_append_failure_is_not_silent_allow() -> None:
     """Append failure позитивной мутации = deny/system failure (§4.5)."""
-    import pytest
-
     sink = FailingAudit()
     event = PluginAuditEvent(
         request_id="req-1", company_id="co_123", subject_id="sub-1",
@@ -231,3 +223,4 @@ def test_append_failure_is_not_silent_allow() -> None:
         capability="cache", operation="cache.get", resource="key", occurred_at=NOW,
     )
     with pytest.raises(RuntimeError):
+        sink.append(event)

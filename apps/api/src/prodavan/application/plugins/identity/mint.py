@@ -223,7 +223,8 @@ def build_payload(
         "exp": now + ttl_seconds,
     }
     # Дополнительная страховка: даже если grant — произвольный dict с полями
-    # egress/quotas, в токен они не попадают (критерий №22).
+    # egress/quotas, в токен они не попадают (критерий №22). Payload собран
+    # из фиксированного набора ключей, поэтому чужие поля не проходят.
     for name in FORBIDDEN_CLAIMS:
         payload.pop(name, None)
     return payload
@@ -266,6 +267,11 @@ def claims_from_payload(payload: Mapping[str, Any]) -> PluginClaims:
             code=PluginTokenErrorCode.MALFORMED,
             detail="plugin token iat/exp must be integer epoch seconds",
         ) from exc
+    if isinstance(payload["iat"], bool) or isinstance(payload["exp"], bool):
+        raise PluginTokenError(
+            code=PluginTokenErrorCode.MALFORMED,
+            detail="plugin token iat/exp must not be booleans",
+        )
     if exp <= iat:
         raise PluginTokenError(
             code=PluginTokenErrorCode.MALFORMED,

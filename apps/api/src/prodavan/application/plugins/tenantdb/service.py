@@ -40,11 +40,7 @@ from typing import Any, Literal, Mapping, Protocol, runtime_checkable
 from urllib.parse import quote
 
 from prodavan.application.plugins.tenantdb import sql
-from prodavan.application.plugins.tenantdb.errors import (
-    ADMIN_UNAVAILABLE,
-    PRIVILEGE_DENIED,
-    TenantDbError,
-)
+from prodavan.application.plugins.tenantdb.errors import TenantDbError
 from prodavan.application.plugins.tenantdb.naming import (
     bucket_name,
     plugin_role_name,
@@ -203,7 +199,7 @@ _PASSWORD_BYTES = 32
 
 # SQLSTATE, которые маппятся в PRIVILEGE_DENIED. Остальные ошибки драйвера
 # считаются недоступностью админского соединения (fail-closed).
-_PRIVILEGE_SQLSTATES = frozenset({"42501", "42883", "22023"})
+_PRIVILEGE_SQLSTATES = frozenset({"42501"})
 # endregion
 
 

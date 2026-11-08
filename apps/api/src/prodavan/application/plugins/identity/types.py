@@ -65,6 +65,23 @@ REQUIRED_CLAIMS: Final[frozenset[str]] = frozenset(
 # Claim, которые запрещено класть в токен: политики живут в БД (критерий №22).
 FORBIDDEN_CLAIMS: Final[frozenset[str]] = frozenset({"egress", "quotas"})
 
+# Все machine-readable коды отказов контура. Перечислены отдельно от StrEnum,
+# чтобы родитель/задача F2 мог сверить словарь без импорта исключения.
+PLUGIN_TOKEN_ERROR_CODES: Final[frozenset[str]] = frozenset(
+    {
+        "INVALID_SIGNATURE",
+        "WRONG_AUDIENCE",
+        "WRONG_TYP",
+        "WRONG_ISSUER",
+        "EXPIRED",
+        "MALFORMED",
+        "MISSING_CLAIM",
+        "UNKNOWN_KID",
+        "REVOKED",
+        "FORBIDDEN_SURFACE",
+    }
+)
+
 
 class PluginTokenErrorCode(StrEnum):
     """Стабильные machine-readable коды отказов (fail-closed)."""

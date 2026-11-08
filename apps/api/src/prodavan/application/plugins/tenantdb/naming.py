@@ -70,6 +70,11 @@ def _validate_raw(raw: object, *, kind: str, operation: str) -> str:
     value = raw.strip().lower()
     if not value:
         raise TenantDbError.invalid_identifier(operation, kind=kind)
+    # Вырожденные id из одних подчёркиваний: ``tenant__`` / ``module___``
+    # технически валидны для PG, но это пустышка, которая легко коллидирует
+    # с другим «мусорным» вводом. Отвергаем явно.
+    if not value.strip("_"):
+        raise TenantDbError.invalid_identifier(operation, kind=kind)
     if _IDENT_RE.fullmatch(value) is None:
         raise TenantDbError.invalid_identifier(operation, kind=kind)
     # Дополнительная проверка на случай будущего ослабления regex:

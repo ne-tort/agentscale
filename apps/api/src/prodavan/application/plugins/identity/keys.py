@@ -257,6 +257,7 @@ def _public_okp_jwk(entry: KeyEntry) -> dict[str, Any]:
     """Построить публичный OKP-JWK из Ed25519 PEM через ``cryptography``."""
     try:
         from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
         from jwt.utils import base64url_encode
     except ImportError as exc:  # pragma: no cover - зависит от окружения
         raise PluginTokenError(
@@ -269,6 +270,8 @@ def _public_okp_jwk(entry: KeyEntry) -> dict[str, Any]:
         if isinstance(pem, str):
             pem = pem.encode("utf-8")
         public_key = serialization.load_pem_public_key(pem)
+        if not isinstance(public_key, Ed25519PublicKey):
+            raise ValueError("plugin JWKS key must be Ed25519, not another algorithm")
         raw = public_key.public_bytes(
             encoding=serialization.Encoding.Raw,
             format=serialization.PublicFormat.Raw,

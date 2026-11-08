@@ -26,9 +26,9 @@ from prodavan.application.plugins.events import (
     AUDIT_PLUGIN_EVENT_RECEIVED,
     CONSUMER_AUTO_OFFSET_RESET,
     CONSUMER_ENABLE_AUTO_COMMIT,
+    PLUGIN_EVENTS_TOPIC,
     DeliveryOutcome,
     IdempotencyKey,
-    PLUGIN_EVENTS_TOPIC,
     PluginEventError,
     PluginEventErrorCode,
     consumer_config,
@@ -458,9 +458,10 @@ def _source_files() -> list[Path]:
 def test_events_zone_never_imports_webhook_outbox() -> None:
     """§13.3: outbox webhook_deliveries остаётся ТОЛЬКО для исходящих вебхуков.
 
-    Проверяем по AST всех модулей зоны: ни прямого импорта моделей/сервиса
-    outbox, ни упоминания ``webhook_deliveries`` как шины, ни ``KafkaManager``
-    (as-built kick-режим), ни ``celery``.
+    Проверяем по AST всех модулей зоны: нет импорта моделей/сервиса outbox,
+    нет ``KafkaManager`` (as-built kick-режим), нет ``celery``/``prodavan.jobs``.
+    Docstring-константы исключены: в них outbox упоминается лишь как ЗАПРЕЩЁННЫЙ
+    механизм (это комментарий, а не использование шины).
     """
 
     files = _source_files()
@@ -468,6 +469,7 @@ def test_events_zone_never_imports_webhook_outbox() -> None:
     forbidden_modules = (
         "webhook_deliveries",
         "WebhookDeliveryRow",
+        "WebhookSubscriptionRow",
         "WebhookService",
         "application.external",
         "core.infra.kafka_manager",
@@ -489,13 +491,41 @@ def test_events_zone_never_imports_webhook_outbox() -> None:
                 assert forbidden not in name, (
                     f"{path.name}: запрещённый импорт {name!r} (outbox/kick/celery)"
                 )
-        # Явная проверка текста: строка-константа 'webhook_deliveries' как
-        # транспорт тоже недопустима (в комментариях/докстрингах она встречается
-        # только как НАЗВАНИЕ запрещённого механизма, но не в коде).
+
+        # Строковые константы КОДА (не докстринги) не должны называть outbox
+        # транспортом: ищем только литералы внутри функций/присваиваний.
+        docstring_lines: set[int] = set()
         for node in ast.walk(tree):
-            if isinstance(node, ast.Constant) and isinstance(node.value, str):
-                assert "webhook_deliveries" not in node.value, (
-                    f"{path.name}: outbox упомянут как строка в коде"
+            if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+                body = getattr(node, "body", [])
+                if (
+                    body
+                    and isinstance(body[0], ast.Expr)
+                    and isinstance(body[0].value, ast.Constant)
+                    and isinstance(body[0].value.value, str)
+                ):
+                    first = body[0]
+                    docstring_lines.update(range(first.lineno, (first.end_lineno or first.lineno) + 1))
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Constant)
+                and isinstance(node.value, str)
+                and node.lineno not in docstring_lines
+                and "webhook_deliveries" in node.value
+            ):
+                pytest.fail(f"{path.name}: outbox используется как строка в коде")
+
+
+def test_events_zone_does_not_depend_on_sqlalchemy_or_outbox_models() -> None:
+    """Дополнительно: зона не тянет ORM/БД — только порты (F11 подключит адаптеры)."""
+
+    files = _source_files()
+    for path in files:
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.module:
+                assert not node.module.startswith(("sqlalchemy", "prodavan.infrastructure")), (
+                    f"{path.name}: неожидаемая зависимость {node.module!r}"
                 )
 
 
