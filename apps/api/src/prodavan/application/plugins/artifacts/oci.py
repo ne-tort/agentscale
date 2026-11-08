@@ -22,6 +22,9 @@ _FULL_REF_PATTERN = re.compile(
 _REPOSITORY_PATTERN = re.compile(
     r"^[a-z0-9]+(?:[._-][a-z0-9]+)*(?:/[a-z0-9]+(?:[._-][a-z0-9]+)*)*$"
 )
+_MEDIA_TYPE_PATTERN = re.compile(
+    r"[a-z0-9]+(?:[.-][a-z0-9]+)*/[a-z0-9]+(?:[.+-][a-z0-9]+)*"
+)
 
 FORBIDDEN_TAGS: frozenset[str] = frozenset({"latest"})
 PLUGIN_PROTOCOL = "plugin-rpc/1"
@@ -30,7 +33,14 @@ BACKEND_MEDIA_TYPE = "application/vnd.oci.image.layer.v1.tar+gzip"
 MIGRATIONS_MEDIA_TYPE = "application/vnd.agentscale.plugin.liquibase+xml"
 
 
-def is_valid_digest(digest: str) -> bool:
+def _media_type_ok(media_type: object) -> bool:
+    return (
+        isinstance(media_type, str)
+        and _MEDIA_TYPE_PATTERN.fullmatch(media_type) is not None
+    )
+
+
+def is_valid_digest(digest: object) -> bool:
     """Строгая проверка digest: только нижний регистр hex и ровно 64 символа."""
     return isinstance(digest, str) and _DIGEST_PATTERN.fullmatch(digest) is not None
 
@@ -71,9 +81,7 @@ class OciArtifactRef:
         но проверяется: пустой/некорректный тип — fail-closed.
         Возвращается канонический ``image_ref`` по digest.
         """
-        if not isinstance(media_type, str) or not re.fullmatch(
-            r"[a-z0-9]+(?:[.-][a-z0-9]+)*/[a-z0-9]+(?:[.+-][a-z0-9]+)*", media_type
-        ):
+        if not _media_type_ok(media_type):
             raise ValueError("media_type must be a valid IANA-style media type")
         return self.image_ref()
 

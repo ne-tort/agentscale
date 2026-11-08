@@ -111,8 +111,11 @@ jobs:
           context: .
           file: apps/api/Dockerfile
           push: ${{ steps.meta.outputs.push }}
-          provenance: false
-          sbom: false
+          # Plugin-платформа (дизайн v4) требует проверяемую цепочку поставки:
+          # cosign верифицирует ОБРАЗ по digest, а SBOM/provenance дают содержимое
+          # и происхождение. Раньше обе опции были явно выключены.
+          provenance: true
+          sbom: true
           tags: |
             ${{ steps.meta.outputs.api }}:${{ steps.meta.outputs.tag }}
             ${{ steps.meta.outputs.api }}:latest
@@ -226,8 +229,8 @@ jobs:
           file: apps/web/Dockerfile
           target: runtime
           push: ${{ steps.meta.outputs.push }}
-          provenance: false
-          sbom: false
+          provenance: true
+          sbom: true
           tags: |
             ${{ steps.meta.outputs.web }}:${{ steps.meta.outputs.tag }}
             ${{ steps.meta.outputs.web }}:latest
@@ -362,8 +365,8 @@ jobs:
           context: searchnet
           file: searchnet/Dockerfile
           push: true
-          provenance: false
-          sbom: false
+          provenance: true
+          sbom: true
           # Токен поднимает лимит GitHub API, из которого camoufox качает
           # бинарники и fpgen-модель: без него запрос анонимный и упирается в
           # 403 rate-limit (тот самый «пустой /root/.cache/camoufox при exit 0»).

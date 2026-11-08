@@ -50,6 +50,15 @@ class InvalidObjectKey(ObjectAccessDenied):
     MESSAGE = "Недопустимый ключ объекта или идентификатор области"
 
 
+class InvalidObjectMethod(InvalidObjectKey):
+    """``method`` presign не ``get``/``put``."""
+
+    CODE = "INVALID_OBJECT_METHOD"
+    STATUS = 400
+    TITLE = "Invalid object method"
+    MESSAGE = "Метод presigned URL должен быть get или put"
+
+
 class BucketUnavailable(PluginObjectError):
     """``BucketAdminPort`` / ``PresignPort`` недоступен или вернул мусор."""
 
@@ -81,6 +90,7 @@ __all__ = [
     "PluginObjectError",
     "ObjectAccessDenied",
     "InvalidObjectKey",
+    "InvalidObjectMethod",
     "BucketUnavailable",
     "StsUnavailable",
     "AuditUnavailable",

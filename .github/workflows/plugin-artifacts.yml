@@ -1,0 +1,544 @@
+# CI OCI-артефактов плагинов (§5.1 дизайна v4, F4, критерий 18).
+#
+# ОТДЕЛЬНЫЙ workflow: НЕ является частью ci-images.yml. Платформенные образы
+# (apps/api, apps/web, searchnet) ведёт родитель — там сейчас provenance: false,
+# sbom: false, cosign отсутствует, теги ':latest' + ':sha12'. Здесь, для плагинов,
+# наоборот: provenance + SBOM + cosign keyless + ТОЛЬКО pin по digest.
+#
+# Риск self-hosted runners (ОБЯЗАТЕЛЬНО проверить до первого боевого прогона):
+#   1. Keyless OIDC: cosign получает Fulcio-сертификат через ACTIONS_ID_TOKEN_*
+#      и требует permissions: id-token: write. На GitHub-hosted это работает
+#      «из коробки», на self-hosted — нужно убедиться, что runner получает
+#      OIDC-токен (не отключён org/repo policy) и что cert identity совпадает
+#      с COSIGN_CERTIFICATE_IDENTITY ниже. Без этого cosign sign/verify упадёт
+#      и verify-before-publish честно уведёт артефакт в QUARANTINED.
+#   2. Приватный GHCR: push по secrets.GHCR_PUSH_TOKEN || GITHUB_TOKEN; у токена
+#      должен быть scope write:packages. cosign sign/verify и oras используют
+#      те же креденшелы из docker/login-action.
+#   3. Fallback, если keyless OIDC недоступен на self-hosted: перейти на
+#      cosign с ЗАФИКСИРОВАННЫМ KMS-ключом (например, GCP KMS / HashiCorp Vault
+#      / AWS KMS), передать --key <kms-uri> и в verify заменить
+#      --certificate-identity/--certificate-oidc-issuer на --key <pub|kms>.
+#      Запрещено «временно отключить проверку подписи» — это ломает критерий 18.
+#
+# Fail-closed: при отсутствии digest из output сборки job падает; ':latest'
+# запрещён явной проверкой; любая ошибка cosign verify -> QUARANTINED, а не
+# публикация. Тесты/сборки/cosign/docker/git в этой сессии НЕ запускались.
+
+name: Plugin OCI Artifacts
+
+on:
+  workflow_dispatch:
+    inputs:
+      plugin_id:
+        description: "Идентификатор плагина (например mod_equipment); каталог packages/plugins/<id>"
+        type: string
+        required: true
+      version:
+        description: "semver версия артефакта (без ':latest'); например 1.2.0"
+        type: string
+        required: true
+      manifest_path:
+        description: "Путь до исходного manifest.json плагина (источник capabilities/min_platform_version)"
+        type: string
+        required: false
+        default: ""
+      platform_version:
+        description: "semver версия ПЛАТФОРМЫ для CompatibilityGate (независимая от манифеста!)"
+        type: string
+        required: false
+        default: ""
+      granted_capabilities:
+        description: "Выданные CapabilityGrant через запятую. Пусто = QUARANTINED (fail-closed)"
+        type: string
+        required: false
+        default: ""
+      min_platform_version:
+        description: "Переопределить min_platform_version, если его нет в исходном манифесте"
+        type: string
+        required: false
+        default: ""
+  push:
+    branches: [main]
+    paths:
+      # «Когда появятся»: каталог plugins ещё не создан, но триггер уже готов.
+      - "packages/plugins/**"
+      - ".github/workflows/plugin-artifacts.yml"
+      - ".github/scripts/plugin_manifest_builder.py"
+      - ".github/scripts/plugin_verify.py"
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write # ОБЯЗАТЕЛЕН для cosign keyless (Fulcio OIDC)
+  actions: read
+
+env:
+  REGISTRY: ghcr.io
+  ARTIFACT_TYPE: application/vnd.agentscale.plugin.oci
+  FRONTEND_MEDIA_TYPE: application/vnd.agentscale.plugin.frontend
+  MIGRATIONS_MEDIA_TYPE: application/vnd.agentscale.plugin.liquibase+xml
+  MANIFEST_MEDIA_TYPE: application/vnd.oci.image.manifest.v1+json
+
+jobs:
+  publish-artifact:
+    name: cosign + SBOM + provenance + pin по digest
+    runs-on: [self-hosted, linux, docker] # как в ci-images.yml
+    timeout-minutes: 60
+    outputs:
+      backend_digest: ${{ steps.digest.outputs.backend_digest }}
+      artifact_digest: ${{ steps.oras.outputs.artifact_digest }}
+      artifact_ref: ${{ steps.oras.outputs.artifact_ref }}
+      backend_ref: ${{ steps.digest.outputs.backend_ref }}
+      decision: ${{ steps.verify.outputs.decision }}
+      code: ${{ steps.verify.outputs.code }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ---------------------------------------------------------------------
+      # Инструменты. Версии ЗАФИКСИРОВАНЫ: cosign-installer и setup-oras
+      # сами проверяют checksum загружаемых бинарников. Fallback (если actions
+      # недоступны на self-hosted) — curl + ЯВНАЯ проверка sha256 перед
+      # установкой в /usr/local/bin; без проверки checksum бинарник не ставим.
+      # ---------------------------------------------------------------------
+      - name: Install cosign (pinned, checksum-verified)
+        uses: sigstore/cosign-installer@v3
+        with:
+          cosign-release: "v2.4.1"
+
+      - name: Install oras (pinned, checksum-verified)
+        uses: oras-project/setup-oras@v1
+        with:
+          version: "1.2.3"
+
+      - name: Toolchain sanity (fail-closed)
+        run: |
+          set -euo pipefail
+          command -v cosign >/dev/null || { echo "::error::cosign не установлен"; exit 1; }
+          command -v oras >/dev/null || { echo "::error::oras не установлен"; exit 1; }
+          cosign version
+          oras version
+
+      # ---------------------------------------------------------------------
+      # Входные данные. workflow_dispatch даёт inputs; push — нет, поэтому
+      # выводим plugin_id/version из изменённого packages/plugins/**. Если
+      # однозначно вывести нельзя — ПАДАЕМ, а не публикуем «что-то».
+      # ---------------------------------------------------------------------
+      - name: Resolve plugin inputs (fail-closed, без ':latest')
+        id: resolve
+        env:
+          IN_PLUGIN_ID: ${{ inputs.plugin_id }}
+          IN_VERSION: ${{ inputs.version }}
+          IN_MANIFEST_PATH: ${{ inputs.manifest_path }}
+          IN_PLATFORM_VERSION: ${{ inputs.platform_version }}
+          IN_GRANTED: ${{ inputs.granted_capabilities }}
+          IN_MIN_PLATFORM: ${{ inputs.min_platform_version }}
+          EVENT_BEFORE: ${{ github.event.before }}
+          EVENT_SHA: ${{ github.sha }}
+          EVENT_NAME: ${{ github.event_name }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, os, re
+
+          event = os.environ["EVENT_NAME"]
+          plugin_id = os.environ.get("IN_PLUGIN_ID", "").strip()
+          version = os.environ.get("IN_VERSION", "").strip()
+          manifest_path = os.environ.get("IN_MANIFEST_PATH", "").strip()
+
+          # ЯВНЫЙ запрет ':latest' на входе ещё до сборки.
+          for name, value in (("plugin_id", plugin_id), ("version", version),
+                             ("manifest_path", manifest_path)):
+              if ":latest" in value or value.endswith("/latest"):
+                  raise SystemExit(f"::error::{name}: ':latest' запрещён для плагинов")
+
+          if event == "push" and not plugin_id:
+              # Пытаемся однозначно вывести плагин из изменённых manifest.json.
+              import subprocess
+              before = os.environ.get("EVENT_BEFORE", "")
+              sha = os.environ["EVENT_SHA"]
+              args = ["git", "diff", "--name-only", (before or "HEAD~1"), sha,
+                      "--", "packages/plugins"]
+              changed = subprocess.run(args, check=False, capture_output=True, text=True).stdout
+              candidates = sorted({
+                  p.split("/")[2] for p in changed.splitlines()
+                  if p.startswith("packages/plugins/") and len(p.split("/")) > 3
+              })
+              if len(candidates) == 1:
+                  plugin_id = candidates[0]
+              else:
+                  raise SystemExit(
+                      "::error::push без inputs: не удалось однозначно определить plugin_id "
+                      f"(кандидаты: {candidates}); используйте workflow_dispatch"
+                  )
+
+          if not plugin_id:
+              raise SystemExit("::error::plugin_id не задан — публикация запрещена (fail-closed)")
+          if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,62}", plugin_id):
+              raise SystemExit(f"::error::некорректный plugin_id: {plugin_id!r}")
+
+          if not manifest_path:
+              manifest_path = f"packages/plugins/{plugin_id}/manifest.json"
+          if not os.path.isfile(manifest_path):
+              raise SystemExit(
+                  f"::error::исходный манифест не найден: {manifest_path!r} (fail-closed)"
+              )
+
+          with open(manifest_path, "r", encoding="utf-8") as handle:
+              src = json.load(handle)
+
+          if not version:
+              version = str(src.get("version", "")).strip()
+          # Строгий semver проверяется и здесь, и в plugin_manifest_builder.
+          semver = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)"
+                              r"(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
+                              r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$")
+          if not semver.fullmatch(version):
+              raise SystemExit(f"::error::version не semver: {version!r} (fail-closed)")
+
+          caps = src.get("capabilities", src.get("requestedCapabilities", []))
+          if isinstance(caps, str):
+              caps = [part.strip() for part in caps.split(",") if part.strip()]
+          if not isinstance(caps, list):
+              raise SystemExit("::error::capabilities должны быть списком (fail-closed)")
+
+          min_platform = (
+              os.environ.get("IN_MIN_PLATFORM", "").strip()
+              or str(src.get("min_platform_version", "")).strip()
+          )
+          if not min_platform:
+              raise SystemExit(
+                  "::error::min_platform_version отсутствует в манифесте и не передан "
+                  "через input (fail-closed)"
+              )
+
+          owner = os.environ["OWNER"].lower()
+          def out(key, value):
+              print(f"{key}={value}")
+
+          out("plugin_id", plugin_id)
+          out("version", version)
+          out("manifest_path", manifest_path)
+          out("capabilities", ",".join(str(c).strip() for c in caps))
+          out("min_platform_version", min_platform)
+          out("platform_version", os.environ.get("IN_PLATFORM_VERSION", "").strip())
+          out("granted_capabilities", os.environ.get("IN_GRANTED", "").strip())
+          out("backend_image", f"ghcr.io/{owner}/plugins/{plugin_id}/backend")
+          out("artifact_repo", f"ghcr.io/{owner}/plugins/{plugin_id}")
+          out("frontend_dir", f"packages/plugins/{plugin_id}/frontend/dist")
+          out("migrations_dir", f"packages/plugins/{plugin_id}/migrations")
+          out("dockerfile", f"packages/plugins/{plugin_id}/Dockerfile")
+          PY
+
+      - name: Check plugin source layout (fail-closed)
+        env:
+          FRONTEND_DIR: ${{ steps.resolve.outputs.frontend_dir }}
+          MIGRATIONS_DIR: ${{ steps.resolve.outputs.migrations_dir }}
+          DOCKERFILE: ${{ steps.resolve.outputs.dockerfile }}
+        run: |
+          set -euo pipefail
+          for path in "$FRONTEND_DIR" "$MIGRATIONS_DIR"; do
+            if [[ ! -d "$path" ]]; then
+              echo "::error::каталог слоя отсутствует: $path"; exit 1
+            fi
+            if [[ -z "$(ls -A "$path")" ]]; then
+              echo "::error::каталог слоя пуст: $path (ровно 3 слоя обязательны)"; exit 1
+            fi
+          done
+          if [[ ! -f "$DOCKERFILE" ]]; then
+            echo "::error::Dockerfile плагина отсутствует: $DOCKERFILE"; exit 1
+          fi
+
+      # ---------------------------------------------------------------------
+      # Сборка backend-образа. ТОЛЬКО provenance: true + sbom: true (в отличие
+      # от ci-images.yml, где они выключены). ':latest' НЕ используется НИГДЕ.
+      #
+      # buildx обязан запушить образ под каким-то именем; единственный тег —
+      # неизменяемый sha-тег, который НИКОГДА не потребляется дальше. Вся
+      # цепочка (cosign sign, manifest, verify, summary) работает исключительно
+      # по @sha256:<digest> из steps.build.outputs.digest. При пустом digest —
+      # немедленный fail (см. следующий шаг).
+      # ---------------------------------------------------------------------
+      - name: Use persistent buildx builder (как в ci-images.yml)
+        run: |
+          set -euo pipefail
+          if ! docker buildx inspect agentscale-ci >/dev/null 2>&1; then
+            docker buildx create --name agentscale-ci \
+              --driver docker-container --driver-opt network=host \
+              --config /etc/buildkit/buildkitd.toml \
+              || docker buildx create --name agentscale-ci \
+                --driver docker-container --driver-opt network=host
+          fi
+          docker buildx use agentscale-ci
+          docker buildx inspect --bootstrap agentscale-ci >/dev/null
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GHCR_PUSH_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Build backend image (provenance + SBOM, push, БЕЗ :latest)
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ steps.resolve.outputs.dockerfile }}
+          push: true
+          provenance: true
+          sbom: true
+          # НЕ ':latest'. Немутабельный sha-тег — только цель push для buildx.
+          tags: ${{ steps.resolve.outputs.backend_image }}:sha-${{ github.sha }}
+
+      - name: Resolve digest + ЯВНЫЙ запрет ':latest' (fail-closed)
+        id: digest
+        env:
+          BACKEND_IMAGE: ${{ steps.resolve.outputs.backend_image }}
+          RAW_DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          DIGEST="${RAW_DIGEST:-}"
+          if [[ -z "$DIGEST" ]]; then
+            echo "::error::docker/build-push-action не вернул outputs.digest — публикация запрещена"
+            exit 1
+          fi
+          if [[ ! "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::невалидный digest: '$DIGEST' (ожидался ^sha256:[0-9a-f]{64}$)"
+            exit 1
+          fi
+          BACKEND_REF="${BACKEND_IMAGE}@${DIGEST}"
+          # ЯВНЫЙ запрет ':latest' во всех ссылках, которые пойдут дальше.
+          for ref in "$BACKEND_REF" "$BACKEND_IMAGE" "${{ steps.resolve.outputs.version }}"; do
+            case "$ref" in
+              *:latest*|*/latest) echo "::error::':latest' запрещён: $ref"; exit 1 ;;
+            esac
+          done
+          {
+            echo "backend_digest=$DIGEST"
+            echo "backend_ref=$BACKEND_REF"
+          } >> "$GITHUB_OUTPUT"
+          echo "Backend закреплён по digest: $BACKEND_REF"
+
+      # ---------------------------------------------------------------------
+      # Подписываем backend-образ ДО того, как на него сошлётся артефакт.
+      # ---------------------------------------------------------------------
+      - name: cosign sign backend image (keyless OIDC, по digest)
+        env:
+          BACKEND_REF: ${{ steps.digest.outputs.backend_ref }}
+        run: |
+          set -euo pipefail
+          # Keyless: токен из permissions: id-token: write. --yes убирает
+          # интерактивное подтверждение (на self-hosted раннере иначе зависнет).
+          cosign sign --yes "$BACKEND_REF"
+          echo "Подписан: $BACKEND_REF"
+
+      # ---------------------------------------------------------------------
+      # Подписываемый OCI-манифест: ровно 3 слоя, semver, plugin-rpc/1,
+      # capability allowlist, БЕЗ artifact_digest/signature (самореференция).
+      # ---------------------------------------------------------------------
+      - name: Build signed OCI manifest (pure-python, fail-closed)
+        env:
+          PLUGIN_ID: ${{ steps.resolve.outputs.plugin_id }}
+          VERSION: ${{ steps.resolve.outputs.version }}
+          BACKEND_DIGEST: ${{ steps.digest.outputs.backend_digest }}
+          FRONTEND_DIR: ${{ steps.resolve.outputs.frontend_dir }}
+          MIGRATIONS_DIR: ${{ steps.resolve.outputs.migrations_dir }}
+          CAPABILITIES: ${{ steps.resolve.outputs.capabilities }}
+          MIN_PLATFORM_VERSION: ${{ steps.resolve.outputs.min_platform_version }}
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/plugin_manifest_builder.py \
+            --plugin-id "$PLUGIN_ID" \
+            --version "$VERSION" \
+            --backend-digest "$BACKEND_DIGEST" \
+            --frontend-dir "$FRONTEND_DIR" \
+            --migrations-dir "$MIGRATIONS_DIR" \
+            --capabilities "$CAPABILITIES" \
+            --min-platform-version "$MIN_PLATFORM_VERSION" \
+            > oci-manifest.json
+          # Дополнительная страховка: в подписанном теле нет ':latest' и
+          # самореференции (builder проверяет это сам, но CI проверяет явно).
+          python3 - <<'PY'
+          import json, sys
+          with open("oci-manifest.json", encoding="utf-8") as f:
+              raw = f.read()
+          if ":latest" in raw:
+              sys.exit("::error::подписанный манифест содержит ':latest'")
+          m = json.loads(raw)
+          if m.get("schemaVersion") != 2 or len(m.get("layers", [])) != 3:
+              sys.exit("::error::манифест должен иметь schemaVersion=2 и ровно 3 слоя")
+          print("OCI-манифест: 3 слоя, без самореференции, без ':latest'")
+          PY
+
+      # ---------------------------------------------------------------------
+      # oras push: frontend/dist + migrations + manifest как layers,
+      # аннотации из подписываемого манифеста. ':latest' отсутствует: тег —
+      # семвер версия (непереиспользуемая), а весь downstream — по @digest.
+      #
+      # НЮАНС СООТВЕТСТВИЯ §5.1 (на ревью родителю): логический манифест из
+      # plugin_manifest_builder описывает РОВНО 3 слоя — (1) backend image ref
+      # по digest, (2) frontend/dist, (3) migrations. Физически oras пушит
+      # (1) frontend/dist, (2) migrations, (3) сам JSON-манифест; backend-образ
+      # НЕ копируется как blob, а остаётся отдельным подписанным образом, на
+      # который артефакт ссылается аннотацией `backend_digest` (тот же самый
+      # @sha256). Это осознанно: §5.1 требует «Backend → Deployment по образу
+      # из того же OCI digest», а копирование ~2 ГБ образа в слой артефакта
+      # сделало бы артефакт неподъёмным. Связность даёт cosign sign ОБОИХ refs
+      # и plugin_verify.py, который проверяет подпись и того, и другого.
+      # Если родитель решит, что backend должен быть физическим слоем —
+      # потребуется добавить 4-й blob и пересмотреть «ровно 3 слоя».
+      # ---------------------------------------------------------------------
+      - name: oras push OCI-артефакта (3 layers + annotations)
+        id: oras
+        env:
+          ARTIFACT_REPO: ${{ steps.resolve.outputs.artifact_repo }}
+          VERSION: ${{ steps.resolve.outputs.version }}
+          MANIFEST_PATH: ${{ steps.resolve.outputs.manifest_path }}
+          FRONTEND_DIR: ${{ steps.resolve.outputs.frontend_dir }}
+          MIGRATIONS_DIR: ${{ steps.resolve.outputs.migrations_dir }}
+        run: |
+          set -euo pipefail
+          # Архивы детерминированы по содержимому каталогов (одинаковый набор
+          # файлов -> одинаковый слой). ':latest' не создаётся ни в одном теге.
+          tar -czf frontend-dist.tar.gz -C "$FRONTEND_DIR" .
+          tar -czf migrations.tar.gz -C "$MIGRATIONS_DIR" .
+
+          # Пары --annotation/key=value генерирует Python в файл (по одной на
+          # строку, значения без переводов строк), затем bash читает в массив.
+          # Так избегаем хрупкой конструкции heredoc внутри <(...).
+          python3 - <<'PY'
+          import json, os
+          with open("oci-manifest.json", encoding="utf-8") as f:
+              manifest = json.load(f)
+          lines = []
+          for key, value in sorted(manifest["annotations"].items()):
+              if "\n" in str(value) or "\r" in str(value):
+                  raise SystemExit(f"::error::недопустимый перевод строки в аннотации {key}")
+              lines.extend(["--annotation", f"{key}={value}"])
+          lines.extend([
+              "--annotation",
+              f"com.agentscale.plugin.source_manifest={os.environ['MANIFEST_PATH']}",
+          ])
+          with open("annotation-args.txt", "w", encoding="utf-8") as f:
+              f.write("\n".join(lines) + "\n")
+          PY
+          mapfile -t ANNOTATION_ARGS < annotation-args.txt
+          if [[ "${#ANNOTATION_ARGS[@]}" -eq 0 ]]; then
+            echo "::error::аннотации артефакта не сформированы"; exit 1
+          fi
+
+          # --export-manifest пишет точные байты манифеста: sha256 от них и
+          # есть digest артефакта (не парсим человекочитаемый stdout).
+          oras push "${ARTIFACT_REPO}:${VERSION}" \
+            --artifact-type "${ARTIFACT_TYPE}" \
+            "${ANNOTATION_ARGS[@]}" \
+            --export-manifest pushed-manifest.json \
+            "frontend-dist.tar.gz:${FRONTEND_MEDIA_TYPE}" \
+            "migrations.tar.gz:${MIGRATIONS_MEDIA_TYPE}" \
+            "oci-manifest.json:${MANIFEST_MEDIA_TYPE}" \
+            2>&1 | tee oras-push.log
+
+          if [[ ! -s pushed-manifest.json ]]; then
+            echo "::error::oras не записал --export-manifest — digest недоступен, fail"
+            exit 1
+          fi
+          ARTIFACT_DIGEST="sha256:$(sha256sum pushed-manifest.json | awk '{print $1}')"
+          if [[ ! "$ARTIFACT_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::невалидный digest артефакта: $ARTIFACT_DIGEST"
+            exit 1
+          fi
+          # Перекрёстная проверка с тем, что напечатал oras (если строка есть).
+          PRINTED="$(grep -oE 'sha256:[0-9a-f]{64}' oras-push.log | tail -n1 || true)"
+          if [[ -n "$PRINTED" && "$PRINTED" != "$ARTIFACT_DIGEST" ]]; then
+            echo "::error::расхождение digest: oras=$PRINTED export=$ARTIFACT_DIGEST"
+            exit 1
+          fi
+
+          ARTIFACT_REF="${ARTIFACT_REPO}@${ARTIFACT_DIGEST}"
+          case "$ARTIFACT_REF" in
+            *:latest*|*/latest) echo "::error::':latest' запрещён: $ARTIFACT_REF"; exit 1 ;;
+          esac
+          {
+            echo "artifact_digest=$ARTIFACT_DIGEST"
+            echo "artifact_ref=$ARTIFACT_REF"
+          } >> "$GITHUB_OUTPUT"
+          echo "OCI-артефакт закреплён по digest: $ARTIFACT_REF"
+
+      - name: cosign sign OCI-артефакт (keyless OIDC, по digest)
+        env:
+          ARTIFACT_REF: ${{ steps.oras.outputs.artifact_ref }}
+        run: |
+          set -euo pipefail
+          cosign sign --yes "$ARTIFACT_REF"
+          echo "Подписан: $ARTIFACT_REF"
+
+      # ---------------------------------------------------------------------
+      # Verify-before-publish. plugin_verify.py сам ещё раз вызывает
+      # `cosign verify` (subprocess check=True) для ОБОИХ refs, проверяет digest,
+      # манифест и CompatibilityGate. QUARANTINED -> exit 1 -> job красный,
+      # публикации нет. GITHUB_OUTPUT/GITHUB_STEP_SUMMARY заполняются скриптом.
+      # ---------------------------------------------------------------------
+      - name: Verify-before-publish (fail-closed: QUARANTINED != publish)
+        id: verify
+        env:
+          PLUGIN_ARTIFACT_REF: ${{ steps.oras.outputs.artifact_ref }}
+          PLUGIN_BACKEND_REF: ${{ steps.digest.outputs.backend_ref }}
+          COSIGN_CERTIFICATE_IDENTITY: >-
+            ${{ vars.COSIGN_CERTIFICATE_IDENTITY || format('https://github.com/{0}/.github/workflows/plugin-artifacts.yml@{1}', github.repository, github.ref) }}
+          COSIGN_CERTIFICATE_OIDC_ISSUER: https://token.actions.githubusercontent.com
+          PLATFORM_VERSION: ${{ steps.resolve.outputs.platform_version || vars.PLATFORM_VERSION }}
+          PLUGIN_GRANTED_CAPABILITIES: ${{ steps.resolve.outputs.granted_capabilities }}
+        run: |
+          set -euo pipefail
+          # Fail-closed: без версии платформы и без выданного CapabilityGrant
+          # скрипт сам вернёт QUARANTINED — «нет данных» != «можно публиковать».
+          python3 .github/scripts/plugin_verify.py \
+            --manifest oci-manifest.json \
+            --backend-digest "${{ steps.digest.outputs.backend_digest }}" \
+            --artifact-ref "$PLUGIN_ARTIFACT_REF" \
+            --backend-ref "$PLUGIN_BACKEND_REF" \
+            --platform-version "$PLATFORM_VERSION" \
+            --granted-capabilities "$PLUGIN_GRANTED_CAPABILITIES" \
+            --certificate-identity "$COSIGN_CERTIFICATE_IDENTITY" \
+            --certificate-oidc-issuer "$COSIGN_CERTIFICATE_OIDC_ISSUER" \
+            --output verify-decision.json
+
+      # ---------------------------------------------------------------------
+      # Digest в output / step summary. Дублируем явно: читать артефакт можно
+      # ТОЛЬКО по @sha256, ':latest' запрещён (§5.1, критерий 18).
+      # ---------------------------------------------------------------------
+      - name: Записать digest в output / summary
+        if: always()
+        env:
+          BACKEND_DIGEST: ${{ steps.digest.outputs.backend_digest }}
+          BACKEND_REF: ${{ steps.digest.outputs.backend_ref }}
+          ARTIFACT_DIGEST: ${{ steps.oras.outputs.artifact_digest }}
+          ARTIFACT_REF: ${{ steps.oras.outputs.artifact_ref }}
+          DECISION: ${{ steps.verify.outputs.decision }}
+          CODE: ${{ steps.verify.outputs.code }}
+        run: |
+          set -euo pipefail
+          {
+            echo "backend_digest=${BACKEND_DIGEST:-}"
+            echo "artifact_digest=${ARTIFACT_DIGEST:-}"
+          } >> "$GITHUB_OUTPUT"
+          if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+            {
+              echo "### Plugin OCI artifact"
+              echo ""
+              echo "| Поле | Значение |"
+              echo "|---|---|"
+              echo "| Решение | **${DECISION:-QUARANTINED}** (${CODE:-нет данных}) |"
+              echo "| Backend digest | \`${BACKEND_DIGEST:-—}\` |"
+              echo "| Backend ref | \`${BACKEND_REF:-—}\` |"
+              echo "| Artifact digest | \`${ARTIFACT_DIGEST:-—}\` |"
+              echo "| Artifact ref | \`${ARTIFACT_REF:-—}\` |"
+              echo ""
+              echo "> Пин ТОЛЬКО по \`@sha256:...\`. \`:latest\` запрещён."
+              echo "> При \`QUARANTINED\` артефакт НЕ публикуется; откат = Previous immutable digest."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi

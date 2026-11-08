@@ -1,0 +1,159 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://prodavan.dev/schemas/plugin-manifest/v1/protocol.json",
+  "title": "Agentscale plugin-rpc/1 Message Contract",
+  "description": "Контракт сообщений iframe ↔ shell (§5.2 v4, dynamic-ui-implementation-contract.md §4.2). Все сообщения — закрытые конверты с проверкой event.origin и WindowProxy; capability token никогда не попадает во frontend и не передаётся в URL query.",
+  "$comment": "Требования к handshake: (1) хост принимает сообщения только от точного зарегистрированного origin и точного WindowProxy iframe; (2) plugin.ready должен совпасть с plugin_id/version/artifact_digest из реестра; (3) nonce привязан к экземпляру iframe против stale-window reuse; (4) timeout/расхождение уничтожает iframe и пишет redacted failure event; (5) navigation/visibility/logout инвалидируют instance и grant; (6) capability token остаётся в backend и приходит коротким TTL через handshake, never in URL.",
+  "oneOf": [
+    { "$ref": "#/$defs/pluginReady" },
+    { "$ref": "#/$defs/pluginRpcRequest" },
+    { "$ref": "#/$defs/pluginRpcResponse" },
+    { "$ref": "#/$defs/pluginError" }
+  ],
+  "$defs": {
+    "protocol": { "const": "plugin-rpc/1" },
+    "pluginId": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+    "semver": { "type": "string", "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$" },
+    "artifactDigest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "nonEmptyString": { "type": "string", "minLength": 1 },
+    "jsonValue": {},
+    "eventOrigin": {
+      "type": "object",
+      "required": ["origin"],
+      "additionalProperties": false,
+      "$comment": "Проверка event.origin: точное совпадение с зарегистрированным static-origin плагина. Обработка сообщения до этой проверки запрещена. origin НЕ берётся из payload как доверительное значение — сверяется с MessageEvent.origin.",
+      "properties": {
+        "origin": {
+          "type": "string",
+          "pattern": "^https://[A-Za-z0-9.-]+(?::[0-9]{1,5})?$",
+          "$comment": "Отдельный origin, не agentscale.dev; opaque origin iframe без allow-same-origin даёт \"null\" — такое сообщение отклоняется."
+        },
+        "source": { "const": "iframe" }
+      }
+    },
+    "requestContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "$comment": "Только поля внутри выданного grant scope; неизвестные поля отклоняются.",
+      "properties": {
+        "company_id": { "$ref": "#/$defs/nonEmptyString" },
+        "cabinet_id": { "$ref": "#/$defs/nonEmptyString" },
+        "project_id": { "$ref": "#/$defs/nonEmptyString" },
+        "session_id": { "$ref": "#/$defs/nonEmptyString" }
+      }
+    },
+    "capabilityRef": {
+      "type": "object",
+      "required": ["id", "version"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/nonEmptyString" },
+        "version": { "$ref": "#/$defs/nonEmptyString" }
+      }
+    },
+    "rpcError": {
+      "type": "object",
+      "required": ["code", "message", "trace_id"],
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "enum": [
+            "ORIGIN_MISMATCH",
+            "PROTOCOL_UNSUPPORTED",
+            "HANDSHAKE_MISMATCH",
+            "HANDSHAKE_TIMEOUT",
+            "NONCE_MISMATCH",
+            "UNKNOWN_METHOD",
+            "CAPABILITY_DENIED",
+            "DUPLICATE_REQUEST_ID",
+            "PAYLOAD_TOO_LARGE",
+            "SCOPE_DENIED",
+            "GRANT_EXPIRED",
+            "INVALID_ENVELOPE"
+          ]
+        },
+        "message": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "trace_id": { "$ref": "#/$defs/nonEmptyString" }
+      }
+    },
+    "pluginReady": {
+      "type": "object",
+      "$comment": "plugin -> host: первое сообщение handshake. Совпадение plugin_id/version/artifact_digest с реестром обязательно; расхождение = QUARANTINED + уничтожение iframe.",
+      "required": ["protocol", "type", "plugin_id", "version", "artifact_digest", "instance_id", "nonce"],
+      "additionalProperties": false,
+      "properties": {
+        "protocol": { "$ref": "#/$defs/protocol" },
+        "type": { "const": "plugin.ready" },
+        "plugin_id": { "$ref": "#/$defs/pluginId" },
+        "version": { "$ref": "#/$defs/semver" },
+        "artifact_digest": { "$ref": "#/$defs/artifactDigest" },
+        "instance_id": { "$ref": "#/$defs/nonEmptyString" },
+        "nonce": { "$ref": "#/$defs/nonEmptyString" },
+        "event": { "$ref": "#/$defs/eventOrigin" }
+      }
+    },
+    "pluginRpcRequest": {
+      "type": "object",
+      "$comment": "host -> plugin (и ответные вызовы): только объявленные typed-методы; без generic fetch/RPC/proxy URL и без capability token.",
+      "required": ["protocol", "type", "plugin_id", "version", "artifact_digest", "instance_id", "nonce", "request_id", "method", "context", "input"],
+      "additionalProperties": false,
+      "properties": {
+        "protocol": { "$ref": "#/$defs/protocol" },
+        "type": { "const": "plugin.rpc.request" },
+        "plugin_id": { "$ref": "#/$defs/pluginId" },
+        "version": { "$ref": "#/$defs/semver" },
+        "artifact_digest": { "$ref": "#/$defs/artifactDigest" },
+        "instance_id": { "$ref": "#/$defs/nonEmptyString" },
+        "nonce": { "$ref": "#/$defs/nonEmptyString" },
+        "event": { "$ref": "#/$defs/eventOrigin" },
+        "request_id": { "$ref": "#/$defs/nonEmptyString" },
+        "method": { "enum": ["capability.call", "host.navigate", "host.resize"] },
+        "capability": { "$ref": "#/$defs/capabilityRef" },
+        "context": { "$ref": "#/$defs/requestContext" },
+        "idempotency_key": { "$ref": "#/$defs/nonEmptyString" },
+        "input": { "$ref": "#/$defs/jsonValue" }
+      }
+    },
+    "pluginRpcResponse": {
+      "type": "object",
+      "$comment": "Ответ строго на существующий request_id; ok=false обязан сопровождаться error, ok=true — не должен его содержать.",
+      "required": ["protocol", "type", "plugin_id", "version", "artifact_digest", "instance_id", "nonce", "request_id", "ok"],
+      "additionalProperties": false,
+      "properties": {
+        "protocol": { "$ref": "#/$defs/protocol" },
+        "type": { "const": "plugin.rpc.response" },
+        "plugin_id": { "$ref": "#/$defs/pluginId" },
+        "version": { "$ref": "#/$defs/semver" },
+        "artifact_digest": { "$ref": "#/$defs/artifactDigest" },
+        "instance_id": { "$ref": "#/$defs/nonEmptyString" },
+        "nonce": { "$ref": "#/$defs/nonEmptyString" },
+        "event": { "$ref": "#/$defs/eventOrigin" },
+        "request_id": { "$ref": "#/$defs/nonEmptyString" },
+        "ok": { "type": "boolean" },
+        "result": { "$ref": "#/$defs/jsonValue" },
+        "error": { "$ref": "#/$defs/rpcError" }
+      },
+      "if": { "properties": { "ok": { "const": false } }, "required": ["ok"] },
+      "then": { "required": ["error"] },
+      "else": { "not": { "required": ["error"] } }
+    },
+    "pluginError": {
+      "type": "object",
+      "$comment": "Ошибка уровня протокола (mismatch/timeout/неизвестный метод/дубликат request_id/oversized payload). Тексты не содержат токенов, SQL, внутренних URL и stack traces.",
+      "required": ["protocol", "type", "plugin_id", "version", "artifact_digest", "instance_id", "nonce", "error"],
+      "additionalProperties": false,
+      "properties": {
+        "protocol": { "$ref": "#/$defs/protocol" },
+        "type": { "const": "plugin.error" },
+        "plugin_id": { "$ref": "#/$defs/pluginId" },
+        "version": { "$ref": "#/$defs/semver" },
+        "artifact_digest": { "$ref": "#/$defs/artifactDigest" },
+        "instance_id": { "$ref": "#/$defs/nonEmptyString" },
+        "nonce": { "$ref": "#/$defs/nonEmptyString" },
+        "event": { "$ref": "#/$defs/eventOrigin" },
+        "request_id": { "$ref": "#/$defs/nonEmptyString" },
+        "error": { "$ref": "#/$defs/rpcError" }
+      }
+    }
+  }
+}

@@ -53,7 +53,7 @@
 | # | Критерий | Владелец | Состояние |
 |---|---|---|---|
 | 13 | Wake-up из `replicas: 0` удерживает запрос до Ready и выдаёт новый короткий токен | задачи 09, 11, 15 | [~] |
-| 14 | Активный `job_id` блокирует усыпление backend | задача 09 + родитель (`idle_pause.py`) | [~] |
+| 14 | Активный `job_id` блокирует усыпление backend | задача 09 (`activation/state.py`) | [~] |
 | 16 | Фича-флаг `plugin_enabled_modules[]` переключает путь без миграции данных | задача 12 | [~] |
 | 20 | Redpanda consumer не теряет событие при простое (ручной commit, `earliest`, DLQ) | задача 10 | [~] |
 
@@ -67,9 +67,9 @@
 | A2 | Подключить plugin-ветку allowlist в middleware | `core/middleware.py` | [ ] |
 | A3 | Настройки + guard'ы | `config/settings.py` | [x] |
 | A4 | Env в ConfigMap (секреты — отдельным Secret) | `infra/k3s/base/agentscale-api/configmap.yaml` | [x] |
-| A5 | Включить provenance/sbom в CI платформенных образов | `.github/workflows/ci-images.yml` | [ ] |
+| A5 | Включить provenance/sbom в CI платформенных образов | `.github/workflows/ci-images.yml` | [x] |
 | A6 | kustomization: подключить `base/plugins` и `overlays/dev/plugins` | `infra/k3s/base/kustomization.yaml`, `overlays/dev/kustomization.yaml` | [ ] |
-| A7 | Реестр активных `job_id` в `ProjectIdlePauseService` | `application/projects/idle_pause.py` | [ ] |
+| A7 | ~~Реестр активных `job_id` в `ProjectIdlePauseService`~~ | — | [x] не требуется |
 | A8 | Зарегистрировать i18n-юнит `plugins` в каталоге | `apps/web/src/i18n/catalogue.ts` | [ ] |
 | A9 | Добавить маршрут pluginpage в роутер web | `apps/web/src/app/router.tsx` | [ ] |
 | A10 | Модели БД для `CapabilityGrant`/`PluginInstance` + Alembic-ревизия | `infrastructure/persistence/models/**`, `alembic/versions/**` | [ ] |
@@ -91,4 +91,9 @@
 
 ---
 
-**Обновляется родителем после каждого отчёта субагента.**
+**A7 снят:** `ProjectIdlePauseService` (`application/project_service/idle_pause.py`)
+принадлежит **агентским проектам** и считает idle по `AgentSessionRow`/`AgentEventRow`.
+Плагины company-scoped и усыпляются собственным activator'ом (задача 09), где
+`ActivationState.active_job_ids` уже блокирует `should_suspend`. Править агентский
+сервис ради плагинов — ровно та ошибка «унификации разных lifecycle», которую
+отверг ADR-008.

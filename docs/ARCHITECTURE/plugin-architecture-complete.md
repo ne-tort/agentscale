@@ -89,9 +89,32 @@ PostgreSQL (отдельный инстанс для tenant-данных, НЕ p
 
 **Почему отдельная БД на компанию, а не общая схема:** при прямом DSN это и есть
 настоящая граница. Роль плагина имеет `CONNECT` только на свою БД; `pg_hba.conf`
-и `GRANT CONNECT` физически не дают ей подключиться к `prodavan` или к
-`tenant_<другая_компания>`. Никакой RLS, GUC или доверия к адаптеру не требуется:
-утечка в чужую БД исключена **конструктивно**, на уровне PostgreSQL, а не политикой.
+и `GRANT CONNECT` в связке со снятыми PUBLIC-привилегиями физически не дают ей
+подключиться к `prodavan` или к `tenant_<другая_компания>`. Никакой RLS, GUC или
+доверия к адаптеру не требуется: утечка в чужую БД исключена **конструктивно**,
+на уровне PostgreSQL, а не политикой.
+
+**Обязательный bootstrap tenant-кластера (иначе граница не работает):**
+PostgreSQL по умолчанию выдаёт `CONNECT` и `TEMPORARY` на любую БД роли `PUBLIC`
+(`acldefault('d', ...)`). Поэтому одного `GRANT CONNECT ... TO plugin_role`
+**недостаточно** — роль всё равно сможет подключиться к `prodavan` и чужим БД.
+Порядок в bootstrap:
+
+```sql
+-- 1. СНАЧАЛА выдать CONNECT админской роли, иначе она потеряет доступ
+--    для CREATE SCHEMA внутри БД компании.
+GRANT CONNECT ON DATABASE tenant_<company> TO platform_admin;
+-- 2. Затем снять PUBLIC-привилегии на prodavan и всех tenant_*.
+REVOKE CONNECT, TEMPORARY ON DATABASE prodavan FROM PUBLIC;
+REVOKE CONNECT, TEMPORARY ON DATABASE tenant_<company> FROM PUBLIC;
+-- 3. Только своей роли — обратно CONNECT.
+GRANT CONNECT ON DATABASE tenant_<company> TO tenant_<company>_plugin_<module>;
+```
+
+Плюс `pg_hba.conf` tenant-кластера явно разрешает только пару
+`(role, tenant_<company>)` через `map`/include-файл, `scram-sha-256`.
+Мгновенный отзыв доступа при `revoke` — `ALTER ROLE ... NOLOGIN`, не зависящий от
+PUBLIC и Redis. `pgaudit` фиксирует DDL, но **не является** границей.
 
 **Почему один кластер, а не инстанс на компанию:** single-node k3s
 (`ResourceQuota pods: 45`, 26Gi, три OOM-инцидента в `runbook.md:484-554`).

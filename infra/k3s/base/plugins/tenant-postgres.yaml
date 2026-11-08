@@ -1,0 +1,560 @@
+# Tenant PostgreSQL — ОТДЕЛЬНЫЙ кластер для данных плагинов (дизайн v4, §2.1, §14 п.2).
+#
+# Это НЕ платформенная БД `prodavan` (`agentscale-postgres` в overlays/dev/postgres.yaml).
+# Плагин получает прямой DSN только к `tenant_<company_id>` этого инстанса; у него нет
+# ни сетевого пути, ни credentials, ни CONNECT к платформенному Postgres (§2.1, §2.2).
+# Отдельный Service `tenant-postgres` нужен, чтобы NetworkPolicy плагинов могла точечно
+# разрешить :5432 по podSelector, НЕ открывая `app: agentscale-postgres` (§6.2).
+#
+# КЛЮЧЕВАЯ ГРАНИЦА (уточнение задачи 05, 2026-11-08): PostgreSQL по умолчанию
+# выдаёт `CONNECT` и `TEMPORARY` на ЛЮБУЮ БД роли PUBLIC (acldefault, копируется
+# из template1 при CREATE DATABASE). Поэтому `GRANT CONNECT ... TO <роль плагина>`
+# САМ ПО СЕБЕ НЕ ЗАПРЕЩАЕТ ей подключиться к `prodavan` или чужой `tenant_*`.
+# Реальная граница = REVOKE ... FROM PUBLIC + явный pg_hba на пару (role, db)
+# + NOLOGIN при revoke. Подробности — в bootstrap-Job и в `tenant_hba.conf` ниже.
+#
+# Один инстанс + N БД на компанию: single-node k3s (ResourceQuota pods: 45,
+# requests.memory: 12Gi, три OOM-инцидента) не потянет инстанс на компанию.
+# Все kinds здесь — из whitelist `infra/argocd/apps/00-project.yaml:37-88`:
+# Secret / PersistentVolumeClaim / ConfigMap / Service / Deployment / Job.
+# Поле namespace намерено НЕ задано: его подставляет NamespaceTransformer оверлея
+# (паттерн guards/app-budget.yaml). НИКАКИХ CRD (KEDA/Knative/cert-manager/SPIRE/HPA).
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: tenant-postgres-credentials
+  labels:
+    app: tenant-postgres
+    app.kubernetes.io/name: tenant-postgres
+    app.kubernetes.io/part-of: agentscale
+    app.kubernetes.io/component: tenant-database
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+type: Opaque
+stringData:
+  # Dev-значения: данные эфемерны, бэкапы/перенос не требуются (§2.1, §8).
+  # На общем контуре значения приносит SealedSecret/k8s Secret; plaintext в git
+  # допустим только в dev (тот же паттерн, что и overlays/dev/postgres.yaml).
+  # Ротация — при reinstall/revoke (§5.5).
+  POSTGRES_USER: tenant_admin
+  POSTGRES_PASSWORD: tenant-admin-change-me
+  # Платформенная БД этого инстанса: НЕ `prodavan`, НЕ `agentscale`.
+  # Владелец кластера (superuser) — ТОЛЬКО для initdb и bootstrap-Job.
+  POSTGRES_DB: tenant_admin
+  # Админская роль платформы: НЕ superuser. Именно она при grant выполняет
+  # CREATE DATABASE / CREATE ROLE / CREATE SCHEMA (§2.2, §5.5). Ей ПЕРЕД
+  # REVOKE ... FROM PUBLIC выдаётся CONNECT, иначе CREATE SCHEMA упадёт 42501.
+  PLATFORM_ADMIN_USER: plugin_platform_admin
+  PLATFORM_ADMIN_PASSWORD: plugin-platform-admin-change-me
+  # Платформенный инстанс (as-built: БД `agentscale` / `agentscale_userdb`,
+  # в дизайне v4 она называется `prodavan`). Bootstrap-Job закрывает на нём
+  # PUBLIC CONNECT/TEMPORARY для всех БД, чтобы роль плагина не могла дотянуться
+  # до платформенных данных даже при утечке DSN. Файлы чужого оверлея НЕ трогаем.
+  PLATFORM_DB_HOST: agentscale-postgres
+  PLATFORM_DB_USER: agentscale
+  PLATFORM_DB_PASSWORD: agentscale
+  PLATFORM_DB_NAME: agentscale
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: tenant-postgres-data
+  labels:
+    app: tenant-postgres
+    app.kubernetes.io/name: tenant-postgres
+    app.kubernetes.io/part-of: agentscale
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  # RWO + strategy Recreate: local-path, без HA (single-node k3s).
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tenant-postgres-config
+  labels:
+    app: tenant-postgres
+    app.kubernetes.io/name: tenant-postgres
+    app.kubernetes.io/part-of: agentscale
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+data:
+  # ---------------------------------------------------------------------------
+  # Главный pg_hba.conf. Передаётся в postgres через `-c hba_file=...`.
+  #
+  # ПРО «map=»: опция `map` в pg_hba.conf работает ТОЛЬКО с методами ident,
+  # peer, gssapi, sspi, ldap, radius, cert — она маппит внешнее/системное имя в
+  # имя роли БД. С `scram-sha-256` она НЕДОПУСТИМА (postgres упадёт с
+  # "authentication option map is not valid for this method"). Поэтому пара
+  # (role, tenant_<company>) задаётся здесь ЯВНО полями DATABASE и USER в
+  # include-файле `tenant_hba.conf`, а не через pg_ident map. `pg_ident.conf`
+  # ниже оставлен как документированная заглушка, чтобы это решение не
+  # «переизобрели» обратно на map=.
+  #
+  # `include` (не include_if_exists) — намеренный fail-closed: если файл пар
+  # пропал, postgres НЕ стартует, а не тихо пускает всех. Записи include
+  # подставляются НА МЕСТЕ директивы, т.е. ДО финального reject-all.
+  #
+  # Задача 05 (Tenant DB lifecycle) при grant ДОБАВЛЯЕТ в ConfigMap ключ
+  # `tenant_hba.conf` строку вида:
+  #   host  tenant_co_123  tenant_co_123_plugin_mod_equipment  10.42.0.0/16  scram-sha-256
+  #   host  tenant_co_123  tenant_co_123_plugin_mod_equipment  10.43.0.0/16  scram-sha-256
+  # после чего ОБЯЗАНА вызвать `SELECT pg_reload_conf()` на tenant-кластере.
+  # Конфиг смонтирован как каталог (БЕЗ subPath), поэтому kubelet проецирует
+  # обновления ConfigMap автоматически; subPath тут был бы ошибкой — он НЕ
+  # обновляется. При revoke строка удаляется + `ALTER ROLE ... NOLOGIN`.
+  # ВНИМАНИЕ ДЛЯ ЗАДАЧИ 15: этот ConfigMap правится контроллером извне Git,
+  # поэтому `/data` нужно добавить в `ignoreDifferences` Argo Application
+  # `plugin-platform` — иначе selfHeal сотрёт пары при первом же синке.
+  # ---------------------------------------------------------------------------
+  pg_hba.conf: |
+    # TYPE  DATABASE  USER                    ADDRESS          METHOD
+    # Локальный bootstrap официального entrypoint (PGPASSWORD из Secret).
+    local   all       all                                      scram-sha-256
+    # Владелец кластера / bootstrap-Job: только loopback и pod-сеть.
+    host    all       tenant_admin            127.0.0.1/32     scram-sha-256
+    host    all       tenant_admin            ::1/128          scram-sha-256
+    host    all       tenant_admin            10.42.0.0/16     scram-sha-256
+    host    all       tenant_admin            10.43.0.0/16     scram-sha-256
+    # Админская роль платформы (CREATE DATABASE / ROLE / SCHEMA при grant).
+    host    all       plugin_platform_admin   10.42.0.0/16     scram-sha-256
+    host    all       plugin_platform_admin   10.43.0.0/16     scram-sha-256
+    # Пары (role, tenant_<company>) — генерирует задача 05, НЕ хардкодим.
+    include /etc/postgresql/tenant_hba.conf
+    # FAIL-CLOSED: всё, для чего нет явной пары, запрещено ЯВНО.
+    # Роль плагина с чужим паролем сюда не попадёт: имя БД и USER не совпадут.
+    host    all       all                     0.0.0.0/0        reject
+    host    all       all                     ::/0             reject
+  # include-файл пар. Стартовое содержимое — ТОЛЬКО комментарии: ни одного
+  # разрешения до первого grant. Строки добавляет контроллер задачи 05.
+  # Имя файла фиксировано (`include` выше); ConfigMap обновляется целиком.
+  tenant_hba.conf: |
+    # Генерируется задачей 05 при grant. Формат строки (pg_hba, БЕЗ map=):
+    #   host  tenant_<company_id>  <роль плагина>  10.42.0.0/16  scram-sha-256
+    #   host  tenant_<company_id>  <роль плагина>  10.43.0.0/16  scram-sha-256
+    #
+    # ОБЯЗАТЕЛЬНЫЙ ПОРЯДОК при grant:
+    #   1) REVOKE CONNECT, TEMPORARY ON DATABASE tenant_<co> FROM PUBLIC;
+    #   2) GRANT  CONNECT ON DATABASE tenant_<co> TO <роль плагина>;
+    #   3) ALTER ROLE <роль> LOGIN; ALTER ROLE <роль> CONNECTION LIMIT 10;
+    #   4) добавить сюда пару; 5) SELECT pg_reload_conf();
+    # При revoke: убрать пару, ALTER ROLE ... NOLOGIN, pg_reload_conf().
+    # Пустой файл = ни один плагин не подключится (fail-closed).
+  # pg_ident.conf НЕ используется: `map=` несовместим с scram-sha-256.
+  # Файл нужен, чтобы `-c ident_file=...` был явным и это решение было видно.
+  pg_ident.conf: |
+    # MAPNAME  SYSTEM-USERNAME  PG-USERNAME
+    # Намеренно пусто. Сопоставление пары (role, tenant_<company>) делается
+    # полями DATABASE/USER в tenant_hba.conf, а не через ident map: scram-sha-256
+    # не поддерживает опцию `map`. Добавление записи сюда НЕ даст эффекта.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tenant-postgres-bootstrap
+  labels:
+    app: tenant-postgres
+    app.kubernetes.io/name: tenant-postgres
+    app.kubernetes.io/part-of: agentscale
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+data:
+  # SQL для tenant-кластера. Идемпотентен: Job — Sync-хук, запускается на
+  # каждом sync Argo (hook-delete-policy BeforeHookCreation,HookSucceeded).
+  bootstrap.sql: |
+    \set ON_ERROR_STOP on
+    -- 1) Админская роль платформы (НЕ superuser). Создаём ДО любых REVOKE.
+    DO $$
+    BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'plugin_platform_admin') THEN
+        CREATE ROLE plugin_platform_admin
+          LOGIN CREATEDB CREATEROLE NOSUPERUSER NOREPLICATION NOBYPASSRLS;
+      END IF;
+    END
+    $$;
+    ALTER ROLE plugin_platform_admin PASSWORD :'admin_password';
+    -- Оставляем только CREATEDB/CREATEROLE, без SUPERUSER/REPLICATION/BYPASSRLS.
+    -- Явное повторение атрибутов защищает от «дрейфа» роли между синками.
+    ALTER ROLE plugin_platform_admin
+      LOGIN CREATEDB CREATEROLE NOSUPERUSER NOREPLICATION NOBYPASSRLS;
+
+    -- 2) ПЕРЕД revoke выдаём CONNECT админской роли на КАЖДУЮ БД.
+    --    Иначе она потеряет доступ для CREATE SCHEMA при grant (ошибка 42501).
+    --    template1 ВАЖЕН: CREATE DATABASE по умолчанию копирует его ACL,
+    --    поэтому снятый там PUBLIC CONNECT наследуют ВСЕ будущие tenant_* БД,
+    --    которые задача 05 создаст между синками Argo.
+    DO $$
+    DECLARE db record;
+    BEGIN
+      FOR db IN
+        SELECT datname FROM pg_database
+        WHERE datallowconn AND datname <> 'template0'
+      LOOP
+        EXECUTE format('GRANT CONNECT, TEMPORARY ON DATABASE %I TO plugin_platform_admin', db.datname);
+      END LOOP;
+    END
+    $$;
+
+    -- 3) Снимаем дефолтные привилегии PUBLIC. Без этого GRANT CONNECT роли
+    --    плагина НЕ является границей: PUBLIC уже имеет CONNECT и TEMPORARY.
+    --    Перебор по pg_database покрывает и БД с именем `prodavan`, если она
+    --    когда-либо появится на этом инстансе, и все tenant_*.
+    DO $$
+    DECLARE db record;
+    BEGIN
+      FOR db IN
+        SELECT datname FROM pg_database
+        WHERE datallowconn AND datname <> 'template0'
+      LOOP
+        EXECUTE format('REVOKE CONNECT, TEMPORARY ON DATABASE %I FROM PUBLIC', db.datname);
+      END LOOP;
+    END
+    $$;
+
+    -- 4) Проверка (fail-closed): у админской роли должен остаться CONNECT.
+    DO $$
+    BEGIN
+      IF NOT has_database_privilege('plugin_platform_admin', current_database(), 'CONNECT') THEN
+        RAISE EXCEPTION 'plugin_platform_admin потеряла CONNECT — CREATE SCHEMA при grant упадёт';
+      END IF;
+    END
+    $$;
+  # Тот же REVOKE на ПЛАТФОРМЕННОМ инстансе (as-built БД `agentscale`,
+  # `agentscale_userdb`; в дизайне v4 — `prodavan`). Перебор по pg_database
+  # покрывает ЛЮБОЕ имя, поэтому расхождение документации не оставляет дыры.
+  # Владелец БД (`agentscale`, он же POSTGRES_USER) сохраняет CONNECT: ACL
+  # владельца — отдельная запись, REVOKE ... FROM PUBLIC её не трогает.
+  # API/миграции платформы продолжают работать.
+  platform-revoke.sql: |
+    \set ON_ERROR_STOP on
+    DO $$
+    DECLARE db record;
+    BEGIN
+      FOR db IN
+        SELECT datname FROM pg_database
+        WHERE datallowconn AND datname <> 'template0'
+      LOOP
+        -- Сначала ЯВНО подтверждаем право владельца (на случай нестандартного
+        -- ACL):CONNECT у owner есть всегда, но fail-closed лучше проверить.
+        EXECUTE format('GRANT CONNECT, TEMPORARY ON DATABASE %I TO %I',
+                       db.datname, current_user);
+        EXECUTE format('REVOKE CONNECT, TEMPORARY ON DATABASE %I FROM PUBLIC', db.datname);
+      END LOOP;
+    END
+    $$;
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tenant-postgres
+  labels:
+    app: tenant-postgres
+    app.kubernetes.io/name: tenant-postgres
+    app.kubernetes.io/part-of: agentscale
+    app.kubernetes.io/component: tenant-database
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  # Один инстанс на кластер (§2.1). Не scale-ить: PVC RWO и local-path.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: tenant-postgres
+  template:
+    metadata:
+      labels:
+        app: tenant-postgres
+        app.kubernetes.io/name: tenant-postgres
+        app.kubernetes.io/part-of: agentscale
+        app.kubernetes.io/component: tenant-database
+    spec:
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        # uid/gid пользователя postgres в официальном образе.
+        fsGroup: 999
+      # Зеркало ghcr (паттерн overlays/dev/postgres.yaml): Docker Hub на холодной
+      # ноде отдаёт 429 TOOMANYREQUESTS. Пакет приватный → контурный ghcr-pull.
+      imagePullSecrets:
+        - name: ghcr-pull
+      containers:
+        - name: postgres
+          # PostgreSQL 16.15 — та же версия, что и платформенный инстанс.
+          #
+          # ОБЯЗАТЕЛЬНОЕ УСЛОВИЕ: образ ДОЛЖЕН содержать расширение pgaudit.
+          # Ванильный official `postgres:16.15` его НЕ содержит, и при
+          # shared_preload_libraries=pgaudit сервер упадёт в FATAL на старте —
+          # это намеренный fail-closed (никакого «тихого» отключения аудита DDL).
+          # Сборка/пин образа с pgaudit — задача 16 (CI: cosign/provenance/SBOM).
+          image: ghcr.io/ne-tort/postgres:16.15
+          imagePullPolicy: IfNotPresent
+          # Все параметры заданы ЯВНО через -c, а не ALTER SYSTEM в init-скрипте:
+          # bootstrap-сервер официального entrypoint стартует ДО загрузки pgaudit,
+          # и ALTER SYSTEM SET pgaudit.* там был бы неразрешённым параметром.
+          command:
+            - docker-entrypoint.sh
+            - postgres
+            - -c
+            - hba_file=/etc/postgresql/pg_hba.conf
+            - -c
+            - ident_file=/etc/postgresql/pg_ident.conf
+            - -c
+            - shared_preload_libraries=pgaudit
+            - -c
+            - pgaudit.log=ddl,write,role
+            - -c
+            - pgaudit.log_catalog=off
+            - -c
+            - max_connections=100
+            - -c
+            - password_encryption=scram-sha-256
+          ports:
+            - name: pg
+              containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: tenant-postgres-credentials
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: tenant-postgres-credentials
+                  key: POSTGRES_PASSWORD
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: tenant-postgres-credentials
+                  key: POSTGRES_DB
+            # НУЖЕН официальному entrypoint: initdb/bootstrap-сервер ходит по
+            # unix-сокету, а pg_hba.conf выше требует scram-sha-256 и для local.
+            # psql --no-password берёт пароль из PGPASSWORD окружения.
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: tenant-postgres-credentials
+                  key: POSTGRES_PASSWORD
+            # Official image отказывается монтировать непустой каталог без подкаталога.
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+            # initdb сразу с scram-sha-256: пароль не оседает в md5/plaintext.
+            - name: POSTGRES_INITDB_ARGS
+              value: "--auth-host=scram-sha-256 --auth-local=scram-sha-256"
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            # Монтируем КАТАЛОГОМ (без subPath!): обновления `tenant_hba.conf`
+            # задачей 05 проецируются kubelet'ом, затем pg_reload_conf().
+            - name: hba
+              mountPath: /etc/postgresql
+              readOnly: true
+          lifecycle:
+            preStop:
+              # Корректный fast shutdown: без него WAL-recovery на следующем старте
+              # может идти минуты и startupProbe убьёт под (паттерн postgres.yaml).
+              exec:
+                command:
+                  - /bin/sh
+                  - -c
+                  - pg_ctl stop -D "$PGDATA" -m fast -w || true
+          startupProbe:
+            # Долгий WAL-recovery после грязного shutdown/ребута VM не должен
+            # перезапускать postgres (overlays/dev/postgres.yaml:77-82).
+            exec:
+              command: ["pg_isready", "-U", "tenant_admin", "-d", "tenant_admin"]
+            periodSeconds: 5
+            failureThreshold: 120
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "tenant_admin", "-d", "tenant_admin"]
+            periodSeconds: 5
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "tenant_admin", "-d", "tenant_admin"]
+            initialDelaySeconds: 20
+            periodSeconds: 20
+          resources:
+            # ЯВНЫЕ requests/limits. LimitRange (`guards/app-budget.yaml`) даёт
+            # max 4Gi / 2 CPU на контейнер — укладываемся с запасом, чтобы не съесть
+            # квоту 12Gi requests / 45 подов (3 OOM-инцидента).
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: tenant-postgres-data
+        - name: hba
+          configMap:
+            name: tenant-postgres-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tenant-postgres
+  labels:
+    app: tenant-postgres
+    app.kubernetes.io/name: tenant-postgres
+    app.kubernetes.io/part-of: agentscale
+    app.kubernetes.io/component: tenant-database
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  # Отдельное имя Service — цель egress-правила NP плагинов (§6.2).
+  # Плагины в норме ходят через PgBouncer (`pgbouncer:6432`), а сюда — только
+  # платформенная роль для CREATE DATABASE/ROLE/SCHEMA при grant (§5.5).
+  selector:
+    app: tenant-postgres
+  ports:
+    - name: pg
+      port: 5432
+      targetPort: pg
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: tenant-postgres-bootstrap
+  labels:
+    app: tenant-postgres
+    app.kubernetes.io/name: tenant-postgres-bootstrap
+    app.kubernetes.io/part-of: agentscale
+    app.kubernetes.io/component: tenant-database-bootstrap
+  annotations:
+    # Sync-хук (паттерн overlays/dev/userdb-init.yaml): обычный Job с TTL
+    # остаётся отслеживаемым ресурсом и превращает Application в вечный
+    # OutOfSync/Missing после удаления по TTL. Хук запускается на КАЖДОМ sync
+    # — это и есть защита для БД, созданных задачей 05 между синками.
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
+    # СТРОГО ПОСЛЕ Deployment/Service/Secret/ConfigMap (wave 0).
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  backoffLimit: 6
+  template:
+    metadata:
+      labels:
+        app: tenant-postgres
+        app.kubernetes.io/name: tenant-postgres-bootstrap
+    spec:
+      restartPolicy: OnFailure
+      imagePullSecrets:
+        - name: ghcr-pull
+      containers:
+        - name: bootstrap
+          image: ghcr.io/ne-tort/postgres:16.15
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: tenant-postgres-credentials
+                  key: POSTGRES_USER
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: tenant-postgres-credentials
+                  key: POSTGRES_DB
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: tenant-postgres-credentials
+                  key: POSTGRES_PASSWORD
+            - name: PLATFORM_ADMIN_USER
+              valueFrom:
+                secretKeyRef:
+                  name: tenant-postgres-credentials
+                  key: PLATFORM_ADMIN_USER
+            - name: PLATFORM_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: tenant-postgres-credentials
+                  key: PLATFORM_ADMIN_PASSWORD
+            - name: PLATFORM_DB_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: tenant-postgres-credentials
+                  key: PLATFORM_DB_HOST
+            - name: PLATFORM_DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: tenant-postgres-credentials
+                  key: PLATFORM_DB_USER
+            - name: PLATFORM_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: tenant-postgres-credentials
+                  key: PLATFORM_DB_PASSWORD
+            - name: PLATFORM_DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: tenant-postgres-credentials
+                  key: PLATFORM_DB_NAME
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              TENANT_HOST=tenant-postgres
+              export PGPASSWORD="$POSTGRES_PASSWORD"
+
+              echo "[bootstrap] ждём tenant-postgres..."
+              i=0
+              until pg_isready -h "$TENANT_HOST" -U "$POSTGRES_USER" -d "$POSTGRES_DB"; do
+                i=$((i+1)); [ "$i" -gt 90 ] && { echo "FAIL: tenant-postgres недоступен" >&2; exit 1; }
+                sleep 2
+              done
+
+              # 1) Роль платформы + GRANT CONNECT ДО revoke + REVOKE PUBLIC
+              #    (включая template1 → наследуется всеми новыми tenant_* БД).
+              psql -h "$TENANT_HOST" -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+                   -v ON_ERROR_STOP=1 -v admin_password="$PLATFORM_ADMIN_PASSWORD" \
+                   -f /bootstrap/bootstrap.sql
+
+              # 2) Проверка ЖИВЫМ подключением: админская роль не должна потерять
+              #    доступ, иначе CREATE SCHEMA при grant упадёт с 42501.
+              PGPASSWORD="$PLATFORM_ADMIN_PASSWORD" \
+                psql -h "$TENANT_HOST" -U "$PLATFORM_ADMIN_USER" -d "$POSTGRES_DB" \
+                     -v ON_ERROR_STOP=1 -c 'SELECT 1' >/dev/null
+              echo "[bootstrap] tenant: OK, admin CONNECT сохранён"
+
+              # 3) Платформенный инстанс (`prodavan` в дизайне / `agentscale`
+              #    as-built): снимаем PUBLIC CONNECT/TEMPORARY со ВСЕХ БД.
+              #    FAIL-CLOSED: недоступность — ЯВНАЯ ошибка, не «пропустим».
+              echo "[bootstrap] ждём $PLATFORM_DB_HOST..."
+              j=0
+              until pg_isready -h "$PLATFORM_DB_HOST" -U "$PLATFORM_DB_USER" -d "$PLATFORM_DB_NAME"; do
+                j=$((j+1)); [ "$j" -gt 90 ] && { echo "FAIL: платформенный Postgres недоступен" >&2; exit 1; }
+                sleep 2
+              done
+              PGPASSWORD="$PLATFORM_DB_PASSWORD" \
+                psql -h "$PLATFORM_DB_HOST" -U "$PLATFORM_DB_USER" -d "$PLATFORM_DB_NAME" \
+                     -v ON_ERROR_STOP=1 -f /bootstrap/platform-revoke.sql
+              echo "[bootstrap] platform: PUBLIC CONNECT/TEMPORARY снят"
+          volumeMounts:
+            - name: bootstrap
+              mountPath: /bootstrap
+              readOnly: true
+          resources:
+            # Явные resources: LimitRange max 4Gi / 2 CPU; Job короткоживущий,
+            # но BestEffort под первым уходит при OOM (guards/app-budget.yaml).
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+      volumes:
+        - name: bootstrap
+          configMap:
+            name: tenant-postgres-bootstrap

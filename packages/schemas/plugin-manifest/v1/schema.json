@@ -1,0 +1,129 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://prodavan.dev/schemas/plugin-manifest/v1/schema.json",
+  "title": "Agentscale Plugin Manifest v1",
+  "description": "Манифест плагина (F0). Подписывается как OCI annotation, поэтому НЕ содержит собственного digest или подписи. Прямой доступ к БД выдаётся DSN, а не capability db.direct.",
+  "type": "object",
+  "required": [
+    "plugin_id",
+    "version",
+    "protocol",
+    "frontend",
+    "backend",
+    "capabilities",
+    "migrations",
+    "egress_ref",
+    "public_pages",
+    "webhooks",
+    "min_platform_version"
+  ],
+  "additionalProperties": false,
+  "$comment": "Явный запрет самореференции (artifact_digest/signature) и встроенного egress allowlist. Список должен совпадать с SELF_REFERENCE_FIELDS | EMBEDDED_EGRESS_FIELDS из domain/plugins/types.py и MANIFEST_ALLOWED_FIELDS из validation.py.",
+  "not": {
+    "anyOf": [
+      { "required": ["artifact_digest"] },
+      { "required": ["signature"] },
+      { "required": ["egress"] },
+      { "required": ["egress_policy"] },
+      { "required": ["allowed_hosts"] },
+      { "required": ["allowed_paths"] }
+    ]
+  },
+  "properties": {
+    "plugin_id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$",
+      "$comment": "Строгий нижний регистр; нормализация применяется валидатором к уже прошедшему проверку значению."
+    },
+    "version": { "type": "string", "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$" },
+    "protocol": { "const": "plugin-rpc/1" },
+    "frontend": {
+      "type": "object",
+      "required": ["entry", "base_path"],
+      "additionalProperties": false,
+      "properties": {
+        "entry": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._/-]+$",
+          "not": { "pattern": "\\.\\." },
+          "$comment": "Относительный путь внутри версионированной статики плагина."
+        },
+        "base_path": {
+          "type": "string",
+          "pattern": "^/[A-Za-z0-9._/-]*$",
+          "not": { "pattern": "\\.\\." },
+          "$comment": "Абсолютный путь на отдельном static-origin; без cookie и API."
+        }
+      }
+    },
+    "backend": {
+      "type": "object",
+      "required": ["port", "health"],
+      "additionalProperties": false,
+      "properties": {
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "health": {
+          "type": "string",
+          "pattern": "^/[A-Za-z0-9._/-]*$",
+          "not": { "pattern": "\\.\\." }
+        }
+      }
+    },
+    "capabilities": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": ["cache", "objects", "docs", "events", "jobs", "pods", "mcp", "secrets", "network"]
+      },
+      "$comment": "db.direct и db.migrations намеренно отсутствуют: БД плагина доступна по прямому DSN (§2 v4), остальная инфраструктура — через типизированные адаптеры gateway."
+    },
+    "migrations": {
+      "type": "object",
+      "required": ["engine", "path"],
+      "additionalProperties": false,
+      "properties": {
+        "engine": { "enum": ["liquibase", "flyway", "alembic"] },
+        "path": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._/-]+$",
+          "not": { "pattern": "\\.\\." }
+        }
+      }
+    },
+    "egress_ref": {
+      "type": "string",
+      "pattern": "^grant:[A-Za-z0-9_.:/-]+$",
+      "$comment": "Только ссылка на долгоживущий CapabilityGrant в БД (§6.1 v4). Встроенный allowlist запрещён: истечение JWT не должно пересобирать сетевые правила."
+    },
+    "public_pages": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^/[A-Za-z0-9._/-]+$",
+        "not": { "pattern": "\\.\\." }
+      },
+      "$comment": "Явно объявленные страницы без сессии; пустой массив означает «публичных страниц нет»."
+    },
+    "webhooks": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^/[A-Za-z0-9._/-]+$",
+        "not": { "pattern": "\\.\\." }
+      },
+      "$comment": "Входящие webhook-маршруты; по умолчанию регистрируются под /webhook/*."
+    },
+    "min_platform_version": { "type": "string", "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$" }
+  },
+  "$defs": {
+    "forbiddenSelfReference": {
+      "$comment": "artifact_digest и signature вычисляются платформой из OCI/cosign и НЕ могут быть частью подписываемого манифеста."
+    },
+    "dbAccess": {
+      "$comment": "Прямой DSN к БД tenant_<company> — привилегия PostgreSQL, а не capability gateway."
+    }
+  }
+}

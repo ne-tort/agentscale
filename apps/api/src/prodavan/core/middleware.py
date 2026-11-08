@@ -37,6 +37,24 @@ _POD_SURFACE_RE = re.compile(
     r"^/api/v1/(?:internal/pods(?:/|$)|projects/[^/]+/(?:infra|modules|agent|web-search|web-fetch|documents)(?:/|$))"
 )
 
+# Plugin-платформа (дизайн v4): отдельный trust-контур. Если Bearer — PluginClaims,
+# ему разрешён ТОЛЬКО /capabilities/v1/*; agent-surface (/agent/*, internal/pods/*,
+# projects/{id}/modules/*) закрыт. Это НЕ расширение pod-gateway :8001.
+_PLUGIN_SURFACE_RE = re.compile(r"^/capabilities/v1(?:/|$)")
+
+
+def _is_plugin_token(token: str) -> bool:
+    try:
+        from prodavan.application.plugins.identity.keys import peek_plugin_token
+
+        peeked = peek_plugin_token(token)
+        return bool(peeked and peeked.get("typ") == "plugin_capability")
+    except Exception:
+        # Модуль ещё не смонтирован или токен битый — не считаем его плагиновым.
+        # Проверка подписи всё равно выполняется dependency на самом роутере.
+        return False
+
+
 # Explicit CORS methods/headers (audit API-P1b). Wildcards with
 # allow_credentials=True were a credential-leak risk; the API uses Bearer JWT
 # (no cookie auth by default), so credentials are opt-in and the headers list
@@ -84,12 +102,18 @@ def _is_pod_bridge_token(token: str) -> bool:
 
 
 class PodSurfaceAllowlistMiddleware(BaseHTTPMiddleware):
-    """If request uses pod credentials, allow only Pod API surface paths."""
+    """Deny-by-default для pod- и plugin-credentials, у каждого свой surface.
+
+    Агентский Pod (Bridge JWT / shared Bearer) видит только /projects/... и
+    internal/pods. Плагин (PluginClaims) — только /capabilities/v1/*. Это два
+    РАЗНЫХ trust-контура (ADR-008): подмена одного другим не даёт доступа к
+    чужим маршрутам, даже если токен валиден.
+    """
 
     async def dispatch(self, request: Request, call_next):  # type: ignore[no-untyped-def]
         token = _bearer(request)
+        path = request.url.path or ""
         if token and (_is_shared_pod_token(token) or _is_pod_bridge_token(token)):
-            path = request.url.path or ""
             if path.startswith("/health"):
                 return await call_next(request)
             if not _POD_SURFACE_RE.match(path):
@@ -99,6 +123,18 @@ class PodSurfaceAllowlistMiddleware(BaseHTTPMiddleware):
                         "code": "FORBIDDEN",
                         "title": "Forbidden",
                         "detail": "pod credentials limited to Pod API surface",
+                    },
+                )
+        elif token and _is_plugin_token(token):
+            if path.startswith("/health"):
+                return await call_next(request)
+            if not _PLUGIN_SURFACE_RE.match(path):
+                return JSONResponse(
+                    status_code=403,
+                    content={
+                        "code": "FORBIDDEN_SURFACE",
+                        "title": "Forbidden",
+                        "detail": "plugin credentials limited to /capabilities/v1/*",
                     },
                 )
         return await call_next(request)

@@ -12,6 +12,11 @@ Pipeline (ровно в этом порядке, каждый шаг — обя�
 ЛЮБАЯ неудача → ``RegistryOutcome.QUARANTINED`` + ``QuarantineEvidence``
 (типы переиспользуются из ``dynamic_app_registry.contracts``), НЕ публикация.
 Ни один «позитивный» результат не строится из непроверенных данных.
+
+Дополнительно verifier выдаёт ``VerificationEvidence`` — привязанный к
+конкретным ``ref`` + manifest результат. ``PluginArtifactRegistry.publish``
+принимает только такой evidence и проверяет печать verifier'а: подделать
+«успешную проверку» конструктором датакласса нельзя.
 """
 
 from __future__ import annotations
@@ -20,6 +25,8 @@ from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
+import hashlib
+import json
 import re
 from typing import Any, Protocol, runtime_checkable
 
@@ -31,6 +38,7 @@ from prodavan.application.dynamic_app_registry.contracts import (
 )
 
 from .errors import ArtifactError, ArtifactErrorCode
+from .layers import SELF_REFERENCE_KEY
 from .oci import PLUGIN_PROTOCOL, OciArtifactRef, is_valid_digest
 
 # Текущая версия платформы. Задаётся снаружи (settings/const); сравнение — semver.
@@ -71,6 +79,64 @@ class VerificationResult:
     def __post_init__(self) -> None:
         if self.verified and not is_valid_digest(self.signed_digest):
             raise ValueError("verified result requires a valid signed_digest")
+
+
+@dataclass(frozen=True, slots=True)
+class VerificationEvidence:
+    """Привязанное свидетельство проверки (для ``PluginArtifactRegistry.publish``).
+
+    ``manifest_fingerprint`` — sha256 канонического JSON манифеста; ``seal`` —
+    неподделываемый объект-печать конкретного экземпляра ``ArtifactVerifier``.
+    Создавать evidence вручную запрещено: его выдаёт только
+    ``ArtifactVerifier.verify``, а ``publish`` сверяет печать.
+    """
+
+    image_ref: str
+    artifact_digest: str
+    manifest_fingerprint: str
+    identity: str
+    issuer: str
+    sbom_verified: bool
+    provenance_verified: bool
+    observed_at: datetime
+    outcome: RegistryOutcome
+    quarantine: QuarantineEvidence | None
+    seal: object
+    # Снимок входов compatibility gate: позволяет publish() перепроверить
+    # решение, не доверяя «голому» флагу успеха.
+    scan_verified: bool = False
+    granted_capabilities: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not is_valid_digest(self.artifact_digest):
+            raise ValueError("evidence requires a valid artifact digest")
+        if not isinstance(self.manifest_fingerprint, str) or len(self.manifest_fingerprint) != 64:
+            raise ValueError("evidence requires a sha256 manifest fingerprint")
+        if self.outcome is RegistryOutcome.APPLIED and self.quarantine is not None:
+            raise ValueError("applied evidence cannot carry quarantine")
+        if self.outcome is RegistryOutcome.QUARANTINED and self.quarantine is None:
+            raise ValueError("quarantined evidence requires QuarantineEvidence")
+
+    @property
+    def verified(self) -> bool:
+        """Только APPLIED-свидетельство разрешает публикацию."""
+        return self.outcome is RegistryOutcome.APPLIED
+
+
+@dataclass(frozen=True, slots=True)
+class VerificationOutcome:
+    """Решение pipeline + evidence (всегда не None, в т.ч. при карантине)."""
+
+    result: RegistryResult
+    evidence: VerificationEvidence
+
+    @property
+    def outcome(self) -> RegistryOutcome:
+        return self.result.outcome
+
+    @property
+    def quarantine(self) -> QuarantineEvidence | None:
+        return self.result.quarantine
 
 
 @runtime_checkable
@@ -145,6 +211,20 @@ def _is_semver(value: object) -> bool:
     return isinstance(value, str) and _SEMVER_PATTERN.fullmatch(value) is not None
 
 
+def manifest_fingerprint(manifest: Mapping[str, Any]) -> str:
+    """sha256 канонического JSON манифеста (для привязки evidence)."""
+    try:
+        canonical = json.dumps(
+            dict(manifest), sort_keys=True, separators=(",", ":"), ensure_ascii=False
+        )
+    except (TypeError, ValueError) as exc:
+        raise ArtifactError(
+            ArtifactErrorCode.INCOMPATIBLE,
+            f"манифест не сериализуется в канонический JSON: {type(exc).__name__}",
+        ) from exc
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
 def _grant_capabilities(grant: object) -> frozenset[str]:
     """Извлечь ``capabilities`` из гранта (атрибут либо Mapping-ключ).
 
@@ -162,7 +242,6 @@ def _grant_capabilities(grant: object) -> frozenset[str]:
     if raw is None or isinstance(raw, (str, bytes)):
         return frozenset()
     if not isinstance(raw, Collection):
-        return frozenset()
     return frozenset(str(item) for item in raw if isinstance(item, str) and item.strip())
 
 
@@ -173,7 +252,7 @@ class CompatibilityGate:
     - ``protocol == plugin-rpc/1``;
     - ``requestedCapabilities ⊆ CapabilityGrant.capabilities``;
     - ``min_platform_version <= PLATFORM_VERSION``;
-    - образ просканирован (``scanned: true``);
+    - образ просканирован (``scan_verified``);
     - CSP для frontend присутствует.
     """
 
@@ -293,6 +372,8 @@ class ArtifactVerifier:
         self._issuer = issuer
         self._compatibility = compatibility or CompatibilityGate()
         self._clock = clock or (lambda: datetime.now(UTC))
+        # Неподделываемая печать экземпляра: evidence выдаётся только этим verifier'ом.
+        self._seal = object()
 
     def verify(
         self,
@@ -301,20 +382,22 @@ class ArtifactVerifier:
         *,
         grant: object | None = None,
         scan_verified: bool = False,
-    ) -> RegistryResult:
-        """Проверить артефакт и вернуть доменный ``RegistryResult``.
+    ) -> VerificationOutcome:
+        """Проверить артефакт и вернуть решение + привязанное свидетельство.
 
-        Возвращает ТОЛЬКО ``APPLIED`` или ``QUARANTINED``. При карантине
-        ``RegistryResult.quarantine`` — переиспользуемый ``QuarantineEvidence``
-        с redacted metadata (код ошибки, этап, без секретов/raw payload).
+        ``result`` — доменный ``RegistryResult`` (APPLIED / QUARANTINED).
+        ``evidence`` — выдаётся ВСЕГДА, но публикацию разрешает только
+        ``VerificationEvidence.verified is True`` (outcome == APPLIED).
         """
         if not isinstance(ref, OciArtifactRef):
-            return self._quarantine(
+            return self._failure(
                 ref=None,
+                manifest=manifest,
                 stage=VerificationStage.DIGEST,
                 code=ArtifactErrorCode.DIGEST_CONFLICT,
                 reason="ожидался OciArtifactRef, закреплённый по digest",
             )
+
         # 1. cosign verify (keyless) — строго по image_ref с digest.
         try:
             verification = self._cosign.verify(
@@ -323,22 +406,25 @@ class ArtifactVerifier:
                 self._issuer,
             )
         except Exception as exc:  # noqa: BLE001 — fail-closed: любое исключение = отказ
-            return self._quarantine(
+            return self._failure(
                 ref=ref,
+                manifest=manifest,
                 stage=VerificationStage.COSIGN,
                 code=ArtifactErrorCode.VERIFY_FAILED,
                 reason=f"cosign verify завершился исключением: {type(exc).__name__}",
             )
         if not isinstance(verification, VerificationResult) or not verification.verified:
-            return self._quarantine(
+            return self._failure(
                 ref=ref,
+                manifest=manifest,
                 stage=VerificationStage.COSIGN,
                 code=ArtifactErrorCode.UNSIGNED,
                 reason="keyless-подпись cosign не подтверждена (identity/issuer)",
             )
         if not verification.sbom_verified or not verification.provenance_verified:
-            return self._quarantine(
+            return self._failure(
                 ref=ref,
+                manifest=manifest,
                 stage=VerificationStage.COSIGN,
                 code=ArtifactErrorCode.VERIFY_FAILED,
                 reason="отсутствуют SBOM/provenance (§5.1)",
@@ -346,16 +432,18 @@ class ArtifactVerifier:
 
         # 2. digest: подписанный digest должен совпадать с ожидаемым.
         if verification.signed_digest != ref.digest or not is_valid_digest(ref.digest):
-            return self._quarantine(
+            return self._failure(
                 ref=ref,
+                manifest=manifest,
                 stage=VerificationStage.DIGEST,
                 code=ArtifactErrorCode.DIGEST_CONFLICT,
                 reason="подписанный digest не совпадает с ожидаемым",
             )
         # Самореференция: artifact_digest не может быть внутри подписываемого manifest.
-        if "artifact_digest" in manifest:
-            return self._quarantine(
+        if SELF_REFERENCE_KEY in manifest:
+            return self._failure(
                 ref=ref,
+                manifest=manifest,
                 stage=VerificationStage.DIGEST,
                 code=ArtifactErrorCode.DIGEST_CONFLICT,
                 reason="artifact_digest внутри manifest — самореференция запрещена (§5.1)",
@@ -365,15 +453,17 @@ class ArtifactVerifier:
         try:
             self._run_validator(dict(manifest))
         except ArtifactError as exc:
-            return self._quarantine(
+            return self._failure(
                 ref=ref,
+                manifest=manifest,
                 stage=VerificationStage.MANIFEST,
                 code=exc.code,
                 reason=exc.reason,
             )
         except Exception as exc:  # noqa: BLE001 — PluginValidationError и пр. = отказ
-            return self._quarantine(
+            return self._failure(
                 ref=ref,
+                manifest=manifest,
                 stage=VerificationStage.MANIFEST,
                 code=ArtifactErrorCode.INCOMPATIBLE,
                 reason=f"validate_manifest отклонил манифест: {type(exc).__name__}",
@@ -384,22 +474,100 @@ class ArtifactVerifier:
             manifest, grant=grant, scan_verified=scan_verified
         )
         if not verdict.ok:
-            return self._quarantine(
+            return self._failure(
                 ref=ref,
+                manifest=manifest,
                 stage=VerificationStage.COMPATIBILITY,
                 code=verdict.code or ArtifactErrorCode.INCOMPATIBLE,
                 reason=verdict.reason,
             )
 
-        # 5. Успех: только проверенные данные, без проекции в хранилище.
-        return RegistryResult(outcome=RegistryOutcome.APPLIED)
+        # 5. Успех: только проверенные данные; evidence привязан к ref + manifest.
+        fingerprint = manifest_fingerprint(manifest)
+        evidence = VerificationEvidence(
+            image_ref=ref.image_ref(),
+            artifact_digest=ref.digest,
+            manifest_fingerprint=fingerprint,
+            identity=self._identity,
+            issuer=self._issuer,
+            sbom_verified=verification.sbom_verified,
+            provenance_verified=verification.provenance_verified,
+            observed_at=self._clock(),
+            outcome=RegistryOutcome.APPLIED,
+            quarantine=None,
+            seal=self._seal,
+            scan_verified=scan_verified,
+            granted_capabilities=tuple(sorted(_grant_capabilities(grant))),
+        )
+        return VerificationOutcome(
+            result=RegistryResult(outcome=RegistryOutcome.APPLIED),
+            evidence=evidence,
+        )
+
+    def validate_evidence(
+        self,
+        evidence: object,
+        *,
+        ref: OciArtifactRef,
+        manifest: Mapping[str, Any],
+    ) -> VerificationEvidence:
+        """Проверить, что evidence выдан ЭТИМ verifier'ом и привязан к ref/manifest.
+
+        Используется ``PluginArtifactRegistry.publish``. Любое расхождение →
+        ``ArtifactError`` (fail-closed), публикация не происходит.
+        """
+        if not isinstance(evidence, VerificationEvidence):
+            raise ArtifactError(
+                ArtifactErrorCode.QUARANTINED,
+                "publish требует VerificationEvidence, выданный ArtifactVerifier.verify",
+            )
+        if evidence.seal is not self._seal:
+            raise ArtifactError(
+                ArtifactErrorCode.QUARANTINED,
+                "evidence выдан другим экземпляром verifier'а",
+            )
+        if not evidence.verified:
+            raise ArtifactError(
+                ArtifactErrorCode.QUARANTINED,
+                "evidence не является успешной проверкой: публикация запрещена",
+            )
+        if evidence.image_ref != ref.image_ref() or evidence.artifact_digest != ref.digest:
+            raise ArtifactError(
+                ArtifactErrorCode.DIGEST_CONFLICT,
+                "evidence привязан к другому OCI-артефакту",
+            )
+        if evidence.manifest_fingerprint != manifest_fingerprint(manifest):
+            raise ArtifactError(
+                ArtifactErrorCode.DIGEST_CONFLICT,
+                "evidence привязан к другому манифесту",
+            )
+        if not (evidence.sbom_verified and evidence.provenance_verified):
+            raise ArtifactError(
+                ArtifactErrorCode.VERIFY_FAILED,
+                "evidence не подтверждает SBOM/provenance",
+            )
+        return evidence
+
+    def recheck_compatibility(
+        self,
+        manifest: Mapping[str, Any],
+        *,
+        grant: object | None = None,
+        scan_verified: bool = False,
+    ) -> CompatibilityVerdict:
+        """Публичный повторный прогон gate (используется реестром при publish)."""
+        return self._compatibility.check(
+            manifest, grant=grant, scan_verified=scan_verified
+        )
 
     def _run_validator(self, data: dict[str, Any]) -> None:
         """Вызвать validate_manifest; отсутствие контракта = явный отказ."""
         validator: object | None = self._validator
         if validator is None:
             # Ленивый импорт: доменный модуль задачи 01 может появиться позже.
-            from prodavan.domain.plugins.validation import validate_manifest as validator  # type: ignore[no-redef]
+            from prodavan.domain.plugins.validation import (  # type: ignore[no-redef]
+                validate_manifest as validator,
+            )
 
         if not callable(validator):
             raise ArtifactError(
@@ -408,17 +576,18 @@ class ArtifactVerifier:
             )
         validator(data)
 
-    def _quarantine(
+    def _failure(
         self,
         *,
         ref: OciArtifactRef | None,
+        manifest: Mapping[str, Any],
         stage: VerificationStage,
         code: ArtifactErrorCode,
         reason: str,
-    ) -> RegistryResult:
+    ) -> VerificationOutcome:
         """Построить QUARANTINED + QuarantineEvidence (переиспользуем типы)."""
         digest = ref.digest if ref is not None else ""
-        evidence = QuarantineEvidence(
+        quarantine = QuarantineEvidence(
             reason=self._registry_reason(code),
             source_kind="plugin_artifact_oci",
             source_id=ref.image_ref() if ref is not None else "unknown",
@@ -430,23 +599,45 @@ class ArtifactVerifier:
                 "detail": reason,
             },
         )
-        return RegistryResult(
+        result = RegistryResult(
             outcome=RegistryOutcome.QUARANTINED,
-            reason=evidence.reason,
-            quarantine=evidence,
+            reason=quarantine.reason,
+            quarantine=quarantine,
         )
+        # Evidence при карантине тоже выдаётся, но НЕ разрешает публикацию.
+        evidence = VerificationEvidence(
+            image_ref=ref.image_ref() if ref is not None else "unknown",
+            artifact_digest=digest or "sha256:" + "0" * 64,
+            manifest_fingerprint=_safe_fingerprint(manifest),
+            identity=self._identity,
+            issuer=self._issuer,
+            sbom_verified=False,
+            provenance_verified=False,
+            observed_at=self._clock(),
+            outcome=RegistryOutcome.QUARANTINED,
+            quarantine=quarantine,
+            seal=self._seal,
+        )
+        return VerificationOutcome(result=result, evidence=evidence)
 
     @staticmethod
     def _registry_reason(code: ArtifactErrorCode) -> RegistryReason:
         """Свести код артефакта к доменному ``RegistryReason`` без копирования типа."""
-        if code in (ArtifactErrorCode.DIGEST_CONFLICT,):
+        if code is ArtifactErrorCode.DIGEST_CONFLICT:
             return RegistryReason.ARTIFACT_DIGEST_CONFLICT
         if code is ArtifactErrorCode.ROLLBACK_INVALID:
             return RegistryReason.ROLLBACK_TARGET_INVALID
-        if code is ArtifactErrorCode.QUARANTINED:
-            return RegistryReason.INVALID_TRANSITION
-        # UNSIGNED / VERIFY_FAILED / INCOMPATIBLE — конфликт перехода в PUBLISHED.
+        # UNSIGNED / VERIFY_FAILED / INCOMPATIBLE / QUARANTINED — конфликт
+        # перехода в PUBLISHED (недопустимый переход).
         return RegistryReason.INVALID_TRANSITION
+
+
+def _safe_fingerprint(manifest: Mapping[str, Any]) -> str:
+    """Отпечаток для quarantine-evidence: не должен маскировать причину отказа."""
+    try:
+        return manifest_fingerprint(manifest)
+    except ArtifactError:
+        return hashlib.sha256(b"<unserializable-manifest>").hexdigest()
 
 
 __all__ = [
@@ -457,6 +648,9 @@ __all__ = [
     "CompatibilityVerdict",
     "CosignPort",
     "ManifestValidatorPort",
+    "VerificationEvidence",
+    "VerificationOutcome",
     "VerificationResult",
     "VerificationStage",
+    "manifest_fingerprint",
 ]
