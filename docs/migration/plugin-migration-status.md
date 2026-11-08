@@ -26,6 +26,8 @@ strangler, 6 таблиц состояния платформы (ревизия 
 | YAML | все `.github/workflows/*.yml` + `infra/**/*.yaml` | парсятся |
 | Alembic | чистый `postgres:17-alpine`, `upgrade head` + `check` | `2026110321 → 2026110801`, 6 таблиц, drift отсутствует |
 | Импорты | `prodavan.main`, `main_plugin_gateway`, все зоны plugins | ok |
+| Композиция | `create_app()` обоих приложений на реальном Postgres с `PLUGIN_PLATFORM_ENABLED=true` | **18/18 `STATE_KEYS`**, `PluginPlatform`, `PluginGatewayRuntime`, `PluginAdminPorts`, `PluginCapabilityService` привязаны; 10 `_UnwiredPort` зафиксированы как долг F11 |
+| HTTP smoke | TestClient по обоим apps | `/health/live` `/health/ready` → 200; `/capabilities/v1/health`, `/webhook/*`, `/api/v1/admin/plugins/` → 401/400/503 (ожидаемые fail-closed), **ни одного 500** |
 
 ## Dev-кластер (последнее подтверждённое состояние до потери VM)
 
