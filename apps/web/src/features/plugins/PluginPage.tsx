@@ -32,6 +32,12 @@ import type { PluginErrorCode } from "./errors";
  * несовпадении origin показывается ошибка, iframe НЕ монтируется вообще.
  */
 
+/**
+ * Версия плагина для версионированного пути и `plugin-rpc/1` handshake.
+ * Явный проп или фиксированный дефолт: версия НЕ читается из env/URL, чтобы
+ * её нельзя было подменить извне. Родитель передаёт реальную версию из реестра
+ * артефактов, когда она известна (v4 §5.1, pin по digest).
+ */
 export const DEFAULT_PLUGIN_VERSION = "1.0.0";
 export const DEFAULT_PLUGIN_BACK_PATH = "/projects";
 
@@ -70,10 +76,6 @@ export function pluginSrcFailure(
 
 function readPluginVersion(override?: string): string {
   if (typeof override === "string" && override.trim()) return override.trim();
-  try {
-    const raw = (import.meta.env as Readonly<Record<string, unknown>> | undefined)?.VITE_PLUGIN_VERSION;
-    if (typeof raw === "string" && raw.trim()) return raw.trim();
-  } catch { /* env недоступен — остаётся явный дефолт */ }
   return DEFAULT_PLUGIN_VERSION;
 }
 
@@ -186,7 +188,11 @@ export function PluginPage(props: PluginPageProps = {}) {
     catch { return ""; }
   }, [effectiveConfig]);
 
-  const failure = pluginSrcFailure(frame.src, expectedOrigin, shellOrigin);
+  const failure = pluginSrcFailure(
+    frame.src,
+    expectedOrigin,
+    effectiveConfig.shellOrigin ?? shellOrigin,
+  );
   const errorCode = frame.error?.code ?? "loadError";
   const { phase, messageKey } = resolvePluginPagePhase({
     status: frame.status,

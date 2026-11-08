@@ -152,7 +152,7 @@ def _validate_binary(binary: str) -> str:
     # Не разрешаем пробелы/переводы строк: argv собирается БЕЗ shell=True,
     # но пустая строка или мусор привели бы к FileNotFoundError -> VERIFY_FAILED.
     if not binary or any(ch.isspace() or ch == "\x00" for ch in binary):
-        raise _fail(f"{ENV_COSIGN_BIN}={binary!r} некорректен")
+        raise _fail(f"{ENV_COSIGN_BIN} некорректен (пробелы/NUL запрещены)")
     return binary
 
 
@@ -224,8 +224,8 @@ class RuntimeConfig:
         """
         source: Mapping[str, str] = os.environ if env is None else env
         kms_raw = str(source.get(ENV_KMS_KEY_REF, "") or "").strip()
-        # ЯВНЫЙ запрет «отключить проверку подписи»: such values не Trust Root,
-        # а попытка обойти критерий 18. Пустое -> keyless, остальное -> KMS.
+        # ЯВНЫЙ запрет «отключить проверку подписи»: такие значения — не trust
+        # root, а попытка обойти критерий 18. Пустое -> keyless, остальное -> KMS.
         if kms_raw and kms_raw.lower() in _KMS_DISABLED:
             raise _fail(
                 f"{ENV_KMS_KEY_REF}={kms_raw!r}: отключение проверки подписи ЗАПРЕЩЕНО "

@@ -158,12 +158,13 @@ class DbFeatureFlagStore:
         где-то ещё (это был бы обход решения родителя).
         """
         row = self._flags_row or load_row(FLAG_ROW)
+        row_name = getattr(row, "__name__", type(row).__name__)
         names = column_names(row)
         require = ["company_id"]
         missing = [name for name in require if name not in names]
         if missing:
             raise PluginRepositorySchemaError(
-                f"{row.__name__}: нет колонки company_id (есть {sorted(names)})"
+                f"{row_name}: нет колонки company_id (есть {sorted(names)})"
             )
         candidates = (
             ([self._explicit_flags_column] if self._explicit_flags_column else [])
@@ -172,7 +173,7 @@ class DbFeatureFlagStore:
         modules_col = next((name for name in candidates if name and name in names), None)
         if modules_col is None:
             raise PluginRepositorySchemaError(
-                f"{row.__name__}: нет JSONB-колонки enabled_modules "
+                f"{row_name}: нет JSONB-колонки enabled_modules "
                 f"(кандидаты {candidates}, есть {sorted(names)}). "
                 f"Передайте flags_column=<реальная колонка> или flags_row=."
             )

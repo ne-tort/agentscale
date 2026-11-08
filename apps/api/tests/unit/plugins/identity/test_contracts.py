@@ -29,9 +29,6 @@ def test_plugin_token_error_codes_match_required_set() -> None:
 
 
 def test_plugin_claims_satisfies_capability_protocol() -> None:
-
-
-def test_plugin_claims_satisfies_capability_protocol() -> None:
     """F2 описал PluginClaims структурно; наш dataclass должен ему отвечать."""
     claims = PluginClaims(
         sub="plugin:mod_equipment:co_123:inst_abc",

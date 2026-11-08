@@ -115,7 +115,7 @@ _CONFIGMAP_KEY_RE = re.compile(r"^[-._a-zA-Z0-9]{1,253}$")
 
 
 class K8sApiError(RuntimeError):
-    """ Любая ошибка k8s API. Наружу всегда маппится в доменную (fail-closed). """
+    """Любая ошибка k8s API. Наружу всегда маппится в доменную (fail-closed)."""
 
     def __init__(self, reason: str) -> None:
         super().__init__(reason)
@@ -838,8 +838,17 @@ def decode_state(raw: str, *, plugin_instance_id: str) -> ActivationState:
             wake_in_flight=bool(payload.get("wake_in_flight", False)),
             job_leases=leases,
         )
-    except (ActivationError, StateStoreUnavailable):
+    except StateStoreUnavailable:
+        # Уже типизированный отказ (_encode_dt/_decode_dt) — не переупаковываем.
         raise
+    except ActivationError as exc:
+        # ``ActivationState.__post_init__`` (рассинхрон active_job_ids/leases,
+        # пустой id) бросает базовый ActivationError. Приводим к единому типу
+        # хранилища, чтобы activator видел system failure, а не «успех».
+        raise StateStoreUnavailable(
+            plugin_instance_id=plugin_instance_id,
+            detail=f"состояние в ConfigMap повреждено: {type(exc).__name__}",
+        ) from exc
     except Exception as exc:  # noqa: BLE001 — битые данные = system failure
         raise StateStoreUnavailable(
             plugin_instance_id=plugin_instance_id,
@@ -950,7 +959,7 @@ class ConfigMapStateStore:
         resource_version = response.resource_version
         if not resource_version:
             # Без resourceVersion оптимистичный CAS невозможен: «повезёт» здесь
-            # быть не должно (иначе два woke снова пройдут одновременно).
+            # быть не должно (иначе два wake снова пройдут одновременно).
             raise StateStoreUnavailable(
                 plugin_instance_id=plugin_instance_id,
                 detail="ConfigMap не содержит metadata.resourceVersion: CAS невозможен",

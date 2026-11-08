@@ -39,6 +39,11 @@ def test_exactly_three_layers_with_expected_media_types() -> None:
 
 
 def test_layer_paths_and_annotations() -> None:
+    """Имя OCI-аннотации ``requestedCapabilities`` неизменно; источник — ``capabilities``.
+
+    Вариант A: запрещённое схемой поле НЕ читается из подписанного manifest —
+    значение аннотации берётся из закрытого whitelist-поля ``capabilities``.
+    """
     manifest = _build()
     titles = [layer["annotations"]["org.opencontainers.image.title"] for layer in manifest["layers"]]
     assert titles == [
@@ -52,6 +57,32 @@ def test_layer_paths_and_annotations() -> None:
     assert annotations["agentscale.plugin.protocol"] == "plugin-rpc/1"
     assert annotations["agentscale.plugin.requestedCapabilities"] == "cache,objects,docs"
     assert annotations["agentscale.plugin.min_platform_version"] == "4.0.0"
+
+
+def test_capabilities_annotation_comes_from_whitelist_field() -> None:
+    """Аннотация следует за ``capabilities``, а не за ``requestedCapabilities``."""
+    manifest = _build(plugin_manifest=valid_manifest(capabilities=["cache", "jobs"]))
+    assert manifest["annotations"]["agentscale.plugin.requestedCapabilities"] == "cache,jobs"
+
+
+def test_forbidden_requested_capabilities_field_is_ignored() -> None:
+    """Даже если в dict случайно добавили запрещённое поле, сборщик его не читает.
+
+    Fail-closed обеспечивает ``validate_manifest`` задачи 01 до сборки; здесь
+    проверяем, что ``build_oci_manifest`` сам НЕ зависит от запрещённого ключа.
+    """
+    payload = valid_manifest()
+    payload["requestedCapabilities"] = ["root"]  # мусор, схемой запрещён
+    manifest = _build(plugin_manifest=payload)
+    assert manifest["annotations"]["agentscale.plugin.requestedCapabilities"] == "cache,objects,docs"
+
+
+def test_missing_capabilities_field_is_rejected() -> None:
+    with pytest.raises(ArtifactError) as exc:
+        payload = valid_manifest()
+        del payload["capabilities"]
+        _build(plugin_manifest=payload)
+    assert exc.value.code is ArtifactErrorCode.INCOMPATIBLE
 
 
 def test_no_artifact_digest_inside_signed_manifest() -> None:

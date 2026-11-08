@@ -21,9 +21,17 @@ Fail-closed (без «тихого успеха»)
   ``UNSIGNED`` или ``VERIFY_FAILED``. Никакого «раз Fallback — значит успех»;
 * ``VerificationResult`` требует ``sbom_verified`` и ``provenance_verified``
   (строки 425-431 verifier'а), иначе артефакт ВСЁ РАВНО уйдёт в карантин.
-  Один ``cosign verify`` этих фактов не даёт, поэтому дополнительно вызываются
-  ``cosign verify-attestation --type spdxjson`` и ``--type slsaprovenance``.
-  Отключить их НЕЛЬЗЯ: флага «пропустить проверку» у адаптера нет в принципе.
+  Один ``cosign verify`` этих фактов не даёт, поэтому по умолчанию дополнительно
+  вызываются ``cosign verify-attestation --type spdxjson`` и
+  ``--type slsaprovenance``. Альтернативный источник подтверждения можно
+  инъектить через ``attestation_verifier=``, но ОТКЛЮЧИТЬ проверку НЕЛЬЗЯ:
+  сбой источника или неполный ``AttestationEvidence`` = QUARANTINED.
+
+  ВАЖНО ДЛЯ РОДИТЕЛЯ: текущий CI (задача 16,
+  ``.github/workflows/plugin-artifacts.yml``) делает только ``cosign sign`` и
+  НЕ делает ``cosign attest``. До добавления attest'ов в CI (или подключения
+  альтернативного проверяемого источника SBOM/provenance) КАЖДЫЙ артефакт
+  будет честно уходить в QUARANTINED. Это fail-closed по дизайну, а не баг.
 
 KMS-fallback (self-hosted runners без keyless OIDC)
 ---------------------------------------------------
@@ -94,6 +102,28 @@ _SBOM_TYPE = "spdxjson"
 _PROVENANCE_TYPE = "slsaprovenance"
 
 CosignRunner = Callable[..., Any]
+
+
+@dataclass(frozen=True, slots=True)
+class AttestationEvidence:
+    """Подтверждение SBOM/provenance для ``VerificationResult``.
+
+    Оба флага обязаны быть ``True``, иначе ``ArtifactVerifier`` (строки 425-431)
+    отправит артефакт в QUARANTINED. «Пустое подтверждение» = отказ.
+    """
+
+    sbom_verified: bool
+    provenance_verified: bool
+    detail: str = ""
+
+    @property
+    def complete(self) -> bool:
+        return self.sbom_verified is True and self.provenance_verified is True
+
+
+#: Инъекция источника SBOM/provenance. НЕ «флаг отключения проверки»: любой
+#: отказ/исключение источника обязан привести к QUARANTINED, а не к успеху.
+AttestationVerifier = Callable[..., AttestationEvidence]
 
 
 class _CosignFailure(Exception):
@@ -253,6 +283,105 @@ def assert_verification_enabled(argv: list[str]) -> None:
             )
 
 
+def attestations_from_cosign(
+    image_ref: str,
+    identity: str,
+    issuer: str,
+    *,
+    runner: CosignRunner,
+    binary: str,
+    timeout: float,
+    kms_key_ref: str = "",
+) -> AttestationEvidence:
+    """Проверить SBOM/provenance через ``cosign verify-attestation``.
+
+    Используется по умолчанию. Требует, чтобы артефакт был подписан И
+    ``cosign attest``-ован (в CI задачи 16 пока только ``cosign sign`` — см.
+    риск в отчёте родителю). Любая ошибка -> оба флага ``False``, что честно
+    уводит артефакт в QUARANTINED, а не «пропускает» проверку.
+    """
+    evidence = AttestationEvidence(sbom_verified=False, provenance_verified=False)
+    for attestation_type, field in ((_SBOM_TYPE, "sbom"), (_PROVENANCE_TYPE, "provenance")):
+        argv = attestation_command(
+            binary,
+            image_ref,
+            attestation_type,
+            identity=identity,
+            issuer=issuer,
+            kms_key_ref=kms_key_ref,
+        )
+        try:
+            verify_cosign_stdout(runner, argv, timeout=timeout, label=field)
+        except _CosignFailure:
+            return evidence
+        evidence = AttestationEvidence(
+            sbom_verified=evidence.sbom_verified or field == "sbom",
+            provenance_verified=evidence.provenance_verified or field == "provenance",
+            detail="cosign verify-attestation: spdxjson + slsaprovenance",
+        )
+    return evidence
+
+
+def verify_cosign_stdout(
+    runner: CosignRunner,
+    argv: list[str],
+    *,
+    timeout: float,
+    label: str,
+) -> Any:
+    """Один вызов cosign с жёсткой проверкой результата (fail-closed).
+
+    Вынесено из ``CliCosignPort._invoke``, чтобы его мог переиспользовать
+    ``attestations_from_cosign`` (без дублирования парсинга JSON).
+    """
+    assert_verification_enabled(argv)
+    try:
+        raw = runner(argv, timeout=timeout)
+    except Exception as exc:  # noqa: BLE001 — FileNotFoundError/Timeout/CalledProcessError
+        raise _CosignFailure(
+            ArtifactErrorCode.VERIFY_FAILED.value,
+            f"cosign {label} недоступен или упал: {type(exc).__name__}",
+        ) from exc
+
+    returncode = getattr(raw, "returncode", None)
+    if returncode is None and isinstance(raw, dict):
+        returncode = raw.get("returncode")
+    if not isinstance(returncode, int) or returncode != 0:
+        raise _CosignFailure(
+            ArtifactErrorCode.VERIFY_FAILED.value,
+            f"cosign {label} завершился с rc={returncode!r}",
+        )
+    stdout = getattr(raw, "stdout", None)
+    if stdout is None and isinstance(raw, dict):
+        stdout = raw.get("stdout")
+    if not isinstance(stdout, str) or not stdout.strip():
+        raise _CosignFailure(
+            ArtifactErrorCode.VERIFY_FAILED.value,
+            f"cosign {label} вернул пустой вывод: проверка не состоялась",
+        )
+    try:
+        payload = json.loads(stdout)
+    except (ValueError, TypeError) as exc:
+        raise _CosignFailure(
+            ArtifactErrorCode.VERIFY_FAILED.value,
+            f"cosign {label} вернул невалидный JSON",
+        ) from exc
+    # cosign verify/verify-attestation отдают JSON-объект или массив результатов.
+    # Скаляр (число/строка/true) — «проверка не состоялась», а не успех: иначе
+    # подделанный stdout дал бы verified=True.
+    if not isinstance(payload, (dict, list)):
+        raise _CosignFailure(
+            ArtifactErrorCode.VERIFY_FAILED.value,
+            f"cosign {label} вернул JSON не объект/массив",
+        )
+    if payload == [] or payload == {}:
+        raise _CosignFailure(
+            ArtifactErrorCode.UNSIGNED.value,
+            f"cosign {label} не подтвердил ни одной подписи/attestation",
+        )
+    return payload
+
+
 def _subprocess_runner(argv: list[str], *, timeout: float) -> _RunResult:
     """Реальный cosign: ``subprocess`` импортируется ТОЛЬКО здесь, при вызове.
 
@@ -287,6 +416,12 @@ class CliCosignPort:
     ``kms_key_ref`` включает KMS-fallback с ЗАФИКСИРОВАННЫМ trust root. Пустое
     значение = keyless (OIDC/Fulcio). Ни тот, ни другой режим не отключает
     проверку подписи; ``signature_verification_enabled`` всегда ``True``.
+
+    ``attestation_verifier`` — инъекция ДРУГОГО ИСТОЧНИКА подтверждения
+    SBOM/provenance (например, проверка OCI-аннотаций реестра). По умолчанию
+    ``attestations_from_cosign`` вызывает ``cosign verify-attestation``. Это НЕ
+    «флаг отключения»: сбой источника, исключение или неполный
+    ``AttestationEvidence`` всегда дают ``verified=False`` (карантин).
     """
 
     def __init__(
@@ -296,6 +431,7 @@ class CliCosignPort:
         timeout_seconds: float = 60.0,
         kms_key_ref: str | None = None,
         runner: CosignRunner | None = None,
+        attestation_verifier: AttestationVerifier | None = None,
     ) -> None:
         if not isinstance(binary, str) or not binary.strip() or any(
             ch.isspace() or ch == "\x00" for ch in binary
@@ -318,6 +454,13 @@ class CliCosignPort:
         self._timeout = timeout
         self._kms_key_ref = trust_root
         self._runner: CosignRunner = runner or _subprocess_runner
+        # Источник SBOM/provenance подменяется ТОЛЬКО другой ПРОВЕРКОЙ, а не
+        # «флагом пропустить». Любой сбой источника = QUARANTINED.
+        if attestation_verifier is not None and not callable(attestation_verifier):
+            raise RuntimeConfigError("attestation_verifier обязан быть вызываемым")
+        self._attestation_verifier: AttestationVerifier = (
+            attestation_verifier or attestations_from_cosign
+        )
         # Инвариант зафиксирован на уровне объекта: сеттера нет, значения
         # ``False`` не существует ни в одном конструкторе/оверрайде.
         self._signature_verification_enabled = True
@@ -364,6 +507,7 @@ class CliCosignPort:
         строит QUARANTINED + ``QuarantineEvidence`` (§5.1).
         """
         digest = ""
+        canonical_ref = image_ref.strip() if isinstance(image_ref, str) else ""
         try:
             # 1) Валидация ДО subprocess. Ни одного вызова при ':latest'/битом digest.
             digest = prepare_ref(image_ref)
@@ -371,33 +515,31 @@ class CliCosignPort:
             issuer = _safe_arg(issuer, label="certificate-oidc-issuer")
 
             # 2) Основная проверка подписи. KMS-режим меняет источник доверия,
-            #    но НЕ отключает саму проверку.
+            #    но НЕ отключает саму проверку. В команду уходит КАНОНИЧЕСКАЯ
+            #    ссылка (без пробелов по краям), прошедшая ту же валидацию.
             if self._kms_key_ref:
-                main = kms_verify_command(self._binary, image_ref, self._kms_key_ref)
+                main = kms_verify_command(self._binary, canonical_ref, self._kms_key_ref)
             else:
-                main = keyless_verify_command(self._binary, image_ref, identity, issuer)
+                main = keyless_verify_command(self._binary, canonical_ref, identity, issuer)
             self._invoke(main, label="verify")
 
-            # 3) SBOM и provenance: verifier требует ОБА флага (§5.1).
-            #    Без этого «успешный» результат всё равно = QUARANTINED.
-            sbom = attestation_command(
-                self._binary,
-                image_ref,
-                _SBOM_TYPE,
-                identity=identity,
-                issuer=issuer,
+            # 3) SBOM и provenance: verifier требует ОБА флага (§5.1). Источник
+            #    подтверждения инъектится, но НЕ отключается: сбой/исключение
+            #    источника -> отказ, пустые флаги -> отказ.
+            evidence = self._attestation_verifier(
+                canonical_ref,
+                identity,
+                issuer,
+                runner=self._runner,
+                binary=self._binary,
+                timeout=self._timeout,
                 kms_key_ref=self._kms_key_ref,
             )
-            self._invoke(sbom, label="sbom")
-            provenance = attestation_command(
-                self._binary,
-                image_ref,
-                _PROVENANCE_TYPE,
-                identity=identity,
-                issuer=issuer,
-                kms_key_ref=self._kms_key_ref,
-            )
-            self._invoke(provenance, label="provenance")
+            if not isinstance(evidence, AttestationEvidence) or not evidence.complete:
+                raise _CosignFailure(
+                    ArtifactErrorCode.VERIFY_FAILED.value,
+                    "SBOM/provenance не подтверждены: публикация запрещена",
+                )
         except _CosignFailure as exc:
             self._audit(digest, identity if isinstance(identity, str) else "", outcome="denied")
             return VerificationResult(verified=False, detail=f"{exc.code}: {exc.reason}")
@@ -425,46 +567,9 @@ class CliCosignPort:
 
     def _invoke(self, argv: list[str], *, label: str) -> Any:
         """Один вызов cosign: check=True, таймаут, JSON-разбор, fail-closed."""
-        assert_verification_enabled(argv)
-        try:
-            raw = self._runner(argv, timeout=self._timeout)
-        except Exception as exc:  # noqa: BLE001 — FileNotFoundError/Timeout/CalledProcessError
-            raise _CosignFailure(
-                ArtifactErrorCode.VERIFY_FAILED.value,
-                f"cosign {label} недоступен или упал: {type(exc).__name__}",
-            ) from exc
-
-        returncode = getattr(raw, "returncode", None)
-        if returncode is None and isinstance(raw, dict):
-            returncode = raw.get("returncode")
-        if not isinstance(returncode, int) or returncode != 0:
-            raise _CosignFailure(
-                ArtifactErrorCode.VERIFY_FAILED.value,
-                f"cosign {label} завершился с rc={returncode!r}",
-            )
-
-        stdout = getattr(raw, "stdout", None)
-        if stdout is None and isinstance(raw, dict):
-            stdout = raw.get("stdout")
-        if not isinstance(stdout, str) or not stdout.strip():
-            raise _CosignFailure(
-                ArtifactErrorCode.VERIFY_FAILED.value,
-                f"cosign {label} вернул пустой вывод: проверка не состоялась",
-            )
-        try:
-            payload = json.loads(stdout)
-        except (ValueError, TypeError) as exc:
-            raise _CosignFailure(
-                ArtifactErrorCode.VERIFY_FAILED.value,
-                f"cosign {label} вернул невалидный JSON",
-            ) from exc
-        # Пустой массив/объект == «cosign ничего не подтвердил».
-        if payload is None or payload == [] or payload == {} or payload is False:
-            raise _CosignFailure(
-                ArtifactErrorCode.UNSIGNED.value,
-                f"cosign {label} не подтвердил ни одной подписи/attestation",
-            )
-        return payload
+        return verify_cosign_stdout(
+            self._runner, argv, timeout=self._timeout, label=label
+        )
 
     def _audit(self, digest: str, identity: str, *, outcome: str) -> None:
         """Запись в лог: ТОЛЬКО digest + identity_digest, без секретов/подписи.
@@ -483,11 +588,15 @@ class CliCosignPort:
 
 __all__ = [
     "FORBIDDEN_COSIGN_FLAGS",
+    "AttestationEvidence",
+    "AttestationVerifier",
     "CliCosignPort",
     "assert_verification_enabled",
     "attestation_command",
+    "attestations_from_cosign",
     "audit_fields",
     "keyless_verify_command",
     "kms_verify_command",
     "prepare_ref",
+    "verify_cosign_stdout",
 ]

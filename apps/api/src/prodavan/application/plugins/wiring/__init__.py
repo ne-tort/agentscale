@@ -61,6 +61,12 @@ from prodavan.application.plugins.wiring.config import (
     PluginPlatformConfigError,
     read_previous_secrets,
 )
+from prodavan.application.plugins.wiring.install import (
+    PLUGIN_SURFACE_GUARD_STATE_KEY,
+    PluginCompositionError,
+    install_plugin_platform,
+    install_plugin_platform_for_tests,
+)
 from prodavan.application.plugins.wiring.keyring import (
     ALGORITHM,
     active_kid_for,
@@ -109,6 +115,11 @@ __all__ = [
     "PluginPlatformConfig",
     "PluginPlatformConfigError",
     "read_previous_secrets",
+    # install (F11: ОДИН вызов для main.py)
+    "PLUGIN_SURFACE_GUARD_STATE_KEY",
+    "PluginCompositionError",
+    "install_plugin_platform",
+    "install_plugin_platform_for_tests",
     # keyring
     "ALGORITHM",
     "active_kid_for",

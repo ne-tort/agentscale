@@ -96,7 +96,10 @@ def test_full_sequence_must_complete_each_step() -> None:
         seen.append(plan.current_step.step_id)
         plan.complete_current_step()
         plan.advance()  # после последнего вернёт None, но не бросит
-    assert seen == tuple(step.step_id for step in CUTOVER_STEPS)
+    # seen собирается в list по ходу цикла; контракт CUTOVER_STEPS — tuple.
+    # Сравниваем ПОСЛЕДОВАТЕЛЬНОСТЬ (приводим к tuple), а не тип контейнера:
+    # ослаблять проверку порядка/полноты нельзя, менять API плана — незачем.
+    assert tuple(seen) == tuple(step.step_id for step in CUTOVER_STEPS)
     assert plan.is_complete is True
     assert plan.completed_steps == tuple(step.step_id for step in CUTOVER_STEPS)
     assert plan.current_step is None

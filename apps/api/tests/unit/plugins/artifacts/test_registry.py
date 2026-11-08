@@ -77,7 +77,9 @@ def test_quarantined_evidence_does_not_publish(registry: PluginArtifactRegistry,
     """cosign verify упал → QUARANTINED, publish не происходит."""
     manifest = valid_manifest()
     cosign.verified = False
-    outcome = verifier.verify(ref(), manifest, grant=full_grant(), scan_verified=True)
+    outcome = verifier.verify(
+        ref(), manifest, grant=full_grant(), scan_verified=True, csp_verified=True
+    )
     assert outcome.outcome is RegistryOutcome.QUARANTINED
     result = registry.publish(ref(), manifest, outcome)
     assert result.outcome is RegistryOutcome.QUARANTINED
@@ -99,7 +101,7 @@ def test_repeat_digest_with_other_manifest_is_artifact_digest_conflict(
     first = _verified(verifier, manifest_a)
     assert registry.publish(ref(), manifest_a, first).outcome is RegistryOutcome.APPLIED
 
-    manifest_b = valid_manifest(version="1.3.0", requestedCapabilities=["cache"])
+    manifest_b = valid_manifest(version="1.3.0", capabilities=["cache"])
     second = _verified(verifier, manifest_b)
     result = registry.publish(ref(), manifest_b, second)
     assert result.outcome is RegistryOutcome.QUARANTINED
@@ -121,13 +123,47 @@ def test_idempotent_republish_same_digest(registry: PluginArtifactRegistry, veri
 
 def test_incompatible_manifest_is_not_published(registry: PluginArtifactRegistry, verifier) -> None:
     """Неизвестная capability → INCOMPATIBLE, запись не публикуется."""
-    manifest = valid_manifest(requestedCapabilities=["cache", "alien_capability"])
-    outcome = verifier.verify(ref(), manifest, grant=full_grant(), scan_verified=True)
+    manifest = valid_manifest(capabilities=["cache", "alien_capability"])
+    outcome = verifier.verify(
+        ref(), manifest, grant=full_grant(), scan_verified=True, csp_verified=True
+    )
     assert outcome.outcome is RegistryOutcome.QUARANTINED
     result = registry.publish(ref(), manifest, outcome)
     assert result.outcome is RegistryOutcome.QUARANTINED
     _assert_no_publication(registry)
     assert COMPATIBILITY_ERROR_CODE == "INCOMPATIBLE"
+
+
+def test_publish_snapshot_of_both_flags_works(registry: PluginArtifactRegistry, verifier) -> None:
+    """Базовый publish(ref, manifest, evidence) берёт ОБА флага из evidence."""
+    manifest = valid_manifest()
+    outcome = _verified(verifier, manifest)
+    assert outcome.evidence.scan_verified is True
+    assert outcome.evidence.csp_verified is True
+    assert registry.publish(ref(), manifest, outcome).outcome is RegistryOutcome.APPLIED
+
+
+def test_publish_with_explicit_false_csp_is_quarantined(
+    registry: PluginArtifactRegistry, verifier
+) -> None:
+    """Явный ``csp_verified=False`` в publish = принудительный отказ (fail-closed)."""
+    manifest = valid_manifest()
+    outcome = _verified(verifier, manifest)
+    result = registry.publish(ref(), manifest, outcome, csp_verified=False)
+    assert result.outcome is RegistryOutcome.QUARANTINED
+    _assert_no_publication(registry)
+
+
+def test_publish_evidence_without_csp_flag_is_quarantined(
+    registry: PluginArtifactRegistry, verifier
+) -> None:
+    """Evidence без ``csp_verified`` не публикуется, даже если gate вызван вручную."""
+    manifest = valid_manifest()
+    outcome = _verified(verifier, manifest, csp_verified=False)
+    assert outcome.outcome is RegistryOutcome.QUARANTINED  # verify сам отказал
+    result = registry.publish(ref(), manifest, outcome)
+    assert result.outcome is RegistryOutcome.QUARANTINED
+    _assert_no_publication(registry)
 
 
 def test_compatibility_error_code(registry: PluginArtifactRegistry) -> None:

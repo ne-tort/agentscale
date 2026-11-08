@@ -12,7 +12,7 @@ from starlette.requests import Request
 from prodavan.application.plugins.identity.keys import keyring_from_secret
 from prodavan.application.plugins.identity.mint import mint_plugin_claims
 from prodavan.application.plugins.identity.revocation import GrantRevocation, InMemoryRevocation
-from prodavan.application.plugins.transport.conftest import (
+from tests.unit.plugins.transport.conftest import (
     FakeGrant,
     FakeInstance,
     TEST_COMPANY,

@@ -72,7 +72,7 @@ from .config import RuntimeConfig
 from .cosign_adapter import CliCosignPort
 from .errors import PluginRuntimeError, RuntimeConfigError
 from .k8s_scale import ConfigMapStateStore, K8sScalePort
-from .proxy import BackendSenderPort, HttpProxyPort
+from .proxy import HttpProxyPort
 
 #: Имена override'ов, которые ``build_runtime_ports`` принимает как ГОТОВЫЕ
 #: адаптеры. Всё остальное = ошибка (опечатка не должна теряться молча).
@@ -88,6 +88,7 @@ RUNTIME_OVERRIDES: Final[frozenset[str]] = frozenset(
         "k8s_api",
         "http_probe",
         "cosign_runner",
+        "attestation_verifier",
         "client",
     }
 )
@@ -140,6 +141,10 @@ class RuntimePorts:
             raise PluginRuntimeError("cosign обязан реализовывать CosignPort (Protocol)")
         if not isinstance(self.state_store, ConfigMapStateStore):
             raise PluginRuntimeError("state_store обязан быть ConfigMapStateStore (межпроцессный CAS)")
+        if not isinstance(self.proxy, HttpProxyPort):
+            raise PluginRuntimeError("proxy обязан быть HttpProxyPort (ProxyPort)")
+        if not callable(getattr(self.backend_http, "send", None)):
+            raise PluginRuntimeError("backend_http обязан реализовывать send()")
 
     @property
     def activation_ports(self) -> dict[str, Any]:
@@ -235,7 +240,7 @@ def build_runtime_ports(settings: Any, **overrides: Any) -> RuntimePorts:
     Любая ошибка композиции = исключение (fail-closed): родитель НЕ должен
     подключать «почти собранную» платформу. Тесты подменяют готовые адаптеры
     через ``**overrides`` и не делают IO (``k8s_api``/``http_probe``/
-    ``cosign_runner``/``client`` — инъекции).
+    ``cosign_runner``/``attestation_verifier``/``client`` — инъекции).
 
     Пример для родителя::
 
@@ -260,6 +265,7 @@ def build_runtime_ports(settings: Any, **overrides: Any) -> RuntimePorts:
             timeout_seconds=config.cosign_timeout_seconds,
             kms_key_ref=config.kms_key_ref or None,
             runner=overrides.get("cosign_runner"),
+            attestation_verifier=overrides.get("attestation_verifier"),
         )
     if not isinstance(cosign, CosignPort):
         raise PluginRuntimeError("cosign override обязан реализовывать CosignPort")

@@ -122,7 +122,14 @@ class FakeRedis:
         self.calls += 1
         key = str(args[0])
         if "ZREMRANGEBYSCORE" in script:
-            now, window, amount, limit, member = (int(args[i]) for i in range(1, 6))
+            # ARGV = (now, window, amount, limit, member). Числовых — первые 4;
+            # ARGV[5] `member` — НЕПРОЗРАЧНАЯ строка (уникальный id события),
+            # которую реальный Redis кладёт в ZSET. Нельзя делать int(member):
+            # адаптер передаёт f"{now_ms}-{id(object())}", и int() бросал
+            # ValueError → RedisPluginQuota.enforce уходил в fail-closed deny
+            # даже на ПЕРВЫЙ запрос. Фейк хранит окно списком (ts, amount),
+            # поэтому сам member ему не нужен — он эмулирует только счётчики.
+            now, window, amount, limit = (int(args[i]) for i in range(1, 5))
             events = [(ts, qty) for ts, qty in self.ops.get(key, ()) if ts > now - window]
             used = sum(qty for _, qty in events)
             if used + amount > limit:

@@ -158,15 +158,44 @@ def test_check_method_matches_transport_deps_contract(grant_store: FakeGrantStor
 
 
 def test_no_bump_pod_bridge_generation_used(grant_store: FakeGrantStore) -> None:
-    """Отзыв плагина не дёргает агентский механизм (критерий №12).
+    """Отзыв плагина не дёргает агентский механизм (критерий №12, ADR-008).
 
-    Проверяем по коду самого класса: ни одного вызова/атрибута с именем
-    агентского ``bump_pod_bridge_generation``.
+    Инвариант = НЕТ вызова/атрибута/импорта ``bump_pod_bridge_generation``
+    в ИСПОЛНЯЕМОМ коде. Имя встречается в docstring'ах как явный запрет
+    («НЕ использует ...»), поэтому проверка «подстрока в исходнике» даёт
+    ложное срабатывание на самом отрицании. Проверяем AST (идентификаторы
+    вне строковых констант) + co_names методов, сохраняя инвариант, а не
+    ослабляя его до «убрать упоминание из документации».
     """
+    import ast
     import inspect
+    import textwrap
 
-    source = inspect.getsource(DurableGrantRevocation)
-    assert "bump_pod_bridge_generation" not in source
+    forbidden = "bump_pod_bridge_generation"
+    source = textwrap.dedent(inspect.getsource(DurableGrantRevocation))
+    tree = ast.parse(source)
+    identifiers = {
+        name
+        for node in ast.walk(tree)
+        for name in (
+            [node.id] if isinstance(node, ast.Name) else
+            [node.attr] if isinstance(node, ast.Attribute) else
+            [node.name, node.asname] if isinstance(node, ast.alias) else
+            []
+        )
+        if name
+    }
+    assert forbidden not in identifiers, (
+        f"{forbidden} используется в исполняемом коде DurableGrantRevocation"
+    )
+    # Дополнительно: рантайм-имена всех методов класса (на случай динамики,
+    # которую AST исходника класса может не покрыть).
+    for attr in vars(DurableGrantRevocation).values():
+        code = getattr(getattr(attr, "__func__", attr), "__code__", None)
+        if code is not None:
+            assert forbidden not in code.co_names
+    # Отзыв опирается на durable-хранилище, а не на агентский Pod/Redis.
+    assert "deactivate" in DurableGrantRevocation.revoke.__code__.co_names
     assert "grant_store" in source or "deactivate" in source
 
 

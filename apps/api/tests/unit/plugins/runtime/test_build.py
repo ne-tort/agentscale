@@ -88,9 +88,10 @@ def test_platform_override_names_match_wiring(config) -> None:  # type: ignore[n
 
 def test_report_has_no_secrets(config) -> None:  # type: ignore[no-untyped-def]
     report = _build(config).report()
-    raw = str(report)
-    for forbidden in ("token", "secret", "password", "dsn", "kubeconfig", "signature"):
-        assert forbidden not in raw.lower() or forbidden == "kms_mode"
+    raw = str(report).lower()
+    for forbidden in ("token", "password", "dsn", "kubeconfig", "signature"):
+        assert forbidden not in raw
+    assert "secret" not in raw  # в отчёте нет ни секретов, ни их значений
     assert report["config"]["state_configmap"] == "plugin-activation-state"
 
 
@@ -111,15 +112,16 @@ def test_in_memory_state_store_is_rejected(config) -> None:  # type: ignore[no-u
     """InMemoryStateStore задачи 09 НЕ защищает от гонки двух реплик Gateway."""
     with pytest.raises(PluginRuntimeError):
         _build(config, state_store=InMemoryStateStore())
+    built = _build(config)
     with pytest.raises(PluginRuntimeError):
         RuntimePorts(
             config=config,
-            cosign=_build(config).cosign,
-            scale=_build(config).scale,
-            readiness=_build(config).readiness,
+            cosign=built.cosign,
+            scale=built.scale,
+            readiness=built.readiness,  # тот же объект: проверяем именно state_store
             state_store=InMemoryStateStore(),  # type: ignore[arg-type]
-            proxy=_build(config).proxy,
-            backend_http=_build(config).backend_http,
+            proxy=built.proxy,
+            backend_http=built.backend_http,
         )
 
 

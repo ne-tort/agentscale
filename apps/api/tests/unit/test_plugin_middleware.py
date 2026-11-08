@@ -37,14 +37,21 @@ def _app() -> FastAPI:
 
 
 def _plugin_token(typ: str = "plugin_capability") -> str:
-    """Минимальный JWT-подобный токен: middleware смотрит только на payload.typ."""
+    """Минимальный JWT: middleware смотрит ТОЛЬКО на payload.typ, подпись не проверяет.
+
+    Третий сегмент всё равно обязан быть корректным base64url: ``jwt.decode``
+    разбирает все три части даже при ``verify_signature=False``.
+    """
     import base64
     import json
 
-    def b64(data: dict) -> str:
-        return base64.urlsafe_b64encode(json.dumps(data).encode()).decode().rstrip("=")
+    def b64(data: bytes) -> str:
+        return base64.urlsafe_b64encode(data).decode().rstrip("=")
 
-    return f"{b64({'alg': 'HS256'})}.{b64({'typ': typ})}.signature"
+    header = b64(json.dumps({"alg": "HS256"}).encode())
+    payload = b64(json.dumps({"typ": typ}).encode())
+    signature = b64(b"not-a-real-signature")
+    return f"{header}.{payload}.{signature}"
 
 
 def test_plugin_surface_regex_is_narrow() -> None:

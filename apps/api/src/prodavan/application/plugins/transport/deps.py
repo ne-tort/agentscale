@@ -238,8 +238,19 @@ def get_plugin_claims(
 
     # ОБЯЗАТЕЛЬНО: плагину разрешено только /capabilities/v1/*; agent-surface
     # (в т.ч. /agent/events) закрыт. Путь берём из request, НЕ из заголовков.
+    #
+    # Проверяем СЫРОЙ scope["path"] И нормализованный url.path: Starlette
+    # вырезает query из url.path, поэтому «?x=1» в исходном пути иначе
+    #变成 валидный /capabilities/v1/cache/get. Любое расхождение = отказ.
+    raw_path = str(request.scope.get("path") or "")
+    normalized_path = request.url.path or ""
     try:
-        claims = assert_plugin_surface(claims, request.url.path or "")
+        if raw_path != normalized_path:
+            raise PluginTokenError(
+                code=PluginTokenErrorCode.FORBIDDEN_SURFACE,
+                detail="path contains query/fragment or was normalized",
+            )
+        claims = assert_plugin_surface(claims, raw_path)
     except PluginTokenError as exc:
         raise _forbidden(str(exc.detail), exc.code.value) from exc
 

@@ -48,13 +48,17 @@ from .config import (
 )
 from .cosign_adapter import (
     FORBIDDEN_COSIGN_FLAGS,
+    AttestationEvidence,
+    AttestationVerifier,
     CliCosignPort,
     assert_verification_enabled,
     attestation_command,
+    attestations_from_cosign,
     audit_fields,
     keyless_verify_command,
     kms_verify_command,
     prepare_ref,
+    verify_cosign_stdout,
 )
 from .errors import PluginRuntimeError, RuntimeConfigError
 from .k8s_scale import (
@@ -104,13 +108,17 @@ __all__ = [
     "RuntimeConfigError",
     # cosign
     "FORBIDDEN_COSIGN_FLAGS",
+    "AttestationEvidence",
+    "AttestationVerifier",
     "CliCosignPort",
     "assert_verification_enabled",
     "attestation_command",
+    "attestations_from_cosign",
     "audit_fields",
     "keyless_verify_command",
     "kms_verify_command",
     "prepare_ref",
+    "verify_cosign_stdout",
     # k8s scale / readiness / CAS
     "ConfigMapStateStore",
     "K8sApiClient",

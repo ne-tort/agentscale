@@ -31,7 +31,7 @@ from prodavan.application.plugins.capabilities.errors import (
     ValidationError,
 )
 from prodavan.application.plugins.capabilities.ports import AdapterMissingError
-from prodavan.application.plugins.transport.conftest import (
+from tests.unit.plugins.transport.conftest import (
     ALL_SCOPES,
     FakeDecision,
     FakeGrant,

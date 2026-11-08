@@ -360,9 +360,12 @@ class HttpProxyPort:
     и кэширует его до :meth:`aclose`. Оба варианта обязательны: без транспорта
     сборка падает (fail-closed).
 
-    ``gateway_forward`` — НЕобязательный готовый ``GatewayProxy`` задачи 11.
-    Тогда адаптер вообще не строит заголовки и не отправляет сам, а делегирует
-    (нулевое дублирование allowlist'а).
+    ``gateway_forward`` — НЕобязательная ГОТОВАЯ корутина/объект с тем же
+    контрактом, что и ``ProxyPort.forward`` (keyword-only ``plugin_instance_id``,
+    ``request``, ``claims``). Готовый ``GatewayProxy`` задачи 11 имеет ДРУГУЮ
+    сигнатуру (``path``/``method``/``body``/``headers``/``GatewayClaims``/
+    ``GatewayGrant``), поэтому напрямую НЕ подходит: интегратор обязан обернуть
+    его тонким маппером. Это осознанная граница, а не «дублирование прокси».
     """
 
     def __init__(
@@ -380,8 +383,12 @@ class HttpProxyPort:
             raise ProxyConfigurationError("backend_http обязан реализовывать send()")
         if backend_http_factory is not None and not callable(backend_http_factory):
             raise ProxyConfigurationError("backend_http_factory обязан быть вызываемым")
-        if gateway_forward is not None and not callable(getattr(gateway_forward, "forward", None)):
-            raise ProxyConfigurationError("gateway_forward обязан реализовывать forward()")
+        if gateway_forward is not None and not (
+            callable(getattr(gateway_forward, "forward", None)) or callable(gateway_forward)
+        ):
+            raise ProxyConfigurationError(
+                "gateway_forward обязан быть callable или реализовывать forward()"
+            )
         self._config = config
         self._backend: BackendSenderPort | None = backend_http
         self._gateway_forward = gateway_forward
@@ -469,12 +476,25 @@ class HttpProxyPort:
             )
 
         if self._gateway_forward is not None:
-            # Тонкая делегация задаче 11: Gateway сам строит allowlist и wake.
-            return await self._gateway_forward.forward(
-                plugin_instance_id=plugin_instance_id,
-                request=request,
-                claims=claims,
-            )
+            # Тонкая делегация задаче 11 (готовый маппер с тем же контрактом):
+            # Gateway сам строит allowlist и wake, дублирования заголовков нет.
+            target = self._gateway_forward
+            forward = getattr(target, "forward", None)
+            if callable(forward):
+                result = forward(
+                    plugin_instance_id=plugin_instance_id,
+                    request=request,
+                    claims=claims,
+                )
+            else:
+                result = target(
+                    plugin_instance_id=plugin_instance_id,
+                    request=request,
+                    claims=claims,
+                )
+            if hasattr(result, "__await__"):
+                return await result
+            return result
 
         held = coerce_request(request)
         headers = build_outgoing_headers(

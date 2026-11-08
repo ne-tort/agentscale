@@ -59,11 +59,22 @@ def create_app() -> FastAPI:
     # Внимание: GET /health этого роутера совпадает с health_routes.router выше;
     # k8s-проба использует корневую /health, зарегистрированную ПЕРВОЙ.
     if settings.plugin_platform_enabled:
-        from prodavan.application.plugins.transport.guard import register_plugin_surface_guard
+        from prodavan.application.plugins.wiring.install import install_plugin_platform
+        from prodavan.core.infra.redis_manager import get_redis_manager
+        from prodavan.infrastructure.persistence.database import get_session_factory
 
-        # Доверенный контур плагинов: guard ДО роутинга, иначе /agent/* с
-        # plugin-токеном дал бы 404 вместо 403 (критерий §11.17).
-        register_plugin_surface_guard(app)
+        # ОДНА точка F11-композиции: build_plugin_platform + attach_plugin_platform
+        # + install_plugin_gateway_runtime + attach_admin_runtime + guard.
+        # Без неё все 19 ключей app.state пусты и роутеры дают 503.
+        # get_session_factory()/get_redis_manager() ленивые: на момент create_app
+        # ресурсы ещё не открыты, но фабрика и менеджер уже существуют —
+        # репозитории будут открывать сессию на операцию, как остальной API.
+        install_plugin_platform(
+            app,
+            settings,
+            session=get_session_factory(),
+            redis=get_redis_manager(),
+        )
         app.include_router(plugin_gateway.router)
         try:
             from prodavan.api.v1 import plugin_capabilities

@@ -11,10 +11,12 @@
 * ``PluginRuntimeError`` — база для ошибок композиции/конфигурации
   (``RuntimeError``: startup обязан упасть, а не деградировать);
 * ``RuntimeConfigError`` — неполная/противоречивая конфигурация;
-* ``ScaleUnavailable`` / ``NotReady`` / ``StateStoreUnavailable`` импортируются
-  из ``application.plugins.activation.errors`` и НЕ дублируются: activator
+* ``ScaleUnavailable`` / ``NotReady`` импортируются из
+  ``application.plugins.activation.errors`` и НЕ дублируются: activator
   (``_apply_scale``, ``_read_replicas``) ловит ``Exception``, но коды доменных
   ошибок должны остаться стабильными для Gateway/Admin API (§4.5 v4).
+  ``StateStoreUnavailable`` объявлен в ``k8s_scale.py`` как подкласс
+  ``ActivationError`` (у разрушенного CAS тот же system-failure контракт).
 
 В ``detail``/``extra`` ЗАПРЕЩЕНЫ токены, подписи, DSN, kubeconfig, тела
 запросов, содержимое stdout cosign и PII (§4.5, критерий №11).

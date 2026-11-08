@@ -8,6 +8,8 @@
 
 from __future__ import annotations
 
+import re
+
 import pytest
 
 from prodavan.application.plugins.activation.errors import NotReady, ScaleUnavailable
@@ -29,12 +31,6 @@ from tests.unit.plugins.runtime.conftest import (
     deployment_response,
     scale_response,
 )
-
-
-def _runtime_config():  # type: ignore[no-untyped-def]
-    from prodavan.infrastructure.plugins.runtime.config import RuntimeConfig
-
-    return RuntimeConfig(namespace="agentscale-dev")
 
 
 def _port(config, api: FakeK8sApi, probe: FakeProbe | None = None, **over):  # type: ignore[no-untyped-def]
@@ -108,7 +104,12 @@ async def test_scale_to_one_patches_deployments_scale(config) -> None:  # type: 
     assert call["method"] == "PATCH"
     assert call["path"] == _scale_path()
     assert "/scale" in call["path"]
-    assert "deployments/scale" in call["path"]
+    # ``deployments/scale`` — это имя РЕСУРСА в RBAC (resource + subresource),
+    # а не фрагмент REST-пути: между ними обязательно стоит имя Deployment
+    # (/apis/apps/v1/namespaces/<ns>/deployments/<name>/scale). Подстрока
+    # "deployments/scale" в URL недостижима — проверяем форму подресурса.
+    assert re.search(r"/deployments/[^/]+/scale$", call["path"]) is not None
+    assert call["body"]["metadata"]["name"] == TEST_DEPLOYMENT
     assert call["content_type"] == "application/merge-patch+json"
     body = call["body"]
     assert body["kind"] == "Scale"

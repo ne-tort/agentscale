@@ -155,10 +155,14 @@ def test_disabled_platform_refuses_keyring(disabled_config: PluginPlatformConfig
 
 
 def test_duplicate_rotation_secret_rejected() -> None:
+    # enabled=True требует полный набор guard'ов, в т.ч. cosign identity.
+    # Иначе validate() (вызывается из build_keyring) упадёт с PLUGIN_COSIGN_IDENTITY
+    # раньше, чем будет проверен дубликат ротационного секрета.
     config = PluginPlatformConfig(
         enabled=True,
         claims_secret=TEST_SECRET,
         static_origin="https://plugins.example.test",
+        cosign_identity=FakeSettings().plugin_cosign_identity,
         previous_claims_secrets=(TEST_OLD_SECRET_1, TEST_OLD_SECRET_1),
     )
     with pytest.raises(PluginPlatformConfigError, match="duplicate"):

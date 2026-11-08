@@ -175,16 +175,31 @@ async def test_forward_does_not_read_body_of_streaming_response(config) -> None:
     assert backend.sent[0].timeout_seconds == config.backend_timeout_seconds
 
 
-def test_gateway_forward_delegation_is_thin(config) -> None:  # type: ignore[no-untyped-def]
-    """Если задача 11 уже собрала proxy — адаптер не дублирует allowlist."""
+async def test_gateway_forward_delegation_is_thin(config) -> None:  # type: ignore[no-untyped-def]
+    """Если задача 11 собрала маппер — адаптер не дублирует allowlist/транспорт."""
 
-    class Gateway:
+    class GatewayMapper:
+        def __init__(self) -> None:
+            self.seen: dict = {}
+
         async def forward(self, **kwargs):  # type: ignore[no-untyped-def]
-            return {"delegated": True, **kwargs}
+            self.seen = kwargs
+            return {"delegated": True}
 
-    port = HttpProxyPort(config=config, gateway_forward=Gateway())
+    mapper = GatewayMapper()
+    port = HttpProxyPort(config=config, gateway_forward=mapper)
     assert port.backend_http is None
-    assert port.gateway_forward is not None
+    claims = fresh_claims()
+    result = await port.forward(
+        plugin_instance_id=TEST_INSTANCE,
+        request=_request(),
+        claims=claims,
+    )
+    assert result == {"delegated": True}
+    assert mapper.seen["plugin_instance_id"] == TEST_INSTANCE
+    assert mapper.seen["claims"] is claims
+    # Ни одного локального httpx/заголовочного кода: чистый маппер задачи 11.
+    assert len(mapper.seen) == 3
 
 
 # --------------------------------------------------------------------------- fail-closed

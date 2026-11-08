@@ -18,6 +18,7 @@ from prodavan.application.plugins.artifacts.verification import (
     VerificationResult,
 )
 from prodavan.infrastructure.plugins.runtime.cosign_adapter import (
+    AttestationEvidence,
     CliCosignPort,
     assert_verification_enabled,
     attestation_command,
@@ -301,3 +302,56 @@ def test_missing_identity_is_unsigned() -> None:
     result = _port(runner).verify(TEST_REF, "", TEST_ISSUER)
     assert result.verified is False
     assert runner.calls == []
+
+
+# --------------------------------------------------------------------------- инъекция attestation
+
+
+def test_injected_attestation_verifier_is_used() -> None:
+    """Альтернативный ИСТОЧНИК подтверждения (не «отключение проверки»)."""
+    seen: dict = {}
+
+    def verifier(ref, identity, issuer, **kwargs):  # type: ignore[no-untyped-def]
+        seen.update(ref=ref, identity=identity, issuer=issuer, kwargs=kwargs)
+        return AttestationEvidence(
+            sbom_verified=True, provenance_verified=True, detail="OCI annotations"
+        )
+
+    runner = FakeCosignRunner()
+    result = CliCosignPort(
+        runner=runner, attestation_verifier=verifier
+    ).verify(TEST_REF, TEST_IDENTITY, TEST_ISSUER)
+    assert result.verified is True
+    assert result.sbom_verified is True and result.provenance_verified is True
+    assert seen["ref"] == TEST_REF
+    assert len(runner.calls) == 1  # только подпись; attestation — из инъекции
+    assert seen["kwargs"]["kms_key_ref"] == ""
+
+
+def test_incomplete_attestation_evidence_is_quarantined() -> None:
+    """Пустое/неполное подтверждение = отказ, а не success (fail-closed)."""
+    def verifier(*_args, **_kwargs):  # type: ignore[no-untyped-def]
+        return AttestationEvidence(sbom_verified=True, provenance_verified=False)
+
+    result = CliCosignPort(
+        runner=FakeCosignRunner(), attestation_verifier=verifier
+    ).verify(TEST_REF, TEST_IDENTITY, TEST_ISSUER)
+    assert result.verified is False
+    assert "SBOM/provenance" in result.detail
+
+
+def test_attestation_verifier_exception_is_quarantined() -> None:
+    """Сбой источника подтверждения = QUARANTINED, не «пропустим проверку»."""
+    def broken(*_args, **_kwargs):  # type: ignore[no-untyped-def]
+        raise RuntimeError("attestation store unavailable")
+
+    result = CliCosignPort(
+        runner=FakeCosignRunner(), attestation_verifier=broken
+    ).verify(TEST_REF, TEST_IDENTITY, TEST_ISSUER)
+    assert result.verified is False
+    assert "RuntimeError" in result.detail
+
+
+def test_attestation_verifier_must_be_callable() -> None:
+    with pytest.raises(RuntimeConfigError):
+        CliCosignPort(runner=FakeCosignRunner(), attestation_verifier=object())  # type: ignore[arg-type]

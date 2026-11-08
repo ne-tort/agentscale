@@ -3,6 +3,7 @@ import type {
   ApiClient,
   ApiError,
   AdminModule,
+  AdminPluginsResponse,
   AdminProfile,
   AttachmentUpload,
   CabinetBoundModule,

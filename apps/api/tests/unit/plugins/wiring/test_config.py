@@ -189,6 +189,15 @@ def test_with_overrides_revalidates_and_rejects_typos() -> None:
     config = PluginPlatformConfig(enabled=False)
     with pytest.raises(PluginPlatformConfigError, match="unknown"):
         config.with_overrides(claim_secret="x")  # опечатка: claims_secret
-    updated = config.with_overrides(enabled=True, claims_secret=TEST_SECRET, static_origin=TEST_STATIC_ORIGIN)
+    # enabled=True включает полный набор guard'ов: помимо секрета и origin
+    # обязателен keyless-cosign identity (см. test_enabled_without_cosign_identity_fails,
+    # который требует именно этот отказ). Без него validate() упадёт по другой
+    # причине и тест не проверит ревалидацию override'ов. Guard не ослабляем.
+    updated = config.with_overrides(
+        enabled=True,
+        claims_secret=TEST_SECRET,
+        static_origin=TEST_STATIC_ORIGIN,
+        cosign_identity=FakeSettings().plugin_cosign_identity,
+    )
     assert updated.enabled is True
     assert config.enabled is False  # исходный frozen-объект не изменился

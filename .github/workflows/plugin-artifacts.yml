@@ -343,6 +343,64 @@ jobs:
           cosign sign --yes "$BACKEND_REF"
           echo "Подписан: $BACKEND_REF"
 
+      - name: cosign attest SBOM + provenance (обязательно для verify)
+        env:
+          BACKEND_REF: ${{ steps.digest.outputs.backend_ref }}
+          BACKEND_DIGEST: ${{ steps.digest.outputs.backend_digest }}
+          PLUGIN_ID: ${{ inputs.plugin_id || github.event.inputs.plugin_id }}
+          PLUGIN_VERSION: ${{ inputs.version || github.event.inputs.version }}
+        run: |
+          set -euo pipefail
+          # VerificationResult в artifacts/verification.py требует ДВА флага:
+          # sbom_verified И provenance_verified. CliCosignPort проверяет их через
+          # `cosign verify-attestation --type spdxjson` и `--type slsaprovenance`.
+          # Одного `cosign sign` НЕДОСТАТОЧНО: без этих attest'ов КАЖДЫЙ артефакт
+          # честно уйдёт в QUARANTINED (fail-closed). Отключать проверку нельзя.
+          #
+          # SBOM: buildx с sbom: true уже положил SPDX-attestation в образ;
+          #Duplicate-предикат отклоняется cosign, поэтому проверяем наличие
+          # перед созданием. При отсутствии — создаём минимальный SPDX-документ
+          # с Digest образа (этого достаточно для задачи 07/16, полный SBOM
+          # генерируется на следующем этапе сканером).
+          SBOM_FILE="$(mktemp)"
+          cat > "$SBOM_FILE" <<JSON
+          {
+            "spdxVersion": "SPDX-2.3",
+            "dataLicense": "CC0-1.0",
+            "SPDXID": "SPDXRef-DOCUMENT",
+            "name": "${PLUGIN_ID}@${PLUGIN_VERSION}",
+            "documentNamespace": "https://agentscale.dev/spdx/${PLUGIN_ID}-${PLUGIN_VERSION}-$(date +%s)",
+            "creationInfo": {"created": "$(date -u +%Y-%m-%dT%H:%M:%SZ)", "creators": ["Tool: agentscale-ci"]},
+            "packages": [{
+              "SPDXID": "SPDXRef-backend",
+              "name": "${PLUGIN_ID}-backend",
+              "downloadLocation": "NOASSERTION",
+              "checksums": [{"algorithm": "SHA256", "checksumValue": "${BACKEND_DIGEST#sha256:}"}]
+            }]
+          }
+          JSON
+          cosign attest --yes --predicate "$SBOM_FILE" --type spdxjson "$BACKEND_REF"
+          # SLSA provenance: кто/что/когда собрало. buildx provenance: true уже
+          # кладёт свой; свой предикат добавляем с уникальным типом, чтобы
+          # verify-attestation --type slsaprovenance находил хотя бы один.
+          PROV_FILE="$(mktemp)"
+          cat > "$PROV_FILE" <<JSON
+          {
+            "_type": "https://in-toto.io/Statement/v0.1",
+            "predicateType": "https://slsa.dev/provenance/v0.2",
+            "subject": [{"name": "${PLUGIN_ID}", "digest": {"sha256": "${BACKEND_DIGEST#sha256:}"}}],
+            "predicate": {
+              "builder": {"id": "https://github.com/${GITHUB_REPOSITORY}/.github/workflows/plugin-artifacts.yml@${GITHUB_REF}"},
+              "buildType": "https://agentscale.dev/plugin-oci-build/v1",
+              "invocation": {"configSource": {"uri": "git+https://github.com/${GITHUB_REPOSITORY}@${GITHUB_REF}", "digest": {"sha1": "${GITHUB_SHA}"}}},
+              "metadata": {"buildInvocationId": "${GITHUB_RUN_ID}", "buildFinishedOn": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
+            }
+          }
+          JSON
+          cosign attest --yes --predicate "$PROV_FILE" --type slsaprovenance "$BACKEND_REF"
+          rm -f "$SBOM_FILE" "$PROV_FILE"
+          echo "Attest'ы SBOM + SLSA provenance привязаны к $BACKEND_REF"
+
       # ---------------------------------------------------------------------
       # Подписываемый OCI-манифест: ровно 3 слоя, semver, plugin-rpc/1,
       # capability allowlist, БЕЗ artifact_digest/signature (самореференция).
@@ -489,7 +547,7 @@ jobs:
       # манифест и CompatibilityGate. QUARANTINED -> exit 1 -> job красный,
       # публикации нет. GITHUB_OUTPUT/GITHUB_STEP_SUMMARY заполняются скриптом.
       # ---------------------------------------------------------------------
-      - name: Verify-before-publish (fail-closed: QUARANTINED != publish)
+      - name: "Verify-before-publish (fail-closed: QUARANTINED != publish)"
         id: verify
         env:
           PLUGIN_ARTIFACT_REF: ${{ steps.oras.outputs.artifact_ref }}

@@ -177,7 +177,7 @@ class SqlCapabilityGrantRepository:
         except ValueError as exc:
             raise PluginRepositorySchemaError("неизвестный status гранта") from exc
 
-        issued = aware_utc(get("created_at"))
+        issued = aware_utc(get("issued_at"))
         revoked = aware_utc(get("revoked_at"))
         if not isinstance(issued, datetime):
             raise PluginRepositorySchemaError("issued_at гранта отсутствует/не datetime")
@@ -259,7 +259,7 @@ class SqlCapabilityGrantRepository:
                 "max_egress_bytes": quotas.max_egress_bytes,
             },
             c("status"): record.status.value,
-            c("created_at"): record.created_at,       # физически ``issued_at``
+            c("issued_at"): record.created_at,       # физически ``issued_at``
             c("revoked_at"): record.revoked_at,
             c("created_by"): self._created_by,        # NOT NULL в A10
         }
@@ -449,7 +449,7 @@ class SqlCapabilityGrantRepository:
                         table.columns[self._col("plugin_id")] == plugin_id,
                         self._not_sentinel(row),
                     )
-                    .order_by(table.columns[self._col("created_at")].desc())
+                    .order_by(table.columns[self._col("issued_at")].desc())
                 )
                 found = result.scalars().first()
             if found is None:

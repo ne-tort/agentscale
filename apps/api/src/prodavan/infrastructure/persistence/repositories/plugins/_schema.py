@@ -9,8 +9,10 @@
 Реальные таблицы (не правятся отсюда):
 
 * ``plugin_capability_grants`` — PK ``id`` (логический ``grant_id``), нет
-  ``created_at`` (есть ``issued_at``), есть ``expires_at`` и обязательный
-  ``created_by``. НЕТ отдельной колонки ``grant_id``.
+  ``created_at`` (есть ``issued_at`` — ЛОГИЧЕСКОЕ имя гранта ``issued_at``,
+  НЕ глобальный алиас), есть ``expires_at`` и обязательный ``created_by``.
+  НЕТ отдельной колонки ``grant_id``. У остальных моделей A10 колонка
+  времени создания называется именно ``created_at``.
 * ``plugin_artifacts`` — ``oci_digest`` вместо ``digest``, ``app_version_projection``
   (NOT NULL + CHECK ``manifest <> app_version_projection``), ``image_ref``,
   ``quarantine_reason``, ``cosign_verified``, ``lifecycle_version`` (CAS) и
@@ -193,8 +195,14 @@ class ColumnMap:
 
 A10_COLUMN_MAP: Mapping[str, str] = {
     # --- CapabilityGrantRow: логический grant_id физически = PK id ---
+    # ВАЖНО: ``created_at`` НЕ алиасим глобально на ``issued_at``. Реальная
+    # колонка ``issued_at`` есть ТОЛЬКО у CapabilityGrantRow; у
+    # PluginArtifactRow / PluginEventDeliveryRow / PluginInstanceRow колонка
+    # называется ``created_at``. Глобальный алиас ломал require() этих моделей
+    # (PluginRepositorySchemaError: "отсутствуют колонки ['issued_at']").
+    # Грант пользуется собственным логическим именем ``issued_at``.
     "grant_id": "id",
-    "created_at": "issued_at",
+    "issued_at": "issued_at",
     "expires_at": "expires_at",
     "revoked_at": "revoked_at",
     "created_by": "created_by",
@@ -253,7 +261,7 @@ A10_COLUMN_MAP: Mapping[str, str] = {
 GRANT_COLUMNS: tuple[str, ...] = (
     "grant_id", "company_id", "plugin_id", "plugin_instance_id",
     "manifest_version", "artifact_digest", "capabilities", "egress_policy",
-    "quota", "status", "created_at", "revoked_at",
+    "quota", "status", "issued_at", "revoked_at",
 )
 GRANT_NOT_NULL_EXTRA: tuple[str, ...] = ("created_by",)
 

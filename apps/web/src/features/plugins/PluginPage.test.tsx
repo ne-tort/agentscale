@@ -10,7 +10,7 @@
  *
  * Тесты НЕ запускались (freeze верификации миграции).
  */
-import { act, Fragment, type ReactElement } from "react";
+import { act, Fragment, isValidElement, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -139,8 +139,10 @@ describe("plugin-routes.tsx: маршруты для родителя", () => {
     expect(PLUGIN_ROUTE_ELEMENTS.type).toBe(Fragment);
     const children = (PLUGIN_ROUTE_ELEMENTS.props as { children: ReactElement[] }).children;
     expect(children).toHaveLength(2);
-    expect(children.map((child) => child.props.path)).toEqual(PLUGIN_ROUTE_PATHS);
-    // Ни один элемент не монтирует роутер сам и не является <Routes>.
+    expect(children.map((child) => (child.props as { path: string }).path)).toEqual(PLUGIN_ROUTE_PATHS);
+    // Все дети — валидные React-элементы; ни один не монтирует роутер сам
+    // и не является <Routes>. Роутер остаётся единственным в AppRouter.
+    expect(children.every((child) => isValidElement(child))).toBe(true);
     expect(children.every((child) => child.type !== Routes)).toBe(true);
     expect(children.every((child) => typeof child.type !== "string")).toBe(true);
   });
@@ -199,6 +201,12 @@ describe("PluginPage: изоляция iframe", () => {
     expect(markup()).not.toContain("access_token");
     expect(markup()).not.toContain("capability_token");
     expect(markup()).not.toContain("authorization");
+  });
+
+  it("версия из пропа попадает в версионированный путь static-origin", async () => {
+    await mountPage("/plugins/mod_equipment/co_123", { version: "2.3.4" });
+    expect(frame()?.getAttribute("src"))
+      .toBe(`${STATIC_ORIGIN}/tenant-co_123/mod_equipment/2.3.4/index.html`);
   });
 
   it("capability-токен НЕ попадает во frontend: порт отдаёт только флаги, в DOM нет секретов", async () => {
