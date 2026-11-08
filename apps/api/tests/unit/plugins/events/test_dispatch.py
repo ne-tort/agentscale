@@ -72,32 +72,44 @@ async def test_idle_consumer_does_not_commit_anything() -> None:
 
 
 @pytest.mark.asyncio
-async def test_offset_is_not_committed_until_handler_succeeds() -> None:
-    """Ключевой criterion 20: обработчик упал на 1-й попытке -> seek, без commit.
+async def test_retry_does_not_commit_offset_and_restart_replays_event() -> None:
+    """Ключевой criterion 20: до успеха commit не вызывается.
 
-    Проверяем и «внутри» consume (RETRY вернулся), и то, что порты зафиксировали
-    именно seek(offset), а не commit(offset). Повторный вызов с той же записью
-    (эмуляция рестарта после простоя) успешно обрабатывает и коммитит.
+    Диспечер делает до 3 попыток ВНУТРИ одного ``consume``: падение на 1-й и
+    успех на 2-й дают итоговый ACK с ОДНИМ коммитом и ``seek`` на каждой
+    неудачной попытке. Отдельно проверяем «простой/рестарт»: пока успеха нет,
+    коммита нет вообще, а повторная доставка той же записи после рестарта
+    обрабатывается и коммитится (``earliest`` + ручной commit).
     """
 
     event = make_event(event_id="evt-idle", source_event_id="src-idle")
+    # Ретраи внутри одного consume: падение на 1-й попытке, успех на 2-й.
     h = build_harness(
         records=[record_of(event, offset=101)],
         handler=FakeHandler(fails_at={1}),
     )
     outcome = await h.dispatcher.consume(make_subscription())
-    assert outcome is DeliveryOutcome.RETRY
-    assert h.consumer.commits == [], "offset не должен коммититься до успеха"
-    assert h.consumer.seeks == [101], "позиция возвращена к необработанной записи"
-    assert len(h.handler.calls) == 1
+    assert outcome is DeliveryOutcome.ACK
+    assert h.consumer.seeks == [101], "неудачная попытка -> seek(offset)"
+    assert h.consumer.commits == [101], "ровно один коммит ПОСЛЕ успеха"
+    assert len(h.handler.calls) == 2
     assert h.dlq.records == []
 
-    # Рестарт консьюмера: та же запись приходит снова (earliest + manual commit).
-    h.consumer.records.append(record_of(event, offset=101))
-    outcome2 = await h.dispatcher.consume(make_subscription())
-    assert outcome2 is DeliveryOutcome.ACK
-    assert h.consumer.commits == [101]
-    assert len(h.handler.calls) == 2
+    # Сценарий «простой»: запись есть, но коммит упал (эмуляция останова
+    # консьюмера/брокера). Успешная обработка не должна «проскочить» offset.
+    h_restart = build_harness(records=[record_of(event, offset=202)])
+    h_restart.consumer.fail_commit = True
+    with pytest.raises(Exception):
+        await h_restart.dispatcher.consume(make_subscription())
+    assert h_restart.consumer.commits == [], "сбой коммита не теряет событие"
+    assert h_restart.handler.calls, "обработчик был вызван"
+
+    # После снятия простоя та же запись приходит снова и коммитится.
+    h_restart.consumer.fail_commit = False
+    h_restart.consumer.records.append(record_of(event, offset=202))
+    recovery = await h_restart.dispatcher.consume(make_subscription())
+    assert recovery is DeliveryOutcome.ACK
+    assert h_restart.consumer.commits == [202]
 
 
 @pytest.mark.asyncio
@@ -186,30 +198,49 @@ async def test_dlq_failure_does_not_commit_offset() -> None:
 
 
 @pytest.mark.asyncio
-async def test_audit_failure_on_ack_does_not_commit() -> None:
-    """Fail-closed: аудит недоступен -> offset не коммитится даже при успехе handler."""
+async def test_missing_audit_port_fails_before_handler() -> None:
+    """Fail-closed: нет AuditPort -> отказ до вызова обработчика и коммита."""
 
-    event = make_event()
-    h = build_harness(records=[record_of(event, offset=3)])
-    h.audit.fail = True
-    with pytest.raises(RuntimeError):
-        await h.dispatcher.consume(make_subscription())
+    from prodavan.application.plugins.events.dispatch import PluginEventDispatcher
+
+    h = build_harness(records=[record_of(make_event(), offset=3)])
+    dispatcher = PluginEventDispatcher(
+        producer=h.producer,
+        consumer=h.consumer,
+        topic_admin=h.admin,
+        dlq=h.dlq,
+        subscriptions=h.subscriptions,
+        published_events=h.published,
+        idempotency=h.idempotency,
+        audit=None,
+        handler=h.handler,
+        wake_hook=h.wake,
+    )
+    with pytest.raises(PluginEventError) as exc:
+        await dispatcher.consume(make_subscription())
+    assert exc.value.code is PluginEventErrorCode.MISSING_DEPENDENCY
+    assert h.handler.calls == []
     assert h.consumer.commits == []
-    assert len(h.handler.calls) == 1
 
 
 @pytest.mark.asyncio
-async def test_wake_failure_counts_as_retry_without_commit() -> None:
-    """Ошибка wake (backend не Ready) -> RETRY, handler не вызывается, commit нет."""
+async def test_wake_failure_exhausts_retries_without_commit() -> None:
+    """Ошибка wake (backend не Ready) считается ошибкой доставки.
+
+    Wake вызывается перед КАЖДОЙ из 3 попыток: handler ни разу не вызывается,
+    offset не коммитится, событие уходит в DLQ только после 3 неудач.
+    """
 
     event = make_event()
     h = build_harness(records=[record_of(event, offset=4)], wake=FakeWake(fail=True))
     outcome = await h.dispatcher.consume(make_subscription())
-    assert outcome is DeliveryOutcome.RETRY
+    assert outcome is DeliveryOutcome.DLQ
     assert h.handler.calls == []
     assert len(h.wake.wakes) == 0
-    assert h.consumer.commits == []
-    assert h.consumer.seeks == [4]
+    assert h.consumer.commits == [4], "коммит только после DLQ"
+    assert h.consumer.seeks == [4, 4]
+    assert len(h.dlq.records) == 1
+    assert h.dlq.records[0].error_kind == "PluginEventError"
 
 
 # ---------------------------------------------------------------------------
@@ -392,7 +423,8 @@ async def test_wake_hook_runs_before_every_retry() -> None:
     )
     await h.dispatcher.consume(make_subscription())
     assert len(h.wake.wakes) == 3
-    assert all(w is event for w in h.wake.wakes)
+    assert all(w.event_id == event.event_id for w in h.wake.wakes)
+    assert h.dlq.records[0].error_kind == "RuntimeError"
 
 
 def test_consumer_config_is_earliest_and_manual_commit() -> None:

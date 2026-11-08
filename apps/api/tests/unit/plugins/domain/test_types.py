@@ -44,8 +44,8 @@ from prodavan.domain.plugins.validation import validate_manifest
 VALID_DIGEST = "sha256:" + "a" * 64
 
 try:
-    from tests.unit.plugins.domain._fixtures import valid_manifest_dict
-except ImportError:  # запуск pytest из каталога domain без настроенного PYTHONPATH
+    from ._fixtures import valid_manifest_dict
+except ImportError:  # запуск теста как отдельного модуля вне пакета
     from _fixtures import valid_manifest_dict  # type: ignore[no-redef]
 
 

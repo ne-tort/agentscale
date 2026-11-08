@@ -403,6 +403,7 @@ def verify_plugin_token(
     payload = keyring.decode(token)
     claims = claims_from_payload(payload)
 
+    # Проверка обязательных claim/форматов и времени — fail-closed на каждом шаге.
     now_epoch = _epoch_seconds(now)
     # Leeway применяется только к exp: токен считается истёкшим, когда
     # now >= exp + leeway. ``iat`` в будущем (с тем же допуском) — тоже отказ.

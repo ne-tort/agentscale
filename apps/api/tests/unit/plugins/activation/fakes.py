@@ -174,13 +174,19 @@ class FakeProxy:
 
 
 class BlockingProxy(FakeProxy):
-    """Прокси, который «держит» запрос до явного ``release``."""
+    """Прокси, который «держит» запрос до явного ``release``.
+
+    ``started`` выставляется в момент входа в ``forward``: тест ждёт именно
+    его, а не «два раза уступи event loop и надеемся, что успело».
+    """
 
     def __init__(self) -> None:
         super().__init__()
         self.gate = asyncio.Event()
+        self.started = asyncio.Event()
 
     async def forward(self, **kwargs: Any) -> Any:
+        self.started.set()
         await self.gate.wait()
         return await super().forward(**kwargs)
 

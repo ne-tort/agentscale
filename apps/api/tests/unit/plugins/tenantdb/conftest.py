@@ -12,7 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from prodavan.application.plugins.tenantdb.service import AdminTarget, ExecuteResult
+from prodavan.application.plugins.tenantdb.service import AdminTarget, ExecuteResult, TenantDatabaseService
 
 
 @dataclass
@@ -184,10 +184,8 @@ def make_service(
     audit: FakeAudit | None = None,
     dsn_host: str = "tenant-postgres.plugins.svc",
     dsn_port: int = 5432,
-) -> tuple[object, FakeAdminConnection, FakeSecretStore, FakeAudit]:
+) -> tuple[TenantDatabaseService, FakeAdminConnection, FakeSecretStore, FakeAudit]:
     """Собрать сервис с полным набором fakes. Возвращает (service, + fakes)."""
-    from prodavan.application.plugins.tenantdb.service import TenantDatabaseService
-
     a = admin if admin is not None else FakeAdminConnection()
     s = secrets if secrets is not None else FakeSecretStore()
     au = audit if audit is not None else FakeAudit()

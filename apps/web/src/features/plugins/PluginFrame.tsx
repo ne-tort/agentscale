@@ -7,14 +7,8 @@ import {
   toPluginFrameError,
   type PluginErrorCode,
 } from "./errors";
-import { createPluginChannel, OPAQUE_ORIGIN, type PluginChannel } from "./rpc";
-
-/** Фабрика каналов: родительский хук может владеть lifecycle вместо компонента. */
-export type PluginChannelFactory = (
-  frame: HTMLIFrameElement,
-  expectedOrigin: string,
-  options: Parameters<typeof createPluginChannel>[2],
-) => PluginChannel;
+import { createPluginChannel, OPAQUE_ORIGIN, type PluginChannel, type PluginChannelFactory } from "./rpc";
+export type { PluginChannelFactory } from "./rpc";
 
 /**
  * `sandbox` плагина: `allow-scripts allow-forms`, БЕЗ `allow-same-origin`.
@@ -83,10 +77,10 @@ type PluginIdentityAttributes = {
   "data-plugin-version"?: string;
 };
 
-/** `credentialless` не описан в @types/react@19; это валидный HTML-атрибут iframe. */
-type CredentiallessAttribute = { credentialless?: boolean };
+/** `credentialless` не описан в @types/react@19; это boolean HTML-атрибут iframe. */
+type CredentiallessAttribute = { credentialless?: string };
 
-export type PluginFrameProps = {
+export interface PluginFrameProps extends Pick<IframeHTMLAttributes<HTMLIFrameElement>, "height" | "width" | "loading"> {
   readonly pluginId: string;
   readonly companyId: string;
   readonly version: string;
@@ -101,7 +95,7 @@ export type PluginFrameProps = {
   readonly onError?: (error: PluginFrameError) => void;
   readonly title?: string;
   readonly className?: string;
-} & Pick<IframeHTMLAttributes<HTMLIFrameElement>, "height" | "width" | "loading">;
+}
 
 type FramePhase = "loading" | "ready" | "error" | "notConnected";
 
@@ -203,7 +197,7 @@ export function PluginFrame(props: PluginFrameProps) {
     "data-plugin-id": pluginId,
     "data-plugin-version": version,
   };
-  const credentialless: CredentiallessAttribute = { credentialless: true };
+  const credentialless: CredentiallessAttribute = { credentialless: "" };
 
   const ariaLabel = props.title ?? t("plugins.open");
 
@@ -248,5 +242,3 @@ export function PluginFrame(props: PluginFrameProps) {
     }}>{t("plugins.close")}</button>}
   </section>;
 }
-
-export { PLUGIN_RPC_PROTOCOL };

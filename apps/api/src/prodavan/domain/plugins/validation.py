@@ -171,6 +171,8 @@ def _check_path_array(value: Any, *, field_name: str, code: ManifestValidationEr
     if not isinstance(value, list):
         _fail(code, f"{field_name} must be an array")
     for item in value:
+        # Валидация до set(): нехешируемые элементы не должны давать TypeError
+        # вместо типизированной PluginValidationError.
         _check_absolute_path(item, field_name=field_name, code=code)
     if len(set(value)) != len(value):
         _fail(code, f"{field_name} must not contain duplicates")
@@ -228,6 +230,8 @@ def _validate_capabilities(value: Any) -> tuple[Capability, ...]:
     if not isinstance(value, list):
         _fail(ManifestValidationErrorCode.CAPABILITY_UNKNOWN, "capabilities must be an array")
     for item in value:
+        # Проверка типа до set(): нехешируемое значение должно дать типизированную
+        # ошибку, а не TypeError.
         if not isinstance(item, str) or item not in CAPABILITY_ALLOWLIST:
             _fail(ManifestValidationErrorCode.CAPABILITY_UNKNOWN, f"unknown capability: {item!r}")
     if len(set(value)) != len(value):
@@ -244,7 +248,12 @@ def _validate_with_jsonschema(data: Mapping[str, Any]) -> None:
         validator_cls = jsonschema.validators.validator_for(schema)
         validator_cls.check_schema(schema)
         validator = validator_cls(schema)
-        errors = sorted(validator.iter_errors(dict(data)), key=lambda error: list(error.absolute_path))
+        # Ключ сортировки — строки: absolute_path может содержать и индексы
+        # массивов (int), и ключи объектов (str), сравнение которых падает.
+        errors = sorted(
+            validator.iter_errors(dict(data)),
+            key=lambda error: tuple(str(part) for part in error.absolute_path),
+        )
     except Exception as exc:  # схема/библиотека повели себя неожиданно — это отказ, не успех
         _fail(ManifestValidationErrorCode.SCHEMA_INVALID, f"schema validation failed: {exc}")
     if errors:

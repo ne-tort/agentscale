@@ -208,7 +208,7 @@ class FakeSeenStore:
 
 @dataclass
 class FakeAudit:
-    entries: list[tuple[str, dict[str, Any]]] = []
+    entries: list[tuple[str, dict[str, Any]]] = field(default_factory=list)
     fail: bool = False
 
     async def append(self, event_type: str, *, details: dict[str, Any]) -> None:

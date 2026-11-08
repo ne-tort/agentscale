@@ -5,6 +5,7 @@ import {
   OPAQUE_ORIGIN,
   createPluginChannel,
   type PluginChannel,
+  type PluginChannelFactory,
   type PluginChannelOptions,
 } from "./rpc";
 
@@ -64,11 +65,7 @@ export type PluginFrameStatus =
   | "notGranted"
   | "notConnected";
 
-export type PluginChannelFactory = (
-  frame: HTMLIFrameElement,
-  expectedOrigin: string,
-  options: PluginChannelOptions,
-) => PluginChannel;
+export type { PluginChannelFactory, PluginChannelOptions };
 
 export interface UsePluginFrameResult {
   readonly status: PluginFrameStatus;
@@ -87,9 +84,17 @@ export interface UsePluginFrameResult {
 
 const SAFE_SEGMENT = /^[A-Za-z0-9._-]{1,128}$/;
 
+/** Подмена env для тестов; по умолчанию — `import.meta.env` (если он есть). */
+function readEnv(): Readonly<Record<string, unknown>> | undefined {
+  try {
+    return import.meta.env as Readonly<Record<string, unknown>> | undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function readConfiguredOrigin(config: PluginFrameConfig): string | undefined {
-  const source: Readonly<Record<string, unknown>> | undefined =
-    config.env ?? (import.meta.env as Readonly<Record<string, unknown>> | undefined);
+  const source: Readonly<Record<string, unknown>> | undefined = config.env ?? readEnv();
   const fromEnv = source?.VITE_PLUGIN_STATIC_ORIGIN;
   const raw = config.staticOrigin ?? (typeof fromEnv === "string" ? fromEnv : undefined);
   return typeof raw === "string" && raw.trim() ? raw.trim() : undefined;
@@ -229,6 +234,10 @@ export function usePluginFrame(options: UsePluginFrameOptions): UsePluginFrameRe
     channelRef.current = null;
     const channel = createPluginChannel(frame, origin, {
       ...channelOptions,
+      // Opaque sandbox адресуется `postMessage("*")`, но принимаем только
+      // `"null"`. Когда цель §5.3 (wildcard subdomain) будет включена, родитель
+      // задаст `acceptedOrigin` точным origin плагина.
+      acceptedOrigin: channelOptions.acceptedOrigin ?? OPAQUE_ORIGIN,
       timeoutMs: timeoutMs ?? channelOptions.timeoutMs,
       onReady: (ready) => {
         setStatus("ready");

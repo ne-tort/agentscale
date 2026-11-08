@@ -34,13 +34,7 @@ from prodavan.application.plugins.gateway.ports import (
     GatewaySession,
 )
 
-# ``conftest`` предоставляет фейки и ``build_harness`` как фикстуры/хелперы
-# через pytest; импорт по абсолютному пути здесь не нужен (и может не резолвиться
-# в зависимости от того, как собран ``sys.path``).
-from .conftest import (  # noqa: F401  (fixtures/helpers)
-    WEBHOOK_SECRET,
-    build_harness,
-)
+from .conftest import WEBHOOK_SECRET, build_harness
 
 
 def _signature(secret: str, body: bytes) -> str:
@@ -164,8 +158,10 @@ async def test_public_page_allows_anonymous_with_reduced_scope() -> None:
     assert result.claims.scopes == ANON_SCOPES
     assert result.claims.project_id is None
     assert result.grant.capability_token == ""
-    # Проверяем, что урезанный scope действительно «урезан».
-    assert result.claims.scopes < SESSION_SCOPES
+    # Проверяем, что урезанный scope действительно «урезан»: он не содержит
+    # ни одного capability-scope обычной страницы и меньше по мощности.
+    assert not (result.claims.scopes & SESSION_SCOPES)
+    assert len(result.claims.scopes) < len(SESSION_SCOPES)
     assert "pluginpage:api" not in result.claims.scopes
 
 
@@ -387,13 +383,15 @@ async def test_webhook_root_never_returns_index_html() -> None:
     """КРИТЕРИЙ №9: ``/webhook/`` не уезжает в SPA и не отдаёт index.html."""
     h = build_harness()
     async with h.client as client:
+        targets = ["/webhook/", "/webhook", "/webhook/mod_equipment/co-123/"]
         for method in ("get", "post", "put", "delete"):
-            response = await getattr(client, method)("/webhook/")
-            assert response.status_code == 400
-            assert response.json()["code"] == GatewayErrorCode.INVALID_PATH.value
-            assert "SPA fallback is forbidden" in response.json()["detail"]
-            body = response.content.decode("utf-8", errors="replace").lower()
-            assert "<html" not in body and "index.html" not in body
+            for target in targets:
+                response = await getattr(client, method)(target)
+                assert response.status_code == 400, (method, target)
+                assert response.json()["code"] == GatewayErrorCode.INVALID_PATH.value
+                assert "SPA fallback is forbidden" in response.json()["detail"]
+                body = response.content.decode("utf-8", errors="replace").lower()
+                assert "<html" not in body and "index.html" not in body
     # Ни один запрос не дошёл до backend/static.
     assert h.backend_http.requests == []
     assert h.static_http.requests == []
@@ -463,3 +461,54 @@ def test_gateway_session_and_grant_shapes() -> None:
     grant = GatewayGrant(grant_id="g", active=True, capability_token="t")
     assert "co-123" in session.company_ids
     assert grant.active and grant.capability_token == "t"
+
+
+# ------------------------------------------------------------- аудит (§11 №11)
+
+
+@pytest.mark.asyncio
+async def test_audit_never_contains_raw_body_tokens_or_cookies() -> None:
+    """Критерий №11: аудит не содержит raw payload / токенов / секретов."""
+    h = build_harness()
+    secret_body = b'{"token":"SUPER-SECRET-DO-NOT-LOG","password":"hunter2"}'
+    headers = _webhook_headers(secret_body, delivery="del-audit-1")
+    headers["Cookie"] = "session=SUPER-SECRET-COOKIE"
+    async with h.client as client:
+        await client.post(
+            "/webhook/mod_equipment/co-123/events",
+            content=secret_body,
+            headers=headers,
+        )
+    # ``GatewayAuditEvent`` — slots-датакласс: перебираем поля явно.
+    serialized = " ".join(
+        f"{f}={getattr(e, f, '')!r}"
+        for e in h.audit.events
+        for f in (
+            "event", "plugin_id", "company_id", "decision", "code",
+            "subject_id", "grant_id", "path_digest", "payload_digest",
+            "reason", "request_id", "metadata",
+        )
+    )
+    for forbidden in ("SUPER-SECRET-DO-NOT-LOG", "hunter2", "SUPER-SECRET-COOKIE"):
+        assert forbidden not in serialized
+    # raw body не попал ни в одно поле; есть только digest.
+    assert all(
+        b"SUPER-SECRET" not in str(e.payload_digest).encode() for e in h.audit.events
+    )
+    assert any(e.payload_digest for e in h.audit.events)
+
+
+@pytest.mark.asyncio
+async def test_audit_failure_is_fail_closed() -> None:
+    """Ошибка append-only аудита = отказ, а не «запрос всё равно разрешён»."""
+    h = build_harness(audit_fail=True)
+    body = b"{}"
+    async with h.client as client:
+        response = await client.post(
+            "/webhook/mod_equipment/co-123/events",
+            content=body,
+            headers=_webhook_headers(body),
+        )
+    assert response.status_code == 503
+    assert response.json()["code"] == GatewayErrorCode.AUDIT_APPEND_FAILED.value
+    assert h.backend_http.requests == []

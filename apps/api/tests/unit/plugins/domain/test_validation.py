@@ -20,13 +20,13 @@ from prodavan.domain.plugins.validation import (
     PluginValidationError,
 )
 try:
-    from tests.unit.plugins.domain._fixtures import (
+    from ._fixtures import (
         VALID_DIGEST,
         valid_manifest_dict,
         with_patch,
         without_field,
     )
-except ImportError:  # запуск pytest из каталога domain без настроенного PYTHONPATH
+except ImportError:  # запуск теста как отдельного модуля вне пакета
     from _fixtures import (  # type: ignore[no-redef]
         VALID_DIGEST,
         valid_manifest_dict,
@@ -38,7 +38,7 @@ except ImportError:  # запуск pytest из каталога domain без �
 def _expect_code(data: Any, code: ManifestValidationErrorCode) -> PluginValidationError:
     """Утвердить, что валидатор отказал с конкретным типизированным кодом."""
     with pytest.raises(PluginValidationError) as exc_info:
-        validate_manifest(data)
+        validate_manifest(data)  # type: ignore[arg-type]
     assert isinstance(exc_info.value, PluginValidationError)
     assert exc_info.value.code is code, (
         f"expected {code.value}, got {exc_info.value.code.value}: {exc_info.value.message}"
@@ -59,6 +59,7 @@ def test_valid_manifest_is_accepted() -> None:
     assert manifest.backend.port == 8080
     assert manifest.migrations.engine.value == "liquibase"
     assert manifest.capabilities == tuple(Capability)
+    assert manifest.egress_ref.startswith("grant:")
     assert manifest.public_pages == ()
     assert manifest.webhooks == ("/webhook/external-system",)
     assert manifest.min_platform_version == "1.0.0"

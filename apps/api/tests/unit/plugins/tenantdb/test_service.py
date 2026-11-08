@@ -287,7 +287,7 @@ async def test_revoke_keeps_database_and_schema() -> None:
     assert admin.count("REVOKE CONNECT") == 1
     # Старый DSN инвалидирован, plaintext не остался.
     assert all(v == "" for v in secrets.values.values())
-    assert '"kept": true' in audit.all_payload_text().lower() or "kept" in audit.all_payload_text()
+    assert "kept" in audit.all_payload_text()
 # endregion
 
 
@@ -371,7 +371,10 @@ async def test_drop_company_database_terminates_and_drops_only_own_db() -> None:
 
     assert DB not in admin.databases
     assert other_db in admin.databases
-    assert admin.count("pg_terminate_backend") == 1
+    # ``pg_terminate_backend`` стоит в середине SELECT, не в начале:
+    # проверяем подстроку, а не count(prefix=...).
+    assert any("pg_terminate_backend" in t for t in admin.texts())
+    assert sum("pg_terminate_backend" in t for t in admin.texts()) == 1
     drop_texts = admin.texts(prefix="DROP DATABASE")
     assert len(drop_texts) == 1
     assert other_db not in drop_texts[0]
@@ -388,6 +391,21 @@ async def test_drop_company_database_validates_id() -> None:
 
 
 # region Протоколы и контракты
+def test_error_codes_contract_is_complete() -> None:
+    """Все пять кодов из задания F3 существуют и уникальны."""
+    assert ALL_CODES == frozenset(
+        {INVALID_IDENTIFIER, ADMIN_UNAVAILABLE, ALREADY_EXISTS, NOT_FOUND, PRIVILEGE_DENIED}
+    )
+    # Каждая фабрика даёт свой код и безопасный http_status.
+    assert TenantDbError.invalid_identifier("x", kind="company_id").code == INVALID_IDENTIFIER
+    assert TenantDbError.admin_unavailable("x").code == ADMIN_UNAVAILABLE
+    assert TenantDbError.already_exists("x", object_kind="db", safe_name="tenant_co").code == ALREADY_EXISTS
+    assert TenantDbError.not_found("x", object_kind="db", safe_name="tenant_co").code == NOT_FOUND
+    assert TenantDbError.privilege_denied("x", safe_name="tenant_co").code == PRIVILEGE_DENIED
+    with pytest.raises(ValueError):
+        TenantDbError(code="UNKNOWN", operation="x", detail="x")
+
+
 def test_ports_are_runtime_checkable_protocols() -> None:
     """Порты — Protocol; fakes структурно им соответствуют."""
     from prodavan.application.plugins.tenantdb.service import AdminConnectionPort, AuditPort, SecretPort

@@ -41,14 +41,14 @@ from prodavan.domain.plugins.validation import (
     validate_manifest,
 )
 try:
-    from tests.unit.plugins.domain._fixtures import (
+    from ._fixtures import (
         VALID_DIGEST,
         protocol_path,
         schema_path,
         types_ts_path,
         valid_manifest_dict,
     )
-except ImportError:  # запуск pytest из каталога domain без настроенного PYTHONPATH
+except ImportError:  # запуск теста как отдельного модуля вне пакета
     from _fixtures import (  # type: ignore[no-redef]
         VALID_DIGEST,
         protocol_path,

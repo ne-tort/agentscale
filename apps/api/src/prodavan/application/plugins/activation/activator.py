@@ -215,11 +215,13 @@ class PluginActivator:
                 detail="Превышен max_concurrent_wakes при ожидании слота пробуждения",
             ) from exc
 
+        scaled_up = False
         try:
             # Намерение 0→1 фиксируется ДО самого PATCH scale: если
             # append-only аудит недоступен, до мутации дело не доходит (§4.5).
             await self._record_wake_started(instance_id, previous_replicas=previous_replicas)
             await self._scale_up(instance_id)
+            scaled_up = True
             ready_at = await self._await_ready(
                 instance_id,
                 started_at=started_at,
@@ -254,13 +256,15 @@ class PluginActivator:
             # _await_ready уже записал denial и выполнил возврат в 0.
             raise
         except ActivationError:
-            await self._restore_zero(instance_id, previous_replicas)
+            if scaled_up:
+                await self._restore_zero(instance_id, previous_replicas)
             raise
         except Exception as exc:
             # Любая непредвиденная ошибка позитивной мутации = system failure:
             # откатываем replicas, чтобы не оставить «вечно живой» backend.
             logger.exception("plugin wake failed instance_id=%s", instance_id)
-            await self._restore_zero(instance_id, previous_replicas)
+            if scaled_up:
+                await self._restore_zero(instance_id, previous_replicas)
             self._record(
                 "plugin_wake_up",
                 instance_id,
@@ -613,12 +617,24 @@ class PluginActivator:
                     timeout_seconds=budget,
                     detail="Параллельное пробуждение не завершилось в отведённое время",
                 ) from exc
-            failure = self._wake_failures.get(instance_id)
+            # Ошибка лидера читается и очищается под блокировкой, чтобы
+            # следующий wake не унаследовал чужой отказ.
+            async with self._lock_for(instance_id):
+                failure = self._wake_failures.pop(instance_id, None)
+                state = await self._store.load(instance_id)
             if failure is not None:
                 raise WakeTimeout(
                     plugin_instance_id=instance_id,
                     timeout_seconds=budget,
                     detail=f"Параллельное пробуждение завершилось отказом: {failure}",
+                )
+            if state.desired is not DesiredState.ACTIVE:
+                # Лидер не смог поднять backend: Ready не состоялся, поэтому
+                # «успех по событию» здесь недопустим (критерий 13).
+                raise WakeTimeout(
+                    plugin_instance_id=instance_id,
+                    timeout_seconds=budget,
+                    detail="Параллельное пробуждение не перевело плагин в ACTIVE",
                 )
         else:
             deadline = started_at + timedelta(seconds=budget)
@@ -633,6 +649,14 @@ class PluginActivator:
                         detail="Параллельное пробуждение не завершилось в отведённое время",
                     )
                 await self._clock.sleep(min(self._policy.ready_poll_interval_seconds, budget))
+            # Межпроцессный лидер мог завершиться отказом: «флаг снят» ещё не
+            # означает ACTIVE (см. критерий 13). Проверяем явно.
+            if state.desired is not DesiredState.ACTIVE:
+                raise WakeTimeout(
+                    plugin_instance_id=instance_id,
+                    timeout_seconds=budget,
+                    detail="Параллельное пробуждение не перевело плагин в ACTIVE",
+                )
 
         # Даже после сигнала лидера Ready проверяется заново: «флаг снят»
         # не равняется «фактически готов» (fail-closed, критерий 13).

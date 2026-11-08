@@ -33,7 +33,10 @@ export LIQUIBASE_ALLOW_EXECUTE_COMMAND=false
 # Не/debug: Liquibase не должен печатать URL с credentials в логи пода.
 export LIQUIBASE_LOG_LEVEL=WARNING
 
-liquibase --changelog-file="$LIQUIBASE_COMMAND_CHANGELOG_FILE" update
+liquibase \
+  --url="$LIQUIBASE_COMMAND_URL" \
+  --changelog-file="$LIQUIBASE_COMMAND_CHANGELOG_FILE" \
+  update
 
 # Только после успешного update помечаем готовность для /health.
 export LIQUIBASE_UPDATE_OK=1

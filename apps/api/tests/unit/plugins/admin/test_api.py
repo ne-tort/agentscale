@@ -32,14 +32,19 @@ from .fakes import DIGEST_A, PLUGIN_X, Harness
 
 def test_router_prefix_and_operations() -> None:
     assert api.router.prefix == "/admin/plugins"
-    operations = {(route.path, tuple(sorted(route.methods))) for route in api.router.routes}
-    assert ("/admin/plugins/grant", ("POST",)) in operations
-    assert ("/admin/plugins/revoke", ("POST",)) in operations
-    assert ("/admin/plugins/uninstall", ("POST",)) in operations
-    assert ("/admin/plugins/wake", ("POST",)) in operations
-    assert ("/admin/plugins/", ("GET",)) in operations
-    assert ("/admin/plugins/enabled-modules", ("PUT",)) in operations
-    assert len(operations) == 6
+    expected = {
+        "/admin/plugins/grant": "POST",
+        "/admin/plugins/revoke": "POST",
+        "/admin/plugins/uninstall": "POST",
+        "/admin/plugins/wake": "POST",
+        "/admin/plugins/": "GET",
+        "/admin/plugins/enabled-modules": "PUT",
+    }
+    actual = {route.path: set(route.methods or ()) for route in api.router.routes}
+    assert set(actual) == set(expected)
+    for path, method in expected.items():
+        # Starlette добавляет HEAD к GET-маршрутам; проверяем наличие основного метода.
+        assert method in actual[path], (path, actual[path])
 
 
 def test_every_request_body_is_strict_typed_model() -> None:

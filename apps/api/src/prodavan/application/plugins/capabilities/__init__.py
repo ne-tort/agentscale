@@ -100,6 +100,7 @@ from prodavan.application.plugins.capabilities.errors import (
     ValidationError,
 )
 from prodavan.application.plugins.capabilities.ports import (
+    CAPABILITY_DOTTED_OPERATIONS,
     CAPABILITY_OPERATIONS,
     CAPABILITY_PORT,
     AdapterMissingError,
@@ -145,6 +146,7 @@ __all__ = [
     "AuditPort",
     "BRIDGE_TO_PLUGIN",
     "CAPABILITY_BRIDGE",
+    "CAPABILITY_DOTTED_OPERATIONS",
     "CAPABILITY_OPERATIONS",
     "CAPABILITY_PORT",
     "CacheDeleteRequest",

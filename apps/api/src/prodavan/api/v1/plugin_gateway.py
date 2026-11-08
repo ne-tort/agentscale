@@ -141,8 +141,13 @@ def _to_response(
     )
 
 
-def _backend_not_ready_response(runtime: PluginGatewayRuntime) -> JSONResponse:
+def _backend_not_ready_response(
+    runtime: PluginGatewayRuntime | None,
+) -> JSONResponse:
     """``202 + Retry-After`` при «backend ещё спит/не Ready» (§7.4)."""
+    retry_after = (
+        runtime.auth.limits.retry_after_seconds if runtime is not None else 3
+    )
     return JSONResponse(
         status_code=202,
         content={
@@ -150,7 +155,7 @@ def _backend_not_ready_response(runtime: PluginGatewayRuntime) -> JSONResponse:
             "code": "PLUGIN_BACKEND_WAKING",
             "detail": "plugin backend is waking up; retry after the indicated delay",
         },
-        headers={"Retry-After": str(runtime.auth.limits.retry_after_seconds)},
+        headers={"Retry-After": str(retry_after)},
     )
 
 
@@ -250,6 +255,46 @@ async def pluginpage_bare() -> Response:
 
 
 @router.api_route(
+    "/pluginpage/{plugin}/{company}",
+    methods=["GET", "POST"],
+    include_in_schema=False,
+)
+async def pluginpage_bare_with_ids(plugin: str, company: str) -> Response:
+    """Пустой ``path`` (``/pluginpage/p/c/``) — НЕ index.html (критерий №9)."""
+    return _no_spa_fallback()
+
+
+@router.api_route(
+    "/webhook/{plugin}/{company}",
+    methods=["GET", "POST", "PUT", "DELETE"],
+    include_in_schema=False,
+)
+async def webhook_bare_with_ids(plugin: str, company: str) -> Response:
+    """Пустой ``path`` у webhook — тоже явный отказ, а не SPA."""
+    return _no_spa_fallback()
+
+
+@router.api_route(
+    "/webhook/{plugin}/{company}/",
+    methods=["GET", "POST", "PUT", "DELETE"],
+    include_in_schema=False,
+)
+async def webhook_bare_with_ids_slash(plugin: str, company: str) -> Response:
+    """То же с завершающим ``/``: index.html не отдаётся ни в каком виде."""
+    return _no_spa_fallback()
+
+
+@router.api_route(
+    "/pluginpage/{plugin}/{company}/",
+    methods=["GET", "POST"],
+    include_in_schema=False,
+)
+async def pluginpage_bare_with_ids_slash(plugin: str, company: str) -> Response:
+    """Пустой статический путь с ``/`` — НЕ index.html."""
+    return _no_spa_fallback()
+
+
+@router.api_route(
     "/pluginpage/",
     methods=["GET", "POST"],
     include_in_schema=False,
@@ -312,8 +357,7 @@ async def _handle_webhook(
         )
         return _to_response(response, stream=False, proxy=runtime.proxy)
     except BackendNotReadyError:
-        # Рантайм гарантированно смонтирован (иначе было бы GatewayError выше).
-        return _backend_not_ready_response(runtime)  # type: ignore[arg-type]
+        return _backend_not_ready_response(runtime)
     except GatewayError as exc:
         return _problem(exc)
 
@@ -405,8 +449,7 @@ async def _handle_pluginpage(
             )
         return _to_response(response, stream=stream, proxy=runtime.proxy)
     except BackendNotReadyError:
-        # Рантайм гарантированно смонтирован (иначе было бы GatewayError выше).
-        return _backend_not_ready_response(runtime)  # type: ignore[arg-type]
+        return _backend_not_ready_response(runtime)
     except GatewayError as exc:
         return _problem(exc)
 

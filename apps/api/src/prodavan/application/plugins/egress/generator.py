@@ -111,7 +111,7 @@ class EgressConfigGenerator:
         * домены виртуального хоста — точные имена из allowlist (НЕ ``["*"]``),
           поэтому подмена ``Host: evil.com`` не попадает ни в один route и получает
           финальный ``direct_response: 403``;
-        * кластеры используют ``LOGICAL_DNS`` + ``auto_sni``/``auto_san_validation``,
+        * кластеры используют ``LOGICAL_DNS`` + явный ``sni`` и проверку SAN,
           чтобы DNS-резолв шёл через прокси, а TLS проверялся на каждом хопе (§6.3).
 
         Ни один хост не захардкожен: ``webhooks.example.com`` из v1/v3 отсутствует.
@@ -121,15 +121,15 @@ class EgressConfigGenerator:
 
         clusters = self._build_clusters(policy)
         routes = self._build_routes(policy)
-        # Финальный маршрут-ловушка: всё, что не совпало, ЯВНО отклоняется.
-        routes.append(self._deny_route())
 
         virtual_hosts = [
             {
                 "name": f"allow_{self._cluster_name(host)}",
                 # Точное совпадение :authority; wildcard НЕ используется.
                 "domains": [host],
-                "routes": [route for route in routes if route.get("_host") == host],
+                # Каждый vhost завершается 403 для любого несовпавшего path/method.
+                "routes": [route for route in routes if route.get("_host") == host]
+                + [self._deny_route()],
             }
             for host in policy.allowed_hosts
         ]
@@ -151,17 +151,13 @@ class EgressConfigGenerator:
                         {
                             "name": "envoy.filters.network.http_connection_manager",
                             "typed_config": {
-                                "@type": (
-                                    "type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager"
-                                ),
+                                "@type": "type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager",
                                 "stat_prefix": "plugin_egress",
                                 "http_filters": [
                                     {
                                         "name": "envoy.filters.http.router",
                                         "typed_config": {
-                                            "@type": (
-                                            "type.googleapis.com/envoy.extensions.filters.http.router.v3.Router"
-                                            )
+                                            "@type": "type.googleapis.com/envoy.extensions.filters.http.router.v3.Router",
                                         },
                                     }
                                 ],
@@ -231,9 +227,7 @@ class EgressConfigGenerator:
                     "transport_socket": {
                         "name": "envoy.transport_sockets.tls",
                         "typed_config": {
-                            "@type": (
-                                "type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext"
-                            ),
+                            "@type": "type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext",
                             "sni": host,
                             "common_tls_context": {
                                 "validation_context": {
@@ -298,9 +292,7 @@ class EgressConfigGenerator:
         return {
             "name": "envoy.access_loggers.stdout",
             "typed_config": {
-                "@type": (
-                    "type.googleapis.com/envoy.extensions.access_loggers.stream.v3.StdoutAccessLog"
-                ),
+                "@type": "type.googleapis.com/envoy.extensions.access_loggers.stream.v3.StdoutAccessLog",
                 "log_format": {
                     "json_format": {
                         "event": "plugin_egress_request",

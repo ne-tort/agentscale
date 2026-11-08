@@ -37,9 +37,12 @@ from prodavan.domain.plugins.types import (
     RegistryResult,
 )
 from prodavan.domain.plugins.validation import (
+    MANIFEST_ALLOWED_FIELDS,
+    MANIFEST_REQUIRED_FIELDS,
     ManifestValidationErrorCode,
     PluginValidationError,
     load_schema,
+    validate_artifact_digest,
     validate_manifest,
 )
 
@@ -48,6 +51,8 @@ __all__ = [
     "CAPABILITY_ALLOWLIST",
     "EGRESS_REF_PATTERN",
     "EMBEDDED_EGRESS_FIELDS",
+    "MANIFEST_ALLOWED_FIELDS",
+    "MANIFEST_REQUIRED_FIELDS",
     "PATH_PATTERN",
     "PLUGIN_ID_PATTERN",
     "PROTOCOL_VERSION",
@@ -75,6 +80,7 @@ __all__ = [
     "RegistryOutcome",
     "RegistryResult",
     "load_schema",
+    "validate_artifact_digest",
     "validate_manifest",
 ]
 

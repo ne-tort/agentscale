@@ -204,6 +204,10 @@ def problem_from_exception(exc: BaseException) -> PluginProblem | None:
 
     # Исключения задачи 03 и произвольные имена из будущих реализаций.
     name = type(exc).__name__
+    # В capabilities/errors.py есть СВОЙ PluginTokenError (без атрибута .code),
+    # отличный от identity-ошибки выше. Он тоже означает «identity не принята».
+    if name == "PluginTokenError":
+        return PluginProblem(401, "UNAUTHORIZED", "Unauthorized", str(exc) or "plugin token rejected")
     if name in {"AdapterMissingError", "AdapterNotFound", "MissingAdapterError"}:
         return PluginProblem(503, "ADAPTER_MISSING", "Adapter Missing", str(exc))
     if name in {"UnknownCapabilityError", "CapabilityUnknownError"}:

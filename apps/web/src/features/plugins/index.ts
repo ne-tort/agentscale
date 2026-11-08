@@ -15,7 +15,6 @@ export {
 } from "./PluginFrame";
 export type {
   PluginFrameProps,
-  PluginChannelFactory as PluginFrameChannelFactory,
   SafeSrcFailure,
 } from "./PluginFrame";
 
@@ -33,16 +32,17 @@ export type {
   UsePluginFrameOptions,
   UsePluginFrameResult,
   PluginFrameStatus,
-  PluginChannelFactory as UsePluginFrameChannelFactory,
 } from "./usePluginFrame";
 
 export {
   createPluginChannel,
+  PLUGIN_RPC_PROTOCOL,
   PLUGIN_RPC_PROTOCOL as RPC_PROTOCOL,
   OPAQUE_ORIGIN,
 } from "./rpc";
 export type {
   PluginChannel,
+  PluginChannelFactory,
   PluginChannelOptions,
   PluginChannelMessage,
   PluginReadyMessage,

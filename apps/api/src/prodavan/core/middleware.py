@@ -67,6 +67,11 @@ _CORS_HEADERS = [
     "X-Project-Id",
     "X-Prodavan-Session-Id",
     "X-Prodavan-Signature",
+    # Plugin Gateway (дизайн v4 §7.5): подпись webhook'а приходит тремя
+    # заголовками. Без Event/Delivery браузерный вызов не пройдёт preflight,
+    # а идемпотентность доставки нельзя будет проверить.
+    "X-Prodavan-Event",
+    "X-Prodavan-Delivery",
     "X-Prodavan-Events-Owner",
     # X-Trace-Id is both a request header (caller propagates) and a response
     # header (server returns) — listed in allow_headers and expose_headers.

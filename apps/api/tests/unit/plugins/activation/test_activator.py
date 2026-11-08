@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import FrozenInstanceError, replace
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 
 import pytest
 
@@ -41,7 +41,7 @@ from prodavan.application.plugins.activation import (
     WakeTimeout,
 )
 from prodavan.application.plugins.activation.ports import MintedClaims
-from tests.unit.plugins.activation.fakes import (
+from .fakes import (
     BlockingProxy,
     FakeAudit,
     FakeClock,
@@ -458,7 +458,7 @@ async def test_max_concurrent_wakes_limits_parallel_wakeups() -> None:
     """Одновременно будится не более N плагинов; лишние получают конфликт."""
     scale = GateScale()
     h = Harness(
-        policy=_policy(max_concurrent_wakes=1, ready_timeout_seconds=1.0),
+        policy=_policy(max_concurrent_wakes=1, ready_timeout_seconds=0.2),
         scale=scale,
         readiness=FakeReadiness(ready=True),
     )
@@ -467,7 +467,8 @@ async def test_max_concurrent_wakes_limits_parallel_wakeups() -> None:
     first = asyncio.create_task(h.activator.wake("inst_a"))
     await asyncio.wait_for(scale.entered.wait(), timeout=1.0)
 
-    # Второй плагин не может получить слот: awake-бюджет 1 с, семафор занят.
+    # Второй плагин не может получить слот: семафор занят лидером, бюджет
+    # ожидания слота ограничен серверным ready_timeout.
     with pytest.raises(ActivationConflict) as exc:
         await h.activator.wake("inst_b")
     assert exc.value.code == ActivationErrorCode.ACTIVATION_CONFLICT.value
@@ -590,9 +591,12 @@ async def test_wake_timeout_cannot_be_extended_by_caller() -> None:
         policy=_policy(ready_timeout_seconds=1.0, ready_poll_interval_seconds=0.5),
         readiness=FakeReadiness(ready=False),
     )
+    started = h.clock.now()
     with pytest.raises(WakeTimeout):
         await h.activator.wake(INSTANCE, timeout=1000.0)
-    assert h.clock.now() - FakeClock().current <= timedelta(seconds=2.0)
+    assert h.clock.now() - started <= timedelta(seconds=1.5), (
+        "клиент не может растянуть серверный ready_timeout"
+    )
 
 
 @pytest.mark.asyncio
@@ -609,7 +613,8 @@ async def test_wake_in_flight_cleared_after_failure() -> None:
     h.readiness.ready = True
     result = await h.activator.wake(INSTANCE)
     assert result.previous_replicas == 0
-    assert h.scale.calls == [1, 0, 1, 1] or h.scale.calls == [1, 0, 1]
+    # Первая попытка: 1 → откат 0; вторая: 1. Лишних PATCH быть не должно.
+    assert h.scale.calls == [1, 0, 1]
 
 
 @pytest.mark.asyncio
@@ -619,8 +624,7 @@ async def test_hold_request_blocks_until_proxy_releases() -> None:
     h = Harness(readiness=FakeReadiness(ready=True), proxy=proxy)
 
     task = asyncio.create_task(h.activator.hold_request(INSTANCE, {"path": "/export"}))
-    await asyncio.sleep(0)
-    await asyncio.sleep(0)
+    await asyncio.wait_for(proxy.started.wait(), timeout=1.0)
     assert task.done() is False, "запрос удерживается до ответа backend'а"
 
     proxy.release()

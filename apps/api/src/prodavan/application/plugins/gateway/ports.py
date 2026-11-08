@@ -1,7 +1,7 @@
 """Контракты (Ports) Plugin Gateway (F6, §7.2/§7.4/§7.5 дизайна v4).
 
 Шлюз — всегда-running сервис, но он **не владеет** реализациями: сессии, grant'ы,
-секреты, активацияbackend'а, HTTP-транспорт, аудит и rate limit приходят извне
+секреты, активация backend'а, HTTP-транспорт, аудит и rate limit приходят извне
 через эти Protocol. Композиция — задача родителя/интегратора (F11). Отсутствие
 любого порта = fail-closed ошибка, а не «деградация до разрешения».
 
@@ -251,7 +251,25 @@ class WakeLease:
 
 
 class ActivationPort(Protocol):
-    """Пробуждение спящего backend'а плагина (задача 09, ADR-008)."""
+    """Пробуждение спящего backend'а плагина (задача 09, ADR-008).
+
+    ИНТЕГРАЦИЯ (для родителя, F11): задача 09 экспортирует
+    ``PluginActivator.wake(instance_id, *, timeout) -> WakeResult``, где
+    ``WakeResult.token`` — свежий ``PluginClaims``, а само ожидание Ready уже
+    выполнено ВНУТРИ ``wake``. Этот Protocol намеренно минимален и описывает
+    «контракт шлюза», а не сигнатуру activator'а: интегратор подкладывает
+    ТОНКИЙ адаптер, который
+
+    * маппит ``(plugin_id, company_id)`` → ``instance_id``;
+    * вызывает ``PluginActivator.wake(...)`` и оборачивает ``WakeResult.token``
+      в ``WakeLease``;
+    * ``wait_ready`` возвращает ``True`` (activator уже дождался Ready) либо
+      повторно опрашивает ``ReadinessPort``.
+
+    Прямого структурного совпадения НЕТ (ключи ``plugin_instance_id`` vs
+    ``plugin_id/company_id``) — это осознанная граница, чтобы шлюз не зависел
+    от доменных типов задачи 09. См. отчёт F6 родителю.
+    """
 
     async def wake(self, *, plugin_id: str, company_id: str) -> WakeLease:
         """Инициировать 0→1 и вернуть lease. ДОЛЖЕН вызываться до forward."""

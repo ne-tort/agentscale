@@ -74,8 +74,8 @@ from prodavan.application.plugins.capabilities.contracts import (
     empty_digest,
 )
 from prodavan.application.plugins.capabilities.ports import (
+    CAPABILITY_DOTTED_OPERATIONS,
     CAPABILITY_OPERATIONS,
-    AdapterMissingError,
     AdapterRegistry,
     GrantRevocationPort,
     PluginClaims,
@@ -235,7 +235,9 @@ class _CoreScope:
     ) -> None:
         self._claims = claims
         self._capability = capability
-        self._operation = operation
+        # Нормализуем к голой части: ``_prepare`` уже шлёт ``get``, но оставляем
+        # устойчивость и к точечной форме ``cache.get`` (стык с задачей 04).
+        self._operation = operation.split(".", 1)[-1]
         self._egress_policy = egress_policy
         self._request = request
 
@@ -243,7 +245,11 @@ class _CoreScope:
         scopes = frozenset(self._claims.scopes)
         if self._capability not in scopes:
             return False
-        if self._operation not in CAPABILITY_OPERATIONS.get(self._capability, frozenset()):
+        allowed_operations = (
+            CAPABILITY_OPERATIONS.get(self._capability, frozenset())
+            | CAPABILITY_DOTTED_OPERATIONS.get(self._capability, frozenset())
+        )
+        if self._operation not in allowed_operations:
             return False
         if request.capability != CAPABILITY_BRIDGE[self._capability]:
             return False
@@ -302,7 +308,8 @@ class _CoreAudit:
         self._audit = audit
         self._envelope = envelope
         self._capability = capability
-        self._operation = operation
+        # Аудит пишет КАНОНИЧЕСКУЮ точечную операцию (реестр §4.4).
+        self._operation = operation if "." in operation else f"{capability}.{operation}"
         self.last_event_id: str | None = None
 
     def record(self, event: AuditEvent) -> None:
@@ -430,7 +437,7 @@ class PluginCapabilityService:
             return self._deny(
                 invocation,
                 DecisionCode.CAPABILITY_UNKNOWN,
-                reason="db.direct is a direct DSN, not a gateway capability",
+                reason="db.direct_dsn_not_gateway_capability",
             )
 
         core_request, core_adapter, core_audit = self._build_core(invocation)
@@ -596,14 +603,15 @@ class PluginCapabilityService:
         # адаптера в CAPABILITY_OPERATIONS / _CoreScope / dispatch. Выбран
         # вариант с нормализацией (не переименование публичного реестра):
         # один формат снаружи, один внутри, без расхождений.
-        bare_operation = operation.split(".", 1)[-1]
-        if OPERATION_TO_CAPABILITY.get(f"{capability}.{bare_operation}") != capability:
-            # Отклоняем и ``cache.get`` для чужого capability, и ``get`` без
-            # префикса, если он не описан в публичном реестре.
-            if OPERATION_TO_CAPABILITY.get(operation) != capability:
-                raise TypedContractError(
-                    f"operation {operation!r} does not belong to {capability!r}"
-                )
+        # Публичный формат — ТОЧЕЧНЫЙ (``cache.get``). Голая форма (``get``)
+        # тоже принимается как уже нормализованная, но только если она есть
+        # в публичном реестре под этим capability.
+        dotted_operation = operation if "." in operation else f"{capability}.{operation}"
+        bare_operation = dotted_operation.split(".", 1)[-1]
+        if OPERATION_TO_CAPABILITY.get(dotted_operation) != capability:
+            raise TypedContractError(
+                f"operation {operation!r} does not belong to {capability!r}"
+            )
         if capability not in CAPABILITY_BRIDGE:
             raise UnknownCapabilityError(capability)
 
@@ -685,7 +693,7 @@ class PluginCapabilityService:
         core_request = CapabilityRequest(
             context=context,
             capability=CAPABILITY_BRIDGE[invocation.capability],
-            operation=invocation.operation,
+            operation=f"{invocation.capability}.{invocation.operation}",
             resource=self._resource(invocation),
             domain=invocation.capability,
         )
@@ -715,7 +723,9 @@ class PluginCapabilityService:
                 manifest_version=manifest_version,
                 subject_id=invocation.envelope.subject_id,
                 capability=CAPABILITY_BRIDGE[invocation.capability],
-                operations=frozenset(CAPABILITY_OPERATIONS[invocation.capability]),
+                operations=frozenset(
+                    {f"{invocation.capability}.{invocation.operation}"}
+                ),
                 resources=frozenset({self._resource(invocation)}),
                 domains=frozenset({invocation.capability}),
                 issued_at=invocation.now - timedelta(seconds=1),
@@ -801,12 +811,19 @@ class PluginCapabilityService:
             audit_event_id=event.event_id,
         )
 
-    @staticmethod
     def _invalid(
-        exc: Exception, capability: str, operation: str, now: datetime
+        self,
+        exc: Exception,
+        capability: str,
+        operation: str,
+        now: datetime,
     ) -> PluginGatewayDecision:
         """Отказ до построения identity: нет достоверного контура, аудит без PII."""
-        code = DecisionCode.CAPABILITY_UNKNOWN if isinstance(exc, UnknownCapabilityError) else DecisionCode.INVALID_REQUEST
+        code = (
+            DecisionCode.CAPABILITY_UNKNOWN
+            if isinstance(exc, UnknownCapabilityError)
+            else DecisionCode.INVALID_REQUEST
+        )
         return PluginGatewayDecision(
             decision=CapabilityDecision.DENY,
             code=code,

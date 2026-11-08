@@ -52,6 +52,7 @@ export function pluginErrorFromCode(rawCode: unknown, detail = "plugin_declared_
   const known = (PLUGIN_ERROR_CODES as readonly string[]).includes(code)
     ? (code as PluginErrorCode)
     : "loadError";
+  // Код плагина не становится текстом ошибки: только безопасный маркер.
   return new PluginFrameError(known, detail);
 }
 

@@ -277,7 +277,9 @@ def build_harness(
         audit=audit,
         limits=GatewayLimits(),
     )
-    app = FastAPI()
+    # redirect_slashes=False: «голые» префиксы должны давать ЯВНЫЙ 400, а не
+    # 307-редирект на вариант со слэшем (иначе критерий №9 не проверяем).
+    app = FastAPI(redirect_slashes=False)
     app.include_router(router)
     install_plugin_gateway_runtime(app, PluginGatewayRuntime(auth=auth, proxy=proxy))
     transport = ASGITransport(app=app)

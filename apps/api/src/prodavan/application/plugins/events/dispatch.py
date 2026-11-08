@@ -166,6 +166,8 @@ class PluginEventDispatcher:
     ) -> None:
         """``plugin_event_received``: только id/digest, без raw payload (§4.5)."""
 
+        # Аудит уже проверен в consume (fail-closed до чтения); повторяем здесь,
+        # так как метод доступен адаптерам и тестам напрямую.
         audit = self._require(self._audit, "AuditPort")
         await audit.append(
             AUDIT_PLUGIN_EVENT_RECEIVED,
@@ -195,6 +197,8 @@ class PluginEventDispatcher:
     ) -> None:
         """``plugin_event_dlq``: фиксирует event_id и run_id (criterion 11/20)."""
 
+        # Аудит уже проверен в consume (fail-closed до чтения); повторяем здесь,
+        # так как метод доступен адаптерам и тестам напрямую.
         audit = self._require(self._audit, "AuditPort")
         await audit.append(
             AUDIT_PLUGIN_EVENT_DLQ,
@@ -301,6 +305,9 @@ class PluginEventDispatcher:
         handler = self._require(self._handler, "EventHandlerPort")
         dlq = self._require(self._dlq, "DlqPort")
         wake_hook = self._require(self._wake_hook, "WakeHookPort/callable")
+        # Аудит проверяем ДО чтения: отсутствие sink'а не должно обнаружиться
+        # только после успешной обработки (иначе обработчик уже отработал).
+        self._require(self._audit, "AuditPort")
 
         await self._ensure_topics_ready()
 
@@ -333,7 +340,7 @@ class PluginEventDispatcher:
         # Дедупликация по (subscription_id, source_event_id), НЕ по URL/hash тела.
         if await idem.seen(idem_key):
             await self._audit_received(event, subscription, duplicate=True)
-            await consumer.commit(offset)
+            await self._commit_after_success(consumer, offset)
             return DeliveryOutcome.ACK
 
         if not subscription.accepts(event.event_type):
@@ -341,7 +348,7 @@ class PluginEventDispatcher:
             # коммитится, чтобы не блокировать группу).
             await self._audit_received(event, subscription)
             await idem.remember(idem_key)
-            await consumer.commit(offset)
+            await self._commit_after_success(consumer, offset)
             return DeliveryOutcome.ACK
 
         last_error_kind: str | None = None
@@ -370,7 +377,7 @@ class PluginEventDispatcher:
             if outcome is DeliveryOutcome.ACK:
                 await self._audit_received(event, subscription)
                 await idem.remember(idem_key)
-                await consumer.commit(offset)
+                await self._commit_after_success(consumer, offset)
                 return DeliveryOutcome.ACK
 
             if outcome is DeliveryOutcome.RETRY:
@@ -393,7 +400,7 @@ class PluginEventDispatcher:
             )
             await idem.remember(idem_key)
             # Коммит ТОЛЬКО после подтверждённой записи в DLQ и аудита.
-            await consumer.commit(offset)
+            await self._commit_after_success(consumer, offset)
             return DeliveryOutcome.DLQ
 
         # Недостижимо: цикл всегда заканчивается ACK/RETRY/DLQ. Оставлено как
@@ -403,6 +410,25 @@ class PluginEventDispatcher:
             PluginEventErrorCode.CONSUME_FAILED,
             f"доставка {event.event_id} завершилась без исхода",
         )
+
+    @staticmethod
+    async def _commit_after_success(consumer: ConsumerPort, offset: int) -> None:
+        """Коммит ТОЛЬКО после успеха; сбой коммита → seek + COMMIT_FAILED.
+
+        Если адаптер не смог зафиксировать offset (брокер недоступен, ребаланс,
+        консьюмер остановлен), событие НЕ считается доставленным: возвращаем
+        позицию к этой же записи, чтобы следующий старт с ``earliest`` прочитал
+        её снова. Именно это отличает dispatch от ``kick`` + ``auto_commit``.
+        """
+
+        try:
+            await consumer.commit(offset)
+        except Exception as exc:
+            await consumer.seek(offset)
+            raise PluginEventError(
+                PluginEventErrorCode.COMMIT_FAILED,
+                f"коммит offset={offset} не удался: {type(exc).__name__}",
+            ) from exc
 
     async def _call_wake(
         self,

@@ -47,7 +47,11 @@ class PluginBody(BaseModel):
     объектов через ``_reject_forbidden_fields``).
     """
 
-    model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=False)
+    # ``strict`` намеренно НЕ включён: JSON-массивы приходят как list и должны
+    # свободно превращаться в объявленные tuple[...] (permissions, predicates,
+    # tools, values). Защита от лишних полей обеспечивается ``extra='forbid'``,
+    # а не жёсткой типизацией контейнеров.
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=False)
 
     @model_validator(mode="before")
     @classmethod

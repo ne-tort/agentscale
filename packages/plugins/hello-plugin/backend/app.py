@@ -2,12 +2,14 @@
 
 Контур (§2, §5.1, §7.2–7.5 архитектуры):
   * контейнер стартует через ``entrypoint.sh``: Liquibase ``update`` (своя БД
-    компании по ``TENANT_DB_DSN``) -> только после успеха ``exec python -m app``;
+    компании по ``TENANT_DB_DSN``) -> только после успеха
+    ``exec python -m uvicorn app:app``;
   * ``/health`` = 200/Ready ТОЛЬКО после успешного ``update``, иначе 503
     (§11 критерий 4, checksum mismatch не даёт стать Ready);
   * остальная инфраструктура — НЕ напрямую, а через Plugin Gateway по
-    ``GATEWAY_URL`` и ``plugin-rpc/1``/``PluginClaims``. Обращений к :8001
-    pod-gateway НЕТ и быть не может: это agent-surface (§4.1, §13.3);
+    ``GATEWAY_URL`` и ``plugin-rpc/1``/``PluginClaims``. Обращений к
+    pod-gateway agent-surface НЕТ и быть не может: это trust-контур агентов
+    (§4.1, §13.3), плагин company-scoped;
   * все env (``GATEWAY_URL``, ``PLUGIN_ID``, ``TENANT_DB_DSN``,
     ``PLUGIN_CLAIMS``, ``PLUGIN_WEBHOOK_SECRET``) приходят из k8s Secret,
     plaintext в манифесте/коде запрещён (§5.5);
@@ -123,7 +125,8 @@ def _authorized_gateway_call() -> None:
     """Любой выход в инфраструктуру начинается с проверки claims.
 
     Реальный HTTP-вызов к ``GATEWAY_URL``/``/capabilities/v1/*`` делает задача 11;
-    здесь фиксируется, что плагин НЕ ходит в :8001 и не доверяет Gateway «просто».
+    здесь фиксируется, что плагин НЕ ходит в агентский pod-gateway и не доверяет
+    Gateway «просто»: сначала проверка claims.
     """
     if not GATEWAY_URL:
         raise RuntimeError("GATEWAY_URL не задан в Secret")
@@ -216,7 +219,8 @@ async def webhook_ping(
         # Повтор: возвращаем сохранённый результат, обработку НЕ дублируем.
         return JSONResponse(status_code=200, content=_seen_deliveries[x_prodavan_delivery])
 
-    # Полезная работа пилота: фиксируем факт доставки. Никаких обращений к :8001.
+    # Полезная работа пилота: фиксируем факт доставки. Выходов в агентский
+    # pod-gateway здесь нет — плагин работает только со своей БД и Gateway.
     result = {
         "ok": True,
         "plugin_id": PLUGIN_ID,

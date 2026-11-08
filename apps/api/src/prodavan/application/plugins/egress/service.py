@@ -111,7 +111,7 @@ class HopInspectorPort(Protocol):
 
     Реализация (Envoy ext_authz / controller) обязана сообщить:
     * все хосты редиректов в порядке следования (КРОМЕ исходного: ``check`` сам
-  добавляет исходный ``Host`` в цепочку);
+      добавляет исходный ``Host`` в цепочку);
     * финальный resolved host (фактический upstream);
     * признаки, что redirect и TLS проверены на каждом хопе.
 
@@ -204,7 +204,7 @@ class EgressService:
     ) -> EgressDecision:
         """Проверить запрос и вернуть ``EgressDecision`` (+ записать аудит).
 
-        Решение NEVER «allow по умолчанию»: ``EgressDenied`` из резолвера
+        Решение НИКОГДА не «allow по умолчанию»: ``EgressDenied`` из резолвера
         превращается в ``EgressDecision(allowed=False)`` с кодом причины и
         событием аудита. Исключение не пробрасывается наружу как «неизвестно» —
         неизвестность зафиксирована как отказ.
@@ -257,13 +257,14 @@ class EgressService:
         try:
             policy = self._resolver.resolve_claims(claims)
         except EgressDenied as exc:
-            code = (
-                EgressDecisionCode.GRANT_REVOKED
-                if exc.reason in ("grant_revoked", "grant_expired", "grant_not_yet_issued")
-                else EgressDecisionCode.GRANT_MISSING
-            )
-            if exc.reason in ("policy_invalid", "store_contract_violation"):
+            # Битая политика grant'а (в т.ч. ``full`` без approval) — это ошибка
+            # конфигурации, а не «grant не найден»; оба варианта = отказ.
+            if isinstance(exc, EgressPolicyError):
                 code = EgressDecisionCode.POLICY_INVALID
+            elif exc.reason == "grant_revoked":
+                code = EgressDecisionCode.GRANT_REVOKED
+            else:
+                code = EgressDecisionCode.GRANT_MISSING
             return self._deny(
                 request_id=request_id,
                 occurred_at=occurred_at,
@@ -563,7 +564,9 @@ class EgressService:
             path=path,
             method=method,
             status=status,
-            bytes=bytes_count,
+            # Отрицательный/не-int объём уже означает отказ; в аудит пишем 0,
+            # чтобы схема события осталась валидной и отказ был зафиксирован.
+            bytes=max(bytes_count, 0),
             decision=decision,
             tenant=tenant,
             subject=subject,

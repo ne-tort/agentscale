@@ -148,6 +148,13 @@ def redact(payload: Mapping[str, Any]) -> dict[str, Any]:
             result[f"{key}_digest"] = canonical_digest(value)
             result[f"{key}_redacted"] = True
             continue
+        # Даже под «безопасным» ключом (``resource``/``reason``/``capability``)
+        # строка, похожая на SQL/токен/DSN/PII, заменяется digest'ом: иначе
+        # утечка через канонические поля события.
+        if isinstance(value, str) and (_looks_like_secret(value) or _looks_like_raw_data(value)):
+            result[f"{key}_digest"] = canonical_digest(value)
+            result[f"{key}_redacted"] = True
+            continue
         result[key] = _redact_value(key, value)
     return result
 
@@ -174,6 +181,20 @@ _SUSPICIOUS_PREFIXES: tuple[str, ...] = (
     "mysql://", "mongodb://", "redis://", "amqp://",
 )
 
+#: Маркеры raw SQL / параметров / чувствительных выражений в строке значения.
+_RAW_DATA_MARKERS: tuple[str, ...] = (
+    "select ", "insert ", "update ", "delete ", "drop ", "create ",
+    "alter ", "copy ", " where ", " from ",
+    "password=", "token=", "secret=", "api_key=", "authorization:",
+    "@",  # email / user@host — PII
+)
+
+
+def _looks_like_raw_data(value: str) -> bool:
+    """Эвристика: raw SQL/params/PII под «безопасным» ключом → только digest."""
+    lowered = value.lower()
+    return any(marker in lowered for marker in _RAW_DATA_MARKERS)
+
 
 def _looks_like_secret(value: str) -> bool:
     """Эвристика: даже под безопасным ключом не пишем подозрительный секрет."""
@@ -184,6 +205,8 @@ def _looks_like_secret(value: str) -> bool:
         return True
     if lowered.startswith("sha256:") and len(value) == 71:  # это сам digest — ок
         return False
+    if _looks_like_raw_data(lowered):
+        return True
     # Длинная строка без пробелов — вероятно ключ/токен/base64.
     return len(value) > 96 and " " not in value
 

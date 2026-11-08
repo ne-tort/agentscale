@@ -118,7 +118,12 @@ async def test_repeated_grant_is_idempotent(harness: Harness, grant_args: dict) 
     assert len(harness.grant_store.grants) == 1
     # Инфраструктура не пересоздаётся: ровно одна запись create на grant.
     assert sum(1 for c in harness.grant_store.calls if c.method == "create") == 1
-    assert sum(1 for c in harness.tenant_db.calls if c.method == "ensure_plugin_schema") == 2  # read-only ensure
+    # ensure_* идемпотентны по контракту порта и вызываются при каждом grant,
+    # но не создают дубликатов (в фейке ровно одна схема/префикс/deployment).
+    assert len(harness.tenant_db.schemas) == 1
+    assert len(harness.object_store.prefixes) == 1
+    assert len(harness.activation.deployments) == 1
+    assert sum(1 for c in harness.activation.calls if c.method == "ensure_deployment") == 1
     # Короткий токен при этом новый (ротация при каждом вызове).
     assert second.claims.token != first.claims.token
     assert second.claims.grant_id == first.claims.grant_id
@@ -250,7 +255,7 @@ async def _install_two_companies(harness: Harness, grant_args: dict) -> None:
 async def test_uninstall_does_not_touch_other_company(
     harness: Harness, grant_args: dict
 ) -> None:
-    """§11 критерий 15: droп schemat/роли и bucket не задевают чужую компанию."""
+    """§11 критерий 15: DROP SCHEMA/ROLE и bucket не задевают чужую компанию."""
 
     await _install_two_companies(harness, grant_args)
     service = harness.service()
@@ -371,6 +376,22 @@ async def test_wake_rejects_revoked_grant(harness: Harness, grant_args: dict) ->
     with pytest.raises(PluginAdminError) as caught:
         await service.wake(company_id=COMPANY_A, plugin_id=PLUGIN_X)
     assert caught.value.code == PluginAdminErrorCode.GRANT_NOT_FOUND.value
+
+
+async def test_wake_rejects_grant_marked_in_revocation_store(
+    harness: Harness, grant_args: dict
+) -> None:
+    """Даже при активной записи grant реестр отзывов блокирует wake (fail-closed)."""
+
+    service = harness.service()
+    receipt = await service.grant(**grant_args)
+    harness.revocation.revoked.add(receipt.grant.grant_id)
+    with pytest.raises(PluginAdminError) as caught:
+        await service.wake(company_id=COMPANY_A, plugin_id=PLUGIN_X)
+    assert caught.value.code == PluginAdminErrorCode.GRANT_NOT_FOUND.value
+    # Ни пробуждения, ни выпуска нового токена.
+    assert not any(call.method == "wake" for call in harness.activation.calls)
+    assert len(harness.mint.issued) == 1
 
 
 async def test_wake_fails_closed_when_not_ready(harness: Harness, grant_args: dict) -> None:
@@ -512,9 +533,12 @@ def test_no_forbidden_migration_terms_in_admin_sources() -> None:
         / "plugins"
         / "admin"
     )
+    # admin_dir = <repo>/apps/api/src/prodavan/application/plugins/admin
+    # parents[2] = <repo>/apps/api/src/prodavan
+    api_file = admin_dir.parents[2] / "api" / "v1" / "plugin_admin.py"
     source = "\n".join(
         path.read_text(encoding="utf-8")
-        for path in sorted(admin_dir.glob("*.py"))
+        for path in (*sorted(admin_dir.glob("*.py")), api_file)
     )
     # Термин из §5.5, который запрещён к реализации.
     assert "migrate-to-plugin" not in source
@@ -538,11 +562,20 @@ def test_uninstall_receipt_has_no_snapshot_field() -> None:
 async def test_audit_failure_blocks_positive_mutation(
     harness: Harness, grant_args: dict
 ) -> None:
-    """§4.5: append failure для позитивной мутации = system failure, а не allow."""
+    """§4.5: append failure для позитивной мутации = system failure, а не allow.
+
+    Решение фиксируется ДО первой мутации, поэтому недоступный sink не оставляет
+    за собой частично созданную инфраструктуру.
+    """
 
     harness.audit.append_result = False
     with pytest.raises(RuntimeError, match="audit append failed"):
         await harness.service().grant(**grant_args)
+    assert harness.tenant_db.databases == set()
+    assert harness.object_store.prefixes == {}
+    assert harness.activation.deployments == {}
+    assert harness.grant_store.grants == {}
+    assert harness.mint.issued == []
 
 
 async def test_admin_operations_are_audited(harness: Harness, grant_args: dict) -> None:

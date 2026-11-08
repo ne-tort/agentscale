@@ -180,8 +180,12 @@ def get_plugin_claims(
     except PluginTokenError as exc:
         code = exc.code
         # FORBIDDEN_SURFACE / REVOKED — 403; прочие ошибки подписи/claim — 401.
-        if code in (PluginTokenErrorCode.FORBIDDEN_SURFACE, PluginTokenErrorCode.REVOKED):
+        if code == PluginTokenErrorCode.FORBIDDEN_SURFACE:
             raise _forbidden(str(exc.detail), code.value) from exc
+        if code == PluginTokenErrorCode.REVOKED:
+            # Единый канонический код для HTTP-клиентов (совпадает с deny-кодом
+            # ядра GRANT_REVOKED из задачи 03).
+            raise _forbidden(str(exc.detail), "GRANT_REVOKED") from exc
         raise _unauthorized(str(exc.detail), code.value) from exc
     except Exception as exc:
         # Любая непредвиденная ошибка криптографии/ключа = отказ, не allow.
@@ -211,7 +215,8 @@ def get_plugin_claims(
     except PluginTransportError:
         raise
     except PluginTokenError as exc:
-        raise _forbidden(str(exc.detail), exc.code.value) from exc
+        canonical = "GRANT_REVOKED" if exc.code == PluginTokenErrorCode.REVOKED else exc.code.value
+        raise _forbidden(str(exc.detail), canonical) from exc
     except Exception as exc:
         # Хранилище отзывов недоступно ≠ «grant активен» (fail-closed).
         raise _forbidden(

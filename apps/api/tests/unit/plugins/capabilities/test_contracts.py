@@ -277,7 +277,29 @@ def test_register_is_idempotency_guarded() -> None:
 
 def test_dispatch_rejects_arbitrary_operation_string() -> None:
     """Typed dispatch не является generic: произвольная операция отклоняется."""
-    with pytest.raises(UnknownCapabilityError):
-        from prodavan.application.plugins.capabilities.ports import dispatch
+    from prodavan.application.plugins.capabilities.ports import dispatch
 
+    with pytest.raises(UnknownCapabilityError):
         dispatch(_DummyCache(), "cache", "execute_sql", CacheGetRequest(key="k", envelope=envelope()))
+
+
+def test_dispatch_accepts_dotted_and_bare_operation_forms() -> None:
+    """Точечная форма (задача 04) и голая форма ведут к одному методу адаптера."""
+    from prodavan.application.plugins.capabilities.contracts import CacheGetResponse
+    from prodavan.application.plugins.capabilities.ports import dispatch
+
+    class TypedCache(_DummyCache):
+        def get(self, request: CacheGetRequest) -> CacheGetResponse:
+            return CacheGetResponse(request_id=request.envelope.request_id, ok=True, digest=DIGEST)
+
+    request = CacheGetRequest(key="k", envelope=envelope())
+    for operation in ("cache.get", "get"):
+        response = dispatch(TypedCache(), "cache", operation, request)
+        assert isinstance(response, CacheGetResponse)
+
+
+def test_registry_register_checks_bare_method_names() -> None:
+    """register проверяет именно голые имена методов адаптера (внутренний контракт)."""
+    registry = AdapterRegistry()
+    registry.register("cache", _DummyCache())
+    assert "cache" in registry.registered

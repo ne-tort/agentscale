@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import ipaddress
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Mapping, Sequence
 
@@ -265,8 +265,8 @@ def resolve_policy(grant: Any) -> EgressPolicy:
     * ``none`` — правил нет, ``allowed_hosts`` игнорируется (но не ошибочен);
     * ``webhooks-only`` — **обязан** иметь непустой allowlist, запрещены wildcard,
       невалидный DNS, частные/loopback/link-local/metadata адреса;
-    * ``full`` — **обязан** иметь явный ``approved: true``; при этом правила всё равно
-      строятся из allowlist, если он задан (квота байт и аудит сохраняются).
+    * ``full`` — **обязан** иметь явный ``approved: true`` и непустой allowlist
+      (квота байт, аудит и проверка путей сохраняются; §6.3).
 
     ``grant_id`` забирается из grant для аудита. Никакого чтения ``egress`` из токена
     здесь нет и быть не может: функция принимает только grant.
@@ -398,7 +398,7 @@ def validate_host(host: str, *, allow_wildcard: bool = False) -> str:
             reason="host_internal",
         )
     # ``.internal``/``.local``/``.localhost`` как сам TLD без префикса уже отсечены
-    # проверкой ``endswith`` выше для составных имён; одноуровневые — правилом выше.
+    # проверкой выше для составных имён; одноуровневые — правилом ``"." not in``.
     if candidate.startswith("metadata.") or candidate == "localhost":
         raise EgressPolicyError(
             f"metadata host is not allowed: {candidate!r}",
@@ -416,7 +416,8 @@ def _reject_ip_literal(candidate: str) -> None:
     ``ipaddress.ip_address`` ловит канонические формы, но не ``2130706433``,
     ``0177.0.0.1`` или ``0x7f000001`` — их резолвер ОС всё равно превратит в
     loopback. Такие строки не проходят DNS-regex (нет точек/не DNS), но проверка
-    оставлена явной и для documenting-целей, и на случай ослабления regex.
+    оставлена явной, чтобы задокументировать угрозу и защититься на случай
+    ослабления regex.
     """
     try:
         address = ipaddress.ip_address(candidate)
@@ -425,8 +426,8 @@ def _reject_ip_literal(candidate: str) -> None:
     if address is not None:
         _raise_for_ip(address, candidate)
 
-    # Десятичная / hex-форма IPv4 (одно число) и octal-метки уже не проходят
-    # ``_HOSTNAME_RE``? Проходят (это цифры и точки) — проверяем дополнительно.
+    # Десятичная / hex-форма IPv4 (одно число) и octal-метки проходят DNS-regex
+    # (это цифры и точки) — проверяем их дополнительно как IP-литералы.
     if _looks_like_numeric_ipv4(candidate):
         try:
             address = ipaddress.ip_address(_numeric_ipv4_to_dotted(candidate))

@@ -32,8 +32,15 @@ HEADER_COMPANY_ID = "X-Company-ID"
 HEADER_PROJECT_ID = "X-Project-ID"
 HEADER_CAPABILITY_TOKEN = "X-Plugin-Capability-Token"
 
-#: Полный allowlist доверенных заголовков. Ни один из этих ключей не может
-#: прийти от клиента — см. ``sanitize_incoming``.
+#: Полный allowlist доверенных заголовков (ровно четыре из §6.4/§7.2).
+#: Ни один из этих ключей не может прийти от клиента — см. ``sanitize_incoming``.
+#:
+#: ПРИМЕЧАНИЕ ДЛЯ ИНТЕГРАТОРА: задача 09 кладёт свежий ``PluginClaims`` из
+#: ``WakeResult.token`` в ``Authorization: Bearer`` (§4.2), а §6.4/§7.2 — в
+#: ``X-Plugin-Capability-Token``. Здесь реализован контракт §7.2: входящий
+#: ``Authorization`` отбрасывается, доверенный НЕ выставляется. Если backend
+#: задачи 09 требует JWT именно в ``Authorization``, адаптер композиции должен
+#: добавить его ЯВНО (не через клиентские заголовки). См. отчёт родителю.
 TRUSTED_HEADERS: frozenset[str] = frozenset(
     {
         HEADER_PLUGIN_ID,

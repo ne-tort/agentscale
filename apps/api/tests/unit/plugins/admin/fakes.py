@@ -435,6 +435,9 @@ class Harness:
     routes: FakeRoutes = field(default_factory=FakeRoutes)
     audit: FakeAudit = field(default_factory=FakeAudit)
     platform_admin: FakePlatformAdmin = field(default_factory=FakePlatformAdmin)
+    #: Один сервис на Harness: генератор id не сбрасывается между вызовами, иначе
+    #: два grant в разные компании получили бы одинаковый grant_id в тестах.
+    _service_instance: Any = field(default=None, repr=False, compare=False)
 
     def ports(self) -> Any:
         from prodavan.application.plugins.admin.ports import PluginAdminPorts
@@ -455,7 +458,11 @@ class Harness:
     def service(self) -> Any:
         from prodavan.application.plugins.admin.service import PluginAdminService
 
-        return PluginAdminService(self.ports(), id_factory=_sequential_ids())
+        if self._service_instance is None:
+            self._service_instance = PluginAdminService(
+                self.ports(), id_factory=_sequential_ids()
+            )
+        return self._service_instance
 
     @property
     def all_calls(self) -> list[Call]:

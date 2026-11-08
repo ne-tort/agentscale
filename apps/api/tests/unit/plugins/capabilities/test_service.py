@@ -17,8 +17,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-import pytest
-
 from prodavan.application.capability_gateway_service import (
     CapabilityDecision,
     CapabilityGatewayService,
@@ -201,7 +199,7 @@ def test_revoked_grant_is_denied_before_adapter_invocation() -> None:
     )
 
     result = service.invoke(
-        claims=FakeClaims(), capability="cache", operation="get",
+        claims=FakeClaims(), capability="cache", operation="cache.get",
         request=cache_request(), now=NOW,
     )
 
@@ -245,7 +243,7 @@ def test_valid_grant_allows_and_calls_typed_adapter() -> None:
     audit = InMemoryAudit()
     service = build(audit=audit)
     result = service.invoke(
-        claims=FakeClaims(), capability="cache", operation="get",
+        claims=FakeClaims(), capability="cache", operation="cache.get",
         request=cache_request(), now=NOW,
     )
     assert result.allowed is True
@@ -337,6 +335,18 @@ def test_db_direct_never_passes_through_gateway() -> None:
     )
     assert result.allowed is False
     assert result.code is DecisionCode.CAPABILITY_UNKNOWN
+    assert result.http_status == 503
+
+
+def test_operation_from_another_capability_is_rejected() -> None:
+    """``cache.get`` не принимается под ``objects``: реестр §4.4 отклоняет."""
+    service = build()
+    result = service.invoke(
+        claims=FakeClaims(), capability="cache", operation="docs.query",
+        request=cache_request(), now=NOW,
+    )
+    assert result.allowed is False
+    assert result.code is DecisionCode.INVALID_REQUEST
 
 
 def test_unknown_operation_is_rejected() -> None:
@@ -489,7 +499,7 @@ def test_egress_without_policy_fails_closed() -> None:
 def test_result_shape_matches_http_surface_contract() -> None:
     """``.decision`` == "allow"/"deny", ``.data`` — typed Response или None."""
     result = build().invoke(
-        claims=FakeClaims(), capability="cache", operation="get",
+        claims=FakeClaims(), capability="cache", operation="cache.get",
         request=cache_request(), now=NOW,
     )
     assert result.decision == "allow"

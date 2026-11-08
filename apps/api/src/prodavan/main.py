@@ -9,6 +9,7 @@ from fastapi import FastAPI
 
 from prodavan.api.exception_handlers import register_exception_handlers
 from prodavan.api.v1 import health as health_routes
+from prodavan.api.v1 import plugin_gateway
 from prodavan.api.v1.router import router as v1_router
 from prodavan.config.settings import settings
 from prodavan.core.middleware import (
@@ -48,6 +49,26 @@ def create_app() -> FastAPI:
     # k3s probes (no /api/v1 prefix) — docs/07-infrastructure/k3s-services.md
     app.include_router(health_routes.router)
     app.include_router(v1_router, prefix=settings.api_v1_prefix)
+    # Plugin Gateway (дизайн v4 §7.1): /webhook/{plugin}/{company}/* и
+    # /pluginpage/{plugin}/{company}/* живут В КОРНЕ хоста, без /api/v1 —
+    # их ведёт отдельный Ingress plugins-gateway с router.priority 120.
+    # Роутер /capabilities/v1/* также монтируется без префикса: allowlist
+    # middleware задачи 02 разрешает только ^/capabilities/v1/, и любой
+    # внешний префикс дал бы 403 на всех эндпоинтах.
+    # До вызова install_plugin_gateway_runtime() роутер отвечает 503 (fail-closed).
+    # Внимание: GET /health этого роутера совпадает с health_routes.router выше;
+    # k8s-проба использует корневую /health, зарегистрированную ПЕРВОЙ.
+    if settings.plugin_platform_enabled:
+        app.include_router(plugin_gateway.router)
+        try:
+            from prodavan.api.v1 import plugin_capabilities
+        except ImportError:
+            # Fail-closed: роутер capability-адаптеров ещё не собран —
+            # платформа включена, но запросы к /capabilities/v1/* не пройдут
+            # allowlist middleware и получат отказ, а не тихий успех.
+            logger.error("plugin platform enabled but /capabilities/v1 router is unavailable")
+        else:
+            app.include_router(plugin_capabilities.router)
     return app
 
 

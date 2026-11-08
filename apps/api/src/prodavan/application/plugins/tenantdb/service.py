@@ -542,9 +542,10 @@ class TenantDatabaseService:
 
         БД и схема СОХРАНЯЮТСЯ. Мгновенный отзыв обеспечивается ``NOLOGIN``:
         ``PUBLIC`` всё ещё имеет дефолтный CONNECT, поэтому снятие одного
-        GRANT не дало бы мгновенного эффекта. Ротация DSN/секрета —
-        ответственность ``CapabilityGrant`` (F12); здесь удаляем и сам
-        plaintext-секрет, чтобы старый DSN не остался в хранилище.
+        GRANT не дало бы мгновенного эффекта. Старый plaintext-DSN здесь же
+        инвалидируется в SecretPort, чтобы он не остался в хранилище;
+        деактивация ``CapabilityGrant`` / старого ``PluginClaims`` — отдельная
+        ответственность Admin API (F12, §11.12).
         """
         operation = "revoke_plugin"
         db, role, schema, _path = self._names(company_id, plugin_id, operation=operation)
@@ -608,16 +609,22 @@ class TenantDatabaseService:
         await self._exec(
             sql.alter_role_no_login(role), target=cluster, operation=operation, safe_name=role
         )
-        # Снимаем явные привилегии в БД компании, затем дропаем схему.
-        await self._exec(
-            sql.revoke_all_on_schema(schema, role),
-            target=database,
-            operation=operation,
-            safe_name=schema,
+        # Снимаем явные привилегии и дропаем схему ТОЛЬКО если она есть:
+        # REVOKE ALL ON SCHEMA на отсутствующей схеме вернёт 3F000 в реальном
+        # PostgreSQL (роль могла остаться после частичного uninstall).
+        schema_present = await self._exists(
+            sql.schema_exists(schema), target=database, operation=operation, safe_name=schema
         )
-        await self._exec(
-            sql.drop_schema(schema), target=database, operation=operation, safe_name=schema
-        )
+        if schema_present:
+            await self._exec(
+                sql.revoke_all_on_schema(schema, role),
+                target=database,
+                operation=operation,
+                safe_name=schema,
+            )
+            await self._exec(
+                sql.drop_schema(schema), target=database, operation=operation, safe_name=schema
+            )
         await self._exec(
             sql.drop_role(role), target=cluster, operation=operation, safe_name=role
         )

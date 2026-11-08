@@ -543,15 +543,24 @@ class GatewayAuth:
                 decision="deny",
                 code=GatewayErrorCode.WEBHOOK_HEADERS_MISSING.value,
                 reason="missing required webhook headers",
-                metadata={"missing": missing},
+                metadata={"missing": sorted(missing)},
             )
             raise GatewayError(
                 GatewayErrorCode.WEBHOOK_HEADERS_MISSING,
                 detail=f"missing webhook headers: {', '.join(missing)}",
             )
-        # После проверки mypy/рантайм: значения гарантированно непустые.
-        assert signature and event and delivery_id
-
+        # Явная перестраховка вместо ``assert`` (который исчезает при -O):
+        # если порт заголовков вернул нестроку, это отказ, не падение с
+        # AttributeError где-то ниже по конвейеру.
+        if not (
+            isinstance(signature, str)
+            and isinstance(event, str)
+            and isinstance(delivery_id, str)
+        ):
+            raise GatewayError(
+                GatewayErrorCode.WEBHOOK_HEADERS_MISSING,
+                detail="required webhook headers must be non-empty strings",
+            )
         # Пустой delivery-id / event после trim — тоже отказ, не «пропустить».
         if not event.strip() or not delivery_id.strip():
             raise GatewayError(
@@ -660,7 +669,7 @@ class GatewayAuth:
                 subject_id="webhook",
                 grant_id=grant.grant_id,
                 request_id=request_id,
-                metadata={"delivery_id": delivery_id, "event": event, "duplicate": True},
+                metadata={"duplicate": True, "has_event": bool(event)},
             )
             return WebhookAuthResult(
                 claims=claims,
@@ -686,7 +695,7 @@ class GatewayAuth:
             grant_id=grant.grant_id,
             request_id=request_id,
             payload_digest=hashlib.sha256(raw_body).hexdigest(),
-            metadata={"delivery_id": delivery_id, "event": event},
+            metadata={"has_event": bool(event)},
         )
         return WebhookAuthResult(
             claims=claims,

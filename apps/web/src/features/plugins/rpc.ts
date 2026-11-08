@@ -11,14 +11,14 @@
  *   требование точного совпадения с `expectedOrigin`;
  * - capability token НЕ попадает во frontend и НИКОГДА не передаётся в URL,
  *   в сообщениях или в тексте ошибок: в этом модуле его просто нет;
- * - fail-closed: нет рукопожатия без таймаута, чужой origin/ignore, неверный
- *   протокол, неизвестный `requestId` и повторное использование — отказы.
+ * - fail-closed: нет рукопожатия без таймаута, чужой origin игнорируется,
+ *   неверный протокол, неизвестный `requestId` и повторное использование — отказы.
  *
  * Сообщение с чужим origin ИГНОРИРУЕТСЯ, а не убивает канал: иначе любая
  * вкладка могла бы «выключить» плагин одним `postMessage` (DoS).
  */
 
-import { PluginFrameError } from "./errors";
+import { PluginFrameError, pluginErrorFromCode } from "./errors";
 
 export const PLUGIN_RPC_PROTOCOL = "plugin-rpc/1" as const;
 
@@ -34,6 +34,8 @@ export type HostReadyMessage = {
   readonly protocol: typeof PLUGIN_RPC_PROTOCOL;
   readonly kind: "host.ready";
   readonly instanceId: string;
+  /** Одноразовая привязка к экземпляру iframe против stale-window reuse. */
+  readonly nonce: string;
   readonly pluginId: string;
   readonly version: string;
 };
@@ -79,6 +81,8 @@ export type PluginChannelOptions = {
   readonly onError?: (error: PluginFrameError) => void;
   /** Диагностика отклонённых сообщений; решение от неё не зависит. */
   readonly onRejected?: (reason: "origin" | "source" | "shape") => void;
+  /** Точный `event.origin` для приёма. По умолчанию совпадает с `expectedOrigin`. */
+  readonly acceptedOrigin?: string;
 };
 
 export interface PluginChannel {
@@ -91,6 +95,16 @@ export interface PluginChannel {
   /** Идемпотентно: повторный вызов безопасен. */
   dispose(): void;
 }
+
+/**
+ * Фабрика каналов: позволяет родительскому хуку владеть lifecycle канала,
+ * не дублируя его внутри компонента. Один тип на все три модуля.
+ */
+export type PluginChannelFactory = (
+  iframe: HTMLIFrameElement,
+  expectedOrigin: string,
+  options: PluginChannelOptions,
+) => PluginChannel;
 
 /** Opaque origin песочницы без `allow-same-origin` (v4 §5.3, path-based v1). */
 export const OPAQUE_ORIGIN = "null";
@@ -126,7 +140,11 @@ function safeJson(value: unknown, depth = 0, budget = { nodes: 0 }): boolean {
 }
 
 function messageBytes(value: unknown): number {
-  try { return new TextEncoder().encode(JSON.stringify(value)).byteLength; } catch { return Number.MAX_SAFE_INTEGER; }
+  try {
+    const serialized = JSON.stringify(value);
+    if (serialized === undefined) return Number.MAX_SAFE_INTEGER;
+    return new TextEncoder().encode(serialized).byteLength;
+  } catch { return Number.MAX_SAFE_INTEGER; }
 }
 
 const MAX_MESSAGE_BYTES = 64 * 1024;
@@ -147,6 +165,12 @@ function defaultRequestId(): string {
   return `rpc-${requestCounter}-${suffix}`;
 }
 
+function randomToken(): string {
+  const bytes = new Uint8Array(18);
+  globalThis.crypto?.getRandomValues?.(bytes);
+  return Array.from(bytes, (value) => value.toString(16).padStart(2, "0")).join("");
+}
+
 /**
  * Канал, привязанный к конкретному `iframe.contentWindow`.
  * `expectedOrigin` — ЕДИНСТВЕННОЕ допустимое значение `event.origin`.
@@ -162,10 +186,32 @@ export function createPluginChannel(
   if (typeof expectedOrigin !== "string" || expectedOrigin.length === 0 || expectedOrigin === "*") {
     throw new PluginFrameError("originMismatch", "plugin_expected_origin_invalid");
   }
+  // Точный https-origin или `"null"` (opaque sandbox). Произвольная строка
+  // вроде "https://evil.example/?x=1" не является origin и отсекается.
+  if (expectedOrigin !== OPAQUE_ORIGIN) {
+    let parsed: URL;
+    try { parsed = new URL(expectedOrigin); }
+    catch { throw new PluginFrameError("originMismatch", "plugin_expected_origin_invalid"); }
+    if (parsed.protocol !== "https:" || parsed.origin !== expectedOrigin) {
+      throw new PluginFrameError("originMismatch", "plugin_expected_origin_invalid");
+    }
+  }
 
   const handshakeTimeoutMs = boundedTimeout(options.timeoutMs, DEFAULT_TIMEOUT_MS);
   const requestTimeoutMs = boundedTimeout(options.requestTimeoutMs, DEFAULT_REQUEST_TIMEOUT_MS);
   const makeRequestId = options.makeRequestId ?? defaultRequestId;
+  // `postMessage("*")` для opaque origin — техническая необходимость (v4 §5.3),
+  // но ПРИЁМ всегда идёт по точному origin. Если плагин уже на реальном
+  // wildcard subdomain, родитель передаёт `acceptedOrigin` с точным origin.
+  const acceptedOrigin = options.acceptedOrigin ?? expectedOrigin;
+  if (acceptedOrigin !== OPAQUE_ORIGIN) {
+    let accepted: URL;
+    try { accepted = new URL(acceptedOrigin); }
+    catch { throw new PluginFrameError("originMismatch", "plugin_accepted_origin_invalid"); }
+    if (accepted.protocol !== "https:" || accepted.origin !== acceptedOrigin) {
+      throw new PluginFrameError("originMismatch", "plugin_accepted_origin_invalid");
+    }
+  }
   const expectedPluginId = options.pluginId ?? iframe.dataset.pluginId ?? "";
   const expectedVersion = options.version ?? iframe.dataset.pluginVersion ?? "";
   // Fail-closed: без известного identity handshake не начинаем.
@@ -175,6 +221,8 @@ export function createPluginChannel(
 
   let disposed = false;
   let ready = false;
+  const instanceId = randomToken();
+  const nonce = randomToken();
   let handshakeResolve: ((message: PluginReadyMessage) => void) | undefined;
   let handshakeReject: ((error: PluginFrameError) => void) | undefined;
   let handshakePromise: Promise<PluginReadyMessage> | undefined;
@@ -215,6 +263,7 @@ export function createPluginChannel(
   const send = (message: HostReadyMessage | PluginRpcRequestMessage): void => {
     if (disposed) return;
     // Оpaque-фрейм адресуется только "*" (v4 §5.3); сообщение не несёт токена.
+    // Реальный origin всё равно проверяется на входе по `expectedOrigin`.
     const targetOrigin = expectedOrigin === OPAQUE_ORIGIN ? "*" : expectedOrigin;
     try { iframe.contentWindow?.postMessage(message, targetOrigin); }
     catch { /* Фрейм, не принявший сообщение, не завершит рукопожатие. */ }
@@ -227,8 +276,9 @@ export function createPluginChannel(
       try { options.onRejected?.("source"); } catch { /* ignore */ }
       return;
     }
-    // 2) Origin: точное совпадение. Чужой origin ИГНОРИРУЕТСЯ, не роняет канал.
-    if (event.origin !== expectedOrigin) {
+    // 2) Origin: точное совпадение с `acceptedOrigin`. Чужой origin
+    // ИГНОРИРУЕТСЯ, не роняет канал (иначе вкладка устроила бы DoS).
+    if (event.origin !== acceptedOrigin) {
       try { options.onRejected?.("origin"); } catch { /* ignore */ }
       return;
     }
@@ -274,7 +324,7 @@ export function createPluginChannel(
     }
     if (data.kind === "error" && exactShape(data, ["protocol", "kind", "code"], []) && typeof data.code === "string") {
       // Текст и `message` плагина намеренно не используются: только whitelist-код.
-      fail(new PluginFrameError("loadError", "plugin_declared_error"));
+      fail(pluginErrorFromCode(data.code));
       return;
     }
     if (data.kind !== "response" || !exactShape(data, ["protocol", "kind", "requestId", "ok"], ["result", "error"])) {
@@ -334,10 +384,12 @@ export function createPluginChannel(
         }, handshakeTimeoutMs);
       });
       // `host.ready` инициирует плагин; capability token здесь отсутствует.
+      // `instanceId`/`nonce` — одноразовая привязка к этому iframe (контракт §4.2).
       send({
         protocol: PLUGIN_RPC_PROTOCOL,
         kind: "host.ready",
-        instanceId: "shell",
+        instanceId,
+        nonce,
         pluginId: expectedPluginId,
         version: expectedVersion,
       });

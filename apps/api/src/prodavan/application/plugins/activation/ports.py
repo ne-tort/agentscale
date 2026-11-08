@@ -17,9 +17,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Mapping, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Mapping, Protocol, runtime_checkable
 
-from prodavan.application.plugins.activation.state import ActivationState
+if TYPE_CHECKING:
+    # Только для аннотаций: разрываем потенциальный цикл ports ↔ state,
+    # если state когда-нибудь начнёт ссылаться на контракты портов.
+    from prodavan.application.plugins.activation.state import ActivationState
 
 # ---------------------------------------------------------------------------
 # Типы-значения, пересекающие границу портов
@@ -34,10 +37,14 @@ class MintedClaims:
     (iss/aud/sub/jti/exp/grant_id/artifact_digest, §4.2 v4). В аудит и логи
     уходит только ``jti``/``grant_id``, **никогда** сам ``token``.
 
-    Намеренно не импортируем типы из задачи 02 (identity): каталог identity
-    разрабатывается параллельно и может ещё отсутствовать. Activator
-    проверяет свежесть по ``issued_at``/``expires_at`` и по ``jti`` — этого
-    достаточно, чтобы не проксировать истёкший токен из Secret (критерий 13).
+    Типы задачи 02 (``identity.PluginClaims``) намеренно не импортируются:
+    этот пакет должен подниматься даже если соседний каталог ещё в работе.
+    Родительский адаптер ``MintPort`` оборачивает
+    ``identity.mint_plugin_claims(grant=..., instance=..., secret=...)``,
+    разбирает payload через ``identity.claims_from_payload`` и заполняет
+    ``jti``/``issued_at``/``expires_at``. Activator дополнительно проверяет
+    свежесть по этим полям — истёкший токен из Secret не попадёт в прокси
+    (критерий 13, §4.2 v4).
     """
 
     token: str
@@ -150,7 +157,7 @@ class AuditPort(Protocol):
 
 @runtime_checkable
 class StateStorePort(Protocol):
-    """Atomарное чтение/запись ``ActivationState`` (БД или ConfigMap, §7.4).
+    """Атомарное чтение/запись ``ActivationState`` (БД или ConfigMap, §7.4).
 
     Родитель (задача 11) подключает реализацию; ``compare_and_swap`` —
     обязательный CAS, чтобы два конкурентных wake не оба прошли проверку

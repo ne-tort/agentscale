@@ -319,6 +319,12 @@ class PluginAdminService:
                 replayed=True,
             )
 
+        # Решение об установке фиксируем ДО первой мутации инфраструктуры (§4.5):
+        # недоступный append-only sink = отказ без частично созданных объектов.
+        await self._decision_audit(
+            operation=AdminOperation.GRANT, company_id=company_id, plugin_id=plugin_id
+        )
+
         # --- 3. Инфраструктура компании. DSN остаётся secret_ref, не plaintext.
         database = await self._ports.tenant_db.ensure_company_database(company_id=company_id)
         schema = await self._ports.tenant_db.ensure_plugin_schema(
@@ -416,6 +422,12 @@ class PluginAdminService:
         grant = await self._require_active_grant(
             operation=AdminOperation.REVOKE, company_id=company_id, plugin_id=plugin_id
         )
+        await self._decision_audit(
+            operation=AdminOperation.REVOKE,
+            company_id=company_id,
+            plugin_id=plugin_id,
+            grant_id=grant.grant_id,
+        )
 
         # Порядок важен: сначала реестр отзывов (мгновенная блокировка запросов),
         # затем деактивация grant, затем снятие маршрутов и Suspended.
@@ -493,6 +505,12 @@ class PluginAdminService:
 
         _validate_identity(company_id=company_id, plugin_id=plugin_id)
         grant = await self._ports.grant_store.get(company_id=company_id, plugin_id=plugin_id)
+        await self._decision_audit(
+            operation=AdminOperation.UNINSTALL,
+            company_id=company_id,
+            plugin_id=plugin_id,
+            grant_id=grant.grant_id if grant is not None else None,
+        )
 
         # Идемпотентность: уже удалено — успех без единого шага удаления.
         if grant is None:
@@ -526,9 +544,11 @@ class PluginAdminService:
 
         # Все шаги пытаемся выполнить даже при отказе предыдущего, чтобы собрать
         # полный список failed_steps для UNINSTALL_PARTIAL; но итог = отказ.
-        async def _step(name: str, coro: object) -> bool:
+        # Каждый шаг — zero-arg thunk: так перехватывается и исключение при самом
+        # обращении к адаптеру, а не только при await.
+        async def _step(name: str, thunk: object) -> bool:
             try:
-                result = await coro  # type: ignore[misc]
+                result = await thunk()  # type: ignore[operator]
                 ok = bool(result)
             except Exception:  # noqa: BLE001 - адаптер мог упасть; фиксируем как провал шага
                 ok = False
@@ -537,40 +557,50 @@ class PluginAdminService:
 
         token_revoked = await _step(
             "token_revocation",
-            self._ports.revocation.revoke(grant_id=grant_id, reason="admin uninstall"),
+            lambda: self._ports.revocation.revoke(grant_id=grant_id, reason="admin uninstall"),
         )
-        routes_removed = await _step(
+        await _step(
             "routes",
-            self._ports.routes.unregister(
+            lambda: self._ports.routes.unregister(
                 company_id=company_id, plugin_id=plugin_id, grant_id=grant_id
             ),
         )
         infra_purged = await _step(
             "tenant_infra",
-            self._ports.activation.purge_infra(company_id=company_id, plugin_id=plugin_id),
+            lambda: self._ports.activation.purge_infra(
+                company_id=company_id, plugin_id=plugin_id
+            ),
         )
         prefix_dropped = await _step(
             "object_prefix",
-            self._ports.object_store.drop_prefix(company_id=company_id, plugin_id=plugin_id),
+            lambda: self._ports.object_store.drop_prefix(
+                company_id=company_id, plugin_id=plugin_id
+            ),
         )
-        # Бакет удаляем только если он пуст: False — нормальный исход, НЕ провал.
-        bucket_dropped = await self._ports.object_store.drop_bucket_if_empty(company_id=company_id)
+        # Бакет удаляем только если он пуст: False — нормальный исход, НЕ провал
+        # (другие плагины компании ещё используют бакет). Исключение адаптера
+        # трактуем так же, но записываем это в аудит через общий итог.
+        try:
+            bucket_dropped = await self._ports.object_store.drop_bucket_if_empty(
+                company_id=company_id
+            )
+        except Exception:  # noqa: BLE001 - отсутствие подтверждения ≠ успех удаления
+            bucket_dropped = False
 
+        # DROP SCHEMA/ROLE возвращает пару флагов, поэтому обрабатывается отдельно:
+        # успешным считается только одновременное удаление и схемы, и роли.
         schema_dropped, role_dropped = False, False
         try:
             schema_dropped, role_dropped = await self._ports.tenant_db.drop_plugin_schema(
                 company_id=company_id, plugin_id=plugin_id
             )
-        except Exception:  # noqa: BLE001 - см. rationale выше
+        except Exception:  # noqa: BLE001 - адаптер мог упасть; фиксируем как провал шага
             pass
-        if schema_dropped and role_dropped:
-            completed.append("schema_and_role")
-        else:
-            failed.append("schema_and_role")
+        (completed if schema_dropped and role_dropped else failed).append("schema_and_role")
 
         artifact_unlinked = await _step(
             "artifact_registry",
-            self._ports.artifact_registry.unlink_installation(
+            lambda: self._ports.artifact_registry.unlink_installation(
                 company_id=company_id,
                 plugin_id=plugin_id,
                 artifact_digest=grant.artifact_digest,
@@ -579,7 +609,9 @@ class PluginAdminService:
 
         grant_deleted = await _step(
             "grant_store",
-            self._ports.grant_store.delete(company_id=company_id, plugin_id=plugin_id),
+            lambda: self._ports.grant_store.delete(
+                company_id=company_id, plugin_id=plugin_id
+            ),
         )
 
         receipt = UninstallReceipt(
@@ -646,6 +678,12 @@ class PluginAdminService:
             )
             raise error
 
+        await self._decision_audit(
+            operation=AdminOperation.WAKE,
+            company_id=company_id,
+            plugin_id=plugin_id,
+            grant_id=grant.grant_id,
+        )
         wake = await self._ports.activation.wake(company_id=company_id, plugin_id=plugin_id)
         if not wake.ready:
             # Холодный старт не дошёл до Ready — токен не выдаём, иначе плагин
@@ -740,6 +778,11 @@ class PluginAdminService:
                 data_migration_performed=False,
             )
 
+        await self._decision_audit(
+            operation=AdminOperation.ENABLED_MODULES,
+            company_id=company_id,
+            plugin_id="enabled-modules",
+        )
         stored = tuple(
             await self._ports.grant_store.set_enabled_modules(
                 company_id=company_id, plugin_ids=normalized

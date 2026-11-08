@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="ru"
+      data-plugin-id="hello_plugin"
+      data-plugin-version="0.1.0"
+      data-host-origin="https://agentscale.dev">
+<head>
+  <meta charset="utf-8" />
+  <!--
+      Ограничительный CSP отдельного static-origin (§5.2, §5.3 v4).
+      Ни inline-скриптов, ни eval, ни сетевых вызовов из iframe: плагин общается
+      с хостом ТОЛЬКО через postMessage (connect-src 'none'). Токен в URL
+      запрещён — capability-токен живёт только в backend, во frontend его нет.
+      Атрибут sandbox задаёт ХОСТ задачи 13 на теге <iframe>; в этом документе
+      его намеренно нет: плагин не может ослабить собственную изоляцию.
+
+      data-host-origin — публичный origin shell, от которого разрешены сообщения.
+      Это НЕ секрет (секреты приходят из Secret в backend), а явная политика
+      доверенного отправителя: без неё handshake не выполняется (fail-closed).
+      digest артефакта плагин НЕ хранит у себя (запрет самореференции, §5.1) —
+      он приходит в host.ready от реестра и эхом возвращается в plugin.ready.
+  -->
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'none'; img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'" />
+  <meta name="referrer" content="no-referrer" />
+  <title>Hello Plugin</title>
+</head>
+<body>
+  <main>
+    <h1>Hello Plugin</h1>
+    <p id="state">Ожидание handshake с хостом…</p>
+
+    <button id="greet" type="button" disabled>Поздороваться</button>
+    <button id="refresh" type="button" disabled>Обновить список</button>
+
+    <h2>Приветствия</h2>
+    <ul id="greetings" aria-live="polite"></ul>
+  </main>
+  <script src="app.js" defer></script>
+</body>
+</html>
