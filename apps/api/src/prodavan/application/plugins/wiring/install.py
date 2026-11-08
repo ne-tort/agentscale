@@ -647,6 +647,50 @@ def _gateway_grants(repos: Any) -> Any | None:
         return None
 
 
+def _gateway_secrets(repos: Any) -> Any | None:
+    """``SecretPort`` через ``SecretAdapter`` + резолвер refs из SQL-grant'а.
+
+    ``SecretAdapter`` сам ходит в существующий ``RoutingSecretStore`` и
+    поддерживает ротацию пары ключей (§7.5). Резолвер здесь НЕ выдумывает
+    secret_ref: он читает его из того же SQL-репозитория ``CapabilityGrant``,
+    что и ``gateway_grants``. Пока при grant не выдаётся
+    ``PLUGIN_WEBHOOK_SECRET`` (долг F11), резолвер возвращает ``None`` и
+    ``SecretAdapter`` даёт типизированный ``503 SECRET_UNAVAILABLE``, а не
+    ``_UnwiredPort``/500. Fail-closed: вебхук без подписи НЕ принимается.
+    """
+    try:
+        from prodavan.infrastructure.plugins.adapters.gateway_adapters import (
+            SecretAdapter,
+            SecretKeyRing,
+        )
+
+        store = getattr(repos, "grant_store", None)
+        if store is None:
+            return None
+
+        async def _refs(plugin_id: str, company_id: str) -> Any | None:
+            getter = getattr(store, "get", None)
+            record = (
+                await getter(company_id=company_id, plugin_id=plugin_id)
+                if callable(getter)
+                else None
+            )
+            ref = getattr(record, "webhook_secret_ref", None) if record else None
+            if not isinstance(ref, str) or not ref.strip():
+                return None
+            return SecretKeyRing(active_ref=ref)
+
+        return SecretAdapter(refs=_refs)
+    except Exception as exc:  # noqa: BLE001 — конфигурация/импорт ≠ падение startup
+        logger.warning(
+            "plugin gateway secret port is not configured (%s: %s); "
+            "webhook HMAC stays fail-closed",
+            type(exc).__name__,
+            str(exc)[:120],
+        )
+        return None
+
+
 def _gateway_runtime(
     runtime: Any, repos: Any, redis: Any, ov: dict[str, Any], unwired: list[str],
     services: Mapping[str, Any] | None = None,
@@ -724,10 +768,15 @@ def _gateway_runtime(
         grants = _gateway_grants(repos)
     if grants is None:
         grants = need("gateway_grants")
+    secrets = ov.get("gateway_secrets")
+    if secrets is None:
+        secrets = _gateway_secrets(repos)
+    if secrets is None:
+        secrets = need("gateway_secrets")
     kwargs: dict[str, Any] = {
         "sessions": sessions,
         "grants": grants,
-        "secrets": need("gateway_secrets"),
+        "secrets": secrets,
         "rate_limit": ov.get("gateway_rate_limit_port") or RedisRateLimitAdapter(redis),
         "audit": audit,
         "hmac_verifier": ov.get("gateway_hmac_port") or Sha256HmacAdapter(),

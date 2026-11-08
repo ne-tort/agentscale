@@ -103,6 +103,25 @@ def test_gateway_grants_uses_sql_store_not_in_memory(monkeypatch: Any) -> None:
     assert install._gateway_grants(SimpleNamespace()) is None
 
 
+def test_gateway_secrets_is_typed_fail_closed_without_ref() -> None:
+    """SecretPort привязан, но без выданного webhook secret_ref НЕ принимает подпись."""
+    import asyncio
+    from types import SimpleNamespace
+
+    from prodavan.infrastructure.plugins.adapters.gateway_adapters import SecretAdapter
+
+    class _Store:
+        async def get(self, *, company_id: str, plugin_id: str) -> Any:
+            return None  # grant есть, но PLUGIN_WEBHOOK_SECRET ещё не выдан
+
+    secrets = install._gateway_secrets(SimpleNamespace(grant_store=_Store()))
+    assert isinstance(secrets, SecretAdapter)
+    assert asyncio.run(secrets.webhook_secrets(plugin_id="p", company_id="co")) == ()
+    assert asyncio.run(secrets.webhook_secret(plugin_id="p", company_id="co")) is None
+    # Нет стора -> None -> честный _UnwiredPort, старт не падает.
+    assert install._gateway_secrets(SimpleNamespace()) is None
+
+
 def test_minio_bucket_admin_is_real_with_valid_env(monkeypatch: Any) -> None:
     """В кластерной конфигурации порт привязан к реальному адаптеру."""
     for key, value in _MINIO_ENV.items():
