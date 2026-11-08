@@ -291,14 +291,13 @@ spec:
         - name: ghcr-pull
       containers:
         - name: postgres
-          # PostgreSQL 16.15 — та же версия, что и платформенный инстанс.
-          #
-          # ОБЯЗАТЕЛЬНОЕ УСЛОВИЕ: образ ДОЛЖЕН содержать расширение pgaudit.
-          # Ванильный official `postgres:16.15` его НЕ содержит, и при
-          # shared_preload_libraries=pgaudit сервер упадёт в FATAL на старте —
-          # это намеренный fail-closed (никакого «тихого» отключения аудита DDL).
-          # Сборка/пин образа с pgaudit — задача 16 (CI: cosign/provenance/SBOM).
-          image: ghcr.io/ne-tort/postgres:16.15
+          # Tenant PostgreSQL 16.15 + pgaudit, СОБСТВЕННЫЙ образ (не платформенный
+          # ghcr.io/ne-tort/postgres:16.15, у которого pgaudit НЕТ). Сборка —
+          # .github/workflows/plugin-base-images.yml из infra/images/plugins/.
+          # ВАЖНО: после первого прогона workflow ЗАМЕНИТЬ :latest на
+          # @sha256:<digest из GITHUB_STEP_SUMMARY> (pin по digest); :latest здесь
+          # допущен ТОЛЬКО как временная метка до Verify Dev.
+          image: ghcr.io/ne-tort/plugin-base-postgres:latest
           imagePullPolicy: IfNotPresent
           # Все параметры заданы ЯВНО через -c, а не ALTER SYSTEM в init-скрипте:
           # bootstrap-сервер официального entrypoint стартует ДО загрузки pgaudit,

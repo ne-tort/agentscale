@@ -1,16 +1,21 @@
 """Постоянное хранение состояния plugin-платформы (F11, задача A10).
 
-五 таблиц ниже — это **состояние платформы** в БД ``prodavan``: долгоживущие
+Шесть таблиц ниже — это **состояние платформы** в БД ``prodavan``: долгоживущие
 ``CapabilityGrant``, реестр экземпляров плагинов, реестр подписанных OCI-артефактов,
-append-only аудит и журнал доставки Redpanda. Данные САМИХ плагинов живут в
-``tenant_<company>`` (задача 05) и сюда не попадают.
+append-only аудит, журнал доставки Redpanda и company-scoped фича-флаг
+``plugin_enabled_modules[]``. Пять первых — базовые по ТЗ A10; шестая
+(``plugin_feature_flags``) добавлена по требованию задачи «A10-репозитории»:
+отдельной таблицы под флаг иначе нет, а хранить его в ``capabilities``/
+``egress_policy``/``quota`` grant'а нельзя (у этих колонок свой смысл и CHECK'и).
+Данные САМИХ плагинов живут в ``tenant_<company>`` (задача 05) и сюда не попадают.
 
 Источник истины по контрактам:
   * ``docs/ARCHITECTURE/plugin-architecture-complete.md`` v4, §4.2 / §4.5 / §5.1 /
-    §5.5 / §6.3 / §11;
+    §5.5 / §6.3 / §8 / §11;
   * доменные типы ``prodavan/domain/plugins/types.py`` (задача 01);
   * типизированные контракты ``prodavan/application/plugins/admin/contracts.py``
     (задача 12);
+  * контракты событий ``prodavan/application/plugins/events/contracts.py`` (задача 10);
   * ``docs/08-migration/audit-append-shape-decision.md:13-19`` — запрет raw-значений
     в аудите.
 
@@ -22,6 +27,14 @@ dual-read/dual-write или перенос данных (§5.5 / §8 / §13.1) �
 Стиль — как в ``dynamic_apps.py`` / ``modules.py``: ``Base``, ``Mapped``/
 ``mapped_column``, ``JSONB``, именованные ``UniqueConstraint``/``CheckConstraint``/
 ``Index``, ``server_default=func.now()`` и русские комментарии.
+
+Согласование имён с задачей «A10-репозитории» (через родителя): физические имена
+колонок зафиксированы здесь и в ревизии ``2026110801``; точный перечень и расхождения
+отправлены родителю отдельным сообщением. Часть колонок добавлена сверх минимального
+ТЗ по запросу репозиториев (``image_ref``, ``lifecycle_version``, ``is_current``,
+поля DLQ-доставки) — они аддитивны и не ослабляют fail-closed. Решение родителя:
+все 6 таблиц создаются ОДНОЙ ревизией ``2026110801``, отдельную ``2026110802``
+не делаем (иначе ``alembic check`` упадёт по drift).
 """
 
 from __future__ import annotations
@@ -35,7 +48,6 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     DateTime,
-    ForeignKey,
     ForeignKeyConstraint,
     Index,
     Integer,
@@ -44,6 +56,7 @@ from sqlalchemy import (
     UniqueConstraint,
     event,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -114,6 +127,7 @@ AUDIT_FORBIDDEN_RAW_COLUMNS: frozenset[str] = frozenset(
         "authorization",
         "cookie",
         "pii",
+        "details",
     }
 )
 
@@ -170,6 +184,9 @@ class CapabilityGrantRow(Base):
     Egress-политика и квоты лежат ЗДЕСЬ, а не в коротком ``PluginClaims``: иначе
     истечение JWT пересобирало бы сетевые правила посреди запроса (§6.3).
     Отзыв = ``status='revoked'`` + проверка ``grant_id`` на каждом запросе.
+
+    Первичный ключ физически называется ``id`` (как в соседних моделях); доменные
+    ``grant_id`` из задачи 01/12 маппятся на него репозиторием.
     """
 
     __tablename__ = "plugin_capability_grants"
@@ -228,6 +245,11 @@ class CapabilityGrantRow(Base):
     status: Mapped[str] = mapped_column(
         String(16), nullable=False, default="active", server_default="active"
     )
+    #: ``plugin_enabled_modules[]`` НЕ хранится здесь: флаг company-scoped и живёт
+    #: в отдельной таблице ``plugin_feature_flags`` (решение родителя). Примешивать
+    #: его к grant'у нельзя — у этой строки per-(company, instance) семантика.
+    #: Момент выдачи: соответствует ``CapabilityGrant.issued_at`` (задача 01) и
+    #: ``CapabilityGrantRecord.created_at`` (задача 12).
     issued_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -257,6 +279,7 @@ class PluginInstanceRow(Base):
             "company_id", "plugin_id", name="uq_plugin_instance_company_plugin"
         ),
         # Экземпляр может ссылаться только на версию, которая ЕСТЬ в реестре.
+        # Требует, чтобы ``plugin_artifacts`` создавалась РАНЬШЕ в ревизии.
         ForeignKeyConstraint(
             ["plugin_id", "manifest_version"],
             ["plugin_artifacts.plugin_id", "plugin_artifacts.version"],
@@ -274,9 +297,7 @@ class PluginInstanceRow(Base):
         CheckConstraint(
             "desired_replicas IN (0, 1)", name="ck_plugin_instance_replicas"
         ),
-        Index(
-            "ix_plugin_instances_company_status", "company_id", "status"
-        ),
+        Index("ix_plugin_instances_company_status", "company_id", "status"),
     )
 
     id: Mapped[str] = mapped_column(
@@ -348,6 +369,18 @@ class PluginArtifactRow(Base):
             name="ck_plugin_artifact_projection_differs",
         ),
         Index("ix_plugin_artifacts_plugin_status", "plugin_id", "status"),
+        #: Явная «текущая» версия плагина: ровно ОДНА на plugin_id. Без неё
+        #: set_current выбирал бы «последний published по published_at» — гонка и
+        #: недетерминизм при параллельной публикации. Partial UNIQUE — ядро
+        #: PostgreSQL, не расширение и не pgaudit. Литерал ``is_current = true``
+        #: ДОСЛОВНО повторён в ревизии 2026110801, иначе ``alembic check`` увидит
+        #: drift и пересоберёт индекс.
+        Index(
+            "uq_plugin_artifact_current",
+            "plugin_id",
+            unique=True,
+            postgresql_where=text("is_current = true"),
+        ),
     )
 
     id: Mapped[str] = mapped_column(
@@ -356,6 +389,8 @@ class PluginArtifactRow(Base):
     plugin_id: Mapped[str] = mapped_column(String(160), nullable=False)
     version: Mapped[str] = mapped_column(String(128), nullable=False)
     oci_digest: Mapped[str] = mapped_column(String(71), nullable=False)
+    #: Полная ссылка ``ghcr.io/...@sha256:...`` (удобство репозитория, аддитивно).
+    image_ref: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     #: Канонический подписанный plugin-manifest (``PluginManifest`` задачи 01).
     #: Нет ``default``: вызывающий ОБЯЗАН передать подписанную форму явно.
     manifest: Mapped[dict] = mapped_column(JSONB, nullable=False)
@@ -371,6 +406,16 @@ class PluginArtifactRow(Base):
         String(16), nullable=False, default="quarantined", server_default="quarantined"
     )
     quarantine_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: Счётчик для CAS при ``set_current``: защищает от гонки параллельной
+    #: публикации (добавлено по запросу репозиториев, аддитивно).
+    lifecycle_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    #: Признак текущей версии для set_current (CAS через lifecycle_version).
+    #: Partial UNIQUE по plugin_id выше гарантирует не более одной true-строки.
+    is_current: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false", index=True
+    )
     #: Момент регистрации в реестре. Nullable, чтобы совпадать с
     #: ``ArtifactRecord.published_at`` (задача 12): у QUARANTINED публикации нет.
     published_at: Mapped[datetime | None] = mapped_column(
@@ -393,6 +438,11 @@ class PluginAuditEventRow(Base):
     ``artifact_digest``. FK и RLS намеренно отсутствуют: аудит не должен
     каскадно удаляться вместе с grant/экземпляром (§6 решения), а RLS в v4
     отвергнут (§13.1). Идентификаторы хранятся как неизменяемые source ID.
+
+    Сознательно НЕ добавлен ``details`` JSONB из запроса репозиториев: универсальный
+    JSONB-«карман» стал бы обходом запрета raw-данных. При необходимости поля
+    ``event_kind`` / ``linked_event_id`` / ``schema_version`` добавляются ТИПИЗИРОВАННЫМИ
+    колонками в отдельной ревизии, а не общим ``details``.
     """
 
     __tablename__ = "plugin_audit_events"
@@ -451,11 +501,12 @@ class PluginEventDeliveryRow(Base):
 
     Уникальность ``(subscription_id, source_event_id)`` — идемпотентность
     КОНСЬЮМЕРА (``events/contracts.py::ConsumerDedupKey``): ключ по идентификатору
-    ИСТОЧНИКА, а не по URL и не по hash тела. offset коммитится вручную только
+    ИСТОЧНИКА, а не по URL и не по hash тела. Offset коммитится вручную только
     после ACK или подтверждённой записи в DLQ.
 
-    Примечание: ``offset`` — зарезервированное слово PostgreSQL, SQLAlchemy
-    экранирует его автоматически; в ревизии колонка объявлена точно так же.
+    Поля ``event_id`` / ``dlq_topic`` / ``error_kind`` / ``payload_digest`` добавлены
+    сверх минимального ТЗ, чтобы строка принимала ``DlqRecord`` и ``PluginEvent``
+    из задачи 10 без потери идентичности. Сырое тело НЕ хранится — только digest.
     """
 
     __tablename__ = "plugin_event_deliveries"
@@ -465,9 +516,7 @@ class PluginEventDeliveryRow(Base):
             "source_event_id",
             name="uq_plugin_event_delivery_dedup",
         ),
-        Index(
-            "ix_plugin_event_deliveries_status_retry", "status", "next_retry_at"
-        ),
+        Index("ix_plugin_event_deliveries_status_retry", "status", "next_retry_at"),
     )
 
     id: Mapped[str] = mapped_column(
@@ -475,24 +524,70 @@ class PluginEventDeliveryRow(Base):
     )
     subscription_id: Mapped[str] = mapped_column(String(160), nullable=False)
     source_event_id: Mapped[str] = mapped_column(String(200), nullable=False)
+    #: Платформенный ``event_id`` (отличается от ``source_event_id``, §7.3).
+    event_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
     topic: Mapped[str] = mapped_column(String(255), nullable=False)
-    partition: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
-    # PG-reserved имя: preparer диалекта заключит его в кавычки и в ORM, и в DDL.
-    offset: Mapped[int] = mapped_column("offset", BigInteger(), nullable=False)
+    dlq_topic: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    partition: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    # ``offset`` — зарезервированное слово PostgreSQL: preparer диалекта
+    # автоматически экранирует его и в ORM, и в DDL ревизии.
+    offset: Mapped[int] = mapped_column(BigInteger(), nullable=False)
     #: ``pending`` либо исход ``DeliveryOutcome`` (ACK/RETRY/DLQ) задачи 10.
-    #: Словарь намеренно не зажат CHECK на уровне БД: журнал не должен зависеть
-    #: от написания enum específico диспетчера; NOT NULL + явный статус достаточны.
     status: Mapped[str] = mapped_column(
         String(32), nullable=False, default="pending", server_default="pending"
     )
     attempts: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default="0"
     )
+    #: Только ИМЯ класса исключения, без текста/payload/URL/токенов (критерий 11).
+    error_kind: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    payload_digest: Mapped[str | None] = mapped_column(String(71), nullable=True)
     next_retry_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+# --------------------------------------------------------------------------- 6. Feature flag
+
+
+class PluginFeatureFlagRow(Base):
+    """Company-scoped ``plugin_enabled_modules[]`` (§8 этап 2, критерий 16).
+
+    Единственный владелец фича-флага strangler'а: переключение пути БЕЗ миграции
+    данных (``EnabledModulesReceipt.data_migration_performed is False``).
+    Одна строка на компанию (``company_id`` = PK) переживает рестарт сервиса —
+    ``DbFeatureFlagStore`` читает её через ``flags_row``. Раньше флаг пытались
+    положить в grant: это ломало семантику ``capabilities``/``egress_policy``/
+    ``quota`` и давало несколько conflicting строк на компанию.
+
+    Значение — JSONB-список включённых модулей, по умолчанию пустой = путь
+    strangler выключен (fail-closed). Проверка «это список, а не объект» тоже
+    зафиксирована CHECK: иначе адаптер мог бы трактовать dict как «всё включено».
+    """
+
+    __tablename__ = "plugin_feature_flags"
+    __table_args__ = (
+        CheckConstraint(
+            "jsonb_typeof(enabled_modules) = 'array'",
+            name="ck_plugin_feature_flags_enabled_modules_array",
+        ),
+    )
+
+    #: company_id одновременно PK и уникальный ключ: строго одна строка на компанию.
+    company_id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    enabled_modules: Mapped[list] = mapped_column(
+        JSONB, nullable=False, default=list, server_default="[]"
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
     )
 
 
@@ -506,6 +601,7 @@ __all__ = [
     "PluginArtifactRow",
     "PluginAuditEventRow",
     "PluginEventDeliveryRow",
+    "PluginFeatureFlagRow",
     "PluginInstanceRow",
     "build_app_version_projection",
 ]

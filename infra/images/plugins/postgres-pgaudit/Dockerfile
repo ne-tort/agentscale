@@ -121,15 +121,16 @@ USER postgres:postgres
 
 EXPOSE 5432
 
-# ЯВНЫЙ HEALTHCHECK. pg_isready ходит по unix-сокету (в pg_hba для local
-# разрешён scram-sha-256), поэтому не зависит от pod-сетей и reject-all.
-# Вторая проверка — наличие pgaudit.so: если библиотеку кто-то выкинул из
-# образа, контейнер станет unhealthy СРАЗУ, а не упадёт в FATAL при первом
-# же `-c shared_preload_libraries=pgaudit` в k3s. Факт ЗАГРУЗКИ pgaudit
-# проверяется отдельным SQL-чеком из README.md (в HEALTHCHECK его не
-# втиснуть без пароля в образе).
+# ЯВНЫЙ HEALTHCHECK (shell-форма Dockerfile, без CMD-SHELL — это синтаксис
+# Compose, а не Dockerfile). pg_isready ходит по unix-сокету (в pg_hba для
+# local разрешён scram-sha-256), поэтому не зависит от pod-сетей и reject-all;
+# пароль не нужен: сам факт ответа сервера = «принимает соединения». Вторая
+# проверка — наличие pgaudit.so: если библиотеку выкинули из образа, контейнер
+# станет unhealthy СРАЗУ, а не упадёт в FATAL при первом же
+# `-c shared_preload_libraries=pgaudit` в k3s. Факт ЗАГРУЗКИ pgaudit
+# проверяется отдельным SQL-чеком из README.md.
 HEALTHCHECK --interval=10s --timeout=5s --start-period=30s --retries=5 \
-    CMD ["CMD-SHELL", "set -eu; pg_isready -U \"${POSTGRES_USER:-postgres}\" -d \"${POSTGRES_DB:-postgres}\" >/dev/null; test -f /usr/lib/postgresql/16/lib/pgaudit.so"]
+    CMD pg_isready -q && test -f /usr/lib/postgresql/16/lib/pgaudit.so
 
 # ENTRYPOINT/CMD наследуются от official-образа (docker-entrypoint.sh +
 # postgres). Deployment задачи 14 переопределяет command, добавляя `-c ...`.

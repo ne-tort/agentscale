@@ -78,8 +78,12 @@ EXPOSE 6432
 # даже при пустом allowlist: доступность ≠ авторизация. Проверка SHOW POOLS
 # требует пароля из userlist и в образ его не вложить — она вынесена в
 # чек-лист README.md (п.8 задачи).
+#
+# `nc` — busybox nc официального Alpine-базового образа (НЕ bash /dev/tcp:
+# в ash его нет). Если конкретная ревизия базы окажется без nc — см. риск №6
+# в README.md; первый реальный прогон это покажет (здесь не запускаем).
 HEALTHCHECK --interval=10s --timeout=5s --start-period=10s --retries=5 \
-    CMD ["CMD-SHELL", "set -eu; exec 3<>/dev/tcp/127.0.0.1/6432 || exit 1; exec 3<&-; exec 3>&-"]
+    CMD nc -z 127.0.0.1 6432
 
 ENTRYPOINT ["pgbouncer"]
 CMD ["/etc/pgbouncer/pgbouncer.ini"]

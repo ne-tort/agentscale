@@ -142,6 +142,8 @@ def test_no_dev_fallback_on_empty_secret() -> None:
         claims_secret="",
         static_origin="https://plugins.example.test",
     )
+    # Пустой секрет ловит ДУБЛЬ guard'а в validate(), до обращения к KeyRing:
+    # это и есть «ошибка сборки», а не «возьмём AUTH_TEST_SECRET».
     with pytest.raises(PluginPlatformConfigError) as ei:
         build_keyring(config)
     assert "AUTH_TEST_SECRET" in str(ei.value) or "PLUGIN_CLAIMS_SECRET" in str(ei.value)
@@ -156,6 +158,7 @@ def test_duplicate_rotation_secret_rejected() -> None:
     config = PluginPlatformConfig(
         enabled=True,
         claims_secret=TEST_SECRET,
+        static_origin="https://plugins.example.test",
         previous_claims_secrets=(TEST_OLD_SECRET_1, TEST_OLD_SECRET_1),
     )
     with pytest.raises(PluginPlatformConfigError, match="duplicate"):

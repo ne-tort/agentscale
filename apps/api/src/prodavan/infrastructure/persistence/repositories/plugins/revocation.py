@@ -36,7 +36,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from ._schema import (
-    FLAG_SENTINEL_GRANT_ID,
+    FLAG_SENTINEL_ID,
     PluginRepositoryError,
     text,
 )
@@ -118,7 +118,7 @@ class DbGrantRevocation:
         неоднозначным → ``False``. Промах кэша = ``False`` + пометка на refresh.
         """
         key = self._normalize(grant_id)
-        if not key or key == FLAG_SENTINEL_GRANT_ID:
+        if not key or key == FLAG_SENTINEL_ID:
             return False
         moment = now or self._now()
         if moment.tzinfo is None or moment.utcoffset() is None:
@@ -195,7 +195,7 @@ class DbGrantRevocation:
     async def is_active_async(self, grant_id: str, *, now: datetime | None = None) -> bool:
         """Авторитетный async-ответ с прогревом кэша (источник истины)."""
         key = self._normalize(grant_id)
-        if not key or key == FLAG_SENTINEL_GRANT_ID:
+        if not key or key == FLAG_SENTINEL_ID:
             return False
         active = await self._repository.is_active_async(key, now=now)
         with self._lock:

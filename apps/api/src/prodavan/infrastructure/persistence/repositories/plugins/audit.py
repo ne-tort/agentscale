@@ -1,38 +1,51 @@
-"""``AppendOnlyAuditSink`` — append-only аудит поверх ``PluginAuditEventRow``.
+"""``AppendOnlyAuditSink`` — append-only аудит поверх РЕАЛЬНОЙ ``PluginAuditEventRow``.
 
-Реализует ``AuditPort`` из трёх слоёв (структурно, через duck-typing):
+Модель A10 ``plugin_audit_events`` намеренно НЕ имеет ``details`` JSONB,
+``event_id`` или ``event_type`` (универсальный «карман» стал бы обходом запрета
+raw-данных). Её колонки — типизированные канонические поля:
 
-* ``admin.ports.AuditPort``: ``async append(*, event: AdminAuditEvent) -> bool``;
-* ``events.ports.AuditPort``: ``async append(event_type, *, details) -> None``;
-* ``capabilities.audit.AuditPort``: ``sync append(event: PluginAuditEvent) -> None``.
+    request_id, run_id, company_id, cabinet_id, project_id, subject_id,
+    plugin_instance_id, artifact_digest, grant_id, capability, operation,
+    resource, decision, code, reason, sql_digest, payload_digest, occurred_at
+
+Часть из них NOT NULL. Append-only дополнительно защищён ORM-listener'ом
+``before_update`` / ``before_delete`` в модели.
+
+Реализует ТРИ ``AuditPort`` (разная сигнатура ``append``) через один
+диспетчер :meth:`AppendOnlyAuditSink.append`:
+
+* ``capabilities.audit.AuditPort`` (задача 03, SYNC):
+  ``append(event: PluginAuditEvent) -> None``;
+* ``admin.ports.AuditPort`` (задача 12, ASYNC):
+  ``await append(*, event: AdminAuditEvent) -> bool``;
+* ``events.ports.AuditPort`` (задача 10, ASYNC):
+  ``await append(event_type: str, *, details: Mapping) -> None``.
+
+Диспетчер разбирает форму вызова и ДЛЯ SYNC-вызова выполняет вставку на
+выделенном фоновом loop (``AsyncSession`` нельзя await'ить из sync-кода,
+но «тихо не записать» недопустимо). Для ASYNC-вызова всё остаётся в текущем
+loop и требует ``await``.
 
 Защита criterion 11 (§4.5)
 --------------------------
-В БД уходит ТОЛЬКО безопасная проекция. Мы НЕ доверяем ни одному полю
-входного события и НЕ пишем:
+В БД уходит ТОЛЬКО безопасная проекция. НЕ пишем raw SQL, параметры,
+payload/body, токены, секреты, PII. :func:`redact_details` пропускает любые
+``details`` через строгий allowlist скаляров: запрещённые ключи и вложенные
+структуры заменяются на ``sha256:...`` digest; длинные/подозрительные строки
+— тоже. Поверх этого переиспользуются ``AdminAuditEvent.redacted()`` и
+``PluginAuditEvent.redacted()`` (F2), которые уже дают каноническую проекцию.
 
-* raw SQL, параметры, bodies/payload, tokens, secrets, PII;
-* ``details`` произвольной формы — пропускаем через строгий allowlist скаляров
-  + отдельную функцию :func:`redact_details`, которая:
-  - разрешает ТОЛЬКО примитивы (str/int/float/bool/None) и короткие строки;
-  - отбрасывает ключи с маркерами ``sql/params/payload/body/token/...``;
-  - длинные/подозрительные строки заменяет на ``sha256:...`` digest;
-  - вложенные dict/list НЕ разворачивает (заменяет digest'ом), чтобы не
-    протащить сырые данные через ``{"meta": {...}}``.
-
-Поверх этого переиспользуется ``capabilities.audit.redact`` (F2), если событие
-— ``PluginAuditEvent``: его ``redacted()`` уже даёт каноническую проекцию.
-
-Fail-closed для позитивной мутации: ЛЮБАЯ ошибка вставки (в т.ч. отсутствие
-модели/колонки, ``IntegrityError``, недоступность БД) → ИСКЛЮЧЕНИЕ
-``AuditAppendError``, а не ``False``/«молча не записали». Вызывающий
-(``PluginAdminService``) превращает это в deny/system failure (§4.5).
+Fail-closed для позитивной мутации: ЛЮБАЯ ошибка вставки (нет модели/колонки,
+``IntegrityError``, недоступность БД) → :class:`AuditAppendError`, а не
+``False``/«молча не записали». Вызывающий превращает это в deny/system failure.
 """
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
+import threading
 from datetime import UTC, datetime
 from typing import Any, Mapping, Sequence
 
@@ -45,12 +58,11 @@ from ._schema import (
     ColumnMap,
     PluginRepositoryError,
     PluginRepositorySchemaError,
-    PluginRepositoryUnavailable,
+    column_names,
     load_row,
     text,
 )
 
-#: Ключи, ЗАПРЕЩЁННЫЕ в ``details`` аудита (criterion 11).
 _FORBIDDEN_DETAIL_TOKENS: frozenset[str] = frozenset(
     {
         "sql", "query", "statement", "params", "parameters", "bind", "bindings",
@@ -62,7 +74,6 @@ _FORBIDDEN_DETAIL_TOKENS: frozenset[str] = frozenset(
     }
 )
 
-#: Разрешённые канонические поля (идентификаторы, digest-ы, коды, счётчики).
 _ALLOWED_DETAIL_KEYS: frozenset[str] = frozenset(
     {
         "event_id", "event_type", "event_kind", "request_id", "run_id",
@@ -78,13 +89,23 @@ _ALLOWED_DETAIL_KEYS: frozenset[str] = frozenset(
     }
 )
 
-_MAX_DETAIL_VALUE_LENGTH = 200
-"""Длинные свободные строки в аудит не пишем (только digest)."""
+_MAX_VALUE_LENGTH = 200
 
 _RAW_MARKERS: tuple[str, ...] = (
     "select ", "insert ", "update ", "delete ", "drop ", "create ", "alter ",
     " where ", " from ", "password=", "token=", "secret=", "authorization:", "@",
 )
+
+#: Значения NOT NULL колонок, которых может не быть во входном событии.
+_NEUTRAL_DEFAULTS: Mapping[str, str] = {
+    "subject_id": "system",
+    "plugin_instance_id": "platform",
+    "capability": "platform",
+    "operation": "audit",
+    "resource": "platform",
+    "decision": "deny",
+    "code": "audit_append",
+}
 
 
 class AuditAppendError(PluginRepositoryError):
@@ -108,19 +129,18 @@ def _suspicious(value: str) -> bool:
         return True
     if lowered.startswith(("bearer ", "basic ", "postgres://", "postgresql://", "redis://")):
         return True
-    if lowered.startswith("eyj") and value.count(".") >= 2:  # JWT
+    if lowered.startswith("eyj") and value.count(".") >= 2:
         return True
-    if lowered.startswith("sha256:") and len(value) == 71:  # это сам digest — ок
-        return False
+    if lowered.startswith("sha256:") and len(value) == 71:
+        return False  # это сам digest — ок
     return len(value) > 96 and " " not in value
 
 
 def redact_details(details: Mapping[str, Any] | None) -> dict[str, Any]:
-    """Строгая проекция ``details``: только плоские безопасные скаляры.
+    """Строгая проекция: только плоские безопасные скаляры (criterion 11).
 
-    Возвращает НОВЫЙ dict. Любой запрещённый ключ/вложенная структура
-    заменяется на ``<key>_digest`` + ``<key>_redacted=True`` — факт наличия
-    сохраняется, значение — НЕТ (как в ``capabilities.audit.redact``).
+    Запрещённый ключ / вложенная структура → ``<key>_digest`` +
+    ``<key>_redacted=True``: факт наличия сохраняется, значение — НЕТ.
     """
     if details is None:
         return {}
@@ -138,7 +158,7 @@ def redact_details(details: Mapping[str, Any] | None) -> dict[str, Any]:
             result[f"{key}_redacted"] = True
             continue
         if isinstance(value, str):
-            if _suspicious(value) or len(value) > _MAX_DETAIL_VALUE_LENGTH:
+            if _suspicious(value) or len(value) > _MAX_VALUE_LENGTH:
                 result[f"{key}_digest"] = canonical_digest(value)
                 result[f"{key}_redacted"] = True
                 continue
@@ -156,30 +176,44 @@ def redact_details(details: Mapping[str, Any] | None) -> dict[str, Any]:
         if isinstance(value, datetime):
             result[key] = value.astimezone(UTC).isoformat()
             continue
-        if hasattr(value, "value") and isinstance(getattr(value, "value"), str):  # StrEnum
+        if hasattr(value, "value") and isinstance(getattr(value, "value"), str):
             result[key] = str(value.value)
             continue
-        # Неизвестный объект: тип + digest, без repr/полей.
         result[key] = {"type": type(value).__name__, "digest": canonical_digest(value)}
     return result
 
 
-def _safe_str(value: Any, *, field: str, default: str = "") -> str:
+def _safe_str(value: Any, *, default: str = "") -> str:
     """Каноническое строковое поле; подозрительное → digest (не raw)."""
     if value is None:
         return default
-    result = str(value.value) if hasattr(value, "value") and isinstance(getattr(value, "value"), str) else str(value)
+    result = (
+        str(value.value)
+        if hasattr(value, "value") and isinstance(getattr(value, "value"), str)
+        else str(value)
+    )
     if _suspicious(result):
         return canonical_digest(result)
-    return result[:_MAX_DETAIL_VALUE_LENGTH]
+    return result[:_MAX_VALUE_LENGTH]
+
+
+def _parse_time(value: Any, fallback: datetime) -> datetime:
+    if isinstance(value, datetime):
+        parsed = value
+    elif isinstance(value, str):
+        try:
+            parsed = datetime.fromisoformat(value)
+        except ValueError:
+            parsed = fallback
+    else:
+        parsed = fallback
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
 
 
 class AppendOnlyAuditSink:
-    """Append-only SQL-sink. Ошибка append = исключение (deny мутации).
-
-    ``session_factory`` обязателен. Ни один метод не обновляет и не удаляет
-    строки: только ``INSERT`` (append-only по контракту §4.5).
-    """
+    """Append-only SQL-sink. Ошибка append = исключение (deny мутации)."""
 
     def __init__(
         self,
@@ -198,10 +232,12 @@ class AppendOnlyAuditSink:
         self._columns = columns or ColumnMap()
         self._clock = clock or (lambda: datetime.now(UTC))
         self._rows_written = 0
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._loop_thread: threading.Thread | None = None
+        self._lock = threading.Lock()
 
     @property
     def rows_written(self) -> int:
-        """Счётчик подтверждённых вставок (диагностика/тесты)."""
         return self._rows_written
 
     def _row(self) -> type:
@@ -225,68 +261,78 @@ class AppendOnlyAuditSink:
         return self._session_factory()
 
     # ------------------------------------------------------------------
-    # Нормализация события → безопасная строка
+    # Событие → безопасная строка БД
     # ------------------------------------------------------------------
 
-    def _values(
-        self,
-        *,
-        event_id: str,
-        event_type: str,
-        occurred_at: datetime,
-        company_id: str,
-        plugin_id: str,
-        details: Mapping[str, Any],
-        row: type,
-    ) -> dict[str, Any]:
-        c = self._col
+    def _projection(self, event: Any, *, event_type_hint: str) -> dict[str, Any]:
+        """Извлечь каноническую проекцию из любого из трёх типов событий."""
+        # 1) AdminAuditEvent / PluginAuditEvent с redacted().
+        redacted = getattr(event, "redacted", None)
+        if callable(redacted):
+            raw = redacted()
+            if isinstance(raw, Mapping):
+                return redact_details(dict(raw))
+        # 2) Произвольный объект события — берём ТОЛЬКО безопасные атрибуты.
+        safe: dict[str, Any] = {}
+        for name in (
+            "event_id", "event_kind", "event_type", "request_id", "run_id",
+            "correlation_id", "company_id", "cabinet_id", "project_id",
+            "subject_id", "plugin_id", "plugin_instance_id", "artifact_digest",
+            "grant_id", "capability", "operation", "resource", "decision",
+            "code", "reason", "occurred_at", "linked_event_id", "schema_version",
+            "sql_digest", "payload_digest",
+        ):
+            value = getattr(event, name, None)
+            if value is not None:
+                safe[name] = value
+        safe.setdefault("event_type", event_type_hint)
+        return redact_details(safe)
+
+    def _details_projection(self, event_type: str, details: Mapping[str, Any]) -> dict[str, Any]:
+        """``events.ports.AuditPort``: event_type + плоские details."""
         safe = redact_details(details)
+        safe.setdefault("event_type", event_type)
+        safe.setdefault("operation", event_type)
+        return safe
+
+    def _values(self, safe: dict[str, Any], row: type) -> dict[str, Any]:
+        """Собрать значения РЕАЛЬНЫХ колонок A10 (все NOT NULL заполнены)."""
+        c = self._col
+        occurred = _parse_time(safe.get("occurred_at"), self._now())
+        # digest-ы: только валидные sha256, иначе NULL.
+        def _digest(key: str) -> str | None:
+            value = safe.get(key)
+            return value if isinstance(value, str) and value.startswith("sha256:") and len(value) == 71 else None
+
+        artifact = _digest("artifact_digest") or "sha256:" + "0" * 64
         values: dict[str, Any] = {
-            c("event_id"): text(event_id, field="event_id"),
-            c("event_type"): _safe_str(event_type, field="event_type"),
-            c("occurred_at"): occurred_at,
-            c("company_id"): _safe_str(company_id, field="company_id"),
-            c("plugin_id"): _safe_str(plugin_id, field="plugin_id"),
-            c("details"): safe,
+            c("request_id"): _safe_str(safe.get("request_id") or safe.get("event_id"), default="audit")[:128],
+            c("company_id"): _safe_str(safe.get("company_id"), default="platform")[:40],
+            c("subject_id"): _safe_str(safe.get("subject_id"), default=_NEUTRAL_DEFAULTS["subject_id"])[:160],
+            c("plugin_instance_id"): _safe_str(
+                safe.get("plugin_instance_id"), default=_NEUTRAL_DEFAULTS["plugin_instance_id"]
+            )[:80],
+            c("artifact_digest"): artifact,
+            c("capability"): _safe_str(safe.get("capability"), default=_NEUTRAL_DEFAULTS["capability"])[:64],
+            c("operation"): _safe_str(safe.get("operation") or safe.get("event_type") or safe.get("event_kind"), default=_NEUTRAL_DEFAULTS["operation"])[:64],
+            c("resource"): _safe_str(safe.get("resource"), default=_NEUTRAL_DEFAULTS["resource"])[:255],
+            c("decision"): _safe_str(safe.get("decision"), default=_NEUTRAL_DEFAULTS["decision"])[:32],
+            c("code"): _safe_str(safe.get("code"), default=_NEUTRAL_DEFAULTS["code"])[:64],
+            c("occurred_at"): occurred,
+            # Опциональные (nullable) канонические поля.
+            "run_id": _safe_str(safe.get("run_id"), default="")[:128] or None,
+            "cabinet_id": _safe_str(safe.get("cabinet_id"), default="")[:40] or None,
+            "project_id": _safe_str(safe.get("project_id"), default="")[:40] or None,
+            "grant_id": _safe_str(safe.get("grant_id"), default="")[:80] or None,
+            "reason": _safe_str(safe.get("reason"), default="")[:255] or None,
+            "sql_digest": _digest("sql_digest"),
+            "payload_digest": _digest("payload_digest"),
         }
-        # Необязательные канонические колонки заполняем ТОЛЬКО из безопасной
-        # проекции — сырое событие никуда не передаётся.
-        optional = {
-            "grant_id": safe.get("grant_id"),
-            "artifact_digest": safe.get("artifact_digest"),
-            "operation": safe.get("operation"),
-            "decision": safe.get("decision"),
-            "code": safe.get("code"),
-            "reason": safe.get("reason"),
-        }
-        existing = set(row.__table__.columns.keys())
-        for name, value in optional.items():
-            if name in existing and value is not None:
-                values[name] = value
+        existing = column_names(row)
         return {key: value for key, value in values.items() if key in existing}
 
-    @staticmethod
-    def _admin_projection(event: Any) -> dict[str, Any]:
-        """``AdminAuditEvent.redacted()`` — уже безопасная проекция задачи 12."""
-        redacted = getattr(event, "redacted", None)
-        if callable(redacted):
-            raw = redacted()
-            if isinstance(raw, Mapping):
-                return dict(raw)
-        raise AuditAppendError("AdminAuditEvent не предоставляет redacted()")
-
-    @staticmethod
-    def _capability_projection(event: Any) -> dict[str, Any]:
-        """``PluginAuditEvent.redacted()`` (F2) — каноническая проекция."""
-        redacted = getattr(event, "redacted", None)
-        if callable(redacted):
-            raw = redacted()
-            if isinstance(raw, Mapping):
-                return dict(raw)
-        raise AuditAppendError("PluginAuditEvent не предоставляет redacted()")
-
     # ------------------------------------------------------------------
-    # Единая точка вставки
+    # Единая точка INSERT
     # ------------------------------------------------------------------
 
     async def _insert(self, values: dict[str, Any]) -> None:
@@ -306,113 +352,103 @@ class AppendOnlyAuditSink:
             raise AuditAppendError(f"audit append failed: {type(exc).__name__}: {exc}") from exc
 
     # ------------------------------------------------------------------
-    # admin.ports.AuditPort: async append(*, event) -> bool
+    # Диспетчер: одна точка входа для всех трёх AuditPort
     # ------------------------------------------------------------------
 
-    async def append(self, *, event: Any) -> bool:
-        """Подтверждённая запись → ``True``; ошибка → исключение, НЕ ``False``.
+    def append(
+        self,
+        event_or_type: Any = None,
+        *,
+        event: Any = None,
+        details: Mapping[str, Any] | None = None,
+    ) -> Any:
+        """Единый ``append`` для трёх форм вызова.
 
-        ``admin.ports.AuditPort`` объявляет ``-> bool`` и fire-and-forget
-        ``False`` недопустим: для позитивной мутации это deny. Поэтому вместо
-        ``False`` всегда бросается ``AuditAppendError``.
+        Формы:
+
+        * ``append(plugin_audit_event)`` — SYNC (задача 03) → блокирующе
+          выполняет вставку на фоновом loop, возвращает ``None``;
+        * ``await append(*, event=admin_audit_event)`` — ASYNC (задача 12) →
+          возвращает ``True``;
+        * ``await append("plugin_event_received", details={...})`` — ASYNC
+          (задача 10) → возвращает ``None``.
+
+        Возврат корутины для async-форм означает, что вызывающий ОБЯЗАН
+        ``await``: «вызвали и забыли» не фиксирует аудит (fail-closed).
         """
-        projection = self._admin_projection(event)
-        occurred_raw = projection.get("occurred_at") or self._now().isoformat()
-        occurred = (
-            datetime.fromisoformat(occurred_raw)
-            if isinstance(occurred_raw, str)
-            else (occurred_raw if isinstance(occurred_raw, datetime) else self._now())
-        )
-        if occurred.tzinfo is None or occurred.utcoffset() is None:
-            occurred = occurred.replace(tzinfo=UTC)
-        values = self._values(
-            event_id=str(projection.get("event_id") or ""),
-            event_type=str(projection.get("operation") or "plugin_admin"),
-            occurred_at=occurred.astimezone(UTC),
-            company_id=str(projection.get("company_id") or ""),
-            plugin_id=str(projection.get("plugin_id") or ""),
-            details=projection,
-            row=self._row(),
-        )
+        if event is not None:
+            # admin.ports.AuditPort: async append(*, event) -> bool
+            return self._append_admin(event)
+        if isinstance(event_or_type, str):
+            # events.ports.AuditPort: async append(event_type, *, details) -> None
+            return self._append_event(event_or_type, details=details or {})
+        if event_or_type is None:
+            raise AuditAppendError("append: не передано событие аудита")
+        # capabilities.audit.AuditPort: sync append(event) -> None
+        projection = self._projection(event_or_type, event_type_hint="plugin_audit")
+        values = self._values(projection, self._row())
+        return self._run_sync(self._insert(values))
+
+    async def _append_admin(self, event: Any) -> bool:
+        """Подтверждённая запись → ``True``; ошибка → исключение, НЕ ``False``."""
+        projection = self._projection(event, event_type_hint="plugin_admin")
+        values = self._values(projection, self._row())
         await self._insert(values)
         return True
 
-    # ------------------------------------------------------------------
-    # events.ports.AuditPort: async append(event_type, *, details) -> None
-    # ------------------------------------------------------------------
-
-    async def append_event(self, event_type: str, *, details: Mapping[str, Any]) -> None:
+    async def _append_event(self, event_type: str, *, details: Mapping[str, Any]) -> None:
         """Стык с диспечером событий (F7): только канонические id/digest-ы."""
-        safe = redact_details(details)
-        occurred = self._now()
-        raw_occurred = safe.get("occurred_at")
-        if isinstance(raw_occurred, str):
-            try:
-                parsed = datetime.fromisoformat(raw_occurred)
-                occurred = parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
-            except ValueError:
-                occurred = self._now()
-        values = self._values(
-            event_id=str(safe.get("event_id") or f"event:{canonical_digest(details)[:24]}"),
-            event_type=text(event_type, field="event_type"),
-            occurred_at=occurred.astimezone(UTC),
-            company_id=str(safe.get("company_id") or ""),
-            plugin_id=str(safe.get("plugin_id") or ""),
-            details=safe,
-            row=self._row(),
-        )
+        text(event_type, field="event_type")
+        projection = self._details_projection(event_type, details)
+        values = self._values(projection, self._row())
         await self._insert(values)
 
-    # ------------------------------------------------------------------
-    # capabilities.audit.AuditPort: SYNC append(event) -> None
-    # ------------------------------------------------------------------
+    # Явные имена для читаемости/тестов (не альтернативные контракты).
+    async def append_event(self, event_type: str, *, details: Mapping[str, Any]) -> None:
+        await self._append_event(event_type, details=details)
 
     def append_sync(self, event: Any) -> None:
-        """Синхронный append для F2 (``PluginAuditEvent``).
+        projection = self._projection(event, event_type_hint="plugin_audit")
+        values = self._values(projection, self._row())
+        self._run_sync(self._insert(values))
 
-        ``AsyncSession`` нельзя await'ить из sync-кода: выполняем вставку на
-        выделенном фоновом loop (как в ``artifacts.py``) и ДОЖДАТЬСЯ результата.
-        Ошибка — исключение (deny), не «тихо не записали».
-        """
-        import asyncio
-        import threading
+    # ------------------------------------------------------------------
+    # Мост sync → async
+    # ------------------------------------------------------------------
 
-        projection = self._capability_projection(event)
-        occurred = self._now()
-        raw_occurred = projection.get("occurred_at")
-        if isinstance(raw_occurred, str):
-            try:
-                parsed = datetime.fromisoformat(raw_occurred)
-                occurred = parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
-            except ValueError:
-                occurred = self._now()
-        values = self._values(
-            event_id=str(projection.get("event_id") or ""),
-            event_type=str(projection.get("event_kind") or "plugin_authorization"),
-            occurred_at=occurred.astimezone(UTC),
-            company_id=str(projection.get("company_id") or ""),
-            plugin_id=str(projection.get("plugin_id") or "capabilities"),
-            details=projection,
-            row=self._row(),
-        )
+    def _get_loop(self) -> asyncio.AbstractEventLoop:
+        with self._lock:
+            if self._loop is not None and not self._loop.is_closed():
+                return self._loop
+            loop = asyncio.new_event_loop()
+            thread = threading.Thread(
+                target=_run_loop, args=(loop,), name="plugin-audit-sink", daemon=True
+            )
+            thread.start()
+            self._loop = loop
+            self._loop_thread = thread
+            return loop
 
+    def _run_sync(self, coro: Any) -> None:
         try:
             asyncio.get_running_loop()
         except RuntimeError:
-            loop = asyncio.new_event_loop()
-            thread = threading.Thread(target=_run_loop, args=(loop,), daemon=True)
-            thread.start()
-            try:
-                future = asyncio.run_coroutine_threadsafe(self._insert(values), loop)
-                future.result()
-            finally:
-                loop.call_soon_threadsafe(loop.stop)
-                thread.join(timeout=2.0)
-                loop.close()
+            future = asyncio.run_coroutine_threadsafe(coro, self._get_loop())
+            future.result()  # ДОЖИДАЕМСЯ подтверждения; ошибка → AuditAppendError
             return
         raise AuditAppendError(
-            "append_sync вызван из работающего event loop; используйте await append/append_event"
+            "append_sync вызван из работающего event loop; используйте await append(...)"
         )
+
+    def close(self) -> None:
+        with self._lock:
+            loop, thread = self._loop, self._loop_thread
+            self._loop = None
+            self._loop_thread = None
+        if loop is not None and not loop.is_closed():
+            loop.call_soon_threadsafe(loop.stop)
+        if thread is not None:
+            thread.join(timeout=2.0)
 
     # ------------------------------------------------------------------
     # Вспомогательное: проверка «нет raw данных» для тестов/ревью
@@ -420,19 +456,13 @@ class AppendOnlyAuditSink:
 
     @staticmethod
     def assert_no_raw_data(details: Mapping[str, Any], raw_values: Sequence[str]) -> None:
-        """Проверить, что ни одно сырое значение не попало в проекцию (тесты).
-
-        Бросает ``AssertionError`` при обнаружении. Используется unit-тестами,
-        НЕ является частью рабочего решения.
-        """
+        """Проверить, что ни одно сырое значение не попало в проекцию (тесты)."""
         serialized = json.dumps(redact_details(details), ensure_ascii=False, sort_keys=True)
         for raw in raw_values:
             assert str(raw) not in serialized, f"raw данные {raw!r} попали в аудит"
 
 
-def _run_loop(loop: Any) -> None:
-    import asyncio
-
+def _run_loop(loop: asyncio.AbstractEventLoop) -> None:
     asyncio.set_event_loop(loop)
     loop.run_forever()
 
@@ -448,4 +478,4 @@ class _BorrowedSession:
         return None
 
 
-__all__ = ["ALLOWED_DETAIL_KEYS", "AppendOnlyAuditSink", "AuditAppendError", "redact_details"]
+__all__ = ["AppendOnlyAuditSink", "AuditAppendError", "canonical_digest", "redact_details"]

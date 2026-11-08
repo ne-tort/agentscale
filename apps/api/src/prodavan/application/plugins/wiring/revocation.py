@@ -3,7 +3,7 @@
 ``DurableGrantRevocation`` реализует ОБА порта сразу:
 
 * ``identity.revocation.RevocationPort`` — ``is_active`` / ``revoke``
-  (используется ``GrantRevocation.check(claims)`` вtransport/deps.py);
+  (используется ``GrantRevocation.check(claims)`` в ``transport/deps.py``);
 * ``capabilities.ports.GrantRevocationPort`` — ``is_active(grant_id, *, now)``
   (вызывается ``PluginCapabilityService`` на КАЖДОМ запросе);
 * плюс ``is_revoked(grant_id)`` как обратный алиас для admin/``wake``.
@@ -151,9 +151,18 @@ def _coerce_snapshot(value: Any) -> GrantSnapshot:
         expires_at=_aware_utc(snapshot.expires_at),
         revoked_at=_aware_utc(snapshot.revoked_at),
     )
-    if normalized.status not in (GRANT_STATUS_ACTIVE, GRANT_STATUS_REVOKED):
+    if snapshot.status not in (GRANT_STATUS_ACTIVE, GRANT_STATUS_REVOKED):
         # Неизвестный статус = неопределённость = отказ, НЕ «считаем активным».
         raise ValueError(f"unsupported grant status: {normalized.status!r}")
+    if normalized.status == GRANT_STATUS_ACTIVE and normalized.revoked_at is not None:
+        # Противоречие: status=active, но есть revoked_at. Доверяем отзыву.
+        return GrantSnapshot(
+            status=GRANT_STATUS_REVOKED,
+            raw=normalized.raw,
+            issued_at=normalized.issued_at,
+            expires_at=normalized.expires_at,
+            revoked_at=normalized.revoked_at,
+        )
     return normalized
 
 

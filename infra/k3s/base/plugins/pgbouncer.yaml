@@ -163,7 +163,11 @@ spec:
         - name: ghcr-pull
       containers:
         - name: pgbouncer
-          image: ghcr.io/ne-tort/pgbouncer:1.24.1
+          # Собственный образ с SCRAM (libpq), сборка — plugin-base-images.yml
+          # из infra/images/plugins/pgbouncer/. ВАЖНО: после первого прогона
+          # workflow ЗАМЕНИТЬ :latest на @sha256:<digest из STEP_SUMMARY>.
+          # ghcr-зеркало: Docker Hub на холодной ноде отдаёт 429 TOOMANYREQUESTS.
+          image: ghcr.io/ne-tort/plugin-base-pgbouncer:latest
           imagePullPolicy: IfNotPresent
           command:
             - pgbouncer

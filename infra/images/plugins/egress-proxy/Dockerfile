@@ -94,12 +94,13 @@ USER envoy:envoy
 EXPOSE 8080
 
 # HEALTHCHECK: admin /ready отвечает только когда конфиг загружен (совпадает
-# с readinessProbe в egress-proxy.yaml). curl в официальном ubuntu-базовом
-# образе есть не всегда, поэтому используем /dev/tcp из bash: образ Ubuntu,
-# /bin/bash присутствует. Отсутствие маршрутов НЕ делает под unhealthy —
-# deny all это ШТАТНОЕ стартовое состояние, а не авария.
+# с readinessProbe в egress-proxy.yaml). Образ envoyproxy/envoy основан на
+# Ubuntu, /bin/bash с /dev/tcp присутствует (в Dockerfile это shell-форма CMD,
+# НЕ JSON-массив с "CMD-SHELL" — тот синтаксис принадлежит Compose).
+# Отсутствие маршрутов НЕ делает под unhealthy — deny all это ШТАТНОЕ
+# стартовое состояние, а не авария.
 HEALTHCHECK --interval=10s --timeout=5s --start-period=10s --retries=5 \
-    CMD ["CMD-SHELL", "set -eu; exec 3<>/dev/tcp/127.0.0.1/9901 || exit 1; printf 'GET /ready HTTP/1.0\\r\\nHost: localhost\\r\\n\\r\\n' >&3; head -n 1 <&3 | grep -q ' 200 '; exec 3<&-; exec 3>&-"]
+    CMD bash -c 'exec 3<>/dev/tcp/127.0.0.1/9901 && printf "GET /ready HTTP/1.0\r\nHost: localhost\r\n\r\n" >&3 && head -n 1 <&3 | grep -q " 200 "'
 
 # ENTRYPOINT / CMD наследуются от официального образа:
 #   ENTRYPOINT ["/docker-entrypoint.sh"], CMD ["envoy","-c","/etc/envoy/envoy.yaml"]

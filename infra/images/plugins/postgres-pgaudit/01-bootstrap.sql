@@ -52,20 +52,27 @@ $$;
 ALTER ROLE plugin_platform_admin
   NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
 
+-- ПРИМЕЧАНИЕ О СОВМЕСТИМОСТИ С ЗАДАЧЕЙ 14. Bootstrap-Job (Sync-хук, wave 1)
+-- из ConfigMap `tenant-postgres-bootstrap` выполняется ПОЗЖЕ initdb и на
+-- КАЖДОМ синке Argo применяет `ALTER ROLE ... PASSWORD` и
+-- `LOGIN CREATEDB CREATEROLE NOSUPERUSER NOREPLICATION NOBYPASSRLS`.
+-- Здесь роль намеренно создаётся БЕЗ пароля и БЕЗ LOGIN (безопасный дефолт
+-- до первого синка); итоговые атрибуты задаёт тот Job, он и «побеждает».
+-- Оба SQL идемпотентны и не конфликтуют: этот — один раз при initdb, тот —
+-- на каждом sync. НЕ добавлять сюда пароль: секрет живёт только в Secret.
+
 -- -----------------------------------------------------------------------------
--- ШАГ 2. ПЕРЕД revoke — CONNECT админской роли на КАЖДУЮ такую БД.
---
--- Список ЯВНЫЙ (по ТЗ п.2): template1, postgres, agentscale,
--- agentscale_userdb и все tenant_*; плюс ЛЮБАЯ существующая БД с
--- datallowconn, кроме template0 (у неё datallowconn=false и её ACL не
--- копируется, но явное исключение документируем). Перебор через DO-блок по
--- pg_database: format('%I', ...) экранирует имя, поэтому БД с дефисами/
--- заглавными буквами не ломают SQL и не дают инъекции.
+-- ШАГ 2. ПЕРЕД revoke — CONNECT админской роли на КАЖДУЮ СУЩЕСТВУЮЩУЮ БД
+-- (по ТЗ: «template1 и существующие БД»), без сужения по имени: на
+-- tenant-кластере это `template1`, `postgres`, `tenant_admin` (POSTGRES_DB)
+-- и уже созданные `tenant_*`. template0 исключён явным условием.
+-- Перебор через DO-блок по pg_database: format('%I', ...) экранирует имя,
+-- поэтому БД с дефисами/заглавными буквами не ломают SQL и не дают инъекции.
 --
 -- template1 ОБЯЗАТЕЛЕН: CREATE DATABASE по умолчанию копирует именно его
 -- ACL. Снятый там PUBLIC CONNECT наследуют ВСЕ будущие tenant_* БД, которые
 -- задача 05 создаст между синками Argo. Идемпотентно: GRANT повторен без
--- ошибки на каждом initdb/синке.
+-- ошибки на каждом initdb/синке. Порядок совпадает с bootstrap.sql задачи 14.
 -- -----------------------------------------------------------------------------
 DO $$
 DECLARE
@@ -73,12 +80,7 @@ DECLARE
 BEGIN
   FOR db IN
     SELECT datname FROM pg_database
-    WHERE datallowconn
-      AND datname <> 'template0'
-      AND (
-            datname IN ('template1', 'postgres', 'agentscale', 'agentscale_userdb')
-            OR datname LIKE 'tenant\_%' ESCAPE '\'
-          )
+    WHERE datallowconn AND datname <> 'template0'
     ORDER BY datname
   LOOP
     EXECUTE format(
@@ -134,15 +136,10 @@ DECLARE
   db record;
   bad int := 0;
 BEGIN
-  -- 4a. У админской роли остался CONNECT на каждую целевую БД.
+  -- 4a. У админской роли остался CONNECT на каждую существующую БД.
   FOR db IN
     SELECT datname FROM pg_database
-    WHERE datallowconn
-      AND datname <> 'template0'
-      AND (
-            datname IN ('template1', 'postgres', 'agentscale', 'agentscale_userdb')
-            OR datname LIKE 'tenant\_%' ESCAPE '\'
-          )
+    WHERE datallowconn AND datname <> 'template0'
   LOOP
     IF NOT has_database_privilege('plugin_platform_admin', db.datname, 'CONNECT') THEN
       RAISE WARNING 'plugin_platform_admin потеряла CONNECT на БД %', db.datname;
@@ -153,23 +150,25 @@ BEGIN
     RAISE EXCEPTION 'bootstrap ACL сломан: % БД без CONNECT у plugin_platform_admin', bad;
   END IF;
 
-  -- 4b. PUBLIC больше НЕ имеет CONNECT ни на одной целевой БД.
-  FOR db IN
-    SELECT datname FROM pg_database
-    WHERE datallowconn
-      AND datname <> 'template0'
+  -- 4b. PUBLIC больше НЕ имеет CONNECT/TEMPORARY ни на одной целевой БД.
+  --     `has_database_privilege('public', ...)` здесь НЕ годится: 'public'
+  --     это ключевое слово ACL, а не строка-имя роли для этой функции.
+  --     Поэтому смотрим прямо в pg_database.datacl через aclexplode:
+  --     grantee = 0 и есть privilege_type CONNECT или TEMPORARY → дыра.
+  IF EXISTS (
+    SELECT 1
+    FROM pg_database d
+    CROSS JOIN LATERAL aclexplode(COALESCE(d.datacl, acldefault('d', d.datdba))) a
+    WHERE d.datallowconn
+      AND d.datname <> 'template0'
       AND (
-            datname IN ('template1', 'postgres', 'agentscale', 'agentscale_userdb')
-            OR datname LIKE 'tenant\_%' ESCAPE '\'
+            d.datname IN ('template1', 'postgres', 'agentscale', 'agentscale_userdb')
+            OR d.datname LIKE 'tenant\_%' ESCAPE '\'
           )
-  LOOP
-    IF has_database_privilege('public', db.datname, 'CONNECT') THEN
-      RAISE WARNING 'PUBLIC всё ещё имеет CONNECT на БД %', db.datname;
-      bad := bad + 1;
-    END IF;
-  END LOOP;
-  IF bad > 0 THEN
-    RAISE EXCEPTION 'REVOKE ... FROM PUBLIC не применён на % БД', bad;
+      AND a.grantee = 0
+      AND a.privilege_type IN ('CONNECT', 'TEMPORARY')
+  ) THEN
+    RAISE EXCEPTION 'REVOKE ... FROM PUBLIC не применён: в datacl остались привилегии PUBLIC';
   END IF;
 END
 $$;

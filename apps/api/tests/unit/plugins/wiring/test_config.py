@@ -105,6 +105,15 @@ def test_enabled_without_static_origin_fails(monkeypatch: pytest.MonkeyPatch) ->
     assert "PLUGIN_STATIC_ORIGIN" in str(ei.value)
 
 
+def test_enabled_without_cosign_identity_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Дополнительный guard F11: keyless cosign без identity = тихий карантин."""
+    monkeypatch.delenv(PLUGIN_CLAIMS_PREVIOUS_SECRETS_ENV, raising=False)
+    with pytest.raises(PluginPlatformConfigError, match="PLUGIN_COSIGN_IDENTITY"):
+        PluginPlatformConfig.from_settings(
+            FakeSettings(plugin_platform_enabled=True, plugin_cosign_identity="")
+        )
+
+
 @pytest.mark.parametrize("ttl", [0, 59, 901, 10000])
 def test_ttl_out_of_range_fails(monkeypatch: pytest.MonkeyPatch, ttl: int) -> None:
     monkeypatch.delenv(PLUGIN_CLAIMS_PREVIOUS_SECRETS_ENV, raising=False)
@@ -142,6 +151,17 @@ def test_previous_secrets_are_read_from_env(monkeypatch: pytest.MonkeyPatch) -> 
     )
     config = PluginPlatformConfig.from_settings(FakeSettings())
     assert config.previous_claims_secrets == (TEST_OLD_SECRET_1, TEST_OLD_SECRET_2)
+
+
+def test_environ_override_makes_rotation_deterministic() -> None:
+    """Явный ``environ=`` позволяет тестам не трогать глобальный os.environ."""
+    config = PluginPlatformConfig.from_settings(
+        FakeSettings(),
+        environ={PLUGIN_CLAIMS_PREVIOUS_SECRETS_ENV: TEST_OLD_SECRET_1},
+    )
+    assert config.previous_claims_secrets == (TEST_OLD_SECRET_1,)
+    plain = PluginPlatformConfig.from_settings(FakeSettings(), environ={})
+    assert plain.previous_claims_secrets == ()
 
 
 def test_active_secret_in_previous_list_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:

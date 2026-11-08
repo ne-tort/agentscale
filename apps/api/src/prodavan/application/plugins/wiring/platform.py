@@ -199,14 +199,19 @@ class PluginPlatform:
     ``event_dispatcher``.
 
     ``gateway`` — пара ``GatewayAuth`` + ``GatewayProxy`` (задача 11 разделяет
-    «решить» и «исполнить», §4.5); ``registry`` — реестр адаптеров
-    capability (НЕ путать с ``artifact_verifier``/``PluginArtifactRegistry`` —
-    последний живёт в поле ``artifact_registry``).
+    «решить» и «исполнить», §4.5); обе части доступны и по отдельности через
+    ``gateway_auth`` / ``gateway_proxy``. ``registry`` — реестр адаптеров
+    capability (НЕ путать с ``PluginArtifactRegistry`` — последний живёт в
+    поле ``artifact_registry``).
+
+    Тип ``revocation`` намеренно структурный (``object``): штатно это
+    ``DurableGrantRevocation``, но тесты/F11 вправе подменить реализацию
+    порта; сборка проверяет контракт по методам, а не по ``isinstance``.
     """
 
     config: PluginPlatformConfig
     keyring: KeyRing
-    revocation: DurableGrantRevocation
+    revocation: object  # RevocationPort + GrantRevocationPort + check(claims)
     capability_service: PluginCapabilityService
     artifact_verifier: ArtifactVerifier
     artifact_registry: PluginArtifactRegistry
@@ -216,15 +221,19 @@ class PluginPlatform:
     egress: EgressService
     egress_generator: EgressConfigGenerator
     activator: PluginActivator
-    gateway_auth: GatewayAuth
-    gateway_proxy: GatewayProxy
+    gateway: tuple[GatewayAuth, GatewayProxy]
     admin: PluginAdminService
     event_dispatcher: PluginEventDispatcher
 
     @property
-    def gateway(self) -> tuple[GatewayAuth, GatewayProxy]:
-        """Удобный доступ к паре «решить / исполнить» (задача 11)."""
-        return (self.gateway_auth, self.gateway_proxy)
+    def gateway_auth(self) -> GatewayAuth:
+        """Решение об авторизации (задача 11, первая половина gateway)."""
+        return self.gateway[0]
+
+    @property
+    def gateway_proxy(self) -> GatewayProxy:
+        """Исполнение уже авторизованного запроса (вторая половина)."""
+        return self.gateway[1]
 
     @property
     def enabled(self) -> bool:
@@ -256,8 +265,7 @@ class PluginPlatform:
             "object_store": type(self.object_store).__name__,
             "egress": type(self.egress).__name__,
             "activator": type(self.activator).__name__,
-            "gateway_auth": type(self.gateway_auth).__name__,
-            "gateway_proxy": type(self.gateway_proxy).__name__,
+            "gateway": [type(self.gateway_auth).__name__, type(self.gateway_proxy).__name__],
             "admin": type(self.admin).__name__,
             "event_dispatcher": type(self.event_dispatcher).__name__,
         }
@@ -347,10 +355,14 @@ def build_plugin_platform(settings: Any, **overrides: Any) -> PluginPlatform | N
         return DurableGrantRevocation(store, clock=overrides.get("clock"))
 
     revocation = _service("revocation", overrides, _build_revocation)
-    if not isinstance(revocation, DurableGrantRevocation):
-        raise PluginPlatformConfigError(
-            "revocation override must be DurableGrantRevocation (БД, не in-memory)"
-        )
+    # Допускаем пользовательскую реализацию порта (тесты/F11-адаптер), но
+    # требуем тот же контракт: is_active/revoke/is_revoked/check, без in-memory
+    # «источника истины» задачи 02.
+    for method in ("is_active", "revoke", "is_revoked", "check"):
+        if not callable(getattr(revocation, method, None)):
+            raise PluginPlatformConfigError(
+                f"revocation override is missing {method!r}; durable port contract violated"
+            )
 
     # --- 3) capability-ядро + реестр адаптеров ----------------------------
     registry = _service(
@@ -385,10 +397,18 @@ def build_plugin_platform(settings: Any, **overrides: Any) -> PluginPlatform | N
                 "build_plugin_platform requires cosign= (CosignPort); "
                 "ArtifactVerifier без проверки подписи публиковать не может"
             )
+        if not config.cosign_identity.strip():
+            # ``--certificate-identity`` обязателен для keyless cosign. Пустая
+            # строка/«unset» давала бы тихий карантин ВСЕХ артефактов вместо
+            # честной ошибки композиции (fail-closed, но не диагностируемой).
+            raise PluginPlatformConfigError(
+                "PLUGIN_COSIGN_IDENTITY is required to build ArtifactVerifier "
+                "(keyless cosign --certificate-identity); no placeholder allowed"
+            )
         return ArtifactVerifier(
             cosign,
             validator=overrides.get("manifest_validator"),
-            identity=config.cosign_identity or "unset",
+            identity=config.cosign_identity,
             issuer=config.cosign_issuer,
             # Версия платформы — константа задачи 07; ``min_platform_version``
             # из настроек — это нижняя граница совместимости manifest'а, а НЕ
@@ -531,8 +551,7 @@ def build_plugin_platform(settings: Any, **overrides: Any) -> PluginPlatform | N
         egress=egress,
         egress_generator=egress_generator,
         activator=activator,
-        gateway_auth=gateway_auth,
-        gateway_proxy=gateway_proxy,
+        gateway=(gateway_auth, gateway_proxy),
         admin=admin,
         event_dispatcher=event_dispatcher,
     )
@@ -591,6 +610,7 @@ def _MissingEgressStore() -> _MissingPort:
 
 
 __all__ = [
+    "ADAPTER_OVERRIDES",
     "OVERRIDE_NAMES",
     "PORT_OVERRIDES",
     "SERVICE_OVERRIDES",

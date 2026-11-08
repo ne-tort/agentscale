@@ -133,9 +133,16 @@ class Settings(BaseSettings):
     plugin_max_concurrent_wakes: int = 2
     # OCI/cosign: деплой строго по проверенному digest, :latest запрещён.
     plugin_oci_registry: str = "ghcr.io/ne-tort/plugins"
+    # keyless cosign: без identity verify некого проверять и все артефакты
+    # уходили бы в карантин молча. Значение = ожидаемый certificate identity
+    # GitHub Actions (например https://github.com/ne-tort/agentscale/...); НЕ секрет.
     plugin_cosign_identity: str = ""
     plugin_cosign_issuer: str = "https://token.actions.githubusercontent.com"
     plugin_min_platform_version: str = "4.0.0"
+    # Ротационные секреты PluginClaims (от старого к новому, через запятую).
+    # Читается wiring/keyring.py напрямую из env; здесь продублировано, чтобы
+    # конфигурация платформы была видна в одном месте.
+    plugin_claims_previous_secrets: str = ""
 
     # P0 object storage (C-OBJECT-STORE). local = keys under storage_root; s3 = MinIO/AWS.
     object_store_backend: str = "local"  # local | s3

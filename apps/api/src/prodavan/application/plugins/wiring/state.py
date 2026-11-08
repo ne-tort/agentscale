@@ -29,8 +29,9 @@ Fail-closed
   выключенную платформу НЕ привязываем «пустышкой», иначе
   ``get_plugin_platform`` перестал бы отличать «включено» от «не собрано»;
 * ``get_plugin_platform(request)`` на непривязанном app -> **503**
-  ``PLUGIN_PLATFORM_UNAVAILABLE`` (наследник ``HTTPException``, чтобы
-  ``register_exception_handlers`` из ``main.py`` сформировал problem+json);
+  ``PLUGIN_PLATFORM_UNAVAILABLE`` (``starlette.exceptions.HTTPException``,
+  чтобы ``register_exception_handlers`` из ``main.py`` сформировал
+  problem+json);
 * платформа с ``enabled=False`` в ``app.state`` -> тоже 503;
 * factory, вернувшая ``None``/бросившая исключение -> 503, НЕ allow.
 """
@@ -169,6 +170,8 @@ def attach_plugin_platform(app: Any, platform: PluginPlatform | None) -> PluginP
         "plugin_event_dispatcher": platform.event_dispatcher,
         "plugin_jwks": platform.jwks,
     }
+    # Проверяем только обязательные по ТЗ ключи: второстепенные ключи
+    # zone-сервисов не обязаны быть не-None (JWKS для HS256 — {"keys": []}).
     for key in REQUIRED_STATE_KEYS:
         if key not in values or values[key] is None:
             raise PluginPlatformNotAttached(

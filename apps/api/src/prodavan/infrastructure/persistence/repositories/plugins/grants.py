@@ -1,40 +1,41 @@
 """SQLAlchemy-репозиторий ``CapabilityGrant`` (F11, стык задач 02/03/12).
 
+Работает поверх РЕАЛЬНОЙ модели A10 ``CapabilityGrantRow``
+(``plugin_capability_grants``). Особенности физической схемы, учтённые здесь:
+
+* логический ``grant_id`` = PK ``id`` (отдельной колонки ``grant_id`` НЕТ);
+* ``created_at`` в контракте задачи 12 = ``issued_at`` в БД;
+* ``expires_at`` ЕСТЬ (у ``CapabilityGrantRecord`` его нет — проверяем отдельно);
+* ``created_by`` — NOT NULL, обязателен при INSERT;
+* Unique(``company_id``, ``plugin_instance_id``) — один активный grant на инстанс;
+* FK ``plugin_instance_id → plugin_instances.id`` (RESTRICT) — при создании
+  гранта строка экземпляра должна существовать (иначе ``IntegrityError`` →
+  явный отказ, fail-closed, а не «создать осиротевший grant»).
+
 Реализует:
 
-* ``admin.ports.GrantStorePort`` — асинхронный контракт задачи 12
-  (``get`` / ``get_by_grant_id`` / ``create`` / ``deactivate`` / ``delete`` /
-  ``list_by_company`` / ``get_enabled_modules`` / ``set_enabled_modules``);
-* синхронные методы ``get_by_id`` / ``get_active`` / ``save`` / ``revoke`` /
+* ``admin.ports.GrantStorePort`` (задача 12): async ``get`` / ``get_by_grant_id`` /
+  ``create`` / ``deactivate`` / ``delete`` / ``list_by_company`` /
+  ``get_enabled_modules`` / ``set_enabled_modules``;
+* синхронный контракт ТЗ: ``get_by_id`` / ``get_active`` / ``save`` / ``revoke`` /
   ``list_by_company`` / ``enabled_modules`` / ``is_active(grant_id, *, now)`` —
-  контракт ТЗ иStructural basis для ``GrantRevocationPort`` (задача 03) и
-  ``RevocationPort`` (задача 02). Синхронная часть НЕ ходит в ``AsyncSession``:
-  она читает/пишет in-memory снимок, который обновляется асинхронными
-  операциями (подробнее — ``revocation.py::DbGrantRevocation``).
+  Structural basis для ``capabilities.ports.GrantRevocationPort`` (03) и
+  ``identity.revocation.RevocationPort`` (02).
 
-Маппинг ORM ↔ домен
---------------------
-* ``CapabilityGrantRow`` (A10) ↔ ``admin.contracts.CapabilityGrantRecord``;
-* при необходимости — ↔ ``domain.plugins.types.CapabilityGrant`` (предусмотрен
-  :meth:`SqlCapabilityGrantRepository.to_domain_grant`).
-* ``capabilities`` / ``egress_policy`` / ``quota`` — JSONB. Egress и квоты
-  хранятся в БД, а НЕ в коротком JWT (§4.2, §13.3).
-
-Fail-closed (критерий №12)
--------------------------
-Грант активен ТОЛЬКО если одновременно: строка существует, ``status == "active"``,
-``revoked_at is None``, ``expires_at`` отсутствует или ещё не наступил, и это
-не служебная строка фича-флага. Любая неопределённость/ошибка чтения = ``False``
-/ ``None``, но НИКОГДА «разрешить по умолчанию».
+Fail-closed (критерий №12): грант активен ТОЛЬКО если строка есть,
+``status == 'active'``, ``revoked_at is None``, ``expires_at`` не наступил и это
+не служебная строка. Любая неопределённость/ошибка чтения = ``False``/``None``,
+НИКОГДА «разрешить по умолчанию».
 """
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any, Sequence
 
 from sqlalchemy import delete, select, update
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from prodavan.application.plugins.admin.contracts import (
@@ -47,9 +48,10 @@ from prodavan.application.plugins.admin.contracts import (
 
 from ._schema import (
     ACTIVE_GRANT_STATUS,
-    FLAG_SENTINEL_GRANT_ID,
+    FLAG_SENTINEL_ID,
     FLAG_SENTINEL_PLUGIN_ID,
     GRANT_COLUMNS,
+    GRANT_NOT_NULL_EXTRA,
     GRANT_ROW,
     ColumnMap,
     PluginRepositoryError,
@@ -62,17 +64,17 @@ from ._schema import (
     text,
 )
 
-def _not_sentinel_condition(row: type, columns: ColumnMap) -> Any:
-    """Исключаем служебную строку фича-флага из ЛЮБОЙ выдачи грантов."""
-    return row.__table__.columns[columns.col("grant_id")] != FLAG_SENTINEL_GRANT_ID
+DEFAULT_CREATED_BY = "platform-admin"
+"""Значение обязательной колонки ``created_by`` при создании гранта репозиторием.
+
+Не является секретом/токеном: это короткий идентификатор субъекта операции.
+"""
 
 
 class SqlCapabilityGrantRepository:
     """Настоящий SQL-репозиторий грантов поверх ``AsyncSession``.
 
-    ``session_factory`` обязателен и НЕ имеет значения по умолчанию: собрать
-    «частично подключённый» репозиторий невозможно. ``session`` (готовая
-    сессия) допустим для сценариев, где транзакцией управляет вызывающий.
+    ``session_factory`` обязателен (без БД гранты не считаются активными).
     """
 
     def __init__(
@@ -82,6 +84,8 @@ class SqlCapabilityGrantRepository:
         session: AsyncSession | None = None,
         columns: ColumnMap | None = None,
         now: Any = None,
+        feature_flags: Any = None,
+        created_by: str = DEFAULT_CREATED_BY,
     ) -> None:
         if session_factory is None and session is None:
             raise PluginRepositoryError(
@@ -92,39 +96,39 @@ class SqlCapabilityGrantRepository:
         self._session = session
         self._columns = columns or ColumnMap()
         self._clock = now or (lambda: datetime.now(UTC))
+        self._feature_flags = feature_flags
+        self._created_by = text(created_by, field="created_by")
         # Синхронный снимок: grant_id -> CapabilityGrantRecord. Обновляется
-        # ТОЛЬКО успешными асинхронными операциями. Пустой снимок = «не знаю»
-        # = fail-closed False (никогда «активен по умолчанию»).
+        # ТОЛЬКО успешными асинхронными операциями. Пустой = «не знаю» = False.
         self._snapshot: dict[str, CapabilityGrantRecord] = {}
         self._snapshot_complete: bool = False
+        self._pending: dict[str, CapabilityGrantRecord] = {}
+        self._pending_revocations: set[str] = set()
 
     # ------------------------------------------------------------------
-    # Внутреннее: модель, сессия, часы
+    # Модель / сессия / часы
     # ------------------------------------------------------------------
 
     def _row(self) -> type:
         row = load_row(GRANT_ROW)
-        self._columns.require(row, *GRANT_COLUMNS)
+        self._columns.require(row, *GRANT_COLUMNS, *GRANT_NOT_NULL_EXTRA)
         return row
 
     @property
     def snapshot_complete(self) -> bool:
-        """Был ли снимок полностью вычитан из БД (для TTL-кэша revocation)."""
         return self._snapshot_complete
 
     def snapshot_records(self) -> tuple[CapabilityGrantRecord, ...]:
-        """Публичный доступ к авторитетному снимку (без возможности мутации)."""
+        """Публичный доступ к авторитетному снимку (без мутации)."""
         return tuple(self._snapshot.values())
 
-    def _session_ctx(self):
-        """Вернуть async-context-manager сессии.
+    def _col(self, name: str) -> str:
+        return self._columns.col(name)
 
-        Если задана внешняя сессия — НЕ закрываем её и НЕ коммитим: транзакцией
-        владеет вызывающий (важно для ``set_current`` реестра артефактов).
-        """
+    def _session_ctx(self):
         if self._session is not None:
             return _BorrowedSession(self._session)
-        assert self._session_factory is not None  # проверено в __init__
+        assert self._session_factory is not None
         return self._session_factory()
 
     def _now(self) -> datetime:
@@ -133,37 +137,31 @@ class SqlCapabilityGrantRepository:
             raise PluginRepositoryError("часы репозитория обязаны возвращать aware datetime")
         return value.astimezone(UTC)
 
+    def _not_sentinel(self, row: type) -> Any:
+        """Исключить служебную строку фича-флага из ЛЮБОЙ выдачи грантов."""
+        id_col = row.__table__.columns[self._col("grant_id")]
+        return id_col != FLAG_SENTINEL_ID
+
     # ------------------------------------------------------------------
     # ORM -> доменный контракт
     # ------------------------------------------------------------------
 
-    def _col(self, name: str) -> str:
-        return self._columns.col(name)
-
     def to_record(self, row: Any) -> CapabilityGrantRecord:
-        """``CapabilityGrantRow`` → ``CapabilityGrantRecord`` (fail-closed).
-
-        Битый JSONB, отсутствие обязательного поля или невалидный digest
-        приводят к ``PluginRepositorySchemaError``, а не к «частичному» гранту:
-        грант, который не удалось доказать, не должен разрешать доступ.
-        """
+        """``CapabilityGrantRow`` → ``CapabilityGrantRecord`` (fail-closed)."""
         c = self._col
         get = lambda name: getattr(row, c(name), None)  # noqa: E731
 
         egress_raw = json_mapping(get("egress_policy"), field="egress_policy")
         quota_raw = json_mapping(get("quota"), field="quota")
-
-        mode_raw = egress_raw.get("mode", "none")
         try:
             egress = AdminEgressPolicy(
-                mode=EgressMode(mode_raw),
+                mode=EgressMode(egress_raw.get("mode", "none")),
                 allowed_hosts=tuple(str(item) for item in egress_raw.get("allowed_hosts", ())),
                 allowed_paths=tuple(str(item) for item in egress_raw.get("allowed_paths", ())),
                 approved_for_full=bool(egress_raw.get("approved_for_full", False)),
             )
         except (ValueError, TypeError) as exc:
             raise PluginRepositorySchemaError(f"egress_policy гранта невалиден: {exc}") from exc
-
         try:
             quotas = QuotaSet(
                 ops_per_minute=int(quota_raw.get("ops_per_minute", 60)),
@@ -175,18 +173,15 @@ class SqlCapabilityGrantRepository:
             )
         except (ValueError, TypeError) as exc:
             raise PluginRepositorySchemaError(f"quota гранта невалидна: {exc}") from exc
-
-        status_raw = str(get("status") or "")
         try:
-            status = GrantStatus(status_raw)
+            status = GrantStatus(str(get("status") or ""))
         except ValueError as exc:
-            raise PluginRepositorySchemaError(f"неизвестный status гранта {status_raw!r}") from exc
+            raise PluginRepositorySchemaError("неизвестный status гранта") from exc
 
-        created = aware_utc(get("created_at"))
+        issued = aware_utc(get("created_at"))
         revoked = aware_utc(get("revoked_at"))
-        if not isinstance(created, datetime):
-            raise PluginRepositorySchemaError("created_at гранта отсутствует/не datetime")
-
+        if not isinstance(issued, datetime):
+            raise PluginRepositorySchemaError("issued_at гранта отсутствует/не datetime")
         try:
             return CapabilityGrantRecord(
                 grant_id=text(get("grant_id"), field="grant_id"),
@@ -199,7 +194,7 @@ class SqlCapabilityGrantRepository:
                 egress_policy=egress,
                 quotas=quotas,
                 status=status,
-                created_at=created,
+                created_at=issued,
                 revoked_at=revoked if isinstance(revoked, datetime) else None,
             )
         except (ValueError, PluginRepositoryError) as exc:
@@ -208,9 +203,8 @@ class SqlCapabilityGrantRepository:
     def to_domain_grant(self, record: CapabilityGrantRecord) -> Any:
         """``CapabilityGrantRecord`` → доменный ``domain.plugins.CapabilityGrant``.
 
-        Импорт домена ленивый: репозиторий не должен падать, если задача 01
-        ещё не зарегистрировала пакет. Возвращает объект домена с ``egress_ref``
-        и ``quota_ref``, построенными из grant_id (источник правил — БД).
+        Импорт домена ленивый. ``egress_ref``/``quota_ref`` строятся из grant_id:
+        источник правил — БД, а не короткий JWT (§13.3).
         """
         from prodavan.domain.plugins.types import (
             ArtifactDigest,
@@ -235,18 +229,16 @@ class SqlCapabilityGrantRepository:
             quota_ref=QuotaRef(f"grant:{record.grant_id}"),
             artifact_digest=ArtifactDigest(record.artifact_digest),
             issued_at=record.created_at,
-            expires_at=None,
             revoked_at=record.revoked_at,
         )
 
-    @staticmethod
-    def to_row_values(record: CapabilityGrantRecord, columns: ColumnMap) -> dict[str, Any]:
-        """Доменный ``CapabilityGrantRecord`` → значения колонок ORM (JSONB)."""
-        c = columns.col
+    def _row_values(self, record: CapabilityGrantRecord, row: type) -> dict[str, Any]:
+        """Доменный контракт → значения РЕАЛЬНЫХ колонок A10."""
+        c = self._col
         egress = record.egress_policy
         quotas = record.quotas
-        return {
-            c("grant_id"): record.grant_id,
+        values: dict[str, Any] = {
+            c("grant_id"): record.grant_id,           # физически PK ``id``
             c("company_id"): record.company_id,
             c("plugin_id"): record.plugin_id,
             c("plugin_instance_id"): record.plugin_instance_id,
@@ -268,9 +260,14 @@ class SqlCapabilityGrantRepository:
                 "max_egress_bytes": quotas.max_egress_bytes,
             },
             c("status"): record.status.value,
-            c("created_at"): record.created_at,
+            c("created_at"): record.created_at,       # физически ``issued_at``
             c("revoked_at"): record.revoked_at,
+            c("created_by"): self._created_by,        # NOT NULL в A10
         }
+        if self._columns.has(row, "expires_at"):
+            values[c("expires_at")] = None
+        existing = set(row.__table__.columns.keys())
+        return {key: value for key, value in values.items() if key in existing}
 
     # ------------------------------------------------------------------
     # Проверка активности (единая точка fail-closed)
@@ -278,35 +275,29 @@ class SqlCapabilityGrantRepository:
 
     @staticmethod
     def record_is_active(record: CapabilityGrantRecord, *, now: datetime) -> bool:
-        """Активен ли грант: status + revoked_at + expires_at + не-служебная строка."""
-        if record.grant_id == FLAG_SENTINEL_GRANT_ID or record.plugin_id == FLAG_SENTINEL_PLUGIN_ID:
+        if record.grant_id == FLAG_SENTINEL_ID or record.plugin_id == FLAG_SENTINEL_PLUGIN_ID:
             return False
-        if record.status is not GrantStatus.ACTIVE:
+        if record.status is not GrantStatus.ACTIVE or record.revoked_at is not None:
             return False
-        if record.revoked_at is not None:
-            return False
-        # ``expires_at`` в CapabilityGrantRecord отсутствует (задача 12), поэтому
-        # срок жизни проверяется на уровне строки БД в ``is_active_async``.
         return True
 
-    async def is_active_async(self, grant_id: str, *, now: datetime | None = None) -> bool:
-        """Авторитетный асинхронный ответ из БД (источник истины).
+    @staticmethod
+    def _row_expired(row_obj: Any, *, now: datetime, col: str) -> bool:
+        expires = aware_utc(getattr(row_obj, col, None))
+        return isinstance(expires, datetime) and expires <= now
 
-        Ошибка БД → ``False`` (fail-closed), НО исключение НЕ маскируется в
-        ``PluginRepositoryUnavailable`` для позитивных мутаций: их вызывающие
-        должны видеть отказ явно.
-        """
+    async def is_active_async(self, grant_id: str, *, now: datetime | None = None) -> bool:
+        """Авторитетный async-ответ из БД (источник истины). Ошибка → False."""
         key = (grant_id or "").strip()
-        if not key or key == FLAG_SENTINEL_GRANT_ID:
+        if not key or key == FLAG_SENTINEL_ID:
             return False
         try:
             row = self._row()
             moment = now or self._now()
+            table = row.__table__
             async with self._session_ctx() as session:
                 result = await session.execute(
-                    select(row).where(
-                        row.__table__.columns[self._col("grant_id")] == key
-                    )
+                    select(row).where(table.columns[self._col("grant_id")] == key)
                 )
                 found = result.scalars().first()
             if found is None:
@@ -314,29 +305,23 @@ class SqlCapabilityGrantRepository:
                 return False
             record = self.to_record(found)
             active = self.record_is_active(record, now=moment)
-            if active:
-                # Проверяем ``expires_at`` напрямую по строке (опциональная колонка).
-                expires = aware_utc(getattr(found, self._col("expires_at"), None)) if self._columns.has(row, "expires_at") else None
-                if isinstance(expires, datetime) and expires <= moment:
-                    active = False
+            if active and self._columns.has(row, "expires_at"):
+                active = not self._row_expired(found, now=moment, col=self._col("expires_at"))
             self._snapshot[key] = record
             return active
         except (SQLAlchemyError, PluginRepositoryError):
-            # Недоступность хранилища ≠ «грант активен».
             self._snapshot.pop(key, None)
             return False
 
     def is_active(self, grant_id: str, *, now: datetime | None = None) -> bool:
         """СИНХРОННЫЙ ``GrantRevocationPort``/``RevocationPort`` контракт.
 
-        ``AsyncSession`` нельзя await'ить из sync-кода, поэтому ответ берётся из
-        in-memory снимка, который обновляет :meth:`is_active_async` и
-        :meth:`refresh`. Промах снимка = ``False`` (fail-closed), а не «пустить».
-        ``DbGrantRevocation`` (см. revocation.py) сам дёргает async-refresh по
-        TTL, так что в штатном потоке ответ авторитетный.
+        ``AsyncSession`` нельзя await'ить из sync-кода → ответ из снимка,
+        который обновляет :meth:`is_active_async`/:meth:`refresh`. Промах =
+        ``False`` (fail-closed). ``DbGrantRevocation`` дёргает async-refresh по TTL.
         """
         key = (grant_id or "").strip()
-        if not key or key == FLAG_SENTINEL_GRANT_ID:
+        if not key or key == FLAG_SENTINEL_ID:
             return False
         record = self._snapshot.get(key)
         if record is None:
@@ -344,22 +329,16 @@ class SqlCapabilityGrantRepository:
         return self.record_is_active(record, now=now or self._now())
 
     # ------------------------------------------------------------------
-    # Синхронный контракт ТЗ (get_by_id / get_active / save / revoke / ...)
+    # Синхронный контракт ТЗ
     # ------------------------------------------------------------------
 
     def get_by_id(self, grant_id: str) -> CapabilityGrantRecord | None:
-        """Синхронный доступ из снимка; ``None`` при отсутствии/неопределённости."""
         key = (grant_id or "").strip()
-        if not key or key == FLAG_SENTINEL_GRANT_ID:
+        if not key or key == FLAG_SENTINEL_ID:
             return None
         return self._snapshot.get(key)
 
     def get_active(self, company_id: str, plugin_id: str) -> CapabilityGrantRecord | None:
-        """Активный грант пары ``(company_id, plugin_id)`` из снимка.
-
-        Возвращает ``None``, если активного нет: вызывающий обязан трактовать
-        это как отказ, а не как «создать дефолтный grant».
-        """
         for record in self._snapshot.values():
             if (
                 record.company_id == company_id
@@ -372,88 +351,73 @@ class SqlCapabilityGrantRepository:
     def save(self, grant: CapabilityGrantRecord) -> CapabilityGrantRecord:
         """СИНХРОННАЯ постановка в очередь записи (НЕ авторитетная запись в БД).
 
-        Валидирует контракт, кладёт в снимок и помечает запись «ожидающей».
-        Реальная durable-запись — ``await create(...)``. Такое разделение
-        необходимо: из sync-метода нельзя выполнить ``AsyncSession.commit``.
-        Без последующего ``create``/``flush`` грант НЕ считается выданным
-        (``_pending`` не публикуется в авторитетный снимок).
+        Реальная durable-запись — ``await create(...)`` / ``await flush()``.
+        Без подтверждения грант НЕ считается выданным (fail-closed).
         """
         if not isinstance(grant, CapabilityGrantRecord):
             raise PluginRepositoryError("save ожидает CapabilityGrantRecord")
-        if grant.grant_id == FLAG_SENTINEL_GRANT_ID:
-            raise PluginRepositoryError("save: зарезервированный grant_id фича-флага")
-        self._pending = getattr(self, "_pending", {})
+        if grant.grant_id == FLAG_SENTINEL_ID:
+            raise PluginRepositoryError("save: зарезервированный id фича-флага")
         self._pending[grant.grant_id] = grant
-        # В снимок НЕ кладём: «поставлено в очередь» ≠ «подтверждено БД».
         return grant
 
     def revoke(self, grant_id: str) -> None:
-        """СИНХРОННАЯ инвалидация (немедленный отзыв в памяти).
+        """СИНХРОННАЯ инвалидация (немедленный отзыв в памяти, кр. №12).
 
-        Критерий №12: ещё не истёкший ``PluginClaims`` перестаёт работать СРАЗУ.
-        В снимке помечаем грант отозванным и добавляем в очередь durable-записи;
-        авторитетный ``await revoke_async(...)`` фиксирует ``status=revoked`` и
-        ``revoked_at`` в БД. Инвалидация кэша ``DbGrantRevocation`` происходит
-        в его собственном методе ``revoke``.
+        Durable-запись — ``await revoke_async(...)`` / ``await flush()``.
         """
-        key = (grant_id or "").strip()
-        if not key:
-            raise PluginRepositoryError("revoke: grant_id не должен быть пустым")
-        self._pending_revocations = getattr(self, "_pending_revocations", set())
+        key = text(grant_id, field="grant_id")
         self._pending_revocations.add(key)
         existing = self._snapshot.get(key)
         if existing is not None:
-            # Пересобираем запись с REVOKED, не мутируя frozen dataclass.
-            from dataclasses import replace
-
             self._snapshot[key] = replace(
-                existing,
-                status=GrantStatus.REVOKED,
-                revoked_at=self._now(),
+                existing, status=GrantStatus.REVOKED, revoked_at=self._now()
             )
-        else:
-            # Гранта в снимке нет — всё равно создаём «заглушку-отзыв», чтобы
-            # повторный запрос не вернул «активен» после появления строки.
-            pass
 
     def list_by_company(self, company_id: str) -> Sequence[CapabilityGrantRecord]:
-        """СИНХРОННЫЙ список из снимка (без служебной строки фича-флага)."""
         text(company_id, field="company_id")
         return tuple(
             record
             for record in self._snapshot.values()
-            if record.company_id == company_id and record.grant_id != FLAG_SENTINEL_GRANT_ID
+            if record.company_id == company_id and record.grant_id != FLAG_SENTINEL_ID
         )
 
+    def _flags(self) -> Any:
+        """Общий ``DbFeatureFlagStore`` (создаётся лениво при отсутствии)."""
+        if self._feature_flags is None:
+            from .flags import DbFeatureFlagStore
+
+            self._feature_flags = DbFeatureFlagStore(
+                session=self._session,
+                session_factory=self._session_factory,
+                columns=self._columns,
+            )
+        return self._feature_flags
+
+    def bind_feature_flags(self, store: Any) -> None:
+        self._feature_flags = store
+
     def enabled_modules(self, company_id: str) -> Sequence[str]:
-        """СИНХРОННЫЙ ``plugin_enabled_modules[]`` из снимка фича-флага.
-
-        Делегирует ``DbFeatureFlagStore``; здесь оставлен тонкий алиас для
-        совместимости с ТЗ и ``GrantStorePort.get_enabled_modules``.
-        """
-        from .flags import DbFeatureFlagStore
-
-        store = DbFeatureFlagStore(session=self._session, session_factory=self._session_factory, columns=self._columns)
-        return store.list_sync(company_id)
+        """СИНХРОННЫЙ ``plugin_enabled_modules[]`` из общего стора фича-флага."""
+        return self._flags().list(company_id)
 
     async def refresh(self, *, company_id: str | None = None) -> None:
-        """Обновить авторитетный снимок из БД (для TTL-кэша revocation).
-
-        Читает ВСЕ строки (или одной компании) и пересобирает снимок. Ошибка
-        чтения = ``PluginRepositoryUnavailable`` (fail-closed: старый снимок
-        НЕ считаем достоверным и очищаем).
-        """
+        """Обновить авторитетный снимок из БД (для TTL-кэша revocation)."""
         try:
             row = self._row()
-            statement = select(row).where(_not_sentinel_condition(row, self._columns))
+            table = row.__table__
+            statement = select(row).where(self._not_sentinel(row))
             if company_id is not None:
                 statement = statement.where(
-                    row.__table__.columns[self._col("company_id")] == company_id
+                    table.columns[self._col("company_id")] == company_id
                 )
             async with self._session_ctx() as session:
                 result = await session.execute(statement)
                 rows = result.scalars().all()
-            rebuilt = {self.to_record(item).grant_id: self.to_record(item) for item in rows}
+            rebuilt: dict[str, CapabilityGrantRecord] = {}
+            for item in rows:
+                record = self.to_record(item)
+                rebuilt[record.grant_id] = record
             if company_id is None:
                 self._snapshot = rebuilt
                 self._snapshot_complete = True
@@ -473,20 +437,20 @@ class SqlCapabilityGrantRepository:
     # ------------------------------------------------------------------
 
     async def get(self, *, company_id: str, plugin_id: str) -> CapabilityGrantRecord | None:
-        """Активный грант пары (company, plugin) или ``None``."""
         text(company_id, field="company_id")
         text(plugin_id, field="plugin_id")
         try:
             row = self._row()
+            table = row.__table__
             async with self._session_ctx() as session:
                 result = await session.execute(
                     select(row)
                     .where(
-                        row.__table__.columns[self._col("company_id")] == company_id,
-                        row.__table__.columns[self._col("plugin_id")] == plugin_id,
-                        _not_sentinel_condition(row, self._columns),
+                        table.columns[self._col("company_id")] == company_id,
+                        table.columns[self._col("plugin_id")] == plugin_id,
+                        self._not_sentinel(row),
                     )
-                    .order_by(row.__table__.columns[self._col("created_at")].desc())
+                    .order_by(table.columns[self._col("created_at")].desc())
                 )
                 found = result.scalars().first()
             if found is None:
@@ -499,13 +463,14 @@ class SqlCapabilityGrantRepository:
 
     async def get_by_grant_id(self, *, grant_id: str) -> CapabilityGrantRecord | None:
         key = text(grant_id, field="grant_id")
-        if key == FLAG_SENTINEL_GRANT_ID:
+        if key == FLAG_SENTINEL_ID:
             return None
         try:
             row = self._row()
+            table = row.__table__
             async with self._session_ctx() as session:
                 result = await session.execute(
-                    select(row).where(row.__table__.columns[self._col("grant_id")] == key)
+                    select(row).where(table.columns[self._col("grant_id")] == key)
                 )
                 found = result.scalars().first()
             if found is None:
@@ -518,24 +483,24 @@ class SqlCapabilityGrantRepository:
             raise PluginRepositoryUnavailable(f"get_by_grant_id failed: {exc}") from exc
 
     async def create(self, *, grant: CapabilityGrantRecord) -> CapabilityGrantRecord:
-        """Идемпотентно по ``grant_id``: существующая запись возвращается как есть.
+        """Идемпотентно по ``grant_id`` (= PK ``id``). Ошибка записи → deny.
 
-        Позитивная мутация: любая ошибка записи → исключение (deny), а не
-        «молчаливый успех». Снимок обновляется только после ``commit``.
+        FK на ``plugin_instances.id``: если экземпляр не создан задачей 12/09,
+        INSERT упадёт ``IntegrityError`` → ``PluginRepositoryUnavailable``,
+        а не «осиротевший grant» (fail-closed).
         """
         if not isinstance(grant, CapabilityGrantRecord):
             raise PluginRepositoryError("create ожидает CapabilityGrantRecord")
-        if grant.grant_id == FLAG_SENTINEL_GRANT_ID:
-            raise PluginRepositoryError("create: зарезервированный grant_id фича-флага")
+        if grant.grant_id == FLAG_SENTINEL_ID:
+            raise PluginRepositoryError("create: зарезервированный id фича-флага")
         try:
             row = self._row()
-            values = self.to_row_values(grant, self._columns)
+            table = row.__table__
+            values = self._row_values(grant, row)
             async with self._session_ctx() as session:
                 existing = (
                     await session.execute(
-                        select(row).where(
-                            row.__table__.columns[self._col("grant_id")] == grant.grant_id
-                        )
+                        select(row).where(table.columns[self._col("grant_id")] == grant.grant_id)
                     )
                 ).scalars().first()
                 if existing is not None:
@@ -544,22 +509,22 @@ class SqlCapabilityGrantRepository:
                     return stored
                 session.add(row(**values))
                 await _commit_if_owned(session, self._session is None)
-            # Подтверждённая запись становится доступна sync-проверкам.
             self._snapshot[grant.grant_id] = grant
-            getattr(self, "_pending", {}).pop(grant.grant_id, None)
+            self._pending.pop(grant.grant_id, None)
             return grant
+        except IntegrityError as exc:
+            raise PluginRepositoryUnavailable(
+                f"create grant failed: нарушение ограничения БД (FK/unique): {type(exc).__name__}"
+            ) from exc
         except (SQLAlchemyError, PluginRepositoryError) as exc:
             raise PluginRepositoryUnavailable(f"create grant failed: {exc}") from exc
 
     async def deactivate(self, *, grant_id: str) -> CapabilityGrantRecord:
-        """Деактивация (мгновенный отзыв, критерий №12).
-
-        distinct от ``delete``: строка остаётся (audit trail), но перестаёт быть
-        активной. Отсутствие строки = ошибка (fail-closed, не «уже отозван»).
-        """
+        """Деактивация (мгновенный отзыв, кр. №12); строка остаётся (audit)."""
         key = text(grant_id, field="grant_id")
         try:
             row = self._row()
+            table = row.__table__
             fields = {
                 self._col("status"): "revoked",
                 self._col("revoked_at"): self._now(),
@@ -567,27 +532,21 @@ class SqlCapabilityGrantRepository:
             async with self._session_ctx() as session:
                 found = (
                     await session.execute(
-                        select(row).where(
-                            row.__table__.columns[self._col("grant_id")] == key
-                        )
+                        select(row).where(table.columns[self._col("grant_id")] == key)
                     )
                 ).scalars().first()
                 if found is None:
                     raise PluginRepositoryUnavailable("deactivate: грант не найден")
                 await session.execute(
                     update(row)
-                    .where(row.__table__.columns[self._col("grant_id")] == key)
+                    .where(table.columns[self._col("grant_id")] == key)
                     .values(**fields)
                 )
                 await _commit_if_owned(session, self._session is None)
             record = self.to_record(found)
-            from dataclasses import replace
-
-            revoked = replace(
-                record, status=GrantStatus.REVOKED, revoked_at=self._now()
-            )
+            revoked = replace(record, status=GrantStatus.REVOKED, revoked_at=self._now())
             self._snapshot[key] = revoked
-            getattr(self, "_pending_revocations", set()).discard(key)
+            self._pending_revocations.discard(key)
             return revoked
         except PluginRepositoryUnavailable:
             raise
@@ -595,62 +554,53 @@ class SqlCapabilityGrantRepository:
             raise PluginRepositoryUnavailable(f"deactivate grant failed: {exc}") from exc
 
     async def revoke_async(self, grant_id: str, *, reason: str = "") -> bool:
-        """Durable-отзыв для ``admin.ports.RevocationPort`` (идентифицирован по grant_id).
-
-        ``True`` только после подтверждённой записи; повторный отзыв того же
-        ``grant_id`` идемпотентно возвращает ``True``, если строка уже revoked.
-        """
+        """Durable-отзыв для ``admin.ports.RevocationPort`` (идентифицирован по grant_id)."""
         key = text(grant_id, field="grant_id")
         try:
             row = self._row()
+            table = row.__table__
             async with self._session_ctx() as session:
                 found = (
                     await session.execute(
-                        select(row).where(
-                            row.__table__.columns[self._col("grant_id")] == key
-                        )
+                        select(row).where(table.columns[self._col("grant_id")] == key)
                     )
                 ).scalars().first()
                 if found is None:
                     return False
                 current = str(getattr(found, self._col("status"), ""))
                 if current == "revoked":
-                    self.revoke(key)  # инвалидируем кэш даже при идемпотентном повторе
+                    self.revoke(key)
                     return True
                 await session.execute(
                     update(row)
-                    .where(row.__table__.columns[self._col("grant_id")] == key)
-                    .values(
-                        **{
-                            self._col("status"): "revoked",
-                            self._col("revoked_at"): self._now(),
-                        }
-                    )
+                    .where(table.columns[self._col("grant_id")] == key)
+                    .values(**{
+                        self._col("status"): "revoked",
+                        self._col("revoked_at"): self._now(),
+                    })
                 )
                 await _commit_if_owned(session, self._session is None)
             self.revoke(key)
             return True
         except (SQLAlchemyError, PluginRepositoryError):
-            # Fail-closed: не подтверждено ≠ подтверждено.
             return False
 
     async def is_revoked_async(self, *, grant_id: str) -> bool:
-        """``admin.ports.RevocationPort.is_revoked`` (fail-closed)."""
         return not await self.is_active_async(grant_id)
 
     async def delete(self, *, company_id: str, plugin_id: str) -> bool:
-        """Удалить grant при uninstall. Идемпотентно (нет строки = True)."""
         text(company_id, field="company_id")
         text(plugin_id, field="plugin_id")
         try:
             row = self._row()
+            table = row.__table__
             condition = (
-                row.__table__.columns[self._col("company_id")] == company_id,
-                row.__table__.columns[self._col("plugin_id")] == plugin_id,
-                _not_sentinel_condition(row, self._columns),
+                table.columns[self._col("company_id")] == company_id,
+                table.columns[self._col("plugin_id")] == plugin_id,
+                self._not_sentinel(row),
             )
             async with self._session_ctx() as session:
-                result = await session.execute(delete(row).where(*condition))
+                await session.execute(delete(row).where(*condition))
                 await _commit_if_owned(session, self._session is None)
             for key, record in list(self._snapshot.items()):
                 if record.company_id == company_id and record.plugin_id == plugin_id:
@@ -660,15 +610,15 @@ class SqlCapabilityGrantRepository:
             raise PluginRepositoryUnavailable(f"delete grant failed: {exc}") from exc
 
     async def list_by_company_async(self, *, company_id: str) -> Sequence[CapabilityGrantRecord]:
-        """Асинхронный авторитетный список (без служебной строки фича-флага)."""
         text(company_id, field="company_id")
         try:
             row = self._row()
+            table = row.__table__
             async with self._session_ctx() as session:
                 result = await session.execute(
                     select(row).where(
-                        row.__table__.columns[self._col("company_id")] == company_id,
-                        _not_sentinel_condition(row, self._columns),
+                        table.columns[self._col("company_id")] == company_id,
+                        self._not_sentinel(row),
                     )
                 )
                 rows = result.scalars().all()
@@ -680,44 +630,18 @@ class SqlCapabilityGrantRepository:
             raise PluginRepositoryUnavailable(f"list_by_company failed: {exc}") from exc
 
     async def get_enabled_modules(self, *, company_id: str) -> Sequence[str]:
-        """``GrantStorePort.get_enabled_modules`` → ``DbFeatureFlagStore``."""
-        from .flags import DbFeatureFlagStore
-
-        store = DbFeatureFlagStore(
-            session=self._session,
-            session_factory=self._session_factory,
-            columns=self._columns,
-        )
-        return await store.list(company_id)
+        return await self._flags().list_async(company_id)
 
     async def set_enabled_modules(
         self, *, company_id: str, plugin_ids: Sequence[str]
     ) -> Sequence[str]:
-        """``GrantStorePort.set_enabled_modules`` → ``DbFeatureFlagStore.set``."""
-        from .flags import DbFeatureFlagStore
-
-        store = DbFeatureFlagStore(
-            session=self._session,
-            session_factory=self._session_factory,
-            columns=self._columns,
-        )
-        return await store.set(company_id, plugin_ids)
-
-    # ------------------------------------------------------------------
-    # Дополнительно: применить отложенные sync-операции (для build/тестов)
-    # ------------------------------------------------------------------
+        return await self._flags().set_async(company_id, plugin_ids)
 
     async def flush(self) -> None:
-        """Применить ``save``/``revoke`` из sync-очереди (после старта loop).
-
-        Вызывается композицией/``DbGrantRevocation``; без него sync-``save`` не
-        становится durable. Ошибка = исключение (deny позитивной мутации).
-        """
-        pending = dict(getattr(self, "_pending", {}))
-        for grant in pending.values():
+        """Применить отложенные sync-``save``/``revoke`` (после старта loop)."""
+        for grant in list(self._pending.values()):
             await self.create(grant=grant)
-        revocations = set(getattr(self, "_pending_revocations", set()))
-        for key in revocations:
+        for key in list(self._pending_revocations):
             await self.revoke_async(key)
 
 
@@ -735,9 +659,8 @@ class _BorrowedSession:
 
 
 async def _commit_if_owned(session: AsyncSession, owned: bool) -> None:
-    """Коммитим только сессию, созданную самим репозиторием."""
     if owned:
         await session.commit()
 
 
-__all__ = ["SqlCapabilityGrantRepository"]
+__all__ = ["DEFAULT_CREATED_BY", "SqlCapabilityGrantRepository"]

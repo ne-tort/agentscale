@@ -9,7 +9,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from prodavan.application.plugins.identity.revocation import GrantRevocation
+from prodavan.application.plugins.identity.revocation import GrantRevocation, RevocationPort
 from prodavan.application.plugins.identity.types import (
     PluginClaims,
     PluginTokenError,
@@ -33,9 +33,15 @@ def _now() -> datetime:
 
 def test_active_grant_from_db_is_active(grant_store: FakeGrantStore) -> None:
     rev = DurableGrantRevocation(grant_store, clock=_now)
+    assert isinstance(grant_store, GrantStorePort)
     assert rev.is_active("grant_01", now=_now()) is True
     assert rev.is_revoked("grant_01") is False
-    assert isinstance(rev, GrantStorePort) or hasattr(rev, "is_active")
+    # Удовлетворяет портам F1/F2 структурно (``is_active``/``revoke``/
+    # ``is_revoked``/``check`` объявлены явно); Protocol без @runtime_checkable
+    # проверяем по наличию методов, а не isinstance.
+    assert isinstance(rev, RevocationPort)  # F1: @runtime_checkable
+    for method in ("is_active", "revoke", "is_revoked", "check"):
+        assert callable(getattr(rev, method, None))
 
 
 def test_missing_port_is_refused_at_construction() -> None:

@@ -1,50 +1,41 @@
 """``DbFeatureFlagStore`` — фича-флаг strangler ``plugin_enabled_modules[]`` (F10, кр. 16).
 
-ГДЕ ХРАНИТСЯ ФЛАГ (важное решение, см. отчёт родителю)
-------------------------------------------------------
-Отдельной таблицы для фича-флагов в A10 НЕТ (и правка моделей/ревизий нам
-запрещена). Поэтому используется **JSONB-поле существующей модели**
-``CapabilityGrantRow``:
+ЕДИНСТВЕННЫЙ владелец флага (решение родителя, 6-я таблица A10):
 
-* одна служебная строка с фиксированным ``grant_id = "__plugin_feature_flags__"``;
-* в её JSONB-колонке (по умолчанию ``feature_flags``) лежит ОДИН объект
-  ``{company_id: [plugin_id, ...], ...}`` — сразу для всех компаний;
-* все запросы грантов исключают этот ``grant_id`` (см. ``grants.py``), поэтому
-  служебная строка НИКОГДА не попадает в выдачу ``get``/``list``/revocation;
-* строка заполняется валидными нейтральными значениями во все обязательные
-  колонки (status="revoked"), чтобы не нарушить CHECK-ограничения A10.
+    ``PluginFeatureFlagRow`` (``plugin_feature_flags``)
+    ``company_id`` PK + ``enabled_modules`` JSONB NOT NULL default ``[]`` + ``updated_at``
 
-Имя JSONB-колонки разрешается по списку кандидатов
-(``feature_flags`` → ``enabled_modules`` → ``plugin_enabled_modules`` →
-``flags`` → ``metadata`` → ``meta``) и может быть задано явно через
-``flags_column=`` / ``ColumnMap``. Если ни одна колонка не найдена — ЯВНАЯ
-``PluginRepositorySchemaError`` (fail-closed), а не «молча вернуть пустой
-список». Родителю рекомендовано добавить в A10 JSONB ``feature_flags``
-(``default=dict`` / ``server_default='{}'``).
+Ни ``CapabilityGrantRow.feature_flags`` (убирается из A10), ни служебная строка
+в таблице доставки НЕ являются источником истины. Если класс 6-й таблицы ещё
+не зарегистрирован в конкретной сессии (A10 дописывается параллельно),
+репозиторий бросает ЯВНУЮ :class:`PluginRepositorySchemaError` при любой
+авторитетной операции — fail-closed, а не «тихо пустой список».
 
-Конкурентность
---------------
-``set`` — read-modify-write по одной строке. Чтобы не потерять флаги другой
-компании при параллельном ``PUT /enabled-modules``, запись идёт CAS:
-``UPDATE ... WHERE grant_id = :sentinel AND <flags_column> = :old_value`` с
-проверкой ``rowcount`` и повтором. При ``rowcount == 0`` (гонка) — ретрай,
-при исчерпании — ``PluginRepositoryUnavailable`` (deny позитивной мутации).
+Стык sync/async
+---------------
+Реализует СИНХРОННЫЙ ``strangler.flags.FeatureFlagStorePort`` ровно тремя
+методами (порт запрещает dual-read/parity/snapshot и всё сверх этого):
 
-Синхронный / асинхронный стык
------------------------------
-Файл ``application/plugins/strangler/flags.py`` (``FeatureFlagStorePort``) ещё
-не создан параллельной задачей, поэтому сигнатуры его методов неизвестны.
-Экспортируем ОБА варианта:
+* ``enabled(company_id, plugin_id) -> bool``;
+* ``set(company_id, plugin_ids) -> None``;
+* ``list(company_id) -> tuple[str, ...]``.
 
-* async ``list`` / ``set`` / ``enabled`` — авторитетные, через БД
-  (стык с ``GrantStorePort.get_enabled_modules``);
-* sync ``list_sync`` / ``set_sync`` / ``enabled_sync`` — через in-memory кэш,
-  для синхронного strangler-порта/горячего пути запроса; прогрев — ``prefetch``.
-* :class:`SyncFeatureFlagStore` — тонкий sync-адаптер с ровно тремя методами
-  ``enabled``/``set``/``list`` (на случай, если порт окажется синхронным).
+``EnabledModulesPolicy.is_enabled`` дёргает их на КАЖДОМ запросе → читаем
+in-memory кэш (fail-closed: пустой кэш → legacy-путь). Авторитетные
+асинхронные операции вынесены в отдельные имена: ``list_async`` /
+``set_async`` / ``enabled_async`` / ``prefetch`` / ``flush`` — их вызывают
+``GrantStorePort.get_enabled_modules`` / ``set_enabled_modules`` и старт
+приложения. Разделение обязательно: ``AsyncSession`` нельзя await'ить из
+sync-метода роутера.
 
-Fail-closed: нет строки / ошибка БД / флаг выключен → ``enabled() == False``,
-то есть **legacy-путь** (безопасное значение по умолчанию, кр. 16).
+Конкурентность: ``set_async`` = UPSERT по PK ``company_id`` с CAS по
+``updated_at`` (``UPDATE ... WHERE company_id=:id AND enabled_modules=:old``,
+проверка ``rowcount``, ретрай). При исчерпании — ``PluginRepositoryUnavailable``
+(deny позитивной мутации), а не «последний победил».
+
+Fail-closed (кр. 16): пустой кэш / ошибка БД / флаг выключен → ``False``/``()``,
+то есть **legacy-путь**. Это безопаснее неожиданного переключения на ещё не
+готовый plugin-путь. Никакой миграции/переноса данных при переключении нет.
 """
 
 from __future__ import annotations
@@ -57,54 +48,46 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ._schema import (
-    FLAG_SENTINEL_GRANT_ID,
-    FLAG_SENTINEL_PLUGIN_ID,
-    GRANT_COLUMNS,
-    GRANT_ROW,
+    FLAG_ROW,
     ColumnMap,
     PluginRepositoryError,
     PluginRepositorySchemaError,
     PluginRepositoryUnavailable,
-    json_mapping,
+    column_names,
     load_row,
+    string_tuple,
     text,
 )
 
-#: Кандидаты JSONB-колонки фича-флага в модели A10 (порядок = приоритет).
-FLAGS_COLUMN_CANDIDATES: tuple[str, ...] = (
-    "feature_flags",
+_CAS_RETRIES = 5
+
+#: Кандидаты имён JSONB-колонки со списком модулей (на случай переименования).
+ENABLED_MODULES_COLUMN_CANDIDATES: tuple[str, ...] = (
     "enabled_modules",
     "plugin_enabled_modules",
-    "flags",
-    "metadata",
-    "meta",
+    "feature_flags",
+    "modules",
 )
 
-#: Значения служебной строки, безопасные для типичных CHECK-ограничений A10.
-_SENTINEL_PLUGIN_ID = "pluginfeatureflags"  # ^[a-z][a-z0-9_]*$
-_SENTINEL_DIGEST = "sha256:" + "0" * 64
-_CAS_RETRIES = 5
+#: Кандидаты колонки-версии для CAS (необязательна). ``updated_at`` НЕ используем
+#: как версию: у неё ``onupdate=func.now()`` и сравнение naive/aware datetime
+#: ненадёжно. CAS идёт по значению ``enabled_modules`` (см. ``set_async``).
+VERSION_COLUMN_CANDIDATES: tuple[str, ...] = ("version", "revision")
 
 
 def feature_flag_port() -> Any | None:
-    """Лениво вернуть ``FeatureFlagStorePort`` из strangler/flags.py, если он есть.
-
-    Не бросает исключение: файл создаётся параллельной задачей и может
-    отсутствовать. Используется только для диагностики/структурных проверок.
-    """
+    """Вернуть ``FeatureFlagStorePort`` (для ``isinstance`` в тестах/ревью)."""
     import importlib
 
     try:
-        module = importlib.import_module(
-            "prodavan.application.plugins.strangler.flags"
-        )
+        module = importlib.import_module("prodavan.application.plugins.strangler.flags")
     except (ImportError, ModuleNotFoundError):
         return None
     return getattr(module, "FeatureFlagStorePort", None)
 
 
 class DbFeatureFlagStore:
-    """Хранилище ``plugin_enabled_modules[]`` в JSONB-поле модели A10."""
+    """Синхронный ``FeatureFlagStorePort`` + асинхронный авторитетный слой."""
 
     def __init__(
         self,
@@ -114,7 +97,6 @@ class DbFeatureFlagStore:
         columns: ColumnMap | None = None,
         flags_column: str | None = None,
         flags_row: type | None = None,
-        dedicated: bool = False,
         clock: Any = None,
     ) -> None:
         if session_factory is None and session is None:
@@ -124,48 +106,78 @@ class DbFeatureFlagStore:
         self._session_factory = session_factory
         self._session = session
         self._columns = columns or ColumnMap()
-        self._explicit_flags_column = self._columns.overrides.get("feature_flags", flags_column)
+        self._explicit_flags_column = flags_column
         self._flags_row = flags_row
-        self._dedicated = dedicated
         self._clock = clock
         self._lock = threading.Lock()
-        # Синхронный кэш: company_id -> tuple[plugin_id, ...]. Пусто = «флаг
-        # выключен» = legacy. Не «разрешить новый путь».
         self._cache: dict[str, tuple[str, ...]] = {}
+        self._pending: dict[str, tuple[str, ...]] = {}
 
     # ------------------------------------------------------------------
-    # Разрешение модели/колонки
+    # FeatureFlagStorePort (СИНХРОННЫЙ, ровно 3 метода)
     # ------------------------------------------------------------------
 
-    def _row(self) -> type:
-        return self._flags_row or load_row(GRANT_ROW)
+    def enabled(self, company_id: str, plugin_id: str) -> bool:
+        """``True`` только если модуль явно включён у компании в кэше."""
+        key = (company_id or "").strip()
+        plugin = (plugin_id or "").strip()
+        if not key or not plugin:
+            return False
+        with self._lock:
+            return plugin in self._cache.get(key, ())
 
-    def _col(self, name: str) -> str:
-        return self._columns.col(name)
+    def set(self, company_id: str, plugin_ids: Iterable[str]) -> None:
+        """Записать список в кэш + поставить durable-задачу (``-> None``).
 
-    def _flags_col(self, row: type) -> str:
-        """Найти JSONB-колонку фича-флага; иначе fail-closed ошибка."""
-        table = getattr(row, "__table__", None)
-        existing = set(table.columns.keys()) if table is not None else set()
-        candidates: list[str] = []
-        if self._explicit_flags_column:
-            candidates.append(self._explicit_flags_column)
-        candidates.extend(FLAGS_COLUMN_CANDIDATES)
-        for name in candidates:
-            if name in existing:
-                return name
-        # Явная колонка задана, но отсутствует — это ошибка конфигурации.
-        if self._explicit_flags_column:
+        Реальная БД-запись — ``await flush()`` / ``await set_async()``; до
+        подтверждения флаг не переживёт рестарт (fail-closed).
+        """
+        key = text(company_id, field="company_id")
+        normalized = tuple(dict.fromkeys(str(item) for item in plugin_ids))
+        with self._lock:
+            self._cache[key] = normalized
+            self._pending[key] = normalized
+
+    def list(self, company_id: str) -> tuple[str, ...]:
+        key = (company_id or "").strip()
+        if not key:
+            return ()
+        with self._lock:
+            return self._cache.get(key, ())
+
+    # ------------------------------------------------------------------
+    # Разрешение 6-й таблицы
+    # ------------------------------------------------------------------
+
+    def _backend(self) -> tuple[type, str, str | None]:
+        """Вернуть ``(row, enabled_modules_col, version_col | None)``.
+
+        ЯВНАЯ ошибка, если 6-й таблицы A10 нет: флаг нельзя «тихо» хранить
+        где-то ещё (это был бы обход решения родителя).
+        """
+        row = self._flags_row or load_row(FLAG_ROW)
+        names = column_names(row)
+        require = ["company_id"]
+        missing = [name for name in require if name not in names]
+        if missing:
             raise PluginRepositorySchemaError(
-                f"колонка фича-флага {self._explicit_flags_column!r} отсутствует в "
-                f"{row.__name__}; есть {sorted(existing)}"
+                f"{row.__name__}: нет колонки company_id (есть {sorted(names)})"
             )
-        raise PluginRepositorySchemaError(
-            f"{row.__name__} не имеет JSONB-колонки для фича-флага. "
-            f"Ожидалась одна из {list(FLAGS_COLUMN_CANDIDATES)}; есть {sorted(existing)}. "
-            f"Родителю: добавьте в A10 JSONB 'feature_flags' default={{}} или "
-            f"передайте flags_column=<реальная колонка> (модели не правятся отсюда)."
+        candidates = (
+            ([self._explicit_flags_column] if self._explicit_flags_column else [])
+            + list(ENABLED_MODULES_COLUMN_CANDIDATES)
         )
+        modules_col = next((name for name in candidates if name and name in names), None)
+        if modules_col is None:
+            raise PluginRepositorySchemaError(
+                f"{row.__name__}: нет JSONB-колонки enabled_modules "
+                f"(кандидаты {candidates}, есть {sorted(names)}). "
+                f"Передайте flags_column=<реальная колонка> или flags_row=."
+            )
+        version_col = next(
+            (name for name in VERSION_COLUMN_CANDIDATES if name in names), None
+        )
+        return row, modules_col, version_col
 
     def _now(self) -> Any:
         from datetime import UTC, datetime
@@ -180,233 +192,174 @@ class DbFeatureFlagStore:
         assert self._session_factory is not None
         return self._session_factory()
 
-    # ------------------------------------------------------------------
-    # Служебная строка
-    # ------------------------------------------------------------------
-
-    def _sentinel_values(self, row: type, flags_col: str, mapping: dict[str, Any]) -> dict[str, Any]:
-        """Значения ВСЕХ обязательных колонок для служебной строки.
-
-        Заполняем нейтральными, но ВАЛИДНЫМИ значениями: иначе CHECK на digest /
-        status / capabilities может отвергнуть INSERT, и фича-флаг не сохранится.
-        """
-        c = self._col
-        now = self._now()
-        values: dict[str, Any] = {
-            c("grant_id"): FLAG_SENTINEL_GRANT_ID,
-            c("company_id"): "__platform__",
-            c("plugin_id"): _SENTINEL_PLUGIN_ID,
-            c("plugin_instance_id"): "platform",
-            c("manifest_version"): "1.0.0",
-            c("artifact_digest"): _SENTINEL_DIGEST,
-            c("capabilities"): ["__feature_flags__"],
-            c("egress_policy"): {"mode": "none"},
-            c("quota"): {
-                "ops_per_minute": 1,
-                "max_rows": 1,
-                "max_bytes": 1,
-                "max_keys": 1,
-                "max_object_bytes": 1,
-                "max_egress_bytes": 1,
-            },
-            c("status"): "revoked",
-            c("created_at"): now,
-            c("revoked_at"): now,
-            flags_col: mapping,
-        }
-        # Оставляем только колонки, реально существующие в модели.
-        table = row.__table__
-        return {key: value for key, value in values.items() if key in table.columns.keys()}
-
-    async def _ensure_sentinel(self, session: AsyncSession, row: type, flags_col: str) -> Any:
-        """Найти служебную строку или создать её (``ON CONFLICT``-безопасно)."""
-        key_col = row.__table__.columns[self._col("grant_id")]
-        found = (
-            await session.execute(select(row).where(key_col == FLAG_SENTINEL_GRANT_ID))
-        ).scalars().first()
-        if found is not None:
-            return found
-        try:
-            session.add(row(**self._sentinel_values(row, flags_col, {})))
-            await _commit_if_owned(session, self._session is None)
-        except IntegrityError:
-            # Параллельный процесс создал строку раньше — перечитываем.
-            await _rollback_if_owned(session, self._session is None)
-            found = (
-                await session.execute(select(row).where(key_col == FLAG_SENTINEL_GRANT_ID))
-            ).scalars().first()
-            if found is None:
-                raise PluginRepositoryUnavailable("не удалось создать служебную строку фича-флага")
-            return found
-        found = (
-            await session.execute(select(row).where(key_col == FLAG_SENTINEL_GRANT_ID))
-        ).scalars().first()
-        if found is None:
-            raise PluginRepositoryUnavailable("служебная строка фича-флага не появилась после INSERT")
-        return found
-
-    # ------------------------------------------------------------------
-    # Чтение / запись отображения (CAS)
-    # ------------------------------------------------------------------
-
     @staticmethod
-    def _mapping(value: Any) -> dict[str, list[str]]:
-        raw = json_mapping(value, field="feature_flags")
-        result: dict[str, list[str]] = {}
-        for company_id, plugin_ids in raw.items():
-            if not isinstance(company_id, str) or not company_id.strip():
-                continue
-            if isinstance(plugin_ids, (list, tuple)):
-                result[company_id] = [
-                    str(item) for item in plugin_ids
-                    if isinstance(item, str) and item.strip()
-                ]
-            else:
-                result[company_id] = []
-        return result
+    def _modules(value: Any) -> tuple[str, ...]:
+        """JSONB-массив → кортеж; пустой/битый = ``()`` (legacy)."""
+        if value is None:
+            return ()
+        if not isinstance(value, (list, tuple)):
+            raise PluginRepositorySchemaError(
+                f"enabled_modules должен быть JSONB-массивом, получено {type(value).__name__}"
+            )
+        return string_tuple(value, field="enabled_modules")
 
-    async def _read_mapping(self) -> tuple[Any, str, dict[str, list[str]]]:
-        row = self._row()
-        flags_col = self._flags_col(row)
-        async with self._session_ctx() as session:
-            found = await self._ensure_sentinel(session, row, flags_col)
-            mapping = self._mapping(getattr(found, flags_col, None))
-        return row, flags_col, mapping
+    # ------------------------------------------------------------------
+    # Авторитетные async-операции
+    # ------------------------------------------------------------------
 
-    async def list(self, company_id: str) -> Sequence[str]:
-        """Async ``GrantStorePort.get_enabled_modules``: список включённых модулей."""
+    async def list_async(self, company_id: str) -> tuple[str, ...]:
+        """Авторитетный async-список (``GrantStorePort.get_enabled_modules``)."""
         text(company_id, field="company_id")
         try:
-            _, _, mapping = await self._read_mapping()
-            result = tuple(mapping.get(company_id, []))
+            row, modules_col, _ = self._backend()
+            table = row.__table__
+            async with self._session_ctx() as session:
+                found = (
+                    await session.execute(
+                        select(row).where(table.columns["company_id"] == company_id)
+                    )
+                ).scalars().first()
+            modules = self._modules(getattr(found, modules_col, None)) if found is not None else ()
             with self._lock:
-                self._cache[company_id] = result
-            return result
+                self._cache[company_id] = modules
+            return modules
         except PluginRepositoryError:
             raise
         except (SQLAlchemyError, ValueError) as exc:
-            # Ошибка чтения = «флаг выключен» (legacy), но ЯВНАЯ ошибка для
-            # позитивных мутаций; для чтения возвращаем безопасный пустой список.
             raise PluginRepositoryUnavailable(f"не удалось прочитать фича-флаг: {exc}") from exc
 
-    async def set(self, company_id: str, plugin_ids: Sequence[str] | Iterable[str]) -> Sequence[str]:
-        """Записать новое значение флага (CAS, идемпотентно, без переноса данных).
+    async def set_async(
+        self, company_id: str, plugin_ids: Sequence[str] | Iterable[str]
+    ) -> tuple[str, ...]:
+        """UPSERT по PK ``company_id`` с CAS (без переноса данных, кр. 16).
 
-        Переключается ТОЛЬКО путь обработки (§8 этап 2, кр. 16): данные
-        declarative-app не трогаются. Ошибка записи → исключение (deny).
+        Кэш обновляется ТОЛЬКО после подтверждённой записи. Ошибка/гонка →
+        ``PluginRepositoryUnavailable`` (deny позитивной мутации).
         """
         text(company_id, field="company_id")
         normalized = tuple(dict.fromkeys(str(item) for item in plugin_ids))
         for item in normalized:
             text(item, field="plugin_ids[]")
         try:
-            row, flags_col, _ = await self._read_mapping()
-            key_col = row.__table__.columns[self._col("grant_id")]
-            flags = row.__table__.columns[flags_col]
-            for attempt in range(_CAS_RETRIES):
+            row, modules_col, version_col = self._backend()
+            table = row.__table__
+            for _attempt in range(_CAS_RETRIES):
                 async with self._session_ctx() as session:
-                    found = await self._ensure_sentinel(session, row, flags_col)
-                    old_raw = getattr(found, flags_col, None)
-                    mapping = self._mapping(old_raw)
-                    if tuple(mapping.get(company_id, [])) == normalized:
-                        # Идемпотентный повтор — запись не нужна.
-                        result = normalized
-                        with self._lock:
-                            self._cache[company_id] = result
-                        return result
-                    mapping[company_id] = list(normalized)
-                    new_value: dict[str, Any] = dict(mapping)
-                    result_set = await session.execute(
-                        update(row)
-                        .where(key_col == FLAG_SENTINEL_GRANT_ID)
-                        .where(flags == old_raw)  # CAS: значение не изменилось с чтения
-                        .values(**{flags_col: new_value})
-                    )
-                    if result_set.rowcount != 1:
-                        await _rollback_if_owned(session, self._session is None)
-                        continue  # гонка: перечитываем и повторяем
-                    await _commit_if_owned(session, self._session is None)
+                    found = (
+                        await session.execute(
+                            select(row).where(table.columns["company_id"] == company_id)
+                        )
+                    ).scalars().first()
+                    if found is None:
+                        values: dict[str, Any] = {
+                            "company_id": company_id,
+                            modules_col: list(normalized),
+                        }
+                        if version_col is not None and version_col in column_names(row):
+                            values[version_col] = self._now()
+                        try:
+                            session.add(row(**values))
+                            await _commit_if_owned(session, self._session is None)
+                        except IntegrityError:
+                            # Параллельный INSERT: перечитываем и идём на CAS.
+                            await _rollback_if_owned(session, self._session is None)
+                            continue
+                    else:
+                        old_raw = getattr(found, modules_col, None)
+                        if self._modules(old_raw) == normalized:
+                            # Идемпотентный повтор: запись не нужна.
+                            with self._lock:
+                                self._cache[company_id] = normalized
+                                self._pending.pop(company_id, None)
+                            return normalized
+                        old_version = getattr(found, version_col, None) if version_col else None
+                        stmt = (
+                            update(row)
+                            .where(table.columns["company_id"] == company_id)
+                            .where(table.columns[modules_col] == old_raw)
+                        )
+                        values = {modules_col: list(normalized)}
+                        if version_col is not None:
+                            stmt = stmt.where(table.columns[version_col] == old_version)
+                            values[version_col] = self._now()
+                        result = await session.execute(stmt.values(**values))
+                        if result.rowcount != 1:
+                            await _rollback_if_owned(session, self._session is None)
+                            continue
+                        await _commit_if_owned(session, self._session is None)
                 with self._lock:
                     self._cache[company_id] = normalized
+                    self._pending.pop(company_id, None)
                 return normalized
             raise PluginRepositoryUnavailable(
-                "set enabled_modules: CAS не подтверждён после нескольких попыток (гонка публикации)"
+                "set enabled_modules: CAS не подтверждён после нескольких попыток (гонка)"
             )
         except PluginRepositoryError:
             raise
         except (SQLAlchemyError, ValueError) as exc:
             raise PluginRepositoryUnavailable(f"set enabled_modules failed: {exc}") from exc
 
-    async def enabled(self, company_id: str, plugin_id: str) -> bool:
-        """Включён ли новый plugin-путь для модуля (False → legacy)."""
+    async def enabled_async(self, company_id: str, plugin_id: str) -> bool:
         text(company_id, field="company_id")
         text(plugin_id, field="plugin_id")
-        modules = await self.list(company_id)
-        return plugin_id in modules
+        return plugin_id in await self.list_async(company_id)
 
     async def prefetch(self, company_id: str | None = None) -> None:
-        """Прогреть синхронный кэш (вызывать при старте / в middleware)."""
+        """Прогреть синхронный кэш (старт приложения / middleware).
+
+        Ошибка чтения НЕ включает флаги: кэш очищается → legacy (fail-closed).
+        """
         try:
-            _, _, mapping = await self._read_mapping()
+            row, modules_col, _ = self._backend()
+            table = row.__table__
+            statement = select(row)
+            if company_id is not None:
+                statement = statement.where(table.columns["company_id"] == company_id)
+            async with self._session_ctx() as session:
+                found = (await session.execute(statement)).scalars().all()
+            mapping = {
+                str(getattr(item, "company_id")): self._modules(getattr(item, modules_col, None))
+                for item in found
+            }
             with self._lock:
                 if company_id is None:
-                    self._cache = {
-                        key: tuple(value) for key, value in mapping.items()
-                    }
+                    self._cache = mapping
                 else:
-                    self._cache[company_id] = tuple(mapping.get(company_id, []))
+                    self._cache[company_id] = mapping.get(company_id, ())
         except (SQLAlchemyError, PluginRepositoryError) as exc:
+            with self._lock:
+                if company_id is None:
+                    self._cache.clear()
+                else:
+                    self._cache.pop(company_id, None)
             raise PluginRepositoryUnavailable(f"prefetch фича-флага не удался: {exc}") from exc
 
-    # ------------------------------------------------------------------
-    # Синхронный доступ из кэша (fail-closed: нет данных → False/())
-    # ------------------------------------------------------------------
-
-    def list_sync(self, company_id: str) -> Sequence[str]:
-        with self._lock:
-            return self._cache.get(text(company_id, field="company_id"), ())
-
-    def enabled_sync(self, company_id: str, plugin_id: str) -> bool:
-        return plugin_id in self.list_sync(company_id)
-
-    def set_sync(self, company_id: str, plugin_ids: Sequence[str]) -> Sequence[str]:
-        """Обновить кэш И поставить durable-задачу (реальная запись — ``flush``).
-
-        Возвращает новое значение для вызывающего, но НЕ считается
-        подтверждённым до ``await flush()``. Без flush флаг останется выключенным
-        после рестарта — это намеренный fail-closed, а не «тихо сохранили».
-        """
-        normalized = tuple(dict.fromkeys(str(item) for item in plugin_ids))
-        with self._lock:
-            self._cache[text(company_id, field="company_id")] = normalized
-            pending = getattr(self, "_pending", None)
-            if pending is None:
-                pending = {}
-                self._pending = pending
-            pending[company_id] = normalized
-        return normalized
-
     async def flush(self) -> None:
-        """Применить отложенные ``set_sync`` (durable CAS-запись)."""
+        """Применить отложенные sync-``set`` (durable UPSERT)."""
         with self._lock:
-            pending = dict(getattr(self, "_pending", {}))
+            pending = dict(self._pending)
             self._pending = {}
         for company_id, plugin_ids in pending.items():
-            await self.set(company_id, plugin_ids)
+            await self.set_async(company_id, plugin_ids)
 
-    def warm(self, company_id: str, plugin_ids: Sequence[str]) -> None:
-        """Засеять кэш без обращения к БД (для sync-порта / тестов)."""
+    def warm(self, company_id: str, plugin_ids: Iterable[str]) -> None:
+        """Засеять кэш без обращения к БД (тесты/старт)."""
         with self._lock:
-            self._cache[text(company_id, field="company_id")] = tuple(plugin_ids)
+            self._cache[text(company_id, field="company_id")] = tuple(str(item) for item in plugin_ids)
+
+    # Алиасы для явной sync-семантики (не часть порта).
+    def list_sync(self, company_id: str) -> tuple[str, ...]:
+        return self.list(company_id)
+
+    def enabled_sync(self, company_id: str, plugin_id: str) -> bool:
+        return self.enabled(company_id, plugin_id)
+
+    def set_sync(self, company_id: str, plugin_ids: Iterable[str]) -> None:
+        self.set(company_id, plugin_ids)
 
 
 class SyncFeatureFlagStore:
-    """Sync-адаптер с ровно ``enabled``/``set``/``list`` для strangler-порта.
-
-    Если ``application/plugins/strangler/flags.py::FeatureFlagStorePort``
-    окажется синхронным — родитель подключает этот адаптер; durable-запись
-    выполняется через ``await inner.flush()`` в async-точке жизненного цикла.
-    """
+    """Тонкий sync-адаптер (``DbFeatureFlagStore`` УЖЕ реализует порт напрямую)."""
 
     def __init__(self, inner: DbFeatureFlagStore) -> None:
         if not isinstance(inner, DbFeatureFlagStore):
@@ -418,18 +371,19 @@ class SyncFeatureFlagStore:
         return self._inner
 
     def enabled(self, company_id: str, plugin_id: str) -> bool:
-        return self._inner.enabled_sync(company_id, plugin_id)
+        return self._inner.enabled(company_id, plugin_id)
 
-    def set(self, company_id: str, plugin_ids: Sequence[str]) -> Sequence[str]:
-        return self._inner.set_sync(company_id, plugin_ids)
+    def set(self, company_id: str, plugin_ids: Iterable[str]) -> None:
+        self._inner.set(company_id, plugin_ids)
 
-    def list(self, company_id: str) -> Sequence[str]:
-        return self._inner.list_sync(company_id)
+    def list(self, company_id: str) -> tuple[str, ...]:
+        return self._inner.list(company_id)
+
+    async def flush(self) -> None:
+        await self._inner.flush()
 
 
 class _BorrowedSession:
-    """Async-CM поверх чужой сессии: НЕ закрывает и НЕ коммитит её."""
-
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
@@ -451,7 +405,7 @@ async def _rollback_if_owned(session: AsyncSession, owned: bool) -> None:
 
 
 __all__ = [
-    "FLAGS_COLUMN_CANDIDATES",
+    "ENABLED_MODULES_COLUMN_CANDIDATES",
     "DbFeatureFlagStore",
     "SyncFeatureFlagStore",
     "feature_flag_port",

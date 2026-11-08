@@ -1,6 +1,6 @@
 """Конфигурация MinIO-адаптеров объектной capability плагинов (v4 §5.4, F3).
 
-Источник значений — ТОЛЬКО пять переменных окружения ниже. Никаких чтений
+Источник значений — ТОЛЬКО переменные окружения ниже. Никаких чтений
 ``settings`` / ``S3_*`` / ``MINIO_ROOT_*`` / ``configmap``: as-built service user
 ``agentscale-api`` имеет ``agentscale/*`` (``minio-api-policy.json``), root-креды
 лежат в том же Secret, и любой «фолбэк на них» мгновенно превращает
@@ -182,7 +182,7 @@ class MinioPluginConfig:
         """Endpoint, на который ПОДПИСЫВАЕМ URL (не переписываем Host после).
 
         Без ``PLUGIN_MINIO_PUBLIC_ENDPOINT`` это in-cluster ``endpoint`` — для
-        внешних клиентов Тогда obligatory ``proxy=1``. При заданном внешнем
+        внешних клиентов тогда обязателен ``proxy=1``. При заданном внешнем
         host подпись сразу идёт на него, иначе SigV4 инвалидируется прокси.
         """
         return self.public_endpoint or self.endpoint

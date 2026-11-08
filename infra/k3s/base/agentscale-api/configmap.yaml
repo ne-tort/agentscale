@@ -105,6 +105,10 @@ data:
   PLUGIN_MAX_CONCURRENT_WAKES: "2"
   PLUGIN_OCI_REGISTRY: ghcr.io/ne-tort/plugins
   PLUGIN_COSIGN_ISSUER: https://token.actions.githubusercontent.com
+  # keyless cosign: ожидаемый certificate identity. Пусто = wiring/config.py
+  # при enabled=true откажет в сборке (иначе все артефакты ушли бы в карантин
+  # молча). Заполняется вместе с включением платформы; это НЕ секрет.
+  PLUGIN_COSIGN_IDENTITY: ""
   PLUGIN_MIN_PLATFORM_VERSION: "4.0.0"
   # MinIO STS НЕ подтверждён официальной документацией (6 неудачных попыток).
   # По умолчанию ВЫКЛЮЧЕН: плагин получает только scoped presigned URL,
@@ -113,7 +117,8 @@ data:
   PLUGIN_MINIO_STS_ENABLED: "false"
   PLUGIN_MINIO_REGION: us-east-1
   PLUGIN_MINIO_ENDPOINT: http://agentscale-minio:9000
-  # Секреты (PLUGIN_CLAIMS_SECRET, PLUGIN_TENANT_DB_ADMIN_URL,
-  # PLUGIN_COSIGN_IDENTITY, PLUGIN_MINIO_ADMIN_* ) НЕ лежат в ConfigMap:
-  # их приносит SealedSecret/k8s Secret. Fallback на root/S3_* запрещён.
+  # Секреты НЕ лежат в ConfigMap: PLUGIN_CLAIMS_SECRET,
+  # PLUGIN_CLAIMS_PREVIOUS_SECRETS, PLUGIN_TENANT_DB_ADMIN_URL,
+  # PLUGIN_MINIO_ADMIN_*, PLUGIN_MINIO_PRESIGN_* приносит k8s Secret/SealedSecret.
+  # Fallback на root/S3_* или AUTH_TEST_SECRET запрещён.
   POD_AGENT_RUNTIME_AUTH_SECRET: pod-agent-bridge-auth

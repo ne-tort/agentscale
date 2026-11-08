@@ -71,6 +71,9 @@ jobs:
 
       # Имя пакета + sha12-тег. owner приводим к нижнему регистру (GHCR
       # требует lowercase), точь-в-точь как в ci-images.yml / plugin-artifacts.yml.
+      # Многозначный output `tags` записываем ЧЕРЕЗ РАЗДЕЛИТЕЛЬ (heredoc в
+      # GITHUB_OUTPUT), а не сырым "\n": GitHub Actions иначе не распарсит
+      # перенос строки и build-push-action получит один кривой тег.
       - name: Имя образа и теги
         id: meta
         run: |
@@ -85,7 +88,7 @@ jobs:
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
               out.write(f"ref={ref}\n")
               out.write(f"sha12={sha12}\n")
-              out.write(f"tags={ref}:{sha12}\n{ref}:latest\n")
+              out.write(f"tags<<__TAGS__\n{ref}:{sha12}\n{ref}:latest\n__TAGS__\n")
           PY
         env:
           MATRIX_IMAGE: ${{ matrix.image }}

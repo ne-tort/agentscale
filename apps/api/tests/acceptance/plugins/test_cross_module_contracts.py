@@ -615,8 +615,14 @@ def test_egress_policy_comes_from_grant_not_from_expired_jwt(
         "поле egress из токена не должно влиять на политику (§13.3)"
     )
 
-    # Хост вне allowlist не совпадает ни с одним правилом.
-    assert egress.match(fresh.rules[0], "evil.com", "/services/x", "POST") is False
+    # Хост вне allowlist не совпадает ни с одним правилом (ни по хосту, ни по
+    # префиксу): перебираем ВСЕ правила, чтобы исключить ложный «не совпал
+    # только из-за метода».
+    assert egress.is_host_allowed(fresh, "evil.com") is False
+    assert not any(
+        egress.match(rule, "evil.com", "/services/x", rule.method)
+        for rule in fresh.rules
+    ), "хост вне allowlist не должен совпадать ни с одним EgressRule"
     # Две NP из одного генератора: у plugin есть :5432/:9000, у agent — нет.
     generator = egress.EgressConfigGenerator()
     plugin_np = generator.build_network_policy(egress.EgressScope.PLUGIN)
@@ -765,7 +771,9 @@ async def test_public_page_does_not_open_backend_api_anonymously(
     """
 
     gateway = pytest.importorskip("prodavan.application.plugins.gateway")
-    platform.gateway_grants.declared_public_pages = frozenset({"/public"})
+    # Префикс, оканчивающийся на '/': GatewayAuth._is_public поддерживает
+    # точное совпадение ИЛИ префикс с завершающим '/'.
+    platform.gateway_grants.declared_public_pages = frozenset({"/public/"})
     auth = platform.gateway_auth()
 
     # Публичная страница: анонимный доступ разрешён, capability-токена НЕТ.
@@ -853,6 +861,7 @@ async def test_admin_revoke_is_immediately_visible_to_capabilities(
     """
 
     platform.artifact_admin.seed_published()
+    platform.grant_store.seed_active_grant()
     admin = platform.admin_service()
     caps_service = platform.capability_service()
 

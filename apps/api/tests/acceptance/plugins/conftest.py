@@ -674,7 +674,7 @@ class FakeGrantStore:
 
 @dataclass
 class FakeTenantDb:
-    """``admin.TenantDbPort`` +_TRACE слой ``TenantDatabaseService``.
+    """``admin.TenantDbPort`` + слой ``TenantDatabaseService``.
 
     Ведёт ТОЧНОЕ множество БД/схем/ролей по ``(company_id, plugin_id)``:
     этим проверяется «uninstall не трогает другую компанию» (кр. 15).
@@ -740,11 +740,16 @@ class FakeTenantDb:
         )
 
     def assert_other_company_untouched(self, other_company: str) -> None:
+        """БД и схемы другой компании должны сохраниться после uninstall."""
+
         assert other_company in self.databases, (
             "БД другой компании должна была сохраниться после uninstall"
         )
-        for company, plugin in self.schemas:
-            assert company != other_company or plugin != TEST_PLUGIN
+        # Ни один вызов drop_plugin_schema не должен был получить чужую пару.
+        for operation, company, plugin in self.calls:
+            assert not (operation == "drop_plugin_schema" and company == other_company), (
+                f"uninstall задел схему другой компании {other_company!r}"
+            )
 
 
 @dataclass

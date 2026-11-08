@@ -53,7 +53,7 @@ from prodavan.application.plugins.wiring.config import (
     PluginPlatformConfigError,
 )
 
-# Все имена, для которых сборка registers адаптер. ``db.direct`` отсутствует.
+# Все имена, для которых сборка регистрирует адаптер. ``db.direct`` отсутствует.
 WIRED_CAPABILITIES: Final[tuple[str, ...]] = tuple(
     name.value for name in CapabilityName
 )
@@ -119,7 +119,7 @@ class UnavailableAdapter:
 
     def __getattr__(self, operation: str) -> Any:
         # ``AdapterRegistry.register`` проверяет ``callable(getattr(impl, m))``;
-        # для объявленных операций возвращаем-bound отказ, для всего прочего —
+        # для объявленных операций возвращаем bound-отказ, для всего прочего —
         # AttributeError, чтобы не «продать» случайный метод как адаптер.
         if operation in self._operations:
             def refuse(request: object) -> TypedResponse:

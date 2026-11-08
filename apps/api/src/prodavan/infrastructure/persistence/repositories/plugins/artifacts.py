@@ -1,42 +1,51 @@
-"""``SqlArtifactRegistryStore`` — ``RegistryStorePort`` (задача 07) поверх БД.
+"""``SqlArtifactRegistryStore`` — ``RegistryStorePort`` (задача 07) поверх БД A10.
 
 Риск из отчёта задачи 07: ПАРАЛЛЕЛЬНАЯ публикация. ``publish`` делает
 ``by_digest → add → set_current``; без транзакции/блокировки два воркера могут
-оба решить «digest ещё нет» и оба назначить себя ``current``. In-memory
+оба решить «digest ещё нет» и оба назначить себя ``current``.
 ``InMemoryRegistryStore`` этим страдает (в его докстринге прямо сказано: нет
 транзакций/блокировок).
 
-Здесь:
+Здесь (РЕАЛЬНАЯ модель ``PluginArtifactRow``):
 
-* :meth:`set_current` — CAS по версии указателя: ``UPDATE ... WHERE version = ожидаемая``
-  с проверкой ``rowcount``, плюс ``SELECT ... FOR UPDATE`` на строке-указателе,
-  если модель A10 предоставляет колонку версии (``lifecycle_version`` /
-  ``version`` / ``revision``). При ``rowcount == 0`` → :class:`ConcurrentPublishError`
-  (deny второй публикации, а не «последний победил»).
-* :meth:`add` — вставка с уникальностью ``(plugin_id, version)`` и ``digest``;
+* :meth:`set_current` — ``SELECT ... FOR UPDATE`` строки-кандидата +
+  CAS по ``lifecycle_version`` (``UPDATE ... WHERE lifecycle_version = ожидаемая``,
+  проверка ``rowcount``) + снятие ``is_current`` у остальных версий. Partial
+  unique ``UNIQUE(plugin_id) WHERE is_current = true`` в A10 — вторая линия
+  защиты: даже при обходе CAS БД не даст двум текущим версиям.
+  При ``rowcount == 0`` → :class:`ConcurrentPublishError` (deny второй
+  публикации, а не «последний победил»).
+* :meth:`add` — уникальность ``(plugin_id, version)`` и ``oci_digest``;
   ``IntegrityError`` (гонка) → явная ошибка, а не перезапись.
-* ``append_lifecycle`` / ``append_quarantine`` — append-only строки в той же
-  транзакции, что и ``set_current`` (иначе откат публикации оставил бы
-  «успешный» лог).
-
-Порт ``RegistryStorePort`` СИНХРОННЫЙ, а ``AsyncSession`` — асинхронный.
-Поэтому класс хранит собственный event loop, запущенный в фоновом потоке
-(``asyncio.run_coroutine_threadsafe``): sync-методы детерминированно дожидаются
-результата. Это честная БД-реализация, а не «in-memory с отложенной записью».
-Альтернатива для async-вызывающих — :meth:`*_async` варианты.
+* ``append_lifecycle`` / ``append_quarantine`` — append-only журнал в памяти
+  процесса (A10 не даёт отдельной таблицы); решение о публикации принимается
+  ТОЛЬКО по строке ``PluginArtifactRow`` в БД, журнал не источник решения.
 
 Маппинг ``PluginArtifactRow`` ↔ ``PluginArtifactRecord``
 -------------------------------------------------------
-JSONB ``manifest`` (исходный подписанный plugin-manifest; НЕ legacy-обёртка
-``AppVersion.manifest``), ``quarantine`` — JSONB-проекция ``QuarantineEvidence``.
-Правила проекции реестра (``registry.py::_to_app_version``) не меняются.
+* ``digest`` ↔ ``oci_digest``; ``image_ref`` есть в A10 (аддитивно);
+* ``manifest`` — исходный подписанный plugin-manifest; ``app_version_projection``
+  — legacy-обёртка из ``build_app_version_projection`` (CHECK в БД требует
+  ``manifest <> app_version_projection``);
+* ``manifest_fingerprint`` НЕ хранится — вычисляется ``manifest_fingerprint()``
+  задачи 07 при чтении (детерминированно);
+* ``status`` A10 = ``published|quarantined|revoked`` ↔ ``AppLifecycleStatus``
+  задачи 07 = ``draft|published|disabled|revoked`` — явный маппинг ниже;
+* ``quarantine_reason`` (короткий код) вместо JSONB ``quarantine``;
+* ``outcome`` не хранится — восстанавливается из ``status``.
+
+Порт ``RegistryStorePort`` СИНХРОННЫЙ, ``AsyncSession`` — асинхронный. Класс
+держит собственный фоновый event loop и мостит sync-методы через
+``asyncio.run_coroutine_threadsafe`` (честная БД-реализация, без «отложенной
+записи»). Async-вызывающие могут использовать :meth:`*_async` напрямую.
 """
 
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import threading
-from dataclasses import asdict, is_dataclass
 from datetime import UTC, datetime
 from typing import Any, Sequence
 
@@ -47,6 +56,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from prodavan.application.dynamic_app_registry.contracts import (
     QuarantineEvidence,
     RegistryOutcome,
+    RegistryReason,
     RollbackCommand,
 )
 from prodavan.application.plugins.artifacts.registry import PluginArtifactRecord
@@ -55,28 +65,25 @@ from prodavan.domain.dynamic_apps import AppLifecycleStatus
 from ._schema import (
     ARTIFACT_COLUMNS,
     ARTIFACT_ROW,
+    ARTIFACT_STATUS_PUBLISHED,
+    ARTIFACT_STATUS_QUARANTINED,
+    ARTIFACT_STATUS_REVOKED,
     ColumnMap,
     PluginRepositoryError,
     PluginRepositorySchemaError,
     PluginRepositoryUnavailable,
     aware_utc,
+    column_names,
     json_mapping,
     load_row,
     text,
 )
 
-#: Кандидаты колонки «указатель текущей версии» (булева или строка).
-CURRENT_COLUMN_CANDIDATES: tuple[str, ...] = (
-    "is_current",
-    "current",
-    "current_version",
-)
-#: Кандидаты колонки версии для CAS/блокировки.
+#: Кандидаты колонки-указателя текущей версии.
+CURRENT_COLUMN_CANDIDATES: tuple[str, ...] = ("is_current", "current", "current_version")
+#: Кандидаты CAS-колонки (целочисленной).
 VERSION_COLUMN_CANDIDATES: tuple[str, ...] = (
-    "lifecycle_version",
-    "revision",
-    "version_number",
-    "version",  # совпадает с semver — используется только если это Integer
+    "lifecycle_version", "revision", "version_number",
 )
 
 
@@ -84,7 +91,7 @@ class ConcurrentPublishError(PluginRepositoryError):
     """Параллельная публикация: CAS не подтверждён, вторая запись отклонена."""
 
 
-def _optional_col(row: type, candidates: Sequence[str], *, integer_only: bool = False) -> str | None:
+def _find_col(row: type, candidates: Sequence[str], *, integer_only: bool = False) -> str | None:
     table = getattr(row, "__table__", None)
     if table is None:
         return None
@@ -93,24 +100,54 @@ def _optional_col(row: type, candidates: Sequence[str], *, integer_only: bool = 
         if column is None:
             continue
         if integer_only:
-            # Под CAS годится только целочисленная колонка, иначе ``version``
-            # (semver-строка) нельзя безопасно инкрементировать.
             try:
-                python_type = column.type.python_type
+                if column.type.python_type is not int:
+                    continue
             except NotImplementedError:
-                continue
-            if python_type is not int:
                 continue
         return name
     return None
 
 
-class SqlArtifactRegistryStore:
-    """Настоящий ``RegistryStorePort`` с транзакцией и CAS-блокировкой.
+def _status_to_domain(value: str) -> AppLifecycleStatus:
+    """A10 status → доменный ``AppLifecycleStatus`` (fail-closed)."""
+    mapping = {
+        ARTIFACT_STATUS_PUBLISHED: AppLifecycleStatus.PUBLISHED,
+        ARTIFACT_STATUS_QUARANTINED: AppLifecycleStatus.DISABLED,
+        ARTIFACT_STATUS_REVOKED: AppLifecycleStatus.REVOKED,
+    }
+    try:
+        return mapping[value]
+    except KeyError as exc:
+        raise PluginRepositorySchemaError(f"неизвестный status артефакта {value!r}") from exc
 
-    ``session_factory`` обязателен. Все sync-методы мостятся в отдельный loop;
-    при отсутствии работающего loop он создаётся лениво и переиспользуется.
-    """
+
+def _status_to_db(status: AppLifecycleStatus) -> str:
+    mapping = {
+        AppLifecycleStatus.PUBLISHED: ARTIFACT_STATUS_PUBLISHED,
+        AppLifecycleStatus.DISABLED: ARTIFACT_STATUS_QUARANTINED,
+        AppLifecycleStatus.DRAFT: ARTIFACT_STATUS_QUARANTINED,
+        AppLifecycleStatus.REVOKED: ARTIFACT_STATUS_REVOKED,
+    }
+    try:
+        return mapping[status]
+    except KeyError as exc:
+        raise PluginRepositorySchemaError(f"неизвестный AppLifecycleStatus {status!r}") from exc
+
+
+def _fingerprint(manifest: Any) -> str:
+    """Детерминированный fingerprint (совпадает с задачей 07 по смыслу)."""
+    from prodavan.application.plugins.artifacts.verification import manifest_fingerprint
+
+    try:
+        return manifest_fingerprint(manifest)
+    except Exception:  # noqa: BLE001 — fallback без external-зависимости
+        encoded = json.dumps(manifest, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+        return "sha256:" + hashlib.sha256(encoded).hexdigest()
+
+
+class SqlArtifactRegistryStore:
+    """Настоящий ``RegistryStorePort`` с транзакцией и CAS-блокировкой."""
 
     def __init__(
         self,
@@ -129,15 +166,12 @@ class SqlArtifactRegistryStore:
         self._session_factory = session_factory
         self._session = session
         self._columns = columns or ColumnMap()
-        self._explicit_current = self._columns.overrides.get("is_current", current_column)
+        self._explicit_current = current_column
         self._explicit_lock = lock_column
         self._clock = clock or (lambda: datetime.now(UTC))
         self._lock = threading.Lock()
         self._loop: asyncio.AbstractEventLoop | None = None
         self._loop_thread: threading.Thread | None = None
-        # Журнал lifecycle/quarantine хранится в памяти ДО первой успешной
-        # транзакции, затем дублируется в ``append-only`` строки БД. При ошибке
-        # записи в БД журнал НЕ считается подтверждённым (deny).
         self._lifecycle: list[tuple[str, str, Any]] = []
         self._quarantine: list[QuarantineEvidence] = []
 
@@ -159,22 +193,17 @@ class SqlArtifactRegistryStore:
             return loop
 
     def _run(self, coro: Any) -> Any:
-        """Выполнить корутину из sync-метода и ДОЖДАТЬСЯ результата."""
         try:
             asyncio.get_running_loop()
         except RuntimeError:
-            loop = self._get_loop()
-            future = asyncio.run_coroutine_threadsafe(coro, loop)
+            future = asyncio.run_coroutine_threadsafe(coro, self._get_loop())
             return future.result()
-        # Уже внутри event loop (например async-тест вызвал sync-метод):
-        # нельзя блокировать тот же loop. Явная ошибка — не «тихо пропустить».
         raise PluginRepositoryError(
             "SqlArtifactRegistryStore: sync-метод вызван из работающего event loop; "
             "используйте *_async-варианты"
         )
 
     def close(self) -> None:
-        """Остановить фоновый loop (вызывать при shutdown приложения)."""
         with self._lock:
             loop, thread = self._loop, self._loop_thread
             self._loop = None
@@ -199,19 +228,19 @@ class SqlArtifactRegistryStore:
     def _current_col(self, row: type) -> str:
         if self._explicit_current:
             return self._explicit_current
-        found = _optional_col(row, CURRENT_COLUMN_CANDIDATES)
+        found = _find_col(row, CURRENT_COLUMN_CANDIDATES)
         if found is None:
             raise PluginRepositorySchemaError(
-                f"{row.__name__}: нет колонки указателя текущей версии "
-                f"{list(CURRENT_COLUMN_CANDIDATES)}; без CAS публикация небезопасна. "
-                f"Добавьте булеву 'is_current' в A10 или передайте current_column=."
+                f"{row.__name__}: нет колонки is_current {list(CURRENT_COLUMN_CANDIDATES)}; "
+                f"без CAS/partial unique публикация небезопасна. Добавьте 'is_current' в A10 "
+                f"или передайте current_column=."
             )
         return found
 
     def _lock_col(self, row: type) -> str | None:
         if self._explicit_lock:
             return self._explicit_lock
-        return _optional_col(row, VERSION_COLUMN_CANDIDATES, integer_only=True)
+        return _find_col(row, VERSION_COLUMN_CANDIDATES, integer_only=True)
 
     def _now(self) -> datetime:
         value = self._clock()
@@ -229,32 +258,41 @@ class SqlArtifactRegistryStore:
     # ORM ↔ PluginArtifactRecord
     # ------------------------------------------------------------------
 
-    def _to_record(self, row: Any) -> PluginArtifactRecord:
+    def _to_record(self, row_obj: Any) -> PluginArtifactRecord:
+        row = type(row_obj)
         c = self._col
-        get = lambda name: getattr(row, c(name), None)  # noqa: E731
-        status_raw = str(get("status") or "")
-        try:
-            status = AppLifecycleStatus(status_raw)
-        except ValueError as exc:
-            raise PluginRepositorySchemaError(f"неизвестный status артефакта {status_raw!r}") from exc
-        outcome_raw = str(getattr(row, "outcome", None) or "applied")
-        try:
-            outcome = RegistryOutcome(outcome_raw)
-        except ValueError as exc:
-            raise PluginRepositorySchemaError(f"неизвестный outcome артефакта {outcome_raw!r}") from exc
+        get = lambda name: getattr(row_obj, c(name), None)  # noqa: E731
+        status = _status_to_domain(str(get("status") or ""))
+        outcome = (
+            RegistryOutcome.APPLIED
+            if status is AppLifecycleStatus.PUBLISHED
+            else RegistryOutcome.QUARANTINED
+        )
         created = aware_utc(get("created_at"))
         if not isinstance(created, datetime):
             raise PluginRepositorySchemaError("created_at артефакта отсутствует")
-        published = aware_utc(getattr(row, "published_at", None))
-        quarantine = self._quarantine_from_json(getattr(row, "quarantine", None))
+        published = aware_utc(get("published_at"))
+        manifest = json_mapping(get("manifest"), field="manifest")
+        image_ref = str(get("image_ref") or "") if self._columns.has(row, "image_ref") else ""
+        quarantine = None
+        reason = get("quarantine_reason")
+        if reason and self._columns.has(row, "quarantine_reason"):
+            quarantine = QuarantineEvidence(
+                reason=RegistryReason.INVALID_TRANSITION,
+                source_kind="plugin_artifact_registry",
+                source_id=str(get("digest")),
+                source_digest=str(get("digest")),
+                observed_at=published if isinstance(published, datetime) else created,
+                metadata={"detail": str(reason)[:200]},
+            )
         try:
             return PluginArtifactRecord(
                 plugin_id=text(get("plugin_id"), field="plugin_id"),
                 version=text(get("version"), field="version"),
                 digest=text(get("digest"), field="digest"),
-                image_ref=str(getattr(row, "image_ref", None) or ""),
-                manifest=json_mapping(get("manifest"), field="manifest"),
-                manifest_fingerprint=text(get("manifest_fingerprint"), field="manifest_fingerprint"),
+                image_ref=image_ref,
+                manifest=manifest,
+                manifest_fingerprint=_fingerprint(manifest),
                 status=status,
                 outcome=outcome,
                 quarantine=quarantine,
@@ -264,73 +302,37 @@ class SqlArtifactRegistryStore:
         except (ValueError, PluginRepositoryError) as exc:
             raise PluginRepositorySchemaError(f"строка артефакта невалидна: {exc}") from exc
 
-    @staticmethod
-    def _quarantine_to_json(evidence: QuarantineEvidence | None) -> dict[str, Any] | None:
-        if evidence is None:
-            return None
-        if is_dataclass(evidence):
-            return _jsonable(asdict(evidence))
-        return None
-
-    @staticmethod
-    def _quarantine_from_json(value: Any) -> QuarantineEvidence | None:
-        if value is None:
-            return None
-        raw = json_mapping(value, field="quarantine")
-        if not raw:
-            return None
-        try:
-            from prodavan.application.dynamic_app_registry.contracts import RegistryReason
-
-            reason_raw = raw.get("reason")
-            reason = RegistryReason(reason_raw) if reason_raw is not None else RegistryReason.INVALID_TRANSITION
-            observed_raw = raw.get("observed_at")
-            observed = (
-                datetime.fromisoformat(observed_raw)
-                if isinstance(observed_raw, str)
-                else aware_utc(observed_raw)
-            )
-            return QuarantineEvidence(
-                reason=reason,
-                source_kind=str(raw.get("source_kind", "")),
-                source_id=str(raw.get("source_id", "")),
-                source_digest=str(raw.get("source_digest", "")),
-                observed_at=observed if isinstance(observed, datetime) else datetime.now(UTC),
-                metadata=dict(raw.get("metadata") or {}),
-            )
-        except (ValueError, TypeError, PluginRepositoryError):
-            # Битая проекция карантина = fail-closed «не published», но сам
-            # артефакт читаем: явно возвращаем None, не роняя весь реестр.
-            return None
-
     def _values(self, record: PluginArtifactRecord, row: type) -> dict[str, Any]:
+        """Доменный контракт → РЕАЛЬНЫЕ колонки A10."""
         c = self._col
+        manifest = dict(record.manifest)
+        # CHECK ``manifest <> app_version_projection``: проекция ВСЕГДА отлична.
+        from prodavan.infrastructure.persistence.models.plugin_platform import (
+            build_app_version_projection,
+        )
+
         values: dict[str, Any] = {
             c("plugin_id"): record.plugin_id,
             c("version"): record.version,
             c("digest"): record.digest,
-            c("manifest"): dict(record.manifest),
-            c("manifest_fingerprint"): record.manifest_fingerprint,
-            c("status"): record.status.value,
+            c("manifest"): manifest,
+            c("app_version_projection"): build_app_version_projection(manifest),
+            c("status"): _status_to_db(record.status),
             c("created_at"): record.created_at,
+            c("published_at"): record.published_at,
+            c("image_ref"): record.image_ref or None,
+            c("cosign_verified"): False,
+            c("lifecycle_version"): 0,
+            c("quarantine_reason"): (
+                record.quarantine.reason.value if record.quarantine is not None else None
+            ),
+            c("is_current"): False,
         }
-        optional = {
-            "image_ref": record.image_ref,
-            "outcome": record.outcome.value,
-            "published_at": record.published_at,
-            "quarantine": self._quarantine_to_json(record.quarantine),
-        }
-        table = row.__table__
-        for name, value in optional.items():
-            if name in table.columns.keys():
-                values[name] = value
-        current_col = _optional_col(row, CURRENT_COLUMN_CANDIDATES)
-        if current_col is not None and current_col in table.columns.keys():
-            values[current_col] = False
-        return values
+        existing = column_names(row)
+        return {key: value for key, value in values.items() if key in existing}
 
     # ------------------------------------------------------------------
-    # RegistryStorePort (sync) — мост в async
+    # RegistryStorePort (sync)
     # ------------------------------------------------------------------
 
     def add(self, record: PluginArtifactRecord) -> None:
@@ -374,7 +376,6 @@ class SqlArtifactRegistryStore:
         try:
             row = self._row()
             table = row.__table__
-            # Явная проверка дубликата ДО вставки (детерминированный отказ).
             async with self._session_ctx() as session:
                 existing = (
                     await session.execute(
@@ -393,9 +394,9 @@ class SqlArtifactRegistryStore:
         except ConcurrentPublishError:
             raise
         except IntegrityError as exc:
-            # Параллельный INSERT того же digest/версии: отказ, не перезапись.
             raise ConcurrentPublishError(
-                f"гонка публикации {record.plugin_id}@{record.version}: уникальность нарушена"
+                f"гонка публикации {record.plugin_id}@{record.version}: "
+                f"нарушена уникальность (plugin_id,version) или oci_digest"
             ) from exc
         except PluginRepositoryError:
             raise
@@ -403,13 +404,15 @@ class SqlArtifactRegistryStore:
             raise PluginRepositoryUnavailable(f"add artifact failed: {exc}") from exc
 
     async def replace_async(self, record: PluginArtifactRecord) -> None:
-        """Обновить запись по (plugin_id, version) (quarantine/rollback/promote)."""
+        """Обновить запись (quarantine/rollback/promote) по (plugin_id, version)."""
         try:
             row = self._row()
             table = row.__table__
             values = self._values(record, row)
             values.pop(self._col("plugin_id"), None)
             values.pop(self._col("version"), None)
+            values.pop(self._col("is_current"), None)  # указатель меняет только set_current
+            values.pop(self._col("lifecycle_version"), None)  # CAS-счётчик не сбрасываем
             async with self._session_ctx() as session:
                 result = await session.execute(
                     update(row)
@@ -482,7 +485,7 @@ class SqlArtifactRegistryStore:
             raise PluginRepositoryUnavailable(f"get artifact failed: {exc}") from exc
 
     async def current_async(self, plugin_id: str) -> PluginArtifactRecord | None:
-        """Текущая версия: строго по колонке-указателю (не «первая попавшаяся»)."""
+        """Текущая версия: строго ``is_current = true`` (не «первая попавшаяся»)."""
         try:
             row = self._row()
             table = row.__table__
@@ -509,14 +512,16 @@ class SqlArtifactRegistryStore:
 
         Алгоритм (одна транзакция):
 
-        1. ``SELECT ... FOR UPDATE`` строки-кандидата (блокировка публикации);
-           при наличии целочисленной колонки версии — читаем её как CAS-ожидание.
-        2. Проверяем, что целевая версия существует и PUBLISHED.
-        3. ``UPDATE`` снимает ``is_current`` у всех версий плагина и ставит его
-           целевой; если задан ``expected_version`` (или найден числовой CAS),
-           добавляем ``WHERE <lock_col> = ожидаемое`` и проверяем ``rowcount``.
-        4. ``rowcount == 0`` → :class:`ConcurrentPublishError` (deny второй
-           публикации). ``commit`` только при подтверждённом CAS.
+        1. ``SELECT ... FOR UPDATE`` строки-кандидата (сериализует публикации
+           одного плагина) + читаем ``lifecycle_version`` как CAS-ожидание.
+        2. Проверяем: версия есть, ``status='published'``, ``cosign_verified``
+           (если колонка есть) — иначе отказ (кр. 18).
+        3. ``UPDATE`` снимает ``is_current`` у всех версий плагина.
+        4. ``UPDATE`` ставит ``is_current=True`` целевой версии с
+           ``WHERE lifecycle_version = ожидаемая`` и инкрементом счётчика;
+           ``rowcount != 1`` → :class:`ConcurrentPublishError` (deny).
+        5. Partial unique ``UNIQUE(plugin_id) WHERE is_current = true`` в A10 —
+           вторая линия защиты на уровне БД.
 
         ``append_lifecycle`` вызывается реестром ПОСЛЕ этого метода; при ошибке
         здесь ни указатель, ни лог не фиксируются.
@@ -531,13 +536,13 @@ class SqlArtifactRegistryStore:
             plugin_col = table.columns[self._col("plugin_id")]
             version_col = table.columns[self._col("version")]
             async with self._session_ctx() as session:
-                # FOR UPDATE: сериализует параллельные публикации одного плагина.
-                candidate_stmt = (
-                    select(row)
-                    .where(plugin_col == plugin_id, version_col == version)
-                    .with_for_update()
-                )
-                candidate = (await session.execute(candidate_stmt)).scalars().first()
+                candidate = (
+                    await session.execute(
+                        select(row)
+                        .where(plugin_col == plugin_id, version_col == version)
+                        .with_for_update()
+                    )
+                ).scalars().first()
                 if candidate is None:
                     raise PluginRepositoryUnavailable(
                         f"set_current: версия {plugin_id}@{version} не найдена"
@@ -547,18 +552,17 @@ class SqlArtifactRegistryStore:
                     raise PluginRepositoryUnavailable(
                         f"set_current: {plugin_id}@{version} не PUBLISHED → отказ публикации"
                     )
+                if self._columns.has(row, "cosign_verified"):
+                    if getattr(candidate, self._col("cosign_verified"), False) is not True:
+                        raise PluginRepositoryUnavailable(
+                            "set_current: cosign-подпись не подтверждена → QUARANTINED"
+                        )
 
-                expected = expected_version
-                cas_value: int | None = None
-                if lock_col is not None:
-                    cas_value = getattr(candidate, lock_col, None)
-                    if not isinstance(cas_value, int):
-                        cas_value = None
-                if expected is not None:
+                if expected_version is not None:
                     current_record = await self.current_async(plugin_id)
-                    if current_record is not None and current_record.version != expected:
+                    if current_record is not None and current_record.version != expected_version:
                         raise ConcurrentPublishError(
-                            f"гонка публикации: ожидался current={expected}, "
+                            f"гонка публикации: ожидался current={expected_version}, "
                             f"фактически {current_record.version}"
                         )
 
@@ -566,22 +570,26 @@ class SqlArtifactRegistryStore:
                 await session.execute(
                     update(row).where(plugin_col == plugin_id).values(**{current_col: False})
                 )
-                # Ставим указатель целевой версии с CAS по версии строки.
+                # Ставим указатель целевой версии с CAS по счётчику.
                 target_stmt = (
                     update(row)
                     .where(plugin_col == plugin_id, version_col == version)
                     .values(**{current_col: True})
                 )
+                cas_value: int | None = None
+                if lock_col is not None:
+                    raw = getattr(candidate, lock_col, None)
+                    cas_value = int(raw) if isinstance(raw, int) else None
                 if lock_col is not None and cas_value is not None:
                     target_stmt = target_stmt.where(
                         table.columns[lock_col] == cas_value
-                    ).values(**{lock_col: cas_value + 1})
+                    ).values(**{current_col: True, lock_col: cas_value + 1})
                 result = await session.execute(target_stmt)
                 if result.rowcount != 1:
                     await _rollback_if_owned(session, self._session is None)
                     raise ConcurrentPublishError(
                         f"CAS не подтверждён для {plugin_id}@{version}: "
-                        "параллельная публикация изменила версию"
+                        "параллельная публикация изменила lifecycle_version"
                     )
                 await _commit_if_owned(session, self._session is None)
         except (ConcurrentPublishError, PluginRepositoryUnavailable, PluginRepositoryError, PluginRepositorySchemaError):
@@ -592,13 +600,10 @@ class SqlArtifactRegistryStore:
     async def append_lifecycle_async(
         self, *, command: RollbackCommand | None, actor: str, detail: str
     ) -> None:
-        """Append-only журнал lifecycle (подтверждается транзакцией записи)."""
+        """Append-only журнал lifecycle (решение — строка артефакта в БД)."""
         text(actor, field="actor")
         with self._lock:
             self._lifecycle.append((actor, detail, command))
-        # Если A10 предоставляет отдельную таблицу lifecycle — родитель может
-        # подключить её; здесь журнал хранится в памяти процесса и НЕ считается
-        # источником решения (решение — текущая строка артефакта в БД).
 
     async def append_quarantine_async(self, evidence: QuarantineEvidence) -> None:
         if not isinstance(evidence, QuarantineEvidence):
@@ -620,23 +625,6 @@ class SqlArtifactRegistryStore:
 def _run_loop(loop: asyncio.AbstractEventLoop) -> None:
     asyncio.set_event_loop(loop)
     loop.run_forever()
-
-
-def _jsonable(value: Any) -> Any:
-    """Привести dataclass-проекцию к JSON-совместимому виду (без raw данных)."""
-    if is_dataclass(value) and not isinstance(value, type):
-        return _jsonable(asdict(value))
-    if isinstance(value, dict):
-        return {str(key): _jsonable(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_jsonable(item) for item in value]
-    if isinstance(value, datetime):
-        return value.astimezone(UTC).isoformat()
-    if hasattr(value, "value"):  # StrEnum
-        return str(value.value)
-    if isinstance(value, (str, int, float, bool)) or value is None:
-        return value
-    return str(value)
 
 
 class _BorrowedSession:

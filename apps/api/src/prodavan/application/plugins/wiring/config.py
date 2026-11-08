@@ -107,13 +107,23 @@ class PluginPlatformConfig:
 
     # ------------------------------------------------------------------ сборка
     @classmethod
-    def from_settings(cls, settings: Any) -> "PluginPlatformConfig":
+    def from_settings(
+        cls,
+        settings: Any,
+        *,
+        environ: Mapping[str, str] | None = None,
+    ) -> "PluginPlatformConfig":
         """Спроецировать ``Settings`` (или любой structural fake) в конфиг.
 
         Читаются ТОЛЬКО поля из ``PLUGIN_SETTING_FIELDS``: слой wiring не знает
         ни про БД, ни про auth-секреты агентского контура. Отсутствующее поле
         = ошибка конфигурации, а не дефолт «на всякий случай» (fail-closed).
+
+        ``environ`` — явная подмена окружения для детерминированных тестов;
+        по умолчанию читается ``os.environ`` (переменная
+        ``PLUGIN_CLAIMS_PREVIOUS_SECRETS`` не является полем ``Settings``).
         """
+        environment = os.environ if environ is None else environ
         values: dict[str, Any] = {}
         for name in PLUGIN_SETTING_FIELDS:
             if not hasattr(settings, name):
@@ -127,7 +137,7 @@ class PluginPlatformConfig:
             enabled=bool(values["plugin_platform_enabled"]),
             claims_secret=str(values["plugin_claims_secret"] or ""),
             previous_claims_secrets=read_previous_secrets(
-                os.environ.get(PLUGIN_CLAIMS_PREVIOUS_SECRETS_ENV, "")
+                environment.get(PLUGIN_CLAIMS_PREVIOUS_SECRETS_ENV, "")
             ),
             claims_ttl_seconds=int(values["plugin_claims_ttl_seconds"]),
             claims_issuer=str(values["plugin_claims_issuer"]),
@@ -201,9 +211,23 @@ class PluginPlatformConfig:
                 "plugin idle/ready/wake limits must be positive integers"
             )
         # Пустые идентификаторы контура = потом не соберётся mint/verify/audit.
-        for name in ("claims_issuer", "claims_audience", "tenant_db_host", "oci_registry", "cosign_issuer", "min_platform_version"):
+        for name in (
+            "claims_issuer",
+            "claims_audience",
+            "tenant_db_host",
+            "oci_registry",
+            "cosign_issuer",
+            "min_platform_version",
+        ):
             if not str(getattr(self, name) or "").strip():
                 raise PluginPlatformConfigError(f"{name} must not be empty")
+
+        if self.cosign_identity.strip() and self.cosign_identity == self.claims_secret.strip():
+            # Секрет подписи JWT не должен случайно оказаться OCI identity:
+            # это разные trust-контуры, и в логах/манифестах identity виден.
+            raise PluginPlatformConfigError(
+                "PLUGIN_COSIGN_IDENTITY must not equal PLUGIN_CLAIMS_SECRET"
+            )
 
         if not self.enabled:
             # Выключено: сборка не создаёт сервисы, секрет/origin не нужны.
@@ -220,6 +244,14 @@ class PluginPlatformConfig:
             raise PluginPlatformConfigError(
                 "PLUGIN_PLATFORM_ENABLED=true requires PLUGIN_STATIC_ORIGIN "
                 "(отдельный origin для iframe, не agentscale.dev)"
+            )
+        if not self.cosign_identity.strip():
+            # Keyless cosign: без --certificate-identity сборка verifier'а
+            # возможна, но каждый артефакт ушёл бы в карантин. Честнее упасть
+            # на старте (settings.py такого guard'а не имеет — это дубль F11).
+            raise PluginPlatformConfigError(
+                "PLUGIN_PLATFORM_ENABLED=true requires PLUGIN_COSIGN_IDENTITY "
+                "(keyless cosign --certificate-identity)"
             )
         for index, secret in enumerate(self.previous_claims_secrets):
             if not secret.strip():

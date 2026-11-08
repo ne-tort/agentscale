@@ -84,14 +84,39 @@ spec:
             - secretRef:
                 name: agentscale-b2b-secrets
                 optional: true
-            # Plugin object storage (дизайн v4 §5.4): отдельный admin-кред для
-            # tenant-* бакетов. Fallback на root/S3_* из configmap ЗАПРЕЩЁН —
-            # config.py задачи MinIO IAM fail-closed при отсутствии этого Secret.
-            # Dev-значения создаёт Job plugin-buckets-init.yaml; для shared
-            # контура заменить на SealedSecret.
-            - secretRef:
-                name: agentscale-minio-plugin-admin
-                optional: true
+          # Plugin object storage (дизайн v4 §5.4): ДВА РАЗНЫХ principal.
+          # admin создаёт бакеты/политики, presigner подписывает URL узкой
+          # политикой только на tenant-*/module-* (иначе presigned унаследовал
+          # бы agentscale/* от общего service user). Fallback на root/S3_*
+          # из configmap ЗАПРЕЩЁН — config.py fail-closed без обеих пар.
+          # Dev-значения создаёт Job plugin-buckets-init.yaml; для shared
+          # контура заменить на SealedSecret и убрать optional (переменные
+          # обязательны, иначе платформа должна упасть, а не работать без них).
+          env:
+            - name: PLUGIN_MINIO_ADMIN_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: agentscale-minio-plugin-admin
+                  key: access-key
+                  optional: true
+            - name: PLUGIN_MINIO_ADMIN_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: agentscale-minio-plugin-admin
+                  key: secret-key
+                  optional: true
+            - name: PLUGIN_MINIO_PRESIGN_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: agentscale-minio-plugin-presigner
+                  key: access-key
+                  optional: true
+            - name: PLUGIN_MINIO_PRESIGN_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: agentscale-minio-plugin-presigner
+                  key: secret-key
+                  optional: true
           volumeMounts:
             - name: storage
               mountPath: /data/storage

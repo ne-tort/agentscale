@@ -23,6 +23,9 @@ dependencies = [
     # живая проверка по JSON Schema draft 2020-12. Ручной валидатор остаётся
     # как fail-closed fallback, но в CI схема должна проверяться по-настоящему.
     "jsonschema>=4.23.0",
+    # Plugin Infra Controller renderer (envoy.yaml) и as-built
+    # openclaw_config_materializer уже используют yaml.safe_dump/safe_load.
+    "PyYAML>=6.0.2",
     "redis>=5.0.0",
     "boto3>=1.35.0",
     "celery[redis]>=5.4.0",

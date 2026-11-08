@@ -77,7 +77,7 @@ stringData:
   access-key: plugin-object-presigner
   secret-key: plugin-object-presigner-secret
 ---
-# Узкая политика подписанта: ТОЛЬKO GetObject/PutObject на
+# Узкая политика подписанта: ТОЛЬКО GetObject/PutObject на
 # tenant-*/module-*. Ни CreateBucket, ни DeleteBucket, ни PutBucketPolicy,
 # ни agentscale/* — подпись от этого ключа физически не даст прав шире префикса.
 apiVersion: v1

@@ -12,11 +12,11 @@ import pytest
 from jwt import get_unverified_header
 
 from prodavan.application.plugins.identity.allowlist import assert_plugin_surface
+from prodavan.application.plugins.identity.mint import mint_plugin_claims, verify_plugin_token
 from prodavan.application.plugins.identity.types import (
     PluginTokenError,
     PluginTokenErrorCode,
 )
-from prodavan.application.plugins.identity.mint import mint_plugin_claims, verify_plugin_token
 from prodavan.application.plugins.wiring.config import (
     PLUGIN_CLAIMS_PREVIOUS_SECRETS_ENV,
     PluginPlatformConfig,
@@ -34,10 +34,6 @@ from tests.unit.plugins.wiring.conftest import (
     FakeCosign,
     FakeGrantStore,
     FakeSettings,
-    admin_ports,
-    cosign,
-    fake_settings,
-    grant_store,
 )
 
 
@@ -167,6 +163,20 @@ def test_enabled_without_admin_ports_raises(
         )
 
 
+def test_enabled_without_cosign_identity_raises(
+    monkeypatch: pytest.MonkeyPatch,
+    grant_store: FakeGrantStore,
+    cosign: FakeCosign,
+    admin_ports: object,
+) -> None:
+    monkeypatch.delenv(PLUGIN_CLAIMS_PREVIOUS_SECRETS_ENV, raising=False)
+    with pytest.raises(PluginPlatformConfigError, match="PLUGIN_COSIGN_IDENTITY"):
+        build_plugin_platform(
+            FakeSettings(plugin_cosign_identity=""),
+            **_full_overrides(grant_store, cosign, admin_ports),
+        )
+
+
 def test_unknown_override_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv(PLUGIN_CLAIMS_PREVIOUS_SECRETS_ENV, raising=False)
     with pytest.raises(PluginPlatformConfigError, match="unknown"):
@@ -204,8 +214,7 @@ def test_build_platform_has_every_required_field(
         "object_store",
         "egress",
         "activator",
-        "gateway_auth",
-        "gateway_proxy",
+        "gateway",
         "admin",
         "event_dispatcher",
     ):
@@ -354,3 +363,4 @@ def test_service_overrides_are_used(
         **_full_overrides(grant_store, cosign, admin_ports),
     )
     assert platform is not None
+    assert platform.capability_service is sentinel

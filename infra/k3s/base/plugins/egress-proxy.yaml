@@ -154,7 +154,12 @@ spec:
         - name: ghcr-pull
       containers:
         - name: envoy
-          image: ghcr.io/ne-tort/envoy:v1.31.2
+          # Собственный образ Envoy v1.31.10 (последний стабильный патч линии;
+          # 1.31.2 из раннего дизайна устарел). Сборка — plugin-base-images.yml
+          # из infra/images/plugins/egress-proxy/. ВАЖНО: после первого прогона
+          # workflow ЗАМЕНИТЬ :latest на @sha256:<digest из STEP_SUMMARY>.
+          # ghcr-зеркало: Docker Hub на холодной ноде отдаёт 429 TOOMANYREQUESTS.
+          image: ghcr.io/ne-tort/plugin-base-envoy:latest
           imagePullPolicy: IfNotPresent
           command:
             - envoy

@@ -14,15 +14,27 @@
 * ``ensure_bucket`` **МЕРДЖИТ** политики, а не перезаписывает: у компании может
   быть несколько плагинов, каждый вызывает grant со своей ``bucket_policy``;
   перезапись отозвала бы доступ у уже установленных плагинов (важный контракт
-  из отчёта задачи 06). Мердж идемпотентный и дедуплицирует Statement по Sid.
+  из отчёта задачи 06). Мердж идемпотентный и дедуплицирует по каноническому
+  JSON Statement (НЕ по Sid — Sid у всех плагинов одинаковые).
+* ``MinioPresigner`` — **ОСНОВНОЙ** путь выдачи доступа (вердикт родителя: STS
+  не подтверждён), подписывает ОТДЕЛЬНЫМ principal ``plugin-object-presigner``
+  с узкой политикой только на ``tenant-*/module-*``. As-built
+  ``agentscale-api`` имеет ``agentscale/*`` — подпись им запрещена.
 * Любая ошибка MinIO/Admin API → ``BucketUnavailable`` (или ``StsUnavailable``
   для STS), а не «и так сойдёт» и не тихое разрешение.
 * Ключи нормализуются в ``module-<plugin>/...``. Адаптер НЕ доверяет сервису и
   перепроверяет жёсткий префикс сам: ``../``, чужой ``module-*``/``tenant-*``,
   абсолютный путь, ``//``, ``\\``, wildcard, NUL → ``ObjectAccessDenied``.
-* При отсутствии/недоступности STS — ``StsUnavailable``, НИКОГДА root-креды и
-  НИКОГДА постоянные креды service user'а. Единственный деградационный путь —
-  scoped presigned URL (§12.8).
+* При отключённом/недоступном STS — ``StsUnavailable``, НИКОГДА root-креды и
+  НИКОГДА постоянные креды service user'а. ``StsPort``/``ScopedCredentials``
+  сохранены как opt-in за ``PLUGIN_MINIO_STS_ENABLED``.
+* Presigned URL и ``X-Amz-Signature`` НЕ логируются (аудит — только
+  ``key_digest``). Отзыв URL не мгновенный: они живут до ``X-Amz-Expires``
+  ≤ 3600 с; ``revoke`` = запрет НОВЫХ URL + деактивация grant, мгновенный
+  отзыв = ротация ключа подписанта (чужой ``service.py`` задачи 06 НЕ правлен).
+* In-cluster host не резолвится снаружи: для внешних клиентов подпись СРАЗУ на
+  внешний host (``PLUGIN_MINIO_PUBLIC_ENDPOINT``) либо ``proxy=1``; перепись
+  Host ПОСЛЕ подписи инвалидирует SigV4.
 
 Технически: boto3 уже используется в ``infrastructure/files/minio_store.py``,
 новых зависимостей НЕ добавляем. Синхронные вызовы boto3 выносятся в
@@ -35,11 +47,11 @@ event loop. Клиент создаётся лениво и инжектируе
 ``RELEASE.2024-10-02T17-50-41Z`` в ``minio.yaml``):
   1. MinIO STS ``AssumeRole`` + session policy (``Policy=json.dumps(...)``),
      ``DurationSeconds`` и ``StringLike`` по ``s3:prefix`` (v4 §12.8, план §5.1).
-     Поэтому ``MinioSts`` по умолчанию НЕ подключается фабрикой, а при вызове
-     без подтверждённой поддержки поднимает ``StsUnavailable``.
+     Сеть недоступна, документ НЕ ПОДТВЕРЖДЁН (вердикт родителя): scoped presigned
+     по умолчанию, STS opt-in; ``MinioSts`` отвечает ``StsUnavailable`` ДО вызова.
   2. Метод MinIO Admin API для **жёсткой** квоты (``SetBucketQuota`` /
      ``mc admin bucket quota ... --hard``). boto3 S3-клиент таких операций не
-     имеет, поэтому ``set_quota`` либоDelegируется инжектированному
+     имеет, поэтому ``set_quota`` делегируется инжектированному
      ``QuotaAdminPort`` (реализация через mc/Admin API — зона родителя), либо
      fail-closed ``BucketUnavailable``. ``get_usage`` считает сумму ``Size``
      через ``list_objects_v2`` — это observability, НЕ hard limit, но и НЕ
@@ -90,7 +102,7 @@ _ALLOWED_STATEMENT_KEYS = frozenset(
 
 
 def _validate_bucket(bucket: str) -> str:
-    """Разрешить ТОЛЬKO ``tenant-<company>`` из валидного идентификатора.
+    """Разрешить ТОЛЬКО ``tenant-<company>`` из валидного идентификатора.
 
     Сравниваем с каноническим ``bucket_name`` после обратной проверки: имя
     ``tenant-co_other`` не должно случайно совпасть с чьим-то «почти таким же».
@@ -195,8 +207,10 @@ def _normalize_key(key: str) -> str:
     canonical_prefix = _normalize_prefix(prefix)
     if not tail or tail.startswith("/") or ".." in PurePosixPath(tail).parts:
         raise err.ObjectAccessDenied(f"ключ {key!r} выходит за пределы {prefix!r}")
-    if "tenant-" in tail.lower():
-        raise err.ObjectAccessDenied(f"ключ {key!r} адресует чужой бакет в хвосте")
+    # Хвост не должен начинаться с «чужого» префикса плагина (как в service):
+    # ``module-mod_a/module-mod_b/...`` — попытка выйти из своей области.
+    if tail.startswith("module-") or tail.lower().startswith("tenant-"):
+        raise err.ObjectAccessDenied(f"ключ {key!r} адресует чужой префикс/бакет")
     return f"{canonical_prefix}{tail}"
 
 
@@ -401,6 +415,15 @@ class QuotaAdminPort(Protocol):
 
     async def enable_quota_enforcement(self) -> None: ...
 
+    async def probe(self) -> None:
+        """Проверить доступность Admin API ДО мутации (fail-fast).
+
+        Реализация должна поднять исключение, если квоты не включены; тогда
+        ``ensure_bucket`` откажет ДО создания бакета, не оставляя частичного
+        состояния (бакет есть, а квоты нет = безлимит).
+        """
+        ...
+
 
 class UnavailableQuotaAdmin:
     """Fail-closed заглушка: квоты НЕ включены → явный отказ, не «безлимит»."""
@@ -412,6 +435,9 @@ class UnavailableQuotaAdmin:
         )
 
     async def enable_quota_enforcement(self) -> None:
+        raise err.BucketUnavailable("MinIO Admin API квот не сконфигурирован")
+
+    async def probe(self) -> None:
         raise err.BucketUnavailable("MinIO Admin API квот не сконфигурирован")
 
 
@@ -507,6 +533,22 @@ class MinioBucketAdmin:
             raise err.BucketUnavailable("некорректное значение квоты") from exc
         if limit <= 0:
             raise err.BucketUnavailable("квота бакета должна быть положительной")
+
+        # Fail-fast: если Admin API квот недоступен, отказываем ДО create_bucket.
+        # Иначе бакет появился бы без hard limit (молчаливый безлимит), а
+        # исключение пришло бы только после записи политики.
+        probe = getattr(self.quota_admin, "probe", None)
+        if probe is not None:
+            try:
+                result = probe()
+                if isinstance(result, Awaitable):
+                    await result
+            except err.PluginObjectError:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                raise err.BucketUnavailable(
+                    f"Admin API квот недоступен: {type(exc).__name__}"
+                ) from exc
 
         try:
             exists = await self._bucket_exists(safe_bucket)

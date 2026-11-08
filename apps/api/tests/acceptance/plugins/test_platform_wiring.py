@@ -186,13 +186,15 @@ def test_every_declared_port_has_impl_or_explicit_stub() -> None:
         ports_mod = _require_module(
             f"prodavan.application.plugins.{zone}.ports"
         )
-        # Собираем все runtime_checkable Protocol из ports.py зоны.
+        # Собираем ВСЕ Protocol из ports.py зоны (не только runtime_checkable:
+        # gateway/admin объявили протоколы без декоратора, но они всё равно
+        # обязаны иметь адаптер или явную заглушку).
         declared = {
             name
             for name, obj in vars(ports_mod).items()
             if isinstance(obj, type)
             and getattr(obj, "_is_protocol", False)
-            and getattr(obj, "_is_runtime_protocol", False)
+            and name != "Protocol"
         }
         for port_name in declared:
             key = (zone, port_name)

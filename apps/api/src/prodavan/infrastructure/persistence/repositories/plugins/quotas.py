@@ -31,7 +31,6 @@ FAIL-CLOSED (главное требование ТЗ)
 
 from __future__ import annotations
 
-import asyncio
 import inspect
 from datetime import UTC, datetime
 from typing import Any
