@@ -236,7 +236,7 @@ spec:
         # RuntimeConfigError после добавления PLUGIN_RUNTIME_NAMESPACE).
         # Менять вручную вместе с конфигом; configMapGenerator с хешем здесь
         # неприменим — ConfigMap статический и используется Sync-хуками.
-        agentscale.io/plugin-config-revision: "3"
+        agentscale.io/plugin-config-revision: "4"
     spec:
       serviceAccountName: plugin-gateway
       automountServiceAccountToken: true
@@ -248,7 +248,11 @@ spec:
           # контура (задача 11). Pin по digest в CI — задача 16; здесь тег
           # `:latest` НЕ используется для плагиновых артефактов (§5.1).
           image: ghcr.io/ne-tort/agentscale-api:latest
-          imagePullPolicy: IfNotPresent
+          # `:latest` платформенного API перезаливается CI Images при каждом
+          # push в main. С IfNotPresent нода продолжала бы использовать
+          # закэшированный старый слой, и gatewaypod оставался бы с кодом,
+          # который уже исправлен (CrashLoop по _admin_ports).
+          imagePullPolicy: Always
           command:
             - uvicorn
             - prodavan.main_plugin_gateway:app
