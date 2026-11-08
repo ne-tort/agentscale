@@ -169,8 +169,11 @@ spec:
           # ghcr-зеркало: Docker Hub на холодной ноде отдаёт 429 TOOMANYREQUESTS.
           image: ghcr.io/ne-tort/plugin-base-pgbouncer:latest
           imagePullPolicy: IfNotPresent
+          # Бинарник официального базового образа лежит в /opt/pgbouncer и НЕ
+          # добавлен в PATH; `command` перекрывает ENTRYPOINT образа, поэтому
+          # указываем ПОЛНЫЙ путь (иначе runc: executable file not found).
           command:
-            - pgbouncer
+            - /opt/pgbouncer/pgbouncer
             - /etc/pgbouncer/config/pgbouncer.ini
           ports:
             - name: pgb

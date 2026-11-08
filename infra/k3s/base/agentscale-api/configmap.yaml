@@ -117,6 +117,10 @@ data:
   PLUGIN_MINIO_STS_ENABLED: "false"
   PLUGIN_MINIO_REGION: us-east-1
   PLUGIN_MINIO_ENDPOINT: http://agentscale-minio:9000
+  # Runtime-адаптеры плагинов (activator/k8s/state): обязательный namespace
+  # без фолбэка на агентский контур (ADR-008). Совпадает с plugin-gateway-config.
+  PLUGIN_RUNTIME_NAMESPACE: agentscale-dev
+  PLUGIN_RUNTIME_DEPLOYMENT_PREFIX: plugin
   # Секреты НЕ лежат в ConfigMap: PLUGIN_CLAIMS_SECRET,
   # PLUGIN_CLAIMS_PREVIOUS_SECRETS, PLUGIN_TENANT_DB_ADMIN_URL,
   # PLUGIN_MINIO_ADMIN_*, PLUGIN_MINIO_PRESIGN_* приносит k8s Secret/SealedSecret.

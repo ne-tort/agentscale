@@ -141,6 +141,11 @@ data:
   PLUGIN_READY_TIMEOUT_SECONDS: "120"
   PLUGIN_MAX_CONCURRENT_WAKES: "2"
   PLUGIN_ACTIVATOR_TARGET_LABEL: "app=plugin"
+  # Namespace k3s для ScalePort/ReadinessPort/ConfigMapStateStore. Без этого
+  # RuntimeConfig.from_env() fail-closed отказывает в сборке (ADR-008: свой
+  # trust-контур, без фолбэка на агентский namespace).
+  PLUGIN_RUNTIME_NAMESPACE: "agentscale-dev"
+  PLUGIN_RUNTIME_DEPLOYMENT_PREFIX: "plugin"
 
   # Webhook-контракт (§7.5): HMAC + идемпотентность, без изобретения нового.
   PLUGIN_WEBHOOK_SIGNATURE_HEADER: "X-Prodavan-Signature"
