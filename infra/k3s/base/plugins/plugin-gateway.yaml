@@ -228,6 +228,15 @@ spec:
         app.kubernetes.io/name: plugin-gateway
         app.kubernetes.io/part-of: agentscale
         app.kubernetes.io/component: plugin-gateway
+      annotations:
+        # ConfigMap монтируется через envFrom, но сам по себе не перекатывает
+        # Deployment: kubelet не сравнивает содержимое envFrom. Явная ревизия
+        # в pod template гарантирует rollout при ЛЮБОЙ правке plugin-gateway-
+        # config / secret (иначе pod остаётся со старым env и падает по
+        # RuntimeConfigError после добавления PLUGIN_RUNTIME_NAMESPACE).
+        # Менять вручную вместе с конфигом; configMapGenerator с хешем здесь
+        # неприменим — ConfigMap статический и используется Sync-хуками.
+        agentscale.io/plugin-config-revision: "3"
     spec:
       serviceAccountName: plugin-gateway
       automountServiceAccountToken: true
