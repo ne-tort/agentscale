@@ -141,6 +141,37 @@ class PluginCompositionError(RuntimeError):
 # ---------------------------------------------------------------------------
 
 
+class _UnwiredDeploymentAdmin:
+    """Fail-closed ``DeploymentAdminPort`` до появления k8s lifecycle-адаптера.
+
+    ``build_plugin_admin_ports`` проверяет ``isinstance(deployment_admin,
+    DeploymentAdminPort)`` (``@runtime_checkable`` Protocol), поэтому одного
+    ``_UnwiredPort`` с ``__getattr__`` мало: Protocol ищет РЕАЛЬНЫЕ атрибуты
+    класса. Объявляем все три метода явно. Каждый честно отказывает — grant
+    БЕЗ созданного Deployment не должен выглядеть успешным, а uninstall БЕЗ
+    purge не должен «пройти». Имя попадает в ``plugin_unwired_ports``.
+    """
+
+    async def ensure_deployment(
+        self, *, company_id: str, plugin_id: str, plugin_instance_id: str,
+        artifact_digest: str, dsn_ref: str,
+    ) -> str:
+        raise RuntimeError(
+            "DeploymentAdminPort.ensure_deployment() is not wired (F11: k8s "
+            "create-deployment adapter required before granting a plugin)"
+        )
+
+    async def purge_infra(self, *, company_id: str, plugin_id: str) -> bool:
+        raise RuntimeError(
+            "DeploymentAdminPort.purge_infra() is not wired (F11: k8s purge adapter required)"
+        )
+
+    async def runtime_status(self, *, company_id: str, plugin_id: str) -> Any:
+        raise RuntimeError(
+            "DeploymentAdminPort.runtime_status() is not wired (F11: k8s status adapter required)"
+        )
+
+
 class _UnwiredPort:
     """Structural-совместимый порт, который ЯВНО отказывает при любом вызове.
 
@@ -418,7 +449,16 @@ def _admin_ports(
 
         instance_resolver = _wrap("admin_ports", InMemoryInstanceResolver)
         unwired.append("instance_resolver (in-memory; кластеру нужна БД, A10)")
-    deployment_admin = need("deployment_admin")
+    deployment_admin = ov.get("deployment_admin")
+    if deployment_admin is None:
+        # K8s lifecycle (ensure_deployment / purge_infra / runtime_status) пока
+        # не имеет отдельного адаптера в worktree: K8sScalePort умеет только
+        # 0→1 + readiness. Передаём ЯВНЫЙ fail-closed объект, реализующий
+        # DeploymentAdminPort: сборка платформы проходит (capabilities/gateway
+        # работают), но grant/uninstall БЕЗ реального создания Deployment
+        # честно отказывают, а не «тихо успешны». НЕ подмена источника истины.
+        deployment_admin = _UnwiredDeploymentAdmin()
+        unwired.append("deployment_admin (k8s create/purge ещё не подключён)")
 
     kwargs: dict[str, Any] = {
         "platform": platform_admin,
