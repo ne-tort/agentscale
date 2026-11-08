@@ -66,14 +66,26 @@ def create_app() -> FastAPI:
         # ОДНА точка F11-композиции: build_plugin_platform + attach_plugin_platform
         # + install_plugin_gateway_runtime + attach_admin_runtime + guard.
         # Без неё все 19 ключей app.state пусты и роутеры дают 503.
-        # get_session_factory()/get_redis_manager() ленивые: на момент create_app
-        # ресурсы ещё не открыты, но фабрика и менеджер уже существуют —
-        # репозитории будут открывать сессию на операцию, как остальной API.
+        #
+        # create_app() работает ДО lifespan.startup(): RedisManager в этот
+        # момент ещё не зарегистрирован (get_redis_manager() -> None), а
+        # install_plugin_platform по A10 обязателен к не-None зависимости.
+        # Передаём ЛЕНИВЫЙ прокси: он Resolve'ит реальный менеджер в момент
+        # ПЕРВОГО запроса к .client (уже после startup), а до этого честно
+        # fail-closed. Это НЕ in-memory подмена источника истины.
+        class _LazyRedisManager:
+            @property
+            def client(self):
+                manager = get_redis_manager()
+                if manager is None:
+                    raise RuntimeError("RedisManager is not started yet (lifespan startup pending)")
+                return manager.client
+
         install_plugin_platform(
             app,
             settings,
             session=get_session_factory(),
-            redis=get_redis_manager(),
+            redis=_LazyRedisManager(),
         )
         app.include_router(plugin_gateway.router)
         try:
