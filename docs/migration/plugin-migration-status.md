@@ -21,7 +21,8 @@ strangler, 6 таблиц состояния платформы (ревизия 
 | Web | `pnpm exec vitest run` | **785 passed**, 0 errors |
 | Web | `pnpm exec tsc --noEmit` | 0 ошибок |
 | Web | `pnpm run build` | success |
-| infra/ops | `pytest infra/ops/tests -q` | **104 passed**, 0 failed |
+| infra/ops | `pytest infra/ops/tests -q` | **106 passed**, 0 failed |
+| GitOps | `kubectl kustomize` обоих оверлеев + аудит 7 разделов | 75 + 23 объекта, **пересечений нет**, все Secret/ConfigMap-ссылки разрешимы, RBAC согласован, приоритеты 120>110>100>50, **блокеров при sync нет** |
 | kustomize | `kubectl kustomize overlays/dev` + `overlays/dev/plugins` | оба собираются |
 | YAML | все `.github/workflows/*.yml` + `infra/**/*.yaml` | парсятся |
 | Alembic | чистый `postgres:17-alpine`, `upgrade head` + `check` | `2026110321 → 2026110801`, 6 таблиц, drift отсутствует |
@@ -104,6 +105,12 @@ strangler, 6 таблиц состояния платформы (ревизия 
 
 - `DeploymentAdminPort` — fail-closed заглушка: grant/uninstall без реального
   k8s create/purge честно отказывают. До первого рабочего плагина нужен адаптер.
+- 10 `_UnwiredPort` в `app.state.plugin_unwired_ports`. Попытка закрыть их
+  одной правкой `wiring/install.py` в раунде 2 дважды ломала композицию
+  (`bucket_admin` не привязан, затем `NameError: _gateway_ports`) — файл
+  откачен к рабочей версии. Закрывать надо ПО ОДНОМУ порту с обязательным
+  smoke `create_app()` на реальном Postgres после каждого, а не только pytest
+  (тесты используют fakes и регрессию не ловят).
 - `RouteRegistry` / `InstanceIdResolver` — in-memory; для кластера нужны БД/Redis.
 - `cosign attest` в CI добавлен, но keyless OIDC на self-hosted раннере требует
   проверки Fulcio/Rekor; fallback — фиксированный KMS trust root.
