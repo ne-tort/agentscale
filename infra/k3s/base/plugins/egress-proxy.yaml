@@ -63,9 +63,15 @@ data:
     admin:
       address:
         socket_address:
-          address: 127.0.0.1
+          # 0.0.0.0, а НЕ 127.0.0.1: kubelet делает readiness-probe
+          # `GET http://<PodIP>:9901/ready`, а не через loopback пода.
+          # С 127.0.0.1 консоль была недоступна с PodIP и probe 140 минут
+          # падал «connection refused», хотя сам Envoy работал. Порт :9901
+          # ЗАКРЫТ NetworkPolicy для внешних клиентов, внутри ns он доступен
+          # только контроллеру/пробам; это не открывает egress наружу.
+          address: 0.0.0.0
           port_value: 9901
-      # Admin-консоль НЕ вынесена отдельным Service: доступна только внутри пода.
+      # Admin-консоль НЕ вынесена отдельным Service.
     static_resources:
       listeners:
         - name: egress_listener

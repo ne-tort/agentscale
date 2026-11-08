@@ -21,10 +21,15 @@
 admin:
   address:
     socket_address:
-      address: 127.0.0.1
+      # 0.0.0.0, а НЕ 127.0.0.1: kubelet делает readiness-probe
+      # `GET http://<PodIP>:9901/ready` с УЗЛА, а не через loopback пода.
+      # Loopback-биндинг давал «connection refused» и под 0/1 Running ~140 мин.
+      # :9901 НЕ экспортируется Service (только :8080) и закрыт NetworkPolicy
+      # для внешних клиентов; это не открывает egress наружу.
+      address: 0.0.0.0
       port_value: 9901
-  # Admin-консоль НЕ вынесена отдельным Service: доступна только внутри пода.
-  # readinessProbe ходит на /ready по 127.0.0.1:9901.
+  # Admin-консоль НЕ вынесена отдельным Service: доступна с PodIP узлом
+  # (kubelet /ready) и внутри пода; readinessProbe ходит на :9901/ready.
 
 static_resources:
   listeners:

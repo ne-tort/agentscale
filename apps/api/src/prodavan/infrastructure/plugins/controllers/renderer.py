@@ -387,9 +387,16 @@ def _empty_envoy_config() -> dict[str, Any]:
     Возвращается, когда активных egress-политик НЕТ. Байт-в-байт повторяет
     структуру манифеста (admin + listener + access_log + route_config), чтобы
     сравнение с текущим ConfigMap не давало ложный patch при первом sync.
+
+    admin.address = 0.0.0.0 (НЕ 127.0.0.1): kubelet выполняет readiness-probe
+    ``GET http://<PodIP>:9901/ready`` с УЗЛА, а не из netns пода. Если
+    контроллер запишет в ConfigMap 127.0.0.1, под снова станет 0/1 Running
+    («connection refused») при первом же grant/revoke. См. также
+    ``EgressConfigGenerator.build_envoy_routes`` и тест-пин
+    ``test_envoy_admin_listens_on_pod_ip``.
     """
     return {
-        "admin": {"address": {"socket_address": {"address": "127.0.0.1", "port_value": 9901}}},
+        "admin": {"address": {"socket_address": {"address": "0.0.0.0", "port_value": 9901}}},
         "static_resources": {
             "listeners": [
                 {

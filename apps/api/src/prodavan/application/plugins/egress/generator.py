@@ -183,7 +183,13 @@ class EgressConfigGenerator:
         }
 
         return {
-            "admin": {"address": {"socket_address": {"address": "127.0.0.1", "port_value": 9901}}},
+            # admin :9901 слушает 0.0.0.0, НЕ 127.0.0.1: kubelet делает
+            # readiness HTTP GET на <PodIP>:9901/ready С УЗЛА. Loopback пода
+            # недоступен kubelet'у → «connection refused» → под вечно 0/1.
+            # Порт не экспортируется Service и закрыт NetworkPolicy для
+            # внешних; fail-closed egress это не ослабляет (clusters/routes
+            # по-прежнему только из CapabilityGrant).
+            "admin": {"address": {"socket_address": {"address": "0.0.0.0", "port_value": 9901}}},
             "static_resources": {"listeners": [listener], "clusters": clusters},
             # Метаданные НЕ попадают в envoy.yaml как поля конфигурации: это
             # контрольная информация для контроллера, обновляющего ConfigMap.

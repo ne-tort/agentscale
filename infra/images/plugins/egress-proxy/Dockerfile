@@ -58,7 +58,9 @@ LABEL org.opencontainers.image.title="agentscale-plugin-base-envoy" \
 #
 # :8080 (egress listener) и :9901 (admin) — НЕ привилегированные порты,
 # поэтому non-root биндит их без CAP_NET_BIND_SERVICE. Admin-консоль слушает
-# 127.0.0.1 и НЕ вынесена отдельным Service (только для readiness /ready).
+# 0.0.0.0 (НЕ 127.0.0.1!): kubelet делает readiness GET <PodIP>:9901/ready
+# с УЗЛА, loopback пода ему недоступен. :9901 НЕ вынесен отдельным Service
+# и закрыт NetworkPolicy для внешних — доступен только пробам/контроллеру.
 # -----------------------------------------------------------------------------
 USER root
 
@@ -97,6 +99,9 @@ EXPOSE 8080
 # с readinessProbe в egress-proxy.yaml). Образ envoyproxy/envoy основан на
 # Ubuntu, /bin/bash с /dev/tcp присутствует (в Dockerfile это shell-форма CMD,
 # НЕ JSON-массив с "CMD-SHELL" — тот синтаксис принадлежит Compose).
+# 127.0.0.1 ЗДЕСЬ корректен: проверка идёт ИЗНУТРИ контейнера, а admin слушает
+# 0.0.0.0 (покрывает и loopback). Не «исправляйте» конфиг обратно на 127.0.0.1
+# по этой строке — kubelet пробует <PodIP> с узла, а не loopback пода.
 # Отсутствие маршрутов НЕ делает под unhealthy — deny all это ШТАТНОЕ
 # стартовое состояние, а не авария.
 HEALTHCHECK --interval=10s --timeout=5s --start-period=10s --retries=5 \
