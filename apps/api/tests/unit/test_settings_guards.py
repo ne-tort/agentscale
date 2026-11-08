@@ -89,3 +89,75 @@ def test_pod_probe_disabled_needs_no_address() -> None:
     s = Settings(app_environment="prod", pod_probe_enabled=False)
     assert s.pod_probe_base_url == ""
 
+
+# --- plugin platform ---------------------------------------------------------
+#
+# Plugin-платформа — отдельный trust-контур (НЕ pod-gateway :8001). Включать её
+# без секрета подписи или без отдельного static-origin нельзя: иначе любой
+# PluginClaims принимается, а iframe оказывается на том же origin, что shell.
+
+
+def test_plugin_platform_is_off_by_default() -> None:
+    from prodavan.config.settings import Settings
+
+    s = Settings()
+    assert s.plugin_platform_enabled is False
+    assert s.plugin_claims_secret == ""
+    assert s.plugin_static_origin == ""
+    assert s.plugin_egress_mode == "none"
+
+
+def test_plugin_platform_enabled_without_secret_fails() -> None:
+    from prodavan.config.settings import Settings
+
+    with pytest.raises(RuntimeError, match="PLUGIN_CLAIMS_SECRET"):
+        Settings(plugin_platform_enabled=True, plugin_static_origin="https://plugins.example.dev")
+
+
+def test_plugin_platform_enabled_without_static_origin_fails() -> None:
+    from prodavan.config.settings import Settings
+
+    with pytest.raises(RuntimeError, match="PLUGIN_STATIC_ORIGIN"):
+        Settings(plugin_platform_enabled=True, plugin_claims_secret="s3cret")
+
+
+def test_plugin_platform_valid_configuration_is_accepted() -> None:
+    from prodavan.config.settings import Settings
+
+    s = Settings(
+        plugin_platform_enabled=True,
+        plugin_claims_secret="s3cret",
+        plugin_static_origin="https://plugin-origin.agentscale.dev",
+    )
+    assert s.plugin_claims_ttl_seconds == 300
+    assert s.plugin_claims_issuer == "agentscale-plugins"
+    assert s.plugin_claims_audience == "capability-gateway"
+
+
+def test_plugin_full_egress_requires_explicit_approval() -> None:
+    from prodavan.config.settings import Settings
+
+    with pytest.raises(RuntimeError, match="PLUGIN_EGRESS_APPROVED"):
+        Settings(plugin_egress_mode="full")
+
+
+def test_plugin_unknown_egress_mode_rejected() -> None:
+    from prodavan.config.settings import Settings
+
+    with pytest.raises(RuntimeError, match="PLUGIN_EGRESS_MODE must be"):
+        Settings(plugin_egress_mode="everything")
+
+
+def test_plugin_claims_ttl_is_bounded() -> None:
+    from prodavan.config.settings import Settings
+
+    with pytest.raises(RuntimeError, match="60..900"):
+        Settings(plugin_claims_ttl_seconds=86400)
+
+
+def test_plugin_disabled_ignores_missing_secret_and_origin() -> None:
+    from prodavan.config.settings import Settings
+
+    s = Settings(app_environment="prod", plugin_platform_enabled=False)
+    assert s.plugin_platform_enabled is False
+

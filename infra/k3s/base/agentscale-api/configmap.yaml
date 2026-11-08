@@ -88,4 +88,24 @@ data:
   POD_AGENT_RUNTIME_PORT: "3921"
   POD_AGENT_RUNTIME_API_BASE_URL: http://agentscale-api.agentscale.svc:8001/api/v1
   POD_AGENT_RUNTIME_BOOTSTRAP_ENABLED: "true"
+  # Plugin-платформа (дизайн v4): ОТДЕЛЬНЫЙ trust-контур, не pod-gateway :8001.
+  # PLUGIN_PLATFORM_ENABLED по умолчанию выключен: Settings._guard_non_dev_flags
+  # требует секрет подписи и static-origin, иначе startup падает (fail closed).
+  PLUGIN_PLATFORM_ENABLED: "false"
+  PLUGIN_CLAIMS_TTL_SECONDS: "300"
+  PLUGIN_CLAIMS_ISSUER: agentscale-plugins
+  PLUGIN_CLAIMS_AUDIENCE: capability-gateway
+  PLUGIN_STATIC_ORIGIN: ""
+  PLUGIN_TENANT_DB_HOST: tenant-postgres
+  PLUGIN_TENANT_DB_PORT: "5432"
+  PLUGIN_EGRESS_MODE: "none"
+  PLUGIN_EGRESS_APPROVED: "false"
+  PLUGIN_IDLE_TTL_SECONDS: "300"
+  PLUGIN_READY_TIMEOUT_SECONDS: "120"
+  PLUGIN_MAX_CONCURRENT_WAKES: "2"
+  PLUGIN_OCI_REGISTRY: ghcr.io/ne-tort/plugins
+  PLUGIN_COSIGN_ISSUER: https://token.actions.githubusercontent.com
+  PLUGIN_MIN_PLATFORM_VERSION: "4.0.0"
+  # Секреты (PLUGIN_CLAIMS_SECRET, PLUGIN_TENANT_DB_ADMIN_URL, PLUGIN_COSIGN_IDENTITY)
+  # НЕ лежат в ConfigMap: их приносит SealedSecret/k8s Secret.
   POD_AGENT_RUNTIME_AUTH_SECRET: pod-agent-bridge-auth

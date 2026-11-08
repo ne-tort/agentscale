@@ -106,6 +106,37 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("USERDB_URL", "TENANT_USERDB_URL"),
     )
 
+    # ---------------------------------------------------------------- plugins
+    # Plugin-платформа (дизайн v4): плагин — полноценное приложение со своей БД
+    # компании. Это ОТДЕЛЬНЫЙ trust-контур, а не pod-gateway :8001 агента.
+    plugin_platform_enabled: bool = False
+    # Подпись PluginClaims. Пусто = fail closed (никаких dev-фолбэков, в отличие
+    # от pod_identity_bridge_secret, который в dev мог брать AUTH_TEST_SECRET).
+    plugin_claims_secret: str = ""
+    plugin_claims_ttl_seconds: int = 300
+    plugin_claims_issuer: str = "agentscale-plugins"
+    plugin_claims_audience: str = "capability-gateway"
+    # Отдельный static-origin для iframe: не agentscale.dev, без cookie/API.
+    plugin_static_origin: str = ""
+    # Tenant PostgreSQL: отдельный Service, НЕ prodavan. DSN нужен только
+    # административному контуру (создание БД/ролей), плагин получает свой DSN
+    # через Secret при grant.
+    plugin_tenant_db_admin_url: str = ""
+    plugin_tenant_db_host: str = "tenant-postgres"
+    plugin_tenant_db_port: int = 5432
+    # Egress-политика читается из CapabilityGrant в БД, не из JWT.
+    plugin_egress_mode: str = "none"  # none | webhooks-only | full
+    plugin_egress_approved: bool = False
+    # Activator: Deployment replicas: 0 + wake/hold-until-Ready.
+    plugin_idle_ttl_seconds: int = 300
+    plugin_ready_timeout_seconds: int = 120
+    plugin_max_concurrent_wakes: int = 2
+    # OCI/cosign: деплой строго по проверенному digest, :latest запрещён.
+    plugin_oci_registry: str = "ghcr.io/ne-tort/plugins"
+    plugin_cosign_identity: str = ""
+    plugin_cosign_issuer: str = "https://token.actions.githubusercontent.com"
+    plugin_min_platform_version: str = "4.0.0"
+
     # P0 object storage (C-OBJECT-STORE). local = keys under storage_root; s3 = MinIO/AWS.
     object_store_backend: str = "local"  # local | s3
     s3_endpoint_url: str | None = None
@@ -642,6 +673,29 @@ class Settings(BaseSettings):
                 "(e.g. http://agentscale-probe-pod.<namespace>.svc:3921); "
                 "the address belongs to the deployment, not to a code default"
             )
+        # Plugin-платформа: включена без секрета подписи = молчаливое принятие
+        # любого PluginClaims. Такой контур не имеет права обслуживать запросы.
+        if self.plugin_platform_enabled and not self.plugin_claims_secret.strip():
+            raise RuntimeError(
+                "PLUGIN_PLATFORM_ENABLED=true requires PLUGIN_CLAIMS_SECRET; "
+                "dev-фолбэки на AUTH_TEST_SECRET запрещены (другой trust-контур)"
+            )
+        if self.plugin_platform_enabled and not self.plugin_static_origin.strip():
+            raise RuntimeError(
+                "PLUGIN_PLATFORM_ENABLED=true requires PLUGIN_STATIC_ORIGIN "
+                "(отдельный origin для iframe, не agentscale.dev)"
+            )
+        if self.plugin_egress_mode not in {"none", "webhooks-only", "full"}:
+            raise RuntimeError(
+                f"PLUGIN_EGRESS_MODE must be none|webhooks-only|full, got {self.plugin_egress_mode!r}"
+            )
+        if self.plugin_egress_mode == "full" and not self.plugin_egress_approved:
+            raise RuntimeError(
+                "PLUGIN_EGRESS_MODE=full requires PLUGIN_EGRESS_APPROVED=true "
+                "(явное разрешение прямого выхода в интернет)"
+            )
+        if self.plugin_claims_ttl_seconds < 60 or self.plugin_claims_ttl_seconds > 900:
+            raise RuntimeError("PLUGIN_CLAIMS_TTL_SECONDS must be within 60..900")
         return self
 
     @property

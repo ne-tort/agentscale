@@ -400,6 +400,13 @@ ghcr.io/ne-tort/plugins/mod_equipment@sha256:<digest>   ← подписано c
   (`QUARANTINED`) / `RollbackCommand` / `QuarantineEvidence` из
   `domain/dynamic_apps/types.py:135-192` и `dynamic_app_registry/contracts.py:13-99`.
   Свой реестр ключей Ed25519 удаляется.
+  **Проекция (обязательная):** `AppVersion.validate_manifest` — legacy-контракт
+  declarative-app (`protocol == "1.0"`, `appId` без подчёркиваний, `ui.render`-подобные
+  capability). Плагинный манифест `plugin-rpc/1` с `plugin_id=mod_equipment` туда
+  напрямую не кладётся. Реестр хранит нормализованную legacy-обёртку в
+  `AppVersion.manifest` + исходный подписанный manifest под ключом `plugin_manifest`;
+  каноническая форма — `PluginArtifactRecord.manifest`. `AppVersion` НЕ ослабляется:
+  его правка сломала бы dynamic_apps.
 - **Compatibility gate** до PUBLISHED: semver, protocol, `requestedCapabilities` против
   `CapabilityGrant`, `min_platform_version`, сканирование образа, CSP для frontend.
 - **Quarantine/rollback:** неподписанный или несовпавший digest не публикуется;
