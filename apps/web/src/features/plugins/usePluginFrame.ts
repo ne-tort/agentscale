@@ -160,6 +160,21 @@ export function usePluginFrame(options: UsePluginFrameOptions): UsePluginFrameRe
   const channelRef = useRef<PluginChannel | null>(null);
   const onErrorRef = useRef(onError);
   onErrorRef.current = onError;
+  // `config` и реализацию порта родитель часто передаёт инлайн-литералом:
+  // зависимость от идентичности объекта перезапускала бы загрузку на каждом
+  // рендере. Контракт — «одна загрузка на (плагин, компания, версия, попытка)»,
+  // поэтому актуальные значения читаются из refs, а в deps — только скаляры.
+  const configRef = useRef(config);
+  configRef.current = config;
+  const infoPortRef = useRef(infoPort);
+  infoPortRef.current = infoPort;
+  const envOrigin = config?.env?.VITE_PLUGIN_STATIC_ORIGIN;
+  const configKey = [
+    config?.staticOrigin ?? "",
+    (config?.allowedStaticOrigins ?? []).join(","),
+    config?.shellOrigin ?? "",
+    typeof envOrigin === "string" ? envOrigin : "",
+  ].join("|");
 
   const fail = useCallback((next: PluginFrameError, nextStatus: PluginFrameStatus = "error") => {
     channelRef.current?.dispose();
@@ -179,7 +194,8 @@ export function usePluginFrame(options: UsePluginFrameOptions): UsePluginFrameRe
     // Публичная страница не требует сессии и grant, но static-origin всё равно
     // берётся из доверенной конфигурации: исключение касается только доступа.
     const requiresSession = pluginSessionRequired(publicPage);
-    if (requiresSession && !infoPort) {
+    const port = infoPortRef.current;
+    if (requiresSession && !port) {
       fail(new PluginFrameError("loadError", "plugin_info_port_unavailable"));
       return () => { current = false; };
     }
@@ -187,7 +203,7 @@ export function usePluginFrame(options: UsePluginFrameOptions): UsePluginFrameRe
     let staticOrigin: string;
     let candidate: string;
     try {
-      staticOrigin = resolveStaticOrigin(config);
+      staticOrigin = resolveStaticOrigin(configRef.current);
       candidate = buildPluginSrc(staticOrigin, { companyId, pluginId, version });
     } catch (cause) {
       fail(toPluginFrameError(cause));
@@ -199,7 +215,7 @@ export function usePluginFrame(options: UsePluginFrameOptions): UsePluginFrameRe
       return () => { current = false; };
     }
 
-    void infoPort!.getPluginInfo({ pluginId, companyId, version, publicPage })
+    void port!.getPluginInfo({ pluginId, companyId, version, publicPage })
       .then((info) => {
         if (!current) return;
         if (!info || info.connected !== true) {
@@ -217,7 +233,7 @@ export function usePluginFrame(options: UsePluginFrameOptions): UsePluginFrameRe
       });
 
     return () => { current = false; };
-  }, [pluginId, companyId, version, publicPage, infoPort, config, attempt, fail]);
+  }, [pluginId, companyId, version, publicPage, configKey, attempt, fail]);
 
   // Cleanup на unmount: канал закрывается даже если iframe ещё жив в DOM-parent.
   useEffect(() => () => {
@@ -237,7 +253,7 @@ export function usePluginFrame(options: UsePluginFrameOptions): UsePluginFrameRe
       // Opaque sandbox адресуется `postMessage("*")`, но принимаем только
       // `"null"`. Когда цель §5.3 (wildcard subdomain) будет включена, родитель
       // задаст `acceptedOrigin` точным origin плагина.
-      acceptedOrigin: channelOptions.acceptedOrigin ?? OPAQUE_ORIGIN,
+      acceptedOrigin: channelOptions.acceptedOrigin ?? origin,
       timeoutMs: timeoutMs ?? channelOptions.timeoutMs,
       onReady: (ready) => {
         setStatus("ready");

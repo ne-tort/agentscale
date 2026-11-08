@@ -59,13 +59,20 @@ def create_app() -> FastAPI:
     # Внимание: GET /health этого роутера совпадает с health_routes.router выше;
     # k8s-проба использует корневую /health, зарегистрированную ПЕРВОЙ.
     if settings.plugin_platform_enabled:
+        from prodavan.application.plugins.transport.guard import register_plugin_surface_guard
+
+        # Доверенный контур плагинов: guard ДО роутинга, иначе /agent/* с
+        # plugin-токеном дал бы 404 вместо 403 (критерий §11.17).
+        register_plugin_surface_guard(app)
         app.include_router(plugin_gateway.router)
         try:
             from prodavan.api.v1 import plugin_capabilities
-        except ImportError:
-            # Fail-closed: роутер capability-адаптеров ещё не собран —
-            # платформа включена, но запросы к /capabilities/v1/* не пройдут
-            # allowlist middleware и получат отказ, а не тихий успех.
+        except ModuleNotFoundError as exc:
+            # Fail-closed: capability-роутер ещё не собран. Различаем «нет
+            # модуля» (ожидаемо на промежуточном коммите) и «модуль есть, но
+            # его собственный импорт упал» — второе маскировать нельзя.
+            if exc.name != "prodavan.api.v1.plugin_capabilities":
+                raise
             logger.error("plugin platform enabled but /capabilities/v1 router is unavailable")
         else:
             app.include_router(plugin_capabilities.router)

@@ -115,8 +115,8 @@ class GrantPolicyResolver:
         except EgressDenied:
             raise
         except Exception as exc:
-            # Хранилище упало — НЕ «разрешить по умолчанию» (§4.5 append failure
-            # для позитивной мутации = deny/system failure).
+            # Хранилище упало — НЕ «разрешить по умолчанию» (§4.5: недоступность
+            # зависимости для позитивного решения = deny/system failure).
             raise EgressDenied(
                 "grant store is unavailable; egress is fail-closed",
                 reason="store_unavailable",

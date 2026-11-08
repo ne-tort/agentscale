@@ -348,7 +348,7 @@ class EgressConfigGenerator:
                 "podSelector": {"matchLabels": {"app": "plugin"}},
                 "policyTypes": ["Ingress", "Egress"],
                 "ingress": [
-                    self._peer_rule(
+                    self._ingress_rule(
                         PLUGIN_GATEWAY_POD_SELECTOR,
                         self._ports("TCP", 8080),
                         namespace=self.namespace,
@@ -426,8 +426,7 @@ class EgressConfigGenerator:
                         ],
                         "ports": self._ports("TCP", 3921),
                     }
-                ],
-                "egress": [
+                ],                "egress": [
                     # pod-gateway :8001 — ТОЛЬКО агентская surface.
                     self._peer_rule(
                         POD_GATEWAY_POD_SELECTOR,
@@ -460,15 +459,30 @@ class EgressConfigGenerator:
     ) -> dict[str, Any]:
         """``to``-правило по namespaceSelector + podSelector (§6.2)."""
         return {
-            "to": [
-                {
-                    "namespaceSelector": {
-                        "matchLabels": {"kubernetes.io/metadata.name": namespace}
-                    },
-                    "podSelector": {"matchLabels": dict(pod_selector)},
-                }
-            ],
+            "to": [self._peer(namespace, pod_selector)],
             "ports": ports,
+        }
+
+    def _ingress_rule(
+        self,
+        pod_selector: Mapping[str, str],
+        ports: list[dict[str, Any]],
+        *,
+        namespace: str,
+    ) -> dict[str, Any]:
+        """``from``-правило ingress: Kubernetes НЕ принимает здесь ключ ``to``."""
+        return {
+            "from": [self._peer(namespace, pod_selector)],
+            "ports": ports,
+        }
+
+    @staticmethod
+    def _peer(namespace: str, pod_selector: Mapping[str, str]) -> dict[str, Any]:
+        return {
+            "namespaceSelector": {
+                "matchLabels": {"kubernetes.io/metadata.name": namespace}
+            },
+            "podSelector": {"matchLabels": dict(pod_selector)},
         }
 
     def _dns_rule(self) -> dict[str, Any]:

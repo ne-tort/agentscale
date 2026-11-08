@@ -514,16 +514,31 @@ v1 использовал `sandbox="allow-scripts allow-same-origin"` на то�
 
 | | Было (агенты) | Стало (плагины) |
 |---|---|---|
-| Изоляция | Python-фильтр по тегам `tenant_infra` / `project:` в `objects_service.py:40-50` | **bucket-per-tenant** `tenant-<company>` (v1-компромисс: префикс + MinIO STS `AssumeRole` session policy с `${aws:username}`) |
-| Креденшелы | один service user с `agentscale/*` (`minio-api-policy.json:6-13`) | short-lived STS creds / scoped presigned, ограниченные `module-<id>/*` |
+| Изоляция | Python-фильтр по тегам `tenant_infra` / `project:` в `objects_service.py:40-50` | **bucket-per-tenant** `tenant-<company>`; доступ через отдельного подписывающего principal с IAM-политикой только на `module-<id>/*` |
+| Креденшелы | один service user с `agentscale/*` (`minio-api-policy.json:6-13`) | **scoped presigned URL по умолчанию**; short-lived STS — opt-in за `PLUGIN_MINIO_STS_ENABLED`, только после ручной проверки |
 | Квота | счётчик `ContentAssetRow` в БД | bucket quota / usage, биллинг по одному бакету |
 | Purge | цикл DELETE по списку | delete bucket/prefix |
 | Egress | :9000 закрыт NP для Pod | :9000 разрешён **только** plugin-namespace |
 
+**Отдельный подписывающий principal обязателен.** Существующий service user владеет
+`arn:aws:s3:::agentscale/*` целиком; подпись presigned им унаследовала бы слишком
+широкие права, и «политика на префикс» осталась бы только на бумаге. Bootstrap
+создаёт `plugin-object-signer` с политикой только на
+`tenant-<company>/module-<plugin>/*`; presigned подписываются им.
+
+**Отзыв при presigned:** уже выданные URL живут до `X-Amz-Expires` (≤3600 с,
+по умолчанию 900) и **не отзываются мгновенно**. `revoke` = запрет новых URL +
+деактивация `CapabilityGrant`; при необходимости мгновенного отзыва — ротация
+ключа подписанта. Presigned URL и `X-Amz-Signature` в логи/аудит не попадают —
+только `key_digest`. In-cluster `agentscale-minio:9000` не резолвится снаружи:
+нужен `proxy=1` или подпись сразу на внешний host (перепись Host после подписи
+инвалидирует подпись).
+
 `TenantObjectsService` остаётся фасадом аудита/квот/листинга, но перестаёт быть
-единственной границей. Теги — метаданные/биллинг, не изоляция. Presigned уже
-реализованы в `minio_store.py:186-203` для обычного контента; для внешних клиентов
-сохраняется `proxy=1` (in-cluster DNS не резолвится снаружи).
+единственной границей. Теги — метаданные/биллинг, не изоляция. `StsPort` /
+`ScopedCredentials` сохраняются как opt-in контракт, но в дефолтном режиме
+`issue_credentials` не экспонируется. Подробности и чек-лист из 8 пунктов —
+[`docs/migration/minio-sts-verification.md`](../migration/minio-sts-verification.md).
 
 ### 5.5 Lifecycle: grant / revoke / uninstall
 
@@ -900,7 +915,13 @@ Wake-up триггеры: HTTP (iframe, webhook, pluginpage), cron перед с
 5. **ADR-008** — разделение lifecycle агентов/плагинов и выбор собственного activator (обязателен до реализации §7.4).
 6. **Переход на wildcard subdomain** — условия в §5.3 (публичный домен, cert-manager DNS-01, whitelist kinds).
 7. **KEDA HTTP Add-on** — целевой вариант после снятия ограничений whitelist/бюджета; в v4 не вводится.
-8. **MinIO STS** — подтвердить официальной документацией `AssumeRole` / policy variables (в этом ревью страница была недоступна); при отсутствии STS — scoped presigned с policy variables.
+8. **MinIO STS** — официальная документация `AssumeRole` / session policy /
+   policy variables недоступна из среды разработки (6 попыток, все неудачны).
+   Блокер **снят решением**: по умолчанию `PLUGIN_MINIO_STS_ENABLED=false` и
+   используется **scoped presigned URL** с IAM-политикой на префикс
+   `module-<plugin>/*` — без выдачи плагину постоянных или STS-креденшелов.
+   STS остаётся опциональной оптимизацией только после ручной проверки
+   8 пунктов на Verify Dev (`docs/migration/minio-sts-verification.md`).
 
 Закрытые вопросы: доступ к БД (B, прямой DSN); реестр артефактов (OCI + cosign); изоляция объектов (bucket/STS вместо тегов); identity (`PluginClaims` вместо Bridge JWT); lifecycle (собственный activator вместо `SandboxClaim`); бэкапы/перенос/dual-read — исключены (dev, данные эфемерны); ADR-007 принят.
 
@@ -967,4 +988,4 @@ Wake-up триггеры: HTTP (iframe, webhook, pluginpage), cron перед с
 
 ---
 
-**Конец документа.** Дизайн, не код. Реализация через субагентов на main; микрокоммиты `git add -A && git commit && git push`, без гигиены и без переписывания истории; тесты пишутся, но не запускаются до явного решения. Блокирующие условия — принятие ADR-008 и подтверждение MinIO STS по официальной документации (или переход на scoped presigned).
+**Конец документа.** Дизайн, не код. Реализация через субагентов на main; микрокоммиты `git add -A && git commit && git push`, без гигиены и без переписывания истории; тесты пишутся, но не запускаются до явного решения. Блокирующее условие — принятие ADR-008 (принят). MinIO STS снят через выбор scoped presigned по умолчанию.

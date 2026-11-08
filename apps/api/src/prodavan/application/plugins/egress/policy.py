@@ -94,6 +94,12 @@ class EgressRule:
 
     def __post_init__(self) -> None:
         # Нормализация через object.__setattr__ — dataclass заморожен.
+        for attr in ("host", "path_prefix", "method"):
+            if not isinstance(getattr(self, attr), str):
+                raise EgressPolicyError(
+                    f"egress rule {attr} must be a string",
+                    reason="policy_invalid",
+                )
         host = self.host.strip().lower().rstrip(".")
         object.__setattr__(self, "host", host)
         if not host:
@@ -112,7 +118,13 @@ class EgressRule:
             )
         # ``//`` и ``..`` в префиксе создают неоднозначность при сравнении с
         # нормализованным путём запроса — запрещаем на этапе конфигурации.
-        if "//" in prefix or ".." in prefix or "?" in prefix or "#" in prefix:
+        if (
+            "//" in prefix
+            or ".." in prefix
+            or "?" in prefix
+            or "#" in prefix
+            or any(char.isspace() or ord(char) < 0x20 for char in prefix)
+        ):
             raise EgressPolicyError(
                 f"egress path_prefix is ambiguous: {prefix!r}",
                 reason="path_invalid",
@@ -147,6 +159,8 @@ class EgressPolicy:
     def __post_init__(self) -> None:
         if not isinstance(self.mode, EgressMode):
             raise EgressPolicyError("egress policy mode must be an EgressMode", reason="mode_invalid")
+        if isinstance(self.max_egress_bytes, bool) or not isinstance(self.max_egress_bytes, int):
+            raise EgressPolicyError("max_egress_bytes must be an integer", reason="quota_invalid")
         if self.max_egress_bytes < 0:
             raise EgressPolicyError("max_egress_bytes must be >= 0", reason="quota_invalid")
         # Fail-closed: невалидные данные запрещено «протаскивать» в политику.
@@ -204,7 +218,10 @@ def _egress_section(grant: Mapping[str, Any]) -> Mapping[str, Any]:
     section = grant.get("egress")
     if section is None:
         # Альтернатива для плоских grant-объектов, где поля лежат в корне.
-        if any(key in grant for key in ("mode", "allowed_hosts", "allowed_paths", "max_egress_bytes", APPROVED_FLAG)):
+        if any(
+            key in grant
+            for key in ("mode", "allowed_hosts", "allowed_paths", "max_egress_bytes", APPROVED_FLAG)
+        ):
             return grant
         return {}
     if not isinstance(section, Mapping):
@@ -280,7 +297,14 @@ def resolve_policy(grant: Any) -> EgressPolicy:
     hosts = _string_tuple(section.get("allowed_hosts"), field_name="allowed_hosts")
     paths = _string_tuple(section.get("allowed_paths"), field_name="allowed_paths")
     for prefix in paths:
-        if not prefix.startswith("/") or "//" in prefix or ".." in prefix or "?" in prefix or "#" in prefix:
+        if (
+            not prefix.startswith("/")
+            or "//" in prefix
+            or ".." in prefix
+            or "?" in prefix
+            or "#" in prefix
+            or any(char.isspace() or ord(char) < 0x20 for char in prefix)
+        ):
             raise EgressPolicyError(
                 f"grant.egress.allowed_paths contains an invalid prefix: {prefix!r}",
                 reason="path_invalid",
@@ -348,7 +372,7 @@ def validate_host(host: str, *, allow_wildcard: bool = False) -> str:
     Запрещено:
 
     * wildcard ``*`` в любом виде (при ``allow_wildcard=False``);
-    * не-DNS строки: схема, порт, ``user@``,backslash, пробелы, подчёркивания,
+    * не-DNS строки: схема, порт, ``user@``, обратный слэш, пробелы, подчёркивания,
       пустые/длинные метки, ведущий/ведомый дефис;
     * IP-литералы (IPv4/IPv6): ``127.0.0.1``, ``10.0.0.1``, ``::1``, ``[::1]``,
       а также decimal/octal/hex-формы IPv4, которые ``ipaddress`` не ловит;
@@ -361,6 +385,13 @@ def validate_host(host: str, *, allow_wildcard: bool = False) -> str:
     """
     if not isinstance(host, str) or not host.strip():
         raise EgressPolicyError("host must be a non-empty string", reason="host_empty")
+    # Любой пробел (в т.ч. ведущий/ведомый) — часть атаки на нормализацию Host:
+    # не «подчищаем» его молча, а отклоняем.
+    if any(char.isspace() for char in host):
+        raise EgressPolicyError(
+            f"host contains whitespace: {host!r}",
+            reason="host_invalid",
+        )
     candidate = host.strip().lower().rstrip(".")
     if not candidate:
         raise EgressPolicyError("host must be a non-empty string", reason="host_empty")
@@ -419,6 +450,8 @@ def _reject_ip_literal(candidate: str) -> None:
     оставлена явной, чтобы задокументировать угрозу и защититься на случай
     ослабления regex.
     """
+    # ``_looks_like_numeric_ipv4`` отсекает и числовые формы, поэтому к этому
+    # месту доходят только канонические IPv4/IPv6-литералы.
     try:
         address = ipaddress.ip_address(candidate)
     except ValueError:
@@ -426,52 +459,27 @@ def _reject_ip_literal(candidate: str) -> None:
     if address is not None:
         _raise_for_ip(address, candidate)
 
-    # Десятичная / hex-форма IPv4 (одно число) и octal-метки проходят DNS-regex
-    # (это цифры и точки) — проверяем их дополнительно как IP-литералы.
+    # Десятичная / hex / octal / короткая форма IPv4 проходят DNS-regex (цифры и
+    # точки). IP-литералы в allowlist запрещены ВООБЩЕ (§6.3 «защита от обхода
+    # по IP»), поэтому отклоняем их сразу, не пытаясь угадать результат резолва.
     if _looks_like_numeric_ipv4(candidate):
-        try:
-            address = ipaddress.ip_address(_numeric_ipv4_to_dotted(candidate))
-        except (ValueError, OverflowError):
-            raise EgressPolicyError(
-                f"numeric IP literal is not allowed: {candidate!r}",
-                reason="host_ip_literal",
-            ) from None
-        _raise_for_ip(address, candidate)
+        raise EgressPolicyError(
+            f"numeric IP literal is not allowed: {candidate!r}",
+            reason="host_ip_literal",
+        )
 
 
 def _looks_like_numeric_ipv4(candidate: str) -> bool:
-    """Похоже ли имя на числовую (в т.ч. octal/hex) форму IPv4."""
-    if re.fullmatch(r"\d+", candidate):
-        return True
+    """Похоже ли имя на числовую (в т.ч. octal/hex) форму IPv4.
+
+    Fail-closed: отклоняем ЛЮБОЕ имя, у которого все метки числовые, независимо
+    от их количества. Даже неканоническая форма (``1.2.3.4.5``) не должна
+    попадать в allowlist: поведение резолверов для таких имён неоднородно.
+    """
     labels = candidate.split(".")
-    if not 2 <= len(labels) <= 4:
+    if not labels:
         return False
     return all(re.fullmatch(r"0[xX][0-9a-fA-F]+|0[0-7]*|\d+", label or "x") for label in labels)
-
-
-def _numeric_ipv4_to_dotted(candidate: str) -> str:
-    """Привести ``2130706433`` / ``0177.0.0.1`` / ``0x7f.1`` к dotted-quad."""
-    if re.fullmatch(r"\d+", candidate):
-        value = int(candidate, 10)
-        if value > 0xFFFFFFFF:
-            raise ValueError("out of range")
-        return str(ipaddress.IPv4Address(value))
-
-    parts: list[str] = []
-    for label in candidate.split("."):
-        if label.lower().startswith("0x"):
-            value = int(label, 16)
-        elif label.startswith("0") and len(label) > 1:
-            value = int(label, 8)
-        else:
-            value = int(label, 10)
-        if not 0 <= value <= 255:
-            raise ValueError("octet out of range")
-        parts.append(str(value))
-    while len(parts) < 4:
-        # Короткая форма (``127.1``) — резолверы трактуют как ``127.0.0.1``.
-        parts.append("0")
-    return ".".join(parts)
 
 
 def _raise_for_ip(address: ipaddress.IPv4Address | ipaddress.IPv6Address, candidate: str) -> None:
@@ -520,6 +528,10 @@ def normalize_path(path: str) -> str:
     """
     if not isinstance(path, str):
         raise EgressPolicyError("path must be a string", reason="path_invalid")
+    # Вертикальная табуляция, \x00 и пробелы внутри пути часто используются
+    # для обхода префиксных проверок на стороне прокси — отклоняем сразу.
+    if any(char.isspace() or ord(char) < 0x20 for char in path):
+        raise EgressPolicyError("path contains control or whitespace characters", reason="path_invalid")
     raw = path.split("?", 1)[0].split("#", 1)[0].strip()
     if not raw:
         raw = "/"
@@ -537,7 +549,7 @@ def normalize_path(path: str) -> str:
             continue
         segments.append(segment)
     normalized = "/" + "/".join(segments)
-    return normalized if normalized != "/" else "/"
+    return normalized if normalized != "" else "/"
 
 
 def normalize_host(host: str) -> str:
@@ -587,7 +599,8 @@ def match(rule: EgressRule, host: str, path: str, method: str) -> bool:
     if rule.path_prefix == "/":
         return True
     # Сравнение по границе сегмента: префикс должен закончиться ровно перед ``/``.
-    return candidate_path == rule.path_prefix or candidate_path.startswith(rule.path_prefix.rstrip("/") + "/")
+    prefix = rule.path_prefix.rstrip("/")
+    return candidate_path == rule.path_prefix or candidate_path.startswith(prefix + "/")
 
 
 def is_host_allowed(policy: EgressPolicy, host: str) -> bool:

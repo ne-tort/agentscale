@@ -28,6 +28,7 @@ identity-поля берутся ТОЛЬКО из claims.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Annotated, Protocol, runtime_checkable
 
 from fastapi import Depends, Request
@@ -207,9 +208,20 @@ def get_plugin_claims(
                     code=PluginTokenErrorCode.REVOKED,
                     detail="capability grant is revoked",
                 )
+        elif hasattr(identity.revocation, "is_active"):
+            # Тот же порт, что ждёт PluginCapabilityService (задача 03):
+            # is_active(grant_id, now=...). Позволяет родителю привязать ОДИН
+            # объект и к middleware, и к сервису.
+            if not identity.revocation.is_active(  # type: ignore[union-attr]
+                claims.grant_id, now=datetime.now(UTC)
+            ):
+                raise PluginTokenError(
+                    code=PluginTokenErrorCode.REVOKED,
+                    detail="capability grant is not active",
+                )
         else:
             raise _unavailable(
-                "revocation source is not usable: check()/is_revoked() missing",
+                "revocation source is not usable: check()/is_revoked()/is_active() missing",
                 "REVOCATION_NOT_CONFIGURED",
             )
     except PluginTransportError:

@@ -11,6 +11,12 @@ resources:
   - searchnet.yaml
   - gotenberg.yaml
   - pdb.yaml
+  # Plugin-платформа (дизайн v4 §5.4): bootstrap service user с политикой,
+  # ограниченной tenant-* бакетами. job монтирует configmap ниже.
+  - plugin-buckets-init.yaml
+  # Топики agentscale.plugin.events + .dlq: auto_create_topics_enabled=false
+  # в kafka.yaml, поэтому создаёт отдельный init Job.
+  - plugin-topics-init.yaml
 generatorOptions:
   disableNameSuffixHash: true
 configMapGenerator:
@@ -20,6 +26,12 @@ configMapGenerator:
   - name: agentscale-minio-api-policy
     files:
       - minio-api-policy.json
+  # НЕ редактируем существующую minio-api-policy.json (у service user всё ещё
+  # agentscale/*). Плагиновый admin получает отдельную политику только на
+  # tenant-* — задача MinIO IAM адаптера.
+  - name: agentscale-minio-plugin-policy
+    files:
+      - plugin-minio-policy.json
   - name: agentscale-keycloak-realm
     files:
       - realm-agentscale.json

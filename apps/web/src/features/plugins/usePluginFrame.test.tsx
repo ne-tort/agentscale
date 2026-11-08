@@ -46,7 +46,8 @@ async function mount(element: ReactElement): Promise<void> {
   document.body.append(host);
   root = createRoot(host);
   await act(async () => { root?.render(element); });
-  await act(async () => { await Promise.resolve(); });
+  // Два тика: эффект запускает `getPluginInfo`, затем его `.then` пишет `src`.
+  await act(async () => { await Promise.resolve(); await Promise.resolve(); });
 }
 
 function state(): { status: string | null; src: string | null; session: string | null; origin: string | null } {
@@ -160,7 +161,7 @@ describe("usePluginFrame: grant/состояние через PluginInfoPort", (
       config={{ staticOrigin: STATIC_ORIGIN }} infoPort={port} />);
     expect(state().session).toBe("false");
     expect(state().src).toBe(`${STATIC_ORIGIN}/tenant-co_123/mod_equipment/1.2.0/index.html`);
-    expect(port.getPluginInfo).not.toHaveBeenCalled();
+    expect(port.getPluginInfo as unknown as ReturnType<typeof vi.fn>).not.toHaveBeenCalled();
   });
 
   it("publicPage без порта работает (сессия не нужна)", async () => {
@@ -204,7 +205,7 @@ describe("usePluginFrame: lifecycle канала и cleanup", () => {
     expect(channel.disposed).toBe(false);
     channel.dispose();
     await act(async () => { result!.retry(); });
-    expect(port.getPluginInfo).toHaveBeenCalledTimes(2);
+    expect(port.getPluginInfo as unknown as ReturnType<typeof vi.fn>).toHaveBeenCalledTimes(2);
     frame.remove();
   });
 });

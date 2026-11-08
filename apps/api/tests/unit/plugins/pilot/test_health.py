@@ -81,11 +81,12 @@ def test_health_checks_both_tables(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_entrypoint_gates_health_on_liquibase_success(monkeypatch: pytest.MonkeyPatch) -> None:
     """`set -eu` + LIQUIBASE_UPDATE_OK=1 ТОЛЬКО после update (§11 кр. 4)."""
     raw = read_text(ENTRYPOINT_PATH)
-    update_pos = raw.index("liquibase --changelog-file=")
+    update_pos = raw.index("liquibase \\")
+    url_pos = raw.index("--url=")
     ok_pos = raw.index("LIQUIBASE_UPDATE_OK=1")
     exec_pos = raw.index("exec python -m uvicorn")
-    assert update_pos < ok_pos < exec_pos, (
-        "порядок: update -> флаг готовности -> запуск приложения"
+    assert update_pos < url_pos < ok_pos < exec_pos, (
+        "порядок: update (с DSN) -> флаг готовности -> запуск приложения"
     )
     assert "set -eu" in raw
     assert "checksum mismatch" in raw.lower()

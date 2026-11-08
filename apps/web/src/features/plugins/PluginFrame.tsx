@@ -121,9 +121,13 @@ export function PluginFrame(props: PluginFrameProps) {
   onReadyRef.current = props.onReady;
   onErrorRef.current = props.onError;
 
+  const channelFactoryRef = useRef(props.channelFactory);
+  channelFactoryRef.current = props.channelFactory;
+
   const { pluginId, version, src, publicPage = false, timeoutMs, expectedOrigin } = props;
 
   useEffect(() => {
+    let cancelled = false;
     setPhase("loading");
     setErrorCode("loadError");
     channelRef.current?.dispose();
@@ -156,18 +160,21 @@ export function PluginFrame(props: PluginFrameProps) {
         version,
         timeoutMs,
         onReady: () => {
+          if (cancelled) return;
           setPhase("ready");
           try { onReadyRef.current?.(); } catch { /* ignore */ }
         },
         onError: (cause: PluginFrameError) => {
+          if (cancelled) return;
           setErrorCode(cause.code);
           setPhase("error");
           try { onErrorRef.current?.(cause); } catch { /* ignore */ }
         },
       };
       // Без фабрики компонент сам владеет каналом и своим cleanup.
-      channel = props.channelFactory
-        ? props.channelFactory(frame, targetOrigin, channelOptions)
+      const factory = channelFactoryRef.current;
+      channel = factory
+        ? factory(frame, targetOrigin, channelOptions)
         : createPluginChannel(frame, targetOrigin, channelOptions);
     } catch (error) {
       const frameError = toPluginFrameError(error);
@@ -179,6 +186,8 @@ export function PluginFrame(props: PluginFrameProps) {
     }
     channelRef.current = channel;
     void channel.handshake().catch((error: unknown) => {
+      // `dispose()` при cleanup тоже реджектит handshake — это не ошибка UI.
+      if (cancelled) return;
       const frameError = toPluginFrameError(error);
       setErrorCode(frameError.code);
       setPhase("error");
@@ -186,10 +195,11 @@ export function PluginFrame(props: PluginFrameProps) {
     });
 
     return () => {
+      cancelled = true;
       channel.dispose();
       if (channelRef.current === channel) channelRef.current = null;
     };
-  }, [pluginId, version, src, timeoutMs, expectedOrigin, props.channelFactory, attempt]);
+  }, [pluginId, version, src, timeoutMs, expectedOrigin, attempt]);
 
   const retry = useCallback(() => setAttempt((value) => value + 1), []);
 

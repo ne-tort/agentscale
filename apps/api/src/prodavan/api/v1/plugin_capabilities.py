@@ -143,7 +143,9 @@ async def _typed_payload(request: Request, model: type[BaseModel]) -> BaseModel:
         raw = dict(request.query_params)
 
     if isinstance(raw, dict):
-        forbidden = GENERIC_DISPATCH_FIELDS
+        from prodavan.application.plugins.transport.bodies import IDENTITY_FIELDS
+
+        forbidden = GENERIC_DISPATCH_FIELDS | IDENTITY_FIELDS
         found = sorted(str(key).lower() for key in raw if str(key).lower() in forbidden)
         if found:
             raise PluginTransportError(
@@ -549,7 +551,15 @@ async def plugin_health(claims: PluginClaimsDep) -> dict[str, Any]:
     methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
     include_in_schema=False,
 )
-async def _unknown_path(path: str) -> None:
+async def _unknown_path(path: str, claims: PluginClaimsDep) -> None:
+    """404 для неизвестного capability-пути, но ТОЛЬКО после проверки claims.
+
+    ``PluginClaimsDep`` обязателен и здесь: если плагин с capability-токеном
+    стучится на ``/agent/events`` (или любой не-capabilities путь), зависимость
+    вызывает ``assert_plugin_surface`` и даёт 403 ``FORBIDDEN_SURFACE`` ещё до
+    404. Так роутер сам соблюдает критерий №17 даже без родительского
+    middleware (защита в глубину, fail-closed).
+    """
     raise PluginTransportError(
         PluginProblem(404, "NOT_FOUND", "Not Found", f"unknown plugin capability path: /{path}")
     )

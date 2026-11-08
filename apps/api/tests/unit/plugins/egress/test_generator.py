@@ -121,6 +121,18 @@ def test_plugin_np_contains_5432_and_9000() -> None:
     assert np["spec"]["policyTypes"] == ["Ingress", "Egress"]
 
 
+def test_np_ingress_uses_from_not_to() -> None:
+    """Kubernetes NetworkPolicyIngressRule требует ``from``, а не ``to``."""
+    for scope in ("plugin", "agent"):
+        np = GEN.build_network_policy(scope)
+        for rule in np["spec"]["ingress"]:
+            assert "from" in rule
+            assert "to" not in rule
+        for rule in np["spec"]["egress"]:
+            assert "to" in rule
+            assert "from" not in rule
+
+
 def test_agent_np_has_no_5432_and_no_9000() -> None:
     """Агент: DNS + 80/443 + :8001, БЕЗ плагиновых портов."""
     np = GEN.build_network_policy(EgressScope.AGENT)
@@ -196,8 +208,10 @@ def test_plugin_and_agent_audit_events_have_identical_fields() -> None:
     assert set(plugin) == set(agent)
     assert tuple(plugin) == tuple(agent)
     assert tuple(plugin) == GEN.audit_fields()
-    assert {key: value for key, value in plugin.items() if key != "event"} == {
-        key: value for key, value in agent.items() if key != "event"
+    # Различаются ТОЛЬКО имя события и scope; все остальные поля и значения
+    # совпадают (единая схема §4.5 / §6.3).
+    assert {k: v for k, v in plugin.items() if k not in ("event", "scope")} == {
+        k: v for k, v in agent.items() if k not in ("event", "scope")
     }
 
 

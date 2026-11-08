@@ -1,0 +1,270 @@
+# Bootstrap объектной capability плагинов (v4 §5.4, F3, задача «адаптеры портов 06»).
+#
+# Sync-хук создаёт ДВА раздельных principal (ВЕРДИКТ РОДИТЕЛЯ, сеть/документация
+# MinIO STS недоступны → по умолчанию scoped presigned, STS opt-in):
+#   1. ``plugin-object-admin``  — BucketAdminPort: создание/удаление tenant-*
+#      бакетов, MERGE политик, листинг/usage, квоты. Политика plugin-minio-policy.json.
+#   2. ``plugin-object-presigner`` — PresignPort: ТОЛЬКО подпись URL на
+#      tenant-<co>/module-<p>/*. Отдельный ключ ОБЯЗАТЕЛЕН: as-built
+#      ``minio-api-policy.json`` даёт service user весь arn:aws:s3:::agentscale/*,
+#      и подпись от такого principal'а унаследовала бы слишком широкие права —
+#      «политика на префикс» осталась бы только на бумаге. Подписывающий ключ
+#      имеет СОБСТВЕННУЮ узкую IAM-политику (см. plugin-presign-policy ниже).
+#      Ротация этого ключа = единственный способ мгновенно отозвать уже
+#      выданные presigned URL (revoke в service.py задачи 06 носит иной смысл).
+#
+# Бакеты ЗДЕСЬ НЕ СОЗДАЮТСЯ: ``tenant-<company>`` появляется только при grant
+# через ``MinioBucketAdmin.ensure_bucket``. As-built бакет ``agentscale`` и
+# политика ``minio-api-policy.json`` НЕ изменяются (этот файл новый).
+#
+# Используются ТОЛЬКО kinds из whitelist infra/argocd/apps/00-project.yaml:
+#   Secret (group ""), ConfigMap (group "") и Job (group batch).
+# ConfigMap ``agentscale-minio-plugin-policy`` монтируется в /policy; его
+# добавил родитель в infra/k3s/base/platform/kustomization.yaml из
+# plugin-minio-policy.json (generatorOptions.disableNameSuffixHash=true → имя
+# остаётся точным). Политика подписанта генерируется ЭТИМ ЖЕ файлом инлайново,
+# чтобы не требовать ещё одной правки общего kustomization.yaml.
+
+#
+# Образ/инструмент — тот же mc, что в minio.yaml (Job agentscale-minio-init),
+# новых зависимостей/образов не вводим.
+#
+# ВАЖНО (требует подтверждения официальной документацией MinIO для образа
+# RELEASE.2024-10-02T17-50-41Z): синтаксис ``mc admin bucket quota --hard`` и
+# поведение ``AssumeRole``/session policy/StringLike по s3:prefix в этой сессии
+# документально НЕ подтверждены (сеть недоступна, вердикт родителя: scoped
+# presigned по умолчанию, ``PLUGIN_MINIO_STS_ENABLED=false``, STS opt-in после
+# ручной проверки на Verify Dev). Job явно проверяет поддержку quota-подкоманды
+# и падает, если её нет (fail-closed): бакет без квоты не должен молча стать
+# безлимитным.
+#
+# Presigned URL и X-Amz-Signature НЕ логируются ни этим Job, ни адаптером:
+# в аудите только key_digest (§4.5, кр. 11). In-cluster host
+# ``agentscale-minio:9000`` не резолвится снаружи — для внешних клиентов нужен
+# proxy=1 ИЛИ подпись сразу на внешний host (перепись Host ПОСЛЕ подписи
+# инвалидирует SigV4). См. adapters.MinioPresigner.
+
+apiVersion: v1
+kind: Secret
+metadata:
+  name: agentscale-minio-plugin-admin
+  labels:
+    app.kubernetes.io/name: agentscale-minio-plugin-admin
+    app.kubernetes.io/part-of: agentscale
+    app.kubernetes.io/component: plugin-objects
+type: Opaque
+stringData:
+  # Dev-значения по образцу minio.yaml (там же root/api креды в plaintext).
+  # Для shared-кластера замените этот Secret на SealedSecret/внешний Secret:
+  # plaintext в git допустим ТОЛЬКО для локального dev-контура.
+  access-key: plugin-object-admin
+  secret-key: plugin-object-admin-secret
+---
+# Отдельный подписывающий principal. НЕ тот же ключ, что admin, и НЕ as-built
+# agentscale-api: у последнего по minio-api-policy.json весь agentscale/*.
+# Ротация ЭТОГО Secret — единственный способ мгновенно отозвать уже выданные
+# presigned URL (они живут до X-Amz-Expires ≤ 3600 с и не отзываются revoke).
+apiVersion: v1
+kind: Secret
+metadata:
+  name: agentscale-minio-plugin-presigner
+  labels:
+    app.kubernetes.io/name: agentscale-minio-plugin-presigner
+    app.kubernetes.io/part-of: agentscale
+    app.kubernetes.io/component: plugin-objects
+type: Opaque
+stringData:
+  access-key: plugin-object-presigner
+  secret-key: plugin-object-presigner-secret
+---
+# Узкая политика подписанта: ТОЛЬKO GetObject/PutObject на
+# tenant-*/module-*. Ни CreateBucket, ни DeleteBucket, ни PutBucketPolicy,
+# ни agentscale/* — подпись от этого ключа физически не даст прав шире префикса.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agentscale-minio-plugin-presign-policy
+  labels:
+    app.kubernetes.io/name: agentscale-minio-plugin-presign-policy
+    app.kubernetes.io/part-of: agentscale
+    app.kubernetes.io/component: plugin-objects
+data:
+  plugin-presign-policy.json: |
+    {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Sid": "DenyLegacyAgentscaleBucket",
+          "Effect": "Deny",
+          "Action": ["s3:*"],
+          "Resource": [
+            "arn:aws:s3:::agentscale",
+            "arn:aws:s3:::agentscale/*"
+          ]
+        },
+        {
+          "Sid": "AllowGetOwnModulePrefix",
+          "Effect": "Allow",
+          "Action": ["s3:GetObject"],
+          "Resource": ["arn:aws:s3:::tenant-*/module-*"]
+        },
+        {
+          "Sid": "AllowPutOwnModulePrefix",
+          "Effect": "Allow",
+          "Action": ["s3:PutObject"],
+          "Resource": ["arn:aws:s3:::tenant-*/module-*"]
+        }
+      ]
+    }
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: plugin-buckets-init
+  labels:
+    app.kubernetes.io/name: plugin-buckets-init
+    app.kubernetes.io/part-of: agentscale
+    app.kubernetes.io/component: plugin-objects-init
+  annotations:
+    # Sync-хук: выполняется до агентов/API (wave 10), после StatefulSet MinIO (wave 1).
+    # Та же волна, что и agentscale-minio-init в minio.yaml; оба хуками ждут mc ready.
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
+    argocd.argoproj.io/sync-wave: "9"
+spec:
+  ttlSecondsAfterFinished: 600
+  backoffLimit: 6
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: plugin-buckets-init
+        app.kubernetes.io/part-of: agentscale
+    spec:
+      restartPolicy: OnFailure
+      imagePullSecrets:
+        - name: ghcr-pull
+      containers:
+        - name: mc
+          image: ghcr.io/ne-tort/mc:RELEASE.2024-10-08T09-37-26Z
+          env:
+            - name: MINIO_ROOT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: agentscale-minio
+                  key: root-user
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: agentscale-minio
+                  key: root-password
+            - name: PLUGIN_ADMIN_USER
+              valueFrom:
+                secretKeyRef:
+                  name: agentscale-minio-plugin-admin
+                  key: access-key
+            - name: PLUGIN_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: agentscale-minio-plugin-admin
+                  key: secret-key
+            - name: PLUGIN_PRESIGN_USER
+              valueFrom:
+                secretKeyRef:
+                  name: agentscale-minio-plugin-presigner
+                  key: access-key
+            - name: PLUGIN_PRESIGN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: agentscale-minio-plugin-presigner
+                  key: secret-key
+            # Hard-квота по умолчанию (совпадает с DEFAULT_QUOTA_BYTES в adapters).
+            - name: PLUGIN_BUCKET_QUOTA
+              value: "1GiB"
+          volumeMounts:
+            - name: plugin-policy
+              mountPath: /policy
+              readOnly: true
+            - name: plugin-presign-policy
+              mountPath: /presign-policy
+              readOnly: true
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              i=0
+              until mc alias set local http://agentscale-minio:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"; do
+                i=$((i+1))
+                if [ "$i" -gt 60 ]; then exit 1; fi
+                sleep 2
+              done
+              j=0
+              until mc ready local; do
+                j=$((j+1))
+                if [ "$j" -gt 60 ]; then exit 1; fi
+                sleep 2
+              done
+
+              # --- Политика plugin-object-admin ---------------------------------
+              # mc admin policy update deprecated → пересоздаём идемпотентно,
+              # как agentscale-api-policy в minio.yaml.
+              mc admin policy remove local plugin-minio-policy 2>/dev/null || true
+              mc admin policy create local plugin-minio-policy /policy/plugin-minio-policy.json
+
+              # --- Service user --------------------------------------------------
+              # Отдельный principal: НЕ root и НЕ agentscale-api (у того agentscale/*).
+              # Повторный Sync не должен менять пароль у существующего пользователя.
+              if ! mc admin user info local "$PLUGIN_ADMIN_USER" >/dev/null 2>&1; then
+                mc admin user add local "$PLUGIN_ADMIN_USER" "$PLUGIN_ADMIN_PASSWORD"
+              fi
+              mc admin policy attach local plugin-minio-policy --user "$PLUGIN_ADMIN_USER"
+
+              # --- Подписывающий principal (ОСНОВНОЙ путь без STS) ---------------
+              # Отдельная узкая политика: только GetObject/PutObject на
+              # tenant-*/module-*. Подпись НЕ делается admin-ключом и НЕ делается
+              # as-built agentscale-api (у того agentscale/* по minio-api-policy).
+              mc admin policy remove local plugin-presign-policy 2>/dev/null || true
+              mc admin policy create local plugin-presign-policy /presign-policy/plugin-presign-policy.json
+              if ! mc admin user info local "$PLUGIN_PRESIGN_USER" >/dev/null 2>&1; then
+                mc admin user add local "$PLUGIN_PRESIGN_USER" "$PLUGIN_PRESIGN_PASSWORD"
+              fi
+              mc admin policy attach local plugin-presign-policy --user "$PLUGIN_PRESIGN_USER"
+
+              # --- Fail-closed smoke: запрет arn:aws:s3:::agentscale/* -----------
+              # Проверяем ОБА principal. Если mc ls прошёл — политика не работает,
+              # Sync-хук валим: подписывать широкими правами запрещено.
+              mc alias set pluginadmin http://agentscale-minio:9000 "$PLUGIN_ADMIN_USER" "$PLUGIN_ADMIN_PASSWORD"
+              mc alias set pluginpresigner http://agentscale-minio:9000 "$PLUGIN_PRESIGN_USER" "$PLUGIN_PRESIGN_PASSWORD"
+              if mc ls "pluginadmin/agentscale" >/dev/null 2>&1; then
+                echo "plugin-buckets-init: FATAL plugin-object-admin имеет доступ к agentscale (Deny не сработал)" >&2
+                exit 1
+              fi
+              if mc ls "pluginpresigner/agentscale" >/dev/null 2>&1; then
+                echo "plugin-buckets-init: FATAL plugin-object-presigner имеет доступ к agentscale (Deny не сработал)" >&2
+                exit 1
+              fi
+
+              # --- Включение квот (БЕЗ создания бакетов) ------------------------
+              # Проверяем поддержку hard-квоты образом mc; синтаксис требует
+              # подтверждения официальной документацией MinIO (см. шапку файла).
+              if ! mc admin bucket quota --help >/dev/null 2>&1; then
+                echo "plugin-buckets-init: FATAL mc admin bucket quota недоступен; квота не включена (fail-closed)" >&2
+                exit 1
+              fi
+              # Бакеты НЕ создаём: mc mb здесь запрещён. Выставляем квоту только
+              # на УЖЕ существующие tenant-* бакеты (идемпотентный повторный Sync).
+              # Новые tenant-<company> получают квоту при grant через QuotaAdminPort.
+              EXISTING="$(mc ls local 2>/dev/null | awk '{print $NF}' | grep '^tenant-' | sed 's:/$::' || true)"
+              for bucket in $EXISTING; do
+                [ -z "$bucket" ] && continue
+                mc admin bucket quota "local/$bucket" --hard "$PLUGIN_BUCKET_QUOTA" || exit 1
+              done
+
+              echo "plugin-buckets-init: admin + presigner + policies + quota ok; бакеты создаются при grant"
+      volumes:
+        - name: plugin-policy
+          configMap:
+            name: agentscale-minio-plugin-policy
+        - name: plugin-presign-policy
+          configMap:
+            name: agentscale-minio-plugin-presign-policy

@@ -1,0 +1,82 @@
+# =============================================================================
+# СТАРТОВЫЙ ЗАКРЫТЫЙ КОНФИГ ENVOY (fail-closed / deny all).
+# Эталон и дефолт образа; в k3s перекрывается ConfigMap `egress-proxy-config`
+# задачи 14 (ключ envoy.yaml), который ГЕНЕРИРУЕТ ЗАДАЧА 08 из CapabilityGrant.
+#
+# ЗАПРЕЩЕНО добавлять сюда:
+#   * `webhooks.example.com` или любой другой статический хост (ошибка v1/v3,
+#     исправлена §6.3 дизайна v4);
+#   * кластеры/маршруты из JWT / PluginClaims (истечение токена пересобирало
+#     бы сетевые правила посреди запроса, §6.1);
+#   * 0.0.0.0/0 :80/:443 в NP плагинов (плагин имеет egress ТОЛЬКО на
+#     egress-proxy:8080, см. networkpolicy-plugin.yaml).
+#
+# Структура, которую ЗАДАЧА 08 ЗАМЕЩАЕТ/ДОПОЛНЯЕТ при grant:
+#   static_resources.clusters[] — по allowed_hosts[] с TLS + DNS-резолвом;
+#   listeners[].route_config.virtual_hosts[].routes[] — по allowed_paths[]
+#       с RBAC и аудитом; несовпадение → direct_response 403 + событие аудита.
+#   При revoke кластер/маршрут УДАЛЯЕТСЯ и вызывается reload Envoy.
+# =============================================================================
+
+admin:
+  address:
+    socket_address:
+      address: 127.0.0.1
+      port_value: 9901
+  # Admin-консоль НЕ вынесена отдельным Service: доступна только внутри пода.
+  # readinessProbe ходит на /ready по 127.0.0.1:9901.
+
+static_resources:
+  listeners:
+    - name: egress_listener
+      address:
+        socket_address:
+          address: 0.0.0.0
+          port_value: 8080
+      filter_chains:
+        - filters:
+            - name: envoy.filters.network.http_connection_manager
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                stat_prefix: plugin_egress
+                # Прокси в режиме forward: плагин шлёт абсолютный URI, Envoy
+                # сопоставляет host/path с разрешёнными из grant.
+                http_filters:
+                  - name: envoy.filters.http.router
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+                route_config:
+                  name: egress_routes
+                  virtual_hosts:
+                    - name: default_deny
+                      domains: ["*"]
+                      routes:
+                        # FAIL-CLOSED: правил из grant ещё нет — ЯВНЫЙ 403.
+                        # Задача 08 ЗАМЕЩАЕТ этот маршрут сгенерированными
+                        # (host × path) и добавляет аудит/квоту байт.
+                        - match:
+                            prefix: "/"
+                          direct_response:
+                            status: 403
+                            body:
+                              inline_string: "egress denied: no CapabilityGrant rule\n"
+                access_log:
+                  - name: envoy.access_loggers.stdout
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.access_loggers.stream.v3.StdoutAccessLog
+                      # Единая схема аудита (§6.3): host, path, method,
+                      # status, bytes, decision, tenant, subject.
+                      log_format:
+                        json_format:
+                          event: "plugin_egress_request"
+                          host: "%REQ(:AUTHORITY)%"
+                          path: "%REQ(:PATH)%"
+                          method: "%REQ(:METHOD)%"
+                          status: "%RESPONSE_CODE%"
+                          bytes: "%BYTES_SENT%"
+                          decision: "%RESPONSE_CODE%"
+                          tenant: "%REQ(X-Company-ID)%"
+                          subject: "%REQ(X-Plugin-ID)%"
+  # НАМЕРЕННО ПУСТО: ни одного внешнего кластера до первого grant.
+  # Пустой allowlist = deny all. Проверяется чек-листом README.md (п.8).
+  clusters: []

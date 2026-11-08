@@ -21,8 +21,8 @@
 сети. Поэтому:
 
 * ТРЕБОВАНИЕ: контроллер/прокси ОБЯЗАН проверять хост, путь, метод и квоту на
-  каждый редирект, каждый повторный DNS-резолв, каждый TLS-upgrade), а не
-  один раз на входе. Список пройденных хостов передаётся в ``hops``.
+  КАЖДОМ хопе (каждый редирект, каждый повторный DNS-резолв, каждый
+  TLS-upgrade), а не один раз на входе. Список пройденных хостов — ``hops``.
 * ТРЕБОВАНИЕ: финальный resolved host (фактический адрес upstream, к которому
   будет установлено соединение) проверяется отдельно и ЯВНО — ``resolved_host``.
   Он должен входить в allowlist И быть валидным публичным DNS-именем; IP-литералы,
@@ -141,6 +141,7 @@ class HopFacts:
             and self.tls_verified
         )
 
+
 def _claims_value(claims: Any, name: str, default: str = "") -> str:
     """Безопасное чтение строкового поля claims (без ``egress``/``exp``)."""
     raw: Any = None
@@ -219,9 +220,12 @@ class EgressService:
         tenant = _claims_value(claims, "company_id", "unknown")
         subject = _claims_value(claims, "sub", "unknown")
 
-        # Нормализуем вход ДО ветвлений, чтобы аудит содержал канонические значения.
+        # Нормализуем (снимаем ``:port``/скобки IPv6) и СТРОГО валидируем вход
+        # ДО ветвлений: ``validate_host`` отсекает ``user@``, IP-литералы,
+        # private/metadata и прочие формы подмены Host, а ``normalize_path`` —
+        # обход префикса через ``..``. Аудит получает канонические значения.
         try:
-            safe_host = normalize_host(host)
+            safe_host = validate_host(normalize_host(host), allow_wildcard=False)
             safe_path = normalize_path(path)
         except EgressPolicyError as exc:
             return self._deny(
@@ -454,21 +458,27 @@ class EgressService:
         status: int = 403,
         policy: EgressPolicy | None = None,
     ) -> EgressDecision:
-        event = self._record(
-            request_id=request_id,
-            occurred_at=occurred_at,
-            host=host,
-            path=path,
-            method=method,
-            bytes_count=bytes_count,
-            status=status,
-            decision="deny",
-            code=code,
-            reason=reason,
-            tenant=tenant,
-            subject=subject,
-            policy=policy,
-        )
+        # Даже если append-only приёмник недоступен, ОТКАЗ обязан быть выражен
+        # решением, а не неперехваченным исключением: иначе вызывающий слой может
+        # трактовать «упало» как «неизвестно». Событие строим best-effort.
+        try:
+            event = self._record(
+                request_id=request_id,
+                occurred_at=occurred_at,
+                host=host,
+                path=path,
+                method=method,
+                bytes_count=bytes_count,
+                status=status,
+                decision="deny",
+                code=code,
+                reason=reason,
+                tenant=tenant,
+                subject=subject,
+                policy=policy,
+            )
+        except Exception:
+            event = None
         return EgressDecision(
             allowed=False,
             decision="deny",
@@ -512,20 +522,20 @@ class EgressService:
                 policy=policy,
             )
         except Exception:
-            # Append failure для позитивной мутации = deny/system failure (§4.5).
-            return self._deny(
+            # §4.5: append failure для позитивной мутации = deny/system failure.
+            # НЕ вызываем ``_deny`` (он снова попытается писать в тот же сломанный
+            # sink), а возвращаем отказ напрямую: решение выражено явно.
+            return EgressDecision(
+                allowed=False,
+                decision="deny",
+                code=EgressDecisionCode.AUDIT_FAILED,
+                status=503,
+                reason="audit append failed; request is denied",
+                policy=policy,
+                grant_id=policy.grant_id,
                 request_id=request_id,
                 occurred_at=occurred_at,
-                host=host,
-                path=path,
-                method=method,
-                bytes_count=bytes_count,
-                code=EgressDecisionCode.AUDIT_FAILED,
-                reason="audit append failed; request is denied",
-                tenant=tenant,
-                subject=subject,
-                status=503,
-                policy=policy,
+                audit_event=None,
             )
         return EgressDecision(
             allowed=True,

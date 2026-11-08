@@ -60,7 +60,7 @@
     if (window.crypto && typeof window.crypto.randomUUID === "function") {
       return window.crypto.randomUUID();
     }
-    throw new Error(" crypto.randomUUID недоступен: нужен secure context");
+    throw new Error("crypto.randomUUID недоступен: нужен secure context");
   }
 
   /* Единственная проверка происхождения. Отдельный origin обязателен:

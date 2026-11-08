@@ -31,10 +31,10 @@ freeze). См. ``docs/migration/plugin-test-plan.md``.
 from __future__ import annotations
 
 import importlib
-import time
+import itertools
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import Any, Callable
+from typing import Any
 
 import pytest
 
@@ -65,6 +65,42 @@ FIXED_NOW = datetime(2026, 11, 8, 9, 0, 0, tzinfo=UTC)
 """Фиксированные часы: тесты детерминированы, реальный ``time`` не нужен."""
 
 FIXED_EPOCH = int(FIXED_NOW.timestamp())
+
+_ID_COUNTER = itertools.count(1)
+"""Детерминированный генератор id: повторный запуск даёт те же receipt'ы."""
+
+
+def _next_id() -> str:
+    return f"acceptance-{next(_ID_COUNTER)}"
+
+
+def _sign_claims(
+    *,
+    grant: "FakeGrant | None" = None,
+    instance: "FakeInstance | None" = None,
+    now_epoch: int = FIXED_EPOCH,
+    ttl_seconds: int = 300,
+) -> str:
+    """Детерминированный выпуск ``PluginClaims`` с ЯВНЫМ ``now``.
+
+    ``identity.mint.mint_plugin_claims`` берёт ``iat/exp`` из реального
+    ``time.time()``. Если оставить так, а в тестах использовать FIXED_NOW
+    (фиксированные часы ``ClockPort``), возникнет рассинхрон: FakeClock может
+    оказаться впереди ``exp`` и ``PluginActivator._mint_fresh`` честно откажет
+    токен как «уже истёкший», а ядро gateway даст GRANT_EXPIRED на ровном
+    месте. Поэтому собираем payload через ``build_payload(now=...)`` и подписываем
+    тем же KeyRing'ом: и mint, и verify, и все сервисы видят ОДНО время.
+    """
+
+    mint_mod = _require_module("prodavan.application.plugins.identity.mint")
+    identity = _require_module("prodavan.application.plugins.identity")
+    payload = mint_mod.build_payload(
+        grant=grant or FakeGrant(),
+        instance=instance or FakeInstance(),
+        now=now_epoch,
+        ttl_seconds=ttl_seconds,
+    )
+    return identity.keyring_from_secret(TEST_SECRET).sign(payload)
 
 
 # ---------------------------------------------------------------------------
@@ -371,29 +407,52 @@ class FakeAudit:
     typed: list[tuple[str, dict[str, Any]]] = field(default_factory=list)
     fail: bool = False
 
-    def append(self, event: Any = None, **kwargs: Any) -> Any:
-        self._maybe_fail()
-        self.events.append(event)
-        row = self._project(event)
-        if row is not None:
-            self.rows.append(row)
-        # admin.AuditPort ждёт ``True`` как подтверждение записи.
-        return True
+    # -- СИНХРОННОЕ ядро ---------------------------------------------------
+    # Два порта зон требуют ИМЕННО синхронный вызов:
+    #   * capabilities.audit.AuditPort.append(event)      -> def append(...)
+    #   * activation.ports.AuditPort.record(event)         -> def record(...)
+    # Если сделать их async, ``PluginActivator._record`` просто создаст
+    # корутину и НИКОГДА её не выполнит: аудит «тихо» исчезнет, а проверка
+    # «append failure = deny» перестанет срабатывать. Поэтому ядро — sync,
+    # а все async-порты получают отдельные тонкие адаптеры ниже.
 
-    async def append_async(self, *, event: Any) -> bool:
-        return self.append(event)
+    def append(self, event: Any = None, **kwargs: Any) -> bool:
+        """``capabilities.AuditPort.append`` и база для admin (через адаптер)."""
 
-    async def record(self, event: Any = None, **kwargs: Any) -> Any:
-        self._maybe_fail()
-        # gateway/objects передают dataclass/dict; events — (event_type, details).
+        return self._write(event, **kwargs)
+
+    def record(self, event: Any = None, **kwargs: Any) -> bool:
+        """``activation.AuditPort.record`` (синхронный контракт §4.5)."""
+
         if isinstance(event, str):
-            self.typed.append((event, dict(kwargs.get("details", {}))))
-            self.rows.append(dict(kwargs.get("details", {})))
-        else:
+            # events.AuditPort тоже зовёт append(event_type, details=...), но
+            # через async-адаптер; эта ветка — запасная для sync-вызовов.
+            return self._typed(event, dict(kwargs.get("details", {})))
+        return self._write(event, **kwargs)
+
+    def append_async(self, *, event: Any) -> bool:
+        """Алиас для читаемости: реальный await делает _AsyncAdminAudit."""
+
+        return self._write(event)
+
+    def _write(self, event: Any, **kwargs: Any) -> bool:
+        self._maybe_fail()
+        if event is None:
+            # tenantdb/objects шлёт dict целиком (уже безопасная проекция).
+            event = dict(kwargs) if kwargs else None
+        if event is not None:
             self.events.append(event)
             row = self._project(event)
             if row is not None:
                 self.rows.append(row)
+        return True
+
+    def _typed(self, event_type: str, details: dict[str, Any]) -> bool:
+        """``events.AuditPort.append(event_type, *, details)``."""
+
+        self._maybe_fail()
+        self.typed.append((event_type, dict(details)))
+        self.rows.append(dict(details))
         return True
 
     def _maybe_fail(self) -> None:
@@ -410,23 +469,63 @@ class FakeAudit:
             return dict(result) if isinstance(result, dict) else {"value": result}
         if isinstance(event, dict):
             return dict(event)
-        # Для прочих dataclass-событий берём только публичные поля-примитивы.
+        # frozen slots dataclass (ActivationAuditEvent, GatewayAuditEvent):
+        # ``__dict__`` отсутствует, поэтому берём поля через dataclasses.
+        try:
+            import dataclasses
+
+            if dataclasses.is_dataclass(event) and not isinstance(event, type):
+                return {
+                    f.name: getattr(event, f.name)
+                    for f in dataclasses.fields(event)
+                }
+        except (TypeError, AttributeError):  # pragma: no cover - защитный путь
+            pass
         as_dict = getattr(event, "__dict__", None)
         if isinstance(as_dict, dict):
             return {k: v for k, v in as_dict.items() if not k.startswith("_")}
         return {"event": str(type(event).__name__)}
 
     def assert_no_raw(self, forbidden: tuple[str, ...] = ()) -> None:
-        """Вспомогательная проверка критерия №11 для любого sink."""
+        """Проверка критерия №11: ни ключ, ни значение не несут сырых данных.
 
-        markers = forbidden or (
+        Безопасные digest-поля (``payload_digest``, ``sql_digest``, ...) НЕ
+        считаются утечкой: это каноническая замена сырого значения, а не оно
+        само. Поэтому проверяем ЗНАЧЕНИЯ на «секретные» маркеры и КЛЮЧИ — на
+        точные запрещённые имена, не на подстроку ``payload``.
+        """
+
+        value_markers = forbidden or (
             "SELECT ", "INSERT ", "UPDATE ", "DELETE ", "DROP ",
-            "password", "postgres://", "postgresql://", TEST_SECRET,
-            "Bearer ", "payload", "params", "raw_sql",
+            "postgresql://", "postgres://", "hunter2", "eyJhbGciOi",
+            "raw content", TEST_SECRET, "Bearer ",
         )
-        blob = repr(self.rows) + repr(self.typed)
-        for marker in markers:
-            assert marker not in blob, f"аудит содержит запрещённые данные: {marker!r}"
+        forbidden_keys = frozenset(
+            {
+                "sql", "query", "statement", "params", "parameters",
+                "payload", "body", "raw", "content", "password", "token",
+                "access_token", "secret", "credentials", "authorization",
+                "cookie", "dsn", "connection_string", "raw_sql",
+            }
+        )
+        for row in self.rows:
+            for key, value in row.items():
+                assert str(key).lower() not in forbidden_keys, (
+                    f"аудит содержит запрещённый ключ {key!r}"
+                )
+                for marker in value_markers:
+                    assert marker not in repr(value), (
+                        f"аудит содержит сырые данные {marker!r} под ключом {key!r}"
+                    )
+        for _event_type, details in self.typed:
+            for key, value in details.items():
+                assert str(key).lower() not in forbidden_keys, (
+                    f"аудит событий содержит запрещённый ключ {key!r}"
+                )
+                for marker in value_markers:
+                    assert marker not in repr(value), (
+                        f"аудит событий содержит сырые данные {marker!r}"
+                    )
 
 
 # ---------------------------------------------------------------------------
@@ -447,6 +546,8 @@ class FakeGrantStore:
     enabled_modules: dict[str, tuple[str, ...]] = field(default_factory=dict)
     created: list[Any] = field(default_factory=list)
     deleted: list[tuple[str, str]] = field(default_factory=list)
+    #: Выдан ли уже детерминированный TEST_GRANT_ID основной компании.
+    primary_seeded: bool = False
 
     async def get(self, *, company_id: str, plugin_id: str) -> Any | None:
         return self.grants.get((company_id, plugin_id))
@@ -457,10 +558,18 @@ class FakeGrantStore:
         )
 
     async def create(self, *, grant: Any) -> Any:
+        from dataclasses import replace
+
         key = (grant.company_id, grant.plugin_id)
         existing = self.grants.get(key)
         if existing is not None:
             return existing  # идемпотентно по grant_id/паре
+        # Детерминированный grant_id для ОСНОВНОЙ тестовой компании: токен
+        # из identity.mint несёт TEST_GRANT_ID, и revoke в admin должен
+        # деактивировать ИМЕННО его (иначе стык admin↔capabilities не проверить).
+        if grant.company_id == TEST_COMPANY and not self.primary_seeded:
+            grant = replace(grant, grant_id=TEST_GRANT_ID)
+            self.primary_seeded = True
         self.grants[key] = grant
         self.created.append(grant)
         return grant
@@ -498,6 +607,46 @@ class FakeGrantStore:
         stored = tuple(str(item) for item in plugin_ids)
         self.enabled_modules[company_id] = stored
         return list(stored)
+
+    def seed_active_grant(
+        self,
+        *,
+        company_id: str = TEST_COMPANY,
+        plugin_id: str = TEST_PLUGIN,
+        grant_id: str = TEST_GRANT_ID,
+        capabilities: tuple[str, ...] = ("cache", "network"),
+        egress_hosts: tuple[str, ...] = ("hooks.slack.com",),
+        egress_paths: tuple[str, ...] = ("/services/",),
+    ) -> Any:
+        """Засеять активный ``CapabilityGrantRecord`` в общий grant_store.
+
+        Используется тестами стыков egress/admin/capabilities, чтобы grant
+        существовал в ТОМ ЖЕ хранилище, которое читает ``GrantPolicyResolver``.
+        Политика ``webhooks-only`` с явным allowlist: ``full`` требует approval.
+        """
+
+        contracts = _require_module("prodavan.application.plugins.admin.contracts")
+        grant = contracts.CapabilityGrantRecord(
+            grant_id=grant_id,
+            company_id=company_id,
+            plugin_id=plugin_id,
+            plugin_instance_id=TEST_INSTANCE,
+            manifest_version=TEST_VERSION,
+            artifact_digest=TEST_DIGEST,
+            capabilities=capabilities,
+            egress_policy=contracts.EgressPolicy(
+                mode=contracts.EgressMode.WEBHOOKS_ONLY,
+                allowed_hosts=egress_hosts,
+                allowed_paths=egress_paths,
+            ),
+            quotas=contracts.QuotaSet(),
+            status=contracts.GrantStatus.ACTIVE,
+            created_at=FIXED_NOW,
+        )
+        self.grants[(company_id, plugin_id)] = grant
+        if grant_id == TEST_GRANT_ID:
+            self.primary_seeded = True
+        return grant
 
     # --- egress.resolver.GrantStorePort (синхронный, transport-neutral) -----
 
@@ -762,7 +911,6 @@ class FakeMintPort:
     issued: list[Any] = field(default_factory=list)
 
     async def mint(self, *, request: Any) -> Any:
-        mint_mod = _require_module("prodavan.application.plugins.identity.mint")
         contracts = _require_module("prodavan.application.plugins.admin.contracts")
         grant = FakeGrant(
             grant_id=request.grant_id,
@@ -774,13 +922,7 @@ class FakeMintPort:
             quota_ref=request.quota_ref,
         )
         instance = FakeInstance(plugin_instance_id=request.plugin_instance_id)
-        # ttl_seconds MintRequest ограничен 1..300; Token TTL по умолчанию 300.
-        token = mint_mod.mint_plugin_claims(
-            grant=grant,
-            instance=instance,
-            secret=self.secret,
-            ttl_seconds=int(request.ttl_seconds),
-        )
+        token = _sign_claims(grant=grant, instance=instance, now_epoch=FIXED_EPOCH)
         issued = contracts.IssuedPluginClaims(
             token=token,
             grant_id=request.grant_id,
@@ -848,9 +990,8 @@ class FakeMint:
 
     async def mint(self, *, plugin_instance_id: str, reason: str) -> Any:
         ports = _require_module("prodavan.application.plugins.activation.ports")
-        mint_mod = _require_module("prodavan.application.plugins.identity.mint")
         self.counter += 1
-        now = (self.clock.now() if self.clock is not None else FIXED_NOW)
+        now = self.clock.now() if self.clock is not None else FIXED_NOW
         grant = FakeGrant(
             grant_id=TEST_GRANT_ID,
             plugin_id=TEST_PLUGIN,
@@ -860,10 +1001,13 @@ class FakeMint:
             artifact_digest=TEST_DIGEST,
         )
         instance = FakeInstance(plugin_instance_id=plugin_instance_id)
-        # mint_plugin_claims сам берёт time.time(); для детерминизма достаточно
-        # того, что токен НОВЫЙ (свой jti) и короткий TTL.
-        token = mint_mod.mint_plugin_claims(
-            grant=grant, instance=instance, secret=self.secret, ttl_seconds=300
+        # Токен ВСЕГДА новый (свой jti из build_payload) и короткий; время
+        # выпуска согласуется с FakeClock, чтобы не дать ложный EXPIRED.
+        token = _sign_claims(
+            grant=grant,
+            instance=instance,
+            now_epoch=int(now.timestamp()),
+            ttl_seconds=300,
         )
         result = ports.MintedClaims(
             token=token,
@@ -1315,7 +1459,7 @@ class Platform:
         return service_mod.PluginAdminService(
             ports,
             clock=lambda: self.clock.now(),
-            id_factory=lambda: "acceptance-id",
+            id_factory=_next_id,
         )
 
     def activator(self) -> Any:
@@ -1390,29 +1534,22 @@ class Platform:
         return identity.keyring_from_secret(TEST_SECRET)
 
     def mint_claims(self, *, grant: FakeGrant | None = None) -> str:
-        """Выпустить валидный PluginClaims с правильным ``typ`` (кр. 17/22)."""
+        """Выпустить валидный PluginClaims с правильным ``typ`` (кр. 17/22).
 
-        identity = _require_module("prodavan.application.plugins.identity")
-        return identity.mint_plugin_claims(
-            grant=grant or FakeGrant(),
-            instance=FakeInstance(),
-            secret=TEST_SECRET,
-            ttl_seconds=300,
-        )
-
-    def verify_claims(self, token: str) -> Any:
-        """Проверить подпись/claim тем же KeyRing'ом, без подмены «сейчас».
-
-        ВАЖНО: ``mint_plugin_claims`` берёт ``iat/exp`` из РЕАЛЬНОГО
-        ``time.time()`` (в identity нет инжектируемых часов). Поэтому verify
-        тоже должен идти с ``now=None`` (реальное время): подстановка
-        ``FakeClock(FIXED_NOW)`` дала бы ложный EXPIRED на ровном месте.
-        Инжектируемые часы используются только там, где порт их реально
-        принимает — в ``PluginActivator`` (idle TTL, кр. 14).
+        Время выпуска — FIXED_EPOCH (то же, что и ``FakeClock``): детерминизм
+        важнее «реального» ``time.time()``, иначе стык activation↔identity
+        даст ложный EXPIRED.
         """
 
+        return _sign_claims(grant=grant, now_epoch=FIXED_EPOCH, ttl_seconds=300)
+
+    def verify_claims(self, token: str) -> Any:
+        """Проверить подпись/claim тем же KeyRing'ом и тем же FIXED_EPOCH."""
+
         identity = _require_module("prodavan.application.plugins.identity")
-        return identity.verify_plugin_token(token, keyring=self.keyring())
+        return identity.verify_plugin_token(
+            token, keyring=self.keyring(), now=FIXED_EPOCH
+        )
 
     def object_store(self) -> Any:
         """``PluginObjectStore`` (задача 06) на in-memory BucketAdmin/Sts."""
@@ -1438,12 +1575,16 @@ class Platform:
         )
 
 
-# --- Тонкие async-адаптеры: один in-memory sink на РАЗНЫЕ контракты портов --
-# (синхронный FakeAudit не может быть напрямую подключён к async-портам)
+# --- Тонкие async-адаптеры: один СИНХРОННЫЙ sink на РАЗНЫЕ контракты портов --
+# Все async-порты зон зовут sync-ядро FakeAudit БЕЗ ``await``: сами адаптеры
+# уже корутины. activation/gateway/objects/events/tenantdb различаются только
+# сигнатурой, поэтому каждый получает свой двухстрочный мост.
 
 
 @dataclass
 class _AsyncAdminAudit:
+    """``admin.AuditPort.append(*, event)``."""
+
     inner: FakeAudit
 
     async def append(self, *, event: Any) -> bool:
@@ -1452,37 +1593,50 @@ class _AsyncAdminAudit:
 
 @dataclass
 class _AsyncEventsAudit:
+    """``events.AuditPort.append(event_type, *, details)``."""
+
     inner: FakeAudit
 
     async def append(self, event_type: str, *, details: Any) -> None:
-        await self.inner.record(event_type, details=dict(details))
+        self.inner._typed(event_type, dict(details))
 
 
 @dataclass
 class _AsyncGatewayAudit:
+    """``gateway.AuditPort.record(event)``."""
+
     inner: FakeAudit
 
     async def record(self, event: Any) -> None:
-        await self.inner.record(event)
+        self.inner.record(event)
 
 
 @dataclass
 class _AsyncObjectAudit:
+    """``objects.AuditPort.record(event: dict)``."""
+
     inner: FakeAudit
 
     async def record(self, event: dict) -> None:
-        await self.inner.record(event)
+        self.inner.record(event)
 
 
 @dataclass
 class _AsyncTenantAudit:
+    """``tenantdb.AuditPort.record(*, event, company_id, plugin_id, payload)``."""
+
     inner: FakeAudit
 
     async def record(
         self, *, event: str, company_id: str, plugin_id: str, payload: Any
     ) -> None:
-        await self.inner.record(
-            {"event": event, "company_id": company_id, "plugin_id": plugin_id, **dict(payload)}
+        self.inner.record(
+            {
+                "event": event,
+                "company_id": company_id,
+                "plugin_id": plugin_id,
+                **dict(payload),
+            }
         )
 
 

@@ -67,7 +67,7 @@ function makeChannel(overrides: Parameters<typeof createPluginChannel>[2] = {}):
 describe("plugin-rpc/1: проверка origin и WindowProxy", () => {
   it("игнорирует сообщение с чужим event.origin и НЕ роняет канал", async () => {
     const rejected: string[] = [];
-    const onError = vi.fn();
+    const onError = vi.fn<(error: PluginFrameError) => void>();
     const ch = makeChannel({ onRejected: (reason) => rejected.push(reason), onError });
     const handshake = ch.handshake();
 
@@ -120,7 +120,7 @@ describe("plugin-rpc/1: проверка origin и WindowProxy", () => {
 
 describe("plugin-rpc/1: handshake", () => {
   it("plugin.ready с неверным protocol → unsupportedProtocol", async () => {
-    const onError = vi.fn();
+    const onError = vi.fn<(error: PluginFrameError) => void>();
     const ch = makeChannel({ onError });
     const handshake = ch.handshake();
 
@@ -142,9 +142,23 @@ describe("plugin-rpc/1: handshake", () => {
     await expect(handshake).rejects.toMatchObject({ code: "identityMismatch" });
   });
 
+  it("plugin.ready с чужим nonce/instance_id не проходит (stale-window reuse)", async () => {
+    const ch = makeChannel();
+    const handshake = ch.handshake();
+    emit(window, {
+      origin: OPAQUE_ORIGIN,
+      source: iframe.contentWindow,
+      data: ready({ nonce: "stale-nonce", instance_id: "stale-instance" }),
+    });
+    expect(ch.ready).toBe(false);
+    // Канал жив: корректный handshake без эхо всё ещё принимается.
+    emit(window, { origin: OPAQUE_ORIGIN, source: iframe.contentWindow, data: ready() });
+    await expect(handshake).resolves.toMatchObject({ type: "plugin.ready" });
+  });
+
   it("рукопожатие без ответа → timeout", async () => {
     vi.useFakeTimers();
-    const onError = vi.fn();
+    const onError = vi.fn<(error: PluginFrameError) => void>();
     const ch = createPluginChannel(iframe, OPAQUE_ORIGIN, {
       pluginId: PLUGIN_ID,
       version: VERSION,
@@ -187,7 +201,7 @@ describe("plugin-rpc/1: request/response", () => {
   });
 
   it("plugin.error закрывает канал с безопасным кодом, без текста плагина", async () => {
-    const onError = vi.fn();
+    const onError = vi.fn<(error: PluginFrameError) => void>();
     const ch = makeChannel({ onError });
     const handshake = ch.handshake();
     emit(window, { origin: OPAQUE_ORIGIN, source: iframe.contentWindow, data: ready() });
@@ -208,13 +222,13 @@ describe("plugin-rpc/1: request/response", () => {
   });
 
   it("не отправляет capability token: в postMessage нет token/access_token/secret", async () => {
-    const postMessage = vi.fn();
+    const postMessage = vi.fn<(message: unknown, targetOrigin: string) => void>();
     Object.defineProperty(iframe, "contentWindow", { value: { postMessage }, configurable: true });
     const ch = makeChannel();
     const handshake = ch.handshake();
     expect(postMessage).toHaveBeenCalledTimes(1);
     const [hostReady, targetOrigin] = postMessage.mock.calls[0] as [unknown, string];
-    expect(JSON.stringify(hostReady).toLowerCase()).not.toMatch(/token|secret|bearer|authorization/);
+    expect(JSON.stringify(hostReady).toLowerCase()).not.toMatch(/token|secret|claims|bearer|authorization/);
     expect(targetOrigin).toBe("*"); // opaque origin: адресуем только "*", данных в сообщении нет
 
     // «Ответ» приходит от подменённого WindowProxy.
@@ -223,7 +237,7 @@ describe("plugin-rpc/1: request/response", () => {
     await handshake;
     const request = ch.request("queries.list");
     const [, sent] = postMessage.mock.calls[1] as [unknown, unknown];
-    expect(JSON.stringify(sent).toLowerCase()).not.toMatch(/token|secret|bearer|authorization/);
+    expect(JSON.stringify(sent).toLowerCase()).not.toMatch(/token|secret|claims|bearer|authorization/);
     emit(window, {
       origin: OPAQUE_ORIGIN,
       source,
@@ -235,7 +249,7 @@ describe("plugin-rpc/1: request/response", () => {
 
 describe("plugin-rpc/1: dispose", () => {
   it("повторный dispose безопасен и не вызывает onError повторно", () => {
-    const onError = vi.fn();
+    const onError = vi.fn<(error: PluginFrameError) => void>();
     const ch = makeChannel({ onError });
     ch.dispose();
     expect(() => ch.dispose()).not.toThrow();
@@ -252,7 +266,7 @@ describe("plugin-rpc/1: dispose", () => {
   });
 
   it("dispose удаляет слушатель message: последующие события не обрабатываются", async () => {
-    const onRejected = vi.fn();
+    const onRejected = vi.fn<(reason: "origin" | "source" | "shape") => void>();
     const ch = makeChannel({ onRejected });
     void ch.handshake().catch(() => undefined);
     ch.dispose();

@@ -109,7 +109,8 @@ def test_backend_uses_full_sql_against_own_tables() -> None:
     assert "greeting_stats" in raw
     assert "ON CONFLICT" in raw, "UPSERT счётчика идемпотентен к повторам"
     assert "$1" in raw and "$2" in raw, "параметризованные запросы, а не конкатенация"
-    assert "jsonb" not in raw.lower()
+    # Слово может быть в пояснении «не jsonb»; запрещён сам ТИП/использование.
+    assert not re.search(r"\bjsonb\b\s*\(", raw, re.IGNORECASE)
     assert "module_instance_data_rows" not in raw.lower()
     # Платформенная БД недоступна плагину даже по имени.
     assert "FROM prodavan" not in raw

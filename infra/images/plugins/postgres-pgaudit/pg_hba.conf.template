@@ -1,0 +1,69 @@
+# =============================================================================
+# ШАБЛОН pg_hba.conf для tenant-PostgreSQL (дизайн v4, §2.1; задача 16, п.3).
+#
+# ФАЙЛ-ОБРАЗЕЦ, НЕ БОЕВОЙ КОНФИГ. В образе лежит как
+# /etc/postgresql/pg_hba.conf.template (эталон). Боевой /etc/postgresql
+# приходит из ConfigMap `tenant-postgres-config` задачи 14, смонтированного
+# КАТАЛОГОМ БЕЗ subPath; Deployment передаёт
+#   -c hba_file=/etc/postgresql/pg_hba.conf
+#   -c ident_file=/etc/postgresql/pg_ident.conf
+# Если ConfigMap не смонтирован, postgres НЕ стартует (fail-closed).
+# Образ НЕ подставляет этот шаблон автоматически: тихая подмена сетевой
+# политики значила бы обход GitOps-источника истины.
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# ЯВНОЕ ПРАВИЛО ПРО `map=` (НЕ «переизобретать» обратно):
+#   Опция `map` в pg_hba.conf работает ТОЛЬКО с методами ident, peer, gssapi,
+#   sspi, ldap, radius, cert — она маппит ВНЕШНЕЕ/системное имя в имя роли БД.
+#   С `scram-sha-256` она НЕДОПУСТИМА: postgres упадёт на старте с
+#     "authentication option map is not valid for this method"
+#   Поэтому пары (DATABASE, USER) задаются ЗДЕСЬ ЯВНО полями DATABASE и USER,
+#   а НЕ через pg_ident / `map=`. `pg_ident.conf` — ПУСТАЯ ЗАГЛУШКА
+#   (см. соседний файл infra/images/plugins/postgres-pgaudit/pg_ident.conf),
+#   добавление записей туда НЕ даст эффекта при scram-sha-256.
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# ПАРЫ (п.3 задачи):
+#   (plugin_platform_admin, all) — админская роль платформы, только pod-сеть.
+#   (tenant_<company>, tenant_<company>_plugin_*) — пары плагинов, НЕ
+#     хардкодятся: их ГЕНЕРИРУЕТ задача 05 при grant в include-файле
+#     `tenant_hba.conf` (см. ниже). До первого grant файл ПУСТОЙ.
+#
+# `include` (НЕ `include_if_exists`) — намеренный fail-closed: если файл пар
+# пропал, postgres НЕ стартует, а не тихо пускает всех. Записи include
+# подставляются НА МЕСТЕ директивы, т.е. ДО финального reject-all.
+#
+# ПОРЯДОК СТРОК ВАЖЕН: pg_hba берёт ПЕРВОЕ совпадение; reject-all стоит
+# ПОСЛЕДНИМ. Чужая пара (роль плагина + не своя БД) до include не дойдёт и
+# упрётся в reject. scram-sha-256 требует пароль, reject его не запрашивает.
+#
+# АДРЕСА: 10.42.0.0/16 и 10.43.0.0/16 — pod/service CIDR single-node k3s
+# (совпадает с tenant-postgres.yaml и networkpolicy-plugin.yaml задачи 14).
+# =============================================================================
+
+# TYPE  DATABASE  USER                     ADDRESS          METHOD  OPTIONS
+
+# --- local: bootstrap официального entrypoint (PGPASSWORD из Secret) ---------
+# Unix-сокет нужен docker-entrypoint.sh на initdb и для HEALTHCHECK pg_isready.
+local   all       all                                       scram-sha-256
+
+# --- пара 1: админская роль платформы (plugin_platform_admin, all) -----------
+# CREATE DATABASE / CREATE ROLE / CREATE SCHEMA при grant (§2.2, §5.5).
+# НЕ superuser. Только pod-сеть, не 0.0.0.0/0.
+host    all       plugin_platform_admin    10.42.0.0/16     scram-sha-256
+host    all       plugin_platform_admin    10.43.0.0/16     scram-sha-256
+
+# --- пара 2: (tenant_<company>, tenant_<company>_plugin_*) -------------------
+# Строки вида:
+#   host  tenant_co_123  tenant_co_123_plugin_mod_equipment  10.42.0.0/16  scram-sha-256
+#   host  tenant_co_123  tenant_co_123_plugin_mod_equipment  10.43.0.0/16  scram-sha-256
+# добавляет ЗАДАЧА 05 при grant и УДАЛЯЕТ при revoke (+ ALTER ROLE NOLOGIN,
+# + SELECT pg_reload_conf()). В этом шаблоне пары НЕ перечислены: пустой
+# include = ни один плагин не подключится (fail-closed).
+include /etc/postgresql/tenant_hba.conf
+
+# --- ФИНАЛЬНЫЙ REJECT ALL (fail-closed) --------------------------------------
+# Всё, для чего нет ЯВНОЙ пары выше, запрещено ЯВНО. Роль плагина с чужим
+# паролем сюда не попадёт: имя БД и USER не совпадут. Вторая строка — IPv6.
+host    all       all                      0.0.0.0/0        reject
+host    all       all                      ::/0             reject

@@ -84,6 +84,14 @@ spec:
             - secretRef:
                 name: agentscale-b2b-secrets
                 optional: true
+            # Plugin object storage (дизайн v4 §5.4): отдельный admin-кред для
+            # tenant-* бакетов. Fallback на root/S3_* из configmap ЗАПРЕЩЁН —
+            # config.py задачи MinIO IAM fail-closed при отсутствии этого Secret.
+            # Dev-значения создаёт Job plugin-buckets-init.yaml; для shared
+            # контура заменить на SealedSecret.
+            - secretRef:
+                name: agentscale-minio-plugin-admin
+                optional: true
           volumeMounts:
             - name: storage
               mountPath: /data/storage

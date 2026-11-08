@@ -19,22 +19,12 @@ from typing import Any
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from starlette.middleware.base import BaseHTTPMiddleware
 
 from prodavan.api.v1.plugin_capabilities import router as plugin_capabilities_router
-from prodavan.application.plugins.identity.allowlist import is_plugin_capability_token
 from prodavan.application.plugins.identity.keys import keyring_from_secret
 from prodavan.application.plugins.identity.mint import mint_plugin_claims, peek_plugin_token
 from prodavan.application.plugins.identity.revocation import GrantRevocation, InMemoryRevocation
-from prodavan.application.plugins.transport.deps import (
-    BEARER_PREFIX,
-    get_plugin_claims,
-    resolve_identity_config,
-)
-from prodavan.application.plugins.transport.errors import (
-    PluginTransportError,
-    plugin_problem_response,
-)
+from prodavan.application.plugins.transport.guard import register_plugin_surface_guard
 
 TEST_SECRET = "plugin-transport-test-secret-explicit-7b21"
 TEST_DIGEST = "sha256:" + ("c0ffee12" * 8)
@@ -136,41 +126,19 @@ def service() -> FakeCapabilityService:
     return FakeCapabilityService()
 
 
-class PluginTokenGuardMiddleware(BaseHTTPMiddleware):
-    """Тестовая имитация F11-интеграции родителя (ветка Plugin Gateway).
-
-    В проде родитель подключает такую же проверку в middleware: если в запросе
-    plugin-токен, он обязан пройти ``get_plugin_claims`` (verify + revocation +
-    ``assert_plugin_surface``) ДО роутинга. Это и даёт 403 на ``/agent/events``
-    даже когда путь не входит в наш route-group (критерий №17). Тест только
-    воспроизводит контракт интеграции, не подменяя продуктовый код.
-    """
-
-    async def dispatch(self, request, call_next):  # type: ignore[no-untyped-def]
-        header = request.headers.get("Authorization") or ""
-        if header.startswith(BEARER_PREFIX):
-            token = header[len(BEARER_PREFIX) :].strip()
-            if token and is_plugin_capability_token(token):
-                state = request.app.state
-                config = PluginIdentityConfig(
-                    keyring=state.plugin_keyring,
-                    revocation=state.plugin_revocation,
-                )
-                try:
-                    get_plugin_claims(request, config)
-                except PluginTransportError as exc:
-                    return plugin_problem_response(exc.problem, request)
-        return await call_next(request)
-
-
 @pytest.fixture
 def app(keyring, revocation, service: FakeCapabilityService) -> FastAPI:
-    """Отдельное приложение Plugin Gateway (НЕ main.py, НЕ main_pod.py)."""
+    """Отдельное приложение Plugin Gateway (НЕ main.py, НЕ main_pod.py).
+
+    Регистрируется РЕАЛЬНАЯ plugin-ветка allowlist из ``transport/guard.py`` —
+    ровно та, которую родитель подключит при F11. Так тест ``/agent/events``
+    проверяет продуктовый код, а не его имитацию.
+    """
     application = FastAPI()
     application.state.plugin_keyring = keyring
     application.state.plugin_revocation = revocation
     application.state.plugin_capability_service = service
-    application.add_middleware(PluginTokenGuardMiddleware)
+    register_plugin_surface_guard(application)
     # КРИТИЧНО: без внешнего /api/v1 префикса — allowlist задачи 02 разрешает
     # только /capabilities/v1/* (см. отчёт родителю).
     application.include_router(plugin_capabilities_router)

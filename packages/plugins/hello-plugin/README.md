@@ -72,6 +72,10 @@ docker build -f backend/Dockerfile -t ghcr.io/ne-tort/plugins/hello_plugin@sha25
 4. k8s **Secret** (не ConfigMap, не plaintext в манифесте): `GATEWAY_URL`,
    `PLUGIN_ID`, `TENANT_DB_DSN`, короткий `PLUGIN_CLAIMS` lease,
    `PLUGIN_WEBHOOK_SECRET`. Ротация при reinstall/revoke.
+   > `PLUGIN_WEBHOOK_SECRET` — дополнение пилота к перечисленным в задаче env:
+   > без секрета невозможно проверить `X-Prodavan-Signature` (§7.5), а брать его
+   > из ``prodavan`` или хардкодить нельзя. Это **ещё один ключ того же Secret**,
+   > не новый источник и не plaintext. Задаче 12/05 нужно выдать его при grant.
 5. Deployment `replicas: 0` по образу из того же OCI digest.
 
 `TENANT_DB_DSN` — **прямой DSN к своей БД компании** (вариант B, ADR-007),
@@ -144,6 +148,10 @@ liquibase update (changelog.xml, свой DSN, LIQUIBASE_ALLOW_EXECUTE_COMMAND=f
 - **Каждое** входящее сообщение проверяет `event.origin` и точный
   `WindowProxy` (`event.source === window.parent`); `origin === "null"` и
   неизвестный origin отбрасываются fail-closed.
+- `data-host-origin` в `index.html` — публичный origin shell как политика
+  доверенного отправителя (не секрет). Для перехода на wildcard subdomain
+  (§5.3) хост задачи 13 должен внедрять это значение в статику при установке,
+  а не плагин хардкодить его: отмечено как риск для родителя.
 - Кнопка «Поздороваться» → `plugin.rpc.request` (envelope `kind: "request"`)
   → хост проксирует в `/pluginpage/hello_plugin/{company}/api/greetings`.
   **Нет `?token=` в URL**, нет `allow-same-origin`, нет прямых вызовов shared

@@ -187,7 +187,7 @@ class JobsSubmitBody(PluginBody):
 
 
 class JobsGetBody(PluginBody):
-    """``GET /jobs/{job_id}`` — тело обязательно: ``run_id`` нельзя брать из query."""
+    """``GET /jobs/{job_id}`` — ``run_id`` из типизированного payload, не произвольный dict."""
 
     run_id: SafeStr
 

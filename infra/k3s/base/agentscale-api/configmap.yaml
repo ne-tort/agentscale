@@ -106,6 +106,14 @@ data:
   PLUGIN_OCI_REGISTRY: ghcr.io/ne-tort/plugins
   PLUGIN_COSIGN_ISSUER: https://token.actions.githubusercontent.com
   PLUGIN_MIN_PLATFORM_VERSION: "4.0.0"
-  # Секреты (PLUGIN_CLAIMS_SECRET, PLUGIN_TENANT_DB_ADMIN_URL, PLUGIN_COSIGN_IDENTITY)
-  # НЕ лежат в ConfigMap: их приносит SealedSecret/k8s Secret.
+  # MinIO STS НЕ подтверждён официальной документацией (6 неудачных попыток).
+  # По умолчанию ВЫКЛЮЧЕН: плагин получает только scoped presigned URL,
+  # никаких STS/постоянных креденшелов. Включать только после ручной проверки
+  # 8 пунктов на Verify Dev (docs/migration/minio-sts-verification.md).
+  PLUGIN_MINIO_STS_ENABLED: "false"
+  PLUGIN_MINIO_REGION: us-east-1
+  PLUGIN_MINIO_ENDPOINT: http://agentscale-minio:9000
+  # Секреты (PLUGIN_CLAIMS_SECRET, PLUGIN_TENANT_DB_ADMIN_URL,
+  # PLUGIN_COSIGN_IDENTITY, PLUGIN_MINIO_ADMIN_* ) НЕ лежат в ConfigMap:
+  # их приносит SealedSecret/k8s Secret. Fallback на root/S3_* запрещён.
   POD_AGENT_RUNTIME_AUTH_SECRET: pod-agent-bridge-auth

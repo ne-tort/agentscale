@@ -28,7 +28,11 @@ export type PluginReadyMessage = {
   readonly type: "plugin.ready";
   readonly plugin_id: string;
   readonly version: string;
+  /** Digest артефакта из реестра (§5.2), при наличии — безопасная строка. */
   readonly digest?: string;
+  /** Эхо `host.ready`: привязка к этому экземпляру (проверяется в handshake). */
+  readonly instance_id?: string;
+  readonly nonce?: string;
 };
 export type HostReadyMessage = {
   readonly protocol: typeof PLUGIN_RPC_PROTOCOL;
@@ -293,12 +297,14 @@ export function createPluginChannel(
       return;
     }
     if (!ready) {
-      if (!exactShape(data, ["protocol", "type", "plugin_id", "version"], ["digest"]) || data.type !== "plugin.ready") {
+      if (!exactShape(data, ["protocol", "type", "plugin_id", "version"], ["digest", "instance_id", "nonce"]) || data.type !== "plugin.ready") {
         try { options.onRejected?.("shape"); } catch { /* ignore */ }
         return;
       }
       if (typeof data.plugin_id !== "string" || typeof data.version !== "string"
-        || (data.digest !== undefined && typeof data.digest !== "string")) {
+        || (data.digest !== undefined && typeof data.digest !== "string")
+        || (data.instance_id !== undefined && data.instance_id !== instanceId)
+        || (data.nonce !== undefined && data.nonce !== nonce)) {
         try { options.onRejected?.("shape"); } catch { /* ignore */ }
         return;
       }
@@ -312,6 +318,8 @@ export function createPluginChannel(
         plugin_id: data.plugin_id,
         version: data.version,
         ...(typeof data.digest === "string" ? { digest: data.digest } : {}),
+        ...(typeof data.instance_id === "string" ? { instance_id: data.instance_id } : {}),
+        ...(typeof data.nonce === "string" ? { nonce: data.nonce } : {}),
       };
       ready = true;
       if (handshakeTimer !== undefined) { clearTimeout(handshakeTimer); handshakeTimer = undefined; }

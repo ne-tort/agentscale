@@ -1,0 +1,169 @@
+# =============================================================================
+# Сборка и публикация ИНФРАСТРУКТУРНЫХ базовых образов плагинов (задача 16).
+#
+# ОТДЕЛЬНЫЙ workflow. `ci-images.yml` НЕ редактируется (правило 1 задачи):
+# там платформенные apps/api, apps/web, searchnet со своей логикой кэшей и
+# smoke-тестов. `plugin-artifacts.yml` тоже не трогаем: он про OCI-АРТЕФАКТЫ
+# ПЛАГИНОВ (cosign keyless, ТОЛЬКО pin по digest, ЗАПРЕТ :latest), а здесь —
+# ИНФРАСТРУКТУРНЫЕ образы, для которых по ТЗ разрешены `:sha12` + `:latest`.
+# Запрет `:latest` из §5.1 / §14 п.5 относится ТОЛЬКО к артефактам плагинов,
+# НЕ к базовым образам платформы. Манифесты k3s всё равно пинуют эти образы
+# по @sha256:<digest> из summary (см. README.md каталога).
+#
+# ТРИ ОБРАЗА В МАТРИЦЕ (ровно 3, по п.7 задачи):
+#   postgres-pgaudit → ghcr.io/<owner>/plugin-base-postgres
+#   pgbouncer        → ghcr.io/<owner>/plugin-base-pgbouncer
+#   egress-proxy     → ghcr.io/<owner>/plugin-base-envoy
+# Новые имена выбраны намеренно: НЕ затираем ghcr-зеркало
+# `ghcr.io/ne-tort/postgres:16.15`, которым пользуется платформенный инстанс
+# (infra/k3s/overlays/dev/postgres.yaml, userdb-init.yaml). Родитель перепинит
+# манифесты задачи 14 после первой успешной сборки.
+#
+# Fail-closed: при пустом/невалидном outputs.digest job ПАДАЕТ, а не
+# «публикует без digest». Без digest в summary нечего пинить в k3s.
+#
+# Тесты/сборки/docker/kubectl/линт/git в этой сессии НЕ запускались.
+# =============================================================================
+
+name: Plugin Base Images
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "infra/images/plugins/**"
+      - ".github/workflows/plugin-base-images.yml"
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  # Самохостед-раннеры живут на ОДНОЙ VM и делят docker daemon/диск
+  # (паттерн ci-images.yml): новейший прогон вытесняет предыдущий.
+  group: plugin-base-images-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: [self-hosted, linux, docker]
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: postgres-pgaudit
+            context: infra/images/plugins/postgres-pgaudit
+            image: plugin-base-postgres
+          - name: pgbouncer
+            context: infra/images/plugins/pgbouncer
+            image: plugin-base-pgbouncer
+          - name: egress-proxy
+            context: infra/images/plugins/egress-proxy
+            image: plugin-base-envoy
+    steps:
+      - uses: actions/checkout@v4
+
+      # Имя пакета + sha12-тег. owner приводим к нижнему регистру (GHCR
+      # требует lowercase), точь-в-точь как в ci-images.yml / plugin-artifacts.yml.
+      - name: Имя образа и теги
+        id: meta
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          owner = os.environ["GITHUB_REPOSITORY_OWNER"].lower()
+          registry = os.environ["REGISTRY"]
+          sha12 = os.environ["GITHUB_SHA"][:12]
+          image = os.environ["MATRIX_IMAGE"]
+          ref = f"{registry}/{owner}/{image}"
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+              out.write(f"ref={ref}\n")
+              out.write(f"sha12={sha12}\n")
+              out.write(f"tags={ref}:{sha12}\n{ref}:latest\n")
+          PY
+        env:
+          MATRIX_IMAGE: ${{ matrix.image }}
+
+      # Тот же долгоживущий buildx-билдер, что и в ci-images.yml: слой-кэш и
+      # RUN-кэш лежат в его state-томе и переживают jobs/PR. Создание
+      # идемпотентно (раннеры делят docker CLI store пользователя runner).
+      - name: Использовать постоянный buildx-билдер
+        run: |
+          set -euo pipefail
+          if ! docker buildx inspect agentscale-ci >/dev/null 2>&1; then
+            docker buildx create --name agentscale-ci \
+              --driver docker-container \
+              --driver-opt network=host \
+              --config /etc/buildkit/buildkitd.toml \
+              || docker buildx create --name agentscale-ci \
+                --driver docker-container --driver-opt network=host
+          fi
+          docker buildx use agentscale-ci
+          docker buildx inspect --bootstrap agentscale-ci >/dev/null
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GHCR_PUSH_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Собрать и запушить ${{ matrix.name }}
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.context }}/Dockerfile
+          push: true
+          # Цепочка поставки (§14 п.5): provenance даёт происхождение сборки,
+          # SBOM — содержимое образа (в т.ч. точную версию
+          # postgresql-16-pgaudit из PGDG). Обе опции ЯВНО включены.
+          provenance: true
+          sbom: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ steps.meta.outputs.sha12 }}
+
+      # Digest — ОБЯЗАТЕЛЬНЫЙ артефакт прогона: именно его родитель пинует
+      # в infra/k3s/base/plugins/*.yaml (@sha256:...). Пустой/кривой digest
+      # = fail, а не «опубликуем и разберёмся».
+      - name: Digest в summary (fail-closed)
+        id: digest
+        env:
+          RAW_DIGEST: ${{ steps.build.outputs.digest }}
+          IMAGE_REF: ${{ steps.meta.outputs.ref }}
+          SHA12: ${{ steps.meta.outputs.sha12 }}
+        run: |
+          set -euo pipefail
+          DIGEST="${RAW_DIGEST:-}"
+          if [ -z "$DIGEST" ]; then
+            echo "::error::docker/build-push-action не вернул outputs.digest — образ не закреплён" >&2
+            exit 1
+          fi
+          if ! printf '%s' "$DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$'; then
+            echo "::error::невалидный digest: '$DIGEST' (ожидался ^sha256:[0-9a-f]{64}$)" >&2
+            exit 1
+          fi
+          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+          echo "pinned=${IMAGE_REF}@${DIGEST}" >> "$GITHUB_OUTPUT"
+          {
+            echo "## ${{ matrix.name }}"
+            echo ""
+            echo "| Поле | Значение |"
+            echo "|---|---|"
+            echo "| Образ | \`${IMAGE_REF}\` |"
+            echo "| Теги | \`:${SHA12}\`, \`:latest\` (инфраструктурные; запрет :latest — только для артефактов плагинов) |"
+            echo "| Digest | \`${DIGEST}\` |"
+            echo "| **Pin для k3s** | \`${IMAGE_REF}@${DIGEST}\` |"
+            echo "| provenance / sbom | \`true\` / \`true\` |"
+            echo ""
+            echo "> В манифестах \`infra/k3s/base/plugins/*.yaml\` использовать **pin по digest**,"
+            echo "> а не \`:latest\`. Тег \`:${SHA12}\` — для отката и читаемости логов."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "OK: ${IMAGE_REF}@${DIGEST}"
