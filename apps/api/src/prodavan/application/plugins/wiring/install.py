@@ -370,6 +370,37 @@ def _register_guard_once(app: Any, composer: _Composer) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _minio_bucket_admin() -> Any | None:
+    """Собрать реальный ``BucketAdminPort`` из env плагинового контура.
+
+    ``MinioBucketAdmin`` уже реализует весь контракт (bucket-per-tenant,
+    merge политик, квоты, fail-closed). Конфигурация читается ТОЛЬКО из
+    ``PLUGIN_MINIO_*`` — фолбэка на root/S3_* нет (ADR-008, §5.4).
+
+    Если env не заданы (unit-тесты, частичный dev-контур), НЕ роняем
+    композицию: логируем и возвращаем ``None`` — вызывающий оставит честную
+    fail-closed заглушку ``_UnwiredPort``. Запрос на bucket даст system deny,
+    а не «200 с None». Это не «тихая деградация»: имя порта попадает в
+    ``app.state.plugin_unwired_ports``.
+    """
+    try:
+        from prodavan.infrastructure.plugins.minio.adapters import MinioBucketAdmin
+        from prodavan.infrastructure.plugins.minio.config import MinioPluginConfig
+
+        return MinioBucketAdmin(
+            config=MinioPluginConfig.from_env(),
+            owns_bucket=True,
+        )
+    except Exception as exc:  # noqa: BLE001 — конфигурация/импорт ≠ падение startup
+        logger.warning(
+            "plugin MinIO bucket admin is not configured (%s: %s); "
+            "object capability stays fail-closed",
+            type(exc).__name__,
+            str(exc)[:120],
+        )
+        return None
+
+
 def _zone_services(runtime: Any, repos: Any, config: Any, ov: dict[str, Any], unwired: list[str]) -> dict[str, Any]:
     """Собрать РЕАЛЬНЫЕ сервисы зон для тонких admin-адаптеров.
 
@@ -405,7 +436,9 @@ def _zone_services(runtime: Any, repos: Any, config: Any, ov: dict[str, Any], un
     artifact_registry = PluginArtifactRegistry(
         store=ov.get("artifact_store") or repos.artifact_store, verifier=verifier
     )
-    object_buckets = need("object_buckets")
+    object_buckets = ov.get("object_buckets")
+    if object_buckets is None:
+        object_buckets = _minio_bucket_admin()
     object_store = PluginObjectStore(
         buckets=object_buckets,
         sts=ov.get("object_sts"),
