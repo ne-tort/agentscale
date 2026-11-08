@@ -34,7 +34,7 @@
 #
 # FAIL-CLOSED: `set -eu`, ожидание брокера и Admin API с ограничением попыток,
 # `|| true` ТОЛЬКО на `rpk topic create` (топик уже мог существовать — это не
-# ошибка) и на `grep -c` (0 совпадений не должен рвать set -e раньше явной
+# ошибка) и на `grep -Ec` (0 совпадений не должен рвать set -e раньше явной
 # проверки), но ПОСЛЕ create — обязательная проверка `rpk topic list` для КАЖДОГО
 # топика. Нет топика после create -> `exit 1` -> Job Failed -> Argo Sync хучит,
 # платформа НЕ считается готовой. Никакого «ну ладно, авось создастся».
@@ -118,7 +118,7 @@ spec:
               # 3) РОВНО ДВА топика (задача 10, topics.py:35,39). Ни одного
               #    лишнего create: 9 платформенных топиков ведёт kafka.yaml.
               #    `-p 1` = partitions, `-r 1` = replication factor.
-              #    `|| true` допустим здесь (повторный синк) и на `grep -c` ниже;
+              #    `|| true` допустим здесь (повторный синк) и на `grep -Ec` ниже;
               #    обязательная проверка факта идёт после create.
               rpk topic create agentscale.plugin.events -p 1 -r 1 -X brokers=$BROKERS || true
               rpk topic create agentscale.plugin.events.dlq -p 1 -r 1 -X brokers=$BROKERS || true

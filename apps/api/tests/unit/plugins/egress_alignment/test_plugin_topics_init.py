@@ -140,21 +140,26 @@ def test_cleanup_policy_and_retention_are_set_for_both() -> None:
 
 def test_job_verifies_topic_existence_after_create() -> None:
     """Повторная проверка ПОСЛЕ create + `exit 1`, а не «надейся на auto-create»."""
-    assert "rpk topic list -X brokers=$BROKERS | grep -qx" in SCRIPT
+    # `rpk topic list` печатает ТАБЛИЦУ (`NAME PARTITIONS REPLICAS`), поэтому
+    # проверяем первый столбец через awk и точное совпадение имени `grep -Fxq`.
+    # Прямой `grep -qx "$t"` по всему выводу промахивался бы всегда и Job вечно
+    # уходил бы в CrashLoopBackOff при уже созданных топиках.
+    assert "topics=$(rpk topic list -X brokers=$BROKERS | awk 'NR > 1 { print $1 }')" in SCRIPT
+    assert "grep -Fxq \"$t\"" in SCRIPT
     assert "exit 1" in SCRIPT
     assert "отсутствует после create" in SCRIPT
     # Проверка идёт ПОСЛЕ всех create (порядок имеет значение).
     last_create = SCRIPT.rfind("rpk topic create")
-    first_check = SCRIPT.find("grep -qx")
+    first_check = SCRIPT.find("grep -Fxq")
     assert first_check > last_create
 
 
 def test_job_fails_on_exactly_two_topics_mismatch() -> None:
-    r"""Ровно 2 имени под шаблоном `\(\.dlq\)\?`, иначе fail."""
-    assert "matched=$(rpk topic list" in SCRIPT
+    """Ровно 2 имени под шаблоном `(\\.dlq)?`, иначе fail."""
+    assert "matched=$(printf '%s\\n' \"$topics\"" in SCRIPT
     assert "[ \"$matched\" -ne 2 ]" in SCRIPT
     # Шаблон не допускает `.dlq.dlq` (только один необязательный суффикс).
-    assert r"\(\.dlq\)\?" in SCRIPT
+    assert r"^agentscale\.plugin\.events(\.dlq)?$" in SCRIPT
 
 
 def test_job_is_strict_shell_with_bounded_waits() -> None:
@@ -163,14 +168,14 @@ def test_job_is_strict_shell_with_bounded_waits() -> None:
     assert "rpk cluster info -X brokers=$BROKERS" in SCRIPT
     assert "admin.hosts=$ADMIN" in SCRIPT
     assert SCRIPT.count("-gt 60") == 2  # оба ожидания ограничены
-    # `|| true` допустим на create (повторный синк) и на `grep -c` (0 совпадений
+    # `|| true` допустим на create (повторный синк) и на `grep -Ec` (0 совпадений
     # не должен рвать set -e раньше явной проверки matched).
     for line in SCRIPT.splitlines():
         if "|| true" in line:
-            assert "rpk topic create" in line or "grep -c" in line
+            assert "rpk topic create" in line or "grep -Ec" in line
     # Ни одного `|| true` на alter-config / проверке существования.
     for line in SCRIPT.splitlines():
-        if "rpk topic alter-config" in line or "grep -qx" in line:
+        if "rpk topic alter-config" in line or "grep -Fxq" in line:
             assert "|| true" not in line
 
 
