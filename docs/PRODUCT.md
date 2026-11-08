@@ -238,17 +238,19 @@ Meta primitives: hub + collections, `file_ref`, `secret_ref`, `column_map`, mast
 
 **Конечное состояние:** declarative-app удалён полностью — `module_meta_documents`, generic runtime, `module_instance_data_rows`, `ModuleRuntime.tsx`. Модуль — это **полноценное приложение** (frontend + backend) с реальными таблицами, собственными миграциями и динамической загрузкой кода.
 
-**Ключевые решения** (источник истины — [`ARCHITECTURE/plugin-architecture-complete.md`](ARCHITECTURE/plugin-architecture-complete.md), [ADR-006](architecture-migration/ADR-006-plugin-modules.md)):
+**Ключевые решения** (источник истины — [`ARCHITECTURE/plugin-architecture-complete.md`](ARCHITECTURE/plugin-architecture-complete.md) v4, [ADR-006](architecture-migration/ADR-006-plugin-modules.md), [ADR-007](architecture-migration/ADR-007-direct-plugin-db.md), [ADR-008](architecture-migration/ADR-008-lifecycle-and-boundaries.md)):
 
 | Аспект | Решение |
 |---|---|
 | Данные | **Прямой DSN к отдельной БД компании** `tenant_<company_id>`: реальные таблицы, полный SQL, JOIN/CTE, индексы, self-managed Liquibase-миграции. Схема `module_<module>` во владении роли плагина. Платформенная `prodavan` недоступна ([ADR-007](architecture-migration/ADR-007-direct-plugin-db.md)) |
-| Доступ к остальной инфраструктуре | Через **существующий** capability gateway (`:8001`, `CapabilityGatewayService`, `PodBridgeClaims`) по typed контрактам: cache, objects, docs, events, jobs, pods, mcp, secrets, network |
+| Доступ к инфраструктуре | Переиспользуется **код** `CapabilityGatewayService` в отдельном trust-контуре плагинов (`PluginClaims` + `/capabilities/v1/*` в Plugin Gateway). `:8001` и `PodBridgeClaims` остаются агентам без изменений |
+| Объекты | Bucket-per-tenant / MinIO STS + scoped presigned вместо тегов в одном бакете |
+| Артефакт | OCI в GHCR + cosign keyless + SBOM/provenance, pin по digest; реестр на `AppVersion`/`RegistryOutcome` |
 | Миграции | Плагин применяет подписанный changelog **сам** при старте контейнера; безопасность = привилегии PostgreSQL + отдельная БД + `pgaudit`, а не парсер SQL |
-| Изоляция | Отдельная БД + `GRANT CONNECT` только на неё + `NOCREATEDB NOCREATEROLE` + NetworkPolicy без egress к `prodavan` + отдельный origin для iframe без `allow-same-origin`. RLS не является границей |
-| Backend | Контейнер с вебхуками, cron, событиями, фоновыми задачами; внешние адреса `/webhook/{plugin}/{company}/*` и `/pluginpage/{plugin}/{company}/*` |
-| Засыпание | Переиспользуется `SandboxClaim.operatingMode` / `pause|resume` / warm pool от контейнеров агентов; Knative не вводится |
-| Фаерволл | Единый egress-контроллер (`none` / `webhooks-only` / `full`) для плагинов **и** агентов |
+| Изоляция | Отдельная БД + `GRANT CONNECT` только на неё + `NOCREATEDB NOCREATEROLE` + две NP из одного генератора + отдельный static-origin для iframe без `allow-same-origin`. RLS не является границей |
+| Backend | Контейнер с вебхуками, cron, событиями (Redpanda dispatch), фоновыми задачами; внешние адреса `/webhook/{plugin}/{company}/*` и `/pluginpage/{plugin}/{company}/*`. v1 — path-based, цель — wildcard subdomain |
+| Засыпание | **Собственный activator**: Deployment `replicas: 0` + Plugin Gateway wake/hold-until-Ready + `ignoreDifferences`. `SandboxClaim` остаётся только агентам |
+| Фаерволл | Общий генератор правил и единая схема egress-аудита для плагинов и агентов; правила из `CapabilityGrant` в БД |
 | Переход | Strangler с фича-флагом **только из-за объёма кода** (~13k строк `mod_equipment`). Это dev: данные эфемерны, бэкапы/перенос данных/snapshot/dual-read не нужны |
 
 **Работа на main (dev):** сразу на `main`, без feature-веток, микрокоммиты. Правила: [`workflow/main-branch-workflow.md`](workflow/main-branch-workflow.md). Реестр ADR: [`architecture-migration/README.md`](architecture-migration/README.md).

@@ -1,14 +1,17 @@
-# Plugin Architecture — Полный дизайн (v2)
+# Plugin Architecture — Полный дизайн (v4)
 
-**Дата:** 2026-11-08 (пересмотр v1 от 2026-11-07)  
+**Дата:** 2026-11-08 (v4: пересмотр «переиспользования as-built»)  
 **Статус:** целевая модель, подлежит утверждению перед реализацией.  
 **Принцип:** в конечном состоянии declarative-app удалён полностью («всё под нож»).  
 **Метод:** strangler с фича-флагом, а не big bang — см. §8.
 
-> v1 был отвергнут на ревью: он изобретал заново инфраструктуру, которая в репозитории
-> уже работает, противоречил трём принятым ADR и содержал неработающие механизмы
-> безопасности (RLS без FORCE, `CONNECTION LIMIT` как «размер БД», Knative без CRD).
-> v2 построен на as-built. Полный разбор причин — в §12.
+> История версий: v1 отвергнут (изобретал уже существующую инфраструктуру,
+> неработающая безопасность); v2 исправил ошибки v1, но ошибочно выбрал typed
+> gateway без DSN; v3 вернул прямой DSN и убрал прод-логику про бэкапы.
+> **v4 устраняет главную ошибку v2/v3: «as-built есть → значит переиспользуем как
+> есть».** Это неверно. Переиспользуются **код и контракты**; точки привязки
+> identity, транспорта, хранилища, артефактов и lifecycle **заменяются** на
+> профессиональную модель. Подробности — §1 и §13.
 
 ---
 
@@ -27,25 +30,35 @@
 
 ---
 
-## 1. Что уже есть и переиспользуется (as-built)
+## 1. Что переиспользуется, что расширяется, что заменяется
 
-**Ключевое решение v2: не строить новый слой, а расширить существующий.**
+**Принцип v4:** наличие работающего кода не является причиной тащить его как есть.
+Плагин — **иной principal** (company-scoped, stateless, HTTP-driven, со своей БД),
+чем агентский Pod (project-scoped, stateful, с workspace и файлами). Общими должны
+быть **контракты и код проверок**, а не trust-модель и транспорт.
 
-| Потребитель | Уже работает | Где |
+| Компонент as-built | Решение v4 | Обоснование |
 |---|---|---|
-| Единая точка доступа, ACL, квоты, аудит, fail-closed | `CapabilityGatewayService.authorize/invoke`: identity → scope → grant → quota → adapter, `AuditEvent`, `DecisionCode.*` | `apps/api/src/prodavan/application/capability_gateway_service.py:180-255` |
-| Токен, scope, revocation | `PodBridgeClaims` / `mint_pod_bridge_token`: `company_id`, `project_id`, `scopes`, `jti`, `exp`, `gen`, отзыв через `bump_pod_bridge_generation` | `application/pod_identity/bridge.py:76-245` |
-| Structured DB без raw SQL | `TenantUserDbService`: БД `agentscale_userdb`, схема `p_<project>`, `_ALLOWED_TYPES`, create/select/insert/drop/purge. **Для плагинов НЕ используется** — это и есть ограниченная декларативность, от которой уходим; остаётся как as-built для агентов | `application/tenant_infra/userdb_service.py:1-172`, `infra/k3s/overlays/dev/userdb-init.yaml:42-48` |
-| Квоты | `CompanyTenantInfraQuota`, `enforce_ops_rate` (ops/min, 60s window), `quota_exceeded` → 429 | `application/tenant_infra/quota.py:35-116` |
-| Cache / key isolation | `rewrite_cache_key` → `tenant:{company}:proj:{project}:{key}`, denylist `prodavan:`/`celery`/`tenant:`, обязательный TTL | `application/tenant_infra/keys.py:9-56` |
-| Objects | `TenantObjectsService`: один бакет `agentscale`, теги `tenant_infra` + `project:{id}`, API-mediated (presigned намеренно отвергнуты) | `application/tenant_infra/objects_service.py:1-70`, `docs/target/12-layer-docs/tenant-infra-gateway.md:30-32` |
-| Docs / Events / Modules / Actions | `TenantDocsService`, `TenantEventsService`, `prodavan-modules` MCP, `pod_modules.py` | `application/tenant_infra/`, `api/v1/pod_modules.py` |
-| Транспорт | pod-gateway `:8001` (`prodavan.main_pod:app`), Bridge JWT only, NP egress только DNS + 80/443 + TCP 8001 | `docs/target/12-layer-docs/tenant-infra-gateway.md:10-20` |
-| Purge при uninstall | `purge_project_tenant_infra` (cache/docs/userdb/events/objects + equipment OS indexes) | `application/tenant_infra/lifecycle.py:12-94` |
-| Pause / resume / warm pool | `SandboxClaim.spec.operatingMode: Running \| Suspended`, `PodRuntimePort.pause/resume`, `SandboxWarmPool` (2 прогретых), `ensure_running_for_project` = lazy start | `application/pod_service/adapters/agent_sandbox/runtime.py:16-22,180-200,292-300,336-374`, `command.py:366-389,600-626` |
-| Маршрутизация | `networking.k8s.io/v1 Ingress` + `ingressClassName: traefik` + аннотация `router.priority` (110 для `/api`, 100 для `/`, 50 prod wildcard) | `infra/k3s/overlays/dev/ingress-https-{api,web}.yaml`, `infra/ops/tests/test_ingress_priority.py` |
+| `CapabilityGatewayService.authorize/invoke`, `DecisionCode`, `AuditEvent`, `CapabilityGrant` | **Переиспользовать код** | Это зрелый fail-closed pipeline identity → scope → grant → quota → adapter (`application/capability_gateway_service.py:180-255`). Ценность именно в ядре, а не в том, на каком порту оно висит |
+| pod-gateway `:8001` (`prodavan.main_pod:app`) | **Оставить агентам, НЕ расширять для плагинов** | Trust = Bridge JWT `typ=pod_bridge`, `sub=pod:{pod_id}`, `require_project()`, allowlist `projects/{id}/(infra\|modules\|agent)/` (`core/middleware.py:36-38`, `pod_identity/bridge.py:76-88,206-232`). Плагин company-scoped; смешение даёт ему доступ к `/agent/*` и `/internal/pods/{pod_id}/workspace-archive` |
+| `PodBridgeClaims` / `mint_pod_bridge_token` | **Заменить для плагинов** на `PluginClaims` (`iss=agentscale-plugins`, `aud=capability-gateway`, `sub=plugin:<id>:<company>:<install>`, `version`, `artifact_digest`, `grant_id`, `jti`, короткий TTL) | В Bridge JWT нет instance/artifact/version, revocation завязана на `pod_id`+Redis, общий HS256-секрет с dev-фолбэками (`bridge.py:111-128`). Отзыв плагина = revoke grant, не bump generation пода |
+| Один MinIO-бакет `agentscale` + tenant-теги в БД | **Заменить изоляцию**: bucket-per-tenant (или префикс + MinIO STS `AssumeRole` с session policy), short-lived scoped credentials/presigned. `TenantObjectsService` оставить фасадом аудита/квот/листинга | Теги `tenant_infra`/`project:` — это Python-фильтр в `objects_service.py:40-50`, а не IAM; один service user имеет `agentscale/*` целиком (`minio-api-policy.json:6-13`). Баг в коде = утечка. Presigned уже используются для обычного контента (`minio_store.py:186-203`), «намеренно отвергнуты» относилось только к Pod-surface |
+| Celery-outbox `webhook_deliveries` | **Переиспользовать как есть** для исходящих вебхуков; **не** использовать как шину событий плагинов | Outbox + `FOR UPDATE SKIP LOCKED` — зрелый паттерн транзакционной доставки (`external-api.md:41-49`), но это не durable log с replay |
+| Redpanda/Kafka (`agentscale-kafka:9092`, включён) | **Расширить**: топик `agentscale.plugin.events`, consumer groups с ручным commit, `earliest`, DLQ + 3 retry, ключ = `company_id` | Сейчас `KAFKA_CONSUMER_MODE=kick`, `enable_auto_commit=True`, `auto_offset_reset=latest` (`configmap.yaml:35-41`, `kafka_manager.py:694-696`) — это «будильник», события теряются при простое консьюмера |
+| `SandboxClaim` / `SandboxWarmPool` (агенты) | **НЕ переиспользовать для плагинов** | CRD не несёт `image`/`port`, требует `warmPoolRef`, `envVarsInjectionPolicy: Disallowed`, тащит PVC 5Gi, `ensure_running` не ждёт Ready (`agent_sandbox/runtime.py:336-348`), пул греет образ агента, не плагина |
+| Traefik Ingress + `router.priority` | **Переиспользовать механизм**, path-based v1 → wildcard subdomain как цель | Приоритет — аннотация на Ingress (`infra/ops/tests/test_ingress_priority.py`); cert-manager в кластере нет, TLS = self-signed TLSStore (`k3s-services.md:117-121`) |
+| CI `ghcr.io` + build-push-action | **Расширить**: включить `provenance`/`sbom` (сейчас `false`), добавить cosign keyless, pin по digest | `ci-images.yml:114-115,229-230` явно отключают provenance/SBOM, cosign/sigstore нет нигде, dev гонит `:latest` |
+| Доменная модель `AppVersion` / `RegistryOutcome` / `RollbackCommand` / `QuarantineEvidence` | **Переиспользовать** как реестр плагинов | `domain/dynamic_apps/types.py:135-192`, `dynamic_app_registry/contracts.py:13-99` уже описывают digest, semver, quarantine, rollback — изобретать свой реестр не нужно |
 
-**Следствия:** новый сервис `capability-adapters:9000`, новый JWT-формат, PgBouncer, `CREATE DATABASE` на компанию, bucket-per-company, Knative — **не строятся**. Всё это уже либо есть в другой форме, либо конфликтует с инфраструктурой.
+**Что действительно переиспользуется без изменений:** ядро `CapabilityGatewayService`,
+схема `AuditEvent`, HMAC-контракт вебхуков, outbox-доставка, Celery beat для cron,
+Redpanda как транспорт, Traefik/TLSStore, Argo app-of-apps и `ignoreDifferences`
+(не CRD!), доменный реестр `dynamic_app_registry`, strangler-подход.
+
+**Что запрещено «просто добавить»** без правки `infra/argocd/apps/00-project.yaml`
+(жёсткий whitelist 27 kinds) и `app-budget.yaml` (45 подов / 12Gi requests / 26Gi
+limits, 3 OOM-инцидента): KEDA, Knative, cert-manager, SPIRE, Temporal, HPA.
+Ни один из этих control plane в v4 не вводится.
 
 ---
 
@@ -231,7 +244,7 @@ liquibase \
 | Роль не может писать в чужую схему | `search_path` + отсутствие `USAGE` на другие схемы |
 | Pod не может достучаться до `prodavan` | NetworkPolicy: egress только tenant PG + gateway + egress-proxy |
 | DDL фиксируется | `pgaudit` на tenant-кластере → append-only лог |
-| Артефакт не подменён | digest + Ed25519-подпись до старта контейнера (§5.2) |
+| Артефакт не подменён | `cosign verify` по digest до старта контейнера (§5.1) |
 | Shell-команды из changelog | `LIQUIBASE_ALLOW_EXECUTE_COMMAND=false` |
 | Ресурсы | `resources.limits` контейнера плагина, `CONNECTION LIMIT` роли |
 
@@ -255,54 +268,85 @@ liquibase \
 
 ## 4. Capability Layer
 
-### 4.1 Не новый сервис, а расширение `:8001`
+### 4.1 Два trust-контура, одно ядро проверок
 
-Запросы плагина идут в тот же pod-gateway, что и запросы агентов: Bridge JWT → `CapabilityGatewayService` → typed adapter. Новые capability добавляются в `DECLARATIVE_CAPABILITIES`/`CapabilityGrant`, а не в отдельный HTTP-сервис.
+Плагин — **не агентский Pod**. Агент: `sub=pod:{pod_id}`, project-bind, эфемерная
+сессия, workspace, файлы. Плагин: company-scoped, stateless, instance + версия +
+артефакт, свой DSN, HTTP-driven. Смешивать их в одном токене и одном allowlist —
+ошибка конфигурации, дающая плагину доступ к `/agent/*` и
+`/internal/pods/{pod_id}/workspace-archive` (`core/middleware.py:36-38`).
 
-### 4.2 Capability Token
+Поэтому:
 
-Переиспользуется `PodBridgeClaims` (не новый JWT-формат):
+- **`:8001` pod-gateway остаётся агентам без изменений.** Его trust (`typ=pod_bridge`,
+  `aud=prodavan-pod-bridge`, `require_project()`, `claims.pod_id == path`) не
+  трогается.
+- **Плагины идут в Plugin Gateway** (тот же always-running сервис, что проксирует
+  `/webhook/` и `/pluginpage/`, §7.2) на отдельном route-group `/capabilities/v1/*`
+  с **своим** issuer/audience/ключом. Отдельный сервис `capability-adapters:9000`
+  **не строится** — это был бы дубль ядра.
+- Переиспользуется **код** `CapabilityGatewayService.authorize/invoke`,
+  `DecisionCode`, `AuditEvent`, `CapabilityGrant`, доменная модель
+  `dynamic_app_registry` и `canonical_grants`. Добавляется отдельная ветка
+  allowlist middleware, различающая типы токенов.
+- mTLS/SPIFFE отложены: на single-node k3s с 45 подами и 3 OOM-инцидентами это
+  несоразмерный control plane. Достаточно short-lived signed token c `kid`/JWKS и
+  привязкой к `artifact_digest`.
+
+### 4.2 PluginClaims (новый контракт identity)
 
 ```json
 {
-  "iss": "prodavan",
+  "iss": "agentscale-plugins",
+  "aud": "capability-gateway",
+  "typ": "plugin_capability",
   "sub": "plugin:mod_equipment:co_123:inst_abc",
   "company_id": "co_123",
   "cabinet_id": "cab_456",
-  "project_id": "proj_789",
-  "scopes": [
-    "module:mod_equipment:rows:read",
-    "module:mod_equipment:rows:write",
-    "module:mod_equipment:migrations:apply",
-    "objects:read", "objects:write",
-    "network:webhooks-only"
-  ],
+  "project_id": null,
+  "plugin_id": "mod_equipment",
+  "plugin_instance_id": "inst_abc",
+  "manifest_version": "1.2.0",
+  "artifact_digest": "sha256:...",
+  "grant_id": "grant_...",
+  "scopes": ["cache", "objects", "events", "jobs", "pods", "mcp", "secrets", "network"],
   "quota_ref": "co_123/plan_pro",
-  "egress": {"mode": "webhooks-only", "allowed_hosts": ["hooks.slack.com"], "allowed_paths": ["/services/*"]},
-  "jti": "...", "gen": 3,
-  "exp": 1794163200          // иллюстрация: короткий TTL, реальное значение = now + 300 с при выдаче/ wake-up
+  "jti": "...",
+  "exp": 1794163200
 }
 ```
 
-Отзыв — `bump_pod_bridge_generation` (уже реализован), а не «ждать истечения токена». Токен передаётся только в `Authorization`, **никогда в URL query**. Ротация при wake-up не нужна: `gen` проверяется на каждом запросе.
+Отличия от v3: `egress.allowed_hosts` и `quotas` **убраны из токена**. Egress-политика
+и квоты — долгоживущие, хранятся в `CapabilityGrant` в БД; токен несёт только
+`grant_id` и короткий TTL (300 с, новый при wake-up). Иначе истечение токена
+пересобирало бы сетевые правила посреди запроса (`§6.2` в v3).
+
+Отзыв = удаление/деактивация `CapabilityGrant` + проверка `grant_id` на каждом
+запросе, а не `bump_pod_bridge_generation` (то привязано к `pod_id` и Redis).
+Токен — только в `Authorization`, никогда в URL query.
 
 ### 4.3 Контракты адаптеров (типизированные, без generic raw SQL)
 
-ADR-002-capability-gateway прямо запрещает «generic row/action dispatch как публичный контракт». Поэтому вместо `POST /adapters/db/query {"sql": "SELECT ..."}`:
+ADR-002-capability-gateway запрещает «generic row/action dispatch как публичный
+контракт». Поэтому вместо `POST /adapters/db/query {"sql": "SELECT ..."}`:
 
 | Адаптер | Контракт | Примечание |
 |---|---|---|
 | `db.direct` | прямой DSN к **своей** БД компании: полный SQL, JOIN, CTE, DDL, индексы, миграции | граница — отдельная БД + роль `NOCREATEDB NOCREATEROLE` + `CONNECT` + NetworkPolicy + `pgaudit`. В gateway **не** проходит |
-| `cache` | `get/set/delete/incr/publish` с key-rewrite | `tenant:{company}:proj:{project}:plugin:{module}:*` |
-| `objects` | `put/get/list/delete` через API-mediated | без presigned URL (as-built решение) |
-| `docs` | Mongo namespace `tenant_infra` | `TenantDocsService` |
-| `events` | `publish/subscribe` | `TenantEventsService` |
+| `cache` | `get/set/delete/incr/publish` с key-rewrite | `tenant:{company}:plugin:{module}:{instance}:*` (project — опционален) |
+| `objects` | short-lived scoped credentials / presigned, bucket-per-tenant | см. §5.4; теги остаются метаданными, **не границей** |
+| `docs` | Mongo namespace per tenant | typed запросы |
+| `events` | `publish/subscribe` через Redpanda consumer groups | см. §7.3 |
+| `jobs` | `submit/get/cancel` с `job_id`, `run_id`, lease | Celery + outbox |
 | `pods` | `invoke` typed action | плагин не имеет k8s API |
 | `mcp` | `register` typed tools | MCP = адаптер к gateway |
-| `secrets` | `read` по ссылке | плагин не хранит plaintext |
+| `secrets` | `read` по `secret_ref` | плагин не хранит plaintext |
 | `network` | egress-прокси | см. §6 |
 
-Квоты берутся из `CompanyTenantInfraQuota` (`enforce_ops_rate`, max keys, max bytes), а не из выдуманных полей токена.
+Квоты: `CompanyTenantInfraQuota` **расширяется** до per-`(company, plugin_instance,
+artifact_digest)` — иначе один «шумный» плагин исчерпает лимит компании, а
+project-ключ `enforce_ops_rate` (`quota.py:93-107`) для company-wide плагина не имеет
+смысла.
 
 ### 4.4 Единый реестр идентификаторов
 
@@ -331,35 +375,62 @@ ADR-002-capability-gateway прямо запрещает «generic row/action di
 
 ## 5. Артефакт и загрузка кода
 
+### 5.1 OCI-артефакт как единственная единица поставки
+
+**Замена v3:** `tar.gz + Ed25519 + самописный реестр ключей` → **OCI в GHCR + cosign**.
+Причина: в v3 подписанный manifest ссылался на **неподписанный** backend-образ
+`ghcr.io/...:1.2.0`, а frontend доставлялся вторым каналом (MinIO). Плюс CI уже
+имеет GHCR (`ci-images.yml:43,101-106`), но явно отключает `provenance`/`sbom`
+(`:114-115`) и не содержит cosign.
+
 ```
-plugin-mod_equipment-1.2.0.tar.gz        (digest sha256, подпись Ed25519)
-├── manifest.json
-│   {
-│     "plugin_id": "mod_equipment", "version": "1.2.0",
-│     "frontend": {"entry": "index.html"},
-│     "backend": {"image": "ghcr.io/.../plugin-mod-equipment:1.2.0", "port": 8080, "health": "/health"},
-│     "capabilities": ["db.schema","db.query","db.mutate","db.migrations","cache","objects","pods","mcp","secrets","network"],
-│     "migrations": {"engine": "liquibase", "path": "migrations/liquibase/changelog.xml"},
-│     "egress": {"mode": "webhooks-only", "allowed_hosts": [], "allowed_paths": []},
-│     "public_pages": [],          // явный список страниц без авторизации
-│     "webhooks": ["/webhook/external-system"]
-│   }
-├── frontend/  dist/
-├── migrations/liquibase/
-└── metadata/
+ghcr.io/ne-tort/plugins/mod_equipment@sha256:<digest>   ← подписано cosign keyless (OIDC)
+├── layer: backend image (linux/amd64)
+├── layer: frontend/dist (OCI artifact, mediaType application/vnd.agentscale.plugin.frontend)
+├── layer: migrations/liquibase/changelog.xml
+└── annotations: plugin_id, manifest_version, protocol, requestedCapabilities,
+                 min_platform_version, artifact_digest
+```
+
+- **Подпись:** `cosign sign` по **digest**, не по тегу; `permissions: id-token: write`;
+  `cosign verify --certificate-identity --certificate-oidc-issuer` перед созданием
+  Deployment. SBOM + provenance включаются в CI.
+- **Pin по digest**, `:latest` для плагинов запрещён (сейчас dev гонит `:latest`).
+- **Реестр:** переиспользуется доменная модель `AppVersion` / `RegistryOutcome`
+  (`QUARANTINED`) / `RollbackCommand` / `QuarantineEvidence` из
+  `domain/dynamic_apps/types.py:135-192` и `dynamic_app_registry/contracts.py:13-99`.
+  Свой реестр ключей Ed25519 удаляется.
+- **Compatibility gate** до PUBLISHED: semver, protocol, `requestedCapabilities` против
+  `CapabilityGrant`, `min_platform_version`, сканирование образа, CSP для frontend.
+- **Quarantine/rollback:** неподписанный или несовпавший digest не публикуется;
+  откат = деплой предыдущего immutable digest.
+
+Manifest (подписан как OCI annotation, без самореференции):
+
+```json
+{
+  "plugin_id": "mod_equipment", "version": "1.2.0",
+  "frontend": {"entry": "index.html"},
+  "backend": {"port": 8080, "health": "/health"},
+  "capabilities": ["cache","objects","docs","events","jobs","pods","mcp","secrets","network"],
+  "migrations": {"engine": "liquibase", "path": "migrations/liquibase/changelog.xml"},
+  "egress_ref": "grant:...",
+  "public_pages": [],
+  "webhooks": ["/webhook/external-system"]
+}
 ```
 
 **Установка (идемпотентная):**
-1. Реестр артефактов: скачать по digest, проверить подпись.
-2. Frontend → объектное хранилище с tenant-тегами (не отдельный bucket).
-3. Backend → контейнер по образу из манифеста; env/k8s Secret получает `GATEWAY_URL`,
-   `PLUGIN_ID`, короткий bridge lease и **`TENANT_DB_DSN`** (только своей БД компании).
-   Пароль — `secret_ref` с ротацией при reinstall, не plaintext в манифесте.
+1. Реестр: `cosign verify` → digest → manifest → compatibility gate.
+2. Frontend → **отдельный static-origin** (§5.2), версионированный путь.
+3. Backend → Deployment `replicas: 0` по образу из того же OCI digest; Secret
+   получает `GATEWAY_URL`, `PLUGIN_ID`, короткий `PluginClaims` lease и
+   **`TENANT_DB_DSN`** только своей БД компании.
 4. Старт контейнера: Liquibase `update` по §3 → `/health` Ready.
-5. Grant/bind → запись в `CapabilityGrant` + `PodBridgeClaims` (для адаптеров, не для БД).
-6. Регистрация маршрутов в Plugin Gateway и egress-правил.
+5. Grant → `CapabilityGrant` (в БД, долгоживущий) + `PluginClaims` (короткий).
+6. Регистрация маршрутов и egress-правил из grant.
 
-### 5.1 Frontend: отдельный origin, без `allow-same-origin`
+### 5.2 Frontend: отдельный origin, без `allow-same-origin`
 
 v1 использовал `sandbox="allow-scripts allow-same-origin"` на том же `agentscale.dev` — сочетание позволяет скрипту **снять собственный sandbox**. Исправлено:
 
@@ -377,44 +448,87 @@ v1 использовал `sandbox="allow-scripts allow-same-origin"` на то�
 - capability token **не** попадает во frontend — только в backend, коротким TTL через handshake; **никогда в URL query** (утечка через Referer, историю и access-логи)
 - публичные страницы объявляются явно в `manifest.public_pages`. По умолчанию Gateway требует сессию и проверяет `employee ∈ company` + grant; публичная страница получает урезанный anon-scope с отдельным rate limit. Вариант «прямой redirect без iframe» исключён: он уводит страницу в общий origin shell.
 
-### 5.2 Supply chain артефакта
+### 5.3 Роутинг frontend: v1 static-origin, цель — wildcard subdomain
 
-Проблема v1: `artifact_digest` лежал **внутри** того же manifest, который подписывался, — самореференция. Исправлено:
+**Противоречие v3:** §5.2要求 «отдельный origin, не `agentscale.dev`», а §7.1 сажал
+`/pluginpage/...` на тот же `agentscale.dev`.
 
-```
-подписывается ≠ содержимое манифеста
-manifest.json          (каноническая форма, без digest/подписи)
-    ↓ sha256 → artifact_digest (в реестре, не в манифесте)
-    ↓ Ed25519 sign → signature (в реестре)
-```
+- **v1 (прагматичный):** отдельный static-origin `plugin-origin.agentscale.dev`
+  отдаёт **только** версионированную静statics без cookie и API; backend-вызовы идут
+  на `agentscale.dev/pluginpage/.../api/*` через Plugin Gateway с `Authorization`
+  (не cookie). `sandbox="allow-scripts allow-forms"` без `allow-same-origin` на
+  path-based URL даёт opaque origin — это корректно, но `event.origin === "null"`,
+  поэтому shell не шлёт туда токен. CSP и `plugin-rpc/1` handshake обязательны.
+- **Цель:** `{company}--{plugin}.plugins.agentscale.dev` с wildcard TLS. Условия
+  перехода: (1) реальный публичный домен и валидный TLS вместо self-signed
+  TLSStore; (2) cert-manager + DNS-01 — in-tree солвера для reg.ru **нет**
+  ([cert-manager DNS01](https://cert-manager.io/docs/configuration/acme/dns01/)),
+  поэтому делегировать `_acme-challenge` на Cloudflare/acme-dns или проверенный
+  webhook; (3) `cert-manager.io/{Certificate,ClusterIssuer}` добавлены в
+  `00-project.yaml` whitelist и отдельный Argo App. Один wildcard, не N сертификатов.
+  Subdomain снимает конфликт приоритетов Traefik и даёт настоящую изоляцию
+  cookie/CSP/`event.origin`.
 
-- **Реестр ключей**: trust root платформы, ротация и отзыв ключей, список доверенных издателей.
-- **Проверка до деплоя**: digest → signature → compatibility (`plugin_id`/`version`/capabilities против grant) → сканирование образа → CSP-политика для frontend.
-- **Откат**: предыдущая версия остаётся в реестре; `quarantine` при несовпадении digest; `rollback` фиксируется событием `plugin_artifact_quarantined`.
-- Статика версионируется (`.../plugins/<module_id>/<version>/`), чтобы обновление не перезаписывало файлы работающей версии.
+### 5.4 Объектное хранилище: IAM-граница вместо тегов
 
-### 5.3 Lifecycle: grant / revoke / uninstall
+**Замена v3:** «один бакет `agentscale` + теги + API-mediated, presigned отвергнуты»
+было верно для агентских Pod без egress к :9000, но **не** для backend-плагина.
+
+| | Было (агенты) | Стало (плагины) |
+|---|---|---|
+| Изоляция | Python-фильтр по тегам `tenant_infra` / `project:` в `objects_service.py:40-50` | **bucket-per-tenant** `tenant-<company>` (v1-компромисс: префикс + MinIO STS `AssumeRole` session policy с `${aws:username}`) |
+| Креденшелы | один service user с `agentscale/*` (`minio-api-policy.json:6-13`) | short-lived STS creds / scoped presigned, ограниченные `module-<id>/*` |
+| Квота | счётчик `ContentAssetRow` в БД | bucket quota / usage, биллинг по одному бакету |
+| Purge | цикл DELETE по списку | delete bucket/prefix |
+| Egress | :9000 закрыт NP для Pod | :9000 разрешён **только** plugin-namespace |
+
+`TenantObjectsService` остаётся фасадом аудита/квот/листинга, но перестаёт быть
+единственной границей. Теги — метаданные/биллинг, не изоляция. Presigned уже
+реализованы в `minio_store.py:186-203` для обычного контента; для внешних клиентов
+сохраняется `proxy=1` (in-cluster DNS не резолвится снаружи).
+
+### 5.5 Lifecycle: grant / revoke / uninstall
 
 | Операция | Что делает |
 |---|---|
-| `POST /gateway/plugins/{id}/grant` | создаёт БД `tenant_<company>` (если нет), схему `module_<id>` с owner = роль плагина, роль, `CapabilityGrant` для адаптеров, маршруты и egress |
-| `POST /gateway/plugins/{id}/revoke` | отзыв bridge lease, снятие маршрутов, `Suspended`; БД/схема сохраняются |
-| `POST /gateway/plugins/{id}/uninstall` | `purge_project_tenant_infra`, `DROP SCHEMA`, дроп роли, удаление артефакта. Данные dev эфемерны — snapshot **не требуется** |
-| `POST /gateway/plugins/{id}/wake` | см. §7.6; новый короткий bridge lease; DSN остаётся тем же |
+| `POST /gateway/plugins/{id}/grant` | создаёт БД `tenant_<company>` (если нет), схему `module_<id>` с owner = роль плагина, роль, `CapabilityGrant`, маршруты, egress-правила из grant |
+| `POST /gateway/plugins/{id}/revoke` | деактивация `CapabilityGrant` → мгновенный отзыв по `grant_id`; снятие маршрутов; `Suspended`; БД/схема сохраняются |
+| `POST /gateway/plugins/{id}/uninstall` | purge tenant infra + delete bucket/prefix, `DROP SCHEMA`, дроп роли, удаление OCI-артефакта из реестра. Данные dev эфемерны — snapshot **не требуется** |
+| `POST /gateway/plugins/{id}/wake` | см. §7.6; новый короткий `PluginClaims`, DSN остаётся тем же |
 
 `migrate-to-plugin` **исключён**: перенос данных не нужен, это dev-разработка.
 
-Секреты: `TENANT_DB_DSN` и bridge lease — короткоживущие `secret_ref` с ротацией при
+Секреты: `TENANT_DB_DSN` и `PluginClaims` — короткоживущие `secret_ref` с ротацией при
 reinstall/revoke; plaintext в манифесте запрещён. ADR-003 действует для агентов,
 для плагинов отменён в части `db.direct` (§2.6, ADR-007).
 
 ---
 
-## 6. Сеть и фаерволл (единая модель для плагинов и агентов)
+## 6. Сеть и фаерволл (общий генератор, две политики)
 
-### 6.1 NetworkPolicy
+### 6.1 Две NP из одного CRD-генератора
 
-Исправления относительно v1: `namespaceSelector` по `kubernetes.io/metadata.name` (лейбла `name` в `namespace.yaml` нет); egress к **tenant** PostgreSQL разрешён подам плагина (это и есть выбранный прямой DSN), ноPlatform Postgres `prodavan` остаётся недостижим — отдельный Service/хост, отдельные credentials, правило ниже его не включает.
+v3 заявлял «единую NP для плагинов и агентов», но сам же добавлял плагину 5432 и
+`:8080`, которых у агентов нет. Честная модель: **общая схема правил и единый
+генератор**, две NetworkPolicy по `podSelector`.
+
+- Агенты: существующая `agentscale-sandboxes-egress` — DNS + 80/443 + TCP 8001,
+  без :9000 и без tenant-PG. **Не меняется.**
+- Плагины: `plugin-egress` — DNS, Plugin Gateway `:8080`/capabilities, egress-proxy,
+  **tenant-postgres :5432**, MinIO :9000 (§5.4). `prodavan` в правила не входит.
+
+Источник egress-политики (`allowed_hosts`/`allowed_paths`) — **`CapabilityGrant` в
+БД**, а не краткоживущий JWT: иначе истечение токена пересобирает сетевые правила
+посреди запроса. Token несёт только `grant_id` (§4.2).
+
+Аудит остаётся единым: `plugin_egress_request` и `agent_egress_request` имеют
+одинаковую схему (§4.5).
+
+### 6.2 NetworkPolicy плагина
+
+`namespaceSelector` по `kubernetes.io/metadata.name` (лейбла `name` в `namespace.yaml`
+нет). В отличие от v3, здесь **Plugin Gateway / capabilities**, а неpod-gateway
+`:8001`; добавлен MinIO :9000 для scoped object access; `prodavan` не входит.
 
 ```yaml
 apiVersion: networking.k8s.io/v1
@@ -438,8 +552,8 @@ spec:
         - namespaceSelector:
             matchLabels: {kubernetes.io/metadata.name: agentscale-dev}
           podSelector:
-            matchLabels: {app: pod-gateway}
-      ports: [{protocol: TCP, port: 8001}]
+            matchLabels: {app: plugin-gateway}
+      ports: [{protocol: TCP, port: 8080}]       # /capabilities/v1/*
     - to:
         - namespaceSelector:
             matchLabels: {kubernetes.io/metadata.name: agentscale-dev}
@@ -459,25 +573,36 @@ spec:
           podSelector:
             matchLabels: {app: tenant-postgres}
       ports: [{protocol: TCP, port: 5432}]
+    # Scoped object storage (§5.4); агентским Pod'ам :9000 закрыт.
+    - to:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: agentscale-dev}
+          podSelector:
+            matchLabels: {app: minio}
+      ports: [{protocol: TCP, port: 9000}]
 ```
 
 `prodavan` (платформенный Postgres) в эту политику **не входит**: у плагина нет ни
 сетевого пути, ни credentials, ни `CONNECT` к этой БД. Tenant-кластер — отдельный
 Deployment/Service с собственным Secret; роли создаются platform-админом при grant.
 
-### 6.2 Egress Proxy
+### 6.3 Egress Proxy
 
 | Режим | Поведение |
 |---|---|
 | `none` | только gateway + DNS |
-| `webhooks-only` | разрешённые `allowed_hosts[]` × `allowed_paths[]` из токена |
+| `webhooks-only` | разрешённые `allowed_hosts[]` × `allowed_paths[]` из **`CapabilityGrant` в БД** |
 | `full` | любой egress, но с обязательным approval, логированием и квотой байт |
 
-**Исправление v1:** Envoy-кластер не статический (`webhooks.example.com` захардкожен), а строится контроллером из `allowed_hosts` capability token; при отсутствии совпадения → `403` + `direct_response`. DNS-резолв через отдельный egress-прокси, чтобы плагин не мог обойти правила прямым IP.
+**Исправление v1/v3:** Envoy-кластер не статический (`webhooks.example.com`
+захардкожен) и не строится из краткоживущего JWT. Контроллер читает allowlist из
+`CapabilityGrant` по `grant_id` из токена; при отсутствии совпадения → `403` +
+`direct_response`. DNS-резолв через отдельный egress-прокси (защита от обхода по
+IP), проверка redirect и TLS на каждом хопе.
 
 **Аудит:** `plugin_egress_request` / `agent_egress_request` — единая схема (host, path, method, status, bytes, decision, tenant, subject). Та же модель применяется к контейнерам агентов: «регулируемая изоляция контейнеров» достигается одним контроллером и одним набором правил, а не двумя реализациями.
 
-### 6.3 Подмена заголовков
+### 6.4 Подмена заголовков
 
 Plugin Gateway **перезаписывает** `X-Plugin-ID`, `X-Company-ID`, `X-Project-ID`, `X-Plugin-Capability-Token`, а не пропускает их из клиентского запроса (v1 делал `**request.headers` — внешний клиент мог выдать себя за другой плагин). Входящие `Authorization` и `Cookie` отбрасываются.
 
@@ -543,17 +668,31 @@ spec:
 | Исходящие webhook'ы | `egress.allowed_hosts` | код плагина | egress-proxy |
 | Публичные страницы | `manifest.public_pages` | GET `/pluginpage/...` | static + `/api/*` |
 | Scheduled tasks | `POST /gateway/cron/register` | Celery beat → outbox | `POST /cron/*` |
-| Event handlers | `POST /gateway/events/subscribe` | Kafka/RabbitMQ | `POST /events/*` (DLQ, 3 retry) |
-| Background workers | `POST /gateway/tasks/submit` | k8s Job | `POST /tasks/*` |
+| Event handlers | `POST /gateway/events/subscribe` | Redpanda consumer group | `POST /events/*` (DLQ, 3 retry) |
+| Background workers | `POST /gateway/tasks/submit` | Celery worker + outbox lease | `POST /tasks/*` |
 | Миграции | `manifest.migrations` | старт контейнера плагина, свой DSN | `liquibase update` в entrypoint, не платформенный Job |
 
-Backend — отдельный контейнер (или sidecar), не имеет k8s API, не имеет DSN, общается только с gateway и egress-proxy.
+Backend — отдельный stateless контейнер, не имеет k8s API к кластеру, имеет
+`TENANT_DB_DSN` (своя БД), общается с Plugin Gateway, tenant-PG и egress-proxy.
 
-**Scheduler / events / jobs — не ad-hoc cron.**
+**Разделение транспортов (исправление v3):**
 
-- Расписания и события проходят через **уже существующий durable project-trigger outbox** (`PRODUCT.md:71`, `docs/migration-architecture.md:250-254`): claim через `FOR UPDATE SKIP LOCKED` + lease, retry, idempotency key, `run_id`/`correlation_id`. Celery beat/enqueue, а не «CronJob будит Knative» (как в v1); см. `docs/target/13-platform-infra/stack.md:52`.
-- Типизированные события (`project.sync.completed`, `agent.turn.completed`, …) идут через `events` capability с DLQ и 3 retry.
-- Долгая задача возвращает `job_id` + статус; результат читается через `jobs.get`. Пока есть активный job, lifecycle-контроллер **не усыпляет** backend.
+- **Outbox `webhook_deliveries` + `FOR UPDATE SKIP LOCKED` + lease** переиспользуется
+  **как есть** — но только для исходящих вебхуков и входящих delivery, где нужна
+  транзакционная доставка (`external-api.md:41-49`). Это не шина событий.
+- **Redpanda/Kafka** (уже включён, `configmap.yaml:35-41`) становится транспортом
+  событий плагинов: топик `agentscale.plugin.events`, ключ партиции = `company_id`,
+  **ручной offset commit**, `auto_offset_reset=earliest`, DLQ + 3 retry,
+  идемпотентность по `(subscription_id, source_event_id)`. Текущий режим
+  `KAFKA_CONSUMER_MODE=kick` + `enable_auto_commit=True` (`kafka_manager.py:694-696`)
+  теряет события при простое консьюмера — для плагинов он заменяется на dispatch.
+- **Celery beat** остаётся для cron-расписаний (строки в `beat_schedule` + lock
+  coalescing + `run_id`). KEDA/Temporal/k8s Job-runner **не вводятся**.
+- **Обязательная доработка:** `ProjectIdlePauseService._last_activity_at`
+  (`idle_pause.py:25-40`) считает idle только по agent-сессиям и не видит активные
+  job'ы. Добавляется реестр активных `job_id` с lease, иначе backend уснёт посреди
+  xlsx-экспорта (acceptance №14 в v3 не был реализуем).
+- Wake-up по событию делает Plugin Gateway при публикации (он владеет lifecycle).
 
 ### 7.5 Webhook-контракт
 
@@ -571,24 +710,47 @@ Backend — отдельный контейнер (или sidecar), не име�
 
 Исходящие webhook'ы плагина идут через тот же egress-контроллер с `allowed_hosts`/`allowed_paths` и логированием.
 
-### 7.6 Засыпание: переиспользуем pause/resume агентов
+### 7.4 Засыпание: отдельный activator, НЕ SandboxClaim
 
-**Knative удалён.** Причины: CRD `serving.knative.dev` в `infra/` нет, Argo `AppProject` имеет жёсткий whitelist kinds (`infra/argocd/apps/00-project.yaml:36-88`), HPA в кластере нет ни одного, `kubectl scale` запрещён AGENTS.md, а холодный старт 100–500 мс из v1 нереалистичен на этом хосте (pull образов — до 18 минут по `runbook.md:223-227`).
+**Замена v3.** `SandboxClaim` — рабочая модель для агентов, но для плагинов она
+неприменима категориально (проверено по CRD и `runtime.py`):
 
-Вместо этого — **тот же механизм, что уже работает у агентов**:
+1. CRD `SandboxClaim` не имеет `image`, `containerPort`, `command`;
+   `warmPoolRef` обязателен; `envVarsInjectionPolicy: Disallowed` — нельзя передать
+   даже `TENANT_DB_DSN`/`PLUGIN_ID`, которые требуются §5.1.
+2. Один `SandboxTemplate` на WarmPool; пул греет `prodavan-agent-runtime:3921`,
+   а не образ плагина. N плагинов × M версий = N×M пулов × 2 пода against квоты
+   45 подов.
+3. Stateful по дизайну: PVC 5Gi workspace + `Suspended` сохраняет volume. Плагин
+   stateless (состояние в `tenant_<company>`), PVC не нужен, а local-path RWO мешает
+   рестарту.
+4. `ensure_running` **не ждёт Ready** (`runtime.py:336-348`): gateway получит
+   connection-refused на первый запрос, SSE/долгий webhook оборвётся.
 
-| Аспект | Реализация |
+**Решение: собственный activator на базе уже запроектированного Plugin Gateway.**
+
+| Аспект | Реализация v4 |
 |---|---|
-| Состояние | `SandboxClaim.spec.operatingMode: Running \| Suspended` (уже в CRD) |
-| Пауза | `PodRuntimePort.pause` → Pod удаляется, volume/Sandbox сохраняются |
-| Пробуждение | `ensure_running_for_project` = lazy start по первому запросу |
-| Idle-таймер | `pod_metrics_sampler_worker` + TTL/`shutdownTime` |
-| Холодный старт | `SandboxWarmPool` (2 прогретых Sandbox) — готовый ответ, которого не было в v1 |
-| Gateway | `POST /gateway/plugins/wake` → `202` + `estimated_wake_up_ms` (секунды, не 500 мс) |
+| Workload | обычный `Deployment` плагина с `replicas: 0`, `readinessProbe /health`, `imagePullPolicy: IfNotPresent`, явные `resources` |
+| Пробуждение | Gateway патчит `deployments/scale` (RBAC `Role`/`RoleBinding` уже в whitelist) и **удерживает соединение до Ready**, затем проксирует |
+| Idle | TTL / `last-active` в БД или ConfigMap, ведёт Gateway; при активном `job_id` усыпление запрещено |
+| Холодный старт | доминирует pull образа (секунды/десятки секунд, не 100–500 мс); митигация — предпрогрев кэша образа на единственной ноде при установке плагина и лимит одновременных wake-up |
+| GitOps | `ignoreDifferences: [{group: apps, kind: Deployment, jsonPointers: [/spec/replicas]}]` в Argo Application. **Никаких новых CRD** |
+| Агенты | остаются на `SandboxClaim` без изменений |
 
-Wake-up триггеры: HTTP-запрос (iframe, webhook, pluginpage), Cron перед срабатыванием, Event до доставки, явный `wake`. Плагин и агент используют **один** lifecycle-контроллер — это и есть «универсальная система».
+Общим остаётся **контракт** (`ensure_running` / `pause` / idle TTL / единая схема
+аудита `plugin_wake_up`), а не реализация. «Один lifecycle-контроллер на всех» из
+v3 был ложной унификацией: агенты stateful+файлы, плагины stateless+HTTP.
 
-**GitOps-совместимость:** desired-состояние хранится в поле CRD/БД, а не в `spec.replicas` Deployment, поэтому Argo `selfHeal` не будет бесконечно возвращать replicas.
+**Почему не KEDA/Knative:** KEDA HTTP Add-on — достойная цель на будущее
+(0→1 по HTTP, [документация](https://raw.githubusercontent.com/kedacore/http-add-on/main/README.md),
+сейчас beta), но требует `keda.sh/*`, `http.keda.sh/*`, `autoscaling/HPA` в
+`00-project.yaml` и +4–6 подов control plane. Knative — +8–12 подов и второй
+ingress-стек. На single-node k3s с 12Gi requests и тремя OOM-инцидентами оба
+несоразмерны. Решение фиксируется в ADR-008.
+
+Wake-up триггеры: HTTP (iframe, webhook, pluginpage), cron перед срабатыванием,
+событие до доставки, явный `POST /gateway/plugins/wake` → `202` + `Retry-After`.
 
 ---
 
@@ -601,7 +763,7 @@ Wake-up триггеры: HTTP-запрос (iframe, webhook, pluginpage), Cron 
 
 **Этапы:**
 
-1. **Инфраструктура** — tenant PostgreSQL (отдельный Deployment/Service/Secret), роли/БД при grant, PgBouncer в transaction mode, `pgaudit`, egress-контроллер, Ingress с `router.priority: 120`, Plugin Gateway, lifecycle-контроллер. Declarative-app работает как прежде.
+1. **Инфраструктура** — tenant PostgreSQL (отдельный Deployment/Service/Secret), роли/БД при grant, PgBouncer, `pgaudit`, **PluginClaims + `/capabilities/v1/*`** (а не расширение `:8001`), OCI/cosign в CI, bucket-per-tenant + STS, Redpanda dispatch, egress-генератор, Ingress priority 120, Plugin Gateway + activator, `ignoreDifferences`. Declarative-app работает как прежде.
 2. **Пилот** — первый плагин с собственными таблицами и Liquibase-миграциями за фича-флагом `plugin_enabled_modules[]`. Данные — только тестовые, созданные сидом плагина.
 3. **Перенос frontend** — страница плагина в iframe; backend-логика пока в API.
 4. **Перенос backend по одному bounded context'у** — офферы → цены → бюджет → документы → тендеры. Каждый шаг за флагом; старый путь можно просто выключить, сравнивать нечего.
@@ -633,10 +795,17 @@ Wake-up триггеры: HTTP-запрос (iframe, webhook, pluginpage), Cron 
 | Анонимный доступ к `/pluginpage/*` | обязательная сессия + `employee ∈ company` + grant; `public_pages` — явное исключение с урезанным scope |
 | iframe снимает sandbox | отдельный origin, без `allow-same-origin`, restrictive CSP, `plugin-rpc/1` handshake, проверка `event.origin`; токен не в URL |
 | Исчерпание соединений/памяти PG | один PgBouncer (transaction mode) на tenant-кластер, `CONNECTION LIMIT` на роли, `statement_timeout`/`lock_timeout` как предохранители |
-| DoS через egress | `none`/`webhooks-only`/`full`, динамический allowlist из токена, квота байт, аудит |
+| DoS через egress | `none`/`webhooks-only`/`full`, allowlist из **`CapabilityGrant` в БД** (не из краткоживущего JWT), квота байт, аудит |
 | `/webhook/` уезжает в SPA | `router.priority: 120` + entrypoints + ingressClassName + тест приоритетов |
 | Сломанный cutover | strangler + фича-флаг; данные dev эфемерны, откат = выключить флаг |
-| Расхождение политик | один egress-контроллер, один lifecycle-контроллер, один реестр capability |
+| Смешение agent/plugin trust | отдельные `typ/aud/kid`, отдельная ветка allowlist middleware, `:8001` агентам без изменений |
+| Один «шумный» плагин исчерпал квоту компании | `CompanyTenantInfraQuota` расширен до per-`(company, plugin_instance, artifact_digest)` |
+| Утечка объектов через баг в тегах | IAM/bucket-граница вместо Python-фильтра; теги — только метаданные |
+| Потеря событий при простое консьюмера | Redpanda dispatch: ручной commit, `earliest`, DLQ, вместо `kick`+`auto_commit` |
+| Backend уснул посреди активного job | реестр активных `job_id` с lease в idle-pause |
+| Неподписанный backend-образ | один OCI digest + cosign verify до деплоя, pin по digest, `:latest` запрещён |
+| Argo selfHeal вернул `replicas: 0` | `ignoreDifferences /spec/replicas` в Argo Application (CRD не нужен) |
+| Расхождение политик | один генератор NP, одна схема egress-аудита, один реестр capability, общий контракт lifecycle (реализации разделены) |
 
 ---
 
@@ -657,75 +826,94 @@ Wake-up триггеры: HTTP-запрос (iframe, webhook, pluginpage), Cron 
 | 9 | `/webhook/` и `/pluginpage/` не уезжают в SPA | тест приоритетов по образцу `test_ingress_priority.py` |
 | 10 | Превышение `ops_per_minute` → `429` + `QUOTA_EXCEEDED` | unit/integration gateway |
 | 11 | Audit-событие не содержит raw SQL, параметров, токенов, payload | unit-тест redaction по `audit-append-shape-decision.md` |
-| 12 | `revoke` мгновенно делает старый токен невалидным | integration `bump_pod_bridge_generation` |
-| 13 | Wake-up после `Suspended` выдаёт новый lease, а не истёкший из Secret | integration lifecycle |
-| 14 | Активный `job_id` блокирует усыпление backend | integration lifecycle |
-| 15 | Uninstall дропает схему/роль, не трогая чужие БД | integration lifecycle |
+| 12 | `revoke` деактивирует `CapabilityGrant`; старый `PluginClaims` отклоняется по `grant_id` | integration gateway |
+| 13 | Wake-up из `replicas: 0` удерживает запрос до Ready и выдаёт новый короткий токен | e2e activator + `ignoreDifferences` |
+| 14 | Активный `job_id` блокирует усыпление backend | integration lifecycle + реестр активных job'ов |
+| 15 | Uninstall дропает схему/роль и bucket/prefix, не трогая чужие БД | integration lifecycle |
 | 16 | Фича-флаг `plugin_enabled_modules[]` переключает путь без миграции данных | e2e: старый/новый путь работают независимо |
+| 17 | Плагин с `PluginClaims` не имеет доступа к agent-surface `:8001` (`/agent/*`, `/internal/pods/*`) | e2e: `403` на всех agent-путях |
+| 18 | `cosign verify` до деплоя; неподписанный/несовпавший digest → `QUARANTINED`, деплой по digest, не `:latest` | CI gate + unit реестра |
+| 19 | STS creds плагина не видят объекты чужого bucket/префикса | integration MinIO policy |
+| 20 | Redpanda consumer не теряет событие при простое (ручной commit, `earliest`, DLQ) | integration топика `agentscale.plugin.events` |
+| 21 | Один плагин не может исчерпать квоту компании | unit per-`(company, instance, digest)` |
+| 22 | Egress-политика не зависит от срока жизни JWT | integration: истёкший токен не меняет allowlist из grant |
 
 ---
 
 ## 12. Открытые вопросы
 
-1. **Хранение артефактов** — реестр с подписью: GHCR + cosign/Ed25519 или отдельный MinIO-префикс?
-2. **Публичные страницы** — какие данные допустимы без сессии; формат anon-scope.
-3. **Cross-module sharing** — пока запрещено; если понадобится, только через явный grant в gateway.
-4. **Маркетплейс** — публикация/установка плагинов, отдельный документ.
-5. **Billing** — привязка `quota_ref` к тарифу.
-6. **ADR-007** — явное supersede ADR-003 в части `db.direct` (обязателен до реализации §2).
+1. **Публичные страницы** — какие данные допустимы без сессии; формат anon-scope.
+2. **Cross-module sharing** — пока запрещено; если понадобится, только через явный grant в gateway.
+3. **Маркетплейс** — публикация/установка плагинов, отдельный документ.
+4. **Billing** — привязка `quota_ref` к тарифу.
+5. **ADR-008** — разделение lifecycle агентов/плагинов и выбор собственного activator (обязателен до реализации §7.4).
+6. **Переход на wildcard subdomain** — условия в §5.3 (публичный домен, cert-manager DNS-01, whitelist kinds).
+7. **KEDA HTTP Add-on** — целевой вариант после снятия ограничений whitelist/бюджета; в v4 не вводится.
+8. **MinIO STS** — подтвердить официальной документацией `AssumeRole` / policy variables (в этом ревью страница была недоступна); при отсутствии STS — scoped presigned с policy variables.
 
-Закрытые вопросы: вариант доступа к БД выбран (B, прямой DSN); бэкапы, перенос данных, dual-read, snapshot и «N недель наблюдения» исключены — это dev-разработка, данные эфемерны.
+Закрытые вопросы: доступ к БД (B, прямой DSN); реестр артефактов (OCI + cosign); изоляция объектов (bucket/STS вместо тегов); identity (`PluginClaims` вместо Bridge JWT); lifecycle (собственный activator вместо `SandboxClaim`); бэкапы/перенос/dual-read — исключены (dev, данные эфемерны); ADR-007 принят.
 
 ---
 
-## 13. Что отвергнуто в v1 и почему
+## 13. Что отвергнуто и почему
 
-| Было в v1 | Почему отвергнуто |
+### 13.1 Ошибки v1 (неработающие механизмы)
+
+| Было | Почему отвергнуто |
 |---|---|
-| `CREATE DATABASE tenant_<company_id>` | **принято в v3** при прямом DSN: это и есть настоящая граница изоляции. Один кластер + PgBouncer, N БД |
-| Прямой `TENANT_DB_DSN` плагину | **принято в v3**; ADR-003 отменяется в части плагинов (ADR-007). Риски RLS/GUC снимаются тем, что RLS не используется, а граница — `CONNECT` |
 | RLS как граница | `ENABLE` без `FORCE` не действует на owner; owner = плагин; `app.*` GUC пере-set'ится |
 | `CONNECTION LIMIT` как размер БД | это лимит сессий |
 | `statement_timeout` как rate limit | это таймаут statement, переопределяется в сессии |
 | `REVOKE SET ON PARAMETER` как защита | осмысленна только для superuser-only параметров |
-| `capability-adapters:9000` | дублирует `:8001`, `CapabilityGatewayService`, `tenant_infra/*` |
 | `POST /adapters/db/query {"sql": ...}` | запрещено ADR-002-capability-gateway (generic row dispatch) |
-| Bucket-per-company + presigned URL | as-built: один бакет `agentscale`, tenant-теги, presigned намеренно отвергнуты |
-| Knative scale-to-zero | нет CRD, нет whitelist в AppProject, нет HPA; pause/resume уже работает |
-| Cold start 100–500 мс | на этом кластере реально секунды/десятки секунд; есть warm pool |
+| Knative scale-to-zero / cold start 100–500 мс | нет CRD в whitelist; на этом кластере pull образов — секунды/десятки секунд |
 | `sandbox="allow-scripts allow-same-origin"` | classic sandbox bypass |
-| egress плагина на `postgresql:5432` | **принято в v3** для отдельного tenant-Postgres Service; платформенный `prodavan` по-прежнему недостижим |
-| `companies.tenant_db_connection` | единая точка компрометации: учётные данные хранятся в k8s Secret на компанию, а не в общей таблице |
-| wildcard `*.agentscale.dev` сертификат | в кластере self-signed TLSStore, cert-manager нет |
+| `companies.tenant_db_connection` | единая точка компрометации; учётные данные в k8s Secret на компанию |
 | `v1→v4 deprecate` при «всё под нож» | разведено: цель = удаление, метод = strangler |
-| Дубли §9.2/§9.6, §9.3/§9.7, два `## 10.` | удалены |
-| Два ADR с номером 002 | новый → ADR-006, см. реестр |
-| Токен в URL `?token=...` | утечка через Referer/историю/логи; только заголовок или `postMessage` |
-| Клиентские заголовки после доверенных в proxy | allowlist + отбрасывание входящих `X-Plugin-*`/`Cookie` |
-| Анонимный `pluginpage_proxy` (`pass`) | обязательная сессия + проверка grant + `employee ∈ company` |
-| Статический Envoy-кластер `webhooks.example.com` | кластеры строятся контроллером из подписанного токена |
-| Долгоживущие `TENANT_DB_DSN`/токен в env | короткие lease + `secret_ref`; DSN ротируется при reinstall/revoke |
-| Generic Redis `command+args`, версия плагина в имени схемы | typed контракты; версия только в `DATABASECHANGELOG` и пути статики |
-| `TenantUserDbService._ALLOWED_TYPES` / структурированный манифест схемы | это та же ограниченная декларативность: плагин в v3 владеет схемой и пишет полноценный SQL |
-| Изолированный Liquibase Job под доверенной ролью + парсер запрещённых SQL | плагин мигрирует сам; безопасность = привилегии PostgreSQL + отдельная БД |
-| `migrate-to-plugin`, dual-read/dual-write, snapshot, бэкапы, «N недель наблюдения» | не нужны: dev-разработка, данные эфемерны, переноса нет |
-| Dual-read метрики парности | не нужны по той же причине; strangler нужен только из-за объёма кода |
+| Дубли §9.2/§9.6, §9.3/§9.7, два `## 10.`, два ADR-002 | удалены; новый → ADR-006, добавлен реестр |
+| Токен в URL `?token=...`, клиентские заголовки после доверенных, анонимный `pluginpage_proxy`, статический Envoy-кластер, просроченный `exp`, самореференция digest | исправлены в v2 |
+| `TenantUserDbService._ALLOWED_TYPES`, изолированный Liquibase Job под доверенной ролью, парсер запрещённых SQL | v2/v3: это та же ограниченная декларативность; плагин владеет схемой и мигрирует сам |
+| `migrate-to-plugin`, dual-read/dual-write, snapshot, бэкапы, метрики парности | не нужны: dev-разработка, данные эфемерны |
+
+### 13.2 Что **принято** в v3 (вопреки v2)
+
+| Решение | Комментарий |
+|---|---|
+| `CREATE DATABASE tenant_<company_id>` | при прямом DSN это настоящая граница изоляции; один кластер + PgBouncer |
+| Прямой `TENANT_DB_DSN` плагину | ADR-007 supersede ADR-003 в части `db.direct` |
+| Egress плагина на tenant-postgres :5432 | `prodavan` по-прежнему недостижим |
+| `CREATE DATABASE` на компанию, реальные таблицы, self-managed Liquibase | полноценное приложение вместо структурированного манифеста |
+
+### 13.3 Что **заменено** в v4 (главная правка: «as-built → не значит как есть»)
+
+| Было в v2/v3 | Стало | Причина |
+|---|---|---|
+| `PodBridgeClaims` как identity плагина, расширение pod-gateway `:8001` | `PluginClaims` + отдельный route-group Plugin Gateway; `:8001` только агентам | разные trust-модели; иначе плагин получает `/agent/*` и `/internal/pods/*` |
+| Один MinIO-бакет + tenant-теги, «presigned намеренно отвергнуты» | bucket-per-tenant / STS session policy + scoped presigned; теги — метаданные | теги — Python-фильтр, не IAM; один service user на `agentscale/*` |
+| Celery-outbox как шина событий | Redpanda dispatch (ручной commit, `earliest`, DLQ) + outbox только для webhook-доставки | `kick` + `auto_commit` теряет события при простое консьюмера |
+| `tar.gz + Ed25519 + свой реестр ключей` | OCI в GHCR + cosign keyless + SBOM/provenance + `AppVersion`/`RegistryOutcome` | подписанный manifest ссылался на неподписанный образ; CI уже имеет ghcr, но отключает provenance |
+| `SandboxClaim` + warm pool для плагинов | Deployment `replicas: 0` + Plugin Gateway activator + `ignoreDifferences` | CRD не несёт image/port, запрещает env, тащит PVC, не ждёт Ready; пул греет не тот образ |
+| «Единая NP для плагинов и агентов» | две NP из одного генератора; общая схема аудита | у плагинов 5432/:9000, у агентов — нет |
+| Egress/cluster rules из capability token | из `CapabilityGrant` в БД; токен несёт `grant_id` | иначе истечение JWT пересобирает сетевую политику |
+| path-based как окончательный ответ | v1 static-origin, цель — wildcard subdomain при выполнении §5.3 | §5.2 требовал отдельный origin, §7.1 сажал на тот же host |
+| «Один lifecycle-контроллер на всех» | общий контракт, разные реализации | агенты stateful+файлы, плагины stateless+HTTP |
 
 ---
 
 ## 14. Порядок реализации
 
-1. ADR-реестр, ADR-006, **ADR-007** (supersede ADR-003 в части `db.direct`).
-2. Tenant PostgreSQL: отдельный Deployment/Service/Secret, PgBouncer (transaction mode), `pgaudit`.
-3. Lifecycle grant/revoke/uninstall: `CREATE DATABASE tenant_<company>`, роль, схема `module_<id>` с owner = плагин, `search_path`, `CONNECT`.
-4. Расширение `CapabilityGatewayService` / `CapabilityGrant` для **не-БД** адаптеров (cache, objects, docs, events, jobs, pods, mcp, secrets, network).
-5. Egress-контроллер (динамический allowlist) + единая схема аудита + CSP/origin для iframe.
-6. Plugin Gateway + Ingress (`router.priority: 120`) + тест приоритетов + webhook-контракт.
-7. Lifecycle-контроллер (pause/resume/wake) на базе `SandboxClaim` + warm pool.
-8. Артефакт/реестр/подпись + установка + Liquibase `update` при старте контейнера.
-9. Пилотный плагин за фича-флагом `plugin_enabled_modules[]` с собственными таблицами и тестовыми данными.
-10. Strangler по контекстам `mod_equipment` → cutover → удаление declarative-app (`module_*` дропаются ревизией без переноса данных).
+1. ADR-реестр, ADR-006, ADR-007, **ADR-008** (разделение lifecycle агентов/плагинов).
+2. Tenant PostgreSQL: отдельный Deployment/Service/Secret, PgBouncer, `pgaudit`.
+3. `PluginClaims` + `/capabilities/v1/*` в Plugin Gateway + ветка allowlist middleware; `:8001` не трогаем. `CapabilityGrant` с per-`(company, instance, digest)` квотами.
+4. Lifecycle grant/revoke/uninstall: `CREATE DATABASE`, роль, схема, `search_path`, `CONNECT`; bucket-per-tenant + STS/presigned.
+5. CI: `provenance`/`sbom` = true, cosign keyless, pin по digest; реестр на `AppVersion`/`RegistryOutcome`.
+6. Egress-генератор (правила из grant в БД) + две NP + единая схема аудита + CSP/static-origin.
+7. Plugin Gateway + Ingress (`router.priority: 120`) + тест приоритетов + webhook-контракт.
+8. Redpanda dispatch (`agentscale.plugin.events`, ручной commit/DLQ/earliest) + реестр активных `job_id` в idle-pause.
+9. Activator: `Deployment replicas: 0` + wake/hold-until-Ready + `ignoreDifferences /spec/replicas`; агенты остаются на `SandboxClaim`.
+10. Пилотный плагин за фича-флагом `plugin_enabled_modules[]` с собственными таблицами, Liquibase и тестовыми данными.
+11. Strangler по контекстам `mod_equipment` → cutover → удаление declarative-app.
 
 ---
 
-**Конец документа.** Дизайн, не код. Реализация через субагентов на main; микрокоммиты `git add -A && git commit && git push`, без гигиены и без переписывания истории; тесты пишутся, но не запускаются до явного решения. Блокирующее условие — принятие ADR-007.
+**Конец документа.** Дизайн, не код. Реализация через субагентов на main; микрокоммиты `git add -A && git commit && git push`, без гигиены и без переписывания истории; тесты пишутся, но не запускаются до явного решения. Блокирующие условия — принятие ADR-008 и подтверждение MinIO STS по официальной документации (или переход на scoped presigned).

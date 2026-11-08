@@ -26,7 +26,7 @@
 3. **Миграции как инфраструктура** — плагин поставляет подписанный Liquibase/Flyway/Alembic changelog и применяет его сам при старте контейнера под своей ролью (`NOCREATEDB NOCREATEROLE`). Безопасность = привилегии PostgreSQL + отдельная БД + `pgaudit`, а не парсер SQL. Произвольный SQL из тела HTTP-запроса к платформе отсутствует (ADR-002).
 4. **Изоляция** — отдельная **БД** `tenant_<company>`, `GRANT CONNECT` только на неё, схема с owner = плагин, NetworkPolicy без egress к `prodavan`, отдельный origin для iframe **без** `allow-same-origin`. RLS не является границей.
 5. **Единый фаерволл** — egress-контроллер с режимами `none`/`webhooks-only`/`full` для плагинов **и** контейнеров агентов.
-6. **Засыпание** — переиспользование `SandboxClaim.operatingMode` / `PodRuntimePort.pause|resume` / warm pool; Knative не вводится (нет CRD, нет whitelist в Argo AppProject).
+6. **Засыпание** — Deployment `replicas: 0` + Plugin Gateway activator (ADR-008). `SandboxClaim` остаётся только агентам; Knative не вводится.
 7. **Внешние адреса** — path-based `/webhook/{plugin}/{company}/*` и `/pluginpage/{plugin}/{company}/*` на отдельном Ingress с `router.priority: 120`.
 
 ### Конечное состояние
@@ -67,8 +67,9 @@ Strangler с фича-флагом — **только из-за объёма к�
 
 ## Связанные документы
 
-- `docs/ARCHITECTURE/plugin-architecture-complete.md` — **полный дизайн v3 (источник истины)**
-- `docs/architecture-migration/ADR-007-direct-plugin-db.md` — прямой DSN, отмена ADR-003 в части плагинов
+- `docs/ARCHITECTURE/plugin-architecture-complete.md` — **полный дизайн v4 (источник истины)**
+- `docs/architecture-migration/ADR-007-direct-plugin-db.md` — прямой DSN
+- `docs/architecture-migration/ADR-008-lifecycle-and-boundaries.md` — разделение trust/lifecycle, замена as-built привязок
 - `docs/ARCHITECTURE/plugin-modules.md` — краткое введение
 - `docs/PRODUCT.md` — раздел «Целевая модель: plugin-модули»
 - `docs/workflow/main-branch-workflow.md` — работа на main
