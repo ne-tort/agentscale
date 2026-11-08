@@ -66,27 +66,17 @@ def create_app() -> FastAPI:
     app.include_router(plugin_gateway.router)
 
     if settings.plugin_platform_enabled:
-        from prodavan.application.plugins.wiring.install import install_plugin_platform
-        from prodavan.core.infra.redis_manager import get_redis_manager
+        from prodavan.application.plugins.wiring.install import (
+            LazyRedisManager,
+            install_plugin_platform,
+        )
         from prodavan.infrastructure.persistence.database import get_session_factory
-
-        # create_app() работает ДО lifespan.startup(): RedisManager ещё не
-        # зарегистрирован. Ленивый прокси Resolve'ит его в момент первого
-        # запроса к .client (уже после startup); до этого — явный отказ.
-        # НЕ in-memory подмена: источник истины остаётся БД + Redis.
-        class _LazyRedisManager:
-            @property
-            def client(self):
-                manager = get_redis_manager()
-                if manager is None:
-                    raise RuntimeError("RedisManager is not started yet (lifespan startup pending)")
-                return manager.client
 
         install_plugin_platform(
             app,
             settings,
             session=get_session_factory(),
-            redis=_LazyRedisManager(),
+            redis=LazyRedisManager(),
         )
         from prodavan.api.v1 import plugin_capabilities
 

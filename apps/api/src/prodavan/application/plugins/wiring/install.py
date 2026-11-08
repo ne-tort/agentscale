@@ -86,6 +86,50 @@ PLUGIN_SURFACE_GUARD_STATE_KEY: Final[str] = "plugin_surface_guard_registered"
 #: Диагностика: порты без прод-фабрики (задачи A10/14/15). НЕ секреты.
 UNWIRED_PORTS_STATE_KEY: Final[str] = "plugin_unwired_ports"
 
+
+class LazyRedisManager:
+    """Прозрачный прокси к ``RedisManager`` на время ``create_app()``.
+
+    ``create_app()`` выполняется ДО ``lifespan.startup()``, поэтому
+    ``get_redis_manager()`` в этот момент возвращает ``None``, а
+    ``install_plugin_platform`` по A10 требует не-None зависимость (in-memory
+    подмена источника истины запрещена). Прокси НЕ хранит состояние: каждый
+    доступ к атрибуту резолвит реальный менеджер в момент ВЫЗОВА, уже после
+    старта lifespan.
+
+    Важно: это НЕ объект только с ``.client``. ``RedisRateLimitAdapter``
+    обращается к ``.eval`` / ``.set`` / ``.enabled`` напрямую, а
+    ``RedisPluginQuota`` — к ``.client``. Поэтому ``__getattr__`` делегирует
+    ВСЁ, а ``client`` объявлен свойством (иначе ``hasattr(client, "client")``
+    в quota-адаптере не сработал бы). До старта Redis любой вызов даёт
+    явный ``RuntimeError`` -> fail-closed deny, а не «тихий allow».
+    """
+
+    __slots__ = ()
+
+    def _manager(self) -> Any:
+        from prodavan.core.infra.redis_manager import get_redis_manager
+
+        manager = get_redis_manager()
+        if manager is None:
+            raise RuntimeError(
+                "RedisManager is not started yet (lifespan startup pending)"
+            )
+        return manager
+
+    @property
+    def client(self) -> Any:
+        return self._manager().client
+
+    @property
+    def enabled(self) -> bool:
+        return bool(getattr(self._manager(), "enabled", False))
+
+    def __getattr__(self, name: str) -> Any:
+        # __slots__ + property уже обработали client/enabled/_manager.
+        return getattr(self._manager(), name)
+
+
 _OWN_STATE_KEYS: Final[tuple[str, ...]] = (
     "plugin_platform",
     "plugin_capability_service",
@@ -114,6 +158,7 @@ _OWN_STATE_KEYS: Final[tuple[str, ...]] = (
 __all__ = [
     "PLUGIN_SURFACE_GUARD_STATE_KEY",
     "UNWIRED_PORTS_STATE_KEY",
+    "LazyRedisManager",
     "PluginCompositionError",
     "install_plugin_platform",
     "install_plugin_platform_for_tests",

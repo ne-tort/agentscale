@@ -59,8 +59,10 @@ def create_app() -> FastAPI:
     # Внимание: GET /health этого роутера совпадает с health_routes.router выше;
     # k8s-проба использует корневую /health, зарегистрированную ПЕРВОЙ.
     if settings.plugin_platform_enabled:
-        from prodavan.application.plugins.wiring.install import install_plugin_platform
-        from prodavan.core.infra.redis_manager import get_redis_manager
+        from prodavan.application.plugins.wiring.install import (
+            LazyRedisManager,
+            install_plugin_platform,
+        )
         from prodavan.infrastructure.persistence.database import get_session_factory
 
         # ОДНА точка F11-композиции: build_plugin_platform + attach_plugin_platform
@@ -68,24 +70,14 @@ def create_app() -> FastAPI:
         # Без неё все 19 ключей app.state пусты и роутеры дают 503.
         #
         # create_app() работает ДО lifespan.startup(): RedisManager в этот
-        # момент ещё не зарегистрирован (get_redis_manager() -> None), а
-        # install_plugin_platform по A10 обязателен к не-None зависимости.
-        # Передаём ЛЕНИВЫЙ прокси: он Resolve'ит реальный менеджер в момент
-        # ПЕРВОГО запроса к .client (уже после startup), а до этого честно
-        # fail-closed. Это НЕ in-memory подмена источника истины.
-        class _LazyRedisManager:
-            @property
-            def client(self):
-                manager = get_redis_manager()
-                if manager is None:
-                    raise RuntimeError("RedisManager is not started yet (lifespan startup pending)")
-                return manager.client
-
+        # момент ещё не зарегистрирован. LazyRedisManager резолвит его в момент
+        # ПЕРВОГО обращения к любому атрибуту (.client/.eval/.enabled), уже
+        # после старта; до этого — явный отказ. НЕ in-memory подмена.
         install_plugin_platform(
             app,
             settings,
             session=get_session_factory(),
-            redis=_LazyRedisManager(),
+            redis=LazyRedisManager(),
         )
         app.include_router(plugin_gateway.router)
         try:

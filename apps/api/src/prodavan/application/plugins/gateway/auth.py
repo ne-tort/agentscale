@@ -270,9 +270,23 @@ class GatewayAuth:
         plugin_id: str,
         company_id: str,
     ) -> None:
-        allowed = await self.rate_limit.allow(
-            bucket=bucket, limit=limit, window_seconds=window_seconds
-        )
+        # Отказ САМОГО хранилища лимитов — это system failure, а не «превышен
+        # лимит». Адаптер (RedisRateLimitAdapter) бросает собственное
+        # исключение, которое НЕ является GatewayError; без обёртки роутер
+        # отдал бы 500 Internal Server Error вместо типизированного 503.
+        # Fail-closed: недоступность Redis = deny, никогда не «пустить без
+        # лимита» (дизайн v4 §7.2, критерий appendix-аудита).
+        try:
+            allowed = await self.rate_limit.allow(
+                bucket=bucket, limit=limit, window_seconds=window_seconds
+            )
+        except GatewayError:
+            raise
+        except Exception as exc:  # noqa: BLE001 — любая ошибка порта = deny
+            raise GatewayError(
+                GatewayErrorCode.UPSTREAM_ERROR,
+                detail="rate limit backend unavailable; refusing request",
+            ) from exc
         if not allowed:
             await self._audit(
                 event_kind,

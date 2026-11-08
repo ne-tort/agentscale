@@ -370,6 +370,35 @@ async def test_webhook_rate_limit_is_per_plugin_company() -> None:
 
 
 @pytest.mark.asyncio
+async def test_rate_limit_backend_failure_is_typed_not_500() -> None:
+    """Недоступность Redis = типизированный 502/503, НЕ 500 и НЕ allow.
+
+    Реальный дефект F11: RedisRateLimitAdapter бросал GatewayAdapterError
+    (RuntimeError), который не являлся GatewayError и не ловился роутером —
+    /webhook/* отдавал 500 Internal Server Error. Обёртка в auth.py обязана
+    превратить любой отказ порта в GatewayError(UPSTREAM_ERROR).
+    """
+
+    class BrokenRateLimit:
+        async def allow(self, **_kwargs: object) -> bool:
+            raise RuntimeError("redis down")
+
+    h = build_harness()
+    h.auth.rate_limit = BrokenRateLimit()  # type: ignore[assignment]
+    with pytest.raises(GatewayError) as exc:
+        await h.auth._enforce_rate_limit(
+            bucket="webhook:p:c",
+            limit=10,
+            window_seconds=60,
+            event_kind="webhook",
+            plugin_id="p",
+            company_id="c",
+        )
+    assert exc.value.code == GatewayErrorCode.UPSTREAM_ERROR
+    assert "rate limit backend unavailable" in str(exc.value.detail)
+
+
+@pytest.mark.asyncio
 async def test_webhook_claims_have_reduced_webhook_scope() -> None:
     h = build_harness()
     body = b"{}"
