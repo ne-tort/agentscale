@@ -30,23 +30,26 @@ LABEL org.opencontainers.image.title="agentscale-plugin-base-pgbouncer" \
       org.opencontainers.image.base.name="pgbouncer/pgbouncer:1.24.1@sha256:3d6fbf93c72009fc9ecb3e4b9957974ffca3e66cc2641fc85df8fbc2429bb2ba"
 
 # -----------------------------------------------------------------------------
-# NON-ROOT. Официальный образ запускает процесс под непривилегированным
-# пользователем `pgbouncer` (uid 70 / gid 70). Мы задаём USER ЯВНО, чтобы это
-# было зафиксировано в НАШЕМ образе, а не унаследовано неявно. Если в базе
-# пользователя нет — сборка УПАДЁТ на `id -u` (fail-closed), а не тихо уедет
-# под root. Каталоги доступны на чтение всем: конфиг НЕ секретный, а
-# userlist.txt в k3s монтируется из Secret только на чтение. Паролей в образе
-# НЕТ (пустая заглушка auth_file = deny all).
-# -----------------------------------------------------------------------------
+# NON-ROOT. Официальный образ pgbouncer/pgbouncer:1.24.1 (Alpine) уже задаёт
+# `USER 70:70` (в /etc/passwd это `postgres:x:70:70`, НЕ `pgbouncer`) и
+# `ENTRYPOINT /opt/pgbouncer/entrypoint.sh`; бинарник лежит в
+# `/opt/pgbouncer/pgbouncer` и НЕ добавлен в PATH. Первый прогон CI с
+# `id -u pgbouncer` и `ENTRYPOINT ["pgbouncer"]` честно упал — оба имени
+# отсутствуют. Мы НЕ переопределяем entrypoint и пользователя базы: фиксируем
+# ЯВНО существующего непривилегированного владельца `postgres:postgres`
+# (uid/gid 70) для chown и USER, а команду оставляем совместимой с базой.
+# Если в будущей ревизии uid 70 исчезнет — сборка УПАДЁТ на `id -u`
+# (fail-closed), а не тихо уедет под root. Паролей в образе НЕТ.
 USER root
 
 RUN set -eux; \
-    id -u pgbouncer >/dev/null; \
-    id -g pgbouncer >/dev/null; \
-    pgbouncer --version; \
+    id -u postgres >/dev/null; \
+    test "$(id -u postgres)" = "70"; \
+    id -g postgres >/dev/null; \
+    /opt/pgbouncer/pgbouncer --version; \
     install -d -m 0755 /etc/pgbouncer /etc/pgbouncer/auth; \
     mkdir -p /var/log/pgbouncer /var/run/pgbouncer; \
-    chown -R pgbouncer:pgbouncer /var/log/pgbouncer /var/run/pgbouncer /etc/pgbouncer/auth
+    chown -R postgres:postgres /var/log/pgbouncer /var/run/pgbouncer /etc/pgbouncer/auth
 
 # -----------------------------------------------------------------------------
 # ДЕФОЛТНЫЙ конфиг образа. В k3s его ПЕРЕКРЫВАЕТ ConfigMap
@@ -62,15 +65,15 @@ RUN set -eux; \
 # PgBouncer читать pg_shadow на backend (нужна суперпользовательская роль) и
 # размывали бы границу. Известны ТОЛЬКО роли из userlist.txt.
 # -----------------------------------------------------------------------------
-COPY --chown=pgbouncer:pgbouncer pgbouncer.ini /etc/pgbouncer/pgbouncer.ini
+COPY --chown=postgres:postgres pgbouncer.ini /etc/pgbouncer/pgbouncer.ini
 
 RUN set -eux; \
     printf '# ПУСТОЙ auth_file по умолчанию = deny all (fail-closed).\n# В k3s монтируется Secret pgbouncer-credentials/userlist.txt.\n' \
       > /etc/pgbouncer/auth/userlist.txt; \
-    chown pgbouncer:pgbouncer /etc/pgbouncer/auth/userlist.txt; \
+    chown postgres:postgres /etc/pgbouncer/auth/userlist.txt; \
     chmod 0640 /etc/pgbouncer/auth/userlist.txt
 
-USER pgbouncer:pgbouncer
+USER postgres:postgres
 
 EXPOSE 6432
 
@@ -85,5 +88,9 @@ EXPOSE 6432
 HEALTHCHECK --interval=10s --timeout=5s --start-period=10s --retries=5 \
     CMD nc -z 127.0.0.1 6432
 
-ENTRYPOINT ["pgbouncer"]
+# НЕ используем /opt/pgbouncer/entrypoint.sh базового образа: он требует
+# DATABASES_HOST/DATABASES и сам генерирует конфиг, перетирая наш эталонный
+# pgbouncer.ini (transaction mode + закрытый auth_file). Запускаем бинарник
+# НАПРЯМУЮ с нашим конфигом — путь полный, т.к. /opt/pgbouncer не в PATH.
+ENTRYPOINT ["/opt/pgbouncer/pgbouncer"]
 CMD ["/etc/pgbouncer/pgbouncer.ini"]
