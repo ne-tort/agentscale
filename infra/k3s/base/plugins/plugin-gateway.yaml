@@ -236,7 +236,7 @@ spec:
         # RuntimeConfigError после добавления PLUGIN_RUNTIME_NAMESPACE).
         # Менять вручную вместе с конфигом; configMapGenerator с хешем здесь
         # неприменим — ConfigMap статический и используется Sync-хуками.
-        agentscale.io/plugin-config-revision: "4"
+        agentscale.io/plugin-config-revision: "5"
     spec:
       serviceAccountName: plugin-gateway
       automountServiceAccountToken: true
