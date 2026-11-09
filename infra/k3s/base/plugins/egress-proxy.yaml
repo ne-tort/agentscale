@@ -161,7 +161,7 @@ spec:
         # /data сама по себе НЕ перекатывает Deployment (pod template не менялся).
         # Явная ревизия гарантирует перезапуск Envoy после правки admin-адреса
         # (127.0.0.1 -> 0.0.0.0), иначе readiness :9901 останется сломанной.
-        agentscale.io/egress-config-revision: "2"
+        agentscale.io/egress-config-revision: "3"
     spec:
       terminationGracePeriodSeconds: 30
       # Зеркало ghcr: Docker Hub на холодной ноде отдаёт 429 TOOMANYREQUESTS.
