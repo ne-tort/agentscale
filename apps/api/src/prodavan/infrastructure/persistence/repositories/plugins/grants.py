@@ -481,6 +481,36 @@ class SqlCapabilityGrantRepository:
         except (SQLAlchemyError, PluginRepositoryError) as exc:
             raise PluginRepositoryUnavailable(f"get_by_grant_id failed: {exc}") from exc
 
+    async def get_by_instance_id(
+        self, *, plugin_instance_id: str
+    ) -> CapabilityGrantRecord | None:
+        """Активный grant по ``plugin_instance_id`` (для ``MintPort`` wake-up).
+
+        ``PluginActivator`` при пробуждении знает только instance_id, а
+        ``identity.mint_plugin_claims`` требует полный grant. Unique
+        (``company_id``, ``plugin_instance_id``) гарантирует не более одной
+        активной строки; берём самую свежую по ``issued_at``. Fail-closed:
+        ошибка БД = ``PluginRepositoryUnavailable``, а не «пустой grant».
+        """
+        key = text(plugin_instance_id, field="plugin_instance_id")
+        try:
+            row = self._row()
+            table = row.__table__
+            async with self._session_ctx() as session:
+                result = await session.execute(
+                    select(row)
+                    .where(table.columns[self._col("plugin_instance_id")] == key)
+                    .order_by(table.columns[self._col("issued_at")].desc())
+                )
+                found = result.scalars().first()
+            if found is None:
+                return None
+            record = self.to_record(found)
+            self._snapshot[record.grant_id] = record
+            return record
+        except (SQLAlchemyError, PluginRepositoryError) as exc:
+            raise PluginRepositoryUnavailable(f"get_by_instance_id failed: {exc}") from exc
+
     async def create(self, *, grant: CapabilityGrantRecord) -> CapabilityGrantRecord:
         """Идемпотентно по ``grant_id`` (= PK ``id``). Ошибка записи → deny.
 

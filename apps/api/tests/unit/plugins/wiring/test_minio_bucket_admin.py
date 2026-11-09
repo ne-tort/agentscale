@@ -122,6 +122,55 @@ def test_gateway_secrets_is_typed_fail_closed_without_ref() -> None:
     assert install._gateway_secrets(SimpleNamespace()) is None
 
 
+def test_activation_mint_uses_sql_grant_and_verified_payload() -> None:
+    """activation.MintPort перевыпускает JWT из SQL-гранта, не из Secret."""
+    import asyncio
+    from dataclasses import dataclass, field
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    from prodavan.application.plugins.admin.contracts import GrantStatus
+    from prodavan.application.plugins.wiring import install as _install
+    from prodavan.application.plugins.wiring.config import PluginPlatformConfig
+
+    from .conftest import FakeSettings
+
+    @dataclass
+    class _Record:
+        grant_id: str = "grant_1"
+        company_id: str = "co_1"
+        plugin_id: str = "p_1"
+        plugin_instance_id: str = "inst_1"
+        manifest_version: str = "1.0.0"
+        artifact_digest: str = "sha256:" + "a" * 64
+        capabilities: tuple[str, ...] = ("cache",)
+        status: Any = GrantStatus.ACTIVE
+        quotas: Any = field(default_factory=dict)
+
+        @property
+        def is_active(self) -> bool:
+            return self.status is GrantStatus.ACTIVE
+
+    class _Store:
+        async def get_by_instance_id(self, *, plugin_instance_id: str) -> Any:
+            return _Record()
+
+    config = PluginPlatformConfig.from_settings(FakeSettings())
+    mint = _install._activation_mint(SimpleNamespace(grant_store=_Store()), config)
+    assert mint is not None
+
+    claims = asyncio.run(mint.mint(plugin_instance_id="inst_1", reason="wake"))
+    assert claims.token
+    assert claims.jti
+    assert claims.expires_at > claims.issued_at
+    assert claims.claims["grant_id"] == "grant_1"
+    # В коротком токене НЕТ egress/квот (§4.2).
+    assert "egress" not in claims.claims and "quotas" not in claims.claims
+
+    # Нет SQL-репозитория -> None -> честный _UnwiredPort, старт не падает.
+    assert _install._activation_mint(SimpleNamespace(), config) is None
+
+
 def test_tenant_db_secrets_async_bridge_rotates_to_empty() -> None:
     """tenantdb.SecretPort async-мост: rotate(value='') инвалидирует DSN."""
     import asyncio

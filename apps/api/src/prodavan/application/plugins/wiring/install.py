@@ -409,6 +409,75 @@ def _minio_bucket_admin() -> Any | None:
         return None
 
 
+def _activation_mint(repos: Any, config: Any) -> Any | None:
+    """``activation.MintPort``: перевыпуск короткого JWT при каждом wake.
+
+    ``PluginActivator`` знает только ``plugin_instance_id``; полный grant
+    берётся из SQL-репозитория A10 (``get_by_instance_id``), затем
+    ``IdentityMintAdapter`` выпускает токен и ``MintedClaims`` собирается из
+    ПРОВЕРЕННОГО payload. Источник истины один — БД грантов, секрет явный
+    из ``config.claims_secret`` (без dev-фолбэков, §4.2/§13).
+
+    Коллизия протоколов: ``admin.MintPort.mint(request=...)`` и
+    ``activation.MintPort.mint(plugin_instance_id=..., reason=...)`` — РАЗНЫЕ
+    контракты. Здесь реализуется именно activation-вариант.
+    """
+    try:
+        from datetime import UTC, datetime
+
+        from prodavan.application.plugins.activation.ports import MintedClaims
+        from prodavan.application.plugins.adapters.identity_adapter import (
+            IdentityMintAdapter,
+        )
+        from prodavan.application.plugins.admin.contracts import MintRequest
+        from prodavan.application.plugins.identity.mint import peek_plugin_token
+
+        store = getattr(repos, "grant_store", None)
+        if store is None or not callable(getattr(store, "get_by_instance_id", None)):
+            return None
+        adapter = IdentityMintAdapter(secret=config.claims_secret)
+
+        class _ActivationMint:
+            async def mint(self, *, plugin_instance_id: str, reason: str) -> Any:
+                record = await store.get_by_instance_id(
+                    plugin_instance_id=plugin_instance_id
+                )
+                if record is None or not getattr(record, "is_active", True):
+                    raise RuntimeError(
+                        "no active CapabilityGrant for instance; refusing wake"
+                    )
+                issued = await adapter.mint(
+                    request=MintRequest(
+                        company_id=record.company_id,
+                        plugin_id=record.plugin_id,
+                        plugin_instance_id=record.plugin_instance_id,
+                        manifest_version=record.manifest_version,
+                        artifact_digest=record.artifact_digest,
+                        grant_id=record.grant_id,
+                        scopes=tuple(record.capabilities),
+                        quota_ref=record.grant_id,
+                    )
+                )
+                payload = peek_plugin_token(issued.token) or {}
+                return MintedClaims(
+                    token=issued.token,
+                    jti=issued.jti,
+                    issued_at=datetime.fromtimestamp(int(payload.get("iat", 0)), tz=UTC),
+                    expires_at=issued.expires_at,
+                    claims=dict(payload),
+                )
+
+        return _ActivationMint()
+    except Exception as exc:  # noqa: BLE001 — конфигурация/импорт ≠ падение startup
+        logger.warning(
+            "plugin activation mint port is not configured (%s: %s); "
+            "wake-up stays fail-closed",
+            type(exc).__name__,
+            str(exc)[:120],
+        )
+        return None
+
+
 def _tenant_db_secrets() -> Any | None:
     """``tenantdb.SecretPort`` поверх существующего ``RoutingSecretStore``.
 
@@ -516,7 +585,7 @@ def _zone_services(runtime: Any, repos: Any, config: Any, ov: dict[str, Any], un
         scale=runtime.scale,
         readiness=runtime.readiness,
         clock=ov.get("clock") or SystemClock(),
-        mint=need("activation_mint"),
+        mint=_activation_mint(repos, config) or need("activation_mint"),
         audit=repos.audit,
         policy=IdlePolicy(
             idle_ttl_seconds=float(config.idle_ttl_seconds),
@@ -851,6 +920,10 @@ def _gateway_activator(runtime: Any, ov: dict[str, Any], need: Any) -> Any:
     from prodavan.application.plugins.activation.activator import PluginActivator, SystemClock
     from prodavan.application.plugins.activation.state import IdlePolicy
 
+    # Редкий fallback: в штатном пути _gateway_runtime берёт УЖЕ собранный
+    # activator из services (с реальным _activation_mint). Здесь config/repos
+    # недоступны, поэтому оставляем честную fail-closed заглушку, а не
+    # дублируем сборку mint с неполным контекстом.
     return PluginActivator(
         scale=runtime.scale,
         readiness=runtime.readiness,
