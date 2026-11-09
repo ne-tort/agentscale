@@ -409,6 +409,52 @@ def _minio_bucket_admin() -> Any | None:
         return None
 
 
+def _tenant_db_secrets() -> Any | None:
+    """``tenantdb.SecretPort`` поверх существующего ``RoutingSecretStore``.
+
+    Порт задачи 05 — ASYNC (``put``/``rotate``/``delete``), а
+    ``RoutingSecretStore`` — синхронный. Тонкий мост НЕ хранит DSN в памяти:
+    каждый вызов уходит в проверенный store, наружу возвращается только
+    ``secret_ref`` (§5.5, критерий №11). ``rotate`` = delete старого ref +
+    put нового значения, как требует контракт.
+
+    Если store недоступен, возвращаем ``None`` -> честный ``_UnwiredPort``.
+    """
+    try:
+        from prodavan.infrastructure.secrets.store import get_secret_store
+
+        store = get_secret_store()
+
+        class _AsyncSecretStore:
+            async def put(self, *, key: str, value: str) -> str:
+                return store.put(key, value)
+
+            async def rotate(self, *, key: str, value: str) -> str:
+                # Сервис задачи 05 вызывает rotate(value="") при revoke, чтобы
+                # инвалидировать DSN. FileSecretStore.put пустоту ОТВЕРГАЕТ
+                # (422 "secret required"), поэтому для пустого значения
+                # удаляем ref напрямую: старый DSN больше недоступен.
+                if not value or not value.strip():
+                    from prodavan.infrastructure.secrets.file_store import REF_PREFIX
+
+                    store.delete(f"{REF_PREFIX}{key}.secret")
+                    return ""
+                return store.put(key, value)
+
+            async def delete(self, *, secret_ref: str) -> None:
+                store.delete(secret_ref)
+
+        return _AsyncSecretStore()
+    except Exception as exc:  # noqa: BLE001 — конфигурация/импорт ≠ падение startup
+        logger.warning(
+            "plugin tenant-db secret port is not configured (%s: %s); "
+            "DSN storage stays fail-closed",
+            type(exc).__name__,
+            str(exc)[:120],
+        )
+        return None
+
+
 def _zone_services(runtime: Any, repos: Any, config: Any, ov: dict[str, Any], unwired: list[str]) -> dict[str, Any]:
     """Собрать РЕАЛЬНЫЕ сервисы зон для тонких admin-адаптеров.
 
@@ -453,9 +499,14 @@ def _zone_services(runtime: Any, repos: Any, config: Any, ov: dict[str, Any], un
         presigner=ov.get("object_presigner"),
         audit=repos.audit,
     )
+    tenant_db_secrets = ov.get("tenant_db_secrets")
+    if tenant_db_secrets is None:
+        tenant_db_secrets = _tenant_db_secrets()
+    if tenant_db_secrets is None:
+        tenant_db_secrets = need("tenant_db_secrets")
     tenant_db = TenantDatabaseService(
         admin=need("tenant_db_admin"),
-        secrets=need("tenant_db_secrets"),
+        secrets=tenant_db_secrets,
         audit=repos.audit,
         dsn_host=config.tenant_db_host,
         dsn_port=config.tenant_db_port,

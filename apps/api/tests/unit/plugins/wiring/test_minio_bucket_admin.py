@@ -122,6 +122,34 @@ def test_gateway_secrets_is_typed_fail_closed_without_ref() -> None:
     assert install._gateway_secrets(SimpleNamespace()) is None
 
 
+def test_tenant_db_secrets_async_bridge_rotates_to_empty() -> None:
+    """tenantdb.SecretPort async-мост: rotate(value='') инвалидирует DSN."""
+    import asyncio
+    from unittest.mock import MagicMock
+
+    from prodavan.application.plugins.wiring import install as _install
+
+    fake_store = MagicMock()
+    fake_store.put.return_value = "file://ai_keys/tenant.secret"
+    monkeypatch = None  # локальная подмена через атрибут модуля
+    import prodavan.infrastructure.secrets.store as _store_module
+
+    original = _store_module.get_secret_store
+    _store_module.get_secret_store = lambda: fake_store
+    try:
+        port = _install._tenant_db_secrets()
+        assert port is not None
+        assert asyncio.run(port.put(key="tenant", value="postgresql://u:p@h/db")) == (
+            "file://ai_keys/tenant.secret"
+        )
+        # revoke: rotate(value="") НЕ должна пасть на FileSecretStore.put("").
+        assert asyncio.run(port.rotate(key="tenant", value="")) == ""
+        fake_store.delete.assert_called_once_with("file://ai_keys/tenant.secret")
+        asyncio.run(port.delete(secret_ref="file://ai_keys/tenant.secret"))
+    finally:
+        _store_module.get_secret_store = original
+
+
 def test_in_memory_ports_have_their_own_diagnostic_key() -> None:
     """Привязанные in-memory порты НЕ должны числиться «совсем не подключено»."""
     assert install.IN_MEMORY_PORTS_STATE_KEY == "plugin_in_memory_ports"
