@@ -122,6 +122,14 @@ def test_gateway_secrets_is_typed_fail_closed_without_ref() -> None:
     assert install._gateway_secrets(SimpleNamespace()) is None
 
 
+def test_in_memory_ports_have_their_own_diagnostic_key() -> None:
+    """Привязанные in-memory порты НЕ должны числиться «совсем не подключено»."""
+    assert install.IN_MEMORY_PORTS_STATE_KEY == "plugin_in_memory_ports"
+    assert install.IN_MEMORY_PORTS_STATE_KEY != install.UNWIRED_PORTS_STATE_KEY
+    assert install.IN_MEMORY_PORTS_STATE_KEY in install._OWN_STATE_KEYS
+    assert "IN_MEMORY_PORTS_STATE_KEY" in install.__all__
+
+
 def test_minio_bucket_admin_is_real_with_valid_env(monkeypatch: Any) -> None:
     """В кластерной конфигурации порт привязан к реальному адаптеру."""
     for key, value in _MINIO_ENV.items():

@@ -86,6 +86,12 @@ PLUGIN_SURFACE_GUARD_STATE_KEY: Final[str] = "plugin_surface_guard_registered"
 #: Диагностика: порты без прод-фабрики (задачи A10/14/15). НЕ секреты.
 UNWIRED_PORTS_STATE_KEY: Final[str] = "plugin_unwired_ports"
 
+#: Порты, которые ПРИВЯЗАНЫ, но работают in-memory (кластеру нужна БД/Redis,
+#: A10). Это НЕ ``_UnwiredPort`` и НЕ долг «совсем не подключено», поэтому
+#: они НЕ должны попадать в ``plugin_unwired_ports`` — иначе Verify Dev видит
+#: ложный долг. Отдельный ключ для честной диагностики.
+IN_MEMORY_PORTS_STATE_KEY: Final[str] = "plugin_in_memory_ports"
+
 
 class LazyRedisManager:
     """Прозрачный прокси к ``RedisManager`` на время ``create_app()``.
@@ -153,11 +159,13 @@ _OWN_STATE_KEYS: Final[tuple[str, ...]] = (
     "plugin_admin_ports",
     PLUGIN_SURFACE_GUARD_STATE_KEY,
     UNWIRED_PORTS_STATE_KEY,
+    IN_MEMORY_PORTS_STATE_KEY,
 )
 
 __all__ = [
     "PLUGIN_SURFACE_GUARD_STATE_KEY",
     "UNWIRED_PORTS_STATE_KEY",
+    "IN_MEMORY_PORTS_STATE_KEY",
     "LazyRedisManager",
     "PluginCompositionError",
     "install_plugin_platform",
@@ -478,7 +486,7 @@ def _zone_services(runtime: Any, repos: Any, config: Any, ov: dict[str, Any], un
 
 def _admin_ports(
     runtime: Any, repos: Any, config: Any, ov: dict[str, Any], unwired: list[str],
-    services_out: dict[str, Any],
+    services_out: dict[str, Any], in_memory: list[str],
 ) -> Any:
     """Шаг (c): ``PluginAdminPorts`` через ``build_plugin_admin_ports``.
 
@@ -518,7 +526,7 @@ def _admin_ports(
         from prodavan.application.plugins.adapters.stores import InMemoryRouteRegistry
 
         routes = _wrap("admin_ports", InMemoryRouteRegistry)
-        unwired.append("routes (InMemoryRouteRegistry: кластеру нужна БД/Redis, A10)")
+        in_memory.append("routes (InMemoryRouteRegistry: кластеру нужна БД/Redis, A10)")
     instance_resolver = ov.get("instance_resolver")
     if instance_resolver is None:
         from prodavan.application.plugins.adapters.activation_adapter import (
@@ -526,7 +534,7 @@ def _admin_ports(
         )
 
         instance_resolver = _wrap("admin_ports", InMemoryInstanceResolver)
-        unwired.append("instance_resolver (in-memory; кластеру нужна БД, A10)")
+        in_memory.append("instance_resolver (in-memory; кластеру нужна БД, A10)")
     deployment_admin = ov.get("deployment_admin")
     if deployment_admin is None:
         # K8s lifecycle (ensure_deployment / purge_infra / runtime_status) пока
@@ -902,6 +910,7 @@ def install_plugin_platform(
 
     composer = _Composer(app)
     unwired: list[str] = []
+    in_memory: list[str] = []
     # ОДНИ и те же реальные сервисы зон использует и admin (шаг c), и gateway
     # (шаг d), и platform (шаг e): иначе capability-запросы, отзыв и wake
     # смотрели бы в разные объекты зон.
@@ -942,7 +951,8 @@ def install_plugin_platform(
 
         # --- c) PluginAdminPorts (10 полей) + PluginAdminService ------------
         admin_ports = ov.get("admin_ports") or _wrap(
-            "admin_ports", _admin_ports, runtime, repos, config, ov, unwired, zone_services
+            "admin_ports", _admin_ports, runtime, repos, config, ov, unwired,
+            zone_services, in_memory,
         )
         admin_service = ov.get("admin_service")
         if admin_service is None:
@@ -1009,8 +1019,12 @@ def install_plugin_platform(
 
         # Диагностика долгов F11 (не «тихий успех»): что ещё требует реального
         # адаптера A10/14/15. В списке только имена портов, без секретов.
+        # in-memory порты ПРИВЯЗАНЫ, поэтому идут в отдельный ключ: иначе
+        # Verify Dev видел бы ложный «не подключено» вместо честного «нужна БД».
         setattr(composer._state, UNWIRED_PORTS_STATE_KEY, tuple(sorted(set(unwired))))
         composer.mark(UNWIRED_PORTS_STATE_KEY)
+        setattr(composer._state, IN_MEMORY_PORTS_STATE_KEY, tuple(sorted(set(in_memory))))
+        composer.mark(IN_MEMORY_PORTS_STATE_KEY)
 
         # Финальная сверка: ни одного «почти привязанного» ключа.
         for key in _OWN_STATE_KEYS:
@@ -1136,6 +1150,8 @@ def install_plugin_platform_for_tests(
 
         setattr(composer._state, UNWIRED_PORTS_STATE_KEY, ())
         composer.mark(UNWIRED_PORTS_STATE_KEY)
+        setattr(composer._state, IN_MEMORY_PORTS_STATE_KEY, ())
+        composer.mark(IN_MEMORY_PORTS_STATE_KEY)
         return platform
     except Exception:
         composer.rollback()
