@@ -17,7 +17,7 @@ strangler, 6 таблиц состояния платформы (ревизия 
 
 | Контур | Команда | Результат |
 |---|---|---|
-| API | `pytest tests/acceptance tests/unit -q` | **4207 passed**, 0 failed |
+| API | `pytest tests/acceptance tests/unit -q` | **4224 passed**, 0 failed |
 | Web | `pnpm exec vitest run` | **785 passed**, 0 errors |
 | Web | `pnpm exec tsc --noEmit` | 0 ошибок |
 | Web | `pnpm run build` | success |
@@ -134,6 +134,13 @@ strangler, 6 таблиц состояния платформы (ревизия 
   `data-host-origin` в статике пилота.
 - `GET /health` конфликт между `health_routes.router` и `plugin_gateway.router`
   решён порядком регистрации; при выделении отдельного порта — переименовать пробу.
-- Финальное удаление declarative-app (`module_meta_documents`, `ModuleRuntime.tsx`,
-  `EquipmentProcurementPage`, `module_*` таблицы) — strangler-карта готова,
-  cutover не выполнялся (данные dev эфемерны, перенос не требуется).
+- Финальное удаление declarative-app: strangler-карта готова, **исполняемая
+  ревизия `2026110802` подготовлена и проверена** на чистом Postgres
+  (8 `module_*` дропнутся, 6 `plugin_*` останутся), чек-лист удаления кода —
+  `apps/api/src/prodavan/application/plugins/strangler/removal.py`.
+  Ревизия ЗАЩИЩЕНА `PLUGIN_CUTOVER_CONFIRMED=true`: `scripts/migrate.sh` и
+  CI Gate зовут `alembic upgrade head` при каждом деплое, поэтому без guard'а
+  автоматический дроп сломал бы рабочий dev-контур. Применять ТОЛЬКО после
+  подтверждённого пилота и переключения `plugin_enabled_modules[]`.
+  `alembic check` до реального cutover показывает ожидаемый drift (8 ORM-моделей
+  `modules.py` ещё в коде) — пересоздающую ревизию НЕ генерировать.
