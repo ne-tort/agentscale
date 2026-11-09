@@ -17,7 +17,7 @@ strangler, 6 таблиц состояния платформы (ревизия 
 
 | Контур | Команда | Результат |
 |---|---|---|
-| API | `pytest tests/acceptance tests/unit -q` | **4199 passed**, 0 failed |
+| API | `pytest tests/acceptance tests/unit -q` | **4205 passed**, 0 failed |
 | Web | `pnpm exec vitest run` | **785 passed**, 0 errors |
 | Web | `pnpm exec tsc --noEmit` | 0 ошибок |
 | Web | `pnpm run build` | success |
@@ -27,7 +27,7 @@ strangler, 6 таблиц состояния платформы (ревизия 
 | YAML | все `.github/workflows/*.yml` + `infra/**/*.yaml` | парсятся |
 | Alembic | чистый `postgres:17-alpine`, `upgrade head` + `check` | `2026110321 → 2026110801`, 6 таблиц, drift отсутствует |
 | Импорты | `prodavan.main`, `main_plugin_gateway`, все зоны plugins | ok |
-| Композиция | `create_app()` обоих приложений на реальном Postgres с `PLUGIN_PLATFORM_ENABLED=true` | **18/18 `STATE_KEYS`**, `PluginPlatform`, `PluginGatewayRuntime`, `PluginAdminPorts`, `PluginCapabilityService` привязаны; 10 `_UnwiredPort` зафиксированы как долг F11 |
+| Композиция | `create_app()` обоих приложений на реальном Postgres с `PLUGIN_PLATFORM_ENABLED=true` | **18/18 `STATE_KEYS`**, `PluginPlatform`, `PluginGatewayRuntime`, `PluginAdminPorts`, `PluginCapabilityService` привязаны; **4 `_UnwiredPort`** + 2 in-memory (раунд 3 закрыл 6 из 10) |
 | HTTP smoke | TestClient по обоим apps | `/health/live` `/health/ready` → 200; `/capabilities/v1/health`, `/api/v1/admin/plugins/` → 401/400 (ожидаемые fail-closed); `/webhook/*` → **502 `problem+json`** при недоступном Redis; **ни одного 500** |
 
 ## Dev-кластер (последнее подтверждённое состояние до потери VM)
@@ -105,12 +105,20 @@ strangler, 6 таблиц состояния платформы (ревизия 
 
 - `DeploymentAdminPort` — fail-closed заглушка: grant/uninstall без реального
   k8s create/purge честно отказывают. До первого рабочего плагина нужен адаптер.
-- 10 `_UnwiredPort` в `app.state.plugin_unwired_ports`. Попытка закрыть их
-  одной правкой `wiring/install.py` в раунде 2 дважды ломала композицию
-  (`bucket_admin` не привязан, затем `NameError: _gateway_ports`) — файл
-  откачен к рабочей версии. Закрывать надо ПО ОДНОМУ порту с обязательным
-  smoke `create_app()` на реальном Postgres после каждого, а не только pytest
-  (тесты используют fakes и регрессию не ловят).
+- **Раунд 3 закрыл 6 из 10 портов ПО ОДНОМУ** (после каждого — smoke
+  `create_app()` на реальном Postgres, что и поймало бы регрессию):
+  `object_buckets` → `MinioBucketAdmin` из `PLUGIN_MINIO_*`;
+  `gateway_sessions` → `SessionAdapter` + `SqlEmployeeDirectory`;
+  `gateway_grants` → `GrantAdapter` поверх SQL-репозитория грантов;
+  `gateway_secrets` → `SecretAdapter` (пока без выданного secret_ref даёт
+  типизированный 503 вместо 500); `routes` и `instance_resolver` вынесены
+  из «не подключено» в отдельный `plugin_in_memory_ports`.
+  Осталось **4** `_UnwiredPort`: `activation_mint`, `deployment_admin`,
+  `tenant_db_admin`, `tenant_db_secrets`.
+- Попытка закрыть их одной правкой `wiring/install.py` в раунде 2 дважды
+  ломала композицию (`bucket_admin` не привязан, затем
+  `NameError: _gateway_ports`) — файл был откачен. Тесты на fakes регрессию
+  НЕ ловят, поэтому smoke обязателен.
 - `RouteRegistry` / `InstanceIdResolver` — in-memory; для кластера нужны БД/Redis.
 - `cosign attest` в CI добавлен, но keyless OIDC на self-hosted раннере требует
   проверки Fulcio/Rekor; fallback — фиксированный KMS trust root.
