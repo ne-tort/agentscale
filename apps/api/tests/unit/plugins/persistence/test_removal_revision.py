@@ -1,9 +1,11 @@
-"""Unit-тесты финальной Alembic-ревизии ``2026110802`` (§8 этап 6).
+"""Unit-тесты ПОДГОТОВЛЕННОЙ Alembic-ревизии ``2026110802`` (§8 этап 6).
 
-Ревизия НЕ выполняется: модуль грузится по пути, ``op`` подменяется шпионом
-(``RecordingOps`` из conftest.py), цепочка ревизий проверяется статически через
-AST всех файлов ``alembic/versions/*.py``. Никаких подключений к БД, alembic/psql
-не запускаются.
+Ревизия лежит в ``alembic/pending/`` и НЕ применяется: Alembic не сканирует
+этот каталог, поэтому рабочая голова остаётся ``2026110801`` и обычный деплой
+не трогает declarative-app. Модуль грузится по пути, ``op`` подменяется
+шпионом (``RecordingOps`` из conftest.py), цепочка ревизий проверяется
+статически через AST versions/ + pending/. Никаких подключений к БД,
+alembic/psql не запускаются.
 
 Проверяется: ``revision``/``down_revision``, единственная голова цепочки,
 ``upgrade()`` БЕЗ ``PLUGIN_CUTOVER_CONFIRMED=true`` Отказывает и не трогает
@@ -29,7 +31,15 @@ from .conftest import REPO_ROOT, RecordingOps, VERSIONS_DIR
 REVISION_ID = "2026110802"
 DOWN_REVISION_ID = "2026110801"
 
-REVISION_PATH = VERSIONS_DIR / "2026110802_remove_declarative_app.py"
+#: Ревизия НЕ лежит в alembic/versions/ до реального cutover'а: initContainer
+#: scripts/migrate.sh и CI Gate зовут `alembic upgrade head` при КАЖДОМ деплое,
+#: и даже с guard'ом PLUGIN_CUTOVER_CONFIRMED ревизия в versions/ делала бы
+#: каждый деплой красным (RuntimeError откатывает всю транзакцию). Держать её
+#: в pending/ = деплой работает, а cutover остаётся ОСОЗНАННЫМ действием:
+#: перенести файл в versions/ + выставить флаг + применить + выполнить чек-лист
+#: strangler/removal.py. Alembic НЕ сканирует pending/.
+PENDING_DIR = VERSIONS_DIR.parent / "pending"
+REVISION_PATH = PENDING_DIR / "2026110802_remove_declarative_app.py"
 
 #: ТОЧНЫЙ порядок дропа: дети перед родителями (обратный FK-зависимостям).
 #: Проверен по models/modules.py и ревизиям 2026082703/2026082705/2026090503.
@@ -103,13 +113,18 @@ def _module_literals(path: Path) -> dict[str, Any]:
 
 
 def _revision_graph() -> dict[str, Any]:
-    """Собрать ``revision -> down_revision`` из AST всех файлов versions/."""
+    """Собрать ``revision -> down_revision`` из AST versions/ + pending/.
+
+    Оба каталога: рабочая цепочка в versions/, подготовленная cutover-ревизия
+    в pending/ (ещё не видна Alembic, но должна быть согласована по цепочке).
+    """
 
     graph: dict[str, Any] = {}
-    for path in sorted(VERSIONS_DIR.glob("*.py")):
-        values = _module_literals(path)
-        if "revision" in values:
-            graph[str(values["revision"])] = values.get("down_revision")
+    for directory in (VERSIONS_DIR, PENDING_DIR):
+        for path in sorted(directory.glob("*.py")):
+            values = _module_literals(path)
+            if "revision" in values:
+                graph[str(values["revision"])] = values.get("down_revision")
     return graph
 
 
@@ -167,10 +182,28 @@ def test_upgrade_refuses_false_or_garbage_confirmation(
 # --------------------------------------------------------------------------- revision / голова цепочки
 
 
-def test_revision_file_lives_in_versions_dir() -> None:
-    assert REVISION_PATH.parent == VERSIONS_DIR
+def test_revision_file_lives_in_pending_dir() -> None:
+    """До cutover'а ревизия ВНЕ versions/: иначе каждый деплой падал бы."""
+    assert REVISION_PATH.parent == PENDING_DIR
     assert REVISION_PATH.name == "2026110802_remove_declarative_app.py"
     assert REPO_ROOT.name.startswith("wt-") or (REPO_ROOT / "apps" / "api").is_dir()
+    # В versions/ её быть НЕ должно.
+    assert not (VERSIONS_DIR / REVISION_PATH.name).exists()
+
+
+def test_pending_revision_is_not_in_alembic_chain_yet() -> None:
+    """Рабочая голова Alembic = 2026110801; pending/ не сканируется."""
+    graph: dict[str, Any] = {}
+    for path in sorted(VERSIONS_DIR.glob("*.py")):
+        values = _module_literals(path)
+        if "revision" in values:
+            graph[str(values["revision"])] = values.get("down_revision")
+    children = {d for d in graph.values() if isinstance(d, str)}
+    heads = sorted(r for r in graph if r not in children)
+    assert heads == [DOWN_REVISION_ID], (
+        f"рабочая цепочка должна оканчиваться на {DOWN_REVISION_ID}, "
+        f"иначе обычный деплой применит cutover: {heads}"
+    )
 
 
 def test_revision_identifiers() -> None:
@@ -188,10 +221,11 @@ def test_module_exposes_same_identifiers() -> None:
 
 
 def test_down_revision_is_previous_head_and_single_head() -> None:
-    """``2026110801`` — прежняя голова; после нас ЕДИНСТВЕННАЯ голова ``2026110802``.
+    """При переносе в versions/ цепочка останется с ЕДИНОЙ головой 2026110802.
 
-    Статически (AST) проверяем: нет висячих ``down_revision``, ровно одна
-    вершина без детей, и ``2026110801`` больше не голова (на неё ссылаемся мы).
+    Граф строится по versions/ + pending/ (см. ``_revision_graph``): это
+    ПРОЕКЦИЯ будущего состояния после осознанного cutover'а. Сейчас рабочая
+    голова Alembic — 2026110801 (отдельный тест выше).
     """
 
     graph = _revision_graph()

@@ -17,7 +17,7 @@ strangler, 6 таблиц состояния платформы (ревизия 
 
 | Контур | Команда | Результат |
 |---|---|---|
-| API | `pytest tests/acceptance tests/unit -q` | **4224 passed**, 0 failed |
+| API | `pytest tests/acceptance tests/unit -q` | **4225 passed**, 0 failed |
 | Web | `pnpm exec vitest run` | **785 passed**, 0 errors |
 | Web | `pnpm exec tsc --noEmit` | 0 ошибок |
 | Web | `pnpm run build` | success |
@@ -135,12 +135,16 @@ strangler, 6 таблиц состояния платформы (ревизия 
 - `GET /health` конфликт между `health_routes.router` и `plugin_gateway.router`
   решён порядком регистрации; при выделении отдельного порта — переименовать пробу.
 - Финальное удаление declarative-app: strangler-карта готова, **исполняемая
-  ревизия `2026110802` подготовлена и проверена** на чистом Postgres
-  (8 `module_*` дропнутся, 6 `plugin_*` останутся), чек-лист удаления кода —
-  `apps/api/src/prodavan/application/plugins/strangler/removal.py`.
-  Ревизия ЗАЩИЩЕНА `PLUGIN_CUTOVER_CONFIRMED=true`: `scripts/migrate.sh` и
-  CI Gate зовут `alembic upgrade head` при каждом деплое, поэтому без guard'а
-  автоматический дроп сломал бы рабочий dev-контур. Применять ТОЛЬКО после
-  подтверждённого пилота и переключения `plugin_enabled_modules[]`.
-  `alembic check` до реального cutover показывает ожидаемый drift (8 ORM-моделей
-  `modules.py` ещё в коде) — пересоздающую ревизию НЕ генерировать.
+  ревизия `2026110802` подготовлена и лежит в `apps/api/alembic/pending/`**
+  (НЕ в `versions/`): Alembic не сканирует pending/, поэтому рабочая голова
+  остаётся `2026110801` и обычный `alembic upgrade head` + `alembic check`
+  проходят чисто (проверено на чистом Postgres: все 8 `module_*` целы).
+  При осознанном cutover: перенести файл в `versions/`, выставить
+  `PLUGIN_CUTOVER_CONFIRMED=true` только в миграционном job'е, применить
+  (8 `module_*` дропнутся, 6 `plugin_*` останутся), затем чек-лист
+  `strangler/removal.py`. Двойная защита: и изоляция в pending/, и guard
+  в `upgrade()`. Без guard'а ревизия в versions/ делала бы КАЖДЫЙ деплой
+  красным (RuntimeError откатывает всю транзакцию миграций).
+  `alembic check` ПОСЛЕ реального cutover покажет ожидаемый drift, пока
+  8 ORM-моделей `modules.py` не удалены по чек-листу; пересоздающую
+  ревизию НЕ генерировать.
