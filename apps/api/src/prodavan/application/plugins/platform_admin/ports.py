@@ -11,7 +11,7 @@
   ``scopes``) от ``require_platform_admin(authorization=...)``;
 * ``domain.identity.Principal`` — результат верификации JWKS/JWT (репозиторий,
   ``infrastructure/auth/jwt.py``): ``sub`` + ``frozenset[str] roles``;
-* ``api.v1.plugin_admin._platform_admin`` — HTTP-зависимость, которая дополнительно
+* ``api.v1.plugin_admin.require_platform_admin`` — HTTP-зависимость, которая дополнительно
   проверяет ``AdminIdentity.is_platform_admin`` и непустой ``actor_id``.
 
 Fail-closed: ``PlatformAdminContext.authenticated`` по умолчанию ``False``;

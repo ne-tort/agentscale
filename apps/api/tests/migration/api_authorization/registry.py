@@ -284,6 +284,20 @@ UNVALIDATED_TENANT_SELECTORS: tuple[TenantSelectorGap, ...] = (
         "POST", "/api/v1/admin/search-index/documents/delete", "body.company_id", "F-02"
     ),
     TenantSelectorGap("POST", "/api/v1/admin/search-index/search", "body.company_id", "F-02"),
+    # -- plugin admin (F11): platform-admin surface, tenant comes from request --
+    # Те же informational findings, что у остальных /api/v1/admin/** роутов:
+    # ``require_platform_admin`` подтверждает ПРАВО кроссить компании, но
+    # ``company_id`` из query/body остаётся клиентским селектором; статический
+    # аудит не видит guard внутри PluginAdminService. Валидация существования
+    # компании/гранта выполняется сервисом (§5.5), это НЕ подмена авторизации.
+    TenantSelectorGap("GET", "/api/v1/admin/plugins/", "company_id", "F-01"),
+    TenantSelectorGap("POST", "/api/v1/admin/plugins/grant", "body.company_id", "F-01"),
+    TenantSelectorGap("POST", "/api/v1/admin/plugins/revoke", "body.company_id", "F-01"),
+    TenantSelectorGap("POST", "/api/v1/admin/plugins/uninstall", "body.company_id", "F-01"),
+    TenantSelectorGap("POST", "/api/v1/admin/plugins/wake", "body.company_id", "F-01"),
+    TenantSelectorGap(
+        "PUT", "/api/v1/admin/plugins/enabled-modules", "body.company_id", "F-01"
+    ),
 )
 
 

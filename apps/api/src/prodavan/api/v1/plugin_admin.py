@@ -18,7 +18,7 @@
 * **Только типизированные Pydantic-тела**, ``model_config = {"extra": "forbid"}``.
   Никаких произвольных ``dict`` / ``Any`` в запросах и ответах: ответы собираются из
   полей типизированных receipts (``GrantReceipt`` и др.).
-* **PlatformAdmin — через порт.** Зависимость ``_platform_admin`` вызывает
+* **PlatformAdmin — через порт.** Зависимость ``require_platform_admin`` вызывает
   ``PlatformAdminPort.require_platform_admin`` и дополнительно проверяет
   ``AdminIdentity.is_platform_admin``. Реальную auth подключает родитель в F11; до
   подключения ``app.state.plugin_admin_ports`` отсутствует → 503 (fail-closed), а не
@@ -309,7 +309,7 @@ def _service(request: Request) -> PluginAdminService:
     return service
 
 
-async def _platform_admin(
+async def require_platform_admin(
     request: Request,
     authorization: Annotated[str | None, Header(alias="Authorization")] = None,
 ) -> str:
@@ -341,7 +341,7 @@ async def _platform_admin(
     return identity.actor_id
 
 
-PlatformAdminActor = Annotated[str, Depends(_platform_admin)]
+PlatformAdminActor = Annotated[str, Depends(require_platform_admin)]
 
 
 # --------------------------------------------------------------------------- helpers

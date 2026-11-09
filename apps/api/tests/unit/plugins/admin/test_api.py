@@ -173,7 +173,7 @@ def test_service_missing_is_fail_closed() -> None:
 async def test_platform_admin_goes_through_port() -> None:
     harness = Harness()
     request = _Request(_App(_State(plugin_admin_ports=harness.ports())))
-    actor = await api._platform_admin(request, authorization="Bearer platform-token")  # type: ignore[arg-type]
+    actor = await api.require_platform_admin(request, authorization="Bearer platform-token")  # type: ignore[arg-type]
     assert actor == "platform-admin"
     assert any(call.method == "require_platform_admin" for call in harness.platform_admin.calls)
 
@@ -183,7 +183,7 @@ async def test_platform_admin_denied_when_port_says_no() -> None:
     harness.platform_admin.is_admin = False
     request = _Request(_App(_State(plugin_admin_ports=harness.ports())))
     with pytest.raises(AppError) as caught:
-        await api._platform_admin(request, authorization=None)  # type: ignore[arg-type]
+        await api.require_platform_admin(request, authorization=None)  # type: ignore[arg-type]
     assert caught.value.code == "FORBIDDEN"
     assert caught.value.status == 403
 

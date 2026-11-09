@@ -61,10 +61,16 @@ Affected (all `require_platform_admin`):
 | PATCH | `/api/v1/admin/modules/{module_id}` | `body.company_ids` |
 | GET | `/api/v1/admin/platform-events` | `company_id` |
 | POST | `/api/v1/admin/search-index/reconcile-equipment` | `company_id` |
+| GET | `/api/v1/admin/plugins/` | `company_id` |
+| POST | `/api/v1/admin/plugins/grant` | `body.company_id` |
+| POST | `/api/v1/admin/plugins/revoke` | `body.company_id` |
+| POST | `/api/v1/admin/plugins/uninstall` | `body.company_id` |
+| POST | `/api/v1/admin/plugins/wake` | `body.company_id` |
+| PUT | `/api/v1/admin/plugins/enabled-modules` | `body.company_id` |
 
 **Suggested direction:** none required for security. If the surface is ever
-opened to a "company-scoped operator" role, these eight handlers are the ones
-that must switch to `require_company_actor` first — `api/v1/company_*` already
+opened to a "company-scoped operator" role, these handlers are the ones that
+must switch to `require_company_actor` first — `api/v1/company_*` already
 does exactly that (`require_company_actor` per handler), and the asymmetry is
 worth a comment at minimum.
 
