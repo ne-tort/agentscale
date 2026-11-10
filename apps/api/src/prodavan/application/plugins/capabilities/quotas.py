@@ -252,6 +252,10 @@ class QuotaPort(Protocol):
         self, key: PluginQuotaKey, op: QuotaOp, amount: int, limits: PluginQuota
     ) -> QuotaDecision: ...
 
+    async def release(
+        self, key: PluginQuotaKey, op: QuotaOp, amount: int
+    ) -> None: ...
+
 
 class InMemoryQuota:
     """Детерминированная реализация ``QuotaPort`` для unit-тестов.
@@ -336,6 +340,35 @@ class InMemoryQuota:
             self._counters[counter_key] = used + amount
             remaining = max(0, limit - (used + amount))
             return self._allow(key, op, amount, limit, used + amount, remaining)
+
+    async def release(
+        self, key: PluginQuotaKey, op: QuotaOp, amount: int
+    ) -> None:
+        """Вернуть ранее разрешённые единицы (откат составного резерва).
+
+        Нужен, когда запрос прошёл по OPS, но был отклонён по другой
+        размерности: без возврата отклонённый запрос съедал бы бюджет.
+        """
+        if not isinstance(key, PluginQuotaKey) or not isinstance(op, QuotaOp):
+            raise TypedContractError("invalid quota release key/op")
+        if not isinstance(amount, int) or isinstance(amount, bool) or amount < 0:
+            return
+        ident = key.to_tuple()
+        with self._lock:
+            if op is QuotaOp.OPS:
+                events = list(self._ops.get(ident, ()))
+                remaining_budget = amount
+                kept: list[tuple[float, int]] = []
+                for ts, qty in reversed(events):
+                    if remaining_budget > 0 and qty <= remaining_budget:
+                        remaining_budget -= qty
+                        continue
+                    kept.append((ts, qty))
+                self._ops[ident] = list(reversed(kept))
+                return
+            counter_key = (ident, op)
+            used = self._counters.get(counter_key, 0)
+            self._counters[counter_key] = max(0, used - amount)
 
     @staticmethod
     def _allow(

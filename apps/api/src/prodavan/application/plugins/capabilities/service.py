@@ -240,6 +240,7 @@ class _CoreQuota:
         usage = await self._usage()
         if usage is None or self._limits is None:
             return False
+        allowed: list[tuple[QuotaOp, int]] = []
         for op in QuotaOp:
             amount = usage.amount_for(op)
             if op is not QuotaOp.OPS and amount == 0:
@@ -249,13 +250,35 @@ class _CoreQuota:
                     self._quota.enforce(self._key, op, amount, self._limits)
                 )
             except Exception:
+                await self._release(allowed)
                 return False
             if not isinstance(decision, QuotaDecision):
+                await self._release(allowed)
                 return False
             self.decisions.append(decision)
             if not decision.allowed:
+                # Отказ по ОДНОЙ размерности обязан вернуть уже списанные в
+                # этом же запросе единицы: иначе отклонённый запрос съедает
+                # OPS-бюджет, и плагин сам себя запирает в 429.
+                await self._release(allowed)
                 return False
+            allowed.append((op, amount))
         return True
+
+    async def _release(self, reserved: list[tuple[QuotaOp, int]]) -> None:
+        """Вернуть ранее разрешённые единицы этого запроса.
+
+        Отмена — best effort: если порт не умеет ``release``, ничего не
+        происходит (поведение остаётся прежним, но не становится хуже).
+        """
+        release = getattr(self._quota, "release", None)
+        if not callable(release):
+            return
+        for op, amount in reversed(reserved):
+            try:
+                await _maybe_await(release(self._key, op, amount))
+            except Exception:
+                return
 
 
 class _CoreAudit:

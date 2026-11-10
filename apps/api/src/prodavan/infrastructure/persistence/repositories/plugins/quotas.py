@@ -259,6 +259,35 @@ class RedisPluginQuota:
                 f"quota storage unavailable: {type(exc).__name__}",
             )
 
+    async def release(
+        self, key: PluginQuotaKey, op: QuotaOp, amount: int
+    ) -> None:
+        """Вернуть ранее разрешённые единицы составного резерва.
+
+        OPS хранится как ZSET событий по одному member на единицу; release
+        удаляет до ``amount`` самых новых members. Остальные размерности —
+        счётчики, поэтому уменьшаются на ``amount`` с полом в ноль.
+        Недоступность Redis здесь не превращается в allow: операция
+        компенсирующая, и её провал только оставляет прежний расход.
+        """
+        if not isinstance(key, PluginQuotaKey) or not isinstance(op, QuotaOp):
+            return
+        if not isinstance(amount, int) or isinstance(amount, bool) or amount < 0:
+            return
+        try:
+            client = self._client()
+            redis_key = self._cache_key(key, op)
+            if op is QuotaOp.OPS:
+                members = await client.zrange(redis_key, -amount, -1)
+                if members:
+                    await client.zrem(redis_key, *members)
+                return
+            remaining = int(await client.decrby(redis_key, amount))
+            if remaining < 0:
+                await client.set(redis_key, 0)
+        except Exception:  # noqa: BLE001 — компенсация не должна ронять запрос
+            return
+
     async def usage(self, key: PluginQuotaKey, op: QuotaOp) -> int:
         """Диагностика: текущее использование (ошибка Redis → 0, НЕ allow)."""
         try:
