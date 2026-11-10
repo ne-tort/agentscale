@@ -563,6 +563,19 @@ class WorkflowPassesRequiredBuildArgs(unittest.TestCase):
         self.assertIn("PLUGIN_LIQUIBASE_SHA256", workflow)
         self.assertNotIn("python:3.13-slim@sha256:", workflow)
 
+    def test_prepare_receives_the_base_image_argument(self) -> None:
+        # prepare валидирует Dockerfile, а база приходит ARG-ом без дефолта:
+        # без этого флага CI падал бы на INVALID_LAYOUT при любом build-arg.
+        workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+        prepare_lines = [
+            line for line in workflow.splitlines()
+            if "plugin_manifest_builder.py\" prepare" in line
+        ]
+        self.assertEqual(len(prepare_lines), 2, "ожидаются dry-run и release вызовы")
+        for line in prepare_lines:
+            self.assertIn("--base-image-arg", line)
+            self.assertIn("$PYTHON_BASE_IMAGE", line)
+
 
 if __name__ == "__main__":
     unittest.main()

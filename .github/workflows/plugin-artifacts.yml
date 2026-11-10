@@ -186,7 +186,7 @@ jobs:
         run: |
           set -euo pipefail
           PREPARE="$RUNNER_TEMP/plugin-prepare"
-          python3 "$CI_DIR/plugin_manifest_builder.py" prepare             --source-root "$SOURCE_DIR"             --plugin-dir "$PLUGIN_DIR"             --manifest-path "$INPUT_MANIFEST_PATH"             --output-dir "$PREPARE" > "$RUNNER_TEMP/resolved.json"
+          python3 "$CI_DIR/plugin_manifest_builder.py" prepare             --source-root "$SOURCE_DIR"             --plugin-dir "$PLUGIN_DIR"             --manifest-path "$INPUT_MANIFEST_PATH"             --output-dir "$PREPARE"             --base-image-arg "$PYTHON_BASE_IMAGE" > "$RUNNER_TEMP/resolved.json"
           python3 - <<'PY'
           import json
           import os
@@ -423,7 +423,7 @@ jobs:
         run: |
           set -euo pipefail
           PREPARE="$RUNNER_TEMP/plugin-prepare"
-          python3 "$CI_DIR/plugin_manifest_builder.py" prepare             --source-root "$SOURCE_DIR"             --plugin-dir "${{ needs.dry-run.outputs.plugin_dir }}"             --manifest-path "${{ inputs.manifest_path }}"             --output-dir "$PREPARE" > "$RUNNER_TEMP/resolved.json"
+          python3 "$CI_DIR/plugin_manifest_builder.py" prepare             --source-root "$SOURCE_DIR"             --plugin-dir "${{ needs.dry-run.outputs.plugin_dir }}"             --manifest-path "${{ inputs.manifest_path }}"             --output-dir "$PREPARE"             --base-image-arg "$PYTHON_BASE_IMAGE" > "$RUNNER_TEMP/resolved.json"
           python3 - <<'PY'
           import json
           import os

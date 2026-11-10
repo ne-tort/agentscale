@@ -406,13 +406,18 @@ def _resolve_arg_reference(base: str, arg_defaults: dict[str, str]) -> str:
     return arg_defaults.get(name, base)
 
 
-def _validate_dockerfile_bases(path: Path) -> None:
+def _validate_dockerfile_bases(
+    path: Path, supplied: dict[str, str] | None = None
+) -> None:
     """Reject mutable base inputs; local stage names and scratch are allowed."""
     stages: set[str] = set()
     # Объявленные ARG с дефолтом: FROM ${ARG} допустим, только если сам
     # дефолт пиннут по digest. ARG без дефолта отвергается — иначе базой
     # может оказаться произвольный тег, переданный при сборке.
     arg_defaults: dict[str, str] = {}
+    for name, value in (supplied or {}).items():
+        if value:
+            arg_defaults[name] = value
     try:
         text = path.read_text(encoding="utf-8")
         lines = text.splitlines()
@@ -501,6 +506,8 @@ def prepare_package(
     plugin_dir: str,
     manifest_path: str,
     output_dir: str,
+    *,
+    base_image_arg: str = "",
 ) -> dict[str, Any]:
     """Resolve source layout and create staging/canonical/archive payloads."""
     root = Path(source_root).resolve()
@@ -552,7 +559,10 @@ def prepare_package(
         dockerfile = package / "backend" / "Dockerfile"
     if not dockerfile.is_file():
         _fail(ManifestErrorCode.INVALID_LAYOUT, "expected Dockerfile or backend/Dockerfile")
-    _validate_dockerfile_bases(dockerfile)
+    _validate_dockerfile_bases(
+        dockerfile,
+        {"PYTHON_BASE_IMAGE": base_image_arg} if base_image_arg else None,
+    )
 
     return {
         "plugin_id": source_manifest["plugin_id"],
@@ -914,6 +924,9 @@ def _build_parser() -> argparse.ArgumentParser:
     prepare.add_argument("--plugin-dir", required=True)
     prepare.add_argument("--manifest-path", default="")
     prepare.add_argument("--output-dir", required=True)
+    # Dockerfile берёт базу из ARG без дефолта (дефолт запрещён template-тестом),
+    # поэтому значение передаётся здесь ровно так же, как build-arg при сборке.
+    prepare.add_argument("--base-image-arg", default="")
 
     build = commands.add_parser("build", help="build canonical OCI and ORAS annotation files")
     build.add_argument("--source-manifest", required=True)
@@ -948,7 +961,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     try:
         if args.command == "prepare":
-            result = prepare_package(args.source_root, args.plugin_dir, args.manifest_path, args.output_dir)
+            result = prepare_package(
+                args.source_root,
+                args.plugin_dir,
+                args.manifest_path,
+                args.output_dir,
+                base_image_arg=args.base_image_arg,
+            )
             print(json.dumps(result, ensure_ascii=False, sort_keys=True))
             return 0
         if args.command == "build":
