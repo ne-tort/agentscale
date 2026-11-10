@@ -31,8 +31,10 @@ class _Transport:
 
     def __init__(self, *, resolved_host: str = "api.example.com") -> None:
         self.resolved_host = resolved_host
+        self.sent = 0
 
     async def execute(self, *, identity: dict[str, Any]) -> dict[str, Any]:
+        self.sent += 1
         return {
             **identity,
             "status_code": 200,
@@ -52,13 +54,16 @@ class _AllowPolicy:
 
 
 class _DenyingEgress:
-    """Политика, которая ЗАПРЕЩАЕТ уже после реального запроса."""
+    """Политика, которая разрешает pre-flight и ЗАПРЕЩАЕТ по фактам хопа."""
 
     def __init__(self) -> None:
         self.calls: list[dict[str, Any]] = []
 
     def check(self, *args: Any, **kwargs: Any) -> Any:
         self.calls.append(kwargs)
+        # До запроса R-10 фактов нет: pre-flight обязан пропустить.
+        if "resolved_host" not in kwargs:
+            return SimpleNamespace(allowed=True)
         return SimpleNamespace(allowed=False)
 
 
@@ -82,9 +87,10 @@ async def test_per_hop_denial_is_a_typed_denial_not_a_success() -> None:
     )
     with pytest.raises(Exception, match="network_per_hop_policy_denied"):
         await adapter.egress(_request())
-    # Политика действительно опрашивалась, а не была пропущена.
-    assert len(egress.calls) == 1
-    assert egress.calls[0]["resolved_host"] == "api.example.com"
+    # Два вызова: pre-flight до запроса и итоговая проверка с фактами хопа.
+    assert len(egress.calls) == 2
+    assert "resolved_host" not in egress.calls[0]
+    assert egress.calls[1]["resolved_host"] == "api.example.com"
 
 
 async def test_foreign_resolved_host_is_reported_to_the_policy_not_blocked_by_the_adapter() -> None:
@@ -99,7 +105,9 @@ async def test_foreign_resolved_host_is_reported_to_the_policy_not_blocked_by_th
 
     class _Recording:
         def check(self, *args: Any, **kwargs: Any) -> Any:
-            seen.append(kwargs.get("resolved_host"))
+            # Pre-flight не несёт R-10 фактов; фиксируем только итоговую.
+            if "resolved_host" in kwargs:
+                seen.append(kwargs.get("resolved_host"))
             return SimpleNamespace(allowed=True)
 
     adapter = K8sEgressNetworkAdapter(
@@ -108,6 +116,29 @@ async def test_foreign_resolved_host_is_reported_to_the_policy_not_blocked_by_th
     )
     await adapter.egress(_request())
     assert seen == ["169.254.169.254"]
+
+
+async def test_preflight_denial_stops_the_request_before_it_is_sent() -> None:
+    """Отказ политики до запроса = запрос НЕ уходит (а не «пометить после»)."""
+    transport = _Transport()
+    calls: list[int] = []
+
+    class _DenyBeforeRequest:
+        def check(self, *args: Any, **kwargs: Any) -> Any:
+            if "resolved_host" not in kwargs:
+                return SimpleNamespace(allowed=False)
+            calls.append(1)
+            return SimpleNamespace(allowed=True)
+
+    adapter = K8sEgressNetworkAdapter(
+        transport=transport, egress=_DenyBeforeRequest(),
+        initial_policy=_AllowPolicy(), max_response_bytes=1024,
+    )
+    with pytest.raises(Exception, match="network_preflight_policy_denied"):
+        await adapter.egress(_request())
+    # Транспорт не вызывался вовсе: побочного egress-запроса не было.
+    assert transport.sent == 0
+    assert calls == []
 
 
 async def test_policy_backend_failure_is_fail_closed() -> None:

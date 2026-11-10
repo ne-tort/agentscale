@@ -104,6 +104,43 @@ class K8sEgressNetworkAdapter(CloseOnce):
             raise CapabilityAccessDenied("network_payload_digest_mismatch")
         return body
 
+    async def _preflight_hop_check(
+        self,
+        request: NetworkEgressRequest,
+        envelope: Any,
+        body: bytes,
+    ) -> None:
+        """Проверить запрос политикой ДО того, как backend его выполнит.
+
+        Политика вызывается без показателей R-10 (resolved_host/hops/etc):
+        до запроса их физически нет. Если политика отказывает уже на этом
+        шаге — запрос не уходит вовсе. Итоговая проверка с реальными
+        фактами хопа остаётся обязательной после ответа.
+
+        Порт без такого метода сохраняет прежнее поведение: адаптер не
+        выдаёт себя за проверку, которую политика не предоставляет.
+        """
+        check = getattr(self._egress, "check", None)
+        if not callable(check):
+            return
+        decision = await await_io(
+            check(
+                {
+                    "company_id": envelope.company_id,
+                    "sub": envelope.subject_id,
+                    "grant_id": envelope.grant_id,
+                },
+                request.host,
+                request.path,
+                request.method.value,
+                len(body),
+            ),
+            timeout=self._timeout_seconds,
+            code="egress_initial_policy_failed",
+        )
+        if getattr(decision, "allowed", False) is not True:
+            raise CapabilityAccessDenied("network_preflight_policy_denied")
+
     async def egress(self, request: NetworkEgressRequest) -> NetworkEgressResponse:
         envelope = request_envelope(request, NetworkEgressRequest)
         self._ensure_open()
@@ -127,6 +164,10 @@ class K8sEgressNetworkAdapter(CloseOnce):
         if allowed is not True:
             raise CapabilityAccessDenied("network_initial_host_denied")
         body = await self._resolve_body(request)
+        # Pre-flight per-hop проверка ДО фактического запроса: без неё
+        # запрет политики наступал уже после того, как backend получил
+        # запрос (и потратил egress), то есть был «пометкой», а не запретом.
+        await self._preflight_hop_check(request, envelope, body)
         identity: dict[str, Any] = {
             "company_id": envelope.company_id,
             "plugin_instance_id": envelope.plugin_instance_id,

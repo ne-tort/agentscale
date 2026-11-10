@@ -594,6 +594,9 @@ async def test_network_policy_hops_quota_and_default_sa_rejected() -> None:
 
     class Egress:
         def check(self, *args: Any, **kwargs: Any) -> Any:
+            # Pre-flight вызывается до запроса, без R-10 фактов хопа.
+            if "resolved_host" not in kwargs:
+                return SimpleNamespace(allowed=True)
             assert kwargs["resolved_host"] == "api.example.com"
             assert kwargs["redirect_checked"] and kwargs["tls_verified"]
             return SimpleNamespace(allowed=True)
