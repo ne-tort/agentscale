@@ -33,6 +33,7 @@ import {
 import { useI18n } from "../i18n/useT";
 import { AutomationsPage } from "../features/automations";
 import { DynamicModulePage, DynamicModulesPage } from "../features/dynamic-modules";
+import { PluginModulesAdminPage } from "./plugin-modules-admin";
 import { PLUGIN_ROUTE_ELEMENTS, PUBLIC_PLUGIN_ROUTE_ELEMENTS } from "./plugin-routes";
 
 const APP_FRAME_STYLES = `
@@ -325,6 +326,9 @@ export function AppRouter() {
           <Route path="companies/:companyId" element={<CompanyDetailPage />} />
           <Route path="keys" element={<KeysPage />} />
           <Route path="modules" element={<ModulesPage />} />
+          {/* Plugin-модули: источник + точный scope + привязка. Отдельный путь,
+              потому что секция требует платформенного клиента и scope. */}
+          <Route path="plugin-modules" element={<PluginModulesAdminPage />} />
           <Route path="deleted" element={<DeletedPage />} />
         </Route>
         {/* Dynamic module registry screens (definitions → versions → install → grants). */}
