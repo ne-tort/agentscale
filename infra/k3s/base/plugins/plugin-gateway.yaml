@@ -202,6 +202,10 @@ stringData:
   # Подпись короткоживущих PluginClaims. Ротация — PLUGIN_CLAIMS_PREVIOUS_SECRETS
   # (от старого к новому), НЕ общий с агентским pod_identity_bridge_secret.
   PLUGIN_CLAIMS_SECRET: "dev-plugin-claims-secret-change-me"
+  # Админский DSN tenant-кластера (создание БД/ролей). НЕ платформенный
+  # prodavan: отдельный Service tenant-postgres / пул pgbouncer.
+  # Живёт в Secret, а не в ConfigMap, потому что содержит пароль.
+  PLUGIN_TENANT_DB_ADMIN_URL: "postgresql://plugin_platform_admin:dev-admin-change-me@tenant-postgres:5432/postgres"
   # Отдельный static-origin для iframe: НЕ совпадает с shellOrigin.
   # В dev это тот же хост, что и shell, но отдельное имя; при переходе на
   # wildcard subdomain (§5.3) заменить на точный https-origin плагинов.
@@ -213,9 +217,10 @@ stringData:
   # карантин молча). Dev-значение ниже совпадает с workflow, который
   # подписывает артефакты; для прод-контура заменить на реальный identity.
   PLUGIN_COSIGN_IDENTITY: "https://github.com/ne-tort/agentscale/.github/workflows/plugin-artifacts.yml@refs/heads/main"
-  # Админский DSN tenant-кластера (создание БД/ролей). НЕ платформенный
-  # prodavan: отдельный Service tenant-postgres / пул pgbouncer.
-  PLUGIN_TENANT_DB_ADMIN_URL: "postgresql://plugin_platform_admin:dev-admin-change-me@tenant-postgres:5432/postgres"
+  # PLUGIN_TENANT_DB_ADMIN_URL намеренно НЕ здесь: это DSN с паролем, поэтому
+  # он приходит только из Secret sibling'а (plugin-gateway-secrets ниже).
+  # ConfigMap не шифруется и читается любым субъектом с get на namespace,
+  # поэтому креденшелы в нём были бы утечкой даже с dev-плейсхолдером.
 ---
 apiVersion: apps/v1
 kind: Deployment
