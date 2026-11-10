@@ -56,6 +56,7 @@ import type {
   ToolApproval,
   ToolApprovalDecisionResponse,
   TriggerListResponse,
+  ModuleSourceResponse,
   UploadedModuleFile,
   WorkspaceListing,
   WorkspaceMutationResponse,
@@ -633,6 +634,20 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
     ),
     getPublicPluginBootstrap: (companyId, pluginId, routePath) => request<PluginBootstrapResponse>(
       `/public/plugins/${encodePath(companyId)}/${encodePath(pluginId)}/bootstrap${routePath ? `?route_path=${encodeURIComponent(routePath)}` : ""}`,
+    ),
+    // Plugin-модуль (v4): источник создаётся из template-репозитория, затем
+    // привязывается к кабинету/проекту. Оба шага — server-side: UI отправляет
+    // только manifest и точный scope, никаких credentials/Git-токенов.
+    createPluginSource: (companyId, pluginId, manifest) => request<ModuleSourceResponse>(
+      `/companies/${encodePath(companyId)}/plugins/${encodePath(pluginId)}/source`,
+      { method: "POST", body: JSON.stringify({ manifest }) },
+    ),
+    getPluginSource: (companyId, pluginId) => request<ModuleSourceResponse>(
+      `/companies/${encodePath(companyId)}/plugins/${encodePath(pluginId)}/source`,
+    ),
+    bindPluginSourceScope: (companyId, pluginId, cabinetId, projectId) => request<ModuleSourceResponse>(
+      `/companies/${encodePath(companyId)}/plugins/${encodePath(pluginId)}/source/scope`,
+      { method: "PUT", body: JSON.stringify({ cabinet_id: cabinetId, project_id: projectId }) },
     ),
     createAdminModule: (name) => request<AdminModule>("/admin/modules", { method: "POST", body: JSON.stringify({ name }) }),
     getAdminModule: (moduleId) => request<AdminModule>(`/admin/modules/${encodePath(moduleId)}`),

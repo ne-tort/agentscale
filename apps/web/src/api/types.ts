@@ -209,9 +209,41 @@ export interface ApiClient {
   /** Compatibility alias used by the existing project overview feature. */ lifecycle(projectId: Id, action: "launch" | "pause" | "resume" | "complete" | "reload"): Promise<void>;
   /** Plugin-платформа (дизайн v4): установленные плагины компании + фича-флаг. */
   listAdminPlugins(companyId: Id): Promise<AdminPluginsResponse>;
+  /**
+   * Plugin-модуль: создание источника из template-репозитория и привязка scope.
+   * UI отправляет только manifest и точный cabinet/project — credentials
+   * выпускает сервер, Git-токен в браузер не попадает.
+   */
+  createPluginSource(companyId: Id, pluginId: Id, manifest: JsonObject): Promise<ModuleSourceResponse>;
+  getPluginSource(companyId: Id, pluginId: Id): Promise<ModuleSourceResponse>;
+  bindPluginSourceScope(companyId: Id, pluginId: Id, cabinetId: string, projectId: string): Promise<ModuleSourceResponse>;
   /** Employee/public runtime bootstrap (task01). */
   getPluginBootstrap(companyId: Id, pluginId: Id, routePath?: string): Promise<PluginBootstrapResponse>;
   getPublicPluginBootstrap(companyId: Id, pluginId: Id, routePath?: string): Promise<PluginBootstrapResponse>;
+}
+
+/**
+ * `ModuleSourceResponse` (`plugin_sources.py`). Публичные метаданные
+ * источника: credential-ref намеренно отсутствует.
+ */
+export interface ModuleSourceResponse {
+  id: string;
+  company_id: string;
+  plugin_id: string;
+  plugin_instance_id: string;
+  cabinet_id: string | null;
+  project_id: string | null;
+  provider: "github_app";
+  repo_id: number;
+  full_name: string;
+  private: boolean;
+  default_branch: string;
+  expected_ref: string;
+  trusted_workflow_ref: string;
+  expected_signer_identity: string;
+  status: "provisioning" | "ready" | "disabled";
+  created_at: string;
+  updated_at: string;
 }
 
 export interface RpcOperationResponse {

@@ -44,7 +44,9 @@ describe("i18n/units/plugins.ts", () => {
 
   it("содержит ровно требуемые ключи", () => {
     expect(Object.keys(pluginStrings.ru).sort()).toEqual([
-      "close", "loadError", "loading", "notConnected", "notGranted", "open",
+      "close", "createDone", "createFailed", "createHint", "createId",
+      "createScopeRequired", "createSubmit", "createTitle", "createVersion",
+      "loadError", "loading", "notConnected", "notGranted", "open",
       "originMismatch", "publicPage", "retry", "timeout", "unsupportedProtocol",
     ]);
   });
