@@ -147,6 +147,21 @@ actions (`setup-buildx`/`setup-docker`), поэтому собрать обра�
 
 ## 6. Открытые блокеры
 
+**Оба обязательных воркфлоу зелёные (2026-11-11).**
+
+- `CI Gate` — `success`, все 7 job'ов: `infra`, `api/test`, `schemas/validate`,
+  `web/web`, `api/postgres-integration`, `api/migration-suite`, `gate`.
+- `Plugin OCI Artifacts` — `success`, 9 шагов dry-run включая реальную сборку.
+
+`CI Gate` падал не из-за раннеров, а на `migration-suite`: контракт
+`test_route_authorization_contract` находил маршруты платформы, которых не было
+в реестре аудита. Проверил каждый: приватный bootstrap вызывает
+`require_membership`, три source-маршрута — `require_company_actor`, публичный
+bootstrap анонимен по дизайну и отдаёт только `company_id`, а
+`/internal/plugin-artifacts` проверяет GitHub OIDC **внутри** обработчика, потому
+что токен не является Keycloak-principal. Дефекта доступа не было — реестр не
+знал о проверенных решениях. Маршруты зарегистрированы с обоснованиями.
+
 **Plugin CI впервые зелёный (2026-11-11).** Прогон
 `42898185702` на коммите `6f911fa7` — `success`, все 9 шагов dry-run, включая
 реальную сборку backend-образа на self-hosted docker-раннере. Это результат
