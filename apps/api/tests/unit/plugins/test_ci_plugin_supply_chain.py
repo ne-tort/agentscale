@@ -545,5 +545,24 @@ class DockerfileBaseArgResolution(unittest.TestCase):
             builder._validate_dockerfile_bases(dockerfile)
 
 
+class WorkflowPassesRequiredBuildArgs(unittest.TestCase):
+    """Dockerfile объявляет ARG без дефолта — значения обязаны прийти build-arg."""
+
+    def test_every_docker_build_passes_the_declared_args(self) -> None:
+        workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+        builds = [line for line in workflow.splitlines() if "docker buildx build" in line]
+        self.assertGreaterEqual(len(builds), 2, "ожидаются dry-run и release сборки")
+        for line in builds:
+            self.assertIn('--build-arg "PYTHON_BASE_IMAGE=', line)
+            self.assertIn('--build-arg "LIQUIBASE_SHA256=', line)
+
+    def test_the_arg_values_come_from_variables_not_hardcoded(self) -> None:
+        workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+        # Digest и checksum — входы supply-chain, не константы в workflow.
+        self.assertIn("PLUGIN_PYTHON_BASE_IMAGE", workflow)
+        self.assertIn("PLUGIN_LIQUIBASE_SHA256", workflow)
+        self.assertNotIn("python:3.13-slim@sha256:", workflow)
+
+
 if __name__ == "__main__":
     unittest.main()

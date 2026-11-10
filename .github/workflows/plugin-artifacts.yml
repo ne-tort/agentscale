@@ -87,6 +87,11 @@ env:
   COSIGN_LINUX_AMD64_SHA256: ${{ vars.PLUGIN_COSIGN_2_4_1_LINUX_AMD64_SHA256 || '' }}
   ORAS_LINUX_AMD64_SHA256: ${{ vars.PLUGIN_ORAS_1_2_3_LINUX_AMD64_SHA256 || '' }}
   BUILDKIT_IMAGE: ${{ vars.PLUGIN_BUILDKIT_IMAGE || '' }} # moby/buildkit:vX.Y.Z@sha256:...
+  # Dockerfile объявляет ARG без дефолта (дефолт запрещён template-тестом),
+  # поэтому значения обязаны прийти build-arg-ом. Пустое значение отвергает
+  # сам Dockerfile: fail-closed остаётся на его стороне.
+  PYTHON_BASE_IMAGE: ${{ vars.PLUGIN_PYTHON_BASE_IMAGE || '' }}
+  LIQUIBASE_SHA256: ${{ vars.PLUGIN_LIQUIBASE_SHA256 || '' }}
 
 jobs:
   dry-run:
@@ -232,7 +237,7 @@ jobs:
           docker buildx create --name "$BUILDER" --driver docker-container \
             --driver-opt "image=$BUILDKIT_IMAGE" --use
           docker buildx inspect --bootstrap "$BUILDER"
-          docker buildx build --load             --provenance=false --sbom=false             --file "$DOCKERFILE"             --tag "local/$PLUGIN_ID:sha-$GITHUB_SHA"             "$DOCKER_CONTEXT"
+          docker buildx build --load             --provenance=false --sbom=false             --build-arg "PYTHON_BASE_IMAGE=$PYTHON_BASE_IMAGE"             --build-arg "LIQUIBASE_SHA256=$LIQUIBASE_SHA256"             --file "$DOCKERFILE"             --tag "local/$PLUGIN_ID:sha-$GITHUB_SHA"             "$DOCKER_CONTEXT"
 
       - name: Remove dry-run builder
         if: always()
@@ -464,7 +469,7 @@ jobs:
         id: backend_build
         run: |
           set -euo pipefail
-          docker buildx build --push             --provenance=mode=max --sbom=true             --metadata-file "$RUNNER_TEMP/backend-build-metadata.json"             --file "$DOCKERFILE"             --tag "$QUAR_BACKEND:sha-$GITHUB_SHA"             "$DOCKER_CONTEXT"
+          docker buildx build --push             --provenance=mode=max --sbom=true             --build-arg "PYTHON_BASE_IMAGE=$PYTHON_BASE_IMAGE"             --build-arg "LIQUIBASE_SHA256=$LIQUIBASE_SHA256"             --metadata-file "$RUNNER_TEMP/backend-build-metadata.json"             --file "$DOCKERFILE"             --tag "$QUAR_BACKEND:sha-$GITHUB_SHA"             "$DOCKER_CONTEXT"
           BACKEND_DIGEST="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["containerimage.digest"])' "$RUNNER_TEMP/backend-build-metadata.json")"
           [[ "$BACKEND_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || {
             echo "::error::buildx did not return a valid backend digest"; exit 1;
