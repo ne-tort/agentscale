@@ -86,12 +86,13 @@ template-репозитория, из которого продукт генер
 | Egress pre-flight | При отказе политики счётчик транспорта = 0, запрос не ушёл |
 | UI: создание, approve, жизненный цикл | Digest/версия берутся из сервера; текст исключения не попадает на экран |
 | UI: достижимость экрана | Маршрут смонтирован, таб в админке, секции гейтятся по scope |
+| Вебхук через прокси | Клиентская подпись не выживает; без `VerifiedWebhook` доверенная не восстанавливается |
 
 ## 5. Верификация
 
 | Набор | Результат |
 |---|---|
-| Backend plugin (unit + integration + acceptance) | **3909 passed** |
+| Backend plugin (unit + integration + acceptance) | **3913 passed** |
 | Frontend | **896 passed** / 102 файла, `tsc --noEmit` чистый |
 | Infra/ops | **122 passed** + `prodavan-ops validate` ok |
 | Disposable PG / Redis / Kafka / K8s / MinIO | 27/27, 22/22, 16/16, 19/19, 29/29 |
