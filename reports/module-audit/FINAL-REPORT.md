@@ -169,16 +169,19 @@ actions (`setup-buildx`/`setup-docker`), поэтому собрать обра�
   **официального файла контрольной суммы у релиза нет**, поэтому это
   воспроизводимость, а не подпись вендора — значение записано в AGENTS.md с этой
   оговоркой, а подтверждение остаётся за владельцем supply-chain.
-  Repo-переменные: **3 из 10 заданы** мной из официальных источников (полный
-  список и форматы — в `docs/PLUGIN-AUTHORING.md`) —
-  `PLUGIN_COSIGN_2_4_1_LINUX_AMD64_SHA256` (из `cosign_checksums.txt` релиза),
-  `PLUGIN_ORAS_1_2_3_LINUX_AMD64_SHA256` (из `oras_1.2.3_checksums.txt`),
-  `PLUGIN_GRANTED_CAPABILITIES` (ровно `capabilities` манифеста hello).
-  Остальные 4 (`PLUGIN_BUILDKIT_IMAGE`, `PLUGIN_PLATFORM_PUBLICATION_CONFIG`,
-  `PLUGIN_PLATFORM_DEV_HTTP_ALLOWLIST`, `PLUGIN_PLATFORM_REPOSITORY_ID`,
-  `PLUGIN_PYTHON_BASE_IMAGE`, `PLUGIN_LIQUIBASE_SHA256`, `PLATFORM_VERSION`) я
-  намеренно не задавал: они описывают protected publication environment, и
-  выдуманные значения включили бы публикацию с фиктивными данными.
+  Repo-переменные: **7 из 10 заданы**, каждая — из проверяемого источника, а не
+  придумана (полный список и форматы — в `docs/PLUGIN-AUTHORING.md`):
+  `PLUGIN_COSIGN_…` и `PLUGIN_ORAS_…` — из официальных `*_checksums.txt` релизов;
+  `PLUGIN_GRANTED_CAPABILITIES` — ровно `capabilities` манифеста hello;
+  `PLUGIN_PYTHON_BASE_IMAGE` и `PLUGIN_BUILDKIT_IMAGE` — digest из
+  `docker buildx imagetools inspect`; `PLUGIN_LIQUIBASE_SHA256` — двойная
+  загрузка архива; `PLUGIN_PLATFORM_REPOSITORY_ID` — фактический
+  `gh api repos/…`.
+  Остались 3 (`PLUGIN_PLATFORM_PUBLICATION_CONFIG`,
+  `PLUGIN_PLATFORM_DEV_HTTP_ALLOWLIST`, `PLATFORM_VERSION`) — они описывают
+  protected publication environment: platform host, Trivy digest и версия
+  платформы известны только владельцу, а выдуманные значения включили бы
+  публикацию с фиктивными данными.
 - `Plugin OCI Artifacts` корректно падает на незакреплённом базовом образе: нужны
   реальные `PYTHON_BASE_IMAGE`, `LIQUIBASE_SHA256` и полный `requirements.lock`.
 
