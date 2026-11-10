@@ -231,13 +231,13 @@ jobs:
         id: local_build
         run: |
           set -euo pipefail
-          # buildx хранит контекст в $HOME/.docker/contexts; без явной
-          # инициализации на чистом раннере он падает "context not found".
+          # buildx на раннере падал с "context not found: .../contexts/meta/<hash>".
+          # Причина — не отсутствие контекста, а DOCKER_HOST: когда он задан,
+          # docker считает окружение внешним и не пишет каталог контекста.
+          # Локальная сборка работает с сокетом напрямую, поэтому фиксируем его.
+          unset DOCKER_HOST DOCKER_CONTEXT || true
           docker --version
-          if ! docker context inspect default >/dev/null 2>&1; then
-            docker context create default >/dev/null
-          fi
-          docker context use default >/dev/null
+          docker context use default >/dev/null 2>&1 || true
           BUILDER="plugin-dry-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           echo "BUILDER_NAME=$BUILDER" >> "$GITHUB_ENV"
           [[ "$BUILDKIT_IMAGE" =~ ^moby/buildkit:v[0-9]+\.[0-9]+\.[0-9]+@sha256:[0-9a-f]{64}$ ]] || {
@@ -471,10 +471,8 @@ jobs:
       - name: Create fresh ephemeral release builder
         run: |
           set -euo pipefail
-          if ! docker context inspect default >/dev/null 2>&1; then
-            docker context create default >/dev/null
-          fi
-          docker context use default >/dev/null
+          unset DOCKER_HOST DOCKER_CONTEXT || true
+          docker context use default >/dev/null 2>&1 || true
           BUILDER="plugin-release-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           echo "BUILDER_NAME=$BUILDER" >> "$GITHUB_ENV"
           [[ "$BUILDKIT_IMAGE" =~ ^moby/buildkit:v[0-9]+\.[0-9]+\.[0-9]+@sha256:[0-9a-f]{64}$ ]] || {
