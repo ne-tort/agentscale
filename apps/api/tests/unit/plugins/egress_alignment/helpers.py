@@ -1,4 +1,4 @@
-"""Общие фикстуры для тестов network-alignment (НАПИСАНЫ, НЕ ЗАПУСКАЛИСЬ)."""
+"""Общие фикстуры для тестов network-alignment (проходят в текущем прогоне)."""
 
 from __future__ import annotations
 

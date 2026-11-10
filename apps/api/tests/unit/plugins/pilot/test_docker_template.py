@@ -1,7 +1,7 @@
 """Статические security/Supply-chain проверки Docker/template hello_plugin.
 
 Тесты намеренно только читают файлы: они не строят образ и не разрешают
-зависимости. Написаны в verification freeze и НЕ запускались.
+зависимости. Проходят в текущем прогоне.
 """
 from __future__ import annotations
 

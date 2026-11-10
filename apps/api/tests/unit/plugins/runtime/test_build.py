@@ -1,4 +1,4 @@
-"""Unit-тесты ``build_runtime_ports`` (писать, НЕ запускать, verification freeze).
+"""Unit-тесты ``build_runtime_ports``.
 
 ТЗ: сборка без обязательного порта падает. Дополнительно: имя override'ов
 совпадает с ``PORT_OVERRIDES``, ``None`` запрещён, ``scale is readiness``,

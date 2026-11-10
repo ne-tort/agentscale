@@ -1,6 +1,6 @@
 """Барьер №2: egress ТОЛЬКО из `CapabilityGrant` по `grant_id`, не из JWT.
 
-Тесты НАПИСАНЫ, НО НЕ ЗАПУСКАЛИСЬ (verification freeze, план миграции §0.2).
+Тесты проходят в текущем прогоне (pytest tests/unit/plugins).
 
 Проверяем ``assert_policy_source_is_grant`` на реальных объектах задачи 08:
 ``EgressPolicy`` из ``resolve_policy``, Envoy-конфиг из ``build_envoy_routes``

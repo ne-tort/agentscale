@@ -1,7 +1,6 @@
 """Unit-тесты egress-политики (v4 §6.3, критерии 8/22).
 
-Тесты НАПИСАНЫ, НО НЕ ЗАПУСКАЛИСЬ: verification freeze по
-``docs/migration/plugin-migration-plan.md`` §0.2 и ``AGENTS.md``.
+Тесты проходят в текущем прогоне (`pytest tests/unit/plugins`).
 """
 
 from __future__ import annotations

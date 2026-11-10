@@ -1,4 +1,4 @@
-"""Регрессии ensure/rotate/revoke/uninstall tenant DB. Не запускать (freeze)."""
+"""Регрессии ensure/rotate/revoke/uninstall tenant DB."""
 
 from __future__ import annotations
 

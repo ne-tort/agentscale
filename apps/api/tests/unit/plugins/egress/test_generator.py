@@ -1,6 +1,6 @@
 """Unit-тесты генератора: Envoy-роуты, ДВЕ NetworkPolicy, единый аудит.
 
-Тесты НАПИСАНЫ, НО НЕ ЗАПУСКАЛИСЬ (verification freeze, план миграции §0.2).
+Тесты проходят в текущем прогоне (pytest tests/unit/plugins).
 """
 
 from __future__ import annotations

@@ -1,6 +1,6 @@
 """Static tests historical contexts narrative и неизменного behavior contract.
 
-Тесты НЕ запускались (verification freeze).
+Тесты проходят в текущем прогоне (pytest tests/unit/plugins).
 """
 
 from __future__ import annotations

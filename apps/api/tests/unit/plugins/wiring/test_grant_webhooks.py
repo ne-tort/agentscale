@@ -1,4 +1,4 @@
-"""GrantRecord.webhooks из подписанного manifest. Не запускать (freeze)."""
+"""GrantRecord.webhooks из подписанного manifest."""
 
 from __future__ import annotations
 

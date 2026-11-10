@@ -1,4 +1,4 @@
-"""Static expectations для неисполняемого removal inventory; не запускались."""
+"""Static expectations для неисполняемого removal inventory; проходят в текущем прогоне."""
 
 from __future__ import annotations
 

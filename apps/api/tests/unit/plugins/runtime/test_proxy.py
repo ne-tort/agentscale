@@ -1,4 +1,4 @@
-"""Unit-тесты ``HttpProxyPort`` (писать, НЕ запускать, verification freeze).
+"""Unit-тесты ``HttpProxyPort``.
 
 ТЗ: proxy добавляет Authorization из свежего токена и НЕ буферизует SSE.
 Дополнительно: доверенные ``X-Plugin-*`` из claims, отброс клиентских

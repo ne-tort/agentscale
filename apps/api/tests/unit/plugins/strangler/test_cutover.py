@@ -1,6 +1,6 @@
 """Static tests compatibility metadata sequence и inert target inventory.
 
-Тесты НЕ запускались (verification freeze).
+Тесты проходят в текущем прогоне (pytest tests/unit/plugins).
 """
 
 from __future__ import annotations

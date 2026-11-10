@@ -1,6 +1,6 @@
 """Общие фикстуры: NP gen + эталонные манифесты задачи 14.
 
-Тесты НАПИСАНЫ, НО НЕ ЗАПУСКАЛИСЬ (verification freeze, план миграции §0.2).
+Тесты проходят в текущем прогоне (pytest tests/unit/plugins).
 """
 
 from __future__ import annotations

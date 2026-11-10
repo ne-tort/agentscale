@@ -1,4 +1,4 @@
-"""Атомарный regrant revoked CapabilityGrantRow. Не запускать (freeze)."""
+"""Атомарный regrant revoked CapabilityGrantRow."""
 
 from __future__ import annotations
 

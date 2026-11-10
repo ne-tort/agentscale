@@ -1,4 +1,4 @@
-"""Read-only effective quotas persisted-grant contract. Не запускать (freeze)."""
+"""Read-only effective quotas persisted-grant contract."""
 
 from __future__ import annotations
 

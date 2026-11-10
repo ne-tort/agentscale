@@ -6,8 +6,7 @@
 результаты пустые/отрицательные, а каждый вызов пишется в ``calls`` для
 проверки изоляции ``(company_id, plugin_id)``.
 
-ВАЖНО (verification freeze): тесты НАПИСАНЫ, НО НЕ ЗАПУСКАЛИСЬ — ни pytest,
-ни сборки, ни линт, ни компиляция, ни git.
+Тесты этих фейков проходят в текущем прогоне (`pytest tests/unit/plugins`).
 """
 
 from __future__ import annotations

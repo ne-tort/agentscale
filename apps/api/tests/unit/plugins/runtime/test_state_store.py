@@ -1,4 +1,4 @@
-"""Unit-тесты ``ConfigMapStateStore`` (писать, НЕ запускать, verification freeze).
+"""Unit-тесты ``ConfigMapStateStore``.
 
 ТЗ: CAS ConfigMap по ``resourceVersion`` (межпроцессный, в отличие от
 ``InMemoryStateStore`` задачи 09). Дополнительно: create при отсутствии

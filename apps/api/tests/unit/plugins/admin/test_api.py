@@ -4,7 +4,7 @@
 ``extra="forbid"`` (никаких произвольных ``dict``/``Any``), маппинг контрактов в
 ответы и PlatformAdmin-зависимость через порт (fail-closed при отсутствии адаптера).
 
-Тесты НЕ запускались (verification freeze).
+Тесты проходят в текущем прогоне (pytest tests/unit/plugins).
 """
 
 from __future__ import annotations

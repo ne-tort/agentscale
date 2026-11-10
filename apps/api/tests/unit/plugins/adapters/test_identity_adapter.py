@@ -1,4 +1,4 @@
-"""Тесты ``identity_adapter``: async-обёртка revocation + mint (НЕ запускать).
+"""Тесты ``identity_adapter``: async-обёртка revocation + mint.
 
 Покрытие по заданию:
 * каждый адаптер транслирует вызов корректно;

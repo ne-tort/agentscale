@@ -1,4 +1,4 @@
-"""Fenced artifact update repository tests. Не запускать (verification freeze)."""
+"""Fenced artifact update repository tests."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""Unit-тесты ``K8sScalePort`` (писать, НЕ запускать, verification freeze).
+"""Unit-тесты ``K8sScalePort``.
 
 ТЗ: ``scale_to(1)`` патчит именно ``deployments/scale``; ``is_ready`` False при
 ``readyReplicas=0``; k8s недоступен -> ``ScaleUnavailable``. Дополнительно:

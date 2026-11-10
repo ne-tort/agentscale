@@ -1,8 +1,8 @@
 """Raw-record DLQ: poison records, безопасные digest и ручной commit.
 
 Фейк RawDlqPort существует только для проверки application-контракта. Он не
-является production-реализацией durable DLQ. Тесты написаны и НЕ запускались
-(verification freeze).
+является production-реализацией durable DLQ. Тесты проходят в текущем прогоне
+(`pytest tests/unit/plugins`).
 """
 
 from __future__ import annotations

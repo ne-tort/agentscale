@@ -1,4 +1,4 @@
-"""Async SQL PluginInstance repository regressions. Не запускать (freeze)."""
+"""Async SQL PluginInstance repository regressions."""
 
 from __future__ import annotations
 
