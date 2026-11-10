@@ -11,7 +11,7 @@ export function useAdminService(): AdminService {
 }
 
 /** The tab paths, in bar order, and which one a path belongs to. */
-export const ADMIN_TAB_PATHS = ["/admin", "/admin/keys", "/admin/modules", "/admin/deleted"] as const;
+export const ADMIN_TAB_PATHS = ["/admin", "/admin/keys", "/admin/modules", "/admin/plugin-modules", "/admin/deleted"] as const;
 
 /**
  * Which tab owns a path.
@@ -43,6 +43,7 @@ export function AdminArea() {
     { to: "/admin", end: true, label: t("admin.tabCompanies") },
     { to: "/admin/keys", end: false, label: t("admin.tabKeys") },
     { to: "/admin/modules", end: false, label: t("admin.tabModules") },
+    { to: "/admin/plugin-modules", end: false, label: t("admin.tabPluginModules") },
     { to: "/admin/deleted", end: false, label: t("admin.tabDeleted") },
   ];
 

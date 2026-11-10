@@ -300,6 +300,12 @@ describe("the tab bar says where you are", () => {
   it("lights the section you are in, not the companies tab", () => {
     expect(adminTabFor("/admin/keys")).toBe("/admin/keys");
     expect(adminTabFor("/admin/modules")).toBe("/admin/modules");
+    // Plugin-модули — отдельный раздел: без собственного таба он попадал бы
+    // под «Модули» и выглядел бы частью каталога платформенных модулей.
+    expect(adminTabFor("/admin/plugin-modules")).toBe("/admin/plugin-modules");
+    // useLocation().pathname никогда не содержит query, поэтому проверяем
+    // только реальные входы: вложенный путь и сам раздел.
+    expect(adminTabFor("/admin/plugin-modules/nested")).toBe("/admin/plugin-modules");
     expect(adminTabFor("/admin/deleted")).toBe("/admin/deleted");
     // An unknown child of a section stays with that section.
     expect(adminTabFor("/admin/modules/mod_1")).toBe("/admin/modules");
