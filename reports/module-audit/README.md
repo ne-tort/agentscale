@@ -4,6 +4,9 @@
 для disposable non-production контуров. Это **не production/live acceptance**,
 не разрешение на rollout и не снятие **STOP-SHIP**.
 
+Итоговый отчёт аудита (сценарий, исправленные дефекты, опровергнутые находки,
+открытые блокеры): [FINAL-REPORT.md](FINAL-REPORT.md).
+
 ## Canonical results
 
 | Контур | Результат | Canonical summary | Acceptance JUnit | Secret scan / integrity | Targeted units |
