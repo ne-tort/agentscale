@@ -515,6 +515,35 @@ class WorkflowStaticTests(unittest.TestCase):
         self.assertNotIn("if: ${{ false }}", self.release)
         self.assertNotIn("backend contract exists", self.release)
 
+class DockerfileBaseArgResolution(unittest.TestCase):
+    """FROM ${ARG} — штатная форма; отвергать её значит ломать корректный Dockerfile."""
+
+    DIGEST = "python:3.13-slim@sha256:" + "a" * 64
+
+    def test_arg_default_is_resolved_to_the_pinned_reference(self) -> None:
+        self.assertEqual(builder._resolve_arg_reference("${BASE}", {"BASE": self.DIGEST}), self.DIGEST)
+
+    def test_arg_without_default_is_left_unresolved_and_thus_rejected(self) -> None:
+        # База, задаваемая только при сборке, статически не доказуема.
+        self.assertEqual(builder._resolve_arg_reference("${PYTHON_BASE_IMAGE}", {}), "${PYTHON_BASE_IMAGE}")
+
+    def test_literal_and_scratch_are_untouched(self) -> None:
+        self.assertEqual(builder._resolve_arg_reference(self.DIGEST, {}), self.DIGEST)
+        self.assertEqual(builder._resolve_arg_reference("scratch", {}), "scratch")
+
+    def test_a_tag_only_arg_default_is_still_rejected_by_the_validator(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            dockerfile = Path(tmp) / "Dockerfile"
+            dockerfile.write_text("ARG BASE=python:3.13-slim\nFROM ${BASE}\n", encoding="utf-8")
+            with self.assertRaises(builder.ManifestError):
+                builder._validate_dockerfile_bases(dockerfile)
+
+    def test_a_digest_pinned_arg_default_passes_validation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            dockerfile = Path(tmp) / "Dockerfile"
+            dockerfile.write_text(f"ARG BASE={self.DIGEST}\nFROM ${{BASE}}\n", encoding="utf-8")
+            builder._validate_dockerfile_bases(dockerfile)
+
 
 if __name__ == "__main__":
     unittest.main()

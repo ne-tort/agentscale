@@ -388,9 +388,31 @@ def _validate_protocol_fixture(source_root: Path) -> None:
             _fail(ManifestErrorCode.INVALID_PROTOCOL, f"incomplete protocol fixture {name}")
 
 
+def _resolve_arg_reference(base: str, arg_defaults: dict[str, str]) -> str:
+    """Разрешить ``${ARG}``/``$ARG`` в ссылку на образ через дефолт ARG.
+
+    ``FROM ${PYTHON_BASE_IMAGE}`` — штатная практика Dockerfile: адрес базы
+    приходит build-arg-ом. Проверка, отвергающая любую такую форму, ломает
+    корректный Dockerfile, поэтому дефолт ARG подставляется, а результат
+    валидируется тем же регексом, что и литеральная ссылка.
+
+    ARG без дефолта разрешать нельзя: тогда база задаётся только при сборке,
+    и статическая проверка ничего о ней не доказывает — пусть падает.
+    """
+    match = re.fullmatch(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)", base)
+    if match is None:
+        return base
+    name = match.group(1) or match.group(2)
+    return arg_defaults.get(name, base)
+
+
 def _validate_dockerfile_bases(path: Path) -> None:
     """Reject mutable base inputs; local stage names and scratch are allowed."""
     stages: set[str] = set()
+    # Объявленные ARG с дефолтом: FROM ${ARG} допустим, только если сам
+    # дефолт пиннут по digest. ARG без дефолта отвергается — иначе базой
+    # может оказаться произвольный тег, переданный при сборке.
+    arg_defaults: dict[str, str] = {}
     try:
         text = path.read_text(encoding="utf-8")
         lines = text.splitlines()
@@ -408,7 +430,14 @@ def _validate_dockerfile_bases(path: Path) -> None:
                 _fail(ManifestErrorCode.INVALID_LAYOUT, "Dockerfile syntax frontend must be digest-pinned")
             continue
         tokens = stripped.split()
-        if not tokens or tokens[0].upper() != "FROM":
+        if not tokens:
+            continue
+        if tokens[0].upper() == "ARG" and len(tokens) >= 2:
+            name, _, default = tokens[1].partition("=")
+            if default:
+                arg_defaults[name] = default.strip('"')
+            continue
+        if tokens[0].upper() != "FROM":
             continue
         index = 1
         while index < len(tokens) and tokens[index].startswith("--"):
@@ -416,7 +445,12 @@ def _validate_dockerfile_bases(path: Path) -> None:
         if index >= len(tokens):
             _fail(ManifestErrorCode.INVALID_LAYOUT, "FROM without an image")
         base = tokens[index]
-        if base.lower() != "scratch" and base not in stages and _REF_RE.fullmatch(base) is None:
+        reference = _resolve_arg_reference(base, arg_defaults)
+        if (
+            reference.lower() != "scratch"
+            and reference not in stages
+            and _REF_RE.fullmatch(reference) is None
+        ):
             _fail(
                 ManifestErrorCode.INVALID_LAYOUT,
                 f"base image must be pinned by @sha256 digest, got {base!r}",
