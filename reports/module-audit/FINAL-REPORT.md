@@ -123,7 +123,14 @@ template-репозитория, из которого продукт генер
   **официального файла контрольной суммы у релиза нет**, поэтому это
   воспроизводимость, а не подпись вендора — значение записано в AGENTS.md с этой
   оговоркой, а подтверждение остаётся за владельцем supply-chain.
-  Не хватает только 7 repo-переменных: `gh variable list` пуст.
+  Repo-переменные: **3 из 7 заданы** мной из официальных источников —
+  `PLUGIN_COSIGN_2_4_1_LINUX_AMD64_SHA256` (из `cosign_checksums.txt` релиза),
+  `PLUGIN_ORAS_1_2_3_LINUX_AMD64_SHA256` (из `oras_1.2.3_checksums.txt`),
+  `PLUGIN_GRANTED_CAPABILITIES` (ровно `capabilities` манифеста hello).
+  Остальные 4 (`PLUGIN_BUILDKIT_IMAGE`, `PLUGIN_PLATFORM_PUBLICATION_CONFIG`,
+  `PLUGIN_PLATFORM_DEV_HTTP_ALLOWLIST`, `PLUGIN_PLATFORM_REPOSITORY_ID`) я
+  намеренно не задавал: они описывают protected publication environment, и
+  выдуманные значения включили бы публикацию с фиктивными данными.
 - `Plugin OCI Artifacts` корректно падает на незакреплённом базовом образе: нужны
   реальные `PYTHON_BASE_IMAGE`, `LIQUIBASE_SHA256` и полный `requirements.lock`.
 
