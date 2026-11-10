@@ -320,6 +320,10 @@ artifact/version registry. Откат кода не является откат�
 обеспечивается expand/contract миграциями плагина, а не автоматическим destructive
 downgrade.
 
-**Граница факта:** на audited HEAD `6ee720dd` этот сквозной сценарий, GitHub App,
-trusted publishing и plugin vertical slice не подтверждены. Реестр решений:
+**Граница факта:** GitHub App (`create_private_repository`, защита ветки, PR) и
+trusted publishing (`/internal/plugin-artifacts`) реализованы статически и покрыты
+тестами, но сквозной live-прогон не подтверждён: в workflows нужны реальные
+`PYTHON_BASE_IMAGE`/`LIQUIBASE_SHA256`/`requirements.lock`, а меню не реализовано
+ни в схеме манифеста, ни в UI. «Меню» в схеме выше — TARGET, а не as-built.
+Реестр решений:
 [`architecture-migration/README.md`](architecture-migration/README.md).
