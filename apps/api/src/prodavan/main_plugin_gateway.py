@@ -64,6 +64,23 @@ def create_app() -> FastAPI:
     # адреса §7.1 живут в корне хоста.
     from prodavan.api.v1 import plugin_gateway
 
+    # Guard ставится ВСЕГДА, а не только при enabled: роутер монтируется в
+    # обоих режимах, поэтому при выключенной платформе без guard плагиновый
+    # токен не отсекался бы до роутинга и 403 на не-plugin поверхностях
+    # зависел бы только от самих обработчиков. При enabled
+    # install_api_plugin_platform дополнительно сверяет, что guard уже стоит.
+    from prodavan.application.plugins.transport.guard import (
+        register_plugin_surface_guard,
+    )
+    from prodavan.application.plugins.wiring.install import (
+        PLUGIN_SURFACE_GUARD_STATE_KEY,
+    )
+
+    # Флаг нужен для дедупликации: install_api_plugin_platform пропускает свою
+    # регистрацию только если увидит его, иначе middleware встанет дважды.
+    if not bool(getattr(app.state, PLUGIN_SURFACE_GUARD_STATE_KEY, False)):
+        register_plugin_surface_guard(app)
+        setattr(app.state, PLUGIN_SURFACE_GUARD_STATE_KEY, True)
     app.include_router(plugin_gateway.router)
 
     if settings.plugin_platform_enabled:
