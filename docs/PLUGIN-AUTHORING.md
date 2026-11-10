@@ -455,6 +455,23 @@ bindings; source/OIDC/ref/workflow checks выполняются до registry w
 **Схема конфига** (ровно эти ключи, `additionalProperties` запрещён — лишний
 ключ даёт `PROTECTED_CONFIG_INVALID`):
 
+Все входы release-пути приходят из repository/environment `vars`, а не из
+caller-параметров. Полный список — ровно эти десять имён; незаданная переменная
+останавливает соответствующий шаг, а не подставляет default:
+
+| Переменная | Зачем | Формат |
+|---|---|---|
+| `PLUGIN_PYTHON_BASE_IMAGE` | база backend-образа | `python:3.13-slim@sha256:<64 hex>` |
+| `PLUGIN_LIQUIBASE_SHA256` | контрольная сумма архива Liquibase | `<64 hex>` |
+| `PLUGIN_BUILDKIT_IMAGE` | driver buildx | `moby/buildkit:v<semver>@sha256:<64 hex>` |
+| `PLUGIN_COSIGN_2_4_1_LINUX_AMD64_SHA256` | контрольная сумма cosign | `<64 hex>` |
+| `PLUGIN_ORAS_1_2_3_LINUX_AMD64_SHA256` | контрольная сумма oras | `<64 hex>` |
+| `PLUGIN_GRANTED_CAPABILITIES` | независимо проверенные grants | `<cap>,<cap>,…` |
+| `PLATFORM_VERSION` | `CompatibilityGate` против `min_platform_version` | `<semver>` |
+| `PLUGIN_PLATFORM_PUBLICATION_CONFIG` | protected publication mapping | JSON ниже |
+| `PLUGIN_PLATFORM_REPOSITORY_ID` | ожидаемый id репозитория для OIDC-сверки | `<int>` |
+| `PLUGIN_PLATFORM_DEV_HTTP_ALLOWLIST` | опциональные HTTP-хосты для внутреннего dev | список URL, пусто в prod |
+
 ```json
 {
   "schema_version": 1,
