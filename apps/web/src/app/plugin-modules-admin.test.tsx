@@ -87,4 +87,3 @@ describe("PluginModulesAdminPage", () => {
     expect(host!.textContent).not.toContain("Жизненный цикл модуля");
   });
 });
-
