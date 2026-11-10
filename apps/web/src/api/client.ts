@@ -57,6 +57,8 @@ import type {
   ToolApprovalDecisionResponse,
   TriggerListResponse,
   ModuleSourceResponse,
+  PluginGrantResponse,
+  PluginLifecycleResponse,
   UploadedModuleFile,
   WorkspaceListing,
   WorkspaceMutationResponse,
@@ -649,6 +651,21 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       `/companies/${encodePath(companyId)}/plugins/${encodePath(pluginId)}/source/scope`,
       { method: "PUT", body: JSON.stringify({ cabinet_id: cabinetId, project_id: projectId }) },
     ),
+    // Жизненный цикл установленного plugin-модуля. Все четыре операции —
+    // admin-only и идут по (company, plugin); ни одна не принимает digest или
+    // task name от клиента: выбор артефакта делает сервер по durable grant.
+    grantPlugin: (body) => request<PluginGrantResponse>("/admin/plugins/grant", {
+      method: "POST", body: JSON.stringify(body),
+    }),
+    revokePlugin: (companyId, pluginId) => request<PluginLifecycleResponse>("/admin/plugins/revoke", {
+      method: "POST", body: JSON.stringify({ company_id: companyId, plugin_id: pluginId }),
+    }),
+    uninstallPlugin: (companyId, pluginId) => request<PluginLifecycleResponse>("/admin/plugins/uninstall", {
+      method: "POST", body: JSON.stringify({ company_id: companyId, plugin_id: pluginId }),
+    }),
+    wakePlugin: (companyId, pluginId) => request<PluginLifecycleResponse>("/admin/plugins/wake", {
+      method: "POST", body: JSON.stringify({ company_id: companyId, plugin_id: pluginId }),
+    }),
     createAdminModule: (name) => request<AdminModule>("/admin/modules", { method: "POST", body: JSON.stringify({ name }) }),
     getAdminModule: (moduleId) => request<AdminModule>(`/admin/modules/${encodePath(moduleId)}`),
     patchAdminModule: (moduleId, patch) => request<AdminModule>(`/admin/modules/${encodePath(moduleId)}`, { method: "PATCH", body: JSON.stringify(patch) }),

@@ -217,6 +217,11 @@ export interface ApiClient {
   createPluginSource(companyId: Id, pluginId: Id, manifest: JsonObject): Promise<ModuleSourceResponse>;
   getPluginSource(companyId: Id, pluginId: Id): Promise<ModuleSourceResponse>;
   bindPluginSourceScope(companyId: Id, pluginId: Id, cabinetId: string, projectId: string): Promise<ModuleSourceResponse>;
+  /** Жизненный цикл: digest и task name выбирает сервер из durable grant. */
+  grantPlugin(body: PluginGrantRequest): Promise<PluginGrantResponse>;
+  revokePlugin(companyId: Id, pluginId: Id): Promise<PluginLifecycleResponse>;
+  uninstallPlugin(companyId: Id, pluginId: Id): Promise<PluginLifecycleResponse>;
+  wakePlugin(companyId: Id, pluginId: Id): Promise<PluginLifecycleResponse>;
   /** Employee/public runtime bootstrap (task01). */
   getPluginBootstrap(companyId: Id, pluginId: Id, routePath?: string): Promise<PluginBootstrapResponse>;
   getPublicPluginBootstrap(companyId: Id, pluginId: Id, routePath?: string): Promise<PluginBootstrapResponse>;
@@ -244,6 +249,48 @@ export interface ModuleSourceResponse {
   status: "provisioning" | "ready" | "disabled";
   created_at: string;
   updated_at: string;
+}
+
+/**
+ * `GrantResponse` (`plugin_admin.py`).
+ *
+ * `claims` намеренно не типизирован: в нём короткоживущий capability-токен,
+ * и UI не должен его читать. Поле присутствует в ответе, но не используется.
+ */
+export interface PluginGrantResponse {
+  company_id: string;
+  plugin_id: string;
+  plugin_instance_id: string;
+  manifest_version: string;
+  artifact_digest: string;
+  grant_id: string;
+  grant_status: string;
+  capabilities: string[];
+  database_name: string;
+  schema_name: string;
+  bucket: string;
+  prefix: string;
+  webhook_path: string;
+  pluginpage_path: string;
+  replayed: boolean;
+}
+
+/** Общий ответ `revoke`/`uninstall`/`wake`: те же границы (company, plugin). */
+export interface PluginLifecycleResponse {
+  company_id: string;
+  plugin_id: string;
+  grant_id: string;
+}
+
+/** Тело `grant`: клиент выбирает только capabilities/egress/квоты. */
+export interface PluginGrantRequest {
+  readonly company_id: string;
+  readonly plugin_id: string;
+  readonly manifest_version: string;
+  readonly artifact_digest: string;
+  readonly capabilities: {
+    readonly capabilities: readonly string[];
+  };
 }
 
 export interface RpcOperationResponse {

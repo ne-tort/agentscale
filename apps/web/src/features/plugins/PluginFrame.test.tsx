@@ -46,6 +46,10 @@ describe("i18n/units/plugins.ts", () => {
     expect(Object.keys(pluginStrings.ru).sort()).toEqual([
       "close", "createDone", "createFailed", "createHint", "createId",
       "createScopeRequired", "createSubmit", "createTitle", "createVersion",
+      "lifecycleBucket", "lifecycleDatabase", "lifecycleFailed",
+      "lifecycleGrant", "lifecycleGrantId", "lifecycleHint", "lifecycleNotReady",
+      "lifecycleRevoke", "lifecycleStatus", "lifecycleTitle", "lifecycleUninstall",
+      "lifecycleWake",
       "loadError", "loading", "notConnected", "notGranted", "open",
       "originMismatch", "publicPage", "retry", "timeout", "unsupportedProtocol",
     ]);
