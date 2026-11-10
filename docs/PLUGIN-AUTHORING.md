@@ -455,6 +455,12 @@ bindings; source/OIDC/ref/workflow checks выполняются до registry w
 **Схема конфига** (ровно эти ключи, `additionalProperties` запрещён — лишний
 ключ даёт `PROTECTED_CONFIG_INVALID`):
 
+Release-job объявлен с `environment: plugin-release`. Это **не** декорация:
+именно этот environment держит protected-переменные (включая
+`PLUGIN_PLATFORM_PUBLICATION_CONFIG`) и правила ревью, поэтому без него
+job либо не стартует, либо видит пустые значения. Секретов workflow не требует
+вовсе — единственный используемый `GITHUB_TOKEN` выдаётся рантаймом.
+
 Все входы release-пути приходят из repository/environment `vars`, а не из
 caller-параметров. Полный список — ровно эти десять имён; незаданная переменная
 останавливает соответствующий шаг, а не подставляет default:
