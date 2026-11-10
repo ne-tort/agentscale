@@ -123,6 +123,17 @@ describe("PluginFrame: sandbox / атрибуты / состояния", () => {
     expect(PLUGIN_SANDBOX).not.toContain("allow-same-origin");
   });
 
+  it("permissions policy пуст: плагин не получает ни одной и не может её расширить", () => {
+    const markup = frameMarkup();
+    // `allow=""` — deny-all Permissions Policy. Без этой проверки однажды
+    // добавленный `camera`/`clipboard-read` прошёл бы молча: sandbox его не
+    // заменяет, это две независимые оси ограничений.
+    expect(markup).toContain('allow=""');
+    for (const feature of ["camera", "microphone", "geolocation", "clipboard-read"]) {
+      expect(markup).not.toContain(feature);
+    }
+  });
+
   it("referrerpolicy, credentialless, no-referrer и aria-атрибуты на месте", () => {
     const markup = frameMarkup();
     // `renderToStaticMarkup` (React 19) выводит имя пропа как `referrerPolicy=`,
