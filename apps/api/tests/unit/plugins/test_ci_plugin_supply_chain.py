@@ -325,6 +325,29 @@ class CanonicalLayoutTests(unittest.TestCase):
                     str(Path(tmp) / "download-output"),
                 )
 
+    def test_dockerfile_tag_plus_digest_pin_is_accepted(self) -> None:
+        # Docker requires a tag before the digest in a Dockerfile, so the
+        # documented form `python:3.13-slim@sha256:<digest>` must be a valid pin.
+        digest = "a" * 64
+        for value in (
+            f"python:3.13-slim@sha256:{digest}",
+            f"ghcr.io/ne-tort/plugins/hello@sha256:{digest}",
+            f"registry.example.com:5000/team/app@sha256:{digest}",
+            f"registry.example.com:5000/team/app:v1.2.3@sha256:{digest}",
+        ):
+            self.assertIsNotNone(builder._REF_RE.fullmatch(value), value)
+        for value in (
+            "python:3.13-slim",
+            f"python@sha256:{'A' * 64}",
+            "python:3.13-slim@sha256:short",
+            f"bad name@sha256:{digest}",
+        ):
+            self.assertIsNone(builder._REF_RE.fullmatch(value), value)
+        # A tag is allowed only because the digest decides identity; :latest
+        # stays banned by the self-reference/mutable check.
+        with self.assertRaises(builder.ManifestError):
+            builder._assert_no_forbidden_keys({"backend": {"image": f"python:latest@sha256:{digest}"}})
+
     def test_backend_and_bundle_evidence_are_independent(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             fixture = _make_oci(tmp)

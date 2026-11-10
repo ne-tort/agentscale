@@ -82,10 +82,20 @@ _SEMVER_RE = re.compile(
     r"(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?"
     r"(?:\+(?P<build>[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$"
 )
+#: Fully digest-pinned OCI reference. Docker requires a tag before the digest in
+#: a Dockerfile, so both ``repo@sha256:...`` and ``repo:tag@sha256:...`` are
+#: valid pins; the digest alone decides identity and ``:latest`` stays banned by
+#: _assert_no_forbidden_keys. Repository names keep docker's [._-] alphabet.
+#: One path component of a docker repository name.
+_REPO_COMPONENT = r"[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*"
+
 _REF_RE = re.compile(
-    r"^[a-z0-9]+(?:[.-][a-z0-9]+)*(?::[0-9]+)?"
-    r"/[a-z0-9]+(?:[._-][a-z0-9]+)*(?:/[a-z0-9]+(?:[._-][a-z0-9]+)*)*"
-    r"@sha256:[0-9a-f]{64}$"
+    r"^(?P<name>"
+    r"(?:[a-z0-9]+(?:[.-][a-z0-9]+)*(?::[0-9]+)?/)?"
+    rf"{_REPO_COMPONENT}(?:/{_REPO_COMPONENT})*"
+    r")"
+    r"(?::(?P<tag>[A-Za-z0-9_][A-Za-z0-9._-]{0,127}))?"
+    r"@(?P<digest>sha256:[0-9a-f]{64})$"
 )
 _PATH_RE = re.compile(r"^[A-Za-z0-9._/-]+$")
 _ABSOLUTE_PATH_RE = re.compile(r"^/[A-Za-z0-9._/-]*$")
