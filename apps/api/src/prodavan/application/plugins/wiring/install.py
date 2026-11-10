@@ -95,6 +95,23 @@ UNWIRED_PORTS_STATE_KEY: Final[str] = "plugin_unwired_ports"
 #: они НЕ должны попадать в ``plugin_unwired_ports`` — иначе Verify Dev видит
 #: ложный долг. Отдельный ключ для честной диагностики.
 IN_MEMORY_PORTS_STATE_KEY: Final[str] = "plugin_in_memory_ports"
+
+#: Префикс имени класса, означающего «порт работает в памяти процесса».
+_IN_MEMORY_PORT_PREFIX: Final[str] = "InMemory"
+
+
+def _in_memory_port_names(ports: dict[str, Any]) -> list[str]:
+    """Вернуть имена портов, чей ПРИВЯЗАННЫЙ объект живёт в памяти процесса.
+
+    Диагностика должна отражать фактическое состояние композиции, а не
+    намерение вызывающего: список наполняется по настоящему классу объекта,
+    поэтому подмена SQL/Redis-порта на in-memory заглушку видна сразу.
+    """
+    names: list[str] = []
+    for name, value in ports.items():
+        if value is not None and type(value).__name__.startswith(_IN_MEMORY_PORT_PREFIX):
+            names.append(name)
+    return names
 RUNTIME_PORTS_STATE_KEY: Final[str] = "plugin_runtime_ports"
 RUNTIME_SHUTDOWN_STATE_KEY: Final[str] = "plugin_runtime_shutdown_registered"
 TENANT_DB_ADMIN_STATE_KEY: Final[str] = "plugin_tenant_db_admin_connection"
@@ -2766,6 +2783,17 @@ def install_plugin_platform(
         # адаптера A10/14/15. В списке только имена портов, без секретов.
         # in-memory порты ПРИВЯЗАНЫ, поэтому идут в отдельный ключ: иначе
         # Verify Dev видел бы ложный «не подключено» вместо честного «нужна БД».
+        # Обнаружение идёт по фактическому классу привязанного порта, а не по
+        # внешнему флагу: раньше ничто не наполняло список, и ключ всегда был
+        # пустым, из-за чего проверки композиции проходили вхолостую.
+        in_memory.extend(_in_memory_port_names({
+            "grant_store": repos.grant_store,
+            "quota": repos.quota,
+            "audit": repos.audit,
+            "artifact_store": repos.artifact_store,
+            "revocation": repos.grant_revocation,
+            "routes": ov.get("routes"),
+        }))
         setattr(composer._state, UNWIRED_PORTS_STATE_KEY, tuple(sorted(set(unwired))))
         composer.mark(UNWIRED_PORTS_STATE_KEY)
         setattr(composer._state, IN_MEMORY_PORTS_STATE_KEY, tuple(sorted(set(in_memory))))

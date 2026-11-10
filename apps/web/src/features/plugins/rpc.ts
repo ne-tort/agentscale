@@ -24,6 +24,7 @@ import {
   type PluginRpcResponse,
 } from "../../../../../packages/schemas/plugin-manifest/v1/types";
 import { PluginFrameError, pluginErrorFromCode } from "./errors";
+import { BLOCKED_FRAME_SRCDOC } from "./frameBlock";
 
 export { PLUGIN_RPC_PROTOCOL };
 export type {
@@ -378,7 +379,7 @@ export function createPluginChannel(
     // srcdoc wins over src: clear both so a disposed channel cannot keep executing
     // a loaded plugin or be revived by changing only src on a later navigation.
     iframe.removeAttribute("src");
-    iframe.setAttribute("srcdoc", "<!doctype html><meta charset=\"utf-8\"><title>Plugin blocked</title>");
+    iframe.setAttribute("srcdoc", BLOCKED_FRAME_SRCDOC);
     iframe.hidden = true;
     iframe.setAttribute("aria-hidden", "true");
     iframe.dataset.pluginBlocked = "true";

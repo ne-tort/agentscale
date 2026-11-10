@@ -7,6 +7,7 @@ import {
   toPluginFrameError,
   type PluginErrorCode,
 } from "./errors";
+import { BLOCKED_FRAME_SRCDOC } from "./frameBlock";
 import { buildPluginShellHandoff, resolvePluginShellOrigin } from "./shellHandoff";
 import {
   createPluginChannel,
@@ -195,6 +196,9 @@ export function PluginFrame(props: PluginFrameProps) {
     if (srcError) {
       frame.removeAttribute("src");
       frame.removeAttribute("name");
+      // A hidden frame still runs; block the document so nothing executes.
+      frame.setAttribute("srcdoc", BLOCKED_FRAME_SRCDOC);
+      frame.dataset.pluginBlocked = "true";
       setErrorCode(srcError.code);
       setPhase(srcError.code === "notConnected" ? "notConnected" : "error");
       try { onErrorRef.current?.(srcError); } catch { /* Внешний обработчик не влияет на отказ. */ }
@@ -242,6 +246,10 @@ export function PluginFrame(props: PluginFrameProps) {
     } catch (error) {
       const frameError = toPluginFrameError(error);
       frame.removeAttribute("src");
+      // A hidden iframe still runs: hide is not stop. Neutralise it the same
+      // way a disposed channel does, so a failed start cannot keep executing.
+      frame.setAttribute("srcdoc", BLOCKED_FRAME_SRCDOC);
+      frame.dataset.pluginBlocked = "true";
       setErrorCode(frameError.code);
       setPhase("error");
       try { onErrorRef.current?.(frameError); } catch { /* ignore */ }

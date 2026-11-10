@@ -151,6 +151,14 @@ describe("PluginFrame: живой рендер", () => {
     expect(onError).toHaveBeenCalledWith(expect.objectContaining({ code: "unsafeSrc" }));
   });
 
+  it("отказ по src нейтрализует документ, а не только скрывает кадр", async () => {
+    // `hidden` не останавливает исполнение: уже загруженный плагин продолжал бы
+    // жить, держать window.name-handoff и слать host-сообщения.
+    await mount(<PluginFrame {...base({ src: `${SAFE_SRC}?token=leak` })} />);
+    expect(frame()?.getAttribute("srcdoc")).toContain("Plugin blocked");
+    expect(frame()?.dataset.pluginBlocked).toBe("true");
+  });
+
   it("access_token в src → отказ и retry-кнопка", async () => {
     await mount(<PluginFrame {...base({ src: `${SAFE_SRC}?access_token=leak` })} />);
     expect(phase()).toBe("error");
