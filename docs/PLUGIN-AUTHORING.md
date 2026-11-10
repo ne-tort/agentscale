@@ -517,9 +517,12 @@ acceptance.
 | `GET /api/v1/public/plugins/{company_id}/{plugin_id}/bootstrap?route_path=/` | Публичный bootstrap: только явно публичные страницы/операции манифеста |
 
 Backend возвращает только public-safe DTO: `plugin_id`, `manifest_version`,
-`artifact_digest`, `static_origin`, `frontend_entry/base_path`, `route_path`,
-`capabilities`, `rpc_operations`, `public_pages`, `scope`,
-`grant_expires_at`. Токены, DSN и admin receipts не отдаются. Дополнительно
+`artifact_digest`, `static_origin`, `plugin_shell_origin`, `frontend_entry/base_path`,
+`route_path`, `capabilities`, `rpc_operations`, `public_pages`, `scope`,
+`grant_expires_at`. Токены, DSN и admin receipts не отдаются. `static_origin` и
+`plugin_shell_origin` — два разных server-derived origin'а: iframe грузится с
+static, а handoff/`frame-ancestors` привязаны к shell; они обязаны различаться
+(`exact_plugin_origins`). Дополнительно
 проверяются соответствие manifest идентичности grant, активность компании и
 совпадение digest артефакта.
 
