@@ -176,6 +176,35 @@ PUBLIC_ROUTES: tuple[PublicRoute, ...] = (
             "it is verified before the payload is queued."
         ),
     ),
+    # ---- plugin public surface ----------------------------------------------
+    PublicRoute(
+        method="GET",
+        path="/api/v1/public/plugins/{company_id}/{plugin_id}/bootstrap",
+        match="exact",
+        justification=(
+            "Anonymous plugin page: a module may declare ``public_pages`` and the "
+            "page must load without a session. The handler reads no employee and "
+            "returns ONLY the anonymous scope (company_id, no cabinet_id/project_id "
+            "— see ``_response_scope(public=True)``), and only for routes the "
+            "signed manifest lists; anything else is 403. There is no tenant row "
+            "behind it beyond the installed grant the plugin itself publishes."
+        ),
+    ),
+    # ---- trusted CI publication (server-to-server) ---------------------------
+    PublicRoute(
+        method="POST",
+        path="/internal/plugin-artifacts",
+        match="exact",
+        justification=(
+            "GitHub Actions publishes a signed bundle here. The credential is a "
+            "GitHub OIDC token in ``Authorization: Bearer``, verified inside the "
+            "handler by the publication service (``publish`` -> OIDC validator) "
+            "because the token is not a Keycloak principal and cannot be "
+            "expressed as the global employee dependency. No bearer means 401 "
+            "before any read; any failure returns QUARANTINED with no internal "
+            "detail. Employee auth is explicitly NOT the intended dependency."
+        ),
+    ),
     # ---- stub marker --------------------------------------------------------
     PublicRoute(
         method="GET",
@@ -205,13 +234,20 @@ PUBLIC_ROUTE_HANDLERS: dict[str, str] = {
     "GET /redoc": "fastapi.applications:redoc_html",
     "GET /openapi.json": "fastapi.applications:openapi",
     "GET /api/v1/auth": "prodavan.api.v1.auth:",
-    "POST /api/v1/auth": "prodavan.api.v1.auth:",    "POST /api/v1/projects/{project_id}/webhooks/http": (
+    "POST /api/v1/auth": "prodavan.api.v1.auth:",
+    "POST /api/v1/projects/{project_id}/webhooks/http": (
         "prodavan.api.v1.projects:ingress_signed_webhook"
     ),
     "POST /api/v1/projects/{project_id}/webhooks/telegram": (
         "prodavan.api.v1.projects:ingress_signed_telegram"
     ),
     "GET /api/v1/stub": "prodavan.api.v1.stub:stub_info",
+    "GET /api/v1/public/plugins/{company_id}/{plugin_id}/bootstrap": (
+        "prodavan.api.v1.plugin_bootstrap:public_bootstrap"
+    ),
+    "POST /internal/plugin-artifacts": (
+        "prodavan.api.internal.plugin_artifacts:publish_plugin_artifact"
+    ),
 }
 
 
@@ -298,6 +334,12 @@ UNVALIDATED_TENANT_SELECTORS: tuple[TenantSelectorGap, ...] = (
     TenantSelectorGap(
         "PUT", "/api/v1/admin/plugins/enabled-modules", "body.company_id", "F-01"
     ),
+    TenantSelectorGap(
+        "POST",
+        "/api/v1/admin/plugins/publication-approvals",
+        "body.company_id",
+        "F-01",
+    ),
 )
 
 
@@ -343,6 +385,33 @@ REVIEWED_INDIRECT_TENANT_PROOFS: dict[str, str] = {
         "web_stream.web_chat_stream -> runtime.sessions.resolve -> "
         "SqlChatSessionResolver.resolve -> ProjectAccessPolicy.require_access "
         "(web_facade_adapter/sessions.py), before the session row is read"
+    ),
+    "GET /api/v1/public/plugins/{company_id}/{plugin_id}/bootstrap": (
+        "Anonymous by design: there is no principal to scope by. company_id names "
+        "the tenant the PAGE belongs to; _response_scope(public=True) returns only "
+        "company_id (no cabinet/project), _validate_installation requires an active "
+        "grant plus enabled instance for exactly (company_id, plugin_id), and "
+        "route_path must be in the signed manifest public_pages or the request is 403"
+    ),
+    "GET /api/v1/companies/{company_id}/plugins/{plugin_id}/bootstrap": (
+        "plugin_bootstrap.private_bootstrap -> ModuleBootstrapService.private -> "
+        "repository.require_membership(employee, company_id) before any "
+        "installation row is read (bootstrap/service.py:286)"
+    ),
+    "GET /api/v1/companies/{company_id}/plugins/{plugin_id}/source": (
+        "plugin_sources.get_module_source_status -> ModuleSourceService._authorize -> "
+        "require_company_actor(principal, company_id) (sources/service.py:449) before "
+        "the source row is read"
+    ),
+    "POST /api/v1/companies/{company_id}/plugins/{plugin_id}/source": (
+        "plugin_sources.create_module_source -> ModuleSourceService._authorize -> "
+        "require_company_actor(principal, company_id) (sources/service.py:449) before "
+        "the reservation is created"
+    ),
+    "PUT /api/v1/companies/{company_id}/plugins/{plugin_id}/source/scope": (
+        "plugin_sources.bind_module_source_scope -> ModuleSourceService._authorize -> "
+        "require_company_actor(principal, company_id) (sources/service.py:449) before "
+        "the scope binding is written"
     ),
 }
 
