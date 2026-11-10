@@ -407,7 +407,7 @@ source → private platform-org repo/template
   → trusted reusable workflow pinned SHA
   → OIDC repository/ref/sha/job_workflow_ref
   → exact PublicationApproval + backend+bundle digest pair
-  → deploy saga → menu/явный public → update/rollback saga
+  → deploy saga → явный public (меню НЕ реализовано, см. §9) → update/rollback saga
 ```
 
 ### ModuleSource и reservation

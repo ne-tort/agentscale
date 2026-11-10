@@ -261,7 +261,7 @@ source/private repo → agent snapshot/patch без Git credentials
   → protected PR + human review
   → trusted reusable workflow pinned SHA + OIDC constraints
   → backend OCI digest + frontend bundle digest
-  → publish evidence → deploy saga → menu/public → update/rollback
+  → publish evidence → deploy saga → explicit public page (no plugin menu) → update/rollback
 ```
 
 GitHub App, атомарная backend+bundle digest pair и deploy/rollback saga **не
