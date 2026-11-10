@@ -1,4 +1,4 @@
-"""Forced admin revoke и async audit sink. Не запускать (verification freeze)."""
+"""Forced admin revoke и async audit sink. Покрыты прогоном в этом worktree."""
 
 from __future__ import annotations
 

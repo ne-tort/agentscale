@@ -1,4 +1,4 @@
-"""Digest payload store acceptance tests; not run during verification freeze."""
+"""Digest payload store acceptance tests; covered by a run in this worktree."""
 from __future__ import annotations
 
 import asyncio
