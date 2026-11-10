@@ -102,12 +102,15 @@ jobs:
       plugin_id: ${{ steps.manifest.outputs.plugin_id }}
     steps:
       - name: Checkout immutable source without persisted credentials
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # The repository is public, so this is an ordinary anonymous read: no
+        # credential is placed in the clone at all. Pinning is enforced by the
+        # detached checkout plus the exact SHA equality test below, so the
+        # result is the same immutable commit a token would have fetched.
         run: |
           set -euo pipefail
           SOURCE="$RUNNER_TEMP/plugin-source"
-          git -c http.extraheader="AUTHORIZATION: bearer $GH_TOKEN"             clone --filter=blob:none --no-checkout             "https://github.com/$GITHUB_REPOSITORY.git" "$SOURCE"
+          GIT_TERMINAL_PROMPT=0 git clone --filter=blob:none --no-checkout \
+            "https://github.com/$GITHUB_REPOSITORY.git" "$SOURCE"
           git -C "$SOURCE" -c advice.detachedHead=false checkout --detach "$GITHUB_SHA"
           test "$(git -C "$SOURCE" rev-parse HEAD)" = "$GITHUB_SHA"
           echo "SOURCE_DIR=$SOURCE" >> "$GITHUB_ENV"
@@ -276,12 +279,15 @@ jobs:
       decision: ${{ steps.release_verify.outputs.decision }}
     steps:
       - name: Checkout immutable source without persisted credentials
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # The repository is public, so this is an ordinary anonymous read: no
+        # credential is placed in the clone at all. Pinning is enforced by the
+        # detached checkout plus the exact SHA equality test below, so the
+        # result is the same immutable commit a token would have fetched.
         run: |
           set -euo pipefail
           SOURCE="$RUNNER_TEMP/plugin-source"
-          git -c http.extraheader="AUTHORIZATION: bearer $GH_TOKEN"             clone --filter=blob:none --no-checkout             "https://github.com/$GITHUB_REPOSITORY.git" "$SOURCE"
+          GIT_TERMINAL_PROMPT=0 git clone --filter=blob:none --no-checkout \
+            "https://github.com/$GITHUB_REPOSITORY.git" "$SOURCE"
           git -C "$SOURCE" -c advice.detachedHead=false checkout --detach "$GITHUB_SHA"
           test "$(git -C "$SOURCE" rev-parse HEAD)" = "$GITHUB_SHA"
           echo "SOURCE_DIR=$SOURCE" >> "$GITHUB_ENV"
