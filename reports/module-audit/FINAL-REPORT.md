@@ -54,6 +54,7 @@ template-репозитория, из которого продукт генер
 | 7 | **Скрытый iframe продолжал исполняться** | `hidden` не останавливает загруженный плагин | Все пути отказа → `srcdoc`-блок |
 | 8 | **Пароль в ConfigMap** | `PLUGIN_TENANT_DB_ADMIN_URL` вне Secret | Рендер dev: переменная только в Secret |
 | 9 | Диагностика in-memory портов всегда пуста | Ничто не наполняло список → проверки вхолостую | Обнаружение по классу порта |
+| 10 | Manifest builder отвергал `FROM ${ARG}` | Любой Dockerfile с базой из build-arg падал, хотя это штатная форма | ARG-дефолт разрешается, тег-only по-прежнему отвергается |
 
 ## 3. Что проверено независимо и НЕ подтвердилось
 
@@ -92,7 +93,7 @@ template-репозитория, из которого продукт генер
 
 | Набор | Результат |
 |---|---|
-| Backend plugin (unit + integration + acceptance) | **3913 passed** |
+| Backend plugin (unit + integration + acceptance) | **3918 passed** |
 | Frontend | **897 passed** / 102 файла, `tsc --noEmit` чистый |
 | Infra/ops | **122 passed** + `prodavan-ops validate` ok |
 | Disposable PG / Redis / Kafka / K8s / MinIO | 27/27, 22/22, 16/16, 19/19, 29/29 |
