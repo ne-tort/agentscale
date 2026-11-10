@@ -3,6 +3,8 @@ import { Link } from "react-router-dom";
 import type { Translate } from "../../../i18n/catalogue";
 import { useI18n } from "../../../i18n/useT";
 import { enumLabel } from "../ui";
+import type { ApiClient } from "../../../api/types";
+import { PluginModuleCreate } from "../../plugins/PluginModuleCreate";
 import type { ModuleAdminMode, ModuleAdminRow, ModuleAdminService } from "./service";
 import { displayValue, moduleEvidence, recordId, templateRows, type ModuleGap, type ModuleRights } from "./view-model";
 import "./module-admin.css";
@@ -11,6 +13,12 @@ export interface ModuleAdminPageProps {
   mode: ModuleAdminMode;
   service: ModuleAdminService;
   companyId?: string;
+  /**
+   * Plugin-API доступен только платформенному админу: секция создания
+   * plugin-модуля рендерится, лишь когда передан клиент и точный scope.
+   */
+  pluginApi?: Pick<ApiClient, "createPluginSource" | "bindPluginSourceScope">;
+  pluginScope?: { readonly cabinetId: string; readonly projectId: string };
 }
 
 /** Rights as the reader sees them: no "(API)" tail, no field names. */
@@ -88,7 +96,9 @@ function isForbidden(error: unknown): boolean {
   return typeof error === "object" && error !== null && "status" in error && error.status === 403;
 }
 
-export function ModuleAdminPage({ mode, service, companyId }: ModuleAdminPageProps) {
+export function ModuleAdminPage({
+  mode, service, companyId, pluginApi, pluginScope,
+}: ModuleAdminPageProps) {
   const { t, plural } = useI18n();
   const [modules, setModules] = useState<ModuleAdminRow[]>([]);
   const [selectedId, setSelectedId] = useState("");
@@ -330,6 +340,15 @@ export function ModuleAdminPage({ mode, service, companyId }: ModuleAdminPagePro
       <div><p className="module-admin__eyebrow">{mode === "admin" ? t("contours.eyebrowPlatform") : t("contours.eyebrowCompany")} / {t("contours.eyebrowModules")}</p><h1>{title}</h1></div>
       <form className="module-admin__create" onSubmit={(event) => void createModule(event)}><label htmlFor="module-new-name">{mode === "admin" ? t("contours.newPlatformModule") : t("contours.newCompanyModule")}</label><input id="module-new-name" maxLength={200} placeholder={t("contours.moduleNamePlaceholder")} value={newModuleName} onChange={(event) => setNewModuleName(event.target.value)} disabled={permissionDenied} /><button type="submit" disabled={busy || permissionDenied || !newModuleName.trim() || (mode === "company" && !companyId)}>{t("common.create")}</button></form>
     </header>
+    {/* Plugin-модуль: единственная точка входа, создающая источник и scope
+        на сервере. Без платформенного клиента и точного scope секция не
+        рендерится — кнопка, которая гарантированно упадёт, хуже её отсутствия. */}
+    {mode === "admin" && pluginApi && companyId && pluginScope ? <PluginModuleCreate
+      api={pluginApi}
+      companyId={companyId}
+      cabinetId={pluginScope.cabinetId}
+      projectId={pluginScope.projectId}
+    /> : null}
     {notice.error && <p className="module-admin__notice module-admin__notice--error" role="alert">{notice.error}</p>}
     {notice.success && <p className="module-admin__notice" role="status">{notice.success}</p>}
     {notice.error && <button type="button" disabled={loading || busy} onClick={() => { setPermissionDenied(false); setRetryVersion((value) => value + 1); }}>{t("common.retry")}</button>}
