@@ -583,6 +583,16 @@ class WorkflowPassesRequiredBuildArgs(unittest.TestCase):
         self.assertIn("GITHUB_REPOSITORY_ID: ${{ github.repository_id }}", workflow)
         self.assertIn("EXPECTED_REPOSITORY_ID:", workflow)
 
+    def test_jobs_run_where_a_docker_daemon_exists(self) -> None:
+        # Оба job'а вызывают docker buildx, которому нужен живой daemon.
+        # На чистом ubuntu-latest его нет — это проверено падением прогона.
+        workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+        runner_lines = [line for line in workflow.splitlines() if line.strip().startswith("runs-on:")]
+        self.assertEqual(len(runner_lines), 2)
+        for line in runner_lines:
+            self.assertIn("[self-hosted, linux, docker]", line)
+            self.assertNotIn("ubuntu-latest", line)
+
 
 if __name__ == "__main__":
     unittest.main()
