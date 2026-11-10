@@ -235,7 +235,8 @@ jobs:
           # Причина — не отсутствие контекста, а DOCKER_HOST: когда он задан,
           # docker считает окружение внешним и не пишет каталог контекста.
           # Локальная сборка работает с сокетом напрямую, поэтому фиксируем его.
-          unset DOCKER_HOST DOCKER_CONTEXT || true
+          unset DOCKER_HOST || true
+          unset DOCKER_CONTEXT || true
           docker --version
           docker context use default >/dev/null 2>&1 || true
           BUILDER="plugin-dry-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
@@ -471,7 +472,8 @@ jobs:
       - name: Create fresh ephemeral release builder
         run: |
           set -euo pipefail
-          unset DOCKER_HOST DOCKER_CONTEXT || true
+          unset DOCKER_HOST || true
+          unset DOCKER_CONTEXT || true
           docker context use default >/dev/null 2>&1 || true
           BUILDER="plugin-release-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           echo "BUILDER_NAME=$BUILDER" >> "$GITHUB_ENV"
