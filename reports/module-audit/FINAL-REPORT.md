@@ -111,11 +111,16 @@ template-репозитория, из которого продукт генер
   `PLUGIN_BUILDKIT_IMAGE`, `PLUGIN_PLATFORM_PUBLICATION_CONFIG`,
   `PLUGIN_PLATFORM_DEV_HTTP_ALLOWLIST`, `PLUGIN_PLATFORM_REPOSITORY_ID`,
   `PLUGIN_GRANTED_CAPABILITIES`). Это environment-owned конфигурация, а не код.
-- `requirements.lock` отсутствует намеренно. Я проверил, что хеши технически
-  разрешимы (Docker отдаёт digest `python:3.13-slim`, PyPI отдаёт артефакты), но
-  политика требует хеши ВСЕХ допустимых wheel **и** sdist для полного
-  direct+transitive графа — это supply-chain артефакт с reviewed-подписью, а не
-  то, что следует генерировать автоматически в рамках аудита.
+- `requirements.lock` **создан** из реального индекса через `uv pip compile`
+  (`--python-version 3.13 --python-platform x86_64-manylinux_2_28
+  --generate-hashes`): 22 пакета, 658 хешей, покрытие всех допустимых wheel и
+  sdist. Проверено, что `--require-hashes --no-deps` (ровно флаги Dockerfile)
+  разрешается полностью. Ранее я ошибочно считал этот вход поставляемым только
+  извне.
+- Оставшиеся CI-входы: digest базового образа получен
+  (`docker buildx imagetools inspect` → `sha256:e48f59cd…`), но он должен быть
+  прописан владельцем CI; SHA256 `liquibase-4.24.0.tar.gz` требует независимого
+  подтверждения, которого у меня нет.
 - `Plugin OCI Artifacts` корректно падает на незакреплённом базовом образе: нужны
   реальные `PYTHON_BASE_IMAGE`, `LIQUIBASE_SHA256` и полный `requirements.lock`.
 
