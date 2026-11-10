@@ -5,6 +5,7 @@ import type { AdminPluginRow } from "../api/types";
 import { ModuleAdminPage } from "../features/contours/module-admin/ModuleAdminPage";
 import { createModuleAdminService } from "../features/contours/module-admin/service";
 import { PluginLifecycle } from "../features/plugins/PluginLifecycle";
+import { pluginMenuItems } from "../features/plugins/pluginMenu";
 import { PluginPublicationApprove } from "../features/plugins/PluginPublicationApprove";
 
 /**
@@ -48,8 +49,18 @@ export function PluginModulesAdminPage(): ReactElement {
   useEffect(() => { void refreshInstalled(); }, [refreshInstalled]);
 
   const current = installed.find((row) => row.plugin_id === pluginId);
+  const menuItems = pluginMenuItems(installed, companyId);
   const pluginScope = cabinetId && projectId ? { cabinetId, projectId } : undefined;
   return <>
+    {/* Меню строится из установленных модулей с активным grant'ом: это и есть
+        навигация по платформе, отдельного экрана меню не требуется. */}
+    {menuItems.length > 0 ? <nav className="plugin-menu" aria-label="Plugin modules">
+      <ul>
+        {menuItems.map((item) => <li key={item.pluginId}>
+          <a href={item.href}>{item.pluginId}</a>
+        </li>)}
+      </ul>
+    </nav> : null}
     <ModuleAdminPage
       mode="admin"
       service={service}
