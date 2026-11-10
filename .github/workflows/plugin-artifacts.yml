@@ -203,7 +203,7 @@ jobs:
               "FRONTEND_ARCHIVE": "frontend_archive",
               "MIGRATIONS_ARCHIVE": "migrations_archive",
               "DOCKERFILE": "dockerfile",
-              "DOCKER_CONTEXT": "docker_context",
+              "BUILD_CONTEXT": "docker_context",
           }
           with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as handle:
               for environment_name, key in mapping.items():
@@ -221,8 +221,8 @@ jobs:
               PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover                 -s "$SOURCE_DIR/apps/api/tests/unit/plugins" -p "$TEST_FILE"
             fi
           done
-          if [[ -d "$DOCKER_CONTEXT/tests/contract" ]]; then
-            PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover               -s "$DOCKER_CONTEXT/tests/contract" -p "test_*.py"
+          if [[ -d "$BUILD_CONTEXT/tests/contract" ]]; then
+            PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover               -s "$BUILD_CONTEXT/tests/contract" -p "test_*.py"
           elif [[ "$GITHUB_REPOSITORY" != "ne-tort/agentscale" ]]; then
             echo "::error::standalone plugin must provide stdlib tests/contract"; exit 1
           fi
@@ -235,8 +235,8 @@ jobs:
           # Причина — не отсутствие контекста, а DOCKER_HOST: когда он задан,
           # docker считает окружение внешним и не пишет каталог контекста.
           # Локальная сборка работает с сокетом напрямую, поэтому фиксируем его.
-          # Осторожно: DOCKER_CONTEXT здесь — путь к исходникам модуля, а не
-          # docker-контекст. Обнулять его нельзя: buildx получил бы пустой
+          # Имя НЕ DOCKER_CONTEXT: docker CLI трактует эту переменную как имя
+          # своего контекста и падал с "context not found" на пути к исходникам.
           # build context. Очищаем только DOCKER_HOST.
           export DOCKER_HOST=""
           docker --version
@@ -249,7 +249,7 @@ jobs:
           docker buildx create --name "$BUILDER" --driver docker-container \
             --driver-opt "image=$BUILDKIT_IMAGE" --use
           docker buildx inspect --bootstrap "$BUILDER"
-          docker buildx build --load             --provenance=false --sbom=false             --build-arg "PYTHON_BASE_IMAGE=$PYTHON_BASE_IMAGE"             --build-arg "LIQUIBASE_SHA256=$LIQUIBASE_SHA256"             --file "$DOCKERFILE"             --tag "local/$PLUGIN_ID:sha-$GITHUB_SHA"             "$DOCKER_CONTEXT"
+          docker buildx build --load             --provenance=false --sbom=false             --build-arg "PYTHON_BASE_IMAGE=$PYTHON_BASE_IMAGE"             --build-arg "LIQUIBASE_SHA256=$LIQUIBASE_SHA256"             --file "$DOCKERFILE"             --tag "local/$PLUGIN_ID:sha-$GITHUB_SHA"             "$BUILD_CONTEXT"
 
       - name: Remove dry-run builder
         if: always()
@@ -451,7 +451,7 @@ jobs:
               "PLUGIN_ID": "plugin_id", "PLUGIN_VERSION": "version",
               "SOURCE_MANIFEST": "manifest_path", "CANONICAL_MANIFEST": "canonical_manifest",
               "FRONTEND_ARCHIVE": "frontend_archive", "MIGRATIONS_ARCHIVE": "migrations_archive",
-              "DOCKERFILE": "dockerfile", "DOCKER_CONTEXT": "docker_context",
+              "DOCKERFILE": "dockerfile", "BUILD_CONTEXT": "docker_context",
           }
           with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as handle:
               for environment_name, key in mapping.items():
@@ -474,8 +474,8 @@ jobs:
       - name: Create fresh ephemeral release builder
         run: |
           set -euo pipefail
-          # Осторожно: DOCKER_CONTEXT здесь — путь к исходникам модуля, а не
-          # docker-контекст. Обнулять его нельзя: buildx получил бы пустой
+          # Имя НЕ DOCKER_CONTEXT: docker CLI трактует эту переменную как имя
+          # своего контекста и падал с "context not found" на пути к исходникам.
           # build context. Очищаем только DOCKER_HOST.
           export DOCKER_HOST=""
           docker context use default >/dev/null 2>&1 || true
@@ -492,7 +492,7 @@ jobs:
         id: backend_build
         run: |
           set -euo pipefail
-          docker buildx build --push             --provenance=mode=max --sbom=true             --build-arg "PYTHON_BASE_IMAGE=$PYTHON_BASE_IMAGE"             --build-arg "LIQUIBASE_SHA256=$LIQUIBASE_SHA256"             --metadata-file "$RUNNER_TEMP/backend-build-metadata.json"             --file "$DOCKERFILE"             --tag "$QUAR_BACKEND:sha-$GITHUB_SHA"             "$DOCKER_CONTEXT"
+          docker buildx build --push             --provenance=mode=max --sbom=true             --build-arg "PYTHON_BASE_IMAGE=$PYTHON_BASE_IMAGE"             --build-arg "LIQUIBASE_SHA256=$LIQUIBASE_SHA256"             --metadata-file "$RUNNER_TEMP/backend-build-metadata.json"             --file "$DOCKERFILE"             --tag "$QUAR_BACKEND:sha-$GITHUB_SHA"             "$BUILD_CONTEXT"
           BACKEND_DIGEST="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["containerimage.digest"])' "$RUNNER_TEMP/backend-build-metadata.json")"
           [[ "$BACKEND_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || {
             echo "::error::buildx did not return a valid backend digest"; exit 1;
